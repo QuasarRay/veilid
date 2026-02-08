@@ -137,15 +137,15 @@ impl Network {
             }
         };
 
+        // These socket options are non-essential; log but don't drop the connection
+        // (e.g. Shadow simulator doesn't support SO_LINGER)
         if let Err(e) = set_tcp_stream_linger(&tcp_stream, Some(core::time::Duration::from_secs(0)))
         {
-            veilid_log!(self debug "Couldn't set TCP linger: {} on {:?} -> {:?}", e, peer_addr, local_addr);
-            return;
+            veilid_log!(self debug "Couldn't set TCP linger (continuing anyway): {} on {:?} -> {:?}", e, peer_addr, local_addr);
         }
 
         if let Err(e) = tcp_stream.set_nodelay(true) {
-            veilid_log!(self debug "Couldn't set TCP nodelay: {} on {:?} -> {:?}", e, peer_addr, local_addr);
-            return;
+            veilid_log!(self debug "Couldn't set TCP nodelay (continuing anyway): {} on {:?} -> {:?}", e, peer_addr, local_addr);
         }
 
         let listener_state = listener_state.clone();

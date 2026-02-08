@@ -13,10 +13,20 @@ impl NetworkManager {
         let bootstrap_nodes = self.find_bootstrap_nodes_filtered(2);
 
         // Serialize out peer info
-        let bootstrap_peerinfo: Vec<Arc<PeerInfo>> = bootstrap_nodes
+        let mut bootstrap_peerinfo: Vec<Arc<PeerInfo>> = bootstrap_nodes
             .iter()
             .filter_map(|nr| nr.get_peer_info(RoutingDomain::PublicInternet))
             .collect();
+
+        // If we have no other peers to share, include our own peer info
+        // This is essential for bootstrap nodes that are the first node in the network
+        if bootstrap_peerinfo.is_empty() {
+            let own_peer_info = self
+                .routing_table()
+                .get_current_peer_info(RoutingDomain::PublicInternet);
+            bootstrap_peerinfo.push(own_peer_info);
+        }
+
         let json_bytes = serialize_json(bootstrap_peerinfo).as_bytes().to_vec();
 
         veilid_log!(self trace "BOOT reponse: {}", String::from_utf8_lossy(&json_bytes));

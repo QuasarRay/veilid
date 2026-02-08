@@ -46,7 +46,7 @@ impl NetworkManager {
 
         let out_data: Vec<u8> = network_result_value_or_log!(self self
             .net()
-            .send_recv_data_unbound_to_dial_info(dial_info, data, timeout_ms)
+            .send_recv_data_unbound_to_dial_info(dial_info.clone(), data, timeout_ms)
             .await? => [ format!(": dial_info={}, data.len={}", dial_info, data.len()) ]
         {
             return Ok(Vec::new());

@@ -9,6 +9,7 @@ members = [
     "veilid-flutter/rust",
     "veilid-wasm",
     "veilid-remote-api",
+    "veilid-core-bench",
 ]
 resolver = "2"
 

@@ -16,13 +16,11 @@ impl_veilid_component_accessors!(RawUdpProtocolHandler);
 
 impl RawUdpProtocolHandler {
     pub fn new(registry: VeilidComponentRegistry, socket: Arc<UdpSocket>, is_ipv6: bool) -> Self {
-        // Get original TTL
+        // Get original TTL (default to 64 if the platform doesn't support the query)
         let default_ttl = if is_ipv6 {
-            socket2_operation(socket.as_ref(), |s| s.unicast_hops_v6())
-                .expect_or_log("getting IPV6_UNICAST_HOPS should not fail")
+            socket2_operation(socket.as_ref(), |s| s.unicast_hops_v6()).unwrap_or(64)
         } else {
-            socket2_operation(socket.as_ref(), |s| s.ttl())
-                .expect_or_log("getting IP_TTL should not fail")
+            socket2_operation(socket.as_ref(), |s| s.ttl()).unwrap_or(64)
         };
 
         Self {

@@ -1,0 +1,87 @@
+general:
+  stop_time: 15m
+  heartbeat_interval: 30s
+  log_level: info
+  model_unblocked_syscall_latency: true
+  parallelism: 0  # use all available cores
+
+network:
+  graph:
+    type: gml
+    inline: |
+      graph [
+        directed 0
+        node [
+          id 0
+          label "core"
+        ]
+        node [
+          id 1
+          label "region"
+        ]
+        edge [
+          source 0
+          target 0
+          latency "1 ns"
+          packet_loss 0.0
+        ]
+        edge [
+          source 1
+          target 1
+          latency "1 ns"
+          packet_loss 0.0
+        ]
+        edge [
+          source 0
+          target 1
+          latency "10 ms"
+          packet_loss 0.002
+        ]
+      ]
+
+hosts:
+  bootstrap:
+    network_node_id: 0
+    ip_addr: 11.0.0.1
+    bandwidth_down: "1 Gbit"
+    bandwidth_up: "1 Gbit"
+    processes:
+      - path: ../target/release/shadow_node
+        start_time: 1s
+        expected_final_state: {exited: 0}
+        environment:
+          RUST_LOG: "warn"
+          NODE_TYPE: "bootstrap"
+          SHADOW_NODE_ID: "bootstrap0"
+          LISTEN_ADDR: "11.0.0.1"
+          EXPECTED_READERS: "2"
+
+  normalnode:
+    network_node_id: 1
+    ip_addr: 11.0.0.2
+    bandwidth_down: "100 Mbit"
+    bandwidth_up: "100 Mbit"
+    processes:
+      - path: ../target/release/shadow_node
+        start_time: 30s
+        expected_final_state: {exited: 0}
+        environment:
+          RUST_LOG: "warn"
+          NODE_TYPE: "normal"
+          SHADOW_NODE_ID: "normal0"
+          LISTEN_ADDR: "11.0.0.2"
+
+  slownode:
+    network_node_id: 1
+    ip_addr: 11.0.0.3
+    bandwidth_down: "10 Mbit"
+    bandwidth_up: "10 Mbit"
+    processes:
+      - path: ../target/release/shadow_node
+        start_time: 35s
+        expected_final_state: {exited: 0}
+        environment:
+          RUST_LOG: "warn"
+          NODE_TYPE: "slow"
+          SHADOW_NODE_ID: "slow0"
+          LISTEN_ADDR: "11.0.0.3"

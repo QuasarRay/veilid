@@ -223,8 +223,9 @@ class Veilid:
         container = container.with_exec([
             "mkdir", "-p",
             "veilid-cli", "veilid-core", "veilid-core/examples/basic",
-            "veilid-core/examples/private_route", "veilid-server", "veilid-tools",
-            "veilid-wasm", "veilid-flutter", "veilid-flutter/rust", "veilid-remote-api"
+            "veilid-core/examples/private_route", "veilid-core-bench", "veilid-server",
+            "veilid-tools", "veilid-wasm", "veilid-flutter", "veilid-flutter/rust",
+            "veilid-remote-api"
         ])
 
         # Copy only Cargo.toml files and build configuration for dependency resolution
@@ -237,6 +238,12 @@ class Veilid:
             .with_file("veilid-core/Cargo.toml", source.file("veilid-core/Cargo.toml"))
             .with_file("veilid-core/examples/basic/Cargo.toml", source.file("veilid-core/examples/basic/Cargo.toml"))
             .with_file("veilid-core/examples/private_route/Cargo.toml", source.file("veilid-core/examples/private_route/Cargo.toml"))
+            .with_file("veilid-core-bench/Cargo.toml", source.file("veilid-core-bench/Cargo.toml"))
+            .with_new_file("veilid-core-bench/src/lib.rs", "")
+            .with_new_file("veilid-core-bench/src/bin/shadow_node/main.rs", "fn main() {}")
+            .with_new_file("veilid-core-bench/benches/crypto.rs", "")
+            .with_new_file("veilid-core-bench/benches/table_store.rs", "")
+            .with_new_file("veilid-core-bench/benches/protected_store.rs", "")
             .with_file("veilid-server/Cargo.toml", source.file("veilid-server/Cargo.toml"))
             .with_file("veilid-tools/Cargo.toml", source.file("veilid-tools/Cargo.toml"))
             .with_file("veilid-remote-api/Cargo.toml", source.file("veilid-remote-api/Cargo.toml"))

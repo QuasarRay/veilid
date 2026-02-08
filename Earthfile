@@ -177,12 +177,17 @@ deps-linux:
 # Make a cache image with downloaded and built dependencies
 build-linux-cache:
     FROM +deps-linux
-    RUN mkdir -p veilid-cli veilid-core veilid-core/examples/basic veilid-core/examples/private_route veilid-server veilid-tools veilid-wasm veilid-flutter veilid-flutter/rust veilid-remote-api
+    RUN mkdir -p veilid-cli veilid-core veilid-core/examples/basic veilid-core/examples/private_route veilid-core-bench veilid-server veilid-tools veilid-wasm veilid-flutter veilid-flutter/rust veilid-remote-api
     COPY --keep-ts --dir .cargo scripts Cargo.lock Cargo.toml .
     COPY --keep-ts veilid-cli/Cargo.toml veilid-cli
     COPY --keep-ts veilid-core/Cargo.toml veilid-core
     COPY --keep-ts veilid-core/examples/basic/Cargo.toml veilid-core/examples/basic
     COPY --keep-ts veilid-core/examples/private_route/Cargo.toml veilid-core/examples/private_route
+    COPY --keep-ts veilid-core-bench/Cargo.toml veilid-core-bench
+    RUN mkdir -p veilid-core-bench/src/bin/shadow_node veilid-core-bench/benches && \
+        touch veilid-core-bench/src/lib.rs veilid-core-bench/src/bin/shadow_node/main.rs \
+              veilid-core-bench/benches/crypto.rs veilid-core-bench/benches/table_store.rs \
+              veilid-core-bench/benches/protected_store.rs veilid-core-bench/benches/route.rs
     COPY --keep-ts veilid-server/Cargo.toml veilid-server
     COPY --keep-ts veilid-tools/Cargo.toml veilid-tools
     COPY --keep-ts veilid-remote-api/Cargo.toml veilid-remote-api
@@ -215,7 +220,7 @@ code-linux:
         ARG CACHE_TAG
         FROM $CI_REGISTRY_IMAGE/$CACHE_NAME:$CACHE_TAG
     END
-    COPY --keep-ts --dir .cargo build_docs.sh scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
+    COPY --keep-ts --dir .cargo build_docs.sh scripts veilid-cli veilid-core veilid-core-bench veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
     # Check to make sure Cargo.lock is up to date
     RUN cargo update -w --locked
     # Restore original Cargo.lock
@@ -228,7 +233,7 @@ code-linux:
 # Code + Linux + Android deps
 code-android:
     FROM +deps-android
-    COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
+    COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-core-bench veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
     COPY --keep-ts scripts/earthly/cargo-android/config.toml /veilid/.cargo/config.toml
 
 # Clippy only
@@ -295,29 +300,47 @@ build-android:
     SAVE ARTIFACT ./target/i686-linux-android AS LOCAL ./target/artifacts/i686-linux-android
     SAVE ARTIFACT ./target/x86_64-linux-android AS LOCAL ./target/artifacts/x86_64-linux-android
 
-# Unit tests
+# Unit tests - core functionality only (MSRV, WASM, docs, native tests)
 unit-tests-linux:
     FROM +code-linux
+    # Increase codegen-units to reduce peak linker memory usage throughout the build
+    ENV CARGO_PROFILE_TEST_CODEGEN_UNITS=256
     RUN cargo msrv verify --manifest-path=veilid-tools/Cargo.toml
     RUN cargo msrv verify --manifest-path=veilid-core/Cargo.toml
     RUN cargo msrv verify --manifest-path=veilid-server/Cargo.toml
     RUN cargo msrv verify --manifest-path=veilid-cli/Cargo.toml
     RUN cargo msrv verify --manifest-path=veilid-flutter/rust/Cargo.toml
-    # WASM checks
+    # Clean up MSRV check artifacts before cross-compilation
+    RUN rm -rf target/$DEFAULT_CARGO_TARGET/debug/incremental \
+        && find target -name "*.d" -delete 2>/dev/null; true
+    # WASM checks - clean up between each step to keep memory/disk low
     RUN cargo clippy --manifest-path=veilid-wasm/Cargo.toml --target wasm32-unknown-unknown --all-targets
-    RUN veilid-wasm/wasm_build_dart.sh release
-    RUN veilid-wasm/wasm_build_js.sh release
     RUN rm -rf target/wasm32-unknown-unknown
+    RUN veilid-wasm/wasm_build_dart.sh release
+    RUN rm -rf target/wasm32-unknown-unknown target/release
+    RUN veilid-wasm/wasm_build_js.sh release
+    RUN rm -rf target/wasm32-unknown-unknown target/release
+    # Default target checks
+    RUN cargo clippy --target $DEFAULT_CARGO_TARGET --all-targets
+    RUN ./build_docs.sh
+    # Aggressively clean up before nextest to free disk space and reduce linker memory pressure
+    # Remove incremental compilation data, docs, dep-info files, and cross-compilation leftovers
+    RUN rm -rf target/$DEFAULT_CARGO_TARGET/debug/incremental \
+               target/doc \
+               target/release \
+        && find target -name "*.d" -delete 2>/dev/null; true
+    RUN cargo nextest run --locked --tests --target $DEFAULT_CARGO_TARGET --workspace --exclude veilid-core-bench
+
+# Cross-platform clippy checks (Windows/macOS)
+cross-platform-checks:
+    FROM +code-linux
+    ENV CARGO_PROFILE_TEST_CODEGEN_UNITS=256
     # Windows checks
     RUN cargo-zigbuild clippy --target x86_64-pc-windows-gnu --all-targets
     RUN rm -rf target/x86_64-pc-windows-gnu
     # MacOS checks
     RUN cargo-zigbuild clippy --target aarch64-apple-darwin --all-targets
     RUN rm -rf target/aarch64-apple-darwin
-    # Default target checks
-    RUN cargo clippy --target $DEFAULT_CARGO_TARGET --all-targets
-    RUN ./build_docs.sh
-    RUN cargo nextest run --locked --tests --target $DEFAULT_CARGO_TARGET --workspace --all-targets
 
 # Package
 package-linux-amd64-deb:

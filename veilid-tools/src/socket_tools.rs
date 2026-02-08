@@ -78,7 +78,13 @@ pub async fn connect_async_tcp_stream(
 ) -> io::Result<TimeoutOr<TcpStream>> {
     let socket = match local_address {
         Some(a) => {
-            new_bound_shared_socket2_tcp(a)?.ok_or(io::Error::from(io::ErrorKind::AddrInUse))?
+            // Try to bind to the preferred local address (using SO_REUSEADDR/SO_REUSEPORT).
+            // If binding fails (e.g. SO_REUSEPORT unsupported in simulation environments),
+            // fall back to an ephemeral port so the connection can still proceed.
+            match new_bound_shared_socket2_tcp(a)? {
+                Some(s) => s,
+                None => new_default_socket2_tcp(domain_for_address(remote_address))?,
+            }
         }
         None => new_default_socket2_tcp(domain_for_address(remote_address))?,
     };
@@ -164,7 +170,8 @@ fn new_default_udp_socket(domain: core::ffi::c_int) -> io::Result<Socket> {
     let domain = Domain::from(domain);
     let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
     if domain == Domain::IPV6 {
-        socket.set_only_v6(true)?;
+        // Ignore errors for IPV6_V6ONLY - some environments (e.g., Shadow simulator) don't support it
+        let _ = socket.set_only_v6(true);
     }
 
     Ok(socket)
@@ -185,10 +192,11 @@ fn new_bound_default_socket2_udp(local_address: SocketAddr) -> io::Result<Option
 pub fn new_default_socket2_tcp(domain: core::ffi::c_int) -> io::Result<Socket> {
     let domain = Domain::from(domain);
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
-    socket.set_linger(Some(core::time::Duration::from_secs(0)))?;
-    socket.set_nodelay(true)?;
+    // Ignore errors for socket options that some environments (e.g., Shadow simulator) don't support
+    let _ = socket.set_linger(Some(core::time::Duration::from_secs(0)));
+    let _ = socket.set_nodelay(true);
     if domain == Domain::IPV6 {
-        socket.set_only_v6(true)?;
+        let _ = socket.set_only_v6(true);
     }
     Ok(socket)
 }
@@ -196,15 +204,17 @@ pub fn new_default_socket2_tcp(domain: core::ffi::c_int) -> io::Result<Socket> {
 fn new_shared_socket2_tcp(domain: core::ffi::c_int) -> io::Result<Socket> {
     let domain = Domain::from(domain);
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
-    socket.set_linger(Some(core::time::Duration::from_secs(0)))?;
-    socket.set_nodelay(true)?;
+    // Ignore errors for socket options that some environments (e.g., Shadow simulator) don't support
+    let _ = socket.set_linger(Some(core::time::Duration::from_secs(0)));
+    let _ = socket.set_nodelay(true);
     if domain == Domain::IPV6 {
-        socket.set_only_v6(true)?;
+        let _ = socket.set_only_v6(true);
     }
-    socket.set_reuse_address(true)?;
+    // These are important for port reuse, but still make them non-fatal
+    let _ = socket.set_reuse_address(true);
     cfg_if! {
         if #[cfg(unix)] {
-            socket.set_reuse_port(true)?;
+            let _ = socket.set_reuse_port(true);
         }
     }
 

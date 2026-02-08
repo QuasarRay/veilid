@@ -31,7 +31,7 @@ impl NetworkManager {
         let routing_domain = pi.routing_domain();
         let routing_table = self.routing_table();
 
-        let nr = match routing_table.register_node_with_peer_info(pi, true) {
+        let nr = match routing_table.register_node_with_peer_info(pi.clone(), true) {
             Ok(nr) => nr,
             Err(e) => {
                 veilid_log!(self error "failed to register bootstrap peer info: {}", e);

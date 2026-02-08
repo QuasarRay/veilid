@@ -529,14 +529,78 @@ impl NetworkInterfaces {
     pub async fn refresh(&self) -> std::io::Result<bool> {
         let mut last_interfaces = {
             let mut last_interfaces = BTreeMap::<String, NetworkInterface>::new();
-            let mut platform_support = PlatformSupport::new();
-            platform_support
-                .get_interfaces(&mut last_interfaces)
-                .await?;
+
+            // When LISTEN_ADDR is set (e.g. in Shadow simulation), skip netlink
+            // entirely. Shadow's netlink emulation can hang indefinitely when
+            // the connection handler crashes on malformed NLMSG_ERROR packets.
+            if let Ok(listen_addr_str) = std::env::var("LISTEN_ADDR") {
+                if let Ok(ip_addr) = listen_addr_str.parse::<std::net::IpAddr>() {
+                    let intf_name = "sim0".to_string();
+                    let flags = InterfaceFlags {
+                        is_loopback: false,
+                        is_running: true,
+                        is_point_to_point: false,
+                    };
+                    let mut intf = NetworkInterface::new(intf_name.clone(), flags);
+
+                    let addr_flags = AddressFlags {
+                        is_dynamic: false,
+                        is_temporary: false,
+                        is_preferred: true,
+                    };
+
+                    match ip_addr {
+                        std::net::IpAddr::V4(ipv4) => {
+                            intf.addrs.push(InterfaceAddress::new(
+                                IfAddr::V4(Ifv4Addr {
+                                    ip: ipv4,
+                                    netmask: std::net::Ipv4Addr::new(255, 255, 255, 0),
+                                    broadcast: None,
+                                }),
+                                addr_flags,
+                            ));
+                            let o = ipv4.octets();
+                            intf.add_gateway(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+                                o[0], o[1], o[2], 1,
+                            )));
+                        }
+                        std::net::IpAddr::V6(ipv6) => {
+                            intf.addrs.push(InterfaceAddress::new(
+                                IfAddr::V6(Ifv6Addr {
+                                    ip: ipv6,
+                                    netmask: std::net::Ipv6Addr::new(
+                                        0xffff, 0xffff, 0xffff, 0xffff, 0, 0, 0, 0,
+                                    ),
+                                    broadcast: None,
+                                }),
+                                addr_flags,
+                            ));
+                            let s = ipv6.segments();
+                            intf.add_gateway(std::net::IpAddr::V6(std::net::Ipv6Addr::new(
+                                s[0], s[1], s[2], s[3], 0, 0, 0, 1,
+                            )));
+                        }
+                    }
+
+                    last_interfaces.insert(intf_name, intf);
+                }
+            } else {
+                let mut platform_support = PlatformSupport::new();
+                let netlink_result = platform_support.get_interfaces(&mut last_interfaces).await;
+
+                if let Err(e) = netlink_result {
+                    warn!(target: "net", "netlink interface discovery failed: {}", e);
+                }
+            }
+
             last_interfaces
         };
 
         let mut inner = self.inner.lock();
+
+        // Check if this is the first refresh (valid was false)
+        let first_refresh = !inner.valid;
+
         core::mem::swap(&mut inner.interfaces, &mut last_interfaces);
         inner.valid = true;
 
@@ -552,6 +616,14 @@ impl NetworkInterfaces {
                 return Ok(true);
             }
         }
+
+        // On first refresh, always return true to ensure startup proceeds
+        // even if no interfaces were found (e.g., in simulation environments)
+        if first_refresh {
+            Self::cache_interface_address_state(&mut inner);
+            return Ok(true);
+        }
+
         Ok(false)
     }
     pub fn with_interfaces<F, R>(&self, f: F) -> R
