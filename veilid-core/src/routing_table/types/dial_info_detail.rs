@@ -144,6 +144,7 @@ pub trait HasDialInfoDetailList: fmt::Debug {
             .dial_info_detail_list()
             .iter()
             .map(|did| match &did.dial_info {
+                DialInfo::Unknown => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                 DialInfo::UDP(di) => di.socket_address.ip_addr(),
                 DialInfo::TCP(di) => di.socket_address.ip_addr(),
                 DialInfo::WS(di) => di.socket_address.ip_addr(),

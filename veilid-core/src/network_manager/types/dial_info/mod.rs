@@ -22,6 +22,9 @@ pub(crate) enum DialInfo {
     WS(DialInfoWS),
     #[cfg(feature = "enable-protocol-wss")]
     WSS(DialInfoWSS),
+    /// Forward-compatibility: deserializes unknown `"kind"` tags without error.
+    #[serde(other)]
+    Unknown,
 }
 impl Default for DialInfo {
     fn default() -> Self {
@@ -40,6 +43,7 @@ impl fmt::Debug for DialInfo {
 impl fmt::Display for DialInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
+            DialInfo::Unknown => write!(f, "unknown|"),
             DialInfo::UDP(di) => write!(f, "udp|{}", di.socket_address),
             DialInfo::TCP(di) => write!(f, "tcp|{}", di.socket_address),
             DialInfo::WS(di) => {
@@ -231,6 +235,7 @@ impl DialInfo {
     }
     pub fn protocol_type(&self) -> ProtocolType {
         match self {
+            Self::Unknown => ProtocolType::UDP,
             Self::UDP(_) => ProtocolType::UDP,
             Self::TCP(_) => ProtocolType::TCP,
             Self::WS(_) => ProtocolType::WS,
@@ -243,6 +248,7 @@ impl DialInfo {
     }
     pub fn address(&self) -> Address {
         match self {
+            Self::Unknown => SocketAddress::default().address(),
             Self::UDP(di) => di.socket_address.address(),
             Self::TCP(di) => di.socket_address.address(),
             Self::WS(di) => di.socket_address.address(),
@@ -253,6 +259,7 @@ impl DialInfo {
     #[expect(dead_code)]
     pub fn set_address(&mut self, address: Address) {
         match self {
+            Self::Unknown => {}
             Self::UDP(di) => di.socket_address.set_address(address),
             Self::TCP(di) => di.socket_address.set_address(address),
             Self::WS(di) => di.socket_address.set_address(address),
@@ -262,6 +269,7 @@ impl DialInfo {
     }
     pub fn socket_address(&self) -> SocketAddress {
         match self {
+            Self::Unknown => SocketAddress::default(),
             Self::UDP(di) => di.socket_address,
             Self::TCP(di) => di.socket_address,
             Self::WS(di) => di.socket_address,
@@ -271,6 +279,7 @@ impl DialInfo {
     }
     pub fn ip_addr(&self) -> IpAddr {
         match self {
+            Self::Unknown => SocketAddress::default().ip_addr(),
             Self::UDP(di) => di.socket_address.ip_addr(),
             Self::TCP(di) => di.socket_address.ip_addr(),
             Self::WS(di) => di.socket_address.ip_addr(),
@@ -280,6 +289,7 @@ impl DialInfo {
     }
     pub fn port(&self) -> u16 {
         match self {
+            Self::Unknown => 0,
             Self::UDP(di) => di.socket_address.port(),
             Self::TCP(di) => di.socket_address.port(),
             Self::WS(di) => di.socket_address.port(),
@@ -290,6 +300,7 @@ impl DialInfo {
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     pub fn set_port(&mut self, port: u16) {
         match self {
+            Self::Unknown => {}
             Self::UDP(di) => di.socket_address.set_port(port),
             Self::TCP(di) => di.socket_address.set_port(port),
             Self::WS(di) => di.socket_address.set_port(port),
@@ -299,6 +310,7 @@ impl DialInfo {
     }
     pub fn to_socket_addr(&self) -> SocketAddr {
         match self {
+            Self::Unknown => SocketAddress::default().socket_addr(),
             Self::UDP(di) => di.socket_address.socket_addr(),
             Self::TCP(di) => di.socket_address.socket_addr(),
             Self::WS(di) => di.socket_address.socket_addr(),
@@ -308,6 +320,7 @@ impl DialInfo {
     }
     pub fn peer_address(&self) -> PeerAddress {
         match self {
+            Self::Unknown => PeerAddress::new(SocketAddress::default(), ProtocolType::UDP),
             Self::UDP(di) => PeerAddress::new(di.socket_address, ProtocolType::UDP),
             Self::TCP(di) => PeerAddress::new(di.socket_address, ProtocolType::TCP),
             Self::WS(di) => PeerAddress::new(di.socket_address, ProtocolType::WS),
@@ -317,6 +330,7 @@ impl DialInfo {
     }
     pub fn request(&self) -> Option<String> {
         match self {
+            Self::Unknown => None,
             Self::UDP(_) => None,
             Self::TCP(_) => None,
             Self::WS(di) => Some(format!("ws://{}", di.request)),
@@ -344,6 +358,7 @@ impl DialInfo {
             return s;
         }
         match (a, b) {
+            (DialInfo::Unknown, DialInfo::Unknown) => core::cmp::Ordering::Equal,
             (DialInfo::UDP(a), DialInfo::UDP(b)) => a.cmp(b),
             (DialInfo::TCP(a), DialInfo::TCP(b)) => a.cmp(b),
             (DialInfo::WS(a), DialInfo::WS(b)) => a.cmp(b),
@@ -356,6 +371,9 @@ impl DialInfo {
 
 impl MatchesDialInfoFilter for DialInfo {
     fn matches_filter(&self, filter: &DialInfoFilter) -> bool {
+        if matches!(self, DialInfo::Unknown) {
+            return false;
+        }
         if !filter.protocol_type_set.contains(self.protocol_type()) {
             return false;
         }

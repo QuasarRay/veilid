@@ -73,6 +73,9 @@ pub fn encode_dial_info(
     builder: &mut veilid_capnp::dial_info::Builder,
 ) -> Result<(), RPCError> {
     match dial_info {
+        DialInfo::Unknown => {
+            return Err(RPCError::internal("cannot encode unknown dial info"));
+        }
         DialInfo::UDP(udp) => {
             builder.set_protocol_type(FOURCC_PROTOCOL_TYPE_UDP);
             let mut di_udp_builder = builder

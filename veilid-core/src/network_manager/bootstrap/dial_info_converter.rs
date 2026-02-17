@@ -110,6 +110,10 @@ where
     fn to_short(&self, dial_info: DialInfo) -> PinBoxFuture<'_, ShortDialInfo> {
         pin_dyn_future!(async move {
             match dial_info {
+                DialInfo::Unknown => ShortDialInfo {
+                    short_url: String::new(),
+                    hostname: String::new(),
+                },
                 DialInfo::UDP(di) => ShortDialInfo {
                     short_url: format!("U{}", di.socket_address.port()),
                     hostname: self
@@ -172,6 +176,7 @@ where
     fn to_url(&self, dial_info: DialInfo) -> PinBoxFuture<'_, String> {
         pin_dyn_future!(async move {
             match dial_info {
+                DialInfo::Unknown => String::new(),
                 DialInfo::UDP(di) => self
                     .ptr_lookup(di.socket_address.ip_addr())
                     .await
