@@ -180,7 +180,11 @@ impl CryptoSystem for CryptoSystemVLD0 {
         let pk_xd = public_to_x25519_pk(key)?;
         let sk_xd = secret_to_x25519_sk(secret)?;
 
-        let dh_bytes = sk_xd.diffie_hellman(&pk_xd).to_bytes();
+        let dh = sk_xd.diffie_hellman(&pk_xd);
+        if !dh.was_contributory() {
+            apibail_generic!("dh was not contributory");
+        }
+        let dh_bytes = dh.to_bytes();
 
         let mut hasher = blake3::Hasher::new();
         hasher.update(VLD0_DOMAIN_CRYPT);

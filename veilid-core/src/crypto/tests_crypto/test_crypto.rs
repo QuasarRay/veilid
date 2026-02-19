@@ -224,6 +224,19 @@ pub async fn test_dh(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     trace!("cached_dh: {:?}", r5);
 }
 
+pub async fn test_dh_rejects_all_zero_public_key(vcrypto: &AsyncCryptoSystemGuard<'_>) {
+    let zero_pk = PublicKey::new(
+        vcrypto.kind(),
+        BarePublicKey::new(&vec![0u8; vcrypto.public_key_length()]),
+    );
+    let (_, secret) = vcrypto.generate_keypair().await.into_split();
+    let result = vcrypto.compute_dh(&zero_pk, &secret).await;
+    assert!(
+        result.is_err(),
+        "compute_dh must reject all-zero public key"
+    );
+}
+
 pub async fn test_generation(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     let b1 = vcrypto.random_bytes(32).await;
     let b2 = vcrypto.random_bytes(32).await;
@@ -298,6 +311,7 @@ pub async fn test_all() {
         test_aead(&vcrypto).await;
         test_no_auth(&vcrypto).await;
         test_dh(&vcrypto).await;
+        test_dh_rejects_all_zero_public_key(&vcrypto).await;
         test_generation(&vcrypto).await;
     }
 
