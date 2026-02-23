@@ -8,7 +8,7 @@ Create an application in Python using the distributed [Veilid](https://veilid.co
 ## Install
 
 ```
-poetry add veilid
+uv add veilid
 ```
 or 
 ```
@@ -19,7 +19,7 @@ pip3 install veilid
 
 To run tests:
 ```shell
-poetry run pytest -v -s
+uv run pytest -v -s
 ```
 
 To update schema for validation with the latest copy from a locally running `veilid-server`:

@@ -287,8 +287,8 @@ publish_python:
   tags:
     - build-amd64-deb
   script:
-    - cd veilid-python && /home/gitlab-runner/.local/bin/poetry build
-    - /home/gitlab-runner/.local/bin/poetry publish
+    - uv --directory veilid-python build
+    - uv --directory veilid-python publish
   allow_failure: true
   rules:
     - if: '$CI_COMMIT_TAG =~ /v\d.+/'
@@ -353,7 +353,7 @@ dryrun_publish_python:
   tags:
     - build-amd64-deb
   script:
-    - cd veilid-python && /home/gitlab-runner/.local/bin/poetry build
+    - uv --directory veilid-python build
   rules:
     - if: $CI_COMMIT_MESSAGE =~ /\[ci dryrun]/
 
@@ -478,4 +478,3 @@ nightly_failed_pipeline_actions:
     - uv --directory scripts/cicd-python sync
     - uv --directory scripts/cicd-python run veilid_release_utils.py --delete-build-machine
   when: on_failure
-

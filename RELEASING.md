@@ -51,9 +51,9 @@ Git tags serve as a historical record of what repo versions were released at whi
 ## Publish to Pypi (Manual steps if needed)
 
 1. Change directory to veilid-python
-2. Install Poetry and configure the Pypi credentials, if not already accomplished.
-3. Execute `poetry build`
-4. Execute `poetry publish`
+2. Install uv and configure the Pypi credentials, if not already accomplished.
+3. Execute `uv build`
+4. Execute `uv publish`
 
 ## Reverting Releases
 
