@@ -325,6 +325,30 @@ async fn test_store_load_json_many(ts: &TableStore) {
     );
 }
 
+async fn test_open_zero_columns(ts: &TableStore) {
+    info!("test_open_zero_columns");
+
+    let _ = ts.delete("zero_cols").await;
+
+    let db = ts.open("zero_cols", 0).await.expect("should have opened");
+    assert_eq!(db.get_column_count().unwrap(), 1);
+    assert!(db.store(0, b"k0", b"v0").await.is_ok());
+    assert_eq!(db.load(0, b"k0").await.unwrap(), Some(b"v0".to_vec()));
+    drop(db);
+
+    let db = ts.open("zero_cols", 3).await.expect("should have opened");
+    assert_eq!(db.get_column_count().unwrap(), 3);
+    assert!(db.store(2, b"k2", b"v2").await.is_ok());
+    drop(db);
+
+    let db = ts.open("zero_cols", 0).await.expect("should have opened");
+    assert_eq!(db.get_column_count().unwrap(), 3);
+    assert_eq!(db.load(2, b"k2").await.unwrap(), Some(b"v2".to_vec()));
+    drop(db);
+
+    let _ = ts.delete("zero_cols").await;
+}
+
 pub async fn test_all() {
     let api = startup().await;
     let crypto = api.crypto().unwrap();
@@ -336,6 +360,7 @@ pub async fn test_all() {
         let vcrypto = crypto.get_async(ck).unwrap();
         test_protect_unprotect(&vcrypto, &ts).await;
         test_delete_open_delete(&ts).await;
+        test_open_zero_columns(&ts).await;
         test_store_delete_load(&ts).await;
         test_transaction(&ts).await;
         test_json(&vcrypto, &ts).await;

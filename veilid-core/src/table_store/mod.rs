@@ -723,10 +723,13 @@ impl TableStore {
             }
         }
 
-        // Open table db using platform-specific driver
+        // Open table db using platform-specific driver.
+        // A requested column_count of 0 means "all columns" at the TableDB API layer,
+        // but backend creation/open requires a concrete count.
+        let backend_column_count = if column_count == 0 { 1 } else { column_count };
         let mut db = match self
             .table_store_driver
-            .open(&table_name, column_count, concurrency)
+            .open(&table_name, backend_column_count, concurrency)
             .await
         {
             Ok(db) => db,
@@ -742,7 +745,7 @@ impl TableStore {
 
         // If more columns are available, open the low level db with the max column count but restrict the tabledb object to the number requested
         let existing_col_count = db.num_columns().map_err(VeilidAPIError::from)?;
-        if existing_col_count > column_count {
+        if existing_col_count > backend_column_count {
             drop(db);
             db = match self
                 .table_store_driver
