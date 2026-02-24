@@ -62,6 +62,8 @@ wFAbkZY9eS/x6P7qrpd7dUA=
 cfg_if! {
 
     if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+        pub fn purge_old_test_group_dirs() {}
+
         #[must_use]
         pub fn get_table_store_path(_test_instance: String) -> String {
             String::new()
