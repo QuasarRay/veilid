@@ -2,6 +2,7 @@
 // Debugging
 
 use super::*;
+use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use data_encoding::BASE64URL_NOPAD;
 use hashlink::LinkedHashMap;
 use network_manager::*;
@@ -10,6 +11,511 @@ use routing_table::*;
 use std::fmt::Write;
 
 impl_veilid_log_facility!("veilid_debug");
+
+const DEBUG_HELP_TEMPLATE: &str = "{about-with-newline}{all-args}{after-help}";
+
+/// Debugging subcommands
+#[derive(Debug, Parser)]
+#[command(
+    name = "debug",
+    disable_help_flag = true,
+    disable_version_flag = true,
+    help_template = "{subcommands}"
+)]
+struct DebugCommandParser {
+    #[command(subcommand)]
+    command: DebugCommand,
+}
+
+/// Subcommands supported by top-level debug command text.
+#[derive(Debug, Subcommand)]
+#[command(help_template = DEBUG_HELP_TEMPLATE)]
+enum DebugCommand {
+    /// display this node's id values
+    Nodeid,
+    /// display routing table bucket statistics
+    Buckets {
+        /// Optional minimum state filter (`punished`, `dead`, `reliable`, `unreliable`).
+        #[arg(value_name = "min_state")]
+        min_state: Option<String>,
+    },
+    /// display dialinfo in this node's routing domains
+    Dialinfo,
+    /// display local peer info
+    Peerinfo {
+        /// Optional tokens in any order:
+        /// - routing domain: `public`, `local`, `pub`, `loc`
+        /// - publication mode: `published`, `current`
+        #[arg(value_name = "peerinfo_token")]
+        args: Vec<String>,
+    },
+    /// explain contact mechanism for a node
+    Contact {
+        /// Filtered node reference:
+        /// `<node>[+<sequencing>][/<protocoltype>][/<addresstype>][/<routingdomain>]`
+        /// where protocol is `udp|tcp|ws|wss`, address is `ipv4|ipv6`,
+        /// and routing domain is `pub|loc`.
+        #[arg(value_name = "node_ref")]
+        node_ref: String,
+    },
+    /// generate and display a random keypair
+    Keypair {
+        /// Optional crypto kind (`VLD0`, etc.).
+        #[arg(value_name = "cryptokind")]
+        cryptokind: Option<String>,
+    },
+    /// show routing table entry index
+    Entries {
+        /// Optional filters in any order:
+        /// - minimum state: `dead` or `reliable`
+        /// - mode: `fastest`
+        /// - capabilities list: comma-separated four-char codes
+        ///   (for example `ROUT,SGNL,RLAY,DIAL,DHTV,APPM`).
+        #[arg(value_name = "entries_token")]
+        args: Vec<String>,
+    },
+    /// show details for a routing table entry
+    Entry {
+        /// Node id or filtered node reference.
+        #[arg(value_name = "node")]
+        node: String,
+    },
+    /// list, clear, add, or remove address-filter punishments
+    Punish {
+        #[command(subcommand)]
+        command: Option<DebugPunishSubcommand>,
+    },
+    /// generate bootstrap TXT record data
+    Txtrecord {
+        /// Optional signing keypair group.
+        #[arg(value_name = "keypairs")]
+        keypairs: Option<String>,
+    },
+    /// change relays in use
+    Relay {
+        /// Relay configuration tokens:
+        /// `[<relay>...] [public|local]`
+        ///
+        /// `<relay>` accepts node id or filtered node forms.
+        #[arg(value_name = "relay_token")]
+        args: Vec<String>,
+    },
+    /// send a status RPC question to a destination
+    Ping {
+        /// Destination grammar:
+        /// - direct: `<node>[+<safety>][/<protocoltype>][/<addresstype>][/<routingdomain>]`
+        /// - relay: `<target>@<relay_dialinfo>`
+        /// - private: `#<index_or_route>[+<safety>]`
+        #[arg(value_name = "destination")]
+        destination: String,
+    },
+    /// send an app message statement
+    Appmessage {
+        /// Destination grammar matches `ping`.
+        #[arg(value_name = "destination")]
+        destination: String,
+        /// Data payload grammar:
+        /// - single-word string (for example `foobar`)
+        /// - shell-quoted string (for example `"foo\nbar\n"`)
+        /// - `#` followed by hex bytes (for example `#12AB34CD...`)
+        #[arg(value_name = "data")]
+        data: Vec<String>,
+    },
+    /// send an app call question
+    Appcall {
+        /// Destination grammar matches `ping`.
+        #[arg(value_name = "destination")]
+        destination: String,
+        /// Data payload grammar:
+        /// - single-word string (for example `foobar`)
+        /// - shell-quoted string (for example `"foo\nbar\n"`)
+        /// - `#` followed by hex bytes (for example `#12AB34CD...`)
+        #[arg(value_name = "data")]
+        data: Vec<String>,
+    },
+    /// reply to a pending app call
+    Appreply {
+        /// Optional `#call_id` value from a pending app call.
+        #[arg(value_name = "id")]
+        id: Option<String>,
+        /// Data payload grammar:
+        /// - single-word string (for example `foobar`)
+        /// - shell-quoted string (for example `"foo\nbar\n"`)
+        /// - `#` followed by hex bytes (for example `#12AB34CD...`)
+        #[arg(value_name = "data")]
+        data: Vec<String>,
+    },
+    /// resolve a destination across the network
+    Resolve {
+        /// Destination grammar matches `ping`.
+        #[arg(value_name = "destination")]
+        destination: String,
+    },
+    /// display detailed local node information
+    Nodeinfo,
+    /// purge local routing state
+    Purge {
+        #[command(subcommand)]
+        command: Option<DebugPurgeSubcommand>,
+    },
+    /// attach this node to the network
+    Attach,
+    /// detach this node from the network
+    Detach,
+    /// inspect or mutate config
+    Config {
+        /// First positional argument:
+        /// - `insecure` to read from full config view
+        /// - otherwise treated as a config key path.
+        #[arg(value_name = "mode_or_key")]
+        arg_0: Option<String>,
+        /// Optional config key path when `mode_or_key` is `insecure`.
+        ///
+        /// Config keys use dot-path grammar, for example:
+        /// `network.protocol.udp.enabled`.
+        #[arg(value_name = "config_key")]
+        arg_1: Option<String>,
+    },
+    /// restart network subsystem or inspect network stats
+    Network {
+        #[command(subcommand)]
+        command: Option<DebugNetworkSubcommand>,
+    },
+    /// allocate, publish, import, and test routes
+    Route {
+        #[command(subcommand)]
+        command: Option<DebugRouteSubcommand>,
+    },
+    /// list, open, inspect, and mutate DHT records
+    Record {
+        #[command(subcommand)]
+        command: Option<DebugRecordSubcommand>,
+    },
+    /// list tables and show table store details
+    Table {
+        #[command(subcommand)]
+        command: Option<DebugTableSubcommand>,
+    },
+    /// show process and attachment uptime
+    Uptime,
+    #[cfg(debug_assertions)]
+    /// trigger crash behaviors for debug testing
+    Die {
+        /// Crash mode (`panic`, `unwrap`, `unwrap_or_log`, `expect`, `expect_or_log`, `div0`, `overflow`, `oob`, `nullptr`, `unreachable`).
+        #[arg(value_name = "mode")]
+        mode: Option<String>,
+        /// Optional panic or expect message words.
+        #[arg(value_name = "message")]
+        message: Vec<String>,
+    },
+}
+
+/// Subcommands supported by `purge`.
+#[derive(Debug, Subcommand)]
+#[command(
+    help_template = DEBUG_HELP_TEMPLATE,
+    disable_help_subcommand = true
+)]
+enum DebugPurgeSubcommand {
+    /// Purge routing table buckets.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Buckets,
+    /// Purge recent peer connections.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Connections,
+    /// Purge route specifications.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Routes,
+}
+
+/// Subcommands supported by `network`.
+#[derive(Debug, Subcommand)]
+#[command(
+    help_template = DEBUG_HELP_TEMPLATE,
+    disable_help_subcommand = true
+)]
+enum DebugNetworkSubcommand {
+    /// Restart the low-level network subsystem.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Restart,
+    /// Print network manager statistics.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Stats,
+}
+
+/// Subcommands supported by `route`.
+#[derive(Debug, Subcommand)]
+#[command(
+    help_template = DEBUG_HELP_TEMPLATE,
+    disable_help_subcommand = true
+)]
+enum DebugRouteSubcommand {
+    /// Allocate a new route.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Allocate {
+        /// Optional allocation arguments in any order:
+        /// - sequencing: `ord`, `*ord`, `pre`, `*pre`, `no`, `*no`
+        /// - stability: `rel` or `lowlat`
+        /// - hop count: positive integer
+        /// - direction: `in` or `out`
+        #[arg(allow_hyphen_values = true, value_name = "allocate_arg")]
+        params: Vec<String>,
+    },
+    /// Release an allocated route.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Release {
+        /// Route id (full or prefix).
+        #[arg(value_name = "route_id")]
+        route_id: String,
+    },
+    /// Publish a route blob for import on another node.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Publish {
+        /// Route id (full or prefix).
+        #[arg(value_name = "route_id")]
+        route_id: String,
+        /// Include full route details when set to `full`.
+        #[arg(value_name = "full")]
+        full: Option<String>,
+    },
+    /// Mark a route as no longer published.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Unpublish {
+        /// Route id (full or prefix).
+        #[arg(value_name = "route_id")]
+        route_id: String,
+    },
+    /// Show details for a route id or route key.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Print {
+        /// Route id or route key (full or prefix).
+        #[arg(value_name = "route")]
+        route: String,
+    },
+    /// List allocated and imported routes.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    List,
+    /// Import a published route blob.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Import {
+        /// Base64URL route blob from `route publish`.
+        #[arg(value_name = "blob")]
+        blob: String,
+    },
+    /// Test an allocated or imported route.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Test {
+        /// Route id (full or prefix).
+        #[arg(value_name = "route_id")]
+        route_id: String,
+    },
+}
+
+/// Subcommands supported by `record`.
+#[derive(Debug, Subcommand)]
+#[command(
+    help_template = DEBUG_HELP_TEMPLATE,
+    disable_help_subcommand = true
+)]
+enum DebugRecordSubcommand {
+    /// List records by scope.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    List {
+        /// Record scope (`local`, `remote`, `opened`, `offline`, `watched`, `transactions`).
+        #[arg(value_name = "scope")]
+        scope: String,
+    },
+    /// Purge local or remote records.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Purge {
+        /// Scope to purge (`local` or `remote`).
+        #[arg(value_name = "scope")]
+        scope: String,
+        /// Optional byte target to purge down to.
+        #[arg(value_name = "bytes")]
+        bytes: Option<u64>,
+    },
+    /// Create a new DHT record.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Create {
+        /// DHT schema JSON or default subkey count.
+        #[arg(value_name = "dht_schema")]
+        dht_schema: Option<String>,
+        /// Crypto kind (for example `VLD0`).
+        #[arg(value_name = "crypto_kind")]
+        crypto_kind: Option<String>,
+        /// Safety selection expression.
+        #[arg(value_name = "safety")]
+        safety: Option<String>,
+    },
+    /// Open an existing DHT record.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Open {
+        /// Record key with optional `+safety` suffix.
+        #[arg(value_name = "key")]
+        key: String,
+        /// Optional writer keypair.
+        #[arg(value_name = "writer")]
+        writer: Option<String>,
+    },
+    /// Close an opened DHT record.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Close {
+        /// Optional key (defaults to most recently opened record).
+        #[arg(value_name = "key")]
+        key: Option<String>,
+    },
+    /// Read a value from a DHT record subkey.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Get {
+        /// Positional form:
+        /// - `[key] <subkey> [force]`
+        /// - if `key` is omitted, the most recently opened record is used
+        /// - `force` refreshes from the network
+        #[arg(allow_hyphen_values = true, value_name = "get_arg")]
+        params: Vec<String>,
+    },
+    /// Write a value to a DHT record subkey.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Set {
+        /// Positional form:
+        /// - `[key] <subkey> <data> [writer] [offline|online|true|false]`
+        /// - if `key` is omitted, the most recently opened record is used
+        /// - `<data>` may be plain text, quoted text, or `#`-prefixed hex
+        #[arg(allow_hyphen_values = true, value_name = "set_arg")]
+        params: Vec<String>,
+    },
+    /// Delete the local copy of a DHT record.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Delete {
+        /// Record key.
+        #[arg(value_name = "key")]
+        key: String,
+    },
+    /// Show local and remote record information.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Info {
+        /// Record key.
+        #[arg(value_name = "key")]
+        key: String,
+        /// Optional subkey to inspect.
+        #[arg(value_name = "subkey")]
+        subkey: Option<u32>,
+    },
+    /// Watch a record for value changes.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Watch {
+        /// Optional key (defaults to most recently opened record).
+        #[arg(value_name = "key")]
+        key: Option<String>,
+        /// Optional subkeys or ranges.
+        #[arg(value_name = "subkeys")]
+        subkeys: Option<String>,
+        /// Optional expiration duration.
+        #[arg(value_name = "expiration")]
+        expiration: Option<String>,
+        /// Optional max change count.
+        #[arg(value_name = "count")]
+        count: Option<u32>,
+    },
+    /// Cancel a record watch.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Cancel {
+        /// Optional key (defaults to most recently opened record).
+        #[arg(value_name = "key")]
+        key: Option<String>,
+        /// Optional subkeys or ranges.
+        #[arg(value_name = "subkeys")]
+        subkeys: Option<String>,
+    },
+    /// Inspect DHT record subkey status.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Inspect {
+        /// Optional key (defaults to most recently opened record).
+        #[arg(value_name = "key")]
+        key: Option<String>,
+        /// Optional inspect scope (`local|syncget|syncset|updateget|updateset`).
+        #[arg(value_name = "scope")]
+        scope: Option<String>,
+        /// Optional subkeys or ranges.
+        #[arg(value_name = "subkeys")]
+        subkeys: Option<String>,
+    },
+    /// Rehydrate expired local record data onto the network.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Rehydrate {
+        /// Record key.
+        #[arg(value_name = "key")]
+        key: String,
+        /// Optional subkeys or ranges.
+        #[arg(value_name = "subkeys")]
+        subkeys: Option<String>,
+        /// Optional consensus count.
+        #[arg(value_name = "consensus_count")]
+        consensus_count: Option<usize>,
+    },
+}
+
+/// Subcommands supported by `table`.
+#[derive(Debug, Subcommand)]
+#[command(
+    help_template = DEBUG_HELP_TEMPLATE,
+    disable_help_subcommand = true
+)]
+enum DebugTableSubcommand {
+    /// List all table store tables.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    List,
+    /// Show details and IO stats for a table.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Info {
+        /// Table name.
+        #[arg(value_name = "name")]
+        name: String,
+    },
+}
+
+/// Subcommands supported by `punish`.
+#[derive(Debug, Subcommand)]
+#[command(
+    help_template = DEBUG_HELP_TEMPLATE,
+    disable_help_subcommand = true
+)]
+enum DebugPunishSubcommand {
+    /// List all address-filter punishments.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    List,
+    /// Clear all address-filter punishments.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Clear,
+    /// Add a punishment for a node id or IP address.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Add {
+        /// Target node id (`VLD0:...`) or IP address.
+        #[arg(value_name = "target")]
+        target: String,
+    },
+    /// Remove a punishment for a node id or IP address.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Remove {
+        /// Target node id (`VLD0:...`) or IP address.
+        #[arg(value_name = "target")]
+        target: String,
+    },
+}
+
+fn render_parser_help<T: CommandFactory>() -> String {
+    let mut command = T::command();
+    let mut bytes = Vec::new();
+    if command.write_long_help(&mut bytes).is_err() {
+        return String::new();
+    }
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into())
+}
+
+fn join_args(args: Vec<String>) -> String {
+    args.join(" ")
+}
 
 #[derive(Default)]
 pub(crate) struct DebugCache {
@@ -47,53 +553,110 @@ pub(crate) fn format_opt_bps(bps: Option<ByteCount>) -> String {
     }
 }
 
-fn get_bucket_entry_state(text: &str) -> Option<BucketEntryState> {
-    if text == "punished" {
-        Some(BucketEntryState::Punished)
-    } else if text == "dead" {
-        Some(BucketEntryState::Dead)
-    } else if text == "reliable" {
-        Some(BucketEntryState::Reliable)
-    } else if text == "unreliable" {
-        Some(BucketEntryState::Unreliable)
-    } else {
-        None
+fn parse_bucket_entry_state(text: &str) -> Result<BucketEntryState, String> {
+    match text {
+        "punished" => Ok(BucketEntryState::Punished),
+        "dead" => Ok(BucketEntryState::Dead),
+        "reliable" => Ok(BucketEntryState::Reliable),
+        "unreliable" => Ok(BucketEntryState::Unreliable),
+        _ => Err(format!("invalid bucket entry state: {text}")),
     }
+}
+
+fn get_bucket_entry_state(text: &str) -> Option<BucketEntryState> {
+    parse_bucket_entry_state(text).ok()
 }
 
 fn get_string(text: &str) -> Option<String> {
     Some(text.to_owned())
 }
 
-fn get_data(text: &str) -> Option<Vec<u8>> {
+fn parse_data(text: &str) -> Result<Vec<u8>, String> {
     if let Some(stripped_text) = text.strip_prefix('#') {
-        hex::decode(stripped_text).ok()
+        hex::decode(stripped_text).map_err(|e| format!("invalid hex data: {e}"))
     } else if text.starts_with('"') || text.starts_with('\'') {
         json::parse(text)
-            .ok()?
+            .map_err(|e| format!("invalid quoted data: {e}"))?
             .as_str()
             .map(|x| x.to_owned().as_bytes().to_vec())
+            .ok_or_else(|| "quoted data must decode to a string".to_owned())
     } else {
-        Some(text.as_bytes().to_vec())
+        Ok(text.as_bytes().to_vec())
+    }
+}
+
+fn get_data(text: &str) -> Option<Vec<u8>> {
+    parse_data(text).ok()
+}
+
+fn parse_subkeys(text: &str) -> Result<ValueSubkeyRangeSet, String> {
+    if let Some(n) = get_number::<u32>(text) {
+        Ok(ValueSubkeyRangeSet::single(n))
+    } else {
+        ValueSubkeyRangeSet::from_str(text).map_err(|e| format!("invalid subkeys: {e}"))
     }
 }
 
 fn get_subkeys(text: &str) -> Option<ValueSubkeyRangeSet> {
-    if let Some(n) = get_number::<u32>(text) {
-        Some(ValueSubkeyRangeSet::single(n))
-    } else {
-        ValueSubkeyRangeSet::from_str(text).ok()
+    parse_subkeys(text).ok()
+}
+
+fn parse_dht_report_scope(text: &str) -> Result<DHTReportScope, String> {
+    match text.to_ascii_lowercase().trim() {
+        "local" => Ok(DHTReportScope::Local),
+        "syncget" => Ok(DHTReportScope::SyncGet),
+        "syncset" => Ok(DHTReportScope::SyncSet),
+        "updateget" => Ok(DHTReportScope::UpdateGet),
+        "updateset" => Ok(DHTReportScope::UpdateSet),
+        _ => Err(format!("invalid dht report scope: {text}")),
     }
 }
 
 fn get_dht_report_scope(text: &str) -> Option<DHTReportScope> {
-    match text.to_ascii_lowercase().trim() {
-        "local" => Some(DHTReportScope::Local),
-        "syncget" => Some(DHTReportScope::SyncGet),
-        "syncset" => Some(DHTReportScope::SyncSet),
-        "updateget" => Some(DHTReportScope::UpdateGet),
-        "updateset" => Some(DHTReportScope::UpdateSet),
-        _ => None,
+    parse_dht_report_scope(text).ok()
+}
+
+enum PublishedState {
+    Published,
+    Current,
+}
+
+impl PublishedState {
+    fn as_bool(&self) -> bool {
+        matches!(self, Self::Published)
+    }
+}
+
+impl FromStr for PublishedState {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "published" => Ok(Self::Published),
+            "current" => Ok(Self::Current),
+            _ => Err(format!("invalid published mode: {s}")),
+        }
+    }
+}
+
+fn get_nested_debug_family_name(arg: Option<&str>) -> Option<String> {
+    let top_level = arg?;
+    let parser = DebugCommandParser::command();
+    let command = parser.find_subcommand(top_level)?;
+    if command.get_subcommands().next().is_some() {
+        Some(top_level.to_owned())
+    } else {
+        None
+    }
+}
+
+fn get_known_debug_command_name(arg: Option<&str>) -> Option<String> {
+    let top_level = arg?;
+    let parser = DebugCommandParser::command();
+    if parser.find_subcommand(top_level).is_some() {
+        Some(top_level.to_owned())
+    } else {
+        None
     }
 }
 
@@ -488,14 +1051,7 @@ fn get_ip_addr(text: &str) -> Option<IpAddr> {
 }
 
 fn get_published(text: &str) -> Option<bool> {
-    let ptext = text.to_ascii_lowercase();
-    if ptext == "published" {
-        Some(true)
-    } else if ptext == "current" {
-        Some(false)
-    } else {
-        None
-    }
+    PublishedState::from_str(text).ok().map(|x| x.as_bool())
 }
 
 fn get_debug_argument<T, G: FnOnce(&str) -> Option<T>>(
@@ -596,12 +1152,11 @@ pub fn print_data(data: &[u8], truncate_len: Option<usize>) -> String {
 }
 
 impl VeilidAPI {
-    fn debug_buckets(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
+    fn debug_buckets(&self, opt_min_state: Option<String>) -> VeilidAPIResult<String> {
         let mut min_state = BucketEntryState::Unreliable;
-        if args.len() == 1 {
+        if let Some(min_state_str) = opt_min_state {
             min_state = get_debug_argument(
-                &args[0],
+                &min_state_str,
                 "debug_buckets",
                 "min_state",
                 get_bucket_entry_state,
@@ -612,14 +1167,13 @@ impl VeilidAPI {
         Ok(routing_table.debug_info_buckets(min_state))
     }
 
-    fn debug_dialinfo(&self, _args: String) -> VeilidAPIResult<String> {
+    fn debug_dialinfo(&self) -> VeilidAPIResult<String> {
         // Dump routing table dialinfo
         let routing_table = self.core_context()?.routing_table();
         Ok(routing_table.debug_info_dialinfo())
     }
-    fn debug_peerinfo(&self, args: String) -> VeilidAPIResult<String> {
+    fn debug_peerinfo(&self, args: Vec<String>) -> VeilidAPIResult<String> {
         // Dump routing table peerinfo
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
         let routing_table = self.core_context()?.routing_table();
 
         let mut ai = 0;
@@ -649,19 +1203,18 @@ impl VeilidAPI {
         Ok(routing_table.debug_info_peerinfo(routing_domain, published))
     }
 
-    async fn debug_txtrecord(&self, args: String) -> VeilidAPIResult<String> {
+    async fn debug_txtrecord(&self, keypairs: Option<String>) -> VeilidAPIResult<String> {
         // Dump routing table txt record
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
-
-        let signing_key_pairs = get_debug_argument_at(
-            &args,
-            0,
-            "debug_txtrecord",
-            "signing_key_pairs",
-            get_keypair_group,
-        )
-        .ok()
-        .unwrap_or_else(KeyPairGroup::new);
+        let signing_key_pairs = if let Some(keypairs) = keypairs {
+            get_debug_argument(
+                &keypairs,
+                "debug_txtrecord",
+                "signing_key_pairs",
+                get_keypair_group,
+            )?
+        } else {
+            KeyPairGroup::new()
+        };
 
         let network_manager = self.core_context()?.network_manager();
         Ok(network_manager
@@ -669,27 +1222,26 @@ impl VeilidAPI {
             .await)
     }
 
-    fn debug_keypair(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
+    fn debug_keypair(&self, cryptokind: Option<String>) -> VeilidAPIResult<String> {
         let crypto = self.crypto()?;
 
-        let vcrypto = get_debug_argument_at(
-            &args,
-            0,
-            "debug_keypair",
-            "kind",
-            get_crypto_system_version(&crypto),
-        )
-        .unwrap_or_else(|_| crypto.best());
+        let vcrypto = if let Some(cryptokind) = cryptokind {
+            get_debug_argument(
+                &cryptokind,
+                "debug_keypair",
+                "kind",
+                get_crypto_system_version(&crypto),
+            )?
+        } else {
+            crypto.best()
+        };
 
         // Generate a keypair
         let out = vcrypto.generate_keypair().to_string();
         Ok(out)
     }
 
-    fn debug_entries(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
-
+    fn debug_entries(&self, args: Vec<String>) -> VeilidAPIResult<String> {
         let mut min_state = BucketEntryState::Unreliable;
         let mut capabilities = vec![];
         let mut fastest = false;
@@ -717,13 +1269,11 @@ impl VeilidAPI {
         })
     }
 
-    fn debug_entry(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
+    fn debug_entry(&self, node: String) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
 
-        let node_ref = get_debug_argument_at(
-            &args,
-            0,
+        let node_ref = get_debug_argument(
+            &node,
             "debug_entry",
             "node_id",
             get_node_ref(registry.clone()),
@@ -733,8 +1283,7 @@ impl VeilidAPI {
         Ok(registry.routing_table().debug_info_entry(node_ref))
     }
 
-    async fn debug_relay(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
+    async fn debug_relay(&self, args: Vec<String>) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
 
         let mut relay_nodes_refs: Vec<NodeRef> = vec![];
@@ -794,7 +1343,7 @@ impl VeilidAPI {
         Ok("Relay changed".to_owned())
     }
 
-    async fn debug_nodeinfo(&self, _args: String) -> VeilidAPIResult<String> {
+    async fn debug_nodeinfo(&self) -> VeilidAPIResult<String> {
         // Dump routing table entry
         let registry = self.core_context()?.registry();
         let nodeinfo_rtab = registry.routing_table().debug_info_nodeinfo();
@@ -835,7 +1384,7 @@ impl VeilidAPI {
         ))
     }
 
-    fn debug_nodeid(&self, _args: String) -> VeilidAPIResult<String> {
+    fn debug_nodeid(&self) -> VeilidAPIResult<String> {
         // Dump routing table entry
         let registry = self.core_context()?.registry();
         let nodeid = registry.routing_table().debug_info_nodeid();
@@ -843,67 +1392,73 @@ impl VeilidAPI {
     }
 
     #[expect(clippy::unused_async)]
-    async fn debug_config(&self, args: String) -> VeilidAPIResult<String> {
-        let mut args = args.as_str();
+    async fn debug_config(
+        &self,
+        arg_0: Option<String>,
+        arg_1: Option<String>,
+    ) -> VeilidAPIResult<String> {
+        let mut args = arg_0.as_deref().unwrap_or_default();
         let mut config = self.config()?;
         if !args.starts_with("insecure") {
+            if let Some(extra) = arg_1 {
+                apibail_invalid_argument!("debug_config", "arg_1", extra);
+            }
             config = config.safe();
         } else {
-            args = &args[8..];
+            if args != "insecure" {
+                apibail_invalid_argument!("debug_config", "arg_0", args);
+            }
+            args = arg_1.as_deref().unwrap_or_default();
         }
         let args = args.trim_start();
 
         if args.is_empty() {
             return config.get_key_json("", true);
         }
-        let (arg, rest) = args.split_once(' ').unwrap_or((args, ""));
-        let rest = rest.trim_start().to_owned();
-
-        // One argument is 'config get'
-        if !rest.is_empty() {
-            apibail_internal!("too many arguments");
-        }
-
-        config.get_key_json(arg, true)
+        config.get_key_json(args, true)
     }
 
-    async fn debug_network(&self, args: String) -> VeilidAPIResult<String> {
-        let args = args.trim_start();
-        if args.is_empty() {
+    async fn debug_network(
+        &self,
+        command: Option<DebugNetworkSubcommand>,
+    ) -> VeilidAPIResult<String> {
+        let Some(command) = command else {
             apibail_missing_argument!("debug_network", "arg_0");
-        }
-        let (arg, _rest) = args.split_once(' ').unwrap_or((args, ""));
-        // let rest = rest.trim_start().to_owned();
+        };
 
-        if arg == "restart" {
-            // Must be attached
-            if matches!(
-                self.get_state().await?.attachment.state,
-                AttachmentState::Detached
-            ) {
-                apibail_internal!("Must be attached to restart network");
+        match command {
+            DebugNetworkSubcommand::Restart => {
+                // Must be attached
+                if matches!(
+                    self.get_state().await?.attachment.state,
+                    AttachmentState::Detached
+                ) {
+                    apibail_internal!("Must be attached to restart network");
+                }
+
+                let registry = self.core_context()?.registry();
+                registry.network_manager().restart_network();
+
+                Ok("Network restarted".to_owned())
             }
+            DebugNetworkSubcommand::Stats => {
+                let registry = self.core_context()?.registry();
+                let debug_stats = registry.network_manager().debug();
 
-            let registry = self.core_context()?.registry();
-            registry.network_manager().restart_network();
-
-            Ok("Network restarted".to_owned())
-        } else if arg == "stats" {
-            let registry = self.core_context()?.registry();
-            let debug_stats = registry.network_manager().debug();
-
-            Ok(debug_stats)
-        } else {
-            apibail_invalid_argument!("debug_restart", "arg_1", arg);
+                Ok(debug_stats)
+            }
         }
     }
 
-    async fn debug_purge(&self, args: String) -> VeilidAPIResult<String> {
+    async fn debug_purge(&self, command: Option<DebugPurgeSubcommand>) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
 
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
-        if !args.is_empty() {
-            if args[0] == "buckets" {
+        let Some(command) = command else {
+            apibail_missing_argument!("debug_purge", "parameter");
+        };
+
+        match command {
+            DebugPurgeSubcommand::Buckets => {
                 // Must be detached
                 if !matches!(
                     self.get_state().await?.attachment.state,
@@ -913,7 +1468,8 @@ impl VeilidAPI {
                 }
                 registry.routing_table().purge_buckets();
                 Ok("Buckets purged".to_owned())
-            } else if args[0] == "connections" {
+            }
+            DebugPurgeSubcommand::Connections => {
                 // Purge connection table
                 let opt_connection_manager = registry.network_manager().opt_connection_manager();
 
@@ -930,7 +1486,8 @@ impl VeilidAPI {
                         .map_err(VeilidAPIError::internal)?;
                 }
                 Ok("Connections purged".to_owned())
-            } else if args[0] == "routes" {
+            }
+            DebugPurgeSubcommand::Routes => {
                 // Purge route spec store
                 self.with_debug_cache(|dc| {
                     dc.imported_routes.clear();
@@ -939,22 +1496,11 @@ impl VeilidAPI {
                     Ok(_) => Ok("Routes purged".to_owned()),
                     Err(e) => Ok(format!("Routes purged but failed to save: {}", e)),
                 }
-            } else {
-                Err(VeilidAPIError::InvalidArgument {
-                    context: "debug_purge".to_owned(),
-                    argument: "parameter".to_owned(),
-                    value: args[0].clone(),
-                })
             }
-        } else {
-            Err(VeilidAPIError::MissingArgument {
-                context: "debug_purge".to_owned(),
-                argument: "parameter".to_owned(),
-            })
         }
     }
 
-    async fn debug_attach(&self, _args: String) -> VeilidAPIResult<String> {
+    async fn debug_attach(&self) -> VeilidAPIResult<String> {
         if !matches!(
             self.get_state().await?.attachment.state,
             AttachmentState::Detached
@@ -967,7 +1513,7 @@ impl VeilidAPI {
         Ok("Attached".to_owned())
     }
 
-    async fn debug_detach(&self, _args: String) -> VeilidAPIResult<String> {
+    async fn debug_detach(&self) -> VeilidAPIResult<String> {
         if matches!(
             self.get_state().await?.attachment.state,
             AttachmentState::Detaching
@@ -980,14 +1526,11 @@ impl VeilidAPI {
         Ok("Detached".to_owned())
     }
 
-    fn debug_contact(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
-
+    fn debug_contact(&self, node_ref: String) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
 
-        let node_ref = get_debug_argument_at(
-            &args,
-            0,
+        let node_ref = get_debug_argument(
+            &node_ref,
             "debug_contact",
             "node_ref",
             get_filtered_node_ref(registry.clone()),
@@ -1001,17 +1544,14 @@ impl VeilidAPI {
         Ok(format!("{:#?}", cm))
     }
 
-    async fn debug_resolve(&self, args: String) -> VeilidAPIResult<String> {
+    async fn debug_resolve(&self, destination: String) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
         if !registry.attachment_manager().is_attached() {
             apibail_internal!("Must be attached first");
         };
 
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
-
-        let dest = async_get_debug_argument_at(
-            &args,
-            0,
+        let dest = async_get_debug_argument(
+            &destination,
             "debug_resolve",
             "destination",
             self.clone().get_destination(registry.clone()),
@@ -1041,17 +1581,14 @@ impl VeilidAPI {
         }
     }
 
-    async fn debug_ping(&self, args: String) -> VeilidAPIResult<String> {
+    async fn debug_ping(&self, destination: String) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
         if !registry.attachment_manager().is_attached() {
             apibail_internal!("Must be attached first");
         };
 
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
-
-        let dest = async_get_debug_argument_at(
-            &args,
-            0,
+        let dest = async_get_debug_argument(
+            &destination,
             "debug_ping",
             "destination",
             self.clone().get_destination(registry.clone()),
@@ -1073,24 +1610,25 @@ impl VeilidAPI {
         Ok(format!("{:#?}", out))
     }
 
-    async fn debug_app_message(&self, args: String) -> VeilidAPIResult<String> {
+    async fn debug_app_message(
+        &self,
+        destination: String,
+        data_parts: Vec<String>,
+    ) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
         if !registry.attachment_manager().is_attached() {
             apibail_internal!("Must be attached first");
         };
-
-        let (arg, rest) = args.split_once(' ').unwrap_or((&args, ""));
-        let rest = rest.trim_start().to_owned();
-
         let dest = async_get_debug_argument(
-            arg,
+            &destination,
             "debug_app_message",
             "destination",
             self.clone().get_destination(registry.clone()),
         )
         .await?;
 
-        let data = get_debug_argument(&rest, "debug_app_message", "data", get_data)?;
+        let data_text = join_args(data_parts);
+        let data = get_debug_argument(&data_text, "debug_app_message", "data", get_data)?;
         let data_len = data.len();
 
         // Send an AppMessage
@@ -1110,24 +1648,25 @@ impl VeilidAPI {
         Ok(out)
     }
 
-    async fn debug_app_call(&self, args: String) -> VeilidAPIResult<String> {
+    async fn debug_app_call(
+        &self,
+        destination: String,
+        data_parts: Vec<String>,
+    ) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
         if !registry.attachment_manager().is_attached() {
             apibail_internal!("Must be attached first");
         };
-
-        let (arg, rest) = args.split_once(' ').unwrap_or((&args, ""));
-        let rest = rest.trim_start().to_owned();
-
         let dest = async_get_debug_argument(
-            arg,
+            &destination,
             "debug_app_call",
             "destination",
             self.clone().get_destination(registry.clone()),
         )
         .await?;
 
-        let data = get_debug_argument(&rest, "debug_app_call", "data", get_data)?;
+        let data_text = join_args(data_parts);
+        let data = get_debug_argument(&data_text, "debug_app_call", "data", get_data)?;
         let data_len = data.len();
 
         // Send an AppCall
@@ -1150,18 +1689,23 @@ impl VeilidAPI {
         Ok(out)
     }
 
-    async fn debug_app_reply(&self, args: String) -> VeilidAPIResult<String> {
+    async fn debug_app_reply(
+        &self,
+        id: Option<String>,
+        data_parts: Vec<String>,
+    ) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
         if !registry.attachment_manager().is_attached() {
             apibail_internal!("Must be attached first");
         };
 
-        let (call_id, data) = if let Some(stripped_args) = args.strip_prefix('#') {
-            let (arg, rest) = stripped_args.split_once(' ').unwrap_or((&args, ""));
-            let call_id =
-                OperationId::new(u64::from_str_radix(arg, 16).map_err(VeilidAPIError::generic)?);
-            let rest = rest.trim_start().to_owned();
-            let data = get_debug_argument(&rest, "debug_app_reply", "data", get_data)?;
+        let (call_id, data) = if let Some(id) = id {
+            let stripped_id = id.strip_prefix('#').unwrap_or(id.as_str());
+            let call_id = OperationId::new(
+                u64::from_str_radix(stripped_id, 16).map_err(VeilidAPIError::generic)?,
+            );
+            let data_text = join_args(data_parts);
+            let data = get_debug_argument(&data_text, "debug_app_reply", "data", get_data)?;
             (call_id, data)
         } else {
             let rpc_processor = registry.rpc_processor();
@@ -1171,7 +1715,8 @@ impl VeilidAPI {
                 .first()
                 .cloned()
                 .ok_or_else(|| VeilidAPIError::generic("no app calls waiting"))?;
-            let data = get_debug_argument(&args, "debug_app_reply", "data", get_data)?;
+            let data_text = join_args(data_parts);
+            let data = get_debug_argument(&data_text, "debug_app_reply", "data", get_data)?;
             (call_id, data)
         };
 
@@ -1193,7 +1738,7 @@ impl VeilidAPI {
         let rss = routing_table.route_spec_store();
         let default_route_hop_count = self.config()?.network.rpc.default_route_hop_count as usize;
 
-        let mut ai = 1;
+        let mut ai = 0;
         let mut sequencing = Sequencing::default();
         let mut stability = Stability::default();
         let mut hop_count = default_route_hop_count;
@@ -1252,7 +1797,7 @@ impl VeilidAPI {
 
         let route_id = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_route",
             "route_id",
             get_route_id(registry.clone(), true, true),
@@ -1285,14 +1830,14 @@ impl VeilidAPI {
 
         let route_id = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_route",
             "route_id",
             get_route_id(registry.clone(), true, false),
         )?;
         let full = {
-            if args.len() > 2 {
-                let full_val = get_debug_argument_at(&args, 2, "debug_route", "full", get_string)?
+            if args.len() > 1 {
+                let full_val = get_debug_argument_at(&args, 1, "debug_route", "full", get_string)?
                     .to_ascii_lowercase();
                 if full_val == "full" {
                     true
@@ -1337,7 +1882,7 @@ impl VeilidAPI {
 
         let route_id = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_route",
             "route_id",
             get_route_id(registry.clone(), true, false),
@@ -1359,7 +1904,7 @@ impl VeilidAPI {
 
         if let Ok(route_id) = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_route",
             "route_id",
             get_route_id(registry.clone(), true, true),
@@ -1367,7 +1912,7 @@ impl VeilidAPI {
             Ok(rss.debug_route_by_id(&route_id))
         } else if let Ok(route_key) = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_route",
             "route_key",
             get_route_key(registry.clone(), true, true),
@@ -1406,7 +1951,7 @@ impl VeilidAPI {
         let routing_table = registry.routing_table();
         let rss = routing_table.route_spec_store();
 
-        let blob = get_debug_argument_at(&args, 1, "debug_route", "blob", get_string)?;
+        let blob = get_debug_argument_at(&args, 0, "debug_route", "blob", get_string)?;
         let blob_dec = BASE64URL_NOPAD
             .decode(blob.as_bytes())
             .map_err(VeilidAPIError::generic)?;
@@ -1433,7 +1978,7 @@ impl VeilidAPI {
 
         let route_id = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_route",
             "route_id",
             get_route_id(registry.clone(), true, true),
@@ -1453,29 +1998,28 @@ impl VeilidAPI {
         Ok(out)
     }
 
-    async fn debug_route(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> = args.split_whitespace().map(|s| s.to_owned()).collect();
+    async fn debug_route(&self, command: Option<DebugRouteSubcommand>) -> VeilidAPIResult<String> {
+        let Some(command) = command else {
+            apibail_missing_argument!("debug_route", "command");
+        };
 
-        let command = get_debug_argument_at(&args, 0, "debug_route", "command", get_string)?;
-
-        if command == "allocate" {
-            self.debug_route_allocate(args).await
-        } else if command == "release" {
-            self.debug_route_release(args)
-        } else if command == "publish" {
-            self.debug_route_publish(args)
-        } else if command == "unpublish" {
-            self.debug_route_unpublish(args)
-        } else if command == "print" {
-            self.debug_route_print(args)
-        } else if command == "list" {
-            self.debug_route_list(args)
-        } else if command == "import" {
-            self.debug_route_import(args)
-        } else if command == "test" {
-            self.debug_route_test(args).await
-        } else {
-            Ok(">>> Unknown command\n".to_owned())
+        match command {
+            DebugRouteSubcommand::Allocate { params } => self.debug_route_allocate(params).await,
+            DebugRouteSubcommand::Release { route_id } => self.debug_route_release(vec![route_id]),
+            DebugRouteSubcommand::Publish { route_id, full } => {
+                let mut args = vec![route_id];
+                if let Some(full) = full {
+                    args.push(full);
+                }
+                self.debug_route_publish(args)
+            }
+            DebugRouteSubcommand::Unpublish { route_id } => {
+                self.debug_route_unpublish(vec![route_id])
+            }
+            DebugRouteSubcommand::Print { route } => self.debug_route_print(vec![route]),
+            DebugRouteSubcommand::List => self.debug_route_list(vec![]),
+            DebugRouteSubcommand::Import { blob } => self.debug_route_import(vec![blob]),
+            DebugRouteSubcommand::Test { route_id } => self.debug_route_test(vec![route_id]).await,
         }
     }
 
@@ -1484,7 +2028,7 @@ impl VeilidAPI {
         let registry = self.core_context()?.registry();
         let storage_manager = registry.storage_manager();
 
-        let scope = get_debug_argument_at(&args, 1, "debug_record_list", "scope", get_string)?;
+        let scope = get_debug_argument_at(&args, 0, "debug_record_list", "scope", get_string)?;
         let out = match scope.as_str() {
             "local" => {
                 let mut out = "Local Records:\n".to_string();
@@ -1531,8 +2075,8 @@ impl VeilidAPI {
         });
         storage_manager.close_all_records().await?;
 
-        let scope = get_debug_argument_at(&args, 1, "debug_record_purge", "scope", get_string)?;
-        let bytes = get_debug_argument_at(&args, 2, "debug_record_purge", "bytes", get_number).ok();
+        let scope = get_debug_argument_at(&args, 0, "debug_record_purge", "scope", get_string)?;
+        let bytes = get_debug_argument_at(&args, 1, "debug_record_purge", "bytes", get_number).ok();
         let out = match scope.as_str() {
             "local" => storage_manager.purge_local_records(bytes).await,
             "remote" => storage_manager.purge_remote_records(bytes).await,
@@ -1546,7 +2090,7 @@ impl VeilidAPI {
 
         let schema = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_record_create",
             "dht_schema",
             get_dht_schema,
@@ -1555,7 +2099,7 @@ impl VeilidAPI {
 
         let csv = get_debug_argument_at(
             &args,
-            2,
+            1,
             "debug_record_create",
             "kind",
             get_crypto_system_version(&crypto),
@@ -1564,7 +2108,7 @@ impl VeilidAPI {
 
         let ss = get_debug_argument_at(
             &args,
-            3,
+            2,
             "debug_record_create",
             "safety_selection",
             get_safety_selection(self.core_context()?.registry()),
@@ -1606,13 +2150,13 @@ impl VeilidAPI {
 
         let (key, ss) = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_record_open",
             "key",
             get_dht_key(registry.clone()),
         )?;
         let writer =
-            get_debug_argument_at(&args, 2, "debug_record_open", "writer", get_keypair).ok();
+            get_debug_argument_at(&args, 1, "debug_record_open", "writer", get_keypair).ok();
 
         // Get routing context with optional safety
         let rc = self.routing_context()?;
@@ -1642,7 +2186,7 @@ impl VeilidAPI {
     async fn debug_record_close(&self, args: Vec<String>) -> VeilidAPIResult<String> {
         let (key, rc) =
             self.clone()
-                .get_opened_dht_record_context(&args, "debug_record_close", "key", 1)?;
+                .get_opened_dht_record_context(&args, "debug_record_close", "key", 0)?;
 
         // Do a record close
         if let Err(e) = rc.close_dht_record(key.clone()).await {
@@ -1653,26 +2197,26 @@ impl VeilidAPI {
     }
 
     async fn debug_record_set(&self, args: Vec<String>) -> VeilidAPIResult<String> {
-        let mut opt_arg_add = if args.len() >= 2 && get_dht_key_no_safety(&args[1]).is_some() {
+        let mut opt_arg_add = if !args.is_empty() && get_dht_key_no_safety(&args[0]).is_some() {
             1
         } else {
             0
         };
         let (key, rc) =
             self.clone()
-                .get_opened_dht_record_context(&args, "debug_record_set", "key", 1)?;
+                .get_opened_dht_record_context(&args, "debug_record_set", "key", 0)?;
         let subkey = get_debug_argument_at(
             &args,
-            1 + opt_arg_add,
+            opt_arg_add,
             "debug_record_set",
             "subkey",
             get_number::<u32>,
         )?;
         let data =
-            get_debug_argument_at(&args, 2 + opt_arg_add, "debug_record_set", "data", get_data)?;
+            get_debug_argument_at(&args, 1 + opt_arg_add, "debug_record_set", "data", get_data)?;
         let writer = match get_debug_argument_at(
             &args,
-            3 + opt_arg_add,
+            2 + opt_arg_add,
             "debug_record_set",
             "writer",
             get_keypair,
@@ -1683,10 +2227,10 @@ impl VeilidAPI {
             }
             Err(_) => None,
         };
-        let allow_offline = if args.len() > 3 + opt_arg_add {
+        let allow_offline = if args.len() > 2 + opt_arg_add {
             get_debug_argument_at(
                 &args,
-                3 + opt_arg_add,
+                2 + opt_arg_add,
                 "debug_record_set",
                 "allow_offline",
                 get_string,
@@ -1735,7 +2279,7 @@ impl VeilidAPI {
     }
 
     async fn debug_record_get(&self, args: Vec<String>) -> VeilidAPIResult<String> {
-        let opt_arg_add = if args.len() >= 2 && get_dht_key_no_safety(&args[1]).is_some() {
+        let opt_arg_add = if !args.is_empty() && get_dht_key_no_safety(&args[0]).is_some() {
             1
         } else {
             0
@@ -1743,18 +2287,18 @@ impl VeilidAPI {
 
         let (key, rc) =
             self.clone()
-                .get_opened_dht_record_context(&args, "debug_record_get", "key", 1)?;
+                .get_opened_dht_record_context(&args, "debug_record_get", "key", 0)?;
         let subkey = get_debug_argument_at(
             &args,
-            1 + opt_arg_add,
+            opt_arg_add,
             "debug_record_get",
             "subkey",
             get_number::<u32>,
         )?;
-        let force_refresh = if args.len() > 2 + opt_arg_add {
+        let force_refresh = if args.len() > 1 + opt_arg_add {
             Some(get_debug_argument_at(
                 &args,
-                2 + opt_arg_add,
+                1 + opt_arg_add,
                 "debug_record_get",
                 "force_refresh",
                 get_string,
@@ -1794,7 +2338,7 @@ impl VeilidAPI {
     async fn debug_record_delete(&self, args: Vec<String>) -> VeilidAPIResult<String> {
         let key = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_record_delete",
             "key",
             get_dht_key_no_safety,
@@ -1814,11 +2358,11 @@ impl VeilidAPI {
         let storage_manager = registry.storage_manager();
 
         let key =
-            get_debug_argument_at(&args, 1, "debug_record_info", "key", get_dht_key_no_safety)?;
+            get_debug_argument_at(&args, 0, "debug_record_info", "key", get_dht_key_no_safety)?;
 
         let subkey = get_debug_argument_at(
             &args,
-            2,
+            1,
             "debug_record_info",
             "subkey",
             get_number::<ValueSubkey>,
@@ -1845,7 +2389,7 @@ impl VeilidAPI {
     }
 
     async fn debug_record_watch(&self, args: Vec<String>) -> VeilidAPIResult<String> {
-        let opt_arg_add = if args.len() >= 2 && get_dht_key_no_safety(&args[1]).is_some() {
+        let opt_arg_add = if !args.is_empty() && get_dht_key_no_safety(&args[0]).is_some() {
             1
         } else {
             0
@@ -1853,12 +2397,12 @@ impl VeilidAPI {
 
         let (key, rc) =
             self.clone()
-                .get_opened_dht_record_context(&args, "debug_record_watch", "key", 1)?;
+                .get_opened_dht_record_context(&args, "debug_record_watch", "key", 0)?;
 
         let mut rest_defaults = false;
         let subkeys = get_debug_argument_at(
             &args,
-            1 + opt_arg_add,
+            opt_arg_add,
             "debug_record_watch",
             "subkeys",
             get_subkeys,
@@ -1875,7 +2419,7 @@ impl VeilidAPI {
         } else {
             get_debug_argument_at(
                 &args,
-                2 + opt_arg_add,
+                1 + opt_arg_add,
                 "debug_record_watch",
                 "expiration",
                 parse_duration,
@@ -1898,7 +2442,7 @@ impl VeilidAPI {
         } else {
             get_debug_argument_at(
                 &args,
-                3 + opt_arg_add,
+                2 + opt_arg_add,
                 "debug_record_watch",
                 "count",
                 get_number,
@@ -1928,7 +2472,7 @@ impl VeilidAPI {
     }
 
     async fn debug_record_cancel(&self, args: Vec<String>) -> VeilidAPIResult<String> {
-        let opt_arg_add = if args.len() >= 2 && get_dht_key_no_safety(&args[1]).is_some() {
+        let opt_arg_add = if !args.is_empty() && get_dht_key_no_safety(&args[0]).is_some() {
             1
         } else {
             0
@@ -1936,10 +2480,10 @@ impl VeilidAPI {
 
         let (key, rc) =
             self.clone()
-                .get_opened_dht_record_context(&args, "debug_record_watch", "key", 1)?;
+                .get_opened_dht_record_context(&args, "debug_record_watch", "key", 0)?;
         let subkeys = get_debug_argument_at(
             &args,
-            1 + opt_arg_add,
+            opt_arg_add,
             "debug_record_watch",
             "subkeys",
             get_subkeys,
@@ -1962,7 +2506,7 @@ impl VeilidAPI {
     }
 
     async fn debug_record_inspect(&self, args: Vec<String>) -> VeilidAPIResult<String> {
-        let opt_arg_add = if args.len() >= 2 && get_dht_key_no_safety(&args[1]).is_some() {
+        let opt_arg_add = if !args.is_empty() && get_dht_key_no_safety(&args[0]).is_some() {
             1
         } else {
             0
@@ -1970,7 +2514,7 @@ impl VeilidAPI {
 
         let (key, rc) =
             self.clone()
-                .get_opened_dht_record_context(&args, "debug_record_inspect", "key", 1)?;
+                .get_opened_dht_record_context(&args, "debug_record_inspect", "key", 0)?;
 
         let mut rest_defaults = false;
 
@@ -1979,7 +2523,7 @@ impl VeilidAPI {
         } else {
             get_debug_argument_at(
                 &args,
-                1 + opt_arg_add,
+                opt_arg_add,
                 "debug_record_inspect",
                 "scope",
                 get_dht_report_scope,
@@ -1996,7 +2540,7 @@ impl VeilidAPI {
         } else {
             get_debug_argument_at(
                 &args,
-                2 + opt_arg_add,
+                1 + opt_arg_add,
                 "debug_record_inspect",
                 "subkeys",
                 get_subkeys,
@@ -2021,7 +2565,7 @@ impl VeilidAPI {
 
         let key = get_debug_argument_at(
             &args,
-            1,
+            0,
             "debug_record_rehydrate",
             "key",
             get_dht_key_no_safety,
@@ -2032,7 +2576,7 @@ impl VeilidAPI {
         let subkeys = if rest_defaults {
             None
         } else {
-            get_debug_argument_at(&args, 2, "debug_record_rehydrate", "subkeys", get_subkeys)
+            get_debug_argument_at(&args, 1, "debug_record_rehydrate", "subkeys", get_subkeys)
                 .inspect_err(|_| {
                     rest_defaults = true;
                 })
@@ -2044,7 +2588,7 @@ impl VeilidAPI {
         } else {
             get_debug_argument_at(
                 &args,
-                3,
+                2,
                 "debug_record_rehydrate",
                 "consensus_count",
                 get_number,
@@ -2066,44 +2610,130 @@ impl VeilidAPI {
         Ok("Request added".to_owned())
     }
 
-    async fn debug_record(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> =
-            shell_words::split(&args).map_err(|e| VeilidAPIError::parse_error(e, args))?;
+    async fn debug_record(
+        &self,
+        command: Option<DebugRecordSubcommand>,
+    ) -> VeilidAPIResult<String> {
+        let Some(command) = command else {
+            apibail_missing_argument!("debug_record", "command");
+        };
 
-        let command = get_debug_argument_at(&args, 0, "debug_record", "command", get_string)?;
-
-        if command == "list" {
-            self.debug_record_list(args)
-        } else if command == "purge" {
-            self.debug_record_purge(args).await
-        } else if command == "create" {
-            self.debug_record_create(args).await
-        } else if command == "open" {
-            self.debug_record_open(args).await
-        } else if command == "close" {
-            self.debug_record_close(args).await
-        } else if command == "get" {
-            self.debug_record_get(args).await
-        } else if command == "set" {
-            self.debug_record_set(args).await
-        } else if command == "delete" {
-            self.debug_record_delete(args).await
-        } else if command == "info" {
-            self.debug_record_info(args).await
-        } else if command == "watch" {
-            self.debug_record_watch(args).await
-        } else if command == "cancel" {
-            self.debug_record_cancel(args).await
-        } else if command == "inspect" {
-            self.debug_record_inspect(args).await
-        } else if command == "rehydrate" {
-            self.debug_record_rehydrate(args)
-        } else {
-            Ok(">>> Unknown command\n".to_owned())
+        match command {
+            DebugRecordSubcommand::List { scope } => self.debug_record_list(vec![scope]),
+            DebugRecordSubcommand::Purge { scope, bytes } => {
+                let mut args = vec![scope];
+                if let Some(bytes) = bytes {
+                    args.push(bytes.to_string());
+                }
+                self.debug_record_purge(args).await
+            }
+            DebugRecordSubcommand::Create {
+                dht_schema,
+                crypto_kind,
+                safety,
+            } => {
+                let mut args = Vec::new();
+                if let Some(dht_schema) = dht_schema {
+                    args.push(dht_schema);
+                }
+                if let Some(crypto_kind) = crypto_kind {
+                    args.push(crypto_kind);
+                }
+                if let Some(safety) = safety {
+                    args.push(safety);
+                }
+                self.debug_record_create(args).await
+            }
+            DebugRecordSubcommand::Open { key, writer } => {
+                let mut args = vec![key];
+                if let Some(writer) = writer {
+                    args.push(writer);
+                }
+                self.debug_record_open(args).await
+            }
+            DebugRecordSubcommand::Close { key } => {
+                let mut args = Vec::new();
+                if let Some(key) = key {
+                    args.push(key);
+                }
+                self.debug_record_close(args).await
+            }
+            DebugRecordSubcommand::Get { params } => self.debug_record_get(params).await,
+            DebugRecordSubcommand::Set { params } => self.debug_record_set(params).await,
+            DebugRecordSubcommand::Delete { key } => self.debug_record_delete(vec![key]).await,
+            DebugRecordSubcommand::Info { key, subkey } => {
+                let mut args = vec![key];
+                if let Some(subkey) = subkey {
+                    args.push(subkey.to_string());
+                }
+                self.debug_record_info(args).await
+            }
+            DebugRecordSubcommand::Watch {
+                key,
+                subkeys,
+                expiration,
+                count,
+            } => {
+                let mut args = Vec::new();
+                if let Some(key) = key {
+                    args.push(key);
+                }
+                if let Some(subkeys) = subkeys {
+                    args.push(subkeys);
+                }
+                if let Some(expiration) = expiration {
+                    args.push(expiration);
+                }
+                if let Some(count) = count {
+                    args.push(count.to_string());
+                }
+                self.debug_record_watch(args).await
+            }
+            DebugRecordSubcommand::Cancel { key, subkeys } => {
+                let mut args = Vec::new();
+                if let Some(key) = key {
+                    args.push(key);
+                }
+                if let Some(subkeys) = subkeys {
+                    args.push(subkeys);
+                }
+                self.debug_record_cancel(args).await
+            }
+            DebugRecordSubcommand::Inspect {
+                key,
+                scope,
+                subkeys,
+            } => {
+                let mut args = Vec::new();
+                if let Some(key) = key {
+                    args.push(key);
+                }
+                if let Some(scope) = scope {
+                    args.push(scope);
+                }
+                if let Some(subkeys) = subkeys {
+                    args.push(subkeys);
+                }
+                self.debug_record_inspect(args).await
+            }
+            DebugRecordSubcommand::Rehydrate {
+                key,
+                subkeys,
+                consensus_count,
+            } => {
+                let mut args = vec![key];
+                if let Some(subkeys) = subkeys {
+                    args.push(subkeys);
+                }
+                if let Some(consensus_count) = consensus_count {
+                    args.push(consensus_count.to_string());
+                }
+                self.debug_record_rehydrate(args)
+            }
         }
     }
 
-    fn debug_table_list(&self, _args: Vec<String>) -> VeilidAPIResult<String> {
+    fn debug_table_list(&self) -> VeilidAPIResult<String> {
         //
         let table_store = self.table_store()?;
         let table_names = table_store.list_all();
@@ -2128,11 +2758,9 @@ impl VeilidAPI {
         out
     }
 
-    async fn debug_table_info(&self, args: Vec<String>) -> VeilidAPIResult<String> {
+    async fn debug_table_info(&self, table_name: String) -> VeilidAPIResult<String> {
         //
         let table_store = self.table_store()?;
-
-        let table_name = get_debug_argument_at(&args, 1, "debug_table_info", "name", get_string)?;
 
         let Some(info) = table_store.info(&table_name).await? else {
             return Ok(format!("Table '{}' does not exist", table_name));
@@ -2155,18 +2783,14 @@ impl VeilidAPI {
         Ok(out)
     }
 
-    async fn debug_table(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> =
-            shell_words::split(&args).map_err(|e| VeilidAPIError::parse_error(e, args))?;
+    async fn debug_table(&self, command: Option<DebugTableSubcommand>) -> VeilidAPIResult<String> {
+        let Some(command) = command else {
+            apibail_missing_argument!("debug_table", "command");
+        };
 
-        let command = get_debug_argument_at(&args, 0, "debug_table", "command", get_string)?;
-
-        if command == "list" {
-            self.debug_table_list(args)
-        } else if command == "info" {
-            self.debug_table_info(args).await
-        } else {
-            Ok(">>> Unknown command\n".to_owned())
+        match command {
+            DebugTableSubcommand::List => self.debug_table_list(),
+            DebugTableSubcommand::Info { name } => self.debug_table_info(name).await,
         }
     }
 
@@ -2191,174 +2815,60 @@ impl VeilidAPI {
         Ok("Address Filter punishments cleared\n".to_owned())
     }
 
-    fn debug_punish_add(&self, args: Vec<String>) -> VeilidAPIResult<String> {
+    fn debug_punish_add(&self, target: String) -> VeilidAPIResult<String> {
         //
         let registry = self.core_context()?.registry();
         let network_manager = registry.network_manager();
         let address_filter = network_manager.address_filter();
 
-        if let Ok(node_id) =
-            get_debug_argument_at(&args, 1, "debug_punish_add", "target", get_node_id)
-        {
+        if let Some(node_id) = get_node_id(&target) {
             address_filter.punish_node_id(node_id, PunishmentReason::Manual);
             Ok("Address Filter node id punishment added\n".to_owned())
-        } else if let Ok(ip_addr) =
-            get_debug_argument_at(&args, 1, "debug_punish_add", "target", get_ip_addr)
-        {
+        } else if let Some(ip_addr) = get_ip_addr(&target) {
             address_filter.punish_ip_addr(ip_addr, PunishmentReason::Manual);
             Ok("Address Filter address punishment added\n".to_owned())
         } else {
-            Ok(">>> Unknown command argument\n".to_owned())
+            apibail_invalid_argument!("debug_punish_add", "target", target);
         }
     }
 
-    fn debug_punish_remove(&self, args: Vec<String>) -> VeilidAPIResult<String> {
+    fn debug_punish_remove(&self, target: String) -> VeilidAPIResult<String> {
         //
         let registry = self.core_context()?.registry();
         let network_manager = registry.network_manager();
         let address_filter = network_manager.address_filter();
 
-        if let Ok(node_id) =
-            get_debug_argument_at(&args, 1, "debug_punish_remove", "target", get_node_id)
-        {
+        if let Some(node_id) = get_node_id(&target) {
             address_filter.forgive_node_id(node_id);
             Ok("Address Filter node id punishment forgiven\n".to_owned())
-        } else if let Ok(ip_addr) =
-            get_debug_argument_at(&args, 1, "debug_punish_remove", "target", get_ip_addr)
-        {
+        } else if let Some(ip_addr) = get_ip_addr(&target) {
             address_filter.forgive_ip_addr(ip_addr);
             Ok("Address Filter address punishment forgiven\n".to_owned())
         } else {
-            Ok(">>> Unknown command argument\n".to_owned())
+            apibail_invalid_argument!("debug_punish_remove", "target", target);
         }
     }
 
-    fn debug_punish(&self, args: String) -> VeilidAPIResult<String> {
-        let args: Vec<String> =
-            shell_words::split(&args).map_err(|e| VeilidAPIError::parse_error(e, args))?;
+    fn debug_punish(&self, command: Option<DebugPunishSubcommand>) -> VeilidAPIResult<String> {
+        let Some(command) = command else {
+            apibail_missing_argument!("debug_punish", "command");
+        };
 
-        let command = get_debug_argument_at(&args, 0, "debug_punish", "command", get_string)?;
-
-        if command == "list" {
-            self.debug_punish_list(args)
-        } else if command == "clear" {
-            self.debug_punish_clear(args)
-        } else if command == "add" {
-            self.debug_punish_add(args)
-        } else if command == "remove" {
-            self.debug_punish_remove(args)
-        } else {
-            Ok(">>> Unknown command\n".to_owned())
+        match command {
+            DebugPunishSubcommand::List => self.debug_punish_list(vec![]),
+            DebugPunishSubcommand::Clear => self.debug_punish_clear(vec![]),
+            DebugPunishSubcommand::Add { target } => self.debug_punish_add(target),
+            DebugPunishSubcommand::Remove { target } => self.debug_punish_remove(target),
         }
     }
 
     /// Get the help text for 'internal debug' commands.
-    pub fn debug_help(&self, _args: String) -> VeilidAPIResult<String> {
-        Ok(r#"Node Information:
-    nodeid  - display a node's id(s)
-    nodeinfo - display detailed information about this node
-    dialinfo - display the dialinfo in the routing domains of this node
-    peerinfo [routingdomain] [published|current] - display the full PeerInfo for a routing domain of this node
-    uptime - display node uptime
-
-Routing:
-    buckets [dead|reliable] - Display the routing table bucket statistics (default is only non-dead nodes)
-    entries [dead|reliable] [<capabilities>] - Display the index of nodes in the routing table
-    entry <node> - Display all the details about a particular node in the routing table
-    contact <filtered node> - Explain what mechanism would be used to contact a particular node
-    resolve <destination> - Search the network for a particular node or private route
-    relay [<relay>...] [public|local] - Change the relays in use for this node
-    punish list - List all punishments this node has assigned to other nodes / networks
-           clear - Clear all punishments from this node
-           add <node> - Punish a node manually for testing purposes
-           remove <node> - Remove a single node's punishment
-
-    route allocate [<sequencing>] [rel] [<count>] [in|out] - Allocate a route
-          release <route> - Release a route
-          publish <route> [full] - Publish a route 'blob' that can be imported on another machine
-          unpublish <route> - Mark a route as 'no longer published'
-          print <route> - Display details about a route
-          list - List allocated routes
-          import <blob> - Import a remote route blob generated by another node's 'publish' command.
-          test <route> - Test an allocated or imported remote route
-
-Utilities:
-    config [insecure] [configkey [new value]] - Display or temporarily change the node config
-                                                (most values should not be changed this way, careful!)
-    txtrecord [keypairs] - Generate a TXT record for making this node into a bootstrap node capable of DNS bootstrap
-    keypair [cryptokind] - Generate and display a random public/private keypair
-    purge <buckets|connections|routes> - Throw away the node's routing table, connections, or routes
-
-Network:
-    attach - Attach the node to the network if it is detached
-    detach - Detach the node from the network if it is attached
-    network restart - Restart the low level network
-            stats - Print network manager statistics
-
-RPC Operations:
-    ping <destination> - Send a 'Status' RPC question to a destination node and display the returned ping status
-    appmessage <destination> <data> - Send an 'App Message' RPC statement to a destination node
-    appcall <destination> <data> - Send a 'App Call' RPC question to a destination node and display the answer
-    appreply [#id] <data> - Reply to an 'App Call' RPC received by this node
-
-DHT Operations:
-    record list <local|remote|opened|offline|watched|transactions> - display the dht records in the store
-           purge <local|remote> [bytes] - clear all dht records optionally down to some total size
-           create <dhtschema> [<cryptokind> [<safety>]] - create a new dht record
-           open <key>[+<safety>] [<writer>] - open an existing dht record
-           close [<key>] - close an opened/created dht record
-           set [<key>] <subkey> <data> [<writer>] [offline|online]- write a value to a dht record subkey
-           get [<key>] <subkey> [force] - read a value from a dht record subkey
-           delete <key> - delete the local copy of a dht record (not from the network)
-           info [<key>] [subkey] - display information about a dht record or subkey
-           watch [<key>] [<subkeys> [<expiration> [<count>]]] - watch a record for changes
-           cancel [<key>] [<subkeys>] - cancel a dht record watch
-           inspect [<key>] [<scope> [<subkeys>]] - display a dht record's subkey status
-           rehydrate <key> [<subkeys>] [<consensus count>] - send a dht record's expired local data back to the network
-
-TableDB Operations:
-    table list - list the names of all the tables in the TableDB
-
---------------------------------------------------------------------
-<key> is: VLD0:GsgXCRPrzSK6oBNgxhNpm-rTYFd02R0ySx6j9vbQBG4
-    * also <node>, <relay>, <target>, <route>
-<capabilities> is: a list of VeilidCapability four-character codes: ROUT,SGNL,RLAY,DIAL,DHTV,APPM etc.
-<configkey> is: dot path like network.protocol.udp.enabled
-<filtered node> is: <node>[+<sequencing>][<modifiers>]
-<destination> is:
-    * direct:  <node>[+<safety>][<modifiers>]
-    * relay:   <relay>@<target>[+<safety>][<modifiers>]
-    * private: #<id>[+<safety>]
-<sequencing> is:
-    * prefer_ordered: 'pre' or 'ord'
-    * ensure_ordered: 'ens' or '*ord'
-<safety> is:
-    * unsafe: -<sequencing>
-    * safe: [route][,<sequencing>][,rel][,<count>]
-<modifiers> is: [/<protocoltype>][/<addresstype>][/<routingdomain>]
-<protocoltype> is: 'udp', 'tcp', 'ws', or 'wss'
-<addresstype> is: 'ipv4', or 'ipv6'
-<routingdomain> is: 'pub', or 'loc'
-<cryptokind> is: VLD0
-<dhtschema> is:
-    * a single-quoted json dht schema, or
-    * an integer number for a DFLT schema subkey count.
-    default is '{"kind":"DFLT","o_cnt":1}'
-<scope> is: local, syncget, syncset, updateget, updateset
-<subkey> is: a number: 2
-<subkeys> is:
-    * a number: 2
-    * a comma-separated inclusive range list: 1..=3,5..=8
-<data> is:
-    * a single-word string: foobar
-    * a shell-quoted string: "foo\nbar\n"
-    * a '#' followed by hex data: #12AB34CD...
-"#
-        .to_owned())
+    pub fn debug_help(&self) -> VeilidAPIResult<String> {
+        Ok(render_parser_help::<DebugCommandParser>())
     }
 
     /// Get node uptime info.
-    pub async fn debug_uptime(&self, _args: String) -> VeilidAPIResult<String> {
+    pub async fn debug_uptime(&self) -> VeilidAPIResult<String> {
         let mut result = String::new();
 
         writeln!(result, "Uptime...").ok();
@@ -2378,9 +2888,13 @@ TableDB Operations:
     /// Cause veilid-core to panic via various means
     #[cfg(debug_assertions)]
     #[expect(clippy::unused_async)]
-    pub async fn debug_die(&self, args: String) -> VeilidAPIResult<String> {
-        let args = args.trim_start();
-        let (arg, rest) = args.split_once(' ').unwrap_or((args, ""));
+    pub async fn debug_die(
+        &self,
+        mode: Option<String>,
+        message: Vec<String>,
+    ) -> VeilidAPIResult<String> {
+        let arg = mode.as_deref().unwrap_or_default();
+        let rest = join_args(message);
         match arg {
             "panic" => {
                 if rest.is_empty() {
@@ -2400,11 +2914,11 @@ TableDB Operations:
             }
             "expect" => {
                 #[expect(clippy::unnecessary_literal_unwrap)]
-                Option::<()>::None.expect(rest);
+                Option::<()>::None.expect(&rest);
                 unreachable!("expect must panic");
             }
             "expect_or_log" => {
-                Option::<()>::None.expect_or_log(rest);
+                Option::<()>::None.expect_or_log(&rest);
                 unreachable!("expect_or_log must panic");
             }
             "div0" => {
@@ -2437,81 +2951,86 @@ TableDB Operations:
         }
     }
 
-    /// Execute an 'internal debug command'.
+    /// Execute an internal debug command.
+    /// `appmessage`, `appcall`, and `appreply` preserve raw trailing payload
+    /// text and parse payloads in command-specific logic. Buckets/config/purge/
+    /// route/record/table/punish/network command routing uses clap while
+    /// semantic parsing remains delegated to existing helpers and downstream
+    /// components.
     pub async fn debug(&self, args: String) -> VeilidAPIResult<String> {
         let res = {
-            let args = args.trim_start();
-            if args.is_empty() {
-                // No arguments runs help command
-                return self.debug_help("".to_owned());
+            let argv_parts =
+                shell_words::split(&args).map_err(|e| VeilidAPIError::parse_error(e, args))?;
+
+            if argv_parts.is_empty() {
+                return self.debug_help();
             }
-            let (arg, rest) = args.split_once(' ').unwrap_or((args, ""));
-            let rest = rest.trim_start().to_owned();
 
-            if arg == "help" {
-                self.debug_help(rest)
-            } else if arg == "nodeid" {
-                self.debug_nodeid(rest)
-            } else if arg == "buckets" {
-                self.debug_buckets(rest)
-            } else if arg == "dialinfo" {
-                self.debug_dialinfo(rest)
-            } else if arg == "peerinfo" {
-                self.debug_peerinfo(rest)
-            } else if arg == "contact" {
-                self.debug_contact(rest)
-            } else if arg == "keypair" {
-                self.debug_keypair(rest)
-            } else if arg == "entries" {
-                self.debug_entries(rest)
-            } else if arg == "entry" {
-                self.debug_entry(rest)
-            } else if arg == "punish" {
-                self.debug_punish(rest)
-            } else {
-                let fut = if arg == "txtrecord" {
-                    pin_dyn_future!(self.debug_txtrecord(rest))
-                } else if arg == "relay" {
-                    pin_dyn_future!(self.debug_relay(rest))
-                } else if arg == "ping" {
-                    pin_dyn_future!(self.debug_ping(rest))
-                } else if arg == "appmessage" {
-                    pin_dyn_future!(self.debug_app_message(rest))
-                } else if arg == "appcall" {
-                    pin_dyn_future!(self.debug_app_call(rest))
-                } else if arg == "appreply" {
-                    pin_dyn_future!(self.debug_app_reply(rest))
-                } else if arg == "resolve" {
-                    pin_dyn_future!(self.debug_resolve(rest))
-                } else if arg == "nodeinfo" {
-                    pin_dyn_future!(self.debug_nodeinfo(rest))
-                } else if arg == "purge" {
-                    pin_dyn_future!(self.debug_purge(rest))
-                } else if arg == "attach" {
-                    pin_dyn_future!(self.debug_attach(rest))
-                } else if arg == "detach" {
-                    pin_dyn_future!(self.debug_detach(rest))
-                } else if arg == "config" {
-                    pin_dyn_future!(self.debug_config(rest))
-                } else if arg == "network" {
-                    pin_dyn_future!(self.debug_network(rest))
-                } else if arg == "route" {
-                    pin_dyn_future!(self.debug_route(rest))
-                } else if arg == "record" {
-                    pin_dyn_future!(self.debug_record(rest))
-                } else if arg == "table" {
-                    pin_dyn_future!(self.debug_table(rest))
-                } else if arg == "uptime" {
-                    pin_dyn_future!(self.debug_uptime(rest))
-                } else {
-                    #[cfg(debug_assertions)]
-                    if arg == "die" {
-                        return self.debug_die(rest).await;
+            let argv: Vec<String> = std::iter::once("debug".to_owned())
+                .chain(argv_parts.iter().cloned())
+                .collect();
+            let nested_family =
+                get_nested_debug_family_name(argv_parts.first().map(String::as_str));
+            let known_command =
+                get_known_debug_command_name(argv_parts.first().map(String::as_str));
+
+            let parsed = match DebugCommandParser::try_parse_from(argv) {
+                Ok(parsed) => parsed,
+                Err(err) if err.kind() == ErrorKind::DisplayHelp => return Ok(err.to_string()),
+                Err(err) if err.kind() == ErrorKind::InvalidSubcommand => {
+                    if let Some(family) = nested_family {
+                        return Err(VeilidAPIError::generic(format!(
+                            "Unknown {} subcommand",
+                            family
+                        )));
                     }
-
                     return Err(VeilidAPIError::generic("Unknown debug command"));
-                };
-                fut.await
+                }
+                Err(_) => {
+                    if let Some(family) = known_command {
+                        let arg = argv_parts.get(1).cloned().unwrap_or_default();
+                        apibail_invalid_argument!(format!("debug_{}", family), "arg_1", arg);
+                    } else {
+                        return Err(VeilidAPIError::generic("Unknown debug command"));
+                    }
+                }
+            };
+
+            let command = parsed.command;
+
+            match command {
+                DebugCommand::Nodeid => self.debug_nodeid(),
+                DebugCommand::Buckets { min_state } => self.debug_buckets(min_state),
+                DebugCommand::Dialinfo => self.debug_dialinfo(),
+                DebugCommand::Peerinfo { args } => self.debug_peerinfo(args),
+                DebugCommand::Contact { node_ref } => self.debug_contact(node_ref),
+                DebugCommand::Keypair { cryptokind } => self.debug_keypair(cryptokind),
+                DebugCommand::Entries { args } => self.debug_entries(args),
+                DebugCommand::Entry { node } => self.debug_entry(node),
+                DebugCommand::Punish { command } => self.debug_punish(command),
+                DebugCommand::Txtrecord { keypairs } => self.debug_txtrecord(keypairs).await,
+                DebugCommand::Relay { args } => self.debug_relay(args).await,
+                DebugCommand::Ping { destination } => self.debug_ping(destination).await,
+                DebugCommand::Appmessage { destination, data } => {
+                    self.debug_app_message(destination, data).await
+                }
+                DebugCommand::Appcall { destination, data } => {
+                    self.debug_app_call(destination, data).await
+                }
+                DebugCommand::Appreply { id, data } => self.debug_app_reply(id, data).await,
+                DebugCommand::Resolve { destination } => self.debug_resolve(destination).await,
+                DebugCommand::Nodeinfo => self.debug_nodeinfo().await,
+                DebugCommand::Purge { command } => self.debug_purge(command).await,
+                DebugCommand::Attach => self.debug_attach().await,
+                DebugCommand::Detach => self.debug_detach().await,
+                DebugCommand::Config { arg_0, arg_1 } => self.debug_config(arg_0, arg_1).await,
+                DebugCommand::Network { command } => self.debug_network(command).await,
+                DebugCommand::Route { command } => self.debug_route(command).await,
+                DebugCommand::Record { command } => self.debug_record(command).await,
+                DebugCommand::Table { command } => self.debug_table(command).await,
+                DebugCommand::Uptime => self.debug_uptime().await,
+                #[cfg(debug_assertions)]
+                DebugCommand::Die { mode, message } => self.debug_die(mode, message).await,
             }
         };
         res
@@ -2729,5 +3248,246 @@ impl<T: AsRef<str>> StripTrailingNewline for T {
             .strip_suffix("\r\n")
             .or(self.as_ref().strip_suffix("\n"))
             .unwrap_or(self.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod clap_parse_tests {
+    use super::*;
+
+    #[test]
+    fn parses_top_level_commands() {
+        let parsed = DebugCommandParser::try_parse_from(["debug", "nodeinfo"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Nodeinfo
+            })
+        ));
+
+        let parsed = DebugCommandParser::try_parse_from(["debug", "nodeid"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Nodeid
+            })
+        ));
+
+        assert!(DebugCommandParser::try_parse_from(["debug", "NoDeId"]).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_command() {
+        assert!(DebugCommandParser::try_parse_from(["debug", "definitely-unknown"]).is_err());
+    }
+
+    #[test]
+    fn single_pass_parser_preserves_quoted_payload_tokens() {
+        let parsed =
+            DebugCommandParser::try_parse_from(["debug", "appmessage", "destination", "foo bar"])
+                .ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Appmessage { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_route_subcommands() {
+        let parsed = DebugCommandParser::try_parse_from(["debug", "route", "allocate", "rel"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Route {
+                    command: Some(DebugRouteSubcommand::Allocate { .. })
+                }
+            })
+        ));
+
+        let parsed =
+            DebugCommandParser::try_parse_from(["debug", "route", "test", "route-id"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Route {
+                    command: Some(DebugRouteSubcommand::Test { .. })
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_route_subcommand() {
+        assert!(DebugCommandParser::try_parse_from(["debug", "route", "unknown"]).is_err());
+    }
+
+    #[test]
+    fn parses_record_subcommands() {
+        let parsed = DebugCommandParser::try_parse_from(["debug", "record", "create", "1"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Record {
+                    command: Some(DebugRecordSubcommand::Create { .. })
+                }
+            })
+        ));
+
+        let parsed =
+            DebugCommandParser::try_parse_from(["debug", "record", "rehydrate", "some-key"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Record {
+                    command: Some(DebugRecordSubcommand::Rehydrate { .. })
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_table_punish_and_network_subcommands() {
+        let parsed = DebugCommandParser::try_parse_from(["debug", "table", "info", "table"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Table {
+                    command: Some(DebugTableSubcommand::Info { .. })
+                }
+            })
+        ));
+
+        let parsed = DebugCommandParser::try_parse_from(["debug", "punish", "remove", "node"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Punish {
+                    command: Some(DebugPunishSubcommand::Remove { .. })
+                }
+            })
+        ));
+
+        let parsed = DebugCommandParser::try_parse_from(["debug", "network", "stats"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Network {
+                    command: Some(DebugNetworkSubcommand::Stats)
+                }
+            })
+        ));
+
+        let parsed = DebugCommandParser::try_parse_from(["debug", "purge", "routes"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Purge {
+                    command: Some(DebugPurgeSubcommand::Routes)
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_missing_nested_subcommands() {
+        let parsed = DebugCommandParser::try_parse_from(["debug", "route"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Route { command: None }
+            })
+        ));
+
+        let parsed = DebugCommandParser::try_parse_from(["debug", "record"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Record { command: None }
+            })
+        ));
+
+        let parsed = DebugCommandParser::try_parse_from(["debug", "purge"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Purge { command: None }
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_buckets_config_and_die_forms() {
+        let parsed = DebugCommandParser::try_parse_from(["debug", "buckets", "dead"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Buckets { min_state: Some(_) }
+            })
+        ));
+
+        let parsed = DebugCommandParser::try_parse_from(["debug", "config", "insecure"]).ok();
+        assert!(matches!(
+            parsed,
+            Some(DebugCommandParser {
+                command: DebugCommand::Config {
+                    arg_0: Some(_),
+                    arg_1: None
+                }
+            })
+        ));
+
+        #[cfg(debug_assertions)]
+        {
+            let parsed = DebugCommandParser::try_parse_from(["debug", "die", "panic", "msg"]).ok();
+            assert!(matches!(
+                parsed,
+                Some(DebugCommandParser {
+                    command: DebugCommand::Die {
+                        mode: Some(_),
+                        message
+                    }
+                }) if message.len() == 1
+            ));
+        }
+    }
+
+    #[test]
+    fn parses_record_data_forms() {
+        assert_eq!(get_data("#666f6f"), Some(b"foo".to_vec()));
+        assert_eq!(get_data("\"foo\\nbar\""), Some(b"foo\nbar".to_vec()));
+        assert_eq!(get_data("plain"), Some(b"plain".to_vec()));
+        assert!(parse_data("#zz").is_err());
+    }
+
+    #[test]
+    fn parses_context_free_converters() {
+        assert!(matches!(
+            parse_bucket_entry_state("dead"),
+            Ok(BucketEntryState::Dead)
+        ));
+        assert!(matches!(
+            parse_dht_report_scope("syncset"),
+            Ok(DHTReportScope::SyncSet)
+        ));
+        assert!(PublishedState::from_str("published")
+            .map(|x| x.as_bool())
+            .unwrap_or(false));
+        assert!(parse_subkeys("1..=3,5..=8").is_ok());
+    }
+
+    #[test]
+    fn generated_help_includes_command_groups() {
+        let help = render_parser_help::<DebugCommandParser>();
+        assert!(help.contains("nodeid"));
+        assert!(help.contains("record"));
+        assert!(help.contains("help"));
+    }
+
+    #[test]
+    fn top_level_help_subcommand_is_available() {
+        let err = DebugCommandParser::try_parse_from(["debug", "help", "route"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::DisplayHelp);
     }
 }

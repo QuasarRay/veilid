@@ -100,12 +100,21 @@ impl CommandProcessor {
         capi.cancel_all();
     }
 
-    pub fn cmd_help(&self, _rest: Option<String>, callback: UICallback) -> Result<(), String> {
+    pub fn cmd_help(&self, rest: Option<String>, callback: UICallback) -> Result<(), String> {
         trace!("CommandProcessor::cmd_help");
         let capi = self.capi();
         let ui = self.ui_sender();
+        let help_args = rest
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let help_command = help_args
+            .as_deref()
+            .map(|s| format!("help {}", s))
+            .unwrap_or_else(|| "help".to_owned());
         spawn_detached_local("cmd help", async move {
-            let out = match capi.server_debug("help".to_owned()).await {
+            let out = match capi.server_debug(help_command).await {
                 Err(e) => {
                     error!("Server command 'debug help' failed: {}", e);
                     ui.send_callback(callback);
@@ -114,10 +123,13 @@ impl CommandProcessor {
                 Ok(v) => v,
             };
 
-            ui.add_node_event(
-                Level::Info,
-                &format!(
-                    r#"Client Commands:
+            if help_args.is_some() {
+                ui.add_node_event(Level::Info, &out);
+            } else {
+                ui.add_node_event(
+                    Level::Info,
+                    &format!(
+                        r#"Client Commands:
     exit/quit                           exit the client
     disconnect                          disconnect the client from the Veilid node
     shutdown                            shut the server down
@@ -131,10 +143,11 @@ impl CommandProcessor {
                                         valid flags in include:
                                             app_messages
 Core Debug Commands:
-{}"#,
-                    indent_all_by(4, out)
-                ),
-            );
+  {}"#,
+                        indent_all_by(2, out)
+                    ),
+                );
+            }
             ui.send_callback(callback);
         });
         Ok(())

@@ -106,6 +106,7 @@ directories = "5.0.1"
 get-size = { version = "0.1.4", features = ["derive"] }
 async-trait = "0.1.89"
 macro_rules_attribute = "0.2.2"
+clap = { version = "4.5.39", features = ["derive"] }
 
 # Logging
 tracing = { version = "0.1.41", features = ["log", "attributes"] }
