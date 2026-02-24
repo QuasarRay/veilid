@@ -330,21 +330,20 @@ async fn test_open_zero_columns(ts: &TableStore) {
 
     let _ = ts.delete("zero_cols").await;
 
-    let db = ts.open("zero_cols", 0).await.expect("should have opened");
-    assert_eq!(db.get_column_count().unwrap(), 1);
-    assert!(db.store(0, b"k0", b"v0").await.is_ok());
-    assert_eq!(db.load(0, b"k0").await.unwrap(), Some(b"v0".to_vec()));
-    drop(db);
+    assert!(
+        ts.open("zero_cols", 0).await.is_err(),
+        "zero columns should be rejected"
+    );
 
     let db = ts.open("zero_cols", 3).await.expect("should have opened");
     assert_eq!(db.get_column_count().unwrap(), 3);
     assert!(db.store(2, b"k2", b"v2").await.is_ok());
     drop(db);
 
-    let db = ts.open("zero_cols", 0).await.expect("should have opened");
-    assert_eq!(db.get_column_count().unwrap(), 3);
-    assert_eq!(db.load(2, b"k2").await.unwrap(), Some(b"v2".to_vec()));
-    drop(db);
+    assert!(
+        ts.open("zero_cols", 0).await.is_err(),
+        "zero columns should be rejected even when table exists"
+    );
 
     let _ = ts.delete("zero_cols").await;
 }

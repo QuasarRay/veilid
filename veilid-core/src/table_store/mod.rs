@@ -688,6 +688,14 @@ impl TableStore {
         column_count: u32,
         concurrency: usize,
     ) -> VeilidAPIResult<TableDB> {
+        if column_count == 0 {
+            apibail_invalid_argument!(
+                "column count must be greater than zero",
+                "column_count",
+                column_count
+            );
+        }
+
         let Ok(_startup_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
         };
@@ -724,12 +732,9 @@ impl TableStore {
         }
 
         // Open table db using platform-specific driver.
-        // A requested column_count of 0 means "all columns" at the TableDB API layer,
-        // but backend creation/open requires a concrete count.
-        let backend_column_count = if column_count == 0 { 1 } else { column_count };
         let mut db = match self
             .table_store_driver
-            .open(&table_name, backend_column_count, concurrency)
+            .open(&table_name, column_count, concurrency)
             .await
         {
             Ok(db) => db,
@@ -745,7 +750,7 @@ impl TableStore {
 
         // If more columns are available, open the low level db with the max column count but restrict the tabledb object to the number requested
         let existing_col_count = db.num_columns().map_err(VeilidAPIError::from)?;
-        if existing_col_count > backend_column_count {
+        if existing_col_count > column_count {
             drop(db);
             db = match self
                 .table_store_driver
@@ -838,12 +843,16 @@ impl TableStore {
             apibail_not_initialized!();
         };
 
-        // Open with the default number of columns
-        let tdb = self.open(name, 0).await?;
+        // Open with at least one column, then reopen to match all available columns.
+        let mut tdb = self.open(name, 1).await?;
+        let column_count = tdb.get_column_count()?;
+        if column_count > 1 {
+            tdb = self.open(name, column_count).await?;
+        }
+
         let internal_name = tdb.table_name();
         let io_stats_since_previous = tdb.io_stats(IoStatsKind::SincePrevious);
         let io_stats_overall = tdb.io_stats(IoStatsKind::Overall);
-        let column_count = tdb.get_column_count()?;
         let mut columns = Vec::<ColumnInfo>::with_capacity(column_count as usize);
         for col in 0..column_count {
             let key_count = tdb.get_key_count(col).await?;
