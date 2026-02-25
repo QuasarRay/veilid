@@ -85,12 +85,8 @@ dagger -v 'test-native $(host | directory --gitignore .)'
 
 | Dagger Function | Earthly Target(s)         | Description                                     |
 | --------------- | ------------------------- | ----------------------------------------------- |
-| `test_native()` | `unit-tests-native-linux` | Run native unit tests for current architecture  |
 | `test_docs()`   | `unit-tests-docs-linux`   | Build and test documentation                    |
-| `test_wasm()`   | `unit-tests-wasm-linux`   | Build WASM module (network tests disabled)      |
 | `test_all()`    | `unit-tests-linux`        | Run all test suites: clippy, native, docs, WASM |
-
-**Note:** Individual clippy test targets (`unit-tests-clippy-*`) are consolidated into the main `clippy()` function.
 
 ### Packaging
 
@@ -129,7 +125,7 @@ dagger -c 'build-linux-amd-64 $(host | directory --gitignore .) | export ./targe
 
 #### 2. **Function Consolidation**
 - **Earthly:** 7 separate `unit-tests-*` targets
-- **Dagger:** 4 focused test functions (`test_native`, `test_docs`, `test_wasm`, `test_all`)
+- **Dagger:** 2 focused test functions (`test_docs`, `test_all`)
 
 #### 3. **Cross-compilation Simplification**
 - **Earthly:** Complex MinGW, cross-gcc, libc-dev packages

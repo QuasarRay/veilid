@@ -10,11 +10,19 @@ get_abs_filename() {
 
 pushd $SCRIPTDIR &> /dev/null
 
-if [[ "$1" == "release" ]]; then  
+if [ $# -ge 1 ] && [ "$1" = "release" ] ; then
+    echo "Release build enabled."
+    RELEASE=1
+    shift
+else
+    RELEASE=0
+fi
+
+if [ "$RELEASE" -eq 1 ]; then  
     OUTPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/release/pkg
     INPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/release
 
-    ./wasm_remap_paths.sh cargo build --target wasm32-unknown-unknown --release --no-default-features --features=default-dart
+    ./wasm_remap_paths.sh cargo build --target wasm32-unknown-unknown --release --no-default-features --features=default-dart $@
     mkdir -p $OUTPUTDIR
     wasm-bindgen --out-dir $OUTPUTDIR --target web $INPUTDIR/veilid_wasm.wasm
     wasm-opt -O $OUTPUTDIR/veilid_wasm_bg.wasm -o $OUTPUTDIR/veilid_wasm_bg.wasm.optimized
@@ -23,7 +31,7 @@ else
     OUTPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/debug/pkg
     INPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/debug
 
-    RUSTFLAGS="-O -g $RUSTFLAGS" cargo build --target wasm32-unknown-unknown --no-default-features --features=default-dart
+    RUSTFLAGS="-O -g $RUSTFLAGS" cargo build --target wasm32-unknown-unknown --no-default-features --features=default-dart $@
     mkdir -p $OUTPUTDIR
     wasm-bindgen --out-dir $OUTPUTDIR --target web --keep-debug --debug $INPUTDIR/veilid_wasm.wasm
 fi

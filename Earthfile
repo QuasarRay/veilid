@@ -34,6 +34,13 @@ ENV PATH=$PATH:/usr/local/cargo/bin:/usr/local/zig
 ENV LD_LIBRARY_PATH=/usr/local/lib
 ENV RUST_BACKTRACE=1
 ENV RETRY_COUNT=12
+# Disable incremental compilation in CI - useless in ephemeral containers and wastes disk
+ENV CARGO_INCREMENTAL=0 
+# Reduce debug info to line-tables-only (still gives backtraces, much smaller binaries)
+ENV CARGO_PROFILE_TEST_DEBUGINFO=1
+# Limit parallel jobs to match medium runner resources (2 vCPU, 8GB RAM)
+ENV CARGO_BUILD_JOBS=2
+    
 
 WORKDIR /veilid
 
@@ -215,7 +222,7 @@ code-linux:
         ARG CACHE_TAG
         FROM $CI_REGISTRY_IMAGE/$CACHE_NAME:$CACHE_TAG
     END
-    COPY --keep-ts --dir .cargo build_docs.sh scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
+    COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
     # Check to make sure Cargo.lock is up to date
     RUN cargo update -w --locked
     # Restore original Cargo.lock
@@ -234,10 +241,12 @@ code-android:
 # Clippy only
 clippy:
     FROM +code-linux
-    RUN cargo clippy --locked --target x86_64-unknown-linux-gnu --workspace --all-targets
-    RUN cargo clippy --locked --target x86_64-pc-windows-gnu --workspace --all-targets
-    RUN cargo clippy --locked --target aarch64-apple-darwin --workspace --all-targets
-    RUN cargo clippy --locked --manifest-path=veilid-wasm/Cargo.toml --target wasm32-unknown-unknown --features=js,dart
+    RUN ./scripts/_clippy_all.sh --cleanup
+
+# MSRV only
+msrv:
+    FROM +code-linux
+    RUN ./scripts/_msrv_all.sh        
 
 # Build
 build-linux-amd64:
@@ -298,27 +307,8 @@ build-android:
 # Unit tests
 unit-tests-linux:
     FROM +code-linux
-    RUN cargo msrv verify --manifest-path=veilid-tools/Cargo.toml
-    RUN cargo msrv verify --manifest-path=veilid-core/Cargo.toml
-    RUN cargo msrv verify --manifest-path=veilid-server/Cargo.toml
-    RUN cargo msrv verify --manifest-path=veilid-cli/Cargo.toml
-    RUN cargo msrv verify --manifest-path=veilid-flutter/rust/Cargo.toml
-    # WASM checks
-    RUN cargo clippy --manifest-path=veilid-wasm/Cargo.toml --target wasm32-unknown-unknown --all-targets
-    RUN veilid-wasm/wasm_build_dart.sh release
-    RUN veilid-wasm/wasm_build_js.sh release
-    RUN rm -rf target/wasm32-unknown-unknown
-    # Windows checks
-    RUN cargo-zigbuild clippy --target x86_64-pc-windows-gnu --all-targets
-    RUN rm -rf target/x86_64-pc-windows-gnu
-    # MacOS checks
-    RUN cargo-zigbuild clippy --target aarch64-apple-darwin --all-targets
-    RUN rm -rf target/aarch64-apple-darwin
-    # Default target checks
-    RUN cargo clippy --target $DEFAULT_CARGO_TARGET --all-targets
-    RUN ./build_docs.sh
-    RUN cargo nextest run --locked --tests --target $DEFAULT_CARGO_TARGET --workspace --all-targets
-
+    RUN ./scripts/check_all.sh --cleanup
+    
 # Package
 package-linux-amd64-deb:
     ARG IS_NIGHTLY="false"
@@ -414,7 +404,7 @@ package-linux-arm64:
 
 package-tests-docs-linux:
     FROM +code-linux
-    RUN ./build_docs.sh $RUST_PACKAGE_TESTS_NIGHTLY_VERSION
+    RUN ./scripts/_build_docs.sh $RUST_PACKAGE_TESTS_NIGHTLY_VERSION
 
 package-linux:
     WAIT

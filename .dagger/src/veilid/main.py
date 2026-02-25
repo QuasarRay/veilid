@@ -18,6 +18,13 @@ RETRY_COUNT = "12"
 RUSTUP_HOME = "/usr/local/rustup"
 RUSTUP_DIST_SERVER = "https://static.rust-lang.org"
 CARGO_HOME = "/usr/local/cargo"
+# Disable incremental compilation in CI - useless in ephemeral containers and wastes disk
+CARGO_INCREMENTAL = "0" 
+# Reduce debug info to line-tables-only (still gives backtraces, much smaller binaries)
+CARGO_PROFILE_TEST_DEBUGINFO = "1"
+# Limit parallel jobs to match medium runner resources (2 vCPU, 8GB RAM)
+CARGO_BUILD_JOBS = "2"
+
 
 # Contains ignore patterns that are not included in the .gitignore file
 DIRECTORY_IGNORE_PATTERNS = [
@@ -49,6 +56,9 @@ class Veilid:
             .with_env_variable("RUSTUP_HOME", RUSTUP_HOME)
             .with_env_variable("RUSTUP_DIST_SERVER", RUSTUP_DIST_SERVER)
             .with_env_variable("CARGO_HOME", CARGO_HOME)
+            .with_env_variable("CARGO_INCREMENTAL", CARGO_INCREMENTAL)
+            .with_env_variable("CARGO_PROFILE_TEST_DEBUGINFO", CARGO_PROFILE_TEST_DEBUGINFO)
+            .with_env_variable("CARGO_BUILD_JOBS", CARGO_BUILD_JOBS)
             .with_env_variable("PATH", f"$PATH:{CARGO_HOME}/bin:/usr/local/zig", expand=True)
             .with_env_variable("LD_LIBRARY_PATH", "/usr/local/lib")
             .with_env_variable("RUST_BACKTRACE", "1")
@@ -324,32 +334,14 @@ class Veilid:
         return container
 
     @function
-    def test_msrv(self, source: dagger.Directory, base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
-        """Run MSRV check"""
-        container = self.code_linux(source, base, ci_registry_image)
-        container = container.with_exec(["cargo", "msrv", "verify", "--manifest-path", "veilid-tools/Cargo.toml"])
-        container = container.with_exec(["cargo", "msrv", "verify", "--manifest-path", "veilid-core/Cargo.toml"])
-        container = container.with_exec(["cargo", "msrv", "verify", "--manifest-path", "veilid-server/Cargo.toml"])
-        container = container.with_exec(["cargo", "msrv", "verify", "--manifest-path", "veilid-cli/Cargo.toml"])
-        container = container.with_exec(["cargo", "msrv", "verify", "--manifest-path", "veilid-flutter/rust/Cargo.toml"])
-        
-        return container.combined_output()
-
-    @function
-    def clippy(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Container:
+    async def clippy(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
         """Run clippy linting for multiple targets"""
         container = self.code_linux(source, base, ci_registry_image)
 
         # Run clippy for different targets
-        container = (
-            container
-            .with_exec(["cargo-zigbuild", "clippy", "--locked", "--target", "x86_64-unknown-linux-gnu", "--workspace", "--all-targets"])
-            .with_exec(["cargo-zigbuild", "clippy", "--locked", "--target", "x86_64-pc-windows-gnu", "--workspace", "--all-targets"])
-            .with_exec(["cargo-zigbuild", "clippy", "--locked", "--target", "aarch64-apple-darwin", "--workspace", "--all-targets"])
-            .with_exec(["cargo", "clippy", "--locked", "--manifest-path=veilid-wasm/Cargo.toml", "--target", "wasm32-unknown-unknown", "--features=js,dart"])
-        )
+        result = await container.with_exec(["./scripts/_clippy_all.sh", "--cleanup"]).combined_output()
 
-        return container
+        return f"Clippy completed:\n{result}"
 
     @function
     def build_windows_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
@@ -447,18 +439,6 @@ class Veilid:
 
     #     # Return the built artifacts directory
     #     return out
-        
-    @function
-    async def test_native(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
-        """Run native unit tests"""
-        container = self.code_linux(source, base, ci_registry_image)
-
-        # Run native unit tests and capture output
-        result = await container.with_exec([
-            "cargo", "test", "--locked", "--tests", "--target", DEFAULT_CARGO_TARGET, "--workspace", "--all-targets"
-        ]).combined_output()
-
-        return f"Native tests completed:\n{result}"
 
     @function
     async def test_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], rust_nightly_version: str , base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
@@ -466,51 +446,26 @@ class Veilid:
         container = self.code_linux(source, base, ci_registry_image)
 
         # Run documentation build and capture output
-        result = await container.with_exec(["./build_docs.sh", rust_nightly_version]).combined_output()
+        result = await container.with_exec(["./scripts/_build_docs.sh", rust_nightly_version]).combined_output()
 
         return f"Documentation build completed:\n{result}"
-
-    @function
-    async def test_wasm(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
-        """Build WASM module (actual tests require network access)"""
-        container = self.code_linux(source, base, ci_registry_image)
-
-        # Build WASM release and capture output (tests require network access, so just build for now)
-        container = await container.with_exec(["veilid-wasm/wasm_build_dart.sh", "release"])
-        result = await container.with_exec(["veilid-wasm/wasm_build_js.sh", "release"]).combined_output()
-
-        return f"WASM build completed:\n{result}"
-
+    
     @function
     async def test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
         """Run all tests: clippy, native tests, docs, and WASM build"""
         results = []
 
-        # Run MSRV check
-        msrv_result = self.test_msrv(source, base, ci_registry_image)
-        results.append(f"MSRV check completed:\n{msrv_result}")
+        container = self.code_linux(source, base, ci_registry_image)
 
-        # Run clippy (already includes multiple targets)
-        clippy_container = self.clippy(source, base, ci_registry_image)
-        clippy_result = await clippy_container.combined_output()
-        results.append(f"Clippy completed:\n{clippy_result}")
-
-        # Run native tests
-        native_result = await self.test_native(source, base, ci_registry_image)
-        results.append(native_result)
-
-        # Build docs
-        docs_result = await self.test_docs(source, RUST_UNIT_TESTS_NIGHTLY_VERSION, base, ci_registry_image)
-        results.append(docs_result)
-
-        # Build WASM
-        wasm_result = await self.test_wasm(source, base, ci_registry_image)
-        results.append(wasm_result)
+        # Run tests for different targets
+        result = await container.with_exec(["./scripts/check_all.sh", "--cleanup"]).combined_output()
+        results.append(result)
 
         return "\n\n=== TEST SUMMARY ===\n" + "\n\n".join(results)
 
+
     @function
-    async def release_test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def package_test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
         """Tests to run before packaging releases"""
         results = []
 

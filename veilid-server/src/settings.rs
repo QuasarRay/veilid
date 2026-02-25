@@ -1715,12 +1715,15 @@ mod tests {
         assert_eq!(s.logging.file.level, LogLevel::Info);
         assert!(s.logging.api.enabled);
         assert_eq!(s.logging.api.level, LogLevel::Info);
-        assert!(!s.logging.otlp.enabled);
-        assert_eq!(s.logging.otlp.level, LogLevel::Trace);
-        assert_eq!(
-            s.logging.otlp.grpc_endpoint,
-            NamedSocketAddrs::from_str("localhost:4317").unwrap_or_log()
-        );
+        #[cfg(feature = "opentelemetry-otlp")]
+        {
+            assert!(!s.logging.otlp.enabled);
+            assert_eq!(s.logging.otlp.level, LogLevel::Trace);
+            assert_eq!(
+                s.logging.otlp.grpc_endpoint,
+                NamedSocketAddrs::from_str("localhost:4317").unwrap_or_log()
+            );
+        }
         #[cfg(feature = "flame")]
         {
             assert!(!s.logging.flame.enabled);
