@@ -288,11 +288,12 @@ create_build_machine:
 
 package_linux:
   stage: build_packages
+  timeout: 120m
   tags:
     - build-amd64-deb
   script:
     - earthly bootstrap
-    - earthly +package-linux
+    - earthly +package-linux --BASE="uncached"
   artifacts:
     paths:
       - target/packages/*
@@ -470,9 +471,10 @@ nightly_package_linux:
   stage: build_packages
   tags:
     - build-amd64-deb
+  timeout: 120m
   script:
     - earthly bootstrap
-    - earthly +package-linux --IS_NIGHTLY="$IS_NIGHTLY"
+    - earthly +package-linux --IS_NIGHTLY="$IS_NIGHTLY" --BASE="uncached"
   artifacts:
     paths:
       - target/packages/*

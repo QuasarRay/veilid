@@ -213,13 +213,16 @@ code-linux:
     # version of the +build-linux-cache from the registry
     ARG BASE=local
     IF [ "$BASE" = "local" ]
+        RUN echo "Using local cache"
         FROM +build-linux-cache
     ELSE IF [ "$BASE" = "uncached" ]
+        RUN echo "Not using cache"
         FROM +deps-linux
     ELSE
         ARG CI_REGISTRY_IMAGE=registry.gitlab.com/veilid/veilid
         ARG CACHE_NAME
         ARG CACHE_TAG
+        RUN echo "Using cache from registry: $CI_REGISTRY_IMAGE/$CACHE_NAME:$CACHE_TAG"
         FROM $CI_REGISTRY_IMAGE/$CACHE_NAME:$CACHE_TAG
     END
     COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
