@@ -14,7 +14,8 @@ fi
 echo "Running all tests..."
 
 ./scripts/_msrv_all.sh
-./scripts/_check_wasm_builds.sh # skip cleanup here because WASM is done first in the clippy script and will clean up there
+./scripts/_check_wasm_builds.sh dart # skip cleanup here because WASM is done first in the clippy script and will clean up there
+./scripts/_check_wasm_builds.sh js # skip cleanup here because WASM is done first in the clippy script and will clean up there
 ./scripts/_clippy_all.sh $CLEANUP
 ./scripts/_build_docs.sh $CLEANUP
 ./scripts/_unit_tests_all.sh

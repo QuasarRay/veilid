@@ -12,6 +12,7 @@ ZIG_VERSION = "0.13.0"
 CMAKE_VERSION_MINOR = "4.0"
 CMAKE_VERSION_PATCH = "4.0.2"
 BINARYEN_VERSION = "125"
+RUST_VERSION = "1.92.0"
 RUST_UNIT_TESTS_NIGHTLY_VERSION="nightly-2026-01-01"
 RUST_PACKAGE_TESTS_NIGHTLY_VERSION="nightly"
 RETRY_COUNT = "12"
@@ -23,7 +24,7 @@ CARGO_INCREMENTAL = "0"
 # Reduce debug info to line-tables-only (still gives backtraces, much smaller binaries)
 CARGO_PROFILE_TEST_DEBUGINFO = "1"
 # Limit parallel jobs to match medium runner resources (2 vCPU, 8GB RAM)
-CARGO_BUILD_JOBS = "2"
+CARGO_BUILD_JOBS = "1"
 
 
 # Contains ignore patterns that are not included in the .gitignore file
@@ -138,7 +139,7 @@ class Veilid:
         # Install rustup and Rust toolchain
         container = container.with_exec([
             "sh", "-c",
-            f"curl --retry {RETRY_COUNT} --retry-connrefused --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path"
+            f"curl --retry {RETRY_COUNT} --retry-connrefused --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain={RUST_VERSION} -y -c clippy --no-modify-path --profile minimal"
         ])
 
         # Set permissions and verify installation
@@ -182,7 +183,7 @@ class Veilid:
             f"cargo binstall wasm-pack --disable-strategies=compile --targets {DEFAULT_CARGO_MUSL_TARGET} || cargo install wasm-pack --locked"
         ]).with_exec([
             "sh", "-c",
-            f"cargo binstall cargo-chef --disable-strategies=compile --targets {DEFAULT_CARGO_MUSL_TARGET} || cargo install cargo-chef --locked"
+            f"curl --retry {RETRY_COUNT} --retry-connrefused -L --proto '=https' --tlsv1.2 -sSf https://gitlab.com/api/v4/projects/79785586/packages/generic/cargo-chef/0.1.73/cargo-chef-x86_64-unknown-linux-musl.tar.gz | tar -xz -C {CARGO_HOME}/bin"
         ]).with_exec([
             "sh", "-c",
             f"cargo binstall cargo-msrv --disable-strategies=compile --targets {DEFAULT_CARGO_MUSL_TARGET} || cargo install cargo-msrv --locked"
@@ -252,46 +253,61 @@ class Veilid:
             .with_file("veilid-remote-api/Cargo.toml", source.file("veilid-remote-api/Cargo.toml"))
             .with_file("veilid-flutter/rust/Cargo.toml", source.file("veilid-flutter/rust/Cargo.toml"))
             .with_file("veilid-wasm/Cargo.toml", source.file("veilid-wasm/Cargo.toml"))
-            .with_file("veilid-wasm/wasm_remap_paths.sh", source.file("veilid-wasm/wasm_remap_paths.sh"))
-            .with_file("veilid-wasm/wasm_build_dart.sh", source.file("veilid-wasm/wasm_build_dart.sh"))
         )
 
         # Prepare cargo chef recipe based on dependencies
+        # Careful not to include veilid-flutter or veilid-wasm in the package lists here as they add the 'json-camel-case' feature
+        # which will screw up the build of veilid-server because it will automatically add that feature inappropriately
+
         container = container.with_exec([
             "cargo", "chef", "prepare", "--recipe-path", "recipe.json"
         ])
 
         container = container.with_exec([
-            "cargo", "chef", "cook", "--profile=test", "--tests",
-            "--target", DEFAULT_CARGO_TARGET, "--recipe-path", "recipe.json",
+            "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--profile=test", "--tests",
+            "--target", DEFAULT_CARGO_TARGET, "--all-targets", "--locked", 
             "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
             "-p", "veilid-core", "-p", "veilid-remote-api"
         ])
 
-        # Cook dependencies for release x86_64
-        # Careful not to include veilid-flutter or veilid-wasm here as they add the 'json-camel-case' feature
-        # which will screw up the build of veilid-server because it will automatically add that feature inappropriately
+        # Cook dependencies for clippy x86_64-unknown-linux-gnu
         container = container.with_exec([
-            "cargo", "chef", "cook", "--zigbuild", "--release",
-            "--target", "x86_64-unknown-linux-gnu", "--recipe-path", "recipe.json",
+            "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
+            "--target", "x86_64-unknown-linux-gnu", "--all-targets", "--locked", 
             "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
             "-p", "veilid-core", "-p", "veilid-remote-api"
         ])
 
-        # Cook dependencies for release aarch64
-        # Careful not to include veilid-flutter or veilid-wasm here as they add the 'json-camel-case' feature
-        # which will screw up the build of veilid-server because it will automatically add that feature inappropriately
+        # Cook dependencies for clippy aarch64-unknown-linux-gnu
         container = container.with_exec([
-            "cargo", "chef", "cook", "--zigbuild", "--release",
-            "--target", "aarch64-unknown-linux-gnu", "--recipe-path", "recipe.json",
+            "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
+            "--target", "aarch64-unknown-linux-gnu", "--all-targets", "--locked", 
             "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
             "-p", "veilid-core", "-p", "veilid-remote-api"
         ])
 
-        # Cook WASM dependencies with path remapping
+        # Cook dependencies for clippy x86_64-pc-windows-gnu
         container = container.with_exec([
-            "sh", "-c",
-            "./veilid-wasm/wasm_remap_paths.sh cargo chef cook --zigbuild --release --target wasm32-unknown-unknown --recipe-path recipe.json -p veilid-wasm"
+            "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
+            "--target", "x86_64-pc-windows-gnu", "--all-targets", "--locked", 
+            "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
+            "-p", "veilid-core", "-p", "veilid-remote-api"
+        ])
+
+        # Cook dependencies for clippy aarch64-apple-darwin
+        container = container.with_exec([
+            "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
+            "--target", "aarch64-apple-darwin", "--all-targets", "--locked", 
+            "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
+            "-p", "veilid-core", "-p", "veilid-remote-api"
+        ])
+
+        # Cook WASM dependencies
+        container = container.with_exec([
+            "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
+            "--target", "wasm32-unknown-unknown", "--all-targets", "--locked",
+            "--features=js,dart", 
+            "-p", "veilid-wasm"
         ])
 
         return container
@@ -342,6 +358,15 @@ class Veilid:
         result = await container.with_exec(["./scripts/_clippy_all.sh", "--cleanup"]).combined_output()
 
         return f"Clippy completed:\n{result}"
+
+    @function
+    async def msrv(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run MSRV checks for all crates"""
+        container = self.code_linux(source, base, ci_registry_image)
+
+        result = await container.with_exec(["./scripts/_msrv_all.sh"]).combined_output()
+
+        return f"MSRV check completed:\n{result}"
 
     @function
     def build_windows_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
@@ -441,28 +466,97 @@ class Veilid:
     #     return out
 
     @function
-    async def test_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], rust_nightly_version: str , base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
-        """Build and test documentation"""
+    async def test_msrv_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run MSRV checks for all crates"""
         container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_msrv_all.sh"]).combined_output()
+        return f"MSRV check completed:\n{result}"
 
-        # Run documentation build and capture output
-        result = await container.with_exec(["./scripts/_build_docs.sh", rust_nightly_version]).combined_output()
+    @function
+    async def test_check_wasm_builds_dart(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Check WASM builds for Dart"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_check_wasm_builds.sh", "dart"]).combined_output()
+        return f"WASM Dart build check completed:\n{result}"
 
+    @function
+    async def test_check_wasm_builds_js(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Check WASM builds for JS"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_check_wasm_builds.sh", "js"]).combined_output()
+        return f"WASM JS build check completed:\n{result}"
+
+    @function
+    async def test_clippy_wasm32_unknown_unknown(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run clippy for wasm32-unknown-unknown"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_clippy_wasm32_unknown_unknown.sh"]).combined_output()
+        return f"Clippy wasm32-unknown-unknown completed:\n{result}"
+
+    @function
+    async def test_clippy_x86_64_pc_windows_gnu(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run clippy for x86_64-pc-windows-gnu"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_clippy_x86_64_pc_windows_gnu.sh"]).combined_output()
+        return f"Clippy x86_64-pc-windows-gnu completed:\n{result}"
+
+    @function
+    async def test_clippy_aarch64_apple_darwin(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run clippy for aarch64-apple-darwin"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_clippy_aarch64_apple_darwin.sh"]).combined_output()
+        return f"Clippy aarch64-apple-darwin completed:\n{result}"
+
+    @function
+    async def test_clippy_x86_64_unknown_linux_gnu(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run clippy for x86_64-unknown-linux-gnu"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_clippy_x86_64_unknown_linux_gnu.sh"]).combined_output()
+        return f"Clippy x86_64-unknown-linux-gnu completed:\n{result}"
+
+    @function
+    async def test_clippy_x86_64_unknown_linux_gnu_async_std(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run clippy for x86_64-unknown-linux-gnu with async-std"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_clippy_x86_64_unknown_linux_gnu_async_std.sh"]).combined_output()
+        return f"Clippy x86_64-unknown-linux-gnu async-std completed:\n{result}"
+
+    @function
+    async def test_build_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Build documentation"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_build_docs.sh"]).combined_output()
         return f"Documentation build completed:\n{result}"
-    
+
+    @function
+    async def test_unit_tests_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run all unit tests"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_unit_tests_all.sh"]).combined_output()
+        return f"Unit tests completed:\n{result}"
+
     @function
     async def test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
-        """Run all tests: clippy, native tests, docs, and WASM build"""
+        """Run all tests (serially! for desktop, not CI use!)"""
         results = []
-
-        container = self.code_linux(source, base, ci_registry_image)
-
-        # Run tests for different targets
-        result = await container.with_exec(["./scripts/check_all.sh", "--cleanup"]).combined_output()
-        results.append(result)
-
+        results.append(await self.test_msrv_all(source, base, ci_registry_image))
+        results.append(await self.test_check_wasm_builds_dart(source, base, ci_registry_image))
+        results.append(await self.test_check_wasm_builds_js(source, base, ci_registry_image))
+        results.append(await self.test_clippy_wasm32_unknown_unknown(source, base, ci_registry_image))
+        results.append(await self.test_clippy_x86_64_pc_windows_gnu(source, base, ci_registry_image))
+        results.append(await self.test_clippy_aarch64_apple_darwin(source, base, ci_registry_image))
+        results.append(await self.test_clippy_x86_64_unknown_linux_gnu(source, base, ci_registry_image))
+        results.append(await self.test_clippy_x86_64_unknown_linux_gnu_async_std(source, base, ci_registry_image))
+        results.append(await self.test_build_docs(source, base, ci_registry_image))
+        results.append(await self.test_unit_tests_all(source, base, ci_registry_image))
         return "\n\n=== TEST SUMMARY ===\n" + "\n\n".join(results)
 
+    @function
+    async def test_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], rust_nightly_version: str , base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Build and test documentation with a specific nightly version (for package testing)"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_build_docs.sh", rust_nightly_version]).combined_output()
+        return f"Documentation build completed:\n{result}"
 
     @function
     async def package_test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:

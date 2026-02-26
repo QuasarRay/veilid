@@ -16,7 +16,7 @@ stages:
 
 format:
   stage: test
-  image: rust:latest
+  image: rust:slim
   before_script:
     - rustup component add rustfmt
 
@@ -35,7 +35,7 @@ format:
   image: docker
   services:
     - docker:dind
-
+      
 .earthly: &earthly_setup
   - apk update && apk add git
   - wget https://github.com/earthly/earthly/releases/download/v0.8.15/earthly-linux-amd64 -O /usr/local/bin/earthly
@@ -43,6 +43,54 @@ format:
   - earthly bootstrap
   - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
   - test "$CI_PROJECT_PATH" != "veilid/veilid" && project_args="--CI_REGISTRY_IMAGE=$CI_REGISTRY_IMAGE"
+
+.unit_test:
+  extends: .base
+  variables:
+    earthly_target: test-all
+  stage: test
+  before_script:
+    # Use branch name as tag, sanitize for Docker tag compatibility
+    - |
+      # Tagged releases first
+      if [[ -n "$CI_COMMIT_TAG" ]]; then
+        CACHE_TAG="main" 
+        CACHE_NAME="build-cache"
+      # Then branch commits
+      elif [[ -n "$CI_COMMIT_BRANCH" ]]; then
+        CACHE_TAG=$(echo "$CI_COMMIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
+        CACHE_NAME="build-cache"
+      # Then MR tests
+      elif [[ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]]; then
+        CACHE_TAG="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+        CACHE_NAME="build-cache"
+      # Catch all fallback to main
+      else
+        CACHE_TAG="main"
+        CACHE_NAME="build-cache"
+      fi
+    - 'echo "Using cache from: $CACHE_NAME:$CACHE_TAG"'
+    - *earthly_setup
+  script:
+      - earthly --use-inline-cache +$earthly_target --BASE=container $project_args --CACHE_TAG=$CACHE_TAG --CACHE_NAME=$CACHE_NAME
+  rules:
+    # Run if branch is not Main and in response to branch push
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - veilid-*/**/*
+        - "**/*[Cc]argo*"
+    # Run if branch is not Main and in response to branch merge request
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - veilid-*/**/*
+        - "**/*[Cc]argo*"
+    # Run if branch is a merge request of Main
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - veilid-*/**/*
+        - "**/*[Cc]argo*"
+      when: always
+    - when: never
 
 # Create the build container if:
 #  - no container in the registry
@@ -128,52 +176,57 @@ build_cache:
         - veilid-*/**/*
         - "**/*[Cc]argo*"
 
-# Runs a basic unit test build
-test_build:
-  extends: .base
-  stage: test
-  script:
-    # Use branch name as tag, sanitize for Docker tag compatibility
-    - |
-      # Tagged releases first
-      if [[ -n "$CI_COMMIT_TAG" ]]; then
-        CACHE_TAG="main" 
-        CACHE_NAME="build-cache"
-      # Then branch commits
-      elif [[ -n "$CI_COMMIT_BRANCH" ]]; then
-        CACHE_TAG=$(echo "$CI_COMMIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
-        CACHE_NAME="build-cache"
-      # Then MR tests
-      elif [[ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]]; then
-        CACHE_TAG="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-        CACHE_NAME="build-cache"
-      # Catch all fallback to main
-      else
-        CACHE_TAG="main"
-        CACHE_NAME="build-cache"
-      fi
-    - 'echo "Using cache from: $CACHE_NAME:$CACHE_TAG"'
-    - *earthly_setup
-    - earthly --use-inline-cache +unit-tests-linux --BASE=container $project_args --CACHE_TAG=$CACHE_TAG --CACHE_NAME=$CACHE_NAME
-  resource_group: test
-  rules:
-    # Run if branch is not Main and in response to branch push
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
-    # Run if branch is not Main and in response to branch merge request
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
-    # Run if branch is a merge request of Main
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
-      when: always
-    - when: never
+# Runs 
+test_msrv_all:
+  extends: .unit_test
+  variables:
+    earthly_target: test-msrv-all
+  
+# test_check_wasm_builds_dart:
+#   extends: .unit_test
+#   variables:
+#     earthly_target: test-check-wasm-builds-dart
+
+# test_check_wasm_builds_js:
+#   extends: .unit_test
+#   variables:
+#     earthly_target: test-check-wasm-builds-js
+
+test_clippy_wasm32_unknown_unknown:
+  extends: .unit_test
+  variables:
+    earthly_target: test-clippy-wasm32-unknown-unknown
+
+test_clippy_x86_64_pc_windows_gnu:
+  extends: .unit_test
+  variables:
+    earthly_target: test-clippy-x86-64-pc-windows-gnu
+
+test_clippy_aarch64_apple_darwin:
+  extends: .unit_test
+  variables:
+    earthly_target: test-clippy-aarch64-apple-darwin
+
+test_clippy_x86_64_unknown_linux_gnu:
+  extends: .unit_test
+  variables:
+    earthly_target: test-clippy-x86-64-unknown-linux-gnu
+
+test_clippy_x86_64_unknown_linux_gnu_async_std:
+  extends: .unit_test
+  variables:
+    earthly_target: test-clippy-x86-64-unknown-linux-gnu-async-std
+
+# test_build_docs:
+#   extends: .unit_test
+#   variables:
+#     earthly_target: test-build-docs
+
+test_unit_tests_all:
+  extends: .unit_test
+  variables:
+    earthly_target: test-unit-tests-all
+
 
 semgrep:
   # A Docker image with Semgrep installed.

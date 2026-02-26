@@ -39,7 +39,7 @@ ENV CARGO_INCREMENTAL=0
 # Reduce debug info to line-tables-only (still gives backtraces, much smaller binaries)
 ENV CARGO_PROFILE_TEST_DEBUGINFO=1
 # Limit parallel jobs to match medium runner resources (2 vCPU, 8GB RAM)
-ENV CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=1
     
 
 WORKDIR /veilid
@@ -124,9 +124,9 @@ deps-rust:
     # Wasm build tool
     RUN cargo binstall wasm-pack --disable-strategies=compile --targets $DEFAULT_CARGO_MUSL_TARGET || \
         cargo install wasm-pack --locked
-    # Caching tool
-    RUN cargo binstall cargo-chef --disable-strategies=compile --targets $DEFAULT_CARGO_MUSL_TARGET || \
-        cargo install cargo-chef --locked
+    # Caching tool (custom build supports zigbuild clippy)
+    RUN curl --retry $RETRY_COUNT --retry-connrefused -L --proto '=https' --tlsv1.2 -sSf https://gitlab.com/api/v4/projects/79785586/packages/generic/cargo-chef/0.1.73/cargo-chef-x86_64-unknown-linux-musl.tar.gz | tar -xz -C $CARGO_HOME/bin
+    # RUN cargo install cargo-chef --git https://gitlab.com/veilid/cargo-chef.git --locked
     # MSRV checking tool
     RUN cargo binstall cargo-msrv --disable-strategies=compile --targets $DEFAULT_CARGO_MUSL_TARGET || \
         cargo install cargo-msrv --locked
@@ -194,14 +194,14 @@ build-linux-cache:
     COPY --keep-ts veilid-tools/Cargo.toml veilid-tools
     COPY --keep-ts veilid-remote-api/Cargo.toml veilid-remote-api
     COPY --keep-ts veilid-flutter/rust/Cargo.toml veilid-flutter/rust
-    COPY --keep-ts veilid-wasm/Cargo.toml veilid-wasm/wasm_remap_paths.sh veilid-wasm
+    COPY --keep-ts veilid-wasm/Cargo.toml veilid-wasm
     RUN cargo chef prepare --recipe-path recipe.json
-    RUN cargo chef cook --profile=test --tests --target $DEFAULT_CARGO_TARGET --recipe-path recipe.json -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
-    RUN cargo chef cook --zigbuild --release --target x86_64-unknown-linux-gnu --recipe-path recipe.json -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
-    RUN cargo chef cook --zigbuild --release --target aarch64-unknown-linux-gnu --recipe-path recipe.json -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
-    # RUN cargo chef cook --zigbuild --release --target x86_64-pc-windows-gnu --recipe-path recipe.json -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
-    # RUN cargo chef cook --zigbuild --release --target aarch64-apple-darwin --recipe-path recipe.json -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
-    RUN veilid-wasm/wasm_remap_paths.sh cargo chef cook --zigbuild --release --target wasm32-unknown-unknown --recipe-path recipe.json -p veilid-wasm
+    RUN cargo chef cook --recipe-path recipe.json --profile=test --tests --target $DEFAULT_CARGO_TARGET --all-targets --locked  -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
+    RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target x86_64-unknown-linux-gnu --all-targets --locked -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
+    RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target aarch64-unknown-linux-gnu --all-targets --locked -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
+    RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target x86_64-pc-windows-gnu --all-targets --locked -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
+    RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target aarch64-apple-darwin --all-targets --locked -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
+    RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target wasm32-unknown-unknown --all-targets --locked --features=js,dart -p veilid-wasm
     ARG CI_REGISTRY_IMAGE=registry.gitlab.com/veilid/veilid
     ARG CACHE_NAME
     ARG CACHE_TAG
@@ -305,10 +305,48 @@ build-android:
     SAVE ARTIFACT ./target/x86_64-linux-android AS LOCAL ./target/artifacts/x86_64-linux-android
 
 # Unit tests
-unit-tests-linux:
+test-msrv-all:
     FROM +code-linux
-    RUN ./scripts/check_all.sh --cleanup
-    
+    RUN ./scripts/_msrv_all.sh
+test-check-wasm-builds-dart:
+    FROM +code-linux
+    RUN ./scripts/_check_wasm_builds.sh dart
+test-check-wasm-builds-js:
+    FROM +code-linux
+    RUN ./scripts/_check_wasm_builds.sh js
+test-clippy-wasm32-unknown-unknown:
+    FROM +code-linux
+    RUN ./scripts/_clippy_wasm32_unknown_unknown.sh
+test-clippy-x86-64-pc-windows-gnu:
+    FROM +code-linux
+    RUN ./scripts/_clippy_x86_64_pc_windows_gnu.sh
+test-clippy-aarch64-apple-darwin:
+    FROM +code-linux
+    RUN ./scripts/_clippy_aarch64_apple_darwin.sh
+test-clippy-x86-64-unknown-linux-gnu:
+    FROM +code-linux
+    RUN ./scripts/_clippy_x86_64_unknown_linux_gnu.sh
+test-clippy-x86-64-unknown-linux-gnu-async-std:
+    FROM +code-linux
+    RUN ./scripts/_clippy_x86_64_unknown_linux_gnu_async_std.sh
+test-build-docs:
+    FROM +code-linux    
+    RUN ./scripts/_build_docs.sh
+test-unit-tests-all:
+    FROM +code-linux
+    RUN ./scripts/_unit_tests_all.sh
+test-all:
+    BUILD +test-msrv-all
+    BUILD +test-check-wasm-builds-dart
+    BUILD +test-check-wasm-builds-js
+    BUILD +test-clippy-wasm32-unknown-unknown
+    BUILD +test-clippy-x86-64-pc-windows-gnu
+    BUILD +test-clippy-aarch64-apple-darwin
+    BUILD +test-clippy-x86-64-unknown-linux-gnu
+    BUILD +test-clippy-x86-64-unknown-linux-gnu-async-std
+    BUILD +test-build-docs
+    BUILD +test-unit-tests-all
+
 # Package
 package-linux-amd64-deb:
     ARG IS_NIGHTLY="false"

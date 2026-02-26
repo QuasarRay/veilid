@@ -12,6 +12,14 @@ fi
 TARGET=${DEFAULT_CARGO_TARGET:-$(rustup default | cut -d- -f2- | cut -d' ' -f1)}
 
 echo "Running unit tests for target $TARGET..."
-cargo nextest run --locked --tests --target $TARGET --workspace --all-targets 
+if [ "$TARGET" = "wasm32-unknown-unknown" ]; then
+    # cargo nextest run --tests --target $TARGET --all-targets --locked -p veilid-wasm
+    
+    pushd veilid-wasm >/dev/null
+    ./wasm_test_js.sh
+    popd >/dev/null
+else
+    cargo nextest run --tests --target $TARGET --all-targets --locked -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
+fi
 
 popd >/dev/null

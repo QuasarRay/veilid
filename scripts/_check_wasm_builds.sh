@@ -13,9 +13,17 @@ else
     CLEANUP=0
 fi
 
-echo "Ensuring WASM builds run..."
-veilid-wasm/wasm_build_dart.sh --locked
-veilid-wasm/wasm_build_js.sh --locked
+if [ $# -ge 1 ] && [ "$1" = "dart" ] ; then
+    echo "Ensuring WASM builds for Dart..."
+    veilid-wasm/wasm_build_dart.sh --locked
+elif [ $# -ge 1 ] && [ "$1" = "js" ] ; then
+    echo "Ensuring WASM builds for JS..."
+    veilid-wasm/wasm_build_js.sh --locked
+else
+    echo "Ensuring WASM builds for both Dart and JS..."
+    veilid-wasm/wasm_build_dart.sh --locked
+    veilid-wasm/wasm_build_js.sh --locked
+fi
 if [ $CLEANUP -eq 1 ] ; then
     rm -rf target/wasm32-unknown-unknown
 fi
