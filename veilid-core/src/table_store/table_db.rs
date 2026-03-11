@@ -502,6 +502,11 @@ impl TableDBTransaction {
                 .ok_or_else(|| VeilidAPIError::generic("transaction already completed"))?
         };
 
+        if dbt.ops.is_empty() {
+            veilid_log!(self debug "attempted to commit an empty transaction");
+            return Ok(());
+        }
+
         let db = self.db.unlocked_inner.database.clone();
         db.write(dbt).await.map_err(|e| {
             veilid_log!(self error "commit failed, transaction lost: {:?}", e);

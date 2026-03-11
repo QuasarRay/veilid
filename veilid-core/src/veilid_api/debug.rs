@@ -2766,16 +2766,68 @@ impl VeilidAPI {
             return Ok(format!("Table '{}' does not exist", table_name));
         };
 
+        fn debug_print_io_stats(stats: &table_store::IOStatsInfo) -> String {
+            let mut info_str = format!(
+                "Started:          {}\n\
+                Span:             {}\n\
+                Transactions:     {:6}\n\
+                Reads:            {:6}\n\
+                Cache reads:      {:6}\n\
+                Writes:           {:6}\n\
+                Bytes read:       {:>6}\n\
+                Cache bytes read: {:>6}\n\
+                Bytes written:    {:>6}\n\
+                Deletes:          {:6}\n\
+                Prefix deletes:   {:6}\n",
+                stats.started,
+                stats.span,
+                stats.transactions,
+                stats.reads,
+                stats.cache_reads,
+                stats.writes,
+                bytesize::ByteSize(stats.bytes_read.as_u64())
+                    .display()
+                    .iec_short()
+                    .to_string(),
+                bytesize::ByteSize(stats.cache_read_bytes.as_u64())
+                    .display()
+                    .iec_short()
+                    .to_string(),
+                bytesize::ByteSize(stats.bytes_written.as_u64())
+                    .display()
+                    .iec_short()
+                    .to_string(),
+                stats.deletes,
+                stats.prefix_deletes,
+            );
+
+            if !stats.write_size_buckets.is_empty() {
+                info_str += "Write size buckets:\n";
+                for (size, count) in stats.write_size_buckets.iter() {
+                    info_str += &format!("  {size:6}: {count:6}\n");
+                }
+            }
+
+            if !stats.tx_write_size_buckets.is_empty() {
+                info_str += "Transaction write size buckets:\n";
+                for (size, (count, avg_duration)) in stats.tx_write_size_buckets.iter() {
+                    info_str += &format!("  {size:6}: {count:6}  {avg_duration}\n");
+                }
+            }
+
+            info_str
+        }
+
         let info_str = format!(
             "Table Name: {}\n\
             Column Count: {}\n\
-            IO Stats (since previous query):\n{}\n\
-            IO Stats (overall):\n{}\n\
+            IO Stats (since previous query):\n{}\
+            IO Stats (overall):\n{}\
             Columns:\n{}\n",
             info.table_name,
             info.column_count,
-            indent::indent_all_by(4, format!("{:#?}", info.io_stats_since_previous)),
-            indent::indent_all_by(4, format!("{:#?}", info.io_stats_overall)),
+            indent_all_by(4, debug_print_io_stats(&info.io_stats_since_previous)),
+            indent_all_by(4, debug_print_io_stats(&info.io_stats_overall)),
             Self::_format_columns(&info.columns),
         );
 

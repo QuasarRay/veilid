@@ -56,6 +56,17 @@ pub struct IOStatsInfo {
     pub cache_read_bytes: ByteCount,
     /// Number of bytes write
     pub bytes_written: ByteCount,
+    /// Number of delete operations.
+    pub deletes: AlignedU64,
+    /// Number of prefix (batch) delete operations.
+    pub prefix_deletes: AlignedU64,
+    /// Write size buckets. Keys are write sizes, slightly rounded upwards.
+    /// Values are the number of times a value of a particular size was written.
+    pub write_size_buckets: BTreeMap<usize, u64>,
+    /// Similar to `write_size_buckets` but tracks total sizes of transactions
+    /// and the average duration for a transaction of that size. The duration is
+    /// in **microseconds**.
+    pub tx_write_size_buckets: BTreeMap<usize, (u64, TimestampDuration)>,
     /// Start of the statistic period.
     pub started: Timestamp,
     /// Total duration of the statistic period.
@@ -870,13 +881,20 @@ impl TableStore {
                 bytes_read: ByteCount::new(io_stats_since_previous.bytes_read),
                 cache_read_bytes: ByteCount::new(io_stats_since_previous.cache_read_bytes),
                 bytes_written: ByteCount::new(io_stats_since_previous.bytes_written),
-                started: Timestamp::new(
-                    io_stats_since_previous
-                        .started
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_micros() as u64,
-                ),
+                deletes: AlignedU64::new(io_stats_since_previous.deletes),
+                prefix_deletes: AlignedU64::new(io_stats_since_previous.prefix_deletes),
+                write_size_buckets: io_stats_since_previous
+                    .write_size_buckets
+                    .into_iter()
+                    .collect(),
+                tx_write_size_buckets: io_stats_since_previous
+                    .tx_write_size_buckets
+                    .into_iter()
+                    .map(|(k, (count, avg_duration))| {
+                        (k, (count, TimestampDuration::new(avg_duration as u64)))
+                    })
+                    .collect(),
+                started: Timestamp::new(io_stats_since_previous.started),
                 span: TimestampDuration::new(io_stats_since_previous.span.as_micros() as u64),
             },
             io_stats_overall: IOStatsInfo {
@@ -887,13 +905,17 @@ impl TableStore {
                 bytes_read: ByteCount::new(io_stats_overall.bytes_read),
                 cache_read_bytes: ByteCount::new(io_stats_overall.cache_read_bytes),
                 bytes_written: ByteCount::new(io_stats_overall.bytes_written),
-                started: Timestamp::new(
-                    io_stats_overall
-                        .started
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_micros() as u64,
-                ),
+                deletes: AlignedU64::new(io_stats_overall.deletes),
+                prefix_deletes: AlignedU64::new(io_stats_overall.prefix_deletes),
+                write_size_buckets: io_stats_overall.write_size_buckets.into_iter().collect(),
+                tx_write_size_buckets: io_stats_overall
+                    .tx_write_size_buckets
+                    .into_iter()
+                    .map(|(k, (count, avg_duration))| {
+                        (k, (count, TimestampDuration::new(avg_duration as u64)))
+                    })
+                    .collect(),
+                started: Timestamp::new(io_stats_overall.started),
                 span: TimestampDuration::new(io_stats_overall.span.as_micros() as u64),
             },
             column_count,
