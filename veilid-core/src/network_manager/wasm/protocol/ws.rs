@@ -137,8 +137,22 @@ impl WebsocketProtocolHandler {
             bail_io_error_other!("invalid websocket url scheme");
         }
 
+        let socket_address = dial_info.socket_address();
+        let connect_request = if socket_address.ip_addr().is_unspecified() {
+            request
+        } else {
+            let ip_based_url = SplitUrl::new(
+                scheme,
+                split_url.userinfo.clone(),
+                SplitUrlHost::IpAddr(socket_address.ip_addr()),
+                Some(socket_address.port()),
+                split_url.path.clone(),
+            );
+            ip_based_url.to_string()
+        };
+
         let fut = SendWrapper::new(timeout(timeout_ms, async move {
-            WsMeta::connect(request, None)
+            WsMeta::connect(connect_request, None)
                 .await
                 .map_err(ws_err_to_io_error)
         }));

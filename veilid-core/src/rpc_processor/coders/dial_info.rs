@@ -1,6 +1,15 @@
 use super::*;
 use core::convert::TryInto;
 
+fn reject_unspecified_socket_address(socket_address: &SocketAddress) -> Result<(), RPCError> {
+    if socket_address.address().is_unspecified() {
+        return Err(RPCError::protocol(
+            "dial info with unspecified (0.0.0.0 or ::) address not allowed",
+        ));
+    }
+    Ok(())
+}
+
 pub fn decode_dial_info(reader: &veilid_capnp::dial_info::Reader) -> Result<DialInfo, RPCError> {
     let pt = reader.get_protocol_type();
 
@@ -13,6 +22,7 @@ pub fn decode_dial_info(reader: &veilid_capnp::dial_info::Reader) -> Result<Dial
             rpc_ignore_missing_property!(udp, socket_address);
             let socket_address_reader = udp.get_socket_address()?;
             let socket_address = decode_socket_address(&socket_address_reader)?;
+            reject_unspecified_socket_address(&socket_address)?;
             Ok(DialInfo::udp(socket_address))
         }
         FOURCC_PROTOCOL_TYPE_TCP => {
@@ -23,6 +33,7 @@ pub fn decode_dial_info(reader: &veilid_capnp::dial_info::Reader) -> Result<Dial
             rpc_ignore_missing_property!(tcp, socket_address);
             let socket_address_reader = tcp.get_socket_address()?;
             let socket_address = decode_socket_address(&socket_address_reader)?;
+            reject_unspecified_socket_address(&socket_address)?;
             Ok(DialInfo::tcp(socket_address))
         }
         FOURCC_PROTOCOL_TYPE_WS => {
@@ -33,6 +44,7 @@ pub fn decode_dial_info(reader: &veilid_capnp::dial_info::Reader) -> Result<Dial
             rpc_ignore_missing_property!(ws, socket_address);
             let socket_address_reader = ws.get_socket_address()?;
             let socket_address = decode_socket_address(&socket_address_reader)?;
+            reject_unspecified_socket_address(&socket_address)?;
             rpc_ignore_missing_property!(ws, request);
             let request = ws.get_request()?;
             DialInfo::try_ws(
@@ -54,6 +66,7 @@ pub fn decode_dial_info(reader: &veilid_capnp::dial_info::Reader) -> Result<Dial
                 .get_socket_address()
                 .map_err(RPCError::map_protocol("missing WSS socketAddress"))?;
             let socket_address = decode_socket_address(&socket_address_reader)?;
+            reject_unspecified_socket_address(&socket_address)?;
             rpc_ignore_missing_property!(wss, request);
             let request = wss.get_request()?;
             DialInfo::try_wss(
