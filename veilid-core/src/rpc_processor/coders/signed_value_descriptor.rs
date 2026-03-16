@@ -12,7 +12,11 @@ pub fn decode_signed_value_descriptor(
     rpc_ignore_missing_property!(reader, signature);
     let sr = reader.get_signature()?;
     let signature = decode_signature(&sr)?;
-    Ok(SignedValueDescriptor::new(owner, schema_data, signature))
+    Ok(SignedValueDescriptor::new(
+        owner,
+        schema_data.into(),
+        signature,
+    ))
 }
 
 pub fn encode_signed_value_descriptor(

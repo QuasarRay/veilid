@@ -55,6 +55,7 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    #[allow(clippy::unused_async)]
     async fn init_async(&self) -> EyreResult<()> {
         let delete = {
             let config = self.config();
@@ -114,14 +115,17 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    #[allow(clippy::unused_async)]
     async fn post_init_async(&self) -> EyreResult<()> {
         Ok(())
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
+    #[allow(clippy::unused_async)]
     async fn pre_terminate_async(&self) {}
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
+    #[allow(clippy::unused_async)]
     async fn terminate_async(&self) {
         *self.inner.lock() = Self::new_inner();
     }

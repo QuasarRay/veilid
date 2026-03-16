@@ -8,6 +8,7 @@ import {
 
 import { VeilidTableDB, veilidClient } from 'veilid-wasm';
 import { textEncoder, textDecoder } from './utils/marshalling-utils';
+import { getLogTimestamp } from './utils/wait-utils';
 
 const TABLE_NAME = 'some-table';
 const TABLE_COLS = 1;
@@ -18,7 +19,8 @@ describe('VeilidTable', () => {
     await veilidClient.startupCore((_update) => {
       if (DEBUGGING) {
         if (_update.kind === 'Log') {
-          console.log(_update.message);
+          const logTimestamp = getLogTimestamp()
+          console.log(`${logTimestamp}: ${_update.message}`);
         }
       }
     }, veilidCoreStartupConfig);

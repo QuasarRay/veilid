@@ -106,8 +106,7 @@ impl Network {
         }
 
         // Update protocols
-        self.register_all_dial_info(&mut editor_public_internet, &mut editor_local_network)
-            .await?;
+        self.register_all_dial_info(&mut editor_public_internet, &mut editor_local_network)?;
 
         let local_network_changed = editor_local_network.commit(true).await;
         let public_internet_changed = editor_public_internet.commit(true).await;

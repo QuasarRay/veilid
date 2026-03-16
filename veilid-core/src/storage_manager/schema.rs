@@ -9,6 +9,7 @@ impl StorageManager {
                 BareMemberId::new(writer_key.ref_value()),
             ));
         }
+
         let crypto = self.crypto();
         let Some(vcrypto) = crypto.get(writer_key.kind()) else {
             apibail_generic!("unsupported cryptosystem");
@@ -43,7 +44,7 @@ impl StorageManager {
     }
 
     /// Check a subkey value data against the DFLT schema
-    pub fn check_subkey_value_data_dflt(
+    pub(crate) fn check_subkey_value_data_dflt(
         &self,
         schema_dflt: &DHTSchemaDFLT,
         owner: &PublicKey,

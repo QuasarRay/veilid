@@ -69,6 +69,11 @@ impl TimestampDuration {
         Self::new(self.0.saturating_mul(rhs))
     }
 
+    /// Multiply by an f64 scaling factor (not const due to float arithmetic)
+    pub fn f64_mul(self, rhs: f64) -> Self {
+        Self::new((self.0 as f64 * rhs) as u64)
+    }
+
     pub const fn div(self, rhs: u64) -> Self {
         Self::new(self.0 / rhs)
     }

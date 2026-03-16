@@ -27,13 +27,16 @@ pub(crate) trait VeilidComponentRegistryAccessor {
     fn registry(&self) -> VeilidComponentRegistry;
 
     fn config(&self) -> Arc<VeilidConfig> {
-        self.registry().startup_options.config()
+        self.registry().unlocked_inner.startup_options.config()
     }
     fn update_callback(&self) -> UpdateCallback {
-        self.registry().startup_options.update_callback()
+        self.registry()
+            .unlocked_inner
+            .startup_options
+            .update_callback()
     }
     fn event_bus(&self) -> EventBus {
-        self.registry().event_bus.clone()
+        self.registry().event_bus()
     }
     fn log_key(&self) -> VeilidLogKey {
         self.registry().log_key()
@@ -64,15 +67,20 @@ struct VeilidComponentRegistryInner {
     mock: bool,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct VeilidComponentRegistry {
-    inner: Arc<Mutex<VeilidComponentRegistryInner>>,
+#[derive(Debug)]
+struct VeilidComponentRegistryUnlockedInner {
+    inner: Mutex<VeilidComponentRegistryInner>,
     startup_options: VeilidStartupOptions,
     namespace: &'static str,
     program_name: &'static str,
     log_key: &'static str,
     event_bus: EventBus,
-    init_lock: Arc<AsyncMutex<bool>>,
+    init_lock: AsyncMutex<bool>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VeilidComponentRegistry {
+    unlocked_inner: Arc<VeilidComponentRegistryUnlockedInner>,
 }
 
 impl VeilidComponentRegistry {
@@ -83,44 +91,50 @@ impl VeilidComponentRegistry {
         let log_key = VeilidLayerFilter::make_veilid_log_key(program_name, namespace);
 
         Self {
-            inner: Arc::new(Mutex::new(VeilidComponentRegistryInner {
-                type_map: HashMap::new(),
-                init_order: Vec::new(),
-                #[cfg(any(test, feature = "test-util"))]
-                mock: false,
-            })),
-            startup_options,
-            namespace,
-            program_name,
-            log_key,
-            event_bus: EventBus::new(),
-            init_lock: Arc::new(AsyncMutex::new(false)),
+            unlocked_inner: Arc::new(VeilidComponentRegistryUnlockedInner {
+                inner: Mutex::new(VeilidComponentRegistryInner {
+                    type_map: HashMap::new(),
+                    init_order: Vec::new(),
+                    #[cfg(any(test, feature = "test-util"))]
+                    mock: false,
+                }),
+                startup_options,
+                namespace,
+                program_name,
+                log_key,
+                event_bus: EventBus::new(),
+                init_lock: AsyncMutex::new(false),
+            }),
         }
     }
 
     #[cfg(any(test, feature = "test-util"))]
     pub fn enable_mock(&self) {
-        let mut inner = self.inner.lock();
+        let mut inner = self.unlocked_inner.inner.lock();
         inner.mock = true;
     }
     // #[cfg(any(test, feature = "test-util"))]
     // pub fn is_mock(&self) -> bool {
-    //     let inner = self.inner.lock();
+    //     let inner = self.unlocked_inner.inner.lock();
     //     inner.mock
     // }
 
     #[expect(dead_code)]
     pub fn namespace(&self) -> &'static str {
-        self.namespace
+        self.unlocked_inner.namespace
     }
 
     #[allow(dead_code)]
     pub fn program_name(&self) -> &'static str {
-        self.program_name
+        self.unlocked_inner.program_name
     }
 
     pub fn log_key(&self) -> VeilidLogKey {
-        self.log_key
+        self.unlocked_inner.log_key
+    }
+
+    pub fn event_bus(&self) -> EventBus {
+        self.unlocked_inner.event_bus.clone()
     }
 
     pub fn register<
@@ -134,7 +148,7 @@ impl VeilidComponentRegistry {
         let component_type_id = core::any::TypeId::of::<T>();
 
         // Add to type map and initialization order
-        let mut inner = self.inner.lock();
+        let mut inner = self.unlocked_inner.inner.lock();
         assert!(
             inner
                 .type_map
@@ -158,7 +172,7 @@ impl VeilidComponentRegistry {
         let component_type_id = core::any::TypeId::of::<T>();
 
         // Add to type map and initialization order
-        let mut inner = self.inner.lock();
+        let mut inner = self.unlocked_inner.inner.lock();
         assert!(
             inner
                 .type_map
@@ -170,7 +184,7 @@ impl VeilidComponentRegistry {
     }
 
     pub async fn init(&self) -> EyreResult<()> {
-        let Some(mut _init_guard) = self.init_lock.try_lock() else {
+        let Some(mut _init_guard) = self.unlocked_inner.init_lock.try_lock() else {
             bail!("init should only happen one at a time");
         };
         if *_init_guard {
@@ -186,7 +200,7 @@ impl VeilidComponentRegistry {
         )?;
 
         // Event bus starts up early
-        self.event_bus.startup()?;
+        self.unlocked_inner.event_bus.startup()?;
 
         // Process components in initialization order
         let init_order = self.get_init_order();
@@ -195,7 +209,7 @@ impl VeilidComponentRegistry {
             if let Err(e) = component.init().await {
                 veilid_log!(self error "Error initializing component '{}': {}", component.name(), e);
                 self.terminate_inner(initialized).await;
-                self.event_bus.shutdown().await;
+                self.unlocked_inner.event_bus.shutdown().await;
                 return Err(e);
             }
             initialized.push(component);
@@ -206,7 +220,7 @@ impl VeilidComponentRegistry {
     }
 
     pub async fn post_init(&self) -> EyreResult<()> {
-        let Some(mut _init_guard) = self.init_lock.try_lock() else {
+        let Some(mut _init_guard) = self.unlocked_inner.init_lock.try_lock() else {
             bail!("init should only happen one at a time");
         };
         if !*_init_guard {
@@ -226,7 +240,7 @@ impl VeilidComponentRegistry {
     }
 
     pub async fn pre_terminate(&self) {
-        let Some(mut _init_guard) = self.init_lock.try_lock() else {
+        let Some(mut _init_guard) = self.unlocked_inner.init_lock.try_lock() else {
             panic!("terminate should only happen one at a time");
         };
         if !*_init_guard {
@@ -238,7 +252,7 @@ impl VeilidComponentRegistry {
     }
 
     pub async fn terminate(&self) {
-        let Some(mut _init_guard) = self.init_lock.try_lock() else {
+        let Some(mut _init_guard) = self.unlocked_inner.init_lock.try_lock() else {
             panic!("terminate should only happen one at a time");
         };
         if !*_init_guard {
@@ -250,7 +264,7 @@ impl VeilidComponentRegistry {
         self.terminate_inner(init_order).await;
 
         // Event bus shuts down last
-        self.event_bus.shutdown().await;
+        self.unlocked_inner.event_bus.shutdown().await;
 
         // Remoave all registered component log facilities from VeilidLayerFilter for this log key
         if let Err(e) = VeilidLayerFilter::terminate_veilid_component_log_facilities(self.log_key())
@@ -284,7 +298,7 @@ impl VeilidComponentRegistry {
     }
 
     fn get_init_order(&self) -> Vec<Arc<dyn VeilidComponent + Send + Sync>> {
-        let inner = self.inner.lock();
+        let inner = self.unlocked_inner.inner.lock();
         inner
             .init_order
             .iter()
@@ -297,7 +311,7 @@ impl VeilidComponentRegistry {
     pub fn lookup<'a, T: VeilidComponent + Send + Sync + 'static>(
         &self,
     ) -> Option<VeilidComponentGuard<'a, T>> {
-        let inner = self.inner.lock();
+        let inner = self.unlocked_inner.inner.lock();
         let component_type_id = core::any::TypeId::of::<T>();
         let component_dyn = inner.type_map.get(&component_type_id)?.clone();
         let component = component_dyn
@@ -402,6 +416,21 @@ macro_rules! impl_setup_task_async {
 }
 
 pub(crate) use impl_setup_task_async;
+
+macro_rules! impl_setup_task_async_clone {
+    ($this:expr, $task_name:ident, $task_routine:ident ) => {{
+        let this = $this.clone();
+        $this.$task_name.set_routine(move |s, l, t| {
+            let this = this.clone();
+            Box::pin(async move {
+                this.$task_routine(s, Timestamp::new(l), Timestamp::new(t))
+                    .await
+            })
+        });
+    }};
+}
+
+pub(crate) use impl_setup_task_async_clone;
 
 // Utility macro for setting up an event bus handler
 // Should be called after init, during post-init or later

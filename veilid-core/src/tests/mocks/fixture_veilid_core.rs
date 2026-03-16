@@ -84,6 +84,11 @@ cfg_if! {
         pub fn get_keyfile_path(_test_instance: String) -> String {
             String::new()
         }
+
+        pub fn purge_old_test_group_dirs() {
+            // Does nothing on WASM
+        }
+
     }
     else {
 

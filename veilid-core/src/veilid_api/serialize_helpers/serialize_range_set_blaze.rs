@@ -1,5 +1,6 @@
 use core::fmt;
 use core::marker::PhantomData;
+use core::ops::RangeInclusive;
 use range_set_blaze::*;
 use serde::{
     de::SeqAccess, de::Visitor, ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer,
@@ -40,8 +41,8 @@ pub fn deserialize<'de, T: Integer + Deserialize<'de>, D: Deserializer<'de>>(
         {
             let mut values = RangeSetBlaze::<T>::new();
 
-            while let Some((start, end)) = seq.next_element()? {
-                values.ranges_insert(start..=end);
+            while let Some((start, end)) = seq.next_element::<(T, T)>()? {
+                values.ranges_insert(RangeInclusive::new(start, end));
             }
 
             Ok(values)

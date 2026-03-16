@@ -32,7 +32,8 @@ impl RPCProcessor {
 
         // Generate receipt and waitable eventual so we can see if we get the receipt back
         let (receipt, eventual_value) = network_manager
-            .generate_single_shot_receipt(receipt_time, [])
+            .generate_single_shot_receipt(receipt_time, Bytes::new())
+            .await
             .map_err(RPCError::internal)?;
 
         let validate_dial_info = RPCOperationValidateDialInfo::new(dial_info, receipt, redirect)?;
@@ -133,22 +134,18 @@ impl RPCProcessor {
             let node_count = self.config().network.dht.max_find_node_count as usize;
 
             // Filter on nodes that can validate dial info, and can reach a specific dial info
-            let outbound_dial_info_entry_filter =
-                RoutingTable::make_outbound_dial_info_entry_filter(
-                    routing_domain,
-                    dial_info.clone(),
-                );
+            let outbound_dial_info_entry_filter = routing_table
+                .make_outbound_dial_info_entry_filter(routing_domain, dial_info.clone());
             let will_validate_dial_info_filter = Box::new(
-                move |rti: &RoutingTableInner, v: Option<Arc<BucketEntry>>, _cur_ts: Timestamp| {
-                    let entry = v.unwrap_or_log();
-                    entry.with(rti, move |_rti, e| {
-                        e.node_info(routing_domain)
-                            .map(|ni| {
-                                ni.has_capability(VEILID_CAPABILITY_VALIDATE_DIAL_INFO)
-                                    && ni.is_fully_direct_inbound()
-                            })
-                            .unwrap_or(false)
-                    })
+                move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+                    let snap = opt_snap.as_ref().unwrap_or_log();
+                    snap.get_peer_info(routing_domain)
+                        .map(|pi| {
+                            pi.node_info()
+                                .has_capability(VEILID_CAPABILITY_VALIDATE_DIAL_INFO)
+                                && pi.node_info().is_fully_direct_inbound()
+                        })
+                        .unwrap_or(false)
                 },
             ) as RoutingTableEntryFilter;
 

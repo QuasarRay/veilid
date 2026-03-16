@@ -9,11 +9,48 @@ use argon2::{
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use chacha20::XChaCha20;
 use chacha20poly1305 as ch;
-use chacha20poly1305::aead::AeadInPlace;
-use chacha20poly1305::KeyInit;
-use curve25519_dalek::digest::Digest;
+use chacha20poly1305::aead::AeadInOut as _;
+use chacha20poly1305::KeyInit as _;
+use curve25519_dalek::digest::Digest as _;
 use ed25519_dalek as ed;
 use x25519_dalek as xd;
+
+pub use chacha20poly1305::aead::Buffer;
+
+pub struct BufferWrapper<'a> {
+    buffer: &'a mut dyn CryptoSystemBuffer,
+}
+
+impl<'a> BufferWrapper<'a> {
+    pub fn new(buffer: &'a mut dyn CryptoSystemBuffer) -> Self {
+        Self { buffer }
+    }
+}
+impl<'a> AsRef<[u8]> for BufferWrapper<'a> {
+    fn as_ref(&self) -> &[u8] {
+        self.buffer.as_ref()
+    }
+}
+impl<'a> AsMut<[u8]> for BufferWrapper<'a> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.buffer.as_mut()
+    }
+}
+impl<'a> ch::aead::Buffer for BufferWrapper<'a> {
+    fn len(&self) -> usize {
+        self.buffer.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+    fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), ch::Error> {
+        self.buffer.extend_from_slice(other);
+        Ok(())
+    }
+    fn truncate(&mut self, len: usize) {
+        self.buffer.truncate(len)
+    }
+}
 
 const VLD0_DOMAIN_SIGN: &[u8] = b"VLD0_SIGN";
 const VLD0_DOMAIN_CRYPT: &[u8] = b"VLD0_CRYPT";
@@ -27,7 +64,7 @@ fn public_to_x25519_pk(public: &PublicKey) -> VeilidAPIResult<xd::PublicKey> {
     let pk_ed = ed::VerifyingKey::from_bytes(
         public
             .ref_value()
-            .bytes()
+            .as_ref()
             .try_into()
             .map_err(VeilidAPIError::internal)?,
     )
@@ -286,7 +323,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
 
         let bytes = *blake3::hash(data).as_bytes();
 
-        Ok(bytes == hash_digest.ref_value().bytes())
+        Ok(bytes == *hash_digest.ref_value().bytes())
     }
 
     #[cfg_attr(
@@ -303,7 +340,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
         let mut hasher = blake3::Hasher::new();
         std::io::copy(reader, &mut hasher).map_err(VeilidAPIError::generic)?;
         let bytes = *hasher.finalize().as_bytes();
-        Ok(bytes == hash_digest.ref_value().bytes())
+        Ok(bytes == *hash_digest.ref_value().bytes())
     }
 
     // Authentication
@@ -320,12 +357,11 @@ impl CryptoSystem for CryptoSystemVLD0 {
         self.check_public_key(public_key)?;
         self.check_secret_key(secret_key)?;
 
-        let mut kpb: [u8; VLD0_SECRET_KEY_LENGTH + VLD0_PUBLIC_KEY_LENGTH] =
-            [0u8; VLD0_SECRET_KEY_LENGTH + VLD0_PUBLIC_KEY_LENGTH];
+        let mut kpb = BytesMut::with_capacity(VLD0_SECRET_KEY_LENGTH + VLD0_PUBLIC_KEY_LENGTH);
 
-        kpb[..VLD0_SECRET_KEY_LENGTH].copy_from_slice(secret_key.ref_value().bytes());
-        kpb[VLD0_SECRET_KEY_LENGTH..].copy_from_slice(public_key.ref_value().bytes());
-        let keypair = ed::SigningKey::from_keypair_bytes(&kpb)
+        kpb.extend_from_slice(secret_key.ref_value().as_ref());
+        kpb.extend_from_slice(public_key.ref_value().as_ref());
+        let keypair = ed::SigningKey::from_keypair_bytes(kpb.as_ref().try_into().unwrap_or_log())
             .map_err(|e| VeilidAPIError::parse_error("Keypair is invalid", e))?;
 
         let mut dig: ed::Sha512 = ed::Sha512::default();
@@ -339,6 +375,43 @@ impl CryptoSystem for CryptoSystemVLD0 {
 
         Ok(sig)
     }
+
+    fn sign_in_place(
+        &self,
+        public_key: &PublicKey,
+        secret_key: &SecretKey,
+        data: &mut [u8],
+        range: Range<usize>,
+        sig_idx: usize,
+    ) -> VeilidAPIResult<()> {
+        self.check_public_key(public_key)?;
+        self.check_secret_key(secret_key)?;
+
+        let mut kpb = BytesMut::with_capacity(VLD0_SECRET_KEY_LENGTH + VLD0_PUBLIC_KEY_LENGTH);
+
+        kpb.extend_from_slice(secret_key.ref_value().as_ref());
+        kpb.extend_from_slice(public_key.ref_value().as_ref());
+        let keypair = ed::SigningKey::from_keypair_bytes(kpb.as_ref().try_into().unwrap_or_log())
+            .map_err(|e| VeilidAPIError::parse_error("Keypair is invalid", e))?;
+
+        let mut dig: ed::Sha512 = ed::Sha512::default();
+
+        dig.update(
+            data.get(range)
+                .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
+        );
+
+        let sig_bytes = keypair
+            .sign_prehashed(dig, Some(VLD0_DOMAIN_SIGN))
+            .map_err(VeilidAPIError::internal)?;
+
+        data.get_mut(sig_idx..sig_idx + VLD0_SIGNATURE_LENGTH)
+            .ok_or_else(|| VeilidAPIError::internal("signature index is out of bounds"))?
+            .copy_from_slice(&sig_bytes.to_bytes());
+
+        Ok(())
+    }
+
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
@@ -355,7 +428,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
         let pk = ed::VerifyingKey::from_bytes(
             public_key
                 .ref_value()
-                .bytes()
+                .as_ref()
                 .try_into()
                 .map_err(VeilidAPIError::internal)?,
         )
@@ -363,7 +436,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
         let sig = ed::Signature::from_bytes(
             signature
                 .ref_value()
-                .bytes()
+                .as_ref()
                 .try_into()
                 .map_err(VeilidAPIError::internal)?,
         );
@@ -380,6 +453,43 @@ impl CryptoSystem for CryptoSystemVLD0 {
         Ok(true)
     }
 
+    fn verify_in_place(
+        &self,
+        public_key: &PublicKey,
+        data: &[u8],
+        range: Range<usize>,
+        sig_idx: usize,
+    ) -> VeilidAPIResult<bool> {
+        self.check_public_key(public_key)?;
+
+        let pk = ed::VerifyingKey::from_bytes(
+            public_key
+                .ref_value()
+                .as_ref()
+                .try_into()
+                .map_err(VeilidAPIError::internal)?,
+        )
+        .map_err(|e| VeilidAPIError::parse_error("Public key is invalid", e))?;
+
+        let mut dig: ed::Sha512 = ed::Sha512::default();
+        dig.update(
+            data.get(range)
+                .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
+        );
+
+        let sig = data
+            .get(sig_idx..sig_idx + VLD0_SIGNATURE_LENGTH)
+            .ok_or_else(|| VeilidAPIError::internal("signature index is out of bounds"))?;
+        let sig = ed::Signature::from_bytes(sig.try_into().unwrap_or_log());
+        if pk
+            .verify_prehashed_strict(dig, Some(VLD0_DOMAIN_SIGN), &sig)
+            .is_err()
+        {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
     // AEAD Encrypt/Decrypt
     #[cfg_attr(
         feature = "instrument",
@@ -387,7 +497,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
     )]
     fn decrypt_in_place_aead(
         &self,
-        body: &mut Vec<u8>,
+        body: &mut dyn CryptoSystemBuffer,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
         associated_data: Option<&[u8]>,
@@ -396,18 +506,25 @@ impl CryptoSystem for CryptoSystemVLD0 {
 
         let shared_secret_bytes: [u8; VLD0_SHARED_SECRET_LENGTH] = shared_secret
             .ref_value()
-            .bytes()
+            .as_ref()
             .try_into()
             .map_err(VeilidAPIError::internal)?;
-        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] =
-            nonce.bytes().try_into().map_err(VeilidAPIError::internal)?;
+        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] = nonce
+            .as_ref()
+            .try_into()
+            .map_err(VeilidAPIError::internal)?;
 
         let key = ch::Key::from(shared_secret_bytes);
         let xnonce = ch::XNonce::from(nonce_bytes);
         let aead = ch::XChaCha20Poly1305::new(&key);
-        aead.decrypt_in_place(&xnonce, associated_data.unwrap_or(b""), body)
-            .map_err(map_to_string)
-            .map_err(VeilidAPIError::generic)
+        let mut buffer = BufferWrapper::new(body);
+        aead.decrypt_in_place(
+            &xnonce,
+            associated_data.unwrap_or(b""),
+            &mut buffer as &mut dyn ch::aead::Buffer,
+        )
+        .map_err(map_to_string)
+        .map_err(VeilidAPIError::generic)
     }
 
     #[cfg_attr(
@@ -437,7 +554,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
     )]
     fn encrypt_in_place_aead(
         &self,
-        body: &mut Vec<u8>,
+        body: &mut dyn CryptoSystemBuffer,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
         associated_data: Option<&[u8]>,
@@ -447,17 +564,20 @@ impl CryptoSystem for CryptoSystemVLD0 {
 
         let shared_secret_bytes: [u8; VLD0_SHARED_SECRET_LENGTH] = shared_secret
             .ref_value()
-            .bytes()
+            .as_ref()
             .try_into()
             .map_err(VeilidAPIError::internal)?;
-        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] =
-            nonce.bytes().try_into().map_err(VeilidAPIError::internal)?;
+        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] = nonce
+            .as_ref()
+            .try_into()
+            .map_err(VeilidAPIError::internal)?;
 
         let key = ch::Key::from(shared_secret_bytes);
         let xnonce = ch::XNonce::from(nonce_bytes);
         let aead = ch::XChaCha20Poly1305::new(&key);
 
-        aead.encrypt_in_place(&xnonce, associated_data.unwrap_or(b""), body)
+        let mut buffer = BufferWrapper::new(body);
+        aead.encrypt_in_place(&xnonce, associated_data.unwrap_or(b""), &mut buffer)
             .map_err(map_to_string)
             .map_err(VeilidAPIError::generic)
     }
@@ -499,11 +619,13 @@ impl CryptoSystem for CryptoSystemVLD0 {
 
         let shared_secret_bytes: [u8; VLD0_SHARED_SECRET_LENGTH] = shared_secret
             .ref_value()
-            .bytes()
+            .as_ref()
             .try_into()
             .map_err(VeilidAPIError::internal)?;
-        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] =
-            nonce.bytes().try_into().map_err(VeilidAPIError::internal)?;
+        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] = nonce
+            .as_ref()
+            .try_into()
+            .map_err(VeilidAPIError::internal)?;
         let key = ch::Key::from(shared_secret_bytes);
         let xnonce = ch::XNonce::from(nonce_bytes);
 
@@ -528,18 +650,18 @@ impl CryptoSystem for CryptoSystemVLD0 {
 
         let shared_secret_bytes: [u8; VLD0_SHARED_SECRET_LENGTH] = shared_secret
             .ref_value()
-            .bytes()
+            .as_ref()
             .try_into()
             .map_err(VeilidAPIError::internal)?;
-        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] =
-            nonce.bytes().try_into().map_err(VeilidAPIError::internal)?;
+        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] = nonce
+            .as_ref()
+            .try_into()
+            .map_err(VeilidAPIError::internal)?;
         let key = ch::Key::from(shared_secret_bytes);
         let xnonce = ch::XNonce::from(nonce_bytes);
 
         let mut cipher = <XChaCha20 as KeyIvInit>::new(&key, &xnonce);
-        cipher
-            .apply_keystream_b2b(in_buf, out_buf)
-            .map_err(VeilidAPIError::generic)?;
+        cipher.apply_keystream_b2b(in_buf, out_buf);
         Ok(())
     }
 

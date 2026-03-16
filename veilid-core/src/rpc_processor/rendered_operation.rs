@@ -7,7 +7,7 @@ pub struct RenderedOperation {
     /// if it wrapped with a route
     pub outer_op_id: OperationId,
     /// The rendered signed operation bytes
-    pub message: Vec<u8>,
+    pub message: Bytes,
     /// Node to send to
     pub node_ref: FilteredNodeRef,
     /// Optional relay dialinfo to send directly to

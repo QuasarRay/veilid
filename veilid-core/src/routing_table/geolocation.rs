@@ -1,8 +1,7 @@
 use crate::CountryCode;
-use maxminddb::MaxMindDBError;
-use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::net::IpAddr;
+use std::sync::LazyLock;
 use tracing::error;
 
 const IPV4_MMDB: &[u8] =
@@ -10,8 +9,8 @@ const IPV4_MMDB: &[u8] =
 const IPV6_MMDB: &[u8] =
     include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../target/ipv6.mmdb"));
 
-static IPV4: Lazy<Option<maxminddb::Reader<&'static [u8]>>> =
-    Lazy::new(|| match maxminddb::Reader::from_source(IPV4_MMDB) {
+static IPV4: LazyLock<Option<maxminddb::Reader<&'static [u8]>>> =
+    LazyLock::new(|| match maxminddb::Reader::from_source(IPV4_MMDB) {
         Ok(reader) => Some(reader),
         Err(err) => {
             error!("Unable to open embedded IPv4 geolocation database: {}", err);
@@ -19,8 +18,8 @@ static IPV4: Lazy<Option<maxminddb::Reader<&'static [u8]>>> =
         }
     });
 
-static IPV6: Lazy<Option<maxminddb::Reader<&'static [u8]>>> =
-    Lazy::new(|| match maxminddb::Reader::from_source(IPV6_MMDB) {
+static IPV6: LazyLock<Option<maxminddb::Reader<&'static [u8]>>> =
+    LazyLock::new(|| match maxminddb::Reader::from_source(IPV6_MMDB) {
         Ok(reader) => Some(reader),
         Err(err) => {
             error!("Unable to open embedded IPv6 geolocation database: {}", err);
@@ -43,9 +42,9 @@ pub fn query_country_code(addr: IpAddr) -> Option<CountryCode> {
         return None;
     };
 
-    let result: Country = match db.lookup(addr) {
-        Ok(result) => result,
-        Err(MaxMindDBError::AddressNotFoundError(_)) => return None,
+    let result: Country = match db.lookup(addr).and_then(|res| res.decode::<Country>()) {
+        Ok(Some(result)) => result,
+        Ok(None) => return None,
         Err(err) => {
             // We only expect AddressNotFoundError as possible error,
             // anything else means there's a problem
@@ -61,7 +60,7 @@ pub fn query_country_code(addr: IpAddr) -> Option<CountryCode> {
 mod tests {
     use crate::CountryCode;
     use core::str::FromStr;
-    use maxminddb::WithinItem;
+    use veilid_tools::*;
 
     #[test]
     fn test_query_country_code() {
@@ -96,9 +95,8 @@ mod tests {
         let db = super::IPV4.as_ref().unwrap_or_log();
 
         let count = db
-            .within("0.0.0.0/0".parse().unwrap_or_log())
+            .within("0.0.0.0/0".parse().unwrap_or_log(), Default::default())
             .unwrap_or_log()
-            .map(|item: Result<WithinItem<super::Country>, _>| item.unwrap_or_log())
             .count();
 
         assert!(count > 100, "Expecting some IPv4 subnets in IPv4 MMDB");
@@ -109,9 +107,8 @@ mod tests {
         let db = super::IPV6.as_ref().unwrap_or_log();
 
         let count = db
-            .within("::/0".parse().unwrap_or_log())
+            .within("::/0".parse().unwrap_or_log(), Default::default())
             .unwrap_or_log()
-            .map(|item: Result<WithinItem<super::Country>, _>| item.unwrap_or_log())
             .count();
 
         assert!(count > 100, "Expecting some IPv6 subnets in IPv6 MMDB");

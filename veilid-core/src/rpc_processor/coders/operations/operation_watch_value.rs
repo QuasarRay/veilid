@@ -38,9 +38,12 @@ impl RPCOperationWatchValueQ {
         })
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn destructure(
         self,
@@ -151,9 +154,12 @@ impl RPCOperationWatchValueA {
         })
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn destructure(self) -> (bool, TimestampDuration, Vec<Arc<PeerInfo>>, u64) {
         (self.accepted, self.duration, self.peers, self.watch_id)

@@ -409,9 +409,9 @@ impl AddressFilter {
     }
 
     pub fn punish_node_id(&self, node_id: NodeId, reason: PunishmentReason) {
-        if let Ok(Some(nr)) = self.routing_table().lookup_node_ref(node_id.clone()) {
+        if let Ok(Some(nr)) = self.routing_table().lookup_node_id(node_id.clone()) {
             // make the entry dead if it's punished
-            nr.operate_mut(|_rti, e| e.set_punished(Some(reason)));
+            nr.set_punished(Some(reason));
         }
 
         let timestamp = Timestamp::now();
@@ -439,8 +439,8 @@ impl AddressFilter {
         veilid_log!(self warn "Forgiving: {}", node_id);
         inner.punishments_by_node_id.remove(&node_id);
         // make the entry alive again if it's still here
-        if let Ok(Some(nr)) = self.routing_table().lookup_node_ref(node_id) {
-            nr.operate_mut(|_rti, e| e.set_punished(None));
+        if let Ok(Some(nr)) = self.routing_table().lookup_node_id(node_id) {
+            nr.set_punished(None);
         }
     }
 

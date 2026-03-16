@@ -17,7 +17,10 @@ impl RPCOperationStartTunnelQ {
         }
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        _validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         Ok(())
     }
 
@@ -78,9 +81,13 @@ impl RPCOperationStartTunnelA {
     pub fn new_error(tunnel_error: TunnelError) -> Self {
         Self::Error(tunnel_error)
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn decode(
         decode_context: &RPCDecodeContext,

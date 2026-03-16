@@ -161,7 +161,7 @@ impl RPCProcessor {
         }
 
         // Validate peers returned are, in fact, closer to the key than the node we sent this to
-        let valid = match self.routing_table().verify_peers_closer(
+        let valid = match self.routing_table().verify_peer_infos_closer(
             target_node_id.to_hash_coordinate(),
             opaque_record_key.to_hash_coordinate(),
             &peers,
@@ -280,7 +280,7 @@ impl RPCProcessor {
 
         // Get the nodes that we know about that are closer to the the key than our own node
         let closer_to_key_peers = network_result_try!(routing_table
-            .find_reliable_peers_closer_to_key(
+            .get_reliable_nodes_closer_to_key_peer_info(
                 routing_domain,
                 opaque_record_key.to_hash_coordinate(),
                 vec![VEILID_CAPABILITY_DHT]

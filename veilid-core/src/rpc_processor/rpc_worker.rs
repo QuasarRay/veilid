@@ -116,7 +116,7 @@ impl RPCProcessor {
         sender_noderef: FilteredNodeRef,
         flow: Flow,
         routing_domain: RoutingDomain,
-        body: Vec<u8>,
+        body: Bytes,
     ) -> EyreResult<()> {
         let _guard = self
             .startup_context
@@ -141,7 +141,7 @@ impl RPCProcessor {
 
         let message_encoded = MessageEncoded {
             header,
-            data: MessageData { contents: body },
+            data: MessageData::new(body),
         };
 
         let send_channel = {
@@ -171,7 +171,7 @@ impl RPCProcessor {
         remote_safety_route: PublicKey,
         sequencing: Sequencing,
         route_op_id: OperationId,
-        body: Vec<u8>,
+        body: Bytes,
     ) -> EyreResult<()> {
         let _guard = self
             .startup_context
@@ -192,7 +192,7 @@ impl RPCProcessor {
 
         let message_encoded = MessageEncoded {
             header,
-            data: MessageData { contents: body },
+            data: MessageData::new(body),
         };
         let send_channel = {
             let inner = self.inner.lock();
@@ -222,7 +222,7 @@ impl RPCProcessor {
         private_route: PublicKey,
         safety_spec: SafetySpec,
         route_op_id: OperationId,
-        body: Vec<u8>,
+        body: Bytes,
     ) -> EyreResult<()> {
         let _guard = self
             .startup_context
@@ -244,7 +244,7 @@ impl RPCProcessor {
 
         let message_encoded = MessageEncoded {
             header,
-            data: MessageData { contents: body },
+            data: MessageData::new(body),
         };
 
         let send_channel = {

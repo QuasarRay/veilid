@@ -78,7 +78,7 @@ impl NetworkManager {
                     routing_table.get_published_peer_info(routing_domain)
                 } else if let Some(best_public_key) = bsrec.public_keys().first() {
                     if let Ok(best_node_id) = routing_table.generate_node_id(best_public_key) {
-                        if let Some(nr) = routing_table.lookup_node_ref(best_node_id).ok().flatten()
+                        if let Some(nr) = routing_table.lookup_node_id(best_node_id).ok().flatten()
                         {
                             nr.get_peer_info(routing_domain)
                         } else {
@@ -95,7 +95,7 @@ impl NetworkManager {
 
         // Serialize out bootstrap response
         let bootv1response = BootV1Response { records, peers };
-        let json_bytes = serialize_json(bootv1response).as_bytes().to_vec();
+        let json_bytes: Bytes = serialize_json(bootv1response).into();
         veilid_log!(self trace "B01T reponse: {}", String::from_utf8_lossy(&json_bytes));
 
         // Reply with bootstrap records

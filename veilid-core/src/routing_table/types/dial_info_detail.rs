@@ -137,6 +137,14 @@ pub trait HasDialInfoDetailList: fmt::Debug {
         false
     }
 
+    // Get set of ipblocks for this node
+    fn get_ipblocks(&self, ip6_prefix_size: usize) -> HashSet<IpAddr> {
+        self.dial_info_detail_list()
+            .iter()
+            .map(|did| ip_to_ipblock(ip6_prefix_size, did.dial_info.to_socket_addr().ip()))
+            .collect::<HashSet<_>>()
+    }
+
     /// Get geolocation info of just this object
     #[cfg(feature = "geolocation")]
     fn get_country_code(&self) -> Option<CountryCode> {

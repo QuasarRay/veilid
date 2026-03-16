@@ -103,6 +103,7 @@ async fn test_get_dht_record_key(api: VeilidAPI) {
             owner_keypair.key(),
             rec.key().encryption_key(),
         )
+        .await
         .unwrap();
 
     // keys should be the same

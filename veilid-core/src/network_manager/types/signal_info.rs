@@ -6,14 +6,16 @@ pub(crate) enum SignalInfo {
     /// UDP Hole Punch Request
     HolePunch {
         /// /// Receipt to be returned after the hole punch
-        receipt: Vec<u8>,
+        receipt: Bytes,
         /// Sender's peer info
         peer_info: Arc<PeerInfo>,
+        /// Hole punch dial info to use (optional, UDP only if not provided)
+        opt_dial_info: Option<DialInfo>,
     },
     /// Reverse Connection Request
     ReverseConnect {
         /// Receipt to be returned by the reverse connection
-        receipt: Vec<u8>,
+        receipt: Bytes,
         /// Sender's peer info
         peer_info: Arc<PeerInfo>,
     },
@@ -25,7 +27,8 @@ impl SignalInfo {
         match self {
             SignalInfo::HolePunch {
                 receipt,
-                peer_info: _,
+                peer_info,
+                opt_dial_info,
             } => {
                 if receipt.len() < RCP0_MIN_RECEIPT_SIZE {
                     return Err(RPCError::protocol("SignalInfo HolePunch receipt too short"));
@@ -33,6 +36,17 @@ impl SignalInfo {
                 if receipt.len() > RCP0_MAX_RECEIPT_SIZE {
                     return Err(RPCError::protocol("SignalInfo HolePunch receipt too long"));
                 }
+
+                // Dial info, if present, must be present in the peer info as well
+                if let Some(dial_info) = &opt_dial_info {
+                    peer_info
+                        .node_info()
+                        .dial_info_detail_list()
+                        .iter()
+                        .find(|d| d.dial_info == *dial_info)
+                        .ok_or(RPCError::protocol("Dial info not found in peer info"))?;
+                }
+
                 Ok(())
             }
             SignalInfo::ReverseConnect {

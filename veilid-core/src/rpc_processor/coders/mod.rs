@@ -73,86 +73,88 @@ pub struct RPCDecodeContext {
     pub origin_routing_domain: RoutingDomain,
 }
 
-pub fn canonical_message_builder_to_vec_packed<'a, T>(
+pub fn canonical_message_builder_to_bytes_writer_packed<'a, T>(
     builder: capnp::message::Builder<T>,
-) -> Result<Vec<u8>, RPCError>
+    bytes_writer_callback: impl FnOnce(usize) -> BytesWriter,
+) -> Result<BytesWriter, RPCError>
 where
     T: capnp::message::Allocator + 'a,
 {
     // Canonicalize builder
-    let buffer = if builder.len() != 1 {
+    let out = if builder.len() != 1 {
         let root = builder
             .get_root_as_reader::<capnp::any_pointer::Reader>()
             .map_err(RPCError::protocol)?;
 
         let size = root.target_size()?.word_count + 1;
-        let mut canonical_builder = capnp::message::Builder::new(
+        let mut builder = capnp::message::Builder::new(
             capnp::message::HeapAllocator::new().first_segment_words(size as u32),
         );
-        canonical_builder.set_root_canonical(root)?;
+        builder.set_root_canonical(root)?;
 
-        let mut buffer = Vec::<u8>::with_capacity(canonical_builder.size_in_words());
-        capnp::serialize_packed::write_message(&mut buffer, &canonical_builder)
-            .map_err(RPCError::protocol)?;
-        buffer
+        // Size of -unpacked- output. Should allocate at least this much capacity,
+        // because we can't tell what the size of the packed output will be.
+        let size = capnp::serialize::compute_serialized_size_in_words(&builder)
+            * capnp::private::units::BYTES_PER_WORD;
+
+        let mut out = bytes_writer_callback(size);
+
+        capnp::serialize_packed::write_message(&mut out, &builder).map_err(RPCError::protocol)?;
+
+        out
     } else {
-        let mut buffer = Vec::<u8>::with_capacity(builder.size_in_words());
-        capnp::serialize_packed::write_message(&mut buffer, &builder)
-            .map_err(RPCError::protocol)?;
-        buffer
+        // Size of -unpacked- output. Should allocate at least this much capacity,
+        // because we can't tell what the size of the packed output will be.
+        let size = capnp::serialize::compute_serialized_size_in_words(&builder)
+            * capnp::private::units::BYTES_PER_WORD;
+
+        let mut out = bytes_writer_callback(size);
+
+        capnp::serialize_packed::write_message(&mut out, &builder).map_err(RPCError::protocol)?;
+
+        out
     };
 
-    Ok(buffer)
+    Ok(out)
 }
 
-pub fn canonical_message_builder_to_write_packed<'a, T, W>(
-    write: W,
+pub fn canonical_message_builder_to_bytes_writer_unpacked<'a, T>(
     builder: capnp::message::Builder<T>,
-) -> Result<(), RPCError>
+    bytes_writer_callback: impl FnOnce(usize) -> BytesWriter,
+) -> Result<BytesWriter, RPCError>
 where
     T: capnp::message::Allocator + 'a,
-    W: capnp::io::Write,
 {
     // Canonicalize builder
-    if builder.len() != 1 {
+    let out = if builder.len() != 1 {
         let root = builder
             .get_root_as_reader::<capnp::any_pointer::Reader>()
             .map_err(RPCError::protocol)?;
 
         let size = root.target_size()?.word_count + 1;
-        let mut canonical_builder = capnp::message::Builder::new(
+        let mut builder = capnp::message::Builder::new(
             capnp::message::HeapAllocator::new().first_segment_words(size as u32),
         );
-        canonical_builder.set_root_canonical(root)?;
+        builder.set_root_canonical(root)?;
 
-        capnp::serialize_packed::write_message(write, &canonical_builder)
-            .map_err(RPCError::protocol)?;
+        let size = capnp::serialize::compute_serialized_size_in_words(&builder)
+            * capnp::private::units::BYTES_PER_WORD;
+
+        let mut out = bytes_writer_callback(size);
+
+        capnp::serialize::write_message(&mut out, &builder).map_err(RPCError::protocol)?;
+
+        out
     } else {
-        capnp::serialize_packed::write_message(write, &builder).map_err(RPCError::protocol)?;
+        let size = capnp::serialize::compute_serialized_size_in_words(&builder)
+            * capnp::private::units::BYTES_PER_WORD;
+
+        let mut out = bytes_writer_callback(size);
+
+        capnp::serialize::write_message(&mut out, &builder).map_err(RPCError::protocol)?;
+
+        out
     };
-    Ok(())
-}
 
-pub fn canonical_message_builder_to_vec_unpacked<'a, T>(
-    builder: capnp::message::Builder<T>,
-) -> Result<Vec<u8>, RPCError>
-where
-    T: capnp::message::Allocator + 'a,
-{
-    // Canonicalize builder
-    if builder.len() != 1 {
-        let root = builder
-            .get_root_as_reader::<capnp::any_pointer::Reader>()
-            .map_err(RPCError::protocol)?;
-
-        let size = root.target_size()?.word_count + 1;
-        let mut canonical_builder = capnp::message::Builder::new(
-            capnp::message::HeapAllocator::new().first_segment_words(size as u32),
-        );
-        canonical_builder.set_root_canonical(root)?;
-
-        Ok(capnp::serialize::write_message_to_words(&canonical_builder))
-    } else {
-        Ok(capnp::serialize::write_message_to_words(&builder))
-    }
+    Ok(out)
 }

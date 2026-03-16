@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! impl_crypto_typed {
     ($visibility:vis $name:ident) => {
-        paste::paste! {
+        pastey::paste! {
 
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(wasm_bindgen_derive::TryFromJsValue))]
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
@@ -163,7 +163,7 @@ macro_rules! impl_crypto_typed {
 #[macro_export]
 macro_rules! impl_crypto_typed_vec {
     ($visibility:vis $name:ident) => {
-        paste::paste! {
+        pastey::paste! {
             impl<'a> TryFrom<&'a [u8]> for $name
             {
                 type Error = VeilidAPIError;

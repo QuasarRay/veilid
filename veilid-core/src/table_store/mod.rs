@@ -179,7 +179,7 @@ impl TableStore {
         let mut dbt = DBTransaction::new();
         dbt.put(0, ALL_TABLE_NAMES, &all_table_names_value);
         if let Err(e) = all_tables_db.write(dbt).await {
-            error!("failed to write all tables db: {}", e);
+            veilid_log!(self error "failed to write all tables db: {}", e);
         }
     }
 
@@ -235,7 +235,7 @@ impl TableStore {
             .insert(name.to_owned(), real_name.clone())
             .is_some()
         {
-            panic!("should not have had some value");
+            veilid_log!(self error "should not have already had this table name: {}", name);
         };
 
         Ok(real_name)
@@ -315,21 +315,22 @@ impl TableStore {
         };
 
         // Get all tables
-        let real_names = {
+        let table_names = {
             let mut inner = self.inner.lock();
             let real_names = inner
                 .all_table_names
-                .values()
-                .cloned()
-                .collect::<Vec<String>>();
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Vec<(String, String)>>();
             inner.all_table_names.clear();
             real_names
         };
 
         // Delete all tables
-        for table_name in real_names {
-            if let Err(e) = self.table_store_driver.delete(&table_name).await {
-                error!("error deleting table: {}", e);
+        for (table_name, table_real_name) in table_names {
+            veilid_log!(self debug "deleting table: {} ({})", table_real_name, table_name);
+            if let Err(e) = self.table_store_driver.delete(&table_real_name).await {
+                veilid_log!(self error "error deleting table: {}", e);
             }
         }
         self.flush().await;
@@ -372,18 +373,26 @@ impl TableStore {
                 &dek_bytes[(4 + vcrypto.shared_secret_length() + vcrypto.aead_overhead())..],
             );
             let shared_secret = vcrypto
-                .derive_shared_secret(device_encryption_key_password.as_bytes(), &nonce)
+                .derive_shared_secret(
+                    Bytes::copy_from_slice(device_encryption_key_password.as_bytes()),
+                    nonce.bytes(),
+                )
                 .await
                 .wrap_err("failed to derive shared secret")?;
 
             let unprotected_key = vcrypto
-                .decrypt_aead(protected_key, &nonce, &shared_secret, None)
+                .decrypt_aead(
+                    Bytes::copy_from_slice(protected_key),
+                    &nonce,
+                    &shared_secret,
+                    None,
+                )
                 .await
                 .wrap_err("failed to decrypt device encryption key")?;
 
             return Ok(SharedSecret::new(
                 kind,
-                BareSharedSecret::new(unprotected_key.as_slice()),
+                BareSharedSecret::new(unprotected_key.as_ref()),
             ));
         }
 
@@ -421,11 +430,19 @@ impl TableStore {
 
         let nonce = vcrypto.random_nonce().await;
         let shared_secret = vcrypto
-            .derive_shared_secret(device_encryption_key_password.as_bytes(), &nonce)
+            .derive_shared_secret(
+                Bytes::copy_from_slice(device_encryption_key_password.as_bytes()),
+                Bytes::copy_from_slice(&nonce),
+            )
             .await
             .wrap_err("failed to derive shared secret")?;
         let protected_key = vcrypto
-            .encrypt_aead(dek.ref_value(), &nonce, &shared_secret, None)
+            .encrypt_aead(
+                Bytes::copy_from_slice(dek.ref_value()),
+                &nonce,
+                &shared_secret,
+                None,
+            )
             .await
             .wrap_err("failed to decrypt device encryption key")?;
         let mut out = Vec::with_capacity(
@@ -434,7 +451,7 @@ impl TableStore {
         out.extend_from_slice(dek.kind().bytes());
         out.extend_from_slice(&protected_key);
         out.extend_from_slice(&nonce);
-        assert_eq!(
+        debug_assert_eq!(
             out.len(),
             4 + vcrypto.shared_secret_length() + vcrypto.aead_overhead() + vcrypto.nonce_length()
         );
@@ -531,7 +548,6 @@ impl TableStore {
     )]
     async fn init_async(&self) -> EyreResult<()> {
         let startup_guard = self.startup_lock.startup()?;
-
         {
             let _async_guard = self.async_lock.lock().await;
 
@@ -604,14 +620,16 @@ impl TableStore {
                 inner.encryption_key = device_encryption_key;
                 inner.all_tables_db = Some(all_tables_db);
             }
-
-            let do_delete = self.config().table_store.delete;
-
-            if do_delete {
-                self.delete_all().await;
-            }
         }
         startup_guard.success();
+
+        // Delete all tables if config has 'delete' enabled
+        // Must happen after startup guard is marked as successful
+        let do_delete = self.config().table_store.delete;
+        if do_delete {
+            veilid_log!(self debug "TableStore config 'delete' enabled: deleting all tables");
+            self.delete_all().await;
+        }
 
         // Set up crypto
         let crypto = self.crypto();
@@ -778,17 +796,86 @@ impl TableStore {
         }
 
         // Wrap low-level Database in TableDB object
-        let mut inner = self.inner.lock();
+        let encryption_key = self.inner.lock().encryption_key.clone();
         let table_db = TableDB::new(
             table_name.clone(),
             self.registry(),
             db,
-            inner.encryption_key.clone(),
-            inner.encryption_key.clone(),
+            encryption_key.clone(),
+            encryption_key.clone(),
             column_count,
         );
 
+        // Validate keys are readable if they exist, otherwise wipe this database
+        // because there is an invalid encryption key and no way to read the data
+        let mut keys_ok = true;
+        for col in 0..existing_col_count {
+            match table_db.get_keys(col).await {
+                Ok(_) => {
+                    // Keys read okay from column
+                }
+                Err(_) => {
+                    keys_ok = false;
+                }
+            }
+        }
+
+        let table_db = if !keys_ok {
+            if self.config().table_store.delete {
+                veilid_log!(self warn "table {}({}) has invalid encryption key, wiping database because config has 'delete' enabled", name, table_name);
+            } else {
+                apibail_generic!(
+                    "table {}({}) has invalid encryption key, refusing to open database",
+                    name,
+                    table_name
+                );
+            }
+
+            // Drop database
+            drop(table_db);
+
+            // Delete the database
+            match self.table_store_driver.delete(&table_name).await {
+                Ok(_) => {
+                    // Delete was successful
+                }
+                Err(e) => {
+                    self.name_delete(name)
+                        .expect_or_log("removing name failed after delete");
+                    self.flush().await;
+                    return Err(e);
+                }
+            }
+
+            // Reopen a new database
+            let db = match self
+                .table_store_driver
+                .open(&table_name, existing_col_count, concurrency)
+                .await
+            {
+                Ok(db) => db,
+                Err(e) => {
+                    self.name_delete(name)
+                        .expect_or_log("removing name failed recreating database");
+                    self.flush().await;
+                    return Err(e);
+                }
+            };
+
+            TableDB::new(
+                table_name.clone(),
+                self.registry(),
+                db,
+                encryption_key.clone(),
+                encryption_key.clone(),
+                column_count,
+            )
+        } else {
+            table_db
+        };
+
         // Keep track of opened DBs
+        let mut inner = self.inner.lock();
         inner
             .opened
             .insert(table_name.clone(), table_db.unlocked_inner());
@@ -837,18 +924,13 @@ impl TableStore {
                 name, table_name
             );
         }
-        self.name_delete(name)
-            .expect_or_log("failed to delete name");
+        if let Err(e) = self.name_delete(name) {
+            veilid_log!(self error "failed to delete name: {}", e);
+            return Err(e);
+        }
         self.flush().await;
-
         Ok(true)
     }
-
-    /// Get the description of a TableDB table
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "tstore", skip_all)
-    )]
     pub async fn info(&self, name: &str) -> VeilidAPIResult<Option<TableInfo>> {
         let Ok(_startup_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();

@@ -35,7 +35,7 @@ struct PeerKey {
 struct MessageAssembly {
     timestamp: u64,
     seq: SequenceType,
-    data: Vec<u8>,
+    data: BytesMut,
     parts: RangeSetBlaze<LengthType>,
 }
 
@@ -116,7 +116,7 @@ impl PeerMessages {
         let mut assembly = MessageAssembly {
             timestamp,
             seq,
-            data: unsafe { unaligned_u8_vec_uninit(len as usize) },
+            data: BytesMut::zeroed(len as usize),
             parts: RangeSetBlaze::from_iter([part_start..=part_end]),
         };
         assembly.data[part_start as usize..=part_end as usize].copy_from_slice(chunk);
@@ -157,7 +157,7 @@ impl PeerMessages {
         off: LengthType,
         len: LengthType,
         chunk: &[u8],
-    ) -> Option<Vec<u8>> {
+    ) -> Option<Bytes> {
         // Get the current timestamp
         let cur_ts = get_raw_timestamp();
 
@@ -188,7 +188,7 @@ impl PeerMessages {
         // If the assembly is now equal to the entire range, then return it
         if done {
             let assembly = self.remove_assembly(ass);
-            return Some(assembly.data);
+            return Some(assembly.data.into());
         }
 
         // Otherwise, do nothing
@@ -258,10 +258,10 @@ impl AssemblyBuffer {
         &self,
         frame: &[u8],
         remote_addr: SocketAddr,
-    ) -> NetworkResult<Option<Vec<u8>>> {
+    ) -> NetworkResult<Option<Bytes>> {
         // If we receive a zero length frame, send it
         if frame.is_empty() {
-            return NetworkResult::value(Some(frame.to_vec()));
+            return NetworkResult::value(Some(Bytes::new()));
         }
 
         // If we receive a frame smaller than or equal to the length of the header, drop it
@@ -296,7 +296,7 @@ impl AssemblyBuffer {
 
         // See if we have a whole message and not a fragment
         if off == 0 && len as usize == chunk.len() {
-            return NetworkResult::value(Some(chunk.to_vec()));
+            return NetworkResult::value(Some(Bytes::from(chunk.to_vec())));
         }
 
         // Drop fragments with offsets greater than or equal to the message length
@@ -356,7 +356,7 @@ impl AssemblyBuffer {
     }
 
     /// Add framing to chunk to send to the wire
-    fn frame_chunk(chunk: &[u8], offset: usize, message_len: usize, seq: SequenceType) -> Vec<u8> {
+    fn frame_chunk(chunk: &[u8], offset: usize, message_len: usize, seq: SequenceType) -> Bytes {
         assert!(!chunk.is_empty());
         assert!(message_len <= MAX_LEN);
         assert!(offset + chunk.len() <= message_len);
@@ -377,7 +377,7 @@ impl AssemblyBuffer {
 
             // Write out body
             out[HEADER_LEN..].copy_from_slice(chunk);
-            out
+            out.into()
         }
     }
 
@@ -386,12 +386,12 @@ impl AssemblyBuffer {
     /// never interleaving packets from one message and another to minimize reassembly problems
     pub async fn split_message<S, F>(
         &self,
-        data: Vec<u8>,
+        data: Bytes,
         remote_addr: SocketAddr,
         mut sender: S,
     ) -> std::io::Result<NetworkResult<()>>
     where
-        S: FnMut(Vec<u8>, SocketAddr) -> F,
+        S: FnMut(Bytes, SocketAddr) -> F,
         F: Future<Output = std::io::Result<NetworkResult<()>>>,
     {
         if data.len() > MAX_LEN {

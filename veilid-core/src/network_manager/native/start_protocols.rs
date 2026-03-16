@@ -85,7 +85,7 @@ impl Network {
     // Returns a port, a set of ip addresses to bind to, and a
     // bool specifying if multiple ports should be tried
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    async fn convert_listen_address_to_bind_set(
+    fn convert_listen_address_to_bind_set(
         &self,
         listen_address: String,
     ) -> EyreResult<NetworkBindSet> {
@@ -138,7 +138,7 @@ impl Network {
     /////////////////////////////////////////////////////
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn bind_udp_protocol_handlers(&self) -> EyreResult<StartupDisposition> {
+    pub(super) fn bind_udp_protocol_handlers(&self) -> EyreResult<StartupDisposition> {
         veilid_log!(self trace "UDP: binding protocol handlers");
         let config = self.config();
         let listen_address = config.network.protocol.udp.listen_address.clone();
@@ -146,9 +146,7 @@ impl Network {
         let require_inbound_relay = config.network.privacy.require_inbound_relay;
 
         // Get the binding parameters from the user-specified listen address
-        let bind_set = self
-            .convert_listen_address_to_bind_set(listen_address.clone())
-            .await?;
+        let bind_set = self.convert_listen_address_to_bind_set(listen_address.clone())?;
 
         // Now create udp inbound sockets for whatever interfaces we're listening on
         if bind_set.search {
@@ -163,16 +161,16 @@ impl Network {
             );
         }
 
-        if !self.create_inbound_udp_protocol_handlers(bind_set).await? {
+        if !self.create_inbound_udp_protocol_handlers(bind_set)? {
             return Ok(StartupDisposition::BindRetry);
         };
 
-        if !self.create_outbound_udp_protocol_handlers().await? {
+        if !self.create_outbound_udp_protocol_handlers()? {
             return Ok(StartupDisposition::BindRetry);
         }
 
         // Now create tasks for udp listeners
-        self.create_udp_listener_tasks().await?;
+        self.create_udp_listener_tasks()?;
 
         {
             let mut inner = self.inner.lock();
@@ -188,7 +186,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn register_udp_dial_info(
+    pub(super) fn register_udp_dial_info(
         &self,
         editor_public_internet: &mut RoutingDomainEditorPublicInternet<'_>,
         editor_local_network: &mut RoutingDomainEditorLocalNetwork<'_>,
@@ -265,7 +263,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn start_ws_listeners(&self) -> EyreResult<StartupDisposition> {
+    pub(super) fn start_ws_listeners(&self) -> EyreResult<StartupDisposition> {
         veilid_log!(self trace "WS: binding protocol handlers");
         let config = self.config();
         let listen_address = config.network.protocol.ws.listen_address.clone();
@@ -273,9 +271,7 @@ impl Network {
         let require_inbound_relay = config.network.privacy.require_inbound_relay;
 
         // Get the binding parameters from the user-specified listen address
-        let bind_set = self
-            .convert_listen_address_to_bind_set(listen_address.clone())
-            .await?;
+        let bind_set = self.convert_listen_address_to_bind_set(listen_address.clone())?;
 
         if bind_set.search {
             veilid_log!(self info
@@ -288,15 +284,12 @@ impl Network {
                 bind_set.port, bind_set.addrs
             );
         }
-        if !self
-            .start_tcp_listener(
-                bind_set,
-                false,
-                ProtocolType::WS,
-                Box::new(|r, t| Box::new(WebsocketProtocolHandler::new(r, t))),
-            )
-            .await?
-        {
+        if !self.start_tcp_listener(
+            bind_set,
+            false,
+            ProtocolType::WS,
+            Box::new(|r, t| Box::new(WebsocketProtocolHandler::new(r, t))),
+        )? {
             return Ok(StartupDisposition::BindRetry);
         }
 
@@ -311,7 +304,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn register_ws_dial_info(
+    pub(super) fn register_ws_dial_info(
         &self,
         editor_public_internet: &mut RoutingDomainEditorPublicInternet<'_>,
         editor_local_network: &mut RoutingDomainEditorLocalNetwork<'_>,
@@ -511,7 +504,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn start_tcp_listeners(&self) -> EyreResult<StartupDisposition> {
+    pub(super) fn start_tcp_listeners(&self) -> EyreResult<StartupDisposition> {
         veilid_log!(self trace "TCP: binding protocol handlers");
 
         let config = self.config();
@@ -521,9 +514,7 @@ impl Network {
         let require_inbound_relay = config.network.privacy.require_inbound_relay;
 
         // Get the binding parameters from the user-specified listen address
-        let bind_set = self
-            .convert_listen_address_to_bind_set(listen_address.clone())
-            .await?;
+        let bind_set = self.convert_listen_address_to_bind_set(listen_address.clone())?;
 
         if bind_set.search {
             veilid_log!(self info
@@ -536,15 +527,12 @@ impl Network {
                 bind_set.port, bind_set.addrs
             );
         }
-        if !self
-            .start_tcp_listener(
-                bind_set,
-                false,
-                ProtocolType::TCP,
-                Box::new(|c, _| Box::new(RawTcpProtocolHandler::new(c))),
-            )
-            .await?
-        {
+        if !self.start_tcp_listener(
+            bind_set,
+            false,
+            ProtocolType::TCP,
+            Box::new(|c, _| Box::new(RawTcpProtocolHandler::new(c))),
+        )? {
             return Ok(StartupDisposition::BindRetry);
         }
 
@@ -562,7 +550,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn register_tcp_dial_info(
+    pub(super) fn register_tcp_dial_info(
         &self,
         editor_public_internet: &mut RoutingDomainEditorPublicInternet<'_>,
         editor_local_network: &mut RoutingDomainEditorLocalNetwork<'_>,

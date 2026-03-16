@@ -2,7 +2,7 @@ use super::*;
 
 impl RouteSpecStore {
     /// Choose the best private route from a private route set to communicate with
-    pub fn best_remote_private_route(&self, id: &RouteId) -> Option<PrivateRoute> {
+    pub fn best_remote_private_route(&self, id: &RouteId) -> Option<Arc<PrivateRoute>> {
         let mut inner = self.inner.write();
         let cur_ts = Timestamp::now();
         let rpri = inner.cache.get_remote_private_route(cur_ts, id)?;
@@ -11,12 +11,9 @@ impl RouteSpecStore {
 
     /// Check if a route id is remote or not
     pub fn is_route_id_remote(&self, id: &RouteId) -> bool {
-        let mut inner = self.inner.write();
+        let inner = self.inner.read();
         let cur_ts = Timestamp::now();
-        inner
-            .cache
-            .peek_remote_private_route_mut(cur_ts, id)
-            .is_some()
+        inner.cache.peek_remote_private_route(cur_ts, id).is_some()
     }
 
     /// Import a remote private route set blob for compilation
@@ -51,7 +48,9 @@ impl RouteSpecStore {
 
         inner
             .cache
-            .cache_remote_private_route(cur_ts, id.clone(), private_routes);
+            .cache_remote_private_route(cur_ts, id.clone(), private_routes, |dead_key| {
+                self.invalidate_compiled_route_cache(dead_key);
+            });
 
         Ok(id)
     }
@@ -65,7 +64,7 @@ impl RouteSpecStore {
     )]
     pub fn import_single_remote_route(
         &self,
-        private_route: PrivateRoute,
+        private_route: Arc<PrivateRoute>,
     ) -> VeilidAPIResult<RouteId> {
         let cur_ts = Timestamp::now();
 
@@ -76,22 +75,21 @@ impl RouteSpecStore {
         let id = self.generate_remote_route_id(&private_routes)?;
 
         // validate the private routes
-        let mut inner = self.inner.write();
         for private_route in &private_routes {
             // ensure private route has first hop
             if !matches!(private_route.hops, PrivateRouteHops::FirstHop(_)) {
                 apibail_generic!("private route must have first hop");
             }
-
-            // ensure this isn't also an allocated route
-            // if inner.content.get_id_by_key(&private_route.public_key.value).is_some() {
-            //     bail!("should not import allocated route");
-            // }
         }
 
-        inner
-            .cache
-            .cache_remote_private_route(cur_ts, id.clone(), private_routes);
+        self.inner.write().cache.cache_remote_private_route(
+            cur_ts,
+            id.clone(),
+            private_routes,
+            |dead_key| {
+                self.invalidate_compiled_route_cache(dead_key);
+            },
+        );
 
         Ok(id)
     }
@@ -102,8 +100,12 @@ impl RouteSpecStore {
         instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub(super) fn release_remote_route_id(&self, id: RouteId) -> bool {
-        let mut inner = self.inner.write();
-        inner.cache.remove_remote_private_route(id)
+        self.inner
+            .write()
+            .cache
+            .remove_remote_private_route(id, |dead_key| {
+                self.invalidate_compiled_route_cache(dead_key);
+            })
     }
 
     /// Get a route id for a route's public key
@@ -167,7 +169,7 @@ impl RouteSpecStore {
             apibail_internal!("peer info is not yet published");
         };
 
-        let mut inner = self.inner.write();
+        let inner = self.inner.read();
 
         // Check for allocated route. If this is not a remote private route
         // then we just skip the recording. We may be running a test and using
@@ -177,7 +179,7 @@ impl RouteSpecStore {
         }
 
         if let Some(rrid) = inner.cache.get_remote_private_route_id_by_key(key) {
-            if let Some(rpri) = inner.cache.peek_remote_private_route_mut(cur_ts, &rrid) {
+            if let Some(rpri) = inner.cache.peek_remote_private_route(cur_ts, &rrid) {
                 rpri.set_last_seen_our_node_info_ts(our_node_info_ts);
                 return Ok(());
             }
@@ -187,7 +189,7 @@ impl RouteSpecStore {
     }
 
     /// Convert binary blob to private route vector
-    fn blob_to_private_routes(&self, blob: Vec<u8>) -> VeilidAPIResult<Vec<PrivateRoute>> {
+    fn blob_to_private_routes(&self, blob: Vec<u8>) -> VeilidAPIResult<Vec<Arc<PrivateRoute>>> {
         // Deserialize count
         if blob.is_empty() {
             apibail_invalid_argument!(
@@ -208,10 +210,11 @@ impl RouteSpecStore {
             origin_routing_domain: RoutingDomain::PublicInternet,
         };
         let pr_slice = &blob[1..];
+        let mut pr_cursor = std::io::Cursor::new(pr_slice);
         let mut out = Vec::with_capacity(pr_count);
         for _ in 0..pr_count {
             let reader = capnp::serialize_packed::read_message(
-                pr_slice,
+                &mut pr_cursor,
                 capnp::message::ReaderOptions::new(),
             )
             .map_err(|e| VeilidAPIError::invalid_argument("failed to read blob", "e", e))?;
@@ -223,7 +226,7 @@ impl RouteSpecStore {
                 VeilidAPIError::invalid_argument("failed to decode private route", "e", e)
             })?;
 
-            out.push(private_route);
+            out.push(Arc::new(private_route));
         }
 
         // Don't trust the order of the blob
@@ -235,7 +238,7 @@ impl RouteSpecStore {
     /// Generate RouteId from set of private routes
     fn generate_remote_route_id(
         &self,
-        private_routes: &[PrivateRoute],
+        private_routes: &[Arc<PrivateRoute>],
     ) -> VeilidAPIResult<RouteId> {
         let crypto = self.crypto();
 

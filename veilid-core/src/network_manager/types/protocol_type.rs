@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 use super::*;
 
-lazy_static::lazy_static! {
-    static ref PROTOCOL_TYPE_ORDERING: BTreeMap<(Sequencing, ProtocolType), usize>= {
+static PROTOCOL_TYPE_ORDERING: LazyLock<BTreeMap<(Sequencing, ProtocolType), usize>> =
+    LazyLock::new(|| {
         let mut out = BTreeMap::<(Sequencing, ProtocolType), usize>::new();
 
         // Sequencing::NoPreference
@@ -26,8 +26,7 @@ lazy_static::lazy_static! {
             }
         }
         // Sequencing::PreferOrdered | Sequencing::EnsureOrdered
-        for pref in [Sequencing::PreferOrdered, Sequencing::EnsureOrdered]
-        {
+        for pref in [Sequencing::PreferOrdered, Sequencing::EnsureOrdered] {
             let mut order = 0;
             out.insert((pref, ProtocolType::TCP), order);
 
@@ -46,19 +45,42 @@ lazy_static::lazy_static! {
         }
 
         out
-    };
-    static ref PROTOCOL_TYPE_ALL_ORDERED_SET: ProtocolTypeSet = {
-        let mut out = ProtocolTypeSet::new();
+    });
 
-        out.insert(ProtocolType::TCP);
-        out.insert(ProtocolType::WS);
-        #[cfg(feature="enable-protocol-wss")]
-        out.insert(ProtocolType::WSS);
+static PROTOCOL_TYPE_ALL_ORDERED_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(|| {
+    let mut out = ProtocolTypeSet::new();
 
-        out
-    };
+    out.insert(ProtocolType::TCP);
+    out.insert(ProtocolType::WS);
+    #[cfg(feature = "enable-protocol-wss")]
+    out.insert(ProtocolType::WSS);
 
-}
+    out
+});
+
+static PROTOCOL_TYPE_LOW_LEVEL_UDP_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(|| {
+    let mut out = ProtocolTypeSet::new();
+
+    for pt in ProtocolTypeSet::all() {
+        if pt.low_level_protocol_type() == LowLevelProtocolType::UDP {
+            out.insert(pt);
+        }
+    }
+
+    out
+});
+
+static PROTOCOL_TYPE_LOW_LEVEL_TCP_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(|| {
+    let mut out = ProtocolTypeSet::new();
+
+    for pt in ProtocolTypeSet::all() {
+        if pt.low_level_protocol_type() == LowLevelProtocolType::TCP {
+            out.insert(pt);
+        }
+    }
+
+    out
+});
 
 pub type ProtocolTypeSort<'a> =
     dyn Fn(&ProtocolType, &ProtocolType) -> core::cmp::Ordering + Send + Sync + 'a;
@@ -102,6 +124,13 @@ impl ProtocolType {
     }
     pub fn all_ordered_set() -> ProtocolTypeSet {
         *PROTOCOL_TYPE_ALL_ORDERED_SET
+    }
+    pub fn low_level_udp_set() -> ProtocolTypeSet {
+        *PROTOCOL_TYPE_LOW_LEVEL_UDP_SET
+    }
+    #[expect(dead_code)]
+    pub fn low_level_tcp_set() -> ProtocolTypeSet {
+        *PROTOCOL_TYPE_LOW_LEVEL_TCP_SET
     }
     pub fn get_ordering_sort(ordering: SequenceOrdering) -> Option<Box<ProtocolTypeSort<'static>>> {
         match ordering {

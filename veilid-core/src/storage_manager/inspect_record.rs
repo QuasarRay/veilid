@@ -45,7 +45,7 @@ struct OutboundInspectValueContext {
 
 /// The result of the outbound_inspect_value operation
 #[derive(Debug, Clone)]
-pub(super) struct OutboundInspectValueResult {
+pub(in crate::storage_manager) struct OutboundInspectValueResult {
     /// Fanout results for each subkey
     pub subkey_fanout_results: Vec<FanoutResult>,
     /// The inspection that was retrieved
@@ -166,7 +166,7 @@ impl StorageManager {
         }
 
         // Get the inspect record report from the network
-        let result = self
+        let outbound_inspect_result = self
             .outbound_inspect_value(
                 &opaque_record_key,
                 subkeys,
@@ -181,12 +181,12 @@ impl StorageManager {
             .await?;
 
         // Keep the list of nodes that returned a value for later reference
-        let results_iter = result
+        let results_iter = outbound_inspect_result
             .inspect_result
             .subkeys()
             .iter()
             .map(ValueSubkeyRangeSet::single)
-            .zip(result.subkey_fanout_results.into_iter());
+            .zip(outbound_inspect_result.subkey_fanout_results.into_iter());
 
         let existed = self.process_fanout_results(
             opaque_record_key.clone(),
@@ -202,7 +202,7 @@ impl StorageManager {
             );
         }
 
-        if result.inspect_result.subkeys().is_empty() {
+        if outbound_inspect_result.inspect_result.subkeys().is_empty() {
             DHTRecordReport::new(
                 local_inspect_result.subkeys().clone(),
                 offline_subkey_writes,
@@ -211,10 +211,10 @@ impl StorageManager {
             )
         } else {
             DHTRecordReport::new(
-                result.inspect_result.subkeys().clone(),
+                outbound_inspect_result.inspect_result.subkeys().clone(),
                 offline_subkey_writes,
                 local_inspect_result.seqs().to_vec(),
-                result.inspect_result.seqs().to_vec(),
+                outbound_inspect_result.inspect_result.seqs().to_vec(),
             )
         }
     }
@@ -240,11 +240,13 @@ impl StorageManager {
 
         // Get the DHT parameters for 'InspectValue'
         // Can use either 'get scope' or 'set scope' depending on the purpose of the inspection
-        let (key_count, consensus_count, fanout, timeout_us) = if use_set_scope {
+        let (node_count, consensus_count, consensus_width, fanout_tasks, timeout) = if use_set_scope
+        {
             let config = self.config();
             (
                 config.network.dht.max_find_node_count as usize,
                 config.network.dht.set_value_count as usize,
+                config.network.dht.consensus_width as usize,
                 config.network.dht.set_value_fanout as usize,
                 TimestampDuration::from(ms_to_us(config.network.dht.set_value_timeout_ms)),
             )
@@ -253,6 +255,7 @@ impl StorageManager {
             (
                 config.network.dht.max_find_node_count as usize,
                 config.network.dht.get_value_count as usize,
+                config.network.dht.consensus_width as usize,
                 config.network.dht.get_value_fanout as usize,
                 TimestampDuration::from(ms_to_us(config.network.dht.get_value_timeout_ms)),
             )
@@ -473,14 +476,18 @@ impl StorageManager {
 
         // Call the fanout
         let routing_table = self.routing_table();
+        let hash_coordinate = opaque_record_key.to_hash_coordinate();
         let fanout_call = FanoutCall::new(
-            format!("outbound_inspect_value({})", Timestamp::now_increasing()),
             &routing_table,
-            opaque_record_key.to_hash_coordinate(),
-            key_count,
-            fanout,
-            consensus_count,
-            timeout_us,
+            FanoutCallParams {
+                name: format!("outbound_inspect_value({})", Timestamp::now_increasing()),
+                hash_coordinate,
+                node_count,
+                fanout_tasks,
+                consensus_count,
+                consensus_width,
+                timeout,
+            },
             capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]),
             call_routine,
             check_done,

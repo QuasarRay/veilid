@@ -4,34 +4,34 @@ const MAX_FIND_NODE_A_PEERS_LEN: usize = 20;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationFindNodeQ {
-    node_id: NodeId,
+    hash_coordinate: HashCoordinate,
     capabilities: Vec<VeilidCapability>,
 }
 
 impl RPCOperationFindNodeQ {
-    pub fn new(node_id: NodeId, capabilities: Vec<VeilidCapability>) -> Result<Self, RPCError> {
+    pub fn new(
+        hash_coordinate: HashCoordinate,
+        capabilities: Vec<VeilidCapability>,
+    ) -> Result<Self, RPCError> {
         if capabilities.len() > MAX_CAPABILITIES {
             return Err(RPCError::internal("capabilities length too long"));
         }
 
         Ok(Self {
-            node_id,
+            hash_coordinate,
             capabilities,
         })
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
 
-    // pub fn node_id(&self) -> &PublicKey {
-    //     &self.node_id
-    // }
-    // pub fn capabilities(&self) -> &[VeilidCapability] {
-    //     &self.capabilities
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
     // }
 
-    pub fn destructure(self) -> (NodeId, Vec<VeilidCapability>) {
-        (self.node_id, self.capabilities)
+    pub fn destructure(self) -> (HashCoordinate, Vec<VeilidCapability>) {
+        (self.hash_coordinate, self.capabilities)
     }
 
     pub fn decode(
@@ -54,14 +54,20 @@ impl RPCOperationFindNodeQ {
             })
             .unwrap_or_default();
 
-        Self::new(node_id, capabilities)
+        Self::new(node_id.to_hash_coordinate(), capabilities)
     }
     pub fn encode(
         &self,
         builder: &mut veilid_capnp::operation_find_node_q::Builder,
     ) -> Result<(), RPCError> {
         let mut ni_builder = builder.reborrow().init_node_id();
-        encode_node_id(&self.node_id, &mut ni_builder);
+        encode_node_id(
+            &NodeId::new(
+                self.hash_coordinate.kind(),
+                BareNodeId::new_from_bytes(self.hash_coordinate.ref_value().bytes()),
+            ),
+            &mut ni_builder,
+        );
 
         let mut cap_builder = builder
             .reborrow()
@@ -93,12 +99,11 @@ impl RPCOperationFindNodeA {
         Ok(Self { peers })
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
-
-    // pub fn peers(&self) -> &[PeerInfo] {
-    //     &self.peers
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
     // }
 
     pub fn destructure(self) -> Vec<Arc<PeerInfo>> {

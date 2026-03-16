@@ -13,6 +13,7 @@ impl Default for PerLogKeyComponentLogFacilities {
         // Add default core log facilities to all log keys
         this.add_tags("attach", ["#common", "#veilid"]);
         this.add_tags("corectx", ["#common", "#veilid"]);
+        this.add_tags("compression", ["#common", "#veilid"]);
         this.add_tags("registry", ["#common", "#veilid"]);
         this.add_tags("veilid_core", ["#common", "#veilid"]);
         this.add_tags("veilid_tools", ["#common", "#veilid"]);

@@ -510,7 +510,7 @@ async def test_dht_transaction_write_read_full_subkeys():
                 async with cs:
 
                     # Number of records
-                    COUNT = 8
+                    COUNT = 32
                     # Number of subkeys per record
                     SUBKEY_COUNT = 32
                     # BareNonce to encrypt test data

@@ -7,7 +7,12 @@ fn round_trip_dial_info(dial_info: &DialInfo) {
 
     encode_dial_info(dial_info, &mut builder).unwrap();
 
-    let buffer = canonical_message_builder_to_vec_packed(message_builder).unwrap();
+    let buffer = canonical_message_builder_to_bytes_writer_packed(message_builder, |size| {
+        BytesWriter::with_capacity(size)
+    })
+    .unwrap()
+    .into_inner()
+    .to_vec();
 
     let mut cursor = &mut &buffer[..];
     let tmp_reader =
@@ -71,7 +76,12 @@ fn build_dial_info_message_unspecified_ipv4() -> Vec<u8> {
     v4_builder.set_addr(0u32); // 0.0.0.0 in big endian
     sa_builder.set_port(8080);
 
-    canonical_message_builder_to_vec_packed(message_builder).unwrap()
+    canonical_message_builder_to_bytes_writer_packed(message_builder, |size| {
+        BytesWriter::with_capacity(size)
+    })
+    .unwrap()
+    .into_inner()
+    .to_vec()
 }
 
 fn build_dial_info_message_unspecified_ipv6() -> Vec<u8> {
@@ -96,7 +106,12 @@ fn build_dial_info_message_unspecified_ipv6() -> Vec<u8> {
     v6_builder.set_addr3(0u32);
     sa_builder.set_port(8080);
 
-    canonical_message_builder_to_vec_packed(message_builder).unwrap()
+    canonical_message_builder_to_bytes_writer_packed(message_builder, |size| {
+        BytesWriter::with_capacity(size)
+    })
+    .unwrap()
+    .into_inner()
+    .to_vec()
 }
 
 pub fn test_decode_dial_info_rejects_unspecified_ipv4() {

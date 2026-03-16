@@ -137,7 +137,11 @@ pub enum NodeContactMethod {
     /// Request via signal the node connect back directly
     SignalReverse { relay_di: DialInfo },
     /// Request via signal the node negotiate a hole punch
-    SignalHolePunch { relay_di: DialInfo },
+    SignalHolePunch {
+        relay_di: DialInfo,
+        hole_punch_di: DialInfo,
+        reverse_hole_punch_di: DialInfo,
+    },
     /// Must use an inbound relay to reach the node
     InboundRelay { relay_di: DialInfo },
     /// Must use outbound relay to reach the node
@@ -164,9 +168,15 @@ impl fmt::Display for NodeContactMethod {
             NodeContactMethod::SignalReverse { relay_di } => {
                 write!(f, "SignalReverse(relay={})", relay_di)
             }
-            NodeContactMethod::SignalHolePunch { relay_di } => {
-                write!(f, "SignalHolePunch(relay={})", relay_di)
-            }
+            NodeContactMethod::SignalHolePunch {
+                relay_di,
+                hole_punch_di,
+                reverse_hole_punch_di,
+            } => write!(
+                f,
+                "SignalHolePunch(relay={}, hole_punch={}, reverse_hole_punch={})",
+                relay_di, hole_punch_di, reverse_hole_punch_di
+            ),
             NodeContactMethod::InboundRelay { relay_di } => {
                 write!(f, "InboundRelay(relay={})", relay_di)
             }
@@ -179,7 +189,7 @@ impl fmt::Display for NodeContactMethod {
 
 enum SendDataToExistingFlowResult {
     Sent(UniqueFlow),
-    NotSent(Vec<u8>),
+    NotSent(Bytes),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -646,13 +656,13 @@ impl NetworkManager {
         instrument(level = "trace", skip(self, extra_data, callback), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     #[expect(dead_code)]
-    pub fn generate_receipt<D: AsRef<[u8]>>(
+    pub async fn generate_receipt(
         &self,
         expiration_duration: TimestampDuration,
         expected_returns: u32,
-        extra_data: D,
+        extra_data: Bytes,
         callback: impl ReceiptCallback,
-    ) -> EyreResult<Vec<u8>> {
+    ) -> EyreResult<Bytes> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             bail!("network is not started");
         };
@@ -680,6 +690,7 @@ impl NetworkManager {
 
         let out = receipt
             .to_signed_data(&crypto, &secret_key)
+            .await
             .wrap_err("failed to generate signed receipt")?;
 
         // Record the receipt for later
@@ -694,11 +705,11 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", skip(self, extra_data), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub fn generate_single_shot_receipt<D: AsRef<[u8]>>(
+    pub async fn generate_single_shot_receipt(
         &self,
         expiration_duration: TimestampDuration,
-        extra_data: D,
-    ) -> EyreResult<(Vec<u8>, EventualValueFuture<ReceiptEvent>)> {
+        extra_data: Bytes,
+    ) -> EyreResult<(Bytes, EventualValueFuture<ReceiptEvent>)> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             bail!("network is not started");
         };
@@ -727,6 +738,7 @@ impl NetworkManager {
 
         let out = receipt
             .to_signed_data(&crypto, &secret_key)
+            .await
             .wrap_err("failed to generate signed receipt")?;
 
         // Record the receipt for later
@@ -743,10 +755,7 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "receipt", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn handle_out_of_band_receipt<R: AsRef<[u8]>>(
-        &self,
-        receipt_data: R,
-    ) -> NetworkResult<()> {
+    pub async fn handle_out_of_band_receipt(&self, receipt_data: Bytes) -> NetworkResult<()> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             return NetworkResult::service_unavailable("network is not started");
         };
@@ -754,7 +763,7 @@ impl NetworkManager {
         let receipt_manager = self.receipt_manager();
         let crypto = self.crypto();
 
-        let receipt = match Receipt::try_from_signed_data(&crypto, receipt_data.as_ref()) {
+        let receipt = match Receipt::try_from_signed_data(&crypto, receipt_data).await {
             Err(e) => {
                 return NetworkResult::invalid_message(e.to_string());
             }
@@ -771,9 +780,9 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "receipt", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn handle_in_band_receipt<R: AsRef<[u8]>>(
+    pub async fn handle_in_band_receipt(
         &self,
-        receipt_data: R,
+        receipt_data: Bytes,
         inbound_noderef: FilteredNodeRef,
     ) -> NetworkResult<()> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
@@ -783,7 +792,7 @@ impl NetworkManager {
         let receipt_manager = self.receipt_manager();
         let crypto = self.crypto();
 
-        let receipt = match Receipt::try_from_signed_data(&crypto, receipt_data.as_ref()) {
+        let receipt = match Receipt::try_from_signed_data(&crypto, receipt_data).await {
             Err(e) => {
                 return NetworkResult::invalid_message(e.to_string());
             }
@@ -800,10 +809,7 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "receipt", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn handle_safety_receipt<R: AsRef<[u8]>>(
-        &self,
-        receipt_data: R,
-    ) -> NetworkResult<()> {
+    pub async fn handle_safety_receipt(&self, receipt_data: Bytes) -> NetworkResult<()> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             return NetworkResult::service_unavailable("network is not started");
         };
@@ -811,7 +817,7 @@ impl NetworkManager {
         let receipt_manager = self.receipt_manager();
         let crypto = self.crypto();
 
-        let receipt = match Receipt::try_from_signed_data(&crypto, receipt_data.as_ref()) {
+        let receipt = match Receipt::try_from_signed_data(&crypto, receipt_data).await {
             Err(e) => {
                 return NetworkResult::invalid_message(e.to_string());
             }
@@ -828,9 +834,9 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "receipt", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn handle_private_receipt<R: AsRef<[u8]>>(
+    pub async fn handle_private_receipt(
         &self,
-        receipt_data: R,
+        receipt_data: Bytes,
         private_route: PublicKey,
     ) -> NetworkResult<()> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
@@ -840,7 +846,7 @@ impl NetworkManager {
         let receipt_manager = self.receipt_manager();
         let crypto = self.crypto();
 
-        let receipt = match Receipt::try_from_signed_data(&crypto, receipt_data.as_ref()) {
+        let receipt = match Receipt::try_from_signed_data(&crypto, receipt_data).await {
             Err(e) => {
                 return NetworkResult::invalid_message(e.to_string());
             }
@@ -895,7 +901,11 @@ impl NetworkManager {
                     .await
                     .wrap_err("rpc failure")
             }
-            SignalInfo::HolePunch { receipt, peer_info } => {
+            SignalInfo::HolePunch {
+                receipt,
+                peer_info,
+                opt_dial_info,
+            } => {
                 let routing_table = self.routing_table();
                 let rpc = self.rpc_processor();
 
@@ -912,30 +922,38 @@ impl NetworkManager {
                 };
 
                 // Get the udp direct dialinfo for the hole punch
-                let outbound_nrf = routing_table
-                    .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
-                    .with_protocol_type(ProtocolType::UDP);
-                peer_nr.set_filter(outbound_nrf);
-                let Some(hole_punch_dial_info_detail) = peer_nr.first_dial_info_detail() else {
-                    return Ok(NetworkResult::no_connection_other(format!(
-                        "No hole punch capable dialinfo found for node: {}",
-                        peer_nr
-                    )));
-                };
+                let hole_punch_di = if let Some(hope_punch_di) = opt_dial_info {
+                    // Specific dialinfo provided, restrict to this dial info
+                    let filter = routing_table
+                        .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
+                        .with_dial_info_filter(hope_punch_di.make_filter());
+                    peer_nr.set_filter(filter);
+                    hope_punch_di
+                } else {
+                    // No specific dialinfo provided, default to UDP protocol
+                    let outbound_nrf = routing_table
+                        .get_outbound_node_ref_filter(RoutingDomain::PublicInternet)
+                        .with_protocol_type(ProtocolType::UDP);
+                    peer_nr.set_filter(outbound_nrf);
+                    let Some(hole_punch_dial_info_detail) = peer_nr.first_dial_info_detail() else {
+                        return Ok(NetworkResult::no_connection_other(format!(
+                            "No hole punch capable dialinfo found for node: {}",
+                            peer_nr
+                        )));
+                    };
 
-                // Now that we picked a specific dialinfo, further restrict the noderef to the specific address type
-                let filter = peer_nr.take_filter();
-                let filter =
-                    filter.with_address_type(hole_punch_dial_info_detail.dial_info.address_type());
-                peer_nr.set_filter(filter);
+                    // Now that we picked a specific dialinfo, further restrict the noderef to the specific address type
+                    let filter = peer_nr.take_filter();
+                    let filter = filter
+                        .with_address_type(hole_punch_dial_info_detail.dial_info.address_type());
+                    peer_nr.set_filter(filter);
+                    hole_punch_dial_info_detail.dial_info
+                };
 
                 // Do our half of the hole punch by sending an empty packet
                 // Both sides will do this and then the receipt will get sent over the punched hole
-                let unique_flow = network_result_try!(
-                    self.net()
-                        .send_hole_punch(hole_punch_dial_info_detail.dial_info.clone(),)
-                        .await?
-                );
+                let unique_flow =
+                    network_result_try!(self.net().send_hole_punch(hole_punch_di).await?);
 
                 // Add small delay to encourage packets to be delivered in order
                 sleep(HOLE_PUNCH_DELAY_MS).await;
@@ -956,16 +974,20 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    async fn build_envelope<B: AsRef<[u8]>>(
+    async fn build_envelope(
         &self,
         timestamp: Timestamp,
         dest_node_id: NodeId,
         version: EnvelopeVersion,
-        body: B,
-    ) -> EyreResult<Vec<u8>> {
+        body: Bytes,
+    ) -> EyreResult<Bytes> {
+        let registry = self.registry();
+        let network_key = self.network_key.clone();
+
+        let routing_table = registry.routing_table();
+        let crypto = registry.crypto();
+
         // DH to get encryption key
-        let routing_table = self.routing_table();
-        let crypto = self.crypto();
         let Some(vcrypto) = crypto.get_async(dest_node_id.kind()) else {
             bail!("should not have a destination with incompatible crypto here");
         };
@@ -974,13 +996,7 @@ impl NetworkManager {
         let secret_key = routing_table.secret_key(vcrypto.kind());
 
         // Get nonce
-        let nonce = vcrypto
-            .random_nonce()
-            .measure_debug(
-                TimestampDuration::new_ms(100),
-                veilid_log_dbg!(self, "NetworkManager::build_envelope random_nonce"),
-            )
-            .await;
+        let nonce = vcrypto.random_nonce().await;
 
         // Encode envelope
         let envelope = match version {
@@ -996,11 +1012,12 @@ impl NetworkManager {
                 bail!("unsupported envelope version: {:?}", version);
             }
         };
+
         envelope
-            .to_encrypted_data(&crypto, body.as_ref(), &secret_key, &self.network_key)
+            .to_encrypted_data(&crypto, body, &secret_key, &network_key)
             .measure_debug(
                 TimestampDuration::new_ms(100),
-                veilid_log_dbg!(self, "NetworkManager::build_envelope to_encrypted_data"),
+                veilid_log_dbg!(registry, "NetworkManager::build_envelope to_encrypted_data"),
             )
             .await
             .wrap_err("envelope failed to encode")
@@ -1014,11 +1031,11 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn send_envelope<B: AsRef<[u8]>>(
+    pub async fn send_envelope(
         &self,
         node_ref: FilteredNodeRef,
         opt_relay_di: Option<DialInfo>,
-        body: B,
+        body: Bytes,
     ) -> EyreResult<NetworkResult<SendDataResult>> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             return Ok(NetworkResult::no_connection_other("network is not started"));
@@ -1081,7 +1098,7 @@ impl NetworkManager {
     pub async fn send_out_of_band_receipt(
         &self,
         dial_info: DialInfo,
-        rcpt_data: Vec<u8>,
+        rcpt_data: Bytes,
     ) -> EyreResult<()> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             veilid_log!(self debug "not sending out-of-band receipt to {} because network is stopped", dial_info);
@@ -1112,7 +1129,7 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    async fn on_recv_envelope(&self, data: &mut [u8], flow: Flow) -> EyreResult<bool> {
+    async fn on_recv_envelope(&self, data: Bytes, flow: Flow) -> EyreResult<bool> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             return Ok(false);
         };
@@ -1166,17 +1183,17 @@ impl NetworkManager {
 
         // Decode envelope header (may fail signature validation)
         let crypto = self.crypto();
-        let envelope = match Envelope::try_from_signed_data(&crypto, data, &self.network_key).await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                veilid_log!(self debug "envelope failed to decode: {}", e);
-                // safe to punish here because relays also check here to ensure they arent forwarding things that don't decode
-                self.address_filter()
-                    .punish_ip_addr(remote_addr, PunishmentReason::FailedToDecodeEnvelope);
-                return Ok(false);
-            }
-        };
+        let envelope =
+            match Envelope::try_from_signed_data(&crypto, data.clone(), &self.network_key).await {
+                Ok(v) => v,
+                Err(e) => {
+                    veilid_log!(self debug "envelope failed to decode: {}", e);
+                    // safe to punish here because relays also check here to ensure they arent forwarding things that don't decode
+                    self.address_filter()
+                        .punish_ip_addr(remote_addr, PunishmentReason::FailedToDecodeEnvelope);
+                    return Ok(false);
+                }
+            };
 
         // Verify and log timestamp
         let local_timestamp = Timestamp::now_increasing();
@@ -1295,7 +1312,7 @@ impl NetworkManager {
                 // We should, because relays are chosen by nodes that have established connectivity and
                 // should be mutually in each others routing tables. The node needing the relay will be
                 // pinging this node regularly to keep itself in the routing table
-                match routing_table.lookup_node_ref(recipient_id) {
+                match routing_table.lookup_node_id(recipient_id) {
                     Ok(v) => v.map(|nr| (nr.default_filtered(), RelayKind::Inbound)),
                     Err(e) => {
                         veilid_log!(self debug "failed to look up recipient node for relay, dropping relayed envelope: {}" ,e);
@@ -1311,7 +1328,7 @@ impl NetworkManager {
                 relay_nr.set_sequencing(sequencing);
 
                 // Pass relay to RPC system
-                if let Err(e) = self.enqueue_relay(relay_nr, data.to_vec(), relay_kind) {
+                if let Err(e) = self.enqueue_relay(relay_nr, data, relay_kind) {
                     // Couldn't enqueue, but not the sender's fault
                     veilid_log!(self debug "failed to enqueue relay: {}", e);
                     return Ok(false);

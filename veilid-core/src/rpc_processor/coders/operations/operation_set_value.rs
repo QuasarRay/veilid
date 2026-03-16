@@ -32,10 +32,14 @@ impl RPCOperationSetValueQ {
             descriptor,
         }
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        // Validation is performed by StorageManager because descriptor is not always available here
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     // Validation is performed by StorageManager because descriptor is not always available here
+    //     Ok(())
+    // }
 
     pub fn destructure(
         self,
@@ -118,7 +122,10 @@ impl RPCOperationSetValueA {
         })
     }
 
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         let question_context = validate_context
             .question_context
             .as_ref()
@@ -128,7 +135,7 @@ impl RPCOperationSetValueA {
         };
 
         let crypto = validate_context.crypto();
-        let Some(vcrypto) = crypto.get(set_value_context.opaque_record_key.kind()) else {
+        let Some(vcrypto) = crypto.get_async(set_value_context.opaque_record_key.kind()) else {
             return Err(RPCError::protocol("unsupported cryptosystem"));
         };
 
@@ -136,6 +143,7 @@ impl RPCOperationSetValueA {
         set_value_context
             .descriptor
             .validate(&vcrypto, &set_value_context.opaque_record_key)
+            .await
             .map_err(RPCError::protocol)?;
 
         if let Some(value) = &self.value {
@@ -146,6 +154,7 @@ impl RPCOperationSetValueA {
                     set_value_context.subkey,
                     &vcrypto,
                 )
+                .await
                 .map_err(RPCError::protocol)?
             {
                 return Err(RPCError::protocol("signed value data did not validate"));

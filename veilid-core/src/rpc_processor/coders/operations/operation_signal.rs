@@ -9,12 +9,11 @@ impl RPCOperationSignal {
     pub fn new(signal_info: SignalInfo) -> Self {
         Self { signal_info }
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+
+    pub fn validate(&self, _validate_context: &RPCValidateContext<'_>) -> Result<(), RPCError> {
         self.signal_info.validate()
     }
-    // pub fn signal_info(&self) -> &SignalInfo {
-    //     &self.signal_info
-    // }
+
     pub fn destructure(self) -> SignalInfo {
         self.signal_info
     }

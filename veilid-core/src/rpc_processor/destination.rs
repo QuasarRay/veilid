@@ -2,6 +2,13 @@ use super::*;
 
 impl_veilid_log_facility!("rpc");
 
+/// Routing configuration for destination
+#[derive(Debug, Clone)]
+pub(crate) struct UnsafeRoutingInfo {
+    pub opt_node: Option<NodeRef>,
+    pub opt_routing_domain: Option<RoutingDomain>,
+}
+
 /// Where to send an RPC message
 #[derive(Debug, Clone)]
 pub(crate) enum Destination {
@@ -22,17 +29,81 @@ pub(crate) enum Destination {
     /// Send to private route
     PrivateRoute {
         /// A private route to send to
-        private_route: PrivateRoute,
+        private_route: Arc<PrivateRoute>,
         /// Require safety route or not
         safety_selection: SafetySelection,
     },
 }
 
-/// Routing configuration for destination
-#[derive(Debug, Clone)]
-pub(crate) struct UnsafeRoutingInfo {
-    pub opt_node: Option<NodeRef>,
-    pub opt_routing_domain: Option<RoutingDomain>,
+impl PartialEq for Destination {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Destination::Direct {
+                    node: self_node,
+                    safety_selection: self_safety_selection,
+                },
+                Destination::Direct {
+                    node: other_node,
+                    safety_selection: other_safety_selection,
+                },
+            ) => {
+                self_node.equivalent(other_node) && self_safety_selection == other_safety_selection
+            }
+            (
+                Destination::Relay {
+                    relay_di: self_relay_di,
+                    node: self_node,
+                },
+                Destination::Relay {
+                    relay_di: other_relay_di,
+                    node: other_node,
+                },
+            ) => self_relay_di == other_relay_di && self_node.equivalent(other_node),
+            (
+                Destination::PrivateRoute {
+                    private_route: self_private_route,
+                    safety_selection: self_safety_selection,
+                },
+                Destination::PrivateRoute {
+                    private_route: other_private_route,
+                    safety_selection: other_safety_selection,
+                },
+            ) => {
+                self_private_route.public_key == other_private_route.public_key
+                    && self_safety_selection == other_safety_selection
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Destination {}
+
+impl core::hash::Hash for Destination {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            Destination::Direct {
+                node,
+                safety_selection,
+            } => {
+                node.hash(state);
+                safety_selection.hash(state);
+            }
+            Destination::Relay { relay_di, node } => {
+                relay_di.hash(state);
+                node.hash(state);
+            }
+            Destination::PrivateRoute {
+                private_route,
+                safety_selection,
+            } => {
+                private_route.public_key.hash(state);
+                safety_selection.hash(state);
+            }
+        }
+    }
 }
 
 impl Destination {
@@ -47,7 +118,10 @@ impl Destination {
     pub fn relay(relay_di: DialInfo, node: NodeRef) -> Self {
         Self::Relay { relay_di, node }
     }
-    pub fn private_route(private_route: PrivateRoute, safety_selection: SafetySelection) -> Self {
+    pub fn private_route(
+        private_route: Arc<PrivateRoute>,
+        safety_selection: SafetySelection,
+    ) -> Self {
         Self::PrivateRoute {
             private_route,
             safety_selection,
@@ -310,6 +384,7 @@ impl RPCProcessor {
                     // Get the assembled route for response
                     let private_route = network_result_try!(rss
                         .assemble_single_private_route(&pr_key, None)
+                        .await
                         .to_rpc_network_result()?);
 
                     Ok(NetworkResult::Value(RespondTo::PrivateRoute(private_route)))
@@ -356,12 +431,12 @@ impl RPCProcessor {
                             RouteNode::PeerInfo(published_peer_info)
                         };
 
-                        Ok(NetworkResult::value(RespondTo::PrivateRoute(
+                        Ok(NetworkResult::value(RespondTo::PrivateRoute(Arc::new(
                             PrivateRoute::new_stub(
                                 routing_table.public_key(crypto_kind),
                                 route_node,
                             ),
-                        )))
+                        ))))
                     }
                     SafetySelection::Safe(safety_spec) => {
                         // Sent to a private route via a safety route, respond to private route
@@ -394,6 +469,7 @@ impl RPCProcessor {
                         // Get the assembled route for response
                         let private_route = network_result_try!(rss
                             .assemble_single_private_route(&pr_key, None)
+                            .await
                             .to_rpc_network_result()?);
 
                         Ok(NetworkResult::Value(RespondTo::PrivateRoute(private_route)))

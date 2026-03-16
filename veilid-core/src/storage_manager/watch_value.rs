@@ -195,17 +195,17 @@ impl StorageManager {
         let inner = self.inner.lock();
 
         let mut out = vec![];
-        let mut node_set: HashSet<HashAtom<BucketEntry>> = HashSet::new();
+        let mut node_set: HashSet<NodeRef> = HashSet::new();
         for v in inner.outbound_watch_manager.outbound_watches.values() {
             if let Some(current) = v.state() {
                 let node_refs =
                     current.watch_node_refs(&inner.outbound_watch_manager.per_node_states);
                 for node_ref in &node_refs {
-                    if node_set.contains(&node_ref.entry().hash_atom()) {
+                    if node_set.contains(node_ref) {
                         continue;
                     }
 
-                    node_set.insert(node_ref.entry().hash_atom());
+                    node_set.insert(node_ref.clone());
                     out.push(Destination::direct(
                         node_ref.routing_domain_filtered(RoutingDomain::PublicInternet),
                         Some(current.params().safety_selection.clone()),
@@ -349,7 +349,6 @@ impl StorageManager {
     }
 
     /// Perform a 'watch value change' on the network without fanout
-    #[allow(clippy::too_many_arguments)]
     #[cfg_attr(
         feature = "instrument",
         instrument(target = "watch", level = "debug", skip_all, err)
@@ -422,7 +421,6 @@ impl StorageManager {
 
     /// Perform a 'watch value' query on the network using fanout
     ///
-    #[allow(clippy::too_many_arguments)]
     #[cfg_attr(
         feature = "instrument",
         instrument(target = "watch", level = "debug", skip_all, err)
@@ -438,10 +436,11 @@ impl StorageManager {
 
         // Get the DHT parameters for 'WatchValue', some of which are the same for 'GetValue' operations
         let config = self.config();
-        let key_count = config.network.dht.max_find_node_count as usize;
+        let node_count = config.network.dht.max_find_node_count as usize;
         let consensus_count = config.network.dht.get_value_count as usize;
-        let fanout = config.network.dht.get_value_fanout as usize;
-        let timeout_us = TimestampDuration::from(ms_to_us(config.network.dht.get_value_timeout_ms));
+        let consensus_width = config.network.dht.consensus_width as usize;
+        let fanout_tasks = config.network.dht.get_value_fanout as usize;
+        let timeout = TimestampDuration::from(ms_to_us(config.network.dht.get_value_timeout_ms));
 
         // Get the appropriate watcher key, if anonymous use a static anonymous watch key
         // which lives for the duration of the app's runtime
@@ -594,14 +593,18 @@ impl StorageManager {
         // Use the same fanout parameters as a get
         // and each one might take timeout_us time.
         let routing_table = self.routing_table();
+        let hash_coordinate = record_key.to_hash_coordinate();
         let fanout_call = FanoutCall::new(
-            format!("outbound_watch_value({})", Timestamp::now_increasing()),
             &routing_table,
-            record_key.to_hash_coordinate(),
-            key_count,
-            fanout,
-            consensus_count,
-            timeout_us,
+            FanoutCallParams {
+                name: format!("outbound_watch_value({})", Timestamp::now_increasing()),
+                hash_coordinate,
+                node_count,
+                fanout_tasks,
+                consensus_count,
+                consensus_width,
+                timeout,
+            },
             capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]),
             call_routine,
             check_done,
@@ -1296,7 +1299,6 @@ impl StorageManager {
     }
 
     /// Handle a received 'Watch Value' query
-    #[allow(clippy::too_many_arguments)]
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "dht", skip_all)
@@ -1505,7 +1507,9 @@ impl StorageManager {
 
         // Announce ValueChanged VeilidUpdate
         // Cancellations (count=0) are sent by process_outbound_watch_dead(), not here
-        let value = self.maybe_decrypt_value_data(&record_key, value.value_data())?;
+        let value = self
+            .maybe_decrypt_value_data(&record_key, value.value_data())
+            .await?;
 
         drop(record_lock);
 

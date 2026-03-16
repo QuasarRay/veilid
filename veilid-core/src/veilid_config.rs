@@ -9,7 +9,7 @@ cfg_if::cfg_if! {
         lazy_static! {
             static ref SYSTEM:System = {
                 sysinfo::System::new_with_specifics(
-                    sysinfo::RefreshKind::new().with_memory(sysinfo::MemoryRefreshKind::everything()),
+                    sysinfo::RefreshKind::nothing().with_memory(sysinfo::MemoryRefreshKind::everything()),
                 )
             };
         }
@@ -476,7 +476,7 @@ impl Default for VeilidConfigDHT {
             get_value_fanout: 5,
             set_value_timeout_ms: 10000,
             set_value_count: 5,
-            set_value_fanout: 5,
+            set_value_fanout: 6,
             consensus_width: 10,
             min_peer_count: 20,
             min_peer_refresh_time_ms: 60000,
@@ -1046,31 +1046,30 @@ impl VeilidConfig {
 
     pub fn get_key_json(&self, key: &str, pretty: bool) -> VeilidAPIResult<String> {
         // Generate json from whole config
-        let jc = serde_json::to_string(self).map_err(VeilidAPIError::generic)?;
-        let jvc = json::parse(&jc).map_err(VeilidAPIError::generic)?;
+        let jvc = serde_json::to_value(self).map_err(VeilidAPIError::generic)?;
 
         // Find requested subkey
         if key.is_empty() {
             Ok(if pretty {
-                jvc.pretty(2)
+                serde_json::to_string_pretty(&jvc).map_err(VeilidAPIError::generic)?
             } else {
-                jvc.to_string()
+                serde_json::to_string(&jvc).map_err(VeilidAPIError::generic)?
             })
         } else {
             // Split key into path parts
             let keypath: Vec<&str> = key.split('.').collect();
             let mut out = &jvc;
             for k in keypath {
-                if !out.has_key(k) {
+                let Some(next_out) = out.get(k) else {
                     apibail_parse_error!(format!("invalid subkey in key '{}'", key), k);
-                }
-                out = &out[k];
+                };
+                out = next_out;
             }
-            Ok(if pretty {
-                out.pretty(2)
+            if pretty {
+                serde_json::to_string_pretty(out).map_err(VeilidAPIError::generic)
             } else {
-                out.to_string()
-            })
+                serde_json::to_string(out).map_err(VeilidAPIError::generic)
+            }
         }
     }
 

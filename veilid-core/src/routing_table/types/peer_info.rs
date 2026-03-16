@@ -12,7 +12,7 @@ pub struct PeerInfo {
     /// The node info, as parsed. May not include everthing that is in the node info message if it is not understandable by this node
     node_info: NodeInfo,
     /// The node info message bytes, as serialized from a capnp message
-    node_info_message: Vec<u8>,
+    node_info_message: Bytes,
     /// The signatures for each public key in the node info, over the node info message.
     /// Only the signatures that are for the supported cryptosystems of this node are included, and those are validated.
     signatures: SignatureGroup,
@@ -81,7 +81,12 @@ impl PeerInfo {
         let mut node_info_builder =
             node_info_message_builder.init_root::<veilid_capnp::node_info::Builder>();
         encode_node_info(&node_info, &mut node_info_builder)?;
-        let node_info_message = canonical_message_builder_to_vec_packed(node_info_message_builder)?;
+        let node_info_message =
+            canonical_message_builder_to_bytes_writer_packed(node_info_message_builder, |size| {
+                BytesWriter::with_capacity(size)
+            })?
+            .into_inner()
+            .freeze();
 
         // Sign the message
         let crypto = routing_table.crypto();
@@ -172,7 +177,7 @@ impl PeerInfo {
         }
 
         // Make owned node info message
-        let node_info_message = node_info_message.to_vec();
+        let node_info_message = Bytes::copy_from_slice(node_info_message);
 
         // Return decoded peerinfo
         Ok(Some(Self {
@@ -214,7 +219,12 @@ impl PeerInfo {
         let mut node_info_builder =
             node_info_message_builder.init_root::<veilid_capnp::node_info::Builder>();
         encode_node_info(&node_info, &mut node_info_builder)?;
-        let node_info_message = canonical_message_builder_to_vec_packed(node_info_message_builder)?;
+        let node_info_message =
+            canonical_message_builder_to_bytes_writer_packed(node_info_message_builder, |size| {
+                BytesWriter::with_capacity(size)
+            })?
+            .into_inner()
+            .freeze();
 
         // Extract node ids for convenience
         let mut node_ids = NodeIdGroup::new();
@@ -248,15 +258,7 @@ impl PeerInfo {
     }
 
     #[expect(dead_code)]
-    pub fn destructure(
-        self,
-    ) -> (
-        RoutingDomain,
-        NodeIdGroup,
-        NodeInfo,
-        Vec<u8>,
-        SignatureGroup,
-    ) {
+    pub fn destructure(self) -> (RoutingDomain, NodeIdGroup, NodeInfo, Bytes, SignatureGroup) {
         (
             self.routing_domain,
             self.node_ids,

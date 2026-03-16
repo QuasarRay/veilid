@@ -92,7 +92,7 @@ impl Network {
     pub async fn send_data_unbound_to_dial_info(
         &self,
         dial_info: DialInfo,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<()>> {
         let _guard = self.unlocked_inner.startup_lock.enter()?;
 
@@ -156,9 +156,9 @@ impl Network {
     pub async fn send_recv_data_unbound_to_dial_info(
         &self,
         dial_info: DialInfo,
-        data: Vec<u8>,
+        data: Bytes,
         timeout_ms: u32,
-    ) -> EyreResult<NetworkResult<Vec<u8>>> {
+    ) -> EyreResult<NetworkResult<Bytes>> {
         let _guard = self.startup_lock.enter()?;
 
         self.record_dial_info_failure(dial_info.clone(), async move {
@@ -229,7 +229,7 @@ impl Network {
     pub async fn send_data_to_existing_flow(
         &self,
         flow: Flow,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<SendDataToExistingFlowResult> {
         let _guard = self.startup_lock.enter()?;
 
@@ -282,7 +282,7 @@ impl Network {
     pub async fn send_data_to_dial_info(
         &self,
         dial_info: DialInfo,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         let _guard = self.startup_lock.enter()?;
 
@@ -406,7 +406,7 @@ impl Network {
 
         match self.startup_internal().await {
             Ok(StartupDisposition::Success) => {
-                veilid_log!(self info "network started");
+                veilid_log!(self debug "Network started");
                 guard.success();
                 Ok(StartupDisposition::Success)
             }
@@ -446,7 +446,7 @@ impl Network {
         let routing_table = self.routing_table();
         routing_table
             .edit_public_internet_routing_domain()
-            .shutdown()
+            .reset()
             .await;
 
         // Cancels all async background tasks by dropping join handles

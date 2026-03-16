@@ -57,7 +57,7 @@ impl StorageManager {
         // Also, we know subkey 0 must exist, and if we don't have a schema, the only other alternative
         // is a ValueSubkeyRangeSet::full() which would be more like a transact_dht_record in terms of wait time
         // No last descriptor, no last value. Use the safety selection we opened the record with.
-        let result = self
+        let outbound_inspect_result = self
             .outbound_inspect_value(
                 &opaque_record_key,
                 ValueSubkeyRangeSet::single(0),
@@ -68,32 +68,21 @@ impl StorageManager {
             .await?;
 
         // If we got nothing back, the key wasn't found
-        if result.inspect_result.opt_descriptor().is_none() {
+        if outbound_inspect_result
+            .inspect_result
+            .opt_descriptor()
+            .is_none()
+        {
             // No result
             apibail_key_not_found!(opaque_record_key);
         };
-
-        // Check again to see if we have a local record already or not
-        // because waiting for the outbound_inspect_value action could result in the key being opened
-        // via some parallel process
-        if let Some(res) = self.open_existing_record_locked(
-            &record_lock,
-            record_key.clone(),
-            writer.clone(),
-            safety_selection.clone(),
-        )? {
-            // Don't bother to rehydrate in this edge case
-            // We already checked above and won't have anything better than what
-            // is on the network in this case
-            return Ok(res);
-        }
 
         // Open the new record
         self.open_new_record_locked(
             &record_lock,
             record_key,
             writer,
-            result.inspect_result,
+            outbound_inspect_result,
             safety_selection,
         )
         .await
@@ -194,7 +183,7 @@ impl StorageManager {
         record_lock: &StorageManagerRecordLockGuard,
         record_key: RecordKey,
         writer: Option<KeyPair>,
-        inspect_result: InspectResult,
+        outbound_inspect_result: OutboundInspectValueResult,
         safety_selection: SafetySelection,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
         let opaque_record_key = record_lock.record();
@@ -211,11 +200,15 @@ impl StorageManager {
             .opened_records
             .contains_key(&opaque_record_key)
         {
-            panic!("new record should never be opened at this point");
+            apibail_internal!(
+                "new record {} should never be opened at this point",
+                opaque_record_key
+            );
         }
 
         // Must have descriptor
-        let Some(signed_value_descriptor) = inspect_result.opt_descriptor() else {
+        let Some(signed_value_descriptor) = outbound_inspect_result.inspect_result.opt_descriptor()
+        else {
             // No descriptor for new record, can't store this
             apibail_generic!("no descriptor");
         };
@@ -250,9 +243,31 @@ impl StorageManager {
 
         // Write open record
         self.inner.lock().opened_records.insert(
-            opaque_record_key,
+            opaque_record_key.clone(),
             OpenedRecord::new(writer, safety_selection, encryption_key),
         );
+
+        // Keep the list of nodes that returned a value for later reference
+        let results_iter = outbound_inspect_result
+            .inspect_result
+            .subkeys()
+            .iter()
+            .map(ValueSubkeyRangeSet::single)
+            .zip(outbound_inspect_result.subkey_fanout_results.into_iter());
+
+        let existed = self.process_fanout_results(
+            opaque_record_key.clone(),
+            results_iter,
+            false,
+            self.config().network.dht.consensus_width as usize,
+        )?;
+
+        if !existed {
+            apibail_internal!(
+                "record was locked for open new record but is now missing: {}",
+                opaque_record_key
+            );
+        }
 
         // Make DHT Record Descriptor to return
         let descriptor = DHTRecordDescriptor::new(record_key, owner, owner_secret, schema);

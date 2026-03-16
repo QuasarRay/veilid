@@ -2,11 +2,11 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationReturnReceipt {
-    receipt: Vec<u8>,
+    receipt: Bytes,
 }
 
 impl RPCOperationReturnReceipt {
-    pub fn new(receipt: Vec<u8>) -> Result<Self, RPCError> {
+    pub fn new(receipt: Bytes) -> Result<Self, RPCError> {
         if receipt.len() < RCP0_MIN_RECEIPT_SIZE {
             return Err(RPCError::protocol("ReturnReceipt receipt too short to set"));
         }
@@ -16,15 +16,15 @@ impl RPCOperationReturnReceipt {
 
         Ok(Self { receipt })
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
 
-    // pub fn receipt(&self) -> &[u8] {
-    //     &self.receipt
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
     // }
 
-    pub fn destructure(self) -> Vec<u8> {
+    pub fn destructure(self) -> Bytes {
         self.receipt
     }
 
@@ -36,7 +36,7 @@ impl RPCOperationReturnReceipt {
         let rr = reader.get_receipt()?;
         rpc_ignore_min_max_len!(rr, RCP0_MIN_RECEIPT_SIZE, RCP0_MAX_RECEIPT_SIZE);
 
-        Self::new(rr.to_vec())
+        Self::new(Bytes::copy_from_slice(rr))
     }
     pub fn encode(
         &self,

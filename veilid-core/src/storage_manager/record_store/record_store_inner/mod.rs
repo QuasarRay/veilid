@@ -166,8 +166,8 @@ where
         self.record_index.prepare_commit_action()
     }
 
-    pub fn finish_commit_action(&mut self, commit_action: CommitAction<D>) -> VeilidAPIResult<()> {
-        self.record_index.finish_commit_action(commit_action)
+    pub fn finish_commit_action(&mut self, commit_action: CommitAction<D>) {
+        self.record_index.finish_commit_action(commit_action);
     }
 
     pub fn total_storage_space(&self) -> u64 {

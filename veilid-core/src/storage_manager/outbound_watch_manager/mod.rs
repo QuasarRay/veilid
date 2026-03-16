@@ -94,7 +94,7 @@ impl OutboundWatchManager {
 
     pub fn prepare(&mut self, routing_table: &RoutingTable) {
         for (pnk, pns) in &mut self.per_node_states {
-            pns.watch_node_ref = match routing_table.lookup_node_ref(pnk.node_id.clone()) {
+            pns.watch_node_ref = match routing_table.lookup_node_id(pnk.node_id.clone()) {
                 Ok(v) => v,
                 Err(e) => {
                     veilid_log!(routing_table debug "Error looking up outbound watch node ref: {}", e);

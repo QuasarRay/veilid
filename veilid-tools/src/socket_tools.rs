@@ -186,7 +186,7 @@ pub fn new_default_socket2_tcp(domain: core::ffi::c_int) -> io::Result<Socket> {
     let domain = Domain::from(domain);
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
     socket.set_linger(Some(core::time::Duration::from_secs(0)))?;
-    socket.set_nodelay(true)?;
+    socket.set_tcp_nodelay(true)?;
     if domain == Domain::IPV6 {
         socket.set_only_v6(true)?;
     }
@@ -197,7 +197,7 @@ fn new_shared_socket2_tcp(domain: core::ffi::c_int) -> io::Result<Socket> {
     let domain = Domain::from(domain);
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
     socket.set_linger(Some(core::time::Duration::from_secs(0)))?;
-    socket.set_nodelay(true)?;
+    socket.set_tcp_nodelay(true)?;
     if domain == Domain::IPV6 {
         socket.set_only_v6(true)?;
     }

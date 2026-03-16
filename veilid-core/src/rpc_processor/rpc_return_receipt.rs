@@ -6,18 +6,16 @@ impl RPCProcessor {
     // Sends a unidirectional in-band return receipt
     // Can be sent via all methods including relays and routes
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rpc", skip(self, receipt), ret, err(level=Level::DEBUG)))]
-    pub async fn rpc_call_return_receipt<D: AsRef<[u8]>>(
+    pub async fn rpc_call_return_receipt(
         &self,
         dest: Destination,
-        receipt: D,
+        receipt: Bytes,
     ) -> RPCNetworkResult<()> {
         let _guard = self
             .startup_context
             .startup_lock
             .enter()
             .map_err(RPCError::map_try_again("not started up"))?;
-
-        let receipt = receipt.as_ref().to_vec();
 
         let return_receipt = RPCOperationReturnReceipt::new(receipt)?;
         let statement =

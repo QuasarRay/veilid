@@ -72,7 +72,7 @@ impl RouteSpecStore {
             avoid_nodes: params.avoid_nodes,
         };
 
-        let opt_first_available_route_lock_guard = {
+        let opt_allocate_route_lock_guard = {
             let inner = self.inner.read();
 
             // See if the preferred route is already available
@@ -94,9 +94,12 @@ impl RouteSpecStore {
             }
 
             // Select a safety route from the pool or make one if we don't have one that matches
-            if let Some(sr_route_id_and_public_keys) =
-                Self::first_available_route_inner(&inner, &first_available_route_params)
-            {
+            // Try this outside of the allocate lock to see if we can do this lock-free first
+            if let Some(sr_route_id_and_public_keys) = Self::first_available_route_inner(
+                &inner,
+                &first_available_route_params,
+                &self.route_selection_counter,
+            ) {
                 // Found a route to use
                 return Ok(sr_route_id_and_public_keys);
             }
@@ -104,25 +107,28 @@ impl RouteSpecStore {
             // No matching route found so allocate one
 
             // Trade locks to get the first available allocate lock
-            self.first_available_route_lock.try_lock()
+            self.allocate_route_lock.try_lock()
 
             // Drop inner read lock because it is synchronous
         };
 
-        let _first_available_route_lock_guard = match opt_first_available_route_lock_guard {
+        let allocate_route_lock_guard = match opt_allocate_route_lock_guard {
             Some(g) => {
                 // No need to re-check first available route because try_lock means no contention
                 g
             }
             None => {
                 // Get the first available allocate lock
-                let g = self.first_available_route_lock.lock().await;
+                let g = self.allocate_route_lock.lock().await;
 
                 // Must re-check first available route to avoid race condition due to await
+                // Because during the time we didn't hold the allocate lock, the first available route may have been allocated
                 let inner = self.inner.read();
-                if let Some(sr_route_id_and_public_keys) =
-                    Self::first_available_route_inner(&inner, &first_available_route_params)
-                {
+                if let Some(sr_route_id_and_public_keys) = Self::first_available_route_inner(
+                    &inner,
+                    &first_available_route_params,
+                    &self.route_selection_counter,
+                ) {
                     // Found a route to use
                     return Ok(sr_route_id_and_public_keys);
                 }
@@ -133,17 +139,21 @@ impl RouteSpecStore {
 
         let params = AllocateRouteParams {
             crypto_kinds: vec![params.crypto_kind],
-            safety_spec: params.safety_spec,
+            safety_spec: SafetySpec {
+                preferred_route: None,
+                ..params.safety_spec
+            },
             directions: params.directions,
             avoid_nodes: first_available_route_params.avoid_nodes,
             automatic: true,
         };
-        self.allocate_route(&params).await
+        self.allocate_route_inner(&allocate_route_lock_guard, params)
+            .await
     }
 
     /// Find first matching unpublished route that fits into the selection criteria
     /// Don't pick any routes that have failed and haven't been tested yet
-    #[allow(clippy::too_many_arguments)]
+    /// Round-robins among top-tier routes to distribute load across safety routes
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = inner.cache.log_key()))
@@ -151,6 +161,7 @@ impl RouteSpecStore {
     fn first_available_route_inner(
         inner: &RouteSpecStoreInner,
         params: &FirstAvailableRouteParams,
+        route_selection_counter: &AtomicUsize,
     ) -> Option<RouteIdAndPublicKeys> {
         let cur_ts = Timestamp::now();
 
@@ -177,8 +188,8 @@ impl RouteSpecStore {
         // Sort the routes by preference
         routes.sort_by(|a, b| {
             // Prefer routes that don't need testing
-            let a_needs_testing = a.1.get_stats().needs_testing(cur_ts);
-            let b_needs_testing = b.1.get_stats().needs_testing(cur_ts);
+            let a_needs_testing = a.1.needs_testing(cur_ts);
+            let b_needs_testing = b.1.needs_testing(cur_ts);
             if !a_needs_testing && b_needs_testing {
                 return cmp::Ordering::Less;
             }
@@ -197,16 +208,35 @@ impl RouteSpecStore {
             }
 
             // Prefer faster routes
-            let a_latency = a.1.get_stats().latency_stats().average;
-            let b_latency = b.1.get_stats().latency_stats().average;
+            let a_latency = a.1.with_stats(|stats| stats.latency_stats().average);
+            let b_latency = b.1.with_stats(|stats| stats.latency_stats().average);
 
             a_latency.cmp(&b_latency)
         });
 
-        // Return the best one if we got one
-        routes.first().map(|r| RouteIdAndPublicKeys {
-            route_id: r.0.clone(),
-            public_keys: r.1.get_route_set_keys().clone(),
-        })
+        // Count top-tier routes (don't need testing and meet stability requirement)
+        let good_count = routes
+            .iter()
+            .take_while(|(_, rssd)| {
+                let needs_testing = rssd.needs_testing(cur_ts);
+                let meets_stability = rssd.get_stability() >= params.stability;
+                !needs_testing && meets_stability
+            })
+            .count();
+
+        if good_count > 1 {
+            // Round-robin among top-tier routes to distribute load
+            let idx = route_selection_counter.fetch_add(1, Ordering::Relaxed) % good_count;
+            routes.get(idx).map(|r| RouteIdAndPublicKeys {
+                route_id: r.0.clone(),
+                public_keys: r.1.get_route_set_keys().clone(),
+            })
+        } else {
+            // Only one or zero good routes, just return the best available
+            routes.first().map(|r| RouteIdAndPublicKeys {
+                route_id: r.0.clone(),
+                public_keys: r.1.get_route_set_keys().clone(),
+            })
+        }
     }
 }

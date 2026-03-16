@@ -432,7 +432,7 @@ where
             subkey,
         };
 
-        // Look through any uncommited changes to see if we have the data already before it hits the DB
+        // Look through any uncommitted changes to see if we have the data already before it hits the DB
         let opt_cached_record_data = self.subkey_cache.get(&stk).cloned().or_else(|| {
             self.uncommitted_subkey_changes
                 .get(&stk)
@@ -941,7 +941,7 @@ where
 
     /// Roll back any part of the commit action that did not complete
     /// in the event of a db commit failure
-    pub fn finish_commit_action(&mut self, commit_action: CommitAction<D>) -> VeilidAPIResult<()> {
+    pub fn finish_commit_action(&mut self, commit_action: CommitAction<D>) {
         veilid_log!(self debug target: "stor::record_index", "finish_commit_action: {:#?}", commit_action);
 
         // XXX: if we ever support 'rollback points', this will become a list of CommitAction<D>
@@ -949,7 +949,7 @@ where
         if self.pending_uncommitted_record_changes.is_none()
             && self.pending_uncommitted_subkey_changes.is_none()
         {
-            apibail_internal!("commit action was not pending");
+            veilid_log!(self error "commit action was not pending");
         }
 
         // Record commit as having finished
@@ -977,8 +977,6 @@ where
             self.rollback_record_changes(uncommitted_record_changes);
             self.rollback_subkey_changes(uncommitted_subkey_changes);
         }
-
-        Ok(())
     }
 
     /// Returns the total amount of used space
@@ -1010,12 +1008,13 @@ where
         let start_ts = Timestamp::now();
         veilid_log!(self info "Loading record index: {}", self.unlocked_inner.name);
 
-        // Start transactions for repairs and drops
-        let rt_xact = self.unlocked_inner.record_table.transact();
-
         // Pull record index from table into a vector to ensure we sort them
         // If they don't load, delete 'em.
         let record_table_keys = self.unlocked_inner.record_table.get_keys(0).await?;
+
+        // Start transactions for repairs and drops
+        let rt_xact = self.unlocked_inner.record_table.transact();
+
         let record_table_keys_count = record_table_keys.len();
         let mut record_index_sorted: Vec<(RecordTableKey, Record<D>)> =
             Vec::with_capacity(record_table_keys_count);

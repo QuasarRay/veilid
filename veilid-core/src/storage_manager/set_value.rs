@@ -8,8 +8,6 @@ struct OutboundSetValueContext {
     pub value: Arc<SignedValueData>,
     /// The number of non-sets since the last set we have received
     pub missed_since_last_set: usize,
-    /// The parsed schema from the descriptor if we have one
-    pub schema: DHTSchema,
     /// If we should send a partial update with the current context
     pub send_partial_update: bool,
 }
@@ -102,8 +100,9 @@ impl StorageManager {
             .handle_get_single_local_value(&opaque_record_key, subkey, true)
             .await?;
 
-        let (signed_value_data, value_data, descriptor) =
-            self.prepare_set_value_data(&record_key, subkey, data, &writer, last_get_result)?;
+        let (signed_value_data, value_data, descriptor) = self
+            .prepare_set_value_data(&record_key, subkey, data, &writer, last_get_result)
+            .await?;
 
         // Check if we are offline (this is a race, but an optimization to avoid fanout if it is likely to fail)
         if !self.dht_is_online() {
@@ -181,7 +180,7 @@ impl StorageManager {
 
     ////////////////////////////////////////////////////////////////////////
 
-    pub(super) fn prepare_set_value_data(
+    pub(super) async fn prepare_set_value_data(
         &self,
         record_key: &RecordKey,
         subkey: ValueSubkey,
@@ -191,7 +190,7 @@ impl StorageManager {
     ) -> VeilidAPIResult<(Arc<SignedValueData>, ValueData, Arc<SignedValueDescriptor>)> {
         // Get cryptosystem
         let crypto = self.crypto();
-        let Some(vcrypto) = crypto.get(record_key.kind()) else {
+        let Some(vcrypto) = crypto.get_async(record_key.kind()) else {
             apibail_generic!("unsupported cryptosystem for record key");
         };
 
@@ -211,8 +210,9 @@ impl StorageManager {
 
         // Check if the subkey value already exists
         if let Some(last_signed_value_data) = opt_last_value {
-            let decrypted =
-                self.maybe_decrypt_value_data(record_key, last_signed_value_data.value_data())?;
+            let decrypted = self
+                .maybe_decrypt_value_data(record_key, last_signed_value_data.value_data())
+                .await?;
             if decrypted.data() == data
                 && last_signed_value_data.value_data().writer() == writer.key()
             {
@@ -229,7 +229,9 @@ impl StorageManager {
         // Make new subkey data
         let value_data = ValueData::new_with_seq(seq, data, writer.key())?;
 
-        let encrypted_value_data = self.maybe_encrypt_value_data(record_key, &value_data)?;
+        let encrypted_value_data = self
+            .maybe_encrypt_value_data(record_key, &value_data)
+            .await?;
 
         // Validate with schema
         if let Err(e) = self.check_subkey_value_data(
@@ -244,13 +246,16 @@ impl StorageManager {
         }
 
         // Sign the new value data with the writer
-        let signed_value_data = Arc::new(SignedValueData::make_signature(
-            encrypted_value_data,
-            &descriptor.owner(),
-            subkey,
-            &vcrypto,
-            &writer.secret(),
-        )?);
+        let signed_value_data = Arc::new(
+            SignedValueData::make_signature(
+                encrypted_value_data,
+                &descriptor.owner(),
+                subkey,
+                &vcrypto,
+                &writer.secret(),
+            )
+            .await?,
+        );
 
         Ok((signed_value_data, value_data, descriptor))
     }
@@ -353,10 +358,11 @@ impl StorageManager {
 
         // Get the DHT parameters for 'SetValue'
         let config = self.config();
-        let key_count = config.network.dht.max_find_node_count as usize;
+        let node_count = config.network.dht.max_find_node_count as usize;
         let consensus_count = config.network.dht.set_value_count as usize;
-        let fanout = config.network.dht.set_value_fanout as usize;
-        let timeout_us = TimestampDuration::from(ms_to_us(config.network.dht.set_value_timeout_ms));
+        let consensus_width = config.network.dht.consensus_width as usize;
+        let fanout_tasks = config.network.dht.set_value_fanout as usize;
+        let timeout = TimestampDuration::from(ms_to_us(config.network.dht.set_value_timeout_ms));
 
         // Get the nodes we know are caching this value to seed the fanout
         let init_fanout_queue = self
@@ -378,7 +384,6 @@ impl StorageManager {
         let context = Arc::new(Mutex::new(OutboundSetValueContext {
             value,
             missed_since_last_set: 0,
-            schema,
             send_partial_update: true,
         }));
         let descriptor_cache = self.descriptor_cache.clone();
@@ -387,6 +392,7 @@ impl StorageManager {
         let call_routine = {
             let context = context.clone();
             let registry = self.registry();
+            let schema = schema.clone();
             let opaque_record_key = opaque_record_key.clone();
             let safety_selection = safety_selection.clone();
             let descriptor_cache = descriptor_cache.clone();
@@ -395,6 +401,7 @@ impl StorageManager {
                 move |next_node: NodeRef| -> PinBoxFutureStatic<FanoutCallResult> {
                     let registry = registry.clone();
                     let context = context.clone();
+                    let schema = schema.clone();
                     let descriptor = descriptor.clone();
                     let opaque_record_key = opaque_record_key.clone();
                     let safety_selection = safety_selection.clone();
@@ -457,12 +464,14 @@ impl StorageManager {
                         };
 
                         // If the node was close enough to possibly set the value
-                        let mut ctx = context.lock();
                         if !sva.answer.accepted {
-                            ctx.missed_since_last_set += 1;
-
+                            let missed ={
+                                let mut ctx = context.lock();
+                                ctx.missed_since_last_set += 1;
+                                ctx.missed_since_last_set
+                            };
                             // Return peers if we have some
-                            veilid_log!(registry debug target:"network_result", "SetValue missed: {}, fanout call returned peers {}", ctx.missed_since_last_set, sva.answer.peers.len());
+                            veilid_log!(registry debug target:"network_result", "SetValue missed: {}, fanout call returned peers {}", missed, sva.answer.peers.len());
                             return Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Rejected});
                         }
 
@@ -474,7 +483,7 @@ impl StorageManager {
                         // See if we got a newer value back
                         let Some(value) = sva.answer.value else {
                             // No newer value was found and returned, so increase our consensus count
-                            ctx.missed_since_last_set = 0;
+                            context.lock().missed_since_last_set = 0;
 
                             // Return peers if we have some
                             veilid_log!(registry debug target:"network_result", "SetValue returned no value, fanout call returned peers {}", sva.answer.peers.len());
@@ -484,7 +493,7 @@ impl StorageManager {
                         // Keep the value if we got one and it is newer and it passes schema validation
 
                         // Validate with schema
-                        if registry.storage_manager().check_subkey_value_data(&ctx.schema,
+                        if registry.storage_manager().check_subkey_value_data(&schema,
                             descriptor_mode.ref_descriptor().ref_owner(),
                             subkey,
                             value.value_data(),
@@ -513,30 +522,33 @@ impl StorageManager {
                         }
 
                         // Check the value received against our current consensus value now
-                        let ctx_seq = ctx.value.value_data().seq();
+                        {
+                            let mut ctx = context.lock();
+                            let ctx_seq = ctx.value.value_data().seq();
 
-                        if rcvd_seq < ctx_seq {
-                            // Ignore if we've got something newer already
-                            veilid_log!(registry debug "SetValue got value back, but it was older than our current value ({} < {}), marking as stale: {}  ", rcvd_seq, ctx_seq, value);
-                            Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Stale})
-                        } else if rcvd_seq > ctx_seq  || value.value_data() != ctx.value.value_data() {
-                            // If the sequence number is greater or equal than the one in our context,
-                            // keep it unless the context has the exact same value, even if the sequence number is the same, accept all conflicts in an attempt to resolve them
-                            veilid_log!(registry debug "SetValue got value back, (rcvd_seq={}, ctx_seq={}) restarting with newer or different value: {}", rcvd_seq, ctx_seq,  value);
+                            if rcvd_seq < ctx_seq {
+                                // Ignore if we've got something newer already
+                                veilid_log!(registry debug "SetValue got value back, but it was older than our current value ({} < {}), marking as stale: {}  ", rcvd_seq, ctx_seq, value);
+                                Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Stale})
+                            } else if rcvd_seq > ctx_seq  || value.value_data() != ctx.value.value_data() {
+                                // If the sequence number is greater or equal than the one in our context,
+                                // keep it unless the context has the exact same value, even if the sequence number is the same, accept all conflicts in an attempt to resolve them
+                                veilid_log!(registry debug "SetValue got value back, (rcvd_seq={}, ctx_seq={}) restarting with newer or different value: {}", rcvd_seq, ctx_seq,  value);
 
-                            ctx.value = Arc::new(value);
-                            // One node has shown us this value so far
-                            ctx.missed_since_last_set = 0;
-                            // Send an update since the value changed
-                            ctx.send_partial_update = true;
+                                ctx.value = Arc::new(value);
+                                // One node has shown us this value so far
+                                ctx.missed_since_last_set = 0;
+                                // Send an update since the value changed
+                                ctx.send_partial_update = true;
 
-                            Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::AcceptedNewerRestart})
-                        } else {
-                            // If the sequence numbers were the same and the values were the same, then mark it as accepted
-                            // since this contributes to our consensus
-                            veilid_log!(registry debug "SetValue got value back, and it matched the current value received from other nodes: {}", value);
-                            Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Accepted})
+                                Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::AcceptedNewerRestart})
+                            } else {
+                                // If the sequence numbers were the same and the values were the same, then mark it as accepted
+                                // since this contributes to our consensus
+                                veilid_log!(registry debug "SetValue got value back, and it matched the current value received from other nodes: {}", value);
+                                Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Accepted})
 
+                            }
                         }
                     }.instrument(tracing::trace_span!("fanout call_routine"))) as PinBoxFuture<FanoutCallResult>
                 },
@@ -587,25 +599,27 @@ impl StorageManager {
 
         // Call the fanout in a spawned task
         let registry = self.registry();
-        let fanout_hash_coordinate = opaque_record_key.to_hash_coordinate();
+        let hash_coordinate = opaque_record_key.to_hash_coordinate();
         spawn(
             "outbound_set_value fanout",
             Box::pin(
                 async move {
                     let routing_table = registry.routing_table();
                     let fanout_call = FanoutCall::new(
-                        format!("outbound_set_value({})", Timestamp::now_increasing()),
                         &routing_table,
-                        fanout_hash_coordinate,
-                        key_count,
-                        fanout,
-                        consensus_count,
-                        timeout_us,
+                        FanoutCallParams {
+                            name: format!("outbound_set_value({})", Timestamp::now_increasing()),
+                            hash_coordinate,
+                            node_count,
+                            fanout_tasks,
+                            consensus_count,
+                            consensus_width,
+                            timeout,
+                        },
                         capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]),
                         call_routine,
                         check_done,
                     );
-
                     let fanout_result = match fanout_call.run(init_fanout_queue, FanoutQueueMode::ThrottleAtConsensus).await {
                         Ok(v) => v,
                         Err(e) => {
@@ -787,8 +801,9 @@ impl StorageManager {
             .await?;
         }
 
-        let value_data =
-            self.maybe_decrypt_value_data(&record_key, result.signed_value_data.value_data())?;
+        let value_data = self
+            .maybe_decrypt_value_data(&record_key, result.signed_value_data.value_data())
+            .await?;
 
         // Return the new value if it differs from what was asked to set
         if value_data != requested_value_data {

@@ -201,6 +201,12 @@ macro_rules! veilid_log {
     ($self_ident:ident debugwarn target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "DEBUGWARN", level: $crate::DEBUGWARN, target: $target, fields: $($k).+ = $($fields)*)};
 }
 
+/// If an operation returns a NetworkResult:
+///
+/// * If it is a Value, return it.
+/// * If it is any other enum variant, log it and return an alternative value in the `=>` block
+///
+/// If a `[ ]` block is also provided, an extra logging string provided in the block will be added to the log message
 #[macro_export]
 macro_rules! network_result_value_or_log {
     ($self:ident $r:expr => $f:expr) => {

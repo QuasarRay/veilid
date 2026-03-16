@@ -10,7 +10,7 @@ pub(crate) struct RouteHopData {
     /// The nonce used in the encryption ENC(Xn,DH(PKn,SKapr))
     pub nonce: Nonce,
     /// The encrypted blob
-    pub blob: Vec<u8>,
+    pub blob: Bytes,
 }
 
 impl fmt::Debug for RouteHopData {
@@ -36,7 +36,7 @@ impl RouteNode {
         match self {
             RouteNode::NodeId(id) => {
                 //
-                match routing_table.lookup_node_ref(id.clone()) {
+                match routing_table.lookup_node_id(id.clone()) {
                     Ok(nr) => nr,
                     Err(e) => {
                         veilid_log!(routing_table debug "failed to look up route node: {}", e);
@@ -126,22 +126,24 @@ impl PrivateRoute {
     }
 
     /// Remove the first unencrypted hop if possible
-    pub fn pop_first_hop(&mut self) -> Option<RouteNode> {
-        match &mut self.hops {
-            PrivateRouteHops::FirstHop(first_hop) => {
-                let first_hop_node = first_hop.node.clone();
+    pub fn split_first_hop(&self) -> (Option<RouteNode>, Self) {
+        let mut opt_route_node = None;
+        let out = Self {
+            public_key: self.public_key.clone(),
+            hops: match &self.hops {
+                PrivateRouteHops::FirstHop(first_hop) => {
+                    opt_route_node = Some(first_hop.node.clone());
 
-                // Go to next hop
-                self.hops = match first_hop.next_hop.take() {
-                    Some(rhd) => PrivateRouteHops::Data(rhd),
-                    None => PrivateRouteHops::Empty,
-                };
+                    match first_hop.next_hop.as_ref() {
+                        Some(rhd) => PrivateRouteHops::Data(rhd.clone()),
+                        None => PrivateRouteHops::Empty,
+                    }
+                }
+                PrivateRouteHops::Data(_) | PrivateRouteHops::Empty => self.hops.clone(),
+            },
+        };
 
-                Some(first_hop_node)
-            }
-            PrivateRouteHops::Data(_) => None,
-            PrivateRouteHops::Empty => None,
-        }
+        (opt_route_node, out)
     }
 
     pub fn first_hop_node_id(&self) -> Option<NodeId> {
@@ -188,7 +190,7 @@ pub(crate) enum SafetyRouteHops {
     /// Has >= 1 safety route hops
     Data(RouteHopData),
     /// Has 0 safety route hops
-    Private(PrivateRoute),
+    Private(Arc<PrivateRoute>),
 }
 
 #[derive(Clone, Debug)]
@@ -199,7 +201,7 @@ pub(crate) struct SafetyRoute {
 
 impl SafetyRoute {
     /// Stub route is the form used when no privacy is required, but you need to directly contact a private route
-    pub fn new_stub(public_key: PublicKey, private_route: PrivateRoute) -> Self {
+    pub fn new_stub(public_key: PublicKey, private_route: Arc<PrivateRoute>) -> Self {
         // First hop should have already been popped off for stubbed safety routes since
         // we are sending directly to the first hop
         assert!(matches!(private_route.hops, PrivateRouteHops::Data(_)));

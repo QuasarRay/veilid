@@ -51,14 +51,14 @@ impl ProtocolNetworkConnection {
             Self::Ws(w) => w.close().await,
         }
     }
-    pub async fn send(&self, message: Vec<u8>) -> io::Result<NetworkResult<()>> {
+    pub async fn send(&self, message: Bytes) -> io::Result<NetworkResult<()>> {
         match self {
             //            Self::Dummy(d) => d.send(message),
             Self::Ws(w) => w.send(message).await,
         }
     }
 
-    pub async fn recv(&self) -> io::Result<NetworkResult<Vec<u8>>> {
+    pub async fn recv(&self) -> io::Result<NetworkResult<Bytes>> {
         match self {
             //            Self::Dummy(d) => d.recv(),
             Self::Ws(w) => w.recv().await,

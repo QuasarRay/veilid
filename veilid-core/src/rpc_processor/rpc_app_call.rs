@@ -9,8 +9,8 @@ impl RPCProcessor {
     pub async fn rpc_call_app_call(
         &self,
         dest: Destination,
-        message: Vec<u8>,
-    ) -> RPCNetworkResult<Answer<Vec<u8>>> {
+        message: Bytes,
+    ) -> RPCNetworkResult<Answer<Bytes>> {
         let _guard = self
             .startup_context
             .startup_lock
@@ -126,7 +126,10 @@ impl RPCProcessor {
         // Pass the call up through the update callback
         let message = app_call_q.destructure();
         (self.update_callback())(VeilidUpdate::AppCall(Box::new(VeilidAppCall::new(
-            sender, route_id, message, op_id,
+            sender,
+            route_id,
+            message.to_vec(),
+            op_id,
         ))));
 
         // Wait for an app call answer to come back from the app
@@ -160,7 +163,7 @@ impl RPCProcessor {
         feature = "instrument",
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub fn app_call_reply(&self, call_id: OperationId, message: Vec<u8>) -> Result<(), RPCError> {
+    pub fn app_call_reply(&self, call_id: OperationId, message: Bytes) -> Result<(), RPCError> {
         let _guard = self
             .startup_context
             .startup_lock

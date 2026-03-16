@@ -9,7 +9,7 @@ impl RPCProcessor {
     pub async fn rpc_call_app_message(
         &self,
         dest: Destination,
-        message: Vec<u8>,
+        message: Bytes,
     ) -> RPCNetworkResult<()> {
         let _guard = self
             .startup_context
@@ -85,7 +85,9 @@ impl RPCProcessor {
         // Pass the message up through the update callback
         let message = app_message.destructure();
         (self.update_callback())(VeilidUpdate::AppMessage(Box::new(VeilidAppMessage::new(
-            sender, route_id, message,
+            sender,
+            route_id,
+            message.to_vec(),
         ))));
 
         Ok(NetworkResult::value(()))

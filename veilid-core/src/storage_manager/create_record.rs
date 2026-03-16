@@ -48,7 +48,7 @@ impl StorageManager {
     ) -> VeilidAPIResult<(RecordKey, KeyPair)> {
         // Get cryptosystem
         let crypto = self.crypto();
-        let Some(vcrypto) = crypto.get(kind) else {
+        let Some(vcrypto) = crypto.get_async(kind) else {
             apibail_generic!("unsupported cryptosystem");
         };
 
@@ -80,11 +80,11 @@ impl StorageManager {
             }
             owner
         } else {
-            vcrypto.generate_keypair()
+            vcrypto.generate_keypair().await
         };
 
         // Always create a new encryption key
-        let encryption_key = Some(vcrypto.random_shared_secret().into_value());
+        let encryption_key = Some(vcrypto.random_shared_secret().await.into_value());
 
         // Calculate dht key
         let record_key = Self::make_record_key(
@@ -92,15 +92,19 @@ impl StorageManager {
             owner.ref_value().ref_key(),
             &schema_data,
             encryption_key,
-        );
+        )
+        .await;
 
         // Make a signed value descriptor for this dht value
-        let signed_value_descriptor = Arc::new(SignedValueDescriptor::make_signature(
-            owner.key(),
-            schema_data,
-            &vcrypto,
-            owner.secret(),
-        )?);
+        let signed_value_descriptor = Arc::new(
+            SignedValueDescriptor::make_signature(
+                owner.key(),
+                schema_data.into(),
+                &vcrypto,
+                owner.secret(),
+            )
+            .await?,
+        );
 
         // Add new local value record
         let cur_ts = Timestamp::now();

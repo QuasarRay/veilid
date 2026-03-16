@@ -5,9 +5,10 @@ use cfg_if::*;
 use console_subscriber::ConsoleLayer;
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "opentelemetry-otlp")] {
-        use opentelemetry_sdk::*;
+    if #[cfg(feature = "opentelemetry")] {
         use opentelemetry_otlp::WithExportConfig;
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+        use opentelemetry::trace::TracerProvider;
     }
 }
 
@@ -135,42 +136,31 @@ impl Logs {
         }
 
         // OpenTelemetry logger
-        #[cfg(feature = "opentelemetry-otlp")]
+        #[cfg(feature = "opentelemetry")]
         if settingsr.logging.otlp.enabled {
             let grpc_endpoint = settingsr.logging.otlp.grpc_endpoint.name.clone();
 
             cfg_if! {
-                if #[cfg(feature="rt-async-std")] {
-                    let exporter = opentelemetry_otlp::new_exporter()
-                        .grpcio()
-                        .with_endpoint(grpc_endpoint);
-                    let batch = opentelemetry_sdk::runtime::AsyncStd;
-                } else if #[cfg(feature="rt-tokio")] {
-                    let exporter = opentelemetry_otlp::new_exporter()
-                        .tonic()
-                        .with_endpoint(format!("http://{}", grpc_endpoint));
-                    let batch = opentelemetry_sdk::runtime::Tokio;
+                if #[cfg(feature="rt-tokio")] {
+                    let exporter = opentelemetry_otlp::SpanExporter::builder()
+                        .with_tonic()
+                        .with_endpoint(format!("http://{}", grpc_endpoint))
+                        .build().wrap_err("failed to build OpenTelemetry exporter")?;
                 } else {
                     compile_error!("needs executor implementation");
                 }
             }
 
-            let tracer = opentelemetry_otlp::new_pipeline()
-                .tracing()
-                .with_exporter(exporter)
-                .with_trace_config(opentelemetry_sdk::trace::Config::default().with_resource(
-                    Resource::new(vec![opentelemetry::KeyValue::new(
-                        opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                        format!(
-                                "veilid_server:{}",
-                                hostname::get()
-                                    .map(|s| s.to_string_lossy().into_owned())
-                                    .unwrap_or_else(|_| "unknown".to_owned())
-                            ),
-                    )]),
-                ))
-                .install_batch(batch)
-                .wrap_err("failed to install OpenTelemetry tracer")?;
+            let provider = SdkTracerProvider::builder()
+                .with_batch_exporter(exporter)
+                .build();
+            let tracer = provider.tracer(format!(
+                "{}:{}",
+                "veilid_server",
+                hostname::get()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| "unknown".to_owned())
+            ));
 
             let filter = VeilidLayerFilter::new_with_config(
                 VeilidLayerFilterConfig::new()

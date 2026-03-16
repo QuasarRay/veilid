@@ -1,13 +1,30 @@
 use super::*;
+use crate::rpc_processor::Destination;
+
+#[must_use]
+pub enum RouteStatsDisposition {
+    /// Route is still valid
+    Valid,
+    /// Route is invalid because it has failed to send too many times
+    InvalidSendFailure,
+    /// Route is invalid because it has lost too many answers
+    InvalidLostAnswers,
+}
+
+impl RouteStatsDisposition {
+    pub fn is_valid(&self) -> bool {
+        matches!(self, RouteStatsDisposition::Valid)
+    }
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RouteStats {
     /// Consecutive failed to send count
     #[serde(skip)]
     pub failed_to_send: u32,
-    /// Consecutive questions that didn't get an answer
+    /// Per-destination lost answer tracking: maps destination public key to lost answer count
     #[serde(skip)]
-    pub recent_lost_answers: u32,
+    pub lost_answer_destinations: HashMap<PublicKey, u32>,
     /// Timestamp of when the route was created
     pub created_ts: Timestamp,
     /// Timestamp of when the route was last checked for validity or received traffic
@@ -44,8 +61,9 @@ impl fmt::Display for RouteStats {
         writeln!(f, "created: {}", self.created_ts)?;
         writeln!(
             f,
-            "# recently-lost/failed-to-send: {} / {}",
-            self.recent_lost_answers, self.failed_to_send
+            "# lost-answer-dests/failed-to-send: {} / {}",
+            self.lost_answer_destinations.len(),
+            self.failed_to_send
         )?;
         writeln!(
             f,
@@ -91,15 +109,31 @@ impl RouteStats {
         }
     }
     /// Mark a route as having failed to send
-    pub fn record_send_failed(&mut self) {
+    pub fn record_send_failed(&mut self) -> RouteStatsDisposition {
         self.failed_to_send += 1;
+        if self.failed_to_send >= ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD {
+            RouteStatsDisposition::InvalidSendFailure
+        } else {
+            RouteStatsDisposition::Valid
+        }
     }
 
-    /// Mark a route as having lost an answer
-    pub fn record_lost_answer(&mut self) {
+    /// Mark a route as having lost an answer for a specific destination
+    pub fn record_lost_answer(&mut self, destination: &Destination) -> RouteStatsDisposition {
         let cur_ts = Timestamp::now();
-        self.recent_lost_answers += 1;
         self.answer_stats_accounting.record_lost_answer(cur_ts);
+
+        let Ok(dest_key) = destination.destination_key() else {
+            return RouteStatsDisposition::Valid;
+        };
+        *self.lost_answer_destinations.entry(dest_key).or_insert(0) += 1;
+        if self.lost_answer_destinations.len() as u32
+            >= ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD
+        {
+            RouteStatsDisposition::InvalidLostAnswers
+        } else {
+            RouteStatsDisposition::Valid
+        }
     }
 
     /// Mark a route as having received a question or statement
@@ -110,11 +144,18 @@ impl RouteStats {
         self.answer_stats_accounting.record_question(cur_ts);
     }
 
-    /// Mark a route as having received an answer
-    pub fn record_answer_received(&mut self, cur_ts: Timestamp, bytes: ByteCount) {
+    /// Mark a route as having received an answer from a specific destination
+    pub fn record_answer_received(
+        &mut self,
+        cur_ts: Timestamp,
+        bytes: ByteCount,
+        destination: &Destination,
+    ) {
         self.last_rcvd_answer_ts = Some(cur_ts);
         self.last_known_valid_ts = Some(cur_ts);
-        self.recent_lost_answers = 0;
+        if let Ok(dest_key) = destination.destination_key() {
+            self.lost_answer_destinations.remove(&dest_key);
+        }
         self.transfer_stats_accounting.add_down(bytes);
         self.answer_stats_accounting.record_answer(cur_ts);
     }
@@ -159,13 +200,13 @@ impl RouteStats {
         self.last_rcvd_question_ts = None;
         self.last_rcvd_answer_ts = None;
         self.failed_to_send = 0;
-        self.recent_lost_answers = 0;
+        self.lost_answer_destinations.clear();
     }
 
     /// Check if a route needs testing
     pub fn needs_testing(&self, cur_ts: Timestamp) -> bool {
         // Has the route had any failures lately?
-        if self.recent_lost_answers > 0 || self.failed_to_send > 0 {
+        if !self.lost_answer_destinations.is_empty() || self.failed_to_send > 0 {
             // If so, always test
             return true;
         }
@@ -193,7 +234,7 @@ impl RouteSpecStore {
     where
         F: FnOnce(&mut RouteStats) -> R,
     {
-        let inner = &mut *self.inner.write();
+        let inner = self.inner.read();
 
         // Check for stub route
         if self.routing_table().public_keys().contains(key) {
@@ -202,24 +243,69 @@ impl RouteSpecStore {
 
         // Check for allocated route
         if let Some(rsid) = inner.content.get_id_by_key(key) {
-            if let Some(rsd) = inner.content.get_detail_mut(&rsid) {
-                return Some(f(rsd.get_stats_mut()));
+            if let Some(rsd) = inner.content.get_detail(&rsid) {
+                return Some(rsd.with_stats_mut(f));
             }
         }
 
         // Check for remote route
         if let Some(rrid) = inner.cache.get_remote_private_route_id_by_key(key) {
-            if let Some(rpri) = inner.cache.peek_remote_private_route_mut(cur_ts, &rrid) {
-                return Some(f(rpri.get_stats_mut()));
+            if let Some(rpri) = inner.cache.peek_remote_private_route(cur_ts, &rrid) {
+                return Some(rpri.with_stats_mut(f));
             }
         }
 
         None
     }
 
+    /// Lock an allocated route from invalidation by its public key
+    pub fn lock_route(&self, key: &PublicKey) {
+        let inner = self.inner.read();
+        if let Some(rsid) = inner.content.get_id_by_key(key) {
+            if let Some(rsd) = inner.content.get_detail(&rsid) {
+                rsd.lock();
+            }
+        }
+    }
+
+    /// Unlock an allocated route and check if it should be invalidated now
+    pub fn unlock_route_and_check(&self, key: &PublicKey) {
+        let should_invalidate = {
+            let inner = self.inner.read();
+            let Some(rsid) = inner.content.get_id_by_key(key) else {
+                return;
+            };
+            let Some(rsd) = inner.content.get_detail(&rsid) else {
+                return;
+            };
+            rsd.unlock();
+            // Check if accumulated failures now warrant invalidation
+            !rsd.is_locked()
+                && rsd.with_stats(|s| {
+                    s.failed_to_send >= ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD
+                        || s.lost_answer_destinations.len() as u32
+                            >= ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD
+                })
+        };
+        if should_invalidate {
+            self.invalidate_compiled_route_cache(key);
+        }
+    }
+
+    /// Check if an allocated route is locked from invalidation
+    pub fn is_route_locked(&self, key: &PublicKey) -> bool {
+        let inner = self.inner.read();
+        if let Some(rsid) = inner.content.get_id_by_key(key) {
+            if let Some(rsd) = inner.content.get_detail(&rsid) {
+                return rsd.is_locked();
+            }
+        }
+        false
+    }
+
     /// Process transfer statistics to get averages
     pub fn roll_transfers(&self, last_ts: Timestamp, cur_ts: Timestamp) {
-        let mut inner = self.inner.write();
+        let inner = self.inner.read();
 
         // Roll transfers for allocated routes
         inner.content.roll_transfers(last_ts, cur_ts);
@@ -230,7 +316,7 @@ impl RouteSpecStore {
 
     /// Process answer statistics
     pub fn roll_answers(&self, cur_ts: Timestamp) {
-        let mut inner = self.inner.write();
+        let inner = self.inner.read();
 
         // Roll transfers for allocated routes
         inner.content.roll_answers(cur_ts);

@@ -2,14 +2,15 @@
 #![cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 #![recursion_limit = "256"]
 
-use parking_lot::Once;
 use tracing::*;
 use veilid_core::tests::*;
+use veilid_tools::parking_lot::Once;
 use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
 static SETUP_ONCE: Once = Once::new();
+
 pub fn setup() -> () {
     SETUP_ONCE.call_once(|| {
         console_error_panic_hook::set_once();

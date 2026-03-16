@@ -1,5 +1,7 @@
 use super::*;
 
+impl_veilid_log_facility!("rtab");
+
 impl RoutingTable {
     // Save routing table to disk
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]

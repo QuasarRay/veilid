@@ -135,6 +135,7 @@ ptr_cast_constness = "deny"
 comparison_chain = "allow"
 upper_case_acronyms = "allow"
 needless_range_loop = "allow"
+mutable_key_type = "allow" # Until this is merged (NodeRef is safe to hash/eq): https://github.com/rust-lang/rust-clippy/pull/15844
 
 [workspace.lints.rust]
 unused_must_use = "deny"

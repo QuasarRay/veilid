@@ -6,7 +6,6 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use data_encoding::BASE64URL_NOPAD;
 use hashlink::LinkedHashMap;
 use network_manager::*;
-use once_cell::sync::Lazy;
 use routing_table::*;
 use std::fmt::Write;
 
@@ -520,7 +519,7 @@ fn join_args(args: Vec<String>) -> String {
 #[derive(Default)]
 pub(crate) struct DebugCache {
     pub imported_routes: Vec<RouteId>,
-    pub opened_record_contexts: Lazy<LinkedHashMap<RecordKey, RoutingContext>>,
+    pub opened_record_contexts: LinkedHashMap<RecordKey, RoutingContext>,
 }
 
 #[must_use]
@@ -575,11 +574,9 @@ fn parse_data(text: &str) -> Result<Vec<u8>, String> {
     if let Some(stripped_text) = text.strip_prefix('#') {
         hex::decode(stripped_text).map_err(|e| format!("invalid hex data: {e}"))
     } else if text.starts_with('"') || text.starts_with('\'') {
-        json::parse(text)
-            .map_err(|e| format!("invalid quoted data: {e}"))?
-            .as_str()
-            .map(|x| x.to_owned().as_bytes().to_vec())
-            .ok_or_else(|| "quoted data must decode to a string".to_owned())
+        serde_json::from_str::<String>(text)
+            .map(|x| x.into_bytes())
+            .map_err(|e| format!("invalid quoted data: {e}"))
     } else {
         Ok(text.as_bytes().to_vec())
     }
@@ -1007,9 +1004,9 @@ fn get_node_ref(registry: VeilidComponentRegistry) -> impl FnOnce(&str) -> Optio
     move |text| {
         let routing_table = registry.routing_table();
         let nr = if let Some(key) = get_bare_node_id(text) {
-            routing_table.lookup_any_node_ref(key).ok().flatten()?
+            routing_table.lookup_bare_node_id(key).ok().flatten()?
         } else if let Some(node_id) = get_node_id(text) {
-            routing_table.lookup_node_ref(node_id).ok().flatten()?
+            routing_table.lookup_node_id(node_id).ok().flatten()?
         } else {
             return None;
         };
@@ -1137,8 +1134,11 @@ pub fn print_data(data: &[u8], truncate_len: Option<usize>) -> String {
         String::from_utf8_lossy(data).to_string()
     } else {
         let sw = shell_words::quote(String::from_utf8_lossy(data).as_ref()).to_string();
+        let always_hex = sw
+            .chars()
+            .any(|c| !c.is_ascii() || c.is_ascii_control() || c.is_ascii_graphic());
         let h = hex::encode(data);
-        if h.len() < sw.len() {
+        if always_hex || h.len() < sw.len() {
             h
         } else {
             sw
@@ -1350,6 +1350,7 @@ impl VeilidAPI {
         let nodeinfo_net = registry.network_manager().debug_info_nodeinfo();
         let nodeinfo_rpc = registry.rpc_processor().debug_info_nodeinfo();
         let nodeinfo_crypto = registry.crypto().debug_info_nodeinfo();
+        let nodeinfo_attach = registry.attachment_manager().debug_info_nodeinfo();
 
         // Dump core state
         let state = self.get_state().await?;
@@ -1379,8 +1380,14 @@ impl VeilidAPI {
             };
 
         Ok(format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n",
-            nodeinfo_rtab, nodeinfo_net, nodeinfo_rpc, peertable, connman, nodeinfo_crypto
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+            nodeinfo_rtab,
+            nodeinfo_net,
+            nodeinfo_rpc,
+            peertable,
+            connman,
+            nodeinfo_crypto,
+            nodeinfo_attach
         ))
     }
 
@@ -1635,7 +1642,7 @@ impl VeilidAPI {
         let rpc_processor = registry.rpc_processor();
 
         let out = match rpc_processor
-            .rpc_call_app_message(dest, data)
+            .rpc_call_app_message(dest, data.into())
             .await
             .map_err(VeilidAPIError::internal)?
         {
@@ -1672,7 +1679,7 @@ impl VeilidAPI {
         // Send an AppCall
         let rpc_processor = registry.rpc_processor();
 
-        let out = match Box::pin(rpc_processor.rpc_call_app_call(dest, data))
+        let out = match Box::pin(rpc_processor.rpc_call_app_call(dest, data.into()))
             .await
             .map_err(VeilidAPIError::internal)?
         {
@@ -1782,7 +1789,7 @@ impl VeilidAPI {
             avoid_nodes: Vec::new(),
             automatic: false,
         };
-        let out = match rss.allocate_route(&allocate_route_params).await {
+        let out = match rss.allocate_route(allocate_route_params).await {
             Ok(v) => v.route_id.to_string(),
             Err(e) => format!("Route allocation failed: {}", e),
         };
@@ -1822,7 +1829,7 @@ impl VeilidAPI {
 
         Ok(out)
     }
-    fn debug_route_publish(&self, args: Vec<String>) -> VeilidAPIResult<String> {
+    async fn debug_route_publish(&self, args: Vec<String>) -> VeilidAPIResult<String> {
         // <route id> [full]
         let registry = self.core_context()?.registry();
         let routing_table = registry.routing_table();
@@ -1850,7 +1857,7 @@ impl VeilidAPI {
         };
 
         // Publish route
-        let out = match rss.assemble_private_route_set(&route_id, Some(!full)) {
+        let out = match rss.assemble_private_route_set(&route_id, Some(!full)).await {
             Ok(private_routes) => {
                 if let Err(e) = rss.mark_route_published(&route_id, true) {
                     return Ok(format!("Couldn't mark route published: {}", e));
@@ -2011,7 +2018,7 @@ impl VeilidAPI {
                 if let Some(full) = full {
                     args.push(full);
                 }
-                self.debug_route_publish(args)
+                self.debug_route_publish(args).await
             }
             DebugRouteSubcommand::Unpublish { route_id } => {
                 self.debug_route_unpublish(vec![route_id])

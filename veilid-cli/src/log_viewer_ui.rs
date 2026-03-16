@@ -87,14 +87,10 @@ impl LogViewerUI {
         if !term.features().is_attended() {
             done.await;
         } else {
-            while let Ok(Ok(c)) = blocking_wrapper(
-                "LogViewerUI read",
-                {
-                    let term = term.clone();
-                    move || term.read_char()
-                },
-                Err(std::io::Error::other("failed")),
-            )
+            while let Ok(Ok(c)) = blocking_wrapper({
+                let term = term.clone();
+                move || term.read_char()
+            })
             .timeout_at(done.clone())
             .await
             {

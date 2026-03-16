@@ -35,9 +35,12 @@ impl RPCOperationTransactBeginQ {
         })
     }
 
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         let crypto = validate_context.crypto();
-        let Some(vcrypto) = crypto.get(self.key.kind()) else {
+        let Some(vcrypto) = crypto.get_async(self.key.kind()) else {
             return Err(RPCError::protocol("unsupported cryptosystem"));
         };
 
@@ -46,6 +49,7 @@ impl RPCOperationTransactBeginQ {
             // Ensure the descriptor itself validates
             descriptor
                 .validate(&vcrypto, &self.key)
+                .await
                 .map_err(RPCError::protocol)?;
         }
         Ok(())
@@ -169,7 +173,10 @@ impl RPCOperationTransactBeginA {
         })
     }
 
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         let question_context = validate_context
             .question_context
             .as_ref()
@@ -179,7 +186,8 @@ impl RPCOperationTransactBeginA {
         };
 
         let crypto = validate_context.crypto();
-        let Some(vcrypto) = crypto.get(transact_begin_context.opaque_record_key.kind()) else {
+        let Some(vcrypto) = crypto.get_async(transact_begin_context.opaque_record_key.kind())
+        else {
             return Err(RPCError::protocol("unsupported cryptosystem"));
         };
 
@@ -188,6 +196,7 @@ impl RPCOperationTransactBeginA {
             // Ensure the descriptor itself validates
             descriptor
                 .validate(&vcrypto, &transact_begin_context.opaque_record_key)
+                .await
                 .map_err(RPCError::protocol)?;
 
             // Ensure descriptor matches last one

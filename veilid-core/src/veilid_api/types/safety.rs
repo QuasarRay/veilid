@@ -191,6 +191,12 @@ impl SafetySelection {
             SafetySelection::Safe(ss) => ss.sequencing,
         }
     }
+    pub fn get_hop_count(&self) -> usize {
+        match self {
+            SafetySelection::Unsafe(_) => 0,
+            SafetySelection::Safe(ss) => ss.hop_count,
+        }
+    }
 }
 
 impl Default for SafetySelection {

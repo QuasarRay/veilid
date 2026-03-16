@@ -1,4 +1,5 @@
 use core::marker::PhantomData;
+use std::ops::Range;
 
 use super::*;
 
@@ -19,6 +20,10 @@ impl<'a> CryptoSystemGuard<'a> {
     pub fn as_async(self) -> AsyncCryptoSystemGuard<'a> {
         AsyncCryptoSystemGuard { guard: self }
     }
+    /// Get a clone of the inner Arc for use in blocking tasks
+    pub(super) fn clone_arc(&self) -> Arc<dyn CryptoSystem + Send + Sync> {
+        self.crypto_system.clone()
+    }
 }
 
 impl core::ops::Deref for CryptoSystemGuard<'_> {
@@ -33,12 +38,6 @@ impl core::ops::Deref for CryptoSystemGuard<'_> {
 #[must_use]
 pub struct AsyncCryptoSystemGuard<'a> {
     guard: CryptoSystemGuard<'a>,
-}
-
-async fn yielding<R, T: FnOnce() -> R>(x: T) -> R {
-    let out = x();
-    sleep(0).await;
-    out
 }
 
 impl AsyncCryptoSystemGuard<'_> {
@@ -61,26 +60,30 @@ impl AsyncCryptoSystemGuard<'_> {
     }
 
     // Generation
-    pub async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        yielding(|| self.guard.random_bytes(len)).await
+    pub async fn random_bytes(&self, len: usize) -> Bytes {
+        yielding(|| self.guard.random_bytes(len).into()).await
     }
 
-    pub async fn hash_password(&self, password: &[u8], salt: &[u8]) -> VeilidAPIResult<String> {
-        yielding(|| self.guard.hash_password(password, salt)).await
+    pub async fn hash_password(&self, password: Bytes, salt: Bytes) -> VeilidAPIResult<String> {
+        let cs = self.guard.clone_arc();
+        let salt = salt.to_vec();
+        cpu_yielding(move || cs.hash_password(&password, &salt)).await
     }
     pub async fn verify_password(
         &self,
-        password: &[u8],
+        password: Bytes,
         password_hash: &str,
     ) -> VeilidAPIResult<bool> {
-        yielding(|| self.guard.verify_password(password, password_hash)).await
+        let cs = self.guard.clone_arc();
+        let password_hash = password_hash.to_string();
+        cpu_yielding(move || cs.verify_password(&password, &password_hash)).await
     }
     pub async fn derive_shared_secret(
         &self,
-        password: &[u8],
-        salt: &[u8],
+        password: Bytes,
+        salt: Bytes,
     ) -> VeilidAPIResult<SharedSecret> {
-        yielding(|| self.guard.derive_shared_secret(password, salt)).await
+        yielding(|| self.guard.derive_shared_secret(&password, &salt)).await
     }
     pub async fn random_nonce(&self) -> Nonce {
         yielding(|| self.guard.random_nonce()).await
@@ -93,18 +96,26 @@ impl AsyncCryptoSystemGuard<'_> {
         key: &PublicKey,
         secret: &SecretKey,
     ) -> VeilidAPIResult<SharedSecret> {
-        yielding(|| self.guard.compute_dh(key, secret)).await
+        let cs = self.guard.clone_arc();
+        let key = key.clone();
+        let secret = secret.clone();
+        cpu_yielding(move || cs.compute_dh(&key, &secret)).await
     }
     pub async fn generate_shared_secret(
         &self,
         key: &PublicKey,
         secret: &SecretKey,
-        domain: &[u8],
+        domain: Bytes,
     ) -> VeilidAPIResult<SharedSecret> {
         let dh = self.compute_dh(key, secret).await?;
-        let hash = self
-            .generate_hash(&[&dh.into_value(), domain, VEILID_DOMAIN_API].concat())
-            .await;
+        let data = [
+            dh.ref_value().bytes().as_ref(),
+            domain.as_ref(),
+            VEILID_DOMAIN_API,
+        ]
+        .concat()
+        .into();
+        let hash = self.generate_hash(data).await;
         Ok(SharedSecret::new(
             hash.kind(),
             BareSharedSecret::new(&hash.into_value()),
@@ -115,8 +126,8 @@ impl AsyncCryptoSystemGuard<'_> {
         yielding(|| self.guard.generate_keypair()).await
     }
 
-    pub async fn generate_hash(&self, data: &[u8]) -> HashDigest {
-        yielding(|| self.guard.generate_hash(data)).await
+    pub async fn generate_hash(&self, data: Bytes) -> HashDigest {
+        yielding(|| self.guard.generate_hash(&data)).await
     }
 
     pub async fn generate_hash_reader(
@@ -185,8 +196,8 @@ impl AsyncCryptoSystemGuard<'_> {
         yielding(|| self.guard.validate_keypair(key, secret)).await
     }
 
-    pub async fn validate_hash(&self, data: &[u8], hash: &HashDigest) -> VeilidAPIResult<bool> {
-        yielding(|| self.guard.validate_hash(data, hash)).await
+    pub async fn validate_hash(&self, data: Bytes, hash: &HashDigest) -> VeilidAPIResult<bool> {
+        yielding(|| self.guard.validate_hash(&data, hash)).await
     }
 
     pub async fn validate_hash_reader(
@@ -200,128 +211,213 @@ impl AsyncCryptoSystemGuard<'_> {
     // Authentication
     pub async fn sign(
         &self,
-        key: &PublicKey,
+        public_key: &PublicKey,
         secret: &SecretKey,
-        data: &[u8],
+        data: Bytes,
     ) -> VeilidAPIResult<Signature> {
-        yielding(|| self.guard.sign(key, secret, data)).await
+        let cs = self.guard.clone_arc();
+        let public_key = public_key.clone();
+        let secret = secret.clone();
+        cpu_yielding(move || cs.sign(&public_key, &secret, &data)).await
     }
+
+    pub async fn sign_in_place(
+        &self,
+        public_key: &PublicKey,
+        secret: &SecretKey,
+        mut data: BytesMut,
+        range: Range<usize>,
+        sig_idx: usize,
+    ) -> VeilidAPIResult<BytesMut> {
+        let cs = self.guard.clone_arc();
+        let public_key = public_key.clone();
+        let secret = secret.clone();
+        cpu_yielding(move || {
+            cs.sign_in_place(&public_key, &secret, &mut data, range, sig_idx)?;
+            Ok(data)
+        })
+        .await
+    }
+
     pub async fn verify(
         &self,
-        key: &PublicKey,
-        data: &[u8],
+        public_key: &PublicKey,
+        data: Bytes,
         signature: &Signature,
     ) -> VeilidAPIResult<bool> {
-        yielding(|| self.guard.verify(key, data, signature)).await
+        let cs = self.guard.clone_arc();
+        let public_key = public_key.clone();
+        let signature = signature.clone();
+        cpu_yielding(move || cs.verify(&public_key, &data, &signature)).await
+    }
+
+    pub async fn verify_in_place(
+        &self,
+        public_key: &PublicKey,
+        data: Bytes,
+        range: Range<usize>,
+        sig_idx: usize,
+    ) -> VeilidAPIResult<bool> {
+        let cs = self.guard.clone_arc();
+        let public_key = public_key.clone();
+        cpu_yielding(move || cs.verify_in_place(&public_key, &data, range, sig_idx)).await
     }
 
     // AEAD Encrypt/Decrypt
-    pub async fn decrypt_in_place_aead(
-        &self,
-        body: &mut Vec<u8>,
-        nonce: &Nonce,
-        shared_secret: &SharedSecret,
-        associated_data: Option<&[u8]>,
-    ) -> VeilidAPIResult<()> {
-        yielding(|| {
-            self.guard
-                .decrypt_in_place_aead(body, nonce, shared_secret, associated_data)
-        })
-        .await
-    }
-
     pub async fn decrypt_aead(
         &self,
-        body: &[u8],
+        body: Bytes,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
-        associated_data: Option<&[u8]>,
-    ) -> VeilidAPIResult<Vec<u8>> {
-        yielding(|| {
-            self.guard
-                .decrypt_aead(body, nonce, shared_secret, associated_data)
+        associated_data: Option<Bytes>,
+    ) -> VeilidAPIResult<Bytes> {
+        let cs = self.guard.clone_arc();
+        let nonce = nonce.clone();
+        let shared_secret = shared_secret.clone();
+        scaled_yielding(body.len(), 1024, 8192, move || {
+            Ok(cs
+                .decrypt_aead(&body, &nonce, &shared_secret, associated_data.as_deref())?
+                .into())
         })
         .await
     }
-
-    pub async fn encrypt_in_place_aead(
+    pub async fn decrypt_in_place_aead(
         &self,
-        body: &mut Vec<u8>,
+        mut body: BytesMut,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
-        associated_data: Option<&[u8]>,
-    ) -> VeilidAPIResult<()> {
-        yielding(|| {
-            self.guard
-                .encrypt_in_place_aead(body, nonce, shared_secret, associated_data)
+        associated_data: Option<Bytes>,
+    ) -> VeilidAPIResult<BytesMut> {
+        let cs = self.guard.clone_arc();
+        let nonce = nonce.clone();
+        let shared_secret = shared_secret.clone();
+        scaled_yielding(body.len(), 1024, 8192, move || {
+            cs.decrypt_in_place_aead(
+                &mut body,
+                &nonce,
+                &shared_secret,
+                associated_data.as_deref(),
+            )?;
+
+            Ok(body)
         })
         .await
     }
 
     pub async fn encrypt_aead(
         &self,
-        body: &[u8],
+        body: Bytes,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
-        associated_data: Option<&[u8]>,
-    ) -> VeilidAPIResult<Vec<u8>> {
-        yielding(|| {
-            self.guard
-                .encrypt_aead(body, nonce, shared_secret, associated_data)
+        associated_data: Option<Bytes>,
+    ) -> VeilidAPIResult<Bytes> {
+        let cs = self.guard.clone_arc();
+        let nonce = nonce.clone();
+        let shared_secret = shared_secret.clone();
+        scaled_yielding(body.len(), 1024, 8192, move || {
+            Ok(cs
+                .encrypt_aead(&body, &nonce, &shared_secret, associated_data.as_deref())?
+                .into())
+        })
+        .await
+    }
+
+    pub async fn encrypt_in_place_aead(
+        &self,
+        mut body: BytesMut,
+        nonce: &Nonce,
+        shared_secret: &SharedSecret,
+        associated_data: Option<Bytes>,
+    ) -> VeilidAPIResult<BytesMut> {
+        let cs = self.guard.clone_arc();
+        let nonce = nonce.clone();
+        let shared_secret = shared_secret.clone();
+        scaled_yielding(body.len(), 1024, 8192, move || {
+            cs.encrypt_in_place_aead(
+                &mut body,
+                &nonce,
+                &shared_secret,
+                associated_data.as_deref(),
+            )?;
+
+            Ok(body)
         })
         .await
     }
 
     // NoAuth Encrypt/Decrypt
-    pub async fn crypt_in_place_no_auth(
+    pub async fn crypt_b2b_no_auth(
         &self,
-        body: &mut [u8],
+        in_buf: Bytes,
+        mut out_buf: BytesMut,
+        out_idx: usize,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
-    ) -> VeilidAPIResult<()> {
-        yielding(|| {
-            self.guard
-                .crypt_in_place_no_auth(body, nonce, shared_secret)
+    ) -> VeilidAPIResult<BytesMut> {
+        let cs = self.guard.clone_arc();
+        let nonce = nonce.clone();
+        let shared_secret = shared_secret.clone();
+        scaled_yielding(in_buf.len(), 1024, 8192, move || {
+            cs.crypt_b2b_no_auth(
+                &in_buf,
+                &mut out_buf[out_idx..out_idx + in_buf.len()],
+                &nonce,
+                &shared_secret,
+            )?;
+            Ok(out_buf)
         })
         .await
     }
 
-    pub async fn crypt_b2b_no_auth(
+    pub async fn crypt_in_place_no_auth(
         &self,
-        in_buf: &[u8],
-        out_buf: &mut [u8],
+        mut body: BytesMut,
+        range: Range<usize>,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
-    ) -> VeilidAPIResult<()> {
-        yielding(|| {
-            self.guard
-                .crypt_b2b_no_auth(in_buf, out_buf, nonce, shared_secret)
+    ) -> VeilidAPIResult<BytesMut> {
+        let cs = self.guard.clone_arc();
+        let nonce = nonce.clone();
+        let shared_secret = shared_secret.clone();
+        scaled_yielding(body.len(), 1024, 8192, move || {
+            cs.crypt_in_place_no_auth(
+                body.as_mut()
+                    .get_mut(range)
+                    .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
+                &nonce,
+                &shared_secret,
+            )?;
+            Ok(body)
         })
         .await
     }
 
     pub async fn crypt_no_auth_aligned_8(
         &self,
-        body: &[u8],
+        body: Bytes,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
     ) -> VeilidAPIResult<Vec<u8>> {
-        yielding(|| {
-            self.guard
-                .crypt_no_auth_aligned_8(body, nonce, shared_secret)
+        let cs = self.guard.clone_arc();
+        let nonce = nonce.clone();
+        let shared_secret = shared_secret.clone();
+        scaled_yielding(body.len(), 1024, 8192, move || {
+            cs.crypt_no_auth_aligned_8(&body, &nonce, &shared_secret)
         })
         .await
     }
 
     pub async fn crypt_no_auth_unaligned(
         &self,
-        body: &[u8],
+        body: Bytes,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
     ) -> VeilidAPIResult<Vec<u8>> {
-        yielding(|| {
-            self.guard
-                .crypt_no_auth_unaligned(body, nonce, shared_secret)
+        let cs = self.guard.clone_arc();
+        let nonce = nonce.clone();
+        let shared_secret = shared_secret.clone();
+        scaled_yielding(body.len(), 1024, 8192, move || {
+            cs.crypt_no_auth_unaligned(&body, &nonce, &shared_secret)
         })
         .await
     }

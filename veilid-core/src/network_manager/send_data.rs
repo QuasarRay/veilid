@@ -17,7 +17,7 @@ impl NetworkManager {
         &self,
         node_ref: NodeRef,
         dial_info: DialInfo,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<SendDataResult>> {
         let unique_flow = network_result_try!(
             pin_future_closure!(self.send_data_ncm_direct(node_ref, dial_info.clone(), data))
@@ -48,7 +48,7 @@ impl NetworkManager {
     pub async fn send_data(
         &self,
         node_ref: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<SendDataResult>> {
         // Get the best way to contact this node
         let mut opt_node_contact_method = self.get_node_contact_method(node_ref.clone())?;
@@ -79,7 +79,11 @@ impl NetworkManager {
                                 Some(NodeContactMethod::InboundRelay { relay_di });
                             continue;
                         }
-                        Some(NodeContactMethod::SignalHolePunch { relay_di }) => {
+                        Some(NodeContactMethod::SignalHolePunch {
+                            relay_di,
+                            hole_punch_di: _,
+                            reverse_hole_punch_di: _,
+                        }) => {
                             // Try again with a different method
                             opt_node_contact_method =
                                 Some(NodeContactMethod::InboundRelay { relay_di });
@@ -136,7 +140,7 @@ impl NetworkManager {
     pub async fn send_inbound_relay_data(
         &self,
         destination_node_ref: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<()> {
         let _ = self
             .send_data_ncm_existing(destination_node_ref, data)
@@ -152,7 +156,7 @@ impl NetworkManager {
         &self,
         opt_node_contact_method: Option<NodeContactMethod>,
         destination_node_ref: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<SendDataResult>> {
         #[cfg(feature = "verbose-tracing")]
         veilid_log!(self debug
@@ -217,10 +221,16 @@ impl NetworkManager {
                     .await?
                 )
             }
-            Some(NodeContactMethod::SignalHolePunch { relay_di }) => {
+            Some(NodeContactMethod::SignalHolePunch {
+                relay_di,
+                hole_punch_di,
+                reverse_hole_punch_di,
+            }) => {
                 network_result_try!(
                     pin_future_closure!(self.send_data_ncm_signal_hole_punch(
                         relay_di.clone(),
+                        hole_punch_di.clone(),
+                        reverse_hole_punch_di.clone(),
                         destination_node_ref.clone(),
                         data.clone()
                     ))
@@ -243,7 +253,7 @@ impl NetworkManager {
     async fn send_data_unreachable(
         &self,
         target_node_ref: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // First try to send data to the last connection we've seen this peer on
         let Some(flow) = target_node_ref.last_flow() else {
@@ -286,7 +296,7 @@ impl NetworkManager {
     async fn send_data_ncm_existing(
         &self,
         target_node_ref: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // First try to send data to the last connection we've seen this peer on
         let Some(flow) = target_node_ref.last_flow() else {
@@ -330,7 +340,7 @@ impl NetworkManager {
         &self,
         relay_di: DialInfo,
         target_node_ref: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // Make a noderef that meets the sequencing requirements
         // But is not protocol-specific, or address-family-specific
@@ -413,8 +423,10 @@ impl NetworkManager {
     async fn send_data_ncm_signal_hole_punch(
         &self,
         relay_di: DialInfo,
+        hole_punch_di: DialInfo,
+        reverse_hole_punch_di: DialInfo,
         target_node_ref: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // Make a noderef that meets the sequencing requirements
         // But is not protocol-specific, or address-family-specific
@@ -477,7 +489,13 @@ impl NetworkManager {
 
         let unique_flow = network_result_try!(
             pin_future!(self
-                .do_hole_punch(relay_di, target_node_ref, data)
+                .do_hole_punch(
+                    relay_di,
+                    hole_punch_di,
+                    reverse_hole_punch_di,
+                    target_node_ref.unfiltered(),
+                    data
+                )
                 .measure_debug(
                     hole_punch_receipt_time,
                     veilid_log_dbg!(
@@ -500,7 +518,7 @@ impl NetworkManager {
         &self,
         node_ref: NodeRef,
         dial_info: DialInfo,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // Since we have the best dial info already, we can find a connection to use by protocol type
         let filtered_node_ref =
@@ -725,8 +743,12 @@ impl NetworkManager {
             ContactMethod::SignalReverse(relay_di) => {
                 Some(NodeContactMethod::SignalReverse { relay_di })
             }
-            ContactMethod::SignalHolePunch(relay_di) => {
-                Some(NodeContactMethod::SignalHolePunch { relay_di })
+            ContactMethod::SignalHolePunch(relay_di, hole_punch_di, reverse_hole_punch_di) => {
+                Some(NodeContactMethod::SignalHolePunch {
+                    relay_di,
+                    hole_punch_di,
+                    reverse_hole_punch_di,
+                })
             }
             ContactMethod::InboundRelay(relay_di) => {
                 Some(NodeContactMethod::InboundRelay { relay_di })
@@ -734,7 +756,7 @@ impl NetworkManager {
             ContactMethod::OutboundRelay(outbound_relay_id) => {
                 // Outbound relays must be in the routing table
                 let mut relay_nr = routing_table
-                    .lookup_and_filter_noderef(
+                    .lookup_node_id_with_filter(
                         outbound_relay_id.clone(),
                         routing_domain.into(),
                         dial_info_filter,
@@ -765,7 +787,7 @@ impl NetworkManager {
         &self,
         relay_di: DialInfo,
         target_nr: NodeRef,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // Detect if network is stopping so we can break out of this
         let Some(stop_token) = self.startup_context.startup_lock.stop_token() else {
@@ -776,7 +798,9 @@ impl NetworkManager {
         let receipt_timeout = TimestampDuration::new_ms(
             self.config().network.reverse_connection_receipt_time_ms as u64,
         );
-        let (receipt, eventual_value) = self.generate_single_shot_receipt(receipt_timeout, [])?;
+        let (receipt, eventual_value) = self
+            .generate_single_shot_receipt(receipt_timeout, Bytes::new())
+            .await?;
 
         // Get relay routing domain
         let Some(routing_domain) = self
@@ -877,24 +901,22 @@ impl NetworkManager {
     async fn do_hole_punch(
         &self,
         relay_di: DialInfo,
-        target_nr: FilteredNodeRef,
-        data: Vec<u8>,
+        hole_punch_di: DialInfo,
+        reverse_hole_punch_di: DialInfo,
+        target_nr: NodeRef,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // Detect if network is stopping so we can break out of this
         let Some(stop_token) = self.startup_context.startup_lock.stop_token() else {
             return Ok(NetworkResult::service_unavailable("network is stopping"));
         };
 
-        // Ensure target is filtered down to UDP (the only hole punch protocol supported today)
-        // Relay can be any protocol because the signal rpc contains the dialinfo to connect over
-        if target_nr.dial_info_filter().protocol_type_set != ProtocolType::UDP {
-            bail!("target noderef for holepunch is not filtered correcty");
-        }
-
         // Build a return receipt for the signal
         let receipt_timeout =
             TimestampDuration::new_ms(self.config().network.hole_punch_receipt_time_ms as u64);
-        let (receipt, eventual_value) = self.generate_single_shot_receipt(receipt_timeout, [])?;
+        let (receipt, eventual_value) = self
+            .generate_single_shot_receipt(receipt_timeout, Bytes::new())
+            .await?;
 
         // Get relay routing domain
         let Some(routing_domain) = self
@@ -915,20 +937,12 @@ impl NetworkManager {
             ));
         };
 
-        // Get the udp direct dialinfo for the hole punch
-        let hole_punch_did = target_nr
-            .first_dial_info_detail()
-            .ok_or_else(|| eyre!("No hole punch capable dialinfo found for node"))?;
-
         // Do our half of the hole punch by sending an empty packet
         // Both sides will do this and then the receipt will get sent over the punched hole
         // Don't bother storing the returned flow as the 'last flow' because the other side of the hole
         // punch should come through and create a real 'last connection' for us if this succeeds
         let net = self.net();
-        network_result_try!(
-            pin_future!(net.send_data_to_dial_info(hole_punch_did.dial_info.clone(), Vec::new()))
-                .await?
-        );
+        network_result_try!(pin_future!(net.send_hole_punch(hole_punch_di.clone())).await?);
 
         // Add small delay to encourage packets to be delivered in order
         sleep(HOLE_PUNCH_DELAY_MS).await;
@@ -936,10 +950,11 @@ impl NetworkManager {
         // Issue the signal
         let rpc = self.rpc_processor();
         network_result_try!(pin_future!(rpc.rpc_call_signal(
-            Destination::relay(relay_di, target_nr.unfiltered()),
+            Destination::relay(relay_di, target_nr.clone()),
             SignalInfo::HolePunch {
                 receipt,
-                peer_info: published_peer_info
+                peer_info: published_peer_info,
+                opt_dial_info: Some(reverse_hole_punch_di),
             },
         ))
         .await
@@ -947,9 +962,7 @@ impl NetworkManager {
 
         // Another hole punch after the signal for UDP redundancy
         let net = self.net();
-        network_result_try!(
-            pin_future!(net.send_data_to_dial_info(hole_punch_did.dial_info, Vec::new())).await?
-        );
+        network_result_try!(pin_future!(net.send_hole_punch(hole_punch_di)).await?);
 
         // Wait for the return receipt
         let inbound_nr = match eventual_value

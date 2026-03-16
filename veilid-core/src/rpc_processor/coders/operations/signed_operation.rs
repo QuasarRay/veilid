@@ -14,12 +14,12 @@ pub(in crate::rpc_processor) struct RPCSigningParams {
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCSignedOperation {
-    operation_data: Vec<u8>,
+    operation_data: Bytes,
     signer_signature: Option<RPCSignerSignature>,
 }
 
 impl RPCSignedOperation {
-    pub fn new(operation_data: Vec<u8>, signer_signature: Option<RPCSignerSignature>) -> Self {
+    pub fn new(operation_data: Bytes, signer_signature: Option<RPCSignerSignature>) -> Self {
         Self {
             operation_data,
             signer_signature,
@@ -27,20 +27,23 @@ impl RPCSignedOperation {
     }
 
     pub async fn sign(
+        crypto: &Crypto,
         operation: &RPCOperation,
         signing_params: Option<RPCSigningParams>,
-        rpc_processor: &RPCProcessor,
     ) -> Result<Self, RPCError> {
         let operation_data = {
             let mut message_builder = ::capnp::message::Builder::new_default();
             let mut builder = message_builder.init_root::<veilid_capnp::operation::Builder>();
             operation.encode(&mut builder)?;
-            canonical_message_builder_to_vec_unpacked(message_builder)?
+            canonical_message_builder_to_bytes_writer_unpacked(message_builder, |size| {
+                BytesWriter::with_capacity(size)
+            })?
+            .into_inner()
+            .freeze()
         };
 
         // Optionally, sign the operation with a signer
         if let Some(signing_params) = signing_params {
-            let crypto = rpc_processor.crypto();
             let Some(vcrypto) = crypto.get_async(signing_params.signer_keypair.kind()) else {
                 return Err(RPCError::protocol("unsupported cryptosystem"));
             };
@@ -53,7 +56,7 @@ impl RPCSignedOperation {
                 .sign(
                     &signing_params.signer_keypair.key(),
                     &signing_params.signer_keypair.secret(),
-                    &signature_data,
+                    signature_data.into(),
                 )
                 .await
                 .map_err(RPCError::protocol)?;
@@ -72,12 +75,11 @@ impl RPCSignedOperation {
 
     pub async fn validate(
         &self,
+        crypto: &Crypto,
         destination_key: PublicKey,
-        rpc_processor: &RPCProcessor,
     ) -> Result<(), RPCError> {
         // Validate the signer signature
         if let Some(signer_signature) = &self.signer_signature {
-            let crypto = rpc_processor.crypto();
             let Some(vcrypto) = crypto.get_async(signer_signature.signer.kind()) else {
                 return Err(RPCError::protocol("unsupported cryptosystem"));
             };
@@ -89,7 +91,7 @@ impl RPCSignedOperation {
             if !vcrypto
                 .verify(
                     &signer_signature.signer,
-                    &signature_data,
+                    signature_data.into(),
                     &signer_signature.signature,
                 )
                 .await
@@ -125,7 +127,7 @@ impl RPCSignedOperation {
         reader: &veilid_capnp::signed_operation::Reader,
     ) -> Result<Self, RPCError> {
         rpc_ignore_missing_property!(reader, operation_data);
-        let operation_data = reader.get_operation_data()?.to_vec();
+        let operation_data = Bytes::copy_from_slice(reader.get_operation_data()?);
 
         if reader.has_signer() {
             let s_reader = reader.get_signer()?;

@@ -63,10 +63,6 @@ impl FilteredNodeRef {
         )
     }
 
-    pub fn locked<'a>(&self, rti: &'a RoutingTableInner) -> LockedFilteredNodeRef<'a> {
-        LockedFilteredNodeRef::new(rti, self.clone())
-    }
-
     pub fn set_filter(&mut self, filter: NodeRefFilter) {
         self.filter = filter
     }
@@ -112,11 +108,11 @@ impl FilteredNodeRef {
         }
         let nr = if let Ok(key) = BareNodeId::from_str(text) {
             routing_table
-                .lookup_any_node_ref(key)
+                .lookup_bare_node_id(key)
                 .map_err(VeilidAPIError::internal)?
         } else if let Ok(node_id) = NodeId::from_str(text) {
             routing_table
-                .lookup_node_ref(node_id)
+                .lookup_node_id(node_id)
                 .map_err(VeilidAPIError::internal)?
         } else {
             apibail_parse_error!(
@@ -172,20 +168,16 @@ impl NodeRefAccessorsTrait for FilteredNodeRef {
 impl NodeRefOperateTrait for FilteredNodeRef {
     fn operate<T, F>(&self, f: F) -> T
     where
-        F: FnOnce(&RoutingTableInner, &BucketEntryInner) -> T,
+        F: FnOnce(&BucketEntryInner) -> T,
     {
-        let routing_table = self.registry.routing_table();
-        let inner = &*routing_table.inner.read();
-        self.entry.with(inner, f)
+        self.entry.with(f)
     }
 
     fn operate_mut<T, F>(&self, f: F) -> T
     where
-        F: FnOnce(&mut RoutingTableInner, &mut BucketEntryInner) -> T,
+        F: FnOnce(&mut BucketEntryInner) -> T,
     {
-        let routing_table = self.registry.routing_table();
-        let inner = &mut *routing_table.inner.write();
-        self.entry.with_mut(inner, f)
+        self.entry.with_mut(f)
     }
 }
 
@@ -208,9 +200,9 @@ impl Clone for FilteredNodeRef {
 
 impl fmt::Display for FilteredNodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let node_id_str = if let Some(best_node_id) = self.entry.with_inner(|e| e.best_node_id()) {
+        let node_id_str = if let Some(best_node_id) = self.entry.with(|e| e.best_node_id()) {
             best_node_id.to_string()
-        } else if let Some(node_id) = self.entry.with_inner(|e| e.node_ids().first().cloned()) {
+        } else if let Some(node_id) = self.entry.with(|e| e.node_ids().first().cloned()) {
             node_id.to_string()
         } else {
             "*ERROR*".to_string()
@@ -237,7 +229,7 @@ impl fmt::Display for FilteredNodeRef {
 impl fmt::Debug for FilteredNodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FilteredNodeRef")
-            .field("node_ids", &self.entry.with_inner(|e| e.node_ids()))
+            .field("node_ids", &self.entry.with(|e| e.node_ids()))
             .field("filter", &self.filter)
             .field("sequencing", &self.sequencing)
             .finish()
@@ -254,8 +246,28 @@ impl Drop for FilteredNodeRef {
         if new_ref_count == 0 {
             // get node ids with inner unlocked because nothing could be referencing this entry now
             // and we don't know when it will get dropped, possibly inside a lock
-            let node_ids = self.entry.with_inner(|e| e.node_ids());
+            // Note: technicall this is a race condition between the entry lock and the ref count
+            // But bucket kicks are only a 'hint' and not worth the synchronization overhead
+            let node_ids = self.entry.with(|e| e.node_ids());
             self.routing_table().queue_bucket_kicks(node_ids);
         }
     }
 }
+
+impl core::hash::Hash for FilteredNodeRef {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.entry).hash(state);
+        self.filter.hash(state);
+        self.sequencing.hash(state);
+    }
+}
+
+impl core::cmp::PartialEq for FilteredNodeRef {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.entry, &other.entry)
+            && self.filter == other.filter
+            && self.sequencing == other.sequencing
+    }
+}
+
+impl core::cmp::Eq for FilteredNodeRef {}

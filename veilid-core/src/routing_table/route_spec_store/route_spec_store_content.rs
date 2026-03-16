@@ -20,35 +20,9 @@ impl RouteSpecStoreContent {
             rsstdb.load_json(0, b"content").await?.unwrap_or_default();
 
         // Look up all route hop noderefs since we can't serialize those
-        let mut dead_ids = Vec::new();
-        for (rsid, rssd) in content.details.iter_mut() {
-            // Get best route since they all should resolve
-            let Some(pk) = rssd.get_best_route_set_key() else {
-                dead_ids.push(rsid.clone());
-                continue;
-            };
-            let Some(rsd) = rssd.get_route_by_key(&pk) else {
-                dead_ids.push(rsid.clone());
-                continue;
-            };
-            // Go through best route and resolve noderefs
-            let mut hop_node_refs = Vec::with_capacity(rsd.hops.len());
-            for h in &rsd.hops {
-                let Ok(Some(nr)) = routing_table.lookup_node_ref(h.clone()) else {
-                    dead_ids.push(rsid.clone());
-                    break;
-                };
-                hop_node_refs.push(nr);
-            }
-
-            // Apply noderefs
-            rssd.set_hop_node_refs(hop_node_refs);
-        }
-
-        for id in dead_ids {
-            veilid_log!(table_store trace "no entry, killing route set: {}", id);
-            content.remove_detail(&id);
-        }
+        content
+            .details
+            .retain(|_, rssd| rssd.prepare(routing_table));
 
         Ok(content)
     }
@@ -84,15 +58,9 @@ impl RouteSpecStoreContent {
     pub fn get_detail(&self, id: &RouteId) -> Option<&RouteSetSpecDetail> {
         self.details.get(id)
     }
-    pub fn get_detail_mut(&mut self, id: &RouteId) -> Option<&mut RouteSetSpecDetail> {
-        self.details.get_mut(id)
-    }
     pub fn get_id_by_key(&self, key: &PublicKey) -> Option<RouteId> {
         self.id_by_key.get(key).cloned()
     }
-    // pub fn iter_ids(&self) -> std::collections::hash_map::Keys<RouteId, RouteSetSpecDetail> {
-    //     self.details.keys()
-    // }
     pub fn iter_details(
         &self,
     ) -> std::collections::hash_map::Iter<'_, RouteId, RouteSetSpecDetail> {
@@ -102,25 +70,25 @@ impl RouteSpecStoreContent {
     /// Clean up local allocated routes
     /// Resets publication status and statistics for when our node info changes
     /// Routes must be republished
-    pub fn reset_details(&mut self) {
-        for v in self.details.values_mut() {
+    pub fn reset_details(&self) {
+        for v in self.details.values() {
             // Must republish route now
             v.set_published(false);
             // Restart stats for routes so we test the route again
-            v.get_stats_mut().reset();
+            v.with_stats_mut(|s| s.reset());
         }
     }
 
     /// Roll transfer statistics
-    pub fn roll_transfers(&mut self, last_ts: Timestamp, cur_ts: Timestamp) {
-        for rssd in self.details.values_mut() {
-            rssd.get_stats_mut().roll_transfers(last_ts, cur_ts);
+    pub fn roll_transfers(&self, last_ts: Timestamp, cur_ts: Timestamp) {
+        for rssd in self.details.values() {
+            rssd.with_stats_mut(|s| s.roll_transfers(last_ts, cur_ts));
         }
     }
     /// Roll answer statistics
-    pub fn roll_answers(&mut self, cur_ts: Timestamp) {
-        for rssd in self.details.values_mut() {
-            rssd.get_stats_mut().roll_answers(cur_ts);
+    pub fn roll_answers(&self, cur_ts: Timestamp) {
+        for rssd in self.details.values() {
+            rssd.with_stats_mut(|s| s.roll_answers(cur_ts));
         }
     }
 }

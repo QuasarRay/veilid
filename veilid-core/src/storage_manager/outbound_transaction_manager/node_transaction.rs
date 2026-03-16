@@ -11,6 +11,9 @@ pub struct NodeTransactionParams {
 /// Transaction per node
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NodeTransaction {
+    /// Registry for logging
+    #[serde(skip)]
+    opt_registry: Option<VeilidComponentRegistry>,
     /// The unique key for this node transaction
     node_xid: NodeTransactionId,
     /// Ref to keep node in routing table
@@ -31,14 +34,22 @@ pub struct NodeTransaction {
     updated_values: BTreeMap<ValueSubkey, Arc<SignedValueData>>,
 }
 
+impl VeilidComponentRegistryAccessor for NodeTransaction {
+    fn registry(&self) -> VeilidComponentRegistry {
+        self.opt_registry.clone().unwrap_or_log()
+    }
+}
+
 impl NodeTransaction {
     pub(super) fn new(
+        registry: VeilidComponentRegistry,
         node_xid: NodeTransactionId,
         node_ref: NodeRef,
         expiration: Timestamp,
     ) -> Self {
         let cur_ts = Timestamp::now();
         Self {
+            opt_registry: Some(registry),
             created_ts: cur_ts,
             stage_ts: cur_ts,
             stage: OutboundTransactionStage::Begin,
@@ -58,9 +69,10 @@ impl NodeTransaction {
         } else {
             return false;
         }
-        let Some(node_ref) = routing_table.lookup_node_ref(self.node_id()).ok().flatten() else {
+        let Some(node_ref) = routing_table.lookup_node_id(self.node_id()).ok().flatten() else {
             return false;
         };
+        self.opt_registry = Some(routing_table.registry());
         self.node_ref = Some(node_ref);
         true
     }
@@ -147,6 +159,31 @@ impl NodeTransaction {
             if updated_seq > opt_current_seq {
                 return true;
             }
+        }
+        #[cfg(feature = "verbose-tracing")]
+        {
+            let subkey_summary = self
+                .updated_values
+                .iter()
+                .map(|(subkey, updated_value)| {
+                    let updated_seq = updated_value.value_data().seq();
+                    let opt_current_seq = self
+                        .current_values
+                        .get(subkey)
+                        .and_then(|v| v.as_ref().map(|x| x.value_data().seq()));
+                    format!(
+                        "#{}:updated={},current={}",
+                        subkey,
+                        updated_seq,
+                        opt_current_seq
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| "None".to_string())
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            veilid_log!(self debug target: "dht", "commit_will_change_remote: node={} → false subkeys=[{}]",
+                self.node_xid, subkey_summary);
         }
         false
     }

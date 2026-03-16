@@ -16,7 +16,7 @@ use lazy_static::*;
 lazy_static! {
     static ref SYSTEM: sysinfo::System = {
         sysinfo::System::new_with_specifics(
-            sysinfo::RefreshKind::new().with_memory(sysinfo::MemoryRefreshKind::everything()),
+            sysinfo::RefreshKind::nothing().with_memory(sysinfo::MemoryRefreshKind::everything()),
         )
     };
     static ref DISKS: sysinfo::Disks = {

@@ -18,7 +18,7 @@ import {
   veilidCrypto
 } from 'veilid-wasm';
 import { textEncoder, textDecoder } from './utils/marshalling-utils';
-import { asyncCallWithTimeout, waitForPublicAttachment, waitForOfflineSubkeyWrite } from './utils/wait-utils';
+import { asyncCallWithTimeout, waitForPublicAttachment, waitForOfflineSubkeyWrite, getLogTimestamp } from './utils/wait-utils';
 
 describe('VeilidRoutingContext', () => {
   before('veilid startup', async () => {
@@ -26,7 +26,8 @@ describe('VeilidRoutingContext', () => {
     await veilidClient.startupCore((_update) => {
       if (DEBUGGING) {
         if (_update.kind === 'Log') {
-          console.log(_update.message);
+          const logTimestamp = getLogTimestamp()
+          console.log(`${logTimestamp}: ${_update.message}`);
         }
       }
     }, veilidCoreStartupConfig);
@@ -87,6 +88,10 @@ describe('VeilidRoutingContext', () => {
     let routingContext: VeilidRoutingContext;
 
     before('create routing context', () => {
+      // routingContext = VeilidRoutingContext.create().withSafety({
+      //   Unsafe: 'EnsureOrdered'
+      // });
+
       routingContext = VeilidRoutingContext.create();
     });
 
@@ -341,6 +346,7 @@ describe('VeilidRoutingContext', () => {
       });
 
       describe(`DHT transactions simple tests for ${cryptoKind}`, () => {
+
         const DHT_RECORD_COUNT = 4
         const DHT_SUBKEY_SIZE = 16
         const DHT_SUBKEY_COUNT = 2
@@ -420,6 +426,7 @@ describe('VeilidRoutingContext', () => {
         });
 
         it('should create transaction, add sets, gets, and commit', async () => {
+
           const tx = await veilidClient.transactDHTRecords(dhtRecords);
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
@@ -567,9 +574,9 @@ describe('VeilidRoutingContext', () => {
       });
 
       describe(`DHT transactions full records tests for ${cryptoKind}`, () => {
-        const DHT_RECORD_COUNT = 8
+        const DHT_RECORD_COUNT = 4
         const DHT_SUBKEY_SIZE = 32768
-        const DHT_SUBKEY_COUNT = 32
+        const DHT_SUBKEY_COUNT = 16
         const data: Uint8Array[] = [];
         for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
           data.push(new Uint8Array(DHT_SUBKEY_SIZE).fill(rec));

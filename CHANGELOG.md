@@ -2,6 +2,42 @@
 
 - veilid-core:
   - Improved DHT transactions speed and reliability
+  - Switched to using the `bytes` crate internally for network code, closes [#414](https://gitlab.com/veilid/veilid/-/issues/414)
+  - 'PublicInternet Ready' state now requires a complete bootstrap when cold-starting. Fixes connectivity problems for fresh nodes.
+  - Bootstrap now uses wide search for nodes as well as closest peers search
+  - Crypto improvements
+    - Crypto moved to thread pool on native platforms
+    - Crypto in-place encrypt/signing
+  - Routing table improvements
+    - Route compilation cache made more efficient
+    - Refactored to use more granular locking
+    - Prefer relay-capable last hop for route allocation
+    - Add two-pass route allocation to the route allocation system
+    - Implemented entry snapshots to eliminate race conditions and sort ordering problems
+  - Routing table ping validator improvements
+    - Replace polling ticktask with a channel-driven background processor
+    - Add priority groups 
+    - Add callback chains to enable multi-step route testing
+  - RPC processor improvements
+    - Add per-destination lost answer tracking
+    - Fix a bug where we were counting lost answers multiple time to the same route
+  - Storage manager improvements
+    - Early consensus exit optimization for transactions
+    - Transaction management tuning
+  - NetworkManger improvements
+    - ConnectionTable fix for connection inactivity timeout
+
+- veilid-tools:
+  - Added synchronous TagLock
+  - Removed HashAtom
+  - Removed MutableFuture
+
+- veilid-server:
+  - OpenTelemetry disabled for async-std build as we move toward deprecation
+
+- veilid-flutter:
+  - OpenTelemetry disabled for async-std build as we move toward deprecation
+
 
 **Changed in Veilid 0.5.2**
 

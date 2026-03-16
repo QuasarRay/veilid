@@ -48,6 +48,11 @@ where
     hasher.update(get_desired_capnp_version_string().as_bytes());
     let capnp_hash = hasher.finalize().to_vec();
 
+    if !std::fs::exists(&input).unwrap() {
+        println!("cargo:warning=Capnp file is missing, rebuilding.");
+        return Ok(true);
+    }
+
     let in_bh = make_build_hash(input);
 
     if out_bh != in_bh {

@@ -10,9 +10,13 @@ impl RPCOperationCancelTunnelQ {
     pub fn new(id: TunnelId) -> Self {
         Self { id }
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn id(&self) -> TunnelId {
         self.id
@@ -55,9 +59,11 @@ impl RPCOperationCancelTunnelA {
     pub fn new_error(error: TunnelError) -> Self {
         Self::Error(error)
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
+
     pub fn decode(
         reader: &veilid_capnp::operation_cancel_tunnel_a::Reader,
     ) -> Result<Self, RPCError> {

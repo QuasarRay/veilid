@@ -99,6 +99,9 @@ impl StorageManager {
         // Resolve options
         let options = options.unwrap_or_default();
         let required_strict_consensus_count = self.config().network.dht.set_value_count as usize;
+        let required_get_consensus_count = self.config().network.dht.get_value_count as usize;
+        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+        let consensus_width = self.config().network.dht.consensus_width as usize;
 
         // Get opened records and construct record states
         let (transaction_handle, begin_params_list) = {
@@ -137,6 +140,7 @@ impl StorageManager {
                     record_key,
                     signing_keypair,
                     required_strict_consensus_count,
+                    required_get_consensus_count,
                     safety_selection,
                 });
             }
@@ -165,25 +169,64 @@ impl StorageManager {
         };
 
         self.rollback_guard_locked(&records_lock, transaction_handle.clone(), async {
-            // Send outbound begin transactions on all records over the network
+            // Snapshot local valuedata for transaction before beginning fanouts
+            self.save_local_snapshot(transaction_handle.clone()).await?;
+
+            let mut opt_begin_error: Option<VeilidAPIError> = None;
             let mut unord = FuturesUnordered::new();
+
+            // Send outbound begin transactions on pending records
             for begin_params in begin_params_list {
-                let fut = self.outbound_transact_begin(begin_params).measure_debug(
-                    TimestampDuration::new_secs(5),
-                    veilid_log_dbg!(
-                        self,
-                        "StorageManager::begin_transaction outbound_transact_begin"
-                    ),
-                );
-                unord.push(fut);
+                let registry = self.registry();
+                unord.push(Box::pin(async move {
+                    let this = registry.storage_manager();
+                    this.outbound_transact_begin(begin_params)
+                        .measure_debug(
+                            rpc_timeout,
+                            veilid_log_dbg!(
+                                this,
+                                "StorageManager::begin_transaction outbound_transact_begin"
+                            ),
+                        )
+                        .await
+                }));
             }
-            let mut results = vec![];
-            let mut opt_begin_error = None;
+
+            let mut begin_results = vec![];
             while let Some(res) = unord.next().await {
                 match res {
-                    Ok(v) => {
-                        //
-                        results.push(v);
+                    Ok(result) => {
+                        // Process fanout results for cache regardless of consensus
+                        let subkey_count = result.descriptor.schema()?.subkey_count();
+                        if result.seqs.len() != subkey_count
+                            && !result.fanout_result.value_nodes.is_empty()
+                        {
+                            apibail_internal!(
+                                "seqs returned does not match subkey count: {} != {}: {:?}",
+                                result.seqs.len(),
+                                subkey_count,
+                                result
+                            );
+                        }
+                        let max_subkey = result.descriptor.schema()?.max_subkey();
+
+                        let existed = self.process_fanout_results(
+                            result.params.opaque_record_key.clone(),
+                            core::iter::once((
+                                ValueSubkeyRangeSet::single_range(0, max_subkey),
+                                result.fanout_result.clone(),
+                            )),
+                            false,
+                            consensus_width,
+                        )?;
+                        if !existed {
+                            apibail_internal!(
+                                "Record went missing during transaction despite lock: {}",
+                                result.params.opaque_record_key
+                            );
+                        }
+
+                        begin_results.push(result);
                     }
                     Err(e) => {
                         veilid_log!(self debug "error in outbound_transact_begin: {}", e);
@@ -194,87 +237,11 @@ impl StorageManager {
                 }
             }
 
-            // Snapshot local valuedata for transaction
-            let local_record_store = self.get_local_record_store()?;
-
-            let local_snapshots = {
-                let mut local_snapshot_locks = vec![];
-                for opaque_record_key in transaction_handle.keys() {
-                    local_snapshot_locks.push(
-                        local_record_store
-                            .prepare_snapshot_lock(opaque_record_key.clone())
-                            .await,
-                    );
-                }
-
-                let mut local_snapshots = vec![];
-                for local_snapshot_lock in local_snapshot_locks {
-                    if let Some(local_snapshot) = local_record_store
-                        .snapshot_record_locked(&local_snapshot_lock)
-                        .await?
-                    {
-                        local_snapshots.push((local_snapshot_lock.record(), local_snapshot));
-                    }
-                }
-                local_snapshots
-            };
-
-            {
-                let mut inner = self.inner.lock();
-                let transaction_state = inner
-                    .outbound_transaction_manager
-                    .get_transaction_state_mut(&transaction_handle)?;
-
-                for (opaque_record_key, local_snapshot) in local_snapshots {
-                    let record_state = transaction_state
-                        .get_record_state_mut(&opaque_record_key)
-                        .ok_or_else(|| {
-                        VeilidAPIError::internal(format!(
-                            "missing record state: {}",
-                            opaque_record_key
-                        ))
-                    })?;
-
-                    record_state.set_local_snapshot(local_snapshot);
-                }
-            }
-
-            // Keep the list of nodes that returned a value for later reference
-            for result in &results {
-                let subkey_count = result.descriptor.schema()?.subkey_count();
-                if result.seqs.len() != subkey_count && !result.fanout_result.value_nodes.is_empty()
-                {
-                    apibail_internal!(
-                        "seqs returned does not match subkey count: {} != {}: {:?}",
-                        result.seqs.len(),
-                        subkey_count,
-                        result
-                    );
-                }
-                let max_subkey = result.descriptor.schema()?.max_subkey();
-
-                let existed = self.process_fanout_results(
-                    result.opaque_record_key.clone(),
-                    core::iter::once((
-                        ValueSubkeyRangeSet::single_range(0, max_subkey),
-                        result.fanout_result.clone(),
-                    )),
-                    false,
-                    self.config().network.dht.consensus_width as usize,
-                )?;
-                if !existed {
-                    apibail_internal!(
-                        "Record went missing during transaction despite lock: {}",
-                        result.opaque_record_key
-                    );
-                }
-            }
-
             if let Err(e) = self
                 .inner
                 .lock()
                 .outbound_transaction_manager
-                .record_transact_begin_results(transaction_handle.clone(), results)
+                .record_transact_begin_results(begin_results)
             {
                 veilid_log!(self debug "error in record_transact_begin_results: {}", e);
                 if opt_begin_error.is_none() {
@@ -287,10 +254,65 @@ impl StorageManager {
                 return Err(begin_error);
             }
 
+            // Lock safety routes to prevent invalidation during the transaction
+            self.lock_transaction_safety_routes(&transaction_handle);
+
             // Otherwise return handle
             Ok(transaction_handle)
         })
         .await
+    }
+
+    /// Save the local snapshot for a new transaction
+    async fn save_local_snapshot(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+    ) -> VeilidAPIResult<()> {
+        let local_record_store = self.get_local_record_store()?;
+
+        let local_snapshots = {
+            let mut local_snapshot_locks = vec![];
+            for opaque_record_key in transaction_handle.keys() {
+                local_snapshot_locks.push(
+                    local_record_store
+                        .prepare_snapshot_lock(opaque_record_key.clone())
+                        .await,
+                );
+            }
+
+            let mut local_snapshots = vec![];
+            for local_snapshot_lock in local_snapshot_locks {
+                if let Some(local_snapshot) = local_record_store
+                    .snapshot_record_locked(&local_snapshot_lock)
+                    .await?
+                {
+                    local_snapshots.push((local_snapshot_lock.record(), local_snapshot));
+                }
+            }
+            local_snapshots
+        };
+
+        {
+            let mut inner = self.inner.lock();
+            let transaction_state = inner
+                .outbound_transaction_manager
+                .get_transaction_state_mut(&transaction_handle)?;
+
+            for (opaque_record_key, local_snapshot) in local_snapshots {
+                let record_state = transaction_state
+                    .get_record_state_mut(&opaque_record_key)
+                    .ok_or_else(|| {
+                        VeilidAPIError::internal(format!(
+                            "missing record state: {}",
+                            opaque_record_key
+                        ))
+                    })?;
+
+                record_state.set_local_snapshot(local_snapshot);
+            }
+        }
+
+        Ok(())
     }
 
     /// Finalize a transaction over a set of records
@@ -366,13 +388,20 @@ impl StorageManager {
                         })?
                 };
 
-                // End transactions on all records
+                // Cancel all scheduled keepalives (sync); marks transaction cancelled so no new Gets are enqueued.
+                self.outbound_transaction_keepalive_processor
+                    .unregister(transaction_handle.clone());
+
+                let rpc_timeout =
+                    TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+
+                // End transactions on all records.
                 let mut unord = FuturesUnordered::new();
                 for command_params in command_params_list {
                     let fut = self
                         .outbound_transact_command(command_params)
                         .measure_debug(
-                            TimestampDuration::new_secs(5),
+                            rpc_timeout,
                             veilid_log_dbg!(
                                 self,
                                 "StorageManager::end_transaction_locked outbound_transact_command"
@@ -451,13 +480,16 @@ impl StorageManager {
                     })?
                 };
 
+                let rpc_timeout =
+                    TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+
                 // Commit transactions on all records
                 let mut unord = FuturesUnordered::new();
                 for command_params in command_params_list {
                     let fut = self
                         .outbound_transact_command(command_params)
                         .measure_debug(
-                            TimestampDuration::new_secs(5),
+                            rpc_timeout,
                             veilid_log_dbg!(
                             self,
                             "StorageManager::commit_transaction_locked outbound_transact_command"
@@ -518,7 +550,7 @@ impl StorageManager {
         records_lock: &StorageManagerRecordsLockGuard,
         transaction_handle: OutboundTransactionHandle,
     ) {
-        let (keys_and_subkeys, background_tokens) = {
+        let (keys_and_subkeys, cleanup) = {
             let mut inner = self.inner.lock();
 
             let Some(transaction_state) = inner
@@ -540,14 +572,26 @@ impl StorageManager {
                     }
                 };
 
+                #[cfg(feature = "verbose-tracing")]
+                {
+                    veilid_log!(self debug "Flush commit for handle={} record={}: {} subkeys to write locally",
+                        transaction_handle,
+                        opaque_record_key,
+                        local_commit_results.len()
+                    );
+                    for (subkey, svd) in &local_commit_results {
+                        veilid_log!(self debug "  subkey {} seq={}", subkey, svd.value_data().seq());
+                    }
+                }
                 keys_and_subkeys.push((opaque_record_key, local_commit_results));
             }
 
-            (keys_and_subkeys, transaction_state.into_background_tokens())
+            let cleanup = transaction_state.into_transaction_cleanup(transaction_handle.clone());
+            (keys_and_subkeys, cleanup)
         };
 
-        // Wait for all background operations to finish on the transaction
-        Self::wait_for_background_tokens(background_tokens).await;
+        // Unlock safety routes and wait for background operations to finish
+        self.process_transaction_cleanup(cleanup).await;
 
         // Record the set values locally since they were successfully set online
         if let Err(e) = self
@@ -629,13 +673,15 @@ impl StorageManager {
                 })?
         };
 
+        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+
         // Rollback transactions on all records
         let mut unord = FuturesUnordered::new();
         for command_params in command_params_list {
             let fut = self
                 .outbound_transact_command(command_params)
                 .measure_debug(
-                    TimestampDuration::new_secs(5),
+                    rpc_timeout,
                     veilid_log_dbg!(
                         self,
                         "StorageManager::rollback_transaction_locked outbound_transact_command"
@@ -695,12 +741,18 @@ impl StorageManager {
             apibail_not_initialized!();
         };
 
+        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+
         let _subkey_lock = self
             .record_lock_table
             .lock_subkey(
                 record_key.opaque(),
                 subkey,
                 StorageManagerSubkeyLockPurpose::TransactGet,
+            )
+            .measure_debug(
+                TimestampDuration::new_ms(200),
+                veilid_log_dbg!(self, "StorageManager::transaction_get lock_subkey"),
             )
             .await;
 
@@ -728,13 +780,22 @@ impl StorageManager {
         };
 
         // Wait for concurrency semaphore
-        let sem = concurrency_semaphore.acquire().await;
+        let sem = concurrency_semaphore
+            .acquire()
+            .measure_debug(
+                TimestampDuration::new_ms(200),
+                veilid_log_dbg!(
+                    self,
+                    "StorageManager::transaction_get concurrency semaphore"
+                ),
+            )
+            .await;
 
         // Send all get commands
         let result = self
             .outbound_transact_command(command_params)
             .measure_debug(
-                TimestampDuration::new_secs(5),
+                rpc_timeout,
                 veilid_log_dbg!(
                     self,
                     "StorageManager::transaction_get outbound_transact_command"
@@ -773,8 +834,9 @@ impl StorageManager {
             // No value
             return Ok(None);
         };
-        let get_value_data =
-            self.maybe_decrypt_value_data(&record_key, get_signed_value_data.value_data())?;
+        let get_value_data = self
+            .maybe_decrypt_value_data(&record_key, get_signed_value_data.value_data())
+            .await?;
 
         // Return the value we got
         Ok(Some(get_value_data))
@@ -791,9 +853,19 @@ impl StorageManager {
         data: Vec<u8>,
         options: Option<DHTTransactionSetValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
+        #[cfg(feature = "verbose-tracing")]
+        let set_start = {
+            veilid_log!(self debug "transaction_set enter: handle={} key={} subkey={}",
+                transaction_handle, record_key.opaque(), subkey,
+            );
+            Timestamp::now()
+        };
+
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
         };
+
+        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
 
         let _subkey_lock = self
             .record_lock_table
@@ -801,6 +873,10 @@ impl StorageManager {
                 record_key.opaque(),
                 subkey,
                 StorageManagerSubkeyLockPurpose::TransactSet,
+            )
+            .measure_debug(
+                TimestampDuration::new_ms(200),
+                veilid_log_dbg!(self, "StorageManager::transaction_set lock_subkey"),
             )
             .await;
 
@@ -812,46 +888,53 @@ impl StorageManager {
         }
 
         let (concurrency_semaphore, command_params) = {
-            let inner = &mut *self.inner.lock();
-            let otm = &mut inner.outbound_transaction_manager;
-            let concurrency_semaphore = otm
-                .get_transaction_state(&transaction_handle)?
-                .get_operation_concurrency_semaphore();
+            let (concurrency_semaphore, writer, last_get_result) = {
+                let inner = &*self.inner.lock();
+                let otm = &inner.outbound_transaction_manager;
+                let concurrency_semaphore = otm
+                    .get_transaction_state(&transaction_handle)?
+                    .get_operation_concurrency_semaphore();
 
-            // Get last known value for this subkey from the transaction
-            let last_get_result = {
-                let outbound_transaction_state = otm.get_transaction_state(&transaction_handle)?;
-                let record_state = outbound_transaction_state
-                    .get_record_state(&opaque_record_key)
-                    .ok_or_else(|| VeilidAPIError::internal("missing record state"))?;
+                // Get last known value for this subkey from the transaction
+                let last_get_result = {
+                    let outbound_transaction_state =
+                        otm.get_transaction_state(&transaction_handle)?;
+                    let record_state = outbound_transaction_state
+                        .get_record_state(&opaque_record_key)
+                        .ok_or_else(|| VeilidAPIError::internal("missing record state"))?;
 
-                record_state.current_subkey_get_result(subkey)?
-            };
-
-            // Use the specified writer, or if not specified, the default writer when the record was opened
-            let opt_writer = {
-                let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
-                    apibail_generic!("record not open");
+                    record_state.current_subkey_get_result(subkey)?
                 };
-                opened_record.writer().cloned()
-            };
-            let opt_writer = options
-                .as_ref()
-                .and_then(|o| o.writer.clone())
-                .or(opt_writer);
 
-            // If we don't have a writer then we can't write
-            let Some(writer) = opt_writer else {
-                apibail_generic!("value is not writable");
+                // Use the specified writer, or if not specified, the default writer when the record was opened
+                let opt_writer = {
+                    let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
+                        apibail_generic!("record not open");
+                    };
+                    opened_record.writer().cloned()
+                };
+                let opt_writer = options
+                    .as_ref()
+                    .and_then(|o| o.writer.clone())
+                    .or(opt_writer);
+
+                // If we don't have a writer then we can't write
+                let Some(writer) = opt_writer else {
+                    apibail_generic!("value is not writable");
+                };
+                (concurrency_semaphore, writer, last_get_result)
             };
 
             // Make signed value data (encrypted) and value data (unencrypted) and get descriptor for this value
-            let (signed_value_data, _, _) =
-                self.prepare_set_value_data(&record_key, subkey, data, &writer, last_get_result)?;
+            let (signed_value_data, _, _) = self
+                .prepare_set_value_data(&record_key, subkey, data, &writer, last_get_result)
+                .await?;
 
             // Prepare for set value
-            let command_params = otm
-                .prepare_transact_set_params(
+            let command_params = {
+                let inner = &mut *self.inner.lock();
+                let otm = &mut inner.outbound_transaction_manager;
+                otm.prepare_transact_set_params(
                     transaction_handle.clone(),
                     &opaque_record_key,
                     subkey,
@@ -859,19 +942,29 @@ impl StorageManager {
                 )
                 .inspect_err(|e| {
                     veilid_log!(self debug "error in prepare_transact_set_params: {}", e);
-                })?;
+                })?
+            };
 
             (concurrency_semaphore, command_params)
         };
 
         // Wait for concurrency semaphore
-        let sem = concurrency_semaphore.acquire().await;
+        let sem = concurrency_semaphore
+            .acquire()
+            .measure_debug(
+                TimestampDuration::new_ms(200),
+                veilid_log_dbg!(
+                    self,
+                    "StorageManager::transaction_set concurrency semaphore"
+                ),
+            )
+            .await;
 
         // Send all set commands
         let result = self
             .outbound_transact_command(command_params)
             .measure_debug(
-                TimestampDuration::new_secs(5),
+                rpc_timeout,
                 veilid_log_dbg!(
                     self,
                     "StorageManager::transaction_set outbound_transact_command"
@@ -909,15 +1002,32 @@ impl StorageManager {
             if let Some(updated_consensus) = record_state.updated_consensus().get(subkey) {
                 // There is an updated value after we did the set
 
-                // Ensure the updated consensus meets the strict consensus requirement
-                if updated_consensus.strict_consensus_count
-                    < record_state.required_strict_consensus_count()
-                {
+                // Ensure the updated consensus meets the strict consensus requirement.
+                let required = record_state.required_strict_consensus_count();
+                if updated_consensus.strict_consensus_count < required {
                     // Otherwise, ask the app to try the set again to continue to attempt consensus
+                    #[cfg(feature = "verbose-tracing")]
+                    {
+                        let set_elapsed = Timestamp::now().duration_since(set_start);
+                        veilid_log!(self debug "transaction_set FAILED consensus: handle={} key={} subkey={} strict_count={} required={} updated_consensus={:?} elapsed={}",
+                            transaction_handle, record_key.opaque(), subkey,
+                            updated_consensus.strict_consensus_count,
+                            required,
+                            updated_consensus,
+                            set_elapsed,
+                        );
+                    }
                     apibail_try_again!("set did not reach consensus");
                 }
 
                 // Return that the set updated with consensus successfully
+                #[cfg(feature = "verbose-tracing")]
+                {
+                    let set_elapsed = Timestamp::now().duration_since(set_start);
+                    veilid_log!(self debug "transaction_set OK: handle={} key={} subkey={} elapsed={}",
+                        transaction_handle, record_key.opaque(), subkey, set_elapsed,
+                    );
+                }
                 return Ok(None);
             };
 
@@ -943,10 +1053,18 @@ impl StorageManager {
                 record_key.opaque()
             );
         };
-        let current_value_data =
-            self.maybe_decrypt_value_data(&record_key, current_signed_value_data.value_data())?;
+        let current_value_data = self
+            .maybe_decrypt_value_data(&record_key, current_signed_value_data.value_data())
+            .await?;
 
         // Return that a newer or different value was found online
+        #[cfg(feature = "verbose-tracing")]
+        {
+            let set_elapsed = Timestamp::now().duration_since(set_start);
+            veilid_log!(self debug "transaction_set NEWER_VALUE: handle={} key={} subkey={} elapsed={}",
+                transaction_handle, record_key.opaque(), subkey, set_elapsed,
+            );
+        }
         Ok(Some(current_value_data))
     }
 
@@ -977,7 +1095,7 @@ impl StorageManager {
         )
     }
 
-    /// Background rollback function used to remove nodes from a transactioni
+    /// Background rollback function used to remove nodes from a transaction
     /// and speculatively issue rollback RPCs to them to help them release their server
     /// side transactions early. Runs detached in the background as we never care about
     /// the result.
@@ -1028,6 +1146,7 @@ impl StorageManager {
         };
 
         // Process background rollbacks -third-
+        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
         let registry = self.registry();
         let background_rollback_fut = async move {
             let this = registry.storage_manager();
@@ -1038,7 +1157,7 @@ impl StorageManager {
                 let fut = this
                     .outbound_transact_command(command_params)
                     .measure_debug(
-                        TimestampDuration::new_secs(5),
+                        rpc_timeout,
                         veilid_log_dbg!(
                             this,
                             "StorageManager::partial_drop_and_background_rollback_locked outbound_transact_command"
@@ -1104,7 +1223,7 @@ impl StorageManager {
     ) -> VeilidAPIResult<V> {
         let res = future.await;
 
-        let mut opt_background_tokens = None;
+        let mut opt_cleanup = None;
 
         let out = match res {
             Ok(v) => {
@@ -1113,7 +1232,7 @@ impl StorageManager {
                     records_lock,
                     transaction_handle,
                     v,
-                    &mut opt_background_tokens,
+                    &mut opt_cleanup,
                 )
             }
             Err(e) => {
@@ -1135,9 +1254,9 @@ impl StorageManager {
             }
         };
 
-        // If we have to wait for some background operations, do that before returning
-        if let Some(background_tokens) = opt_background_tokens {
-            Self::wait_for_background_tokens(background_tokens).await;
+        // If we have cleanup to do, process it
+        if let Some(cleanup) = opt_cleanup {
+            self.process_transaction_cleanup(cleanup).await;
         }
 
         out
@@ -1145,13 +1264,13 @@ impl StorageManager {
 
     // Process stage consensus operations
     // Returns either the value or an error if consensus operations could not be performed
-    // Also returns a list of background tokens to wait for through the mutable reference parameter
+    // Also returns cleanup to process through the mutable reference parameter
     fn rollback_guard_locked_success<V>(
         &self,
         records_lock: &StorageManagerRecordsLockGuard,
         transaction_handle: OutboundTransactionHandle,
         value: V,
-        opt_background_tokens: &mut Option<Vec<StopToken>>,
+        opt_cleanup: &mut Option<TransactionCleanup>,
     ) -> VeilidAPIResult<V> {
         let stage_consensus = {
             let mut inner = self.inner.lock();
@@ -1163,11 +1282,13 @@ impl StorageManager {
                 Err(e) => {
                     veilid_log!(self debug "Error getting transaction state in guard: {}", e);
 
-                    // Drop the transaction and return background tasks to complete if any
-                    *opt_background_tokens = inner
+                    // Drop the transaction and return cleanup to process
+                    if let Some(state) = inner
                         .outbound_transaction_manager
-                        .drop_transaction(transaction_handle)
-                        .map(|x| x.into_background_tokens());
+                        .drop_transaction(transaction_handle.clone())
+                    {
+                        *opt_cleanup = Some(state.into_transaction_cleanup(transaction_handle));
+                    }
 
                     return Err(e);
                 }
@@ -1185,7 +1306,9 @@ impl StorageManager {
 
         let rollback_ids = stage_consensus.per_record_node_xids_to_rollback;
         let drop_ids = stage_consensus.per_record_node_xids_to_drop;
-        if !rollback_ids.is_empty() {
+        if rollback_ids.iter().any(|(_, xids)| !xids.is_empty())
+            || drop_ids.iter().any(|(_, xids)| !xids.is_empty())
+        {
             // Perform partial speculative rollback and drop from transaction
             if let Err(e) = self.partial_drop_and_background_rollback_locked(
                 records_lock,
@@ -1195,18 +1318,89 @@ impl StorageManager {
             ) {
                 veilid_log!(self debug "Error in partial drop and roll back transaction: {}", e);
 
-                // Drop the transaction and wait for background tasks to complete if any
-                let mut inner = self.inner.lock();
-                *opt_background_tokens = inner
+                // Drop the transaction and return cleanup to process
+                if let Some(state) = self
+                    .inner
+                    .lock()
                     .outbound_transaction_manager
-                    .drop_transaction(transaction_handle)
-                    .map(|x| x.into_background_tokens());
+                    .drop_transaction(transaction_handle.clone())
+                {
+                    *opt_cleanup = Some(state.into_transaction_cleanup(transaction_handle));
+                }
 
                 return Err(e);
             }
         }
 
         Ok(value)
+    }
+
+    /// Lock safety routes used by a transaction to prevent invalidation during the transaction
+    fn lock_transaction_safety_routes(&self, transaction_handle: &OutboundTransactionHandle) {
+        let routing_table = self.network_manager().routing_table();
+        let rss = routing_table.route_spec_store();
+
+        // Collect safety selections from all records in the transaction
+        let safety_selections: Vec<SafetySelection> = {
+            let inner = self.inner.lock();
+            let Ok(state) = inner
+                .outbound_transaction_manager
+                .get_transaction_state(transaction_handle)
+            else {
+                return;
+            };
+            state
+                .get_record_states()
+                .iter()
+                .map(|r| r.safety_selection().clone())
+                .collect()
+        };
+
+        // Find and lock the safety routes
+        let mut locked_safety_routes = LockedSafetyRoutes::new();
+        for ss in &safety_selections {
+            for key in rss.get_safety_route_keys_for_selection(ss) {
+                rss.lock_route(&key);
+                locked_safety_routes.insert(key);
+            }
+        }
+
+        // Store the locked routes in the transaction state for later unlock
+        if !locked_safety_routes.is_empty() {
+            let mut inner = self.inner.lock();
+            if let Ok(state) = inner
+                .outbound_transaction_manager
+                .get_transaction_state_mut(transaction_handle)
+            {
+                state.add_locked_safety_routes(locked_safety_routes);
+            }
+        }
+    }
+
+    /// Unlock safety routes that were locked for a transaction
+    fn unlock_safety_routes(&self, locked_safety_routes: LockedSafetyRoutes) {
+        if locked_safety_routes.is_empty() {
+            return;
+        }
+        let routing_table = self.network_manager().routing_table();
+        let rss = routing_table.route_spec_store();
+        for (key, count) in locked_safety_routes.into_iter() {
+            for _ in 0..count {
+                rss.unlock_route_and_check(&key);
+            }
+        }
+    }
+
+    /// Process transaction cleanup: unregister keepalives, unlock safety routes, and wait for background tokens
+    pub(super) async fn process_transaction_cleanup(&self, cleanup: TransactionCleanup) {
+        self.outbound_transaction_keepalive_processor
+            .unregister(cleanup.transaction_handle.clone());
+        self.outbound_transaction_keepalive_processor
+            .cleanup_transaction(cleanup.transaction_handle);
+        self.unlock_safety_routes(cleanup.locked_safety_routes);
+        if !cleanup.background_tokens.is_empty() {
+            Self::wait_for_background_tokens(cleanup.background_tokens).await;
+        }
     }
 
     /// Wait for a list of background tokens to drop
@@ -1220,14 +1414,15 @@ impl StorageManager {
         &self,
         transaction_handle: OutboundTransactionHandle,
     ) {
-        let opt_background_tokens = self
-            .inner
-            .lock()
-            .outbound_transaction_manager
-            .drop_transaction(transaction_handle)
-            .map(|x| x.into_background_tokens());
-        if let Some(background_tokens) = opt_background_tokens {
-            Self::wait_for_background_tokens(background_tokens).await;
+        let opt_cleanup = {
+            let mut inner = self.inner.lock();
+            inner
+                .outbound_transaction_manager
+                .drop_transaction(transaction_handle.clone())
+                .map(|state| state.into_transaction_cleanup(transaction_handle))
+        };
+        if let Some(cleanup) = opt_cleanup {
+            self.process_transaction_cleanup(cleanup).await;
         }
     }
 

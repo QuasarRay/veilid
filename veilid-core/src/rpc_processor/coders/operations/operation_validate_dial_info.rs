@@ -3,12 +3,12 @@ use super::*;
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationValidateDialInfo {
     dial_info: DialInfo,
-    receipt: Vec<u8>,
+    receipt: Bytes,
     redirect: bool,
 }
 
 impl RPCOperationValidateDialInfo {
-    pub fn new(dial_info: DialInfo, receipt: Vec<u8>, redirect: bool) -> Result<Self, RPCError> {
+    pub fn new(dial_info: DialInfo, receipt: Bytes, redirect: bool) -> Result<Self, RPCError> {
         if receipt.len() < RCP0_MIN_RECEIPT_SIZE {
             return Err(RPCError::internal(
                 "ValidateDialInfo receipt too short to set",
@@ -27,11 +27,14 @@ impl RPCOperationValidateDialInfo {
         })
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
-    pub fn destructure(self) -> (DialInfo, Vec<u8>, bool) {
+    pub fn destructure(self) -> (DialInfo, Bytes, bool) {
         (self.dial_info, self.receipt, self.redirect)
     }
 
@@ -47,7 +50,7 @@ impl RPCOperationValidateDialInfo {
         let rcpt_reader = reader.get_receipt()?;
         rpc_ignore_min_max_len!(rcpt_reader, RCP0_MIN_RECEIPT_SIZE, RCP0_MAX_RECEIPT_SIZE);
 
-        let receipt = rcpt_reader.to_vec();
+        let receipt = Bytes::copy_from_slice(rcpt_reader);
         let redirect = reader.get_redirect();
 
         Self::new(dial_info, receipt, redirect)

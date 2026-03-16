@@ -15,11 +15,11 @@ impl SignedValueData {
         }
     }
 
-    pub fn validate(
+    pub async fn validate(
         &self,
         owner: &PublicKey,
         subkey: ValueSubkey,
-        vcrypto: &CryptoSystemGuard<'_>,
+        vcrypto: &AsyncCryptoSystemGuard<'_>,
     ) -> VeilidAPIResult<bool> {
         let writer = self.value_data.writer();
         if vcrypto.kind() != writer.kind() {
@@ -33,21 +33,25 @@ impl SignedValueData {
             // new approach, verify the whole capnp blob as is
             let signature_bytes = Self::make_signature_bytes(&self.value_data, owner, subkey)?;
             // validate signature
-            vcrypto.verify(&writer, &signature_bytes, &self.signature)
+            vcrypto
+                .verify(&writer, signature_bytes, &self.signature)
+                .await
         } else {
             // old approach, use make_signature_bytes()
             let signature_bytes =
                 Self::legacy_make_signature_bytes(&self.value_data, owner, subkey)?;
             // validate signature
-            vcrypto.verify(&writer, &signature_bytes, &self.signature)
+            vcrypto
+                .verify(&writer, signature_bytes, &self.signature)
+                .await
         }
     }
 
-    pub fn make_signature(
+    pub async fn make_signature(
         value_data: EncryptedValueData,
         owner: &PublicKey,
         subkey: ValueSubkey,
-        vcrypto: &CryptoSystemGuard<'_>,
+        vcrypto: &AsyncCryptoSystemGuard<'_>,
         writer_secret: &SecretKey,
     ) -> VeilidAPIResult<Self> {
         let writer = value_data.writer();
@@ -56,12 +60,16 @@ impl SignedValueData {
             // new approach, sign the whole capnp blob as is
             let signature_bytes = Self::make_signature_bytes(&value_data, owner, subkey)?;
             // create signature
-            vcrypto.sign(&writer, writer_secret, &signature_bytes)?
+            vcrypto
+                .sign(&writer, writer_secret, signature_bytes)
+                .await?
         } else {
             // old approach, no capnp in use
             let signature_bytes = Self::legacy_make_signature_bytes(&value_data, owner, subkey)?;
             // create signature
-            vcrypto.sign(&writer, writer_secret, &signature_bytes)?
+            vcrypto
+                .sign(&writer, writer_secret, signature_bytes)
+                .await?
         };
 
         Ok(Self {
@@ -91,7 +99,7 @@ impl SignedValueData {
         value_data: &EncryptedValueData,
         owner: &PublicKey,
         subkey: ValueSubkey,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    ) -> VeilidAPIResult<Bytes> {
         let owner_len;
         let is_vld0 = if owner.kind() == CRYPTO_KIND_VLD0 {
             owner_len = owner.ref_value().len();
@@ -101,7 +109,8 @@ impl SignedValueData {
             false
         };
 
-        let mut signature_bytes = Vec::with_capacity(owner_len + 4 + 4 + value_data.data().len());
+        let mut signature_bytes =
+            BytesMut::with_capacity(owner_len + 4 + 4 + value_data.data().len());
 
         // Add owner to signature
         if !is_vld0 {
@@ -115,17 +124,17 @@ impl SignedValueData {
         // Add data to signature
         signature_bytes.extend_from_slice(&value_data.data());
 
-        Ok(signature_bytes)
+        Ok(signature_bytes.freeze())
     }
 
     fn make_signature_bytes(
         value_data: &EncryptedValueData,
         owner: &PublicKey,
         subkey: ValueSubkey,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    ) -> VeilidAPIResult<Bytes> {
         let owner_len = owner.ref_value().len();
         let raw_blob_len = value_data.raw_blob().len();
-        let mut signature_bytes = Vec::with_capacity(4 + 4 + owner_len + 4 + 4 + raw_blob_len);
+        let mut signature_bytes = BytesMut::with_capacity(4 + 4 + owner_len + 4 + 4 + raw_blob_len);
 
         // Add raw capnp blob and length to signature
         let raw_blob_len = raw_blob_len as u32;
@@ -139,7 +148,7 @@ impl SignedValueData {
         // Add subkey to signature
         signature_bytes.extend_from_slice(&subkey.to_le_bytes());
 
-        Ok(signature_bytes)
+        Ok(signature_bytes.freeze())
     }
 }
 

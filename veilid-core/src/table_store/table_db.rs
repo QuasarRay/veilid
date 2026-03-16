@@ -13,6 +13,7 @@ cfg_if! {
 impl_veilid_log_facility!("tstore");
 
 #[must_use]
+#[derive(Debug)]
 struct CryptInfo {
     secret: SharedSecret,
 }
@@ -27,6 +28,8 @@ pub struct TableDBUnlockedInner {
     registry: VeilidComponentRegistry,
     table: String,
     database: Database,
+    // Lock to serialize commits so they don't cause SQLITE_BUSY or similar errors
+    commit_lock: AsyncMutex<()>,
     // Encryption and decryption key will be the same unless configured for an in-place migration
     encrypt_info: Option<CryptInfo>,
     decrypt_info: Option<CryptInfo>,
@@ -75,6 +78,7 @@ impl TableDB {
                 registry,
                 table,
                 database,
+                commit_lock: AsyncMutex::new(()),
                 encrypt_info,
                 decrypt_info,
             }),
@@ -193,33 +197,44 @@ impl TableDB {
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    async fn maybe_encrypt(&self, data: &[u8], keyed_nonce: bool) -> Vec<u8> {
+    pub(in crate::table_store) async fn maybe_encrypt(
+        &self,
+        data: &[u8],
+        keyed_nonce: bool,
+    ) -> Vec<u8> {
         let data = compress_prepend_size(data);
         if let Some(ei) = &self.unlocked_inner.encrypt_info {
             let crypto = self.crypto();
             let vcrypto = crypto.get_async(ei.secret.kind()).unwrap_or_log();
-            let mut out = unsafe { unaligned_u8_vec_uninit(vcrypto.nonce_length() + data.len()) };
+            let mut out = BytesMut::zeroed(vcrypto.nonce_length() + data.len());
 
             if keyed_nonce {
                 // Key content nonce
-                let mut noncedata = Vec::with_capacity(data.len() + ei.secret.ref_value().len());
+                let mut noncedata =
+                    BytesMut::with_capacity(data.len() + ei.secret.ref_value().len());
                 noncedata.extend_from_slice(&data);
                 noncedata.extend_from_slice(ei.secret.ref_value());
-                let noncehash = vcrypto.generate_hash(&noncedata).await.value();
+                let noncehash = vcrypto.generate_hash(noncedata.freeze()).await.value();
                 // Key content nonce is first 'nonce_length' bytes of generated hash
-                out[0..vcrypto.nonce_length()]
-                    .copy_from_slice(&noncehash[0..vcrypto.nonce_length()]);
+                out.as_mut()[0..vcrypto.nonce_length()]
+                    .copy_from_slice(&noncehash.as_ref()[0..vcrypto.nonce_length()]);
             } else {
                 // Random nonce
                 random_bytes(&mut out[0..vcrypto.nonce_length()]);
             }
+            let nonce = Nonce::new(&out[0..vcrypto.nonce_length()]);
 
-            let (nonce, encout) = out.split_at_mut(vcrypto.nonce_length());
-            vcrypto
-                .crypt_b2b_no_auth(&data, encout, &Nonce::new(nonce), &ei.secret)
+            let out = vcrypto
+                .crypt_b2b_no_auth(
+                    Bytes::from(data),
+                    out,
+                    vcrypto.nonce_length(),
+                    &nonce,
+                    &ei.secret,
+                )
                 .await
                 .unwrap_or_log();
-            out
+            out.to_vec()
         } else {
             data
         }
@@ -230,7 +245,10 @@ impl TableDB {
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    async fn maybe_decrypt(&self, data: &[u8]) -> std::io::Result<Vec<u8>> {
+    pub(in crate::table_store) async fn maybe_decrypt(
+        &self,
+        data: &[u8],
+    ) -> std::io::Result<Vec<u8>> {
         if let Some(di) = &self.unlocked_inner.decrypt_info {
             let crypto = self.crypto();
             let vcrypto = crypto.get_async(di.secret.kind()).unwrap_or_log();
@@ -239,18 +257,16 @@ impl TableDB {
                 return Ok(Vec::new());
             }
 
-            let mut out = unsafe { unaligned_u8_vec_uninit(data.len() - vcrypto.nonce_length()) };
+            let out = BytesMut::zeroed(data.len() - vcrypto.nonce_length());
+            let mut data = Bytes::copy_from_slice(data);
+            let data_start = data.split_to(vcrypto.nonce_length());
 
-            vcrypto
-                .crypt_b2b_no_auth(
-                    &data[vcrypto.nonce_length()..],
-                    &mut out,
-                    &Nonce::new(&data[0..vcrypto.nonce_length()]),
-                    &di.secret,
-                )
+            let out = vcrypto
+                .crypt_b2b_no_auth(data, out, 0, &Nonce::new(data_start.as_ref()), &di.secret)
                 .await
                 .unwrap_or_log();
-            decompress_size_prepended(&out, None).map_err(|e| std::io::Error::other(e.to_string()))
+            decompress_size_prepended(out.as_ref(), None)
+                .map_err(|e| std::io::Error::other(e.to_string()))
         } else {
             decompress_size_prepended(data, None).map_err(|e| std::io::Error::other(e.to_string()))
         }
@@ -283,7 +299,6 @@ impl TableDB {
         for k in &mut out {
             *k = self.maybe_decrypt(k).await.map_err(VeilidAPIError::from)?;
         }
-
         Ok(out)
     }
 
@@ -508,6 +523,20 @@ impl TableDBTransaction {
         }
 
         let db = self.db.unlocked_inner.database.clone();
+        let _commit_lock = self
+            .db
+            .unlocked_inner
+            .commit_lock
+            .lock()
+            .measure_debug(
+                TimestampDuration::new_ms(200),
+                veilid_log_dbg!(
+                    self,
+                    "TableDBTransaction({})::commit lock",
+                    self.db.table_name()
+                ),
+            )
+            .await;
         db.write(dbt).await.map_err(|e| {
             veilid_log!(self error "commit failed, transaction lost: {:?}", e);
             VeilidAPIError::generic(format!("commit failed, transaction lost: {}", e))

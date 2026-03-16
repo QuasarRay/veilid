@@ -4,9 +4,15 @@ use cfg_if::*;
 use data_encoding::BASE64URL_NOPAD;
 use ffi_support::*;
 use lazy_static::*;
-use opentelemetry::sdk::*;
-use opentelemetry::*;
-use opentelemetry_otlp::WithExportConfig;
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "opentelemetry")] {
+        use opentelemetry_otlp::WithExportConfig;
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+        use opentelemetry::trace::TracerProvider;
+    }
+}
+
 use parking_lot::Mutex;
 use serde::*;
 use std::io::Write;
@@ -275,57 +281,48 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
     };
 
     // OpenTelemetry logger
-    if platform_config.logging.otlp.enabled {
-        let grpc_endpoint = platform_config.logging.otlp.grpc_endpoint.clone();
+    cfg_if! {
+        if #[cfg(feature = "opentelemetry")] {
+            if platform_config.logging.otlp.enabled {
+                let grpc_endpoint = platform_config.logging.otlp.grpc_endpoint.clone();
 
-        cfg_if! {
-            if #[cfg(feature="rt-async-std")] {
-                let exporter = opentelemetry_otlp::new_exporter()
-                    .grpcio()
-                    .with_endpoint(grpc_endpoint);
-                let batch = opentelemetry::runtime::AsyncStd;
-            } else if #[cfg(feature="rt-tokio")] {
-                let exporter = opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_endpoint(format!("http://{}", grpc_endpoint));
-                let batch = opentelemetry::runtime::Tokio;
-            } else {
-                compile_error!("needs executor implementation");
+                cfg_if! {
+                    if #[cfg(feature="rt-tokio")] {
+                        let exporter = opentelemetry_otlp::SpanExporter::builder()
+                            .with_tonic()
+                            .with_endpoint(format!("http://{}", grpc_endpoint))
+                            .build()
+                            .expect("failed to build OpenTelemetry exporter");
+                    } else {
+                        compile_error!("needs executor implementation");
+                    }
+                }
+
+                let provider = SdkTracerProvider::builder()
+                    .with_batch_exporter(exporter)
+                    .build();
+                let tracer = provider.tracer(format!(
+                    "{}:{}",
+                    platform_config.logging.otlp.service_name,
+                    hostname::get()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| "unknown".to_owned())));
+
+                let filter =
+                    VeilidLayerFilter::new_with_config(VeilidLayerFilterConfig::new().with_directives([
+                        VeilidLogDirective::global_level(Some(platform_config.logging.otlp.level)),
+                    ]));
+
+                #[allow(deprecated)]
+                filter.apply_ignore_change_list(&platform_config.logging.otlp.ignore_log_targets);
+
+                let layer = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(filter.clone());
+                filters.insert("otlp", filter);
+                layers.push(layer.boxed());
             }
         }
-
-        let tracer =
-            opentelemetry_otlp::new_pipeline()
-                .tracing()
-                .with_exporter(exporter)
-                .with_trace_config(opentelemetry::sdk::trace::config().with_resource(
-                    Resource::new(vec![KeyValue::new(
-                        opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                        format!(
-                        "{}:{}",
-                        platform_config.logging.otlp.service_name,
-                        hostname::get()
-                            .map(|s| s.to_string_lossy().into_owned())
-                            .unwrap_or_else(|_| "unknown".to_owned())),
-                    )]),
-                ))
-                .install_batch(batch)
-                .map_err(|e| format!("failed to install OpenTelemetry tracer: {}", e))
-                .unwrap_or_log();
-
-        let filter =
-            VeilidLayerFilter::new_with_config(VeilidLayerFilterConfig::new().with_directives([
-                VeilidLogDirective::global_level(Some(platform_config.logging.otlp.level)),
-            ]));
-
-        #[allow(deprecated)]
-        filter.apply_ignore_change_list(&platform_config.logging.otlp.ignore_log_targets);
-
-        let layer = tracing_opentelemetry::layer()
-            .with_tracer(tracer)
-            .with_filter(filter.clone());
-        filters.insert("otlp", filter);
-        layers.push(layer.boxed());
     }
 
     // Flamegraph logger
@@ -919,7 +916,9 @@ pub extern "C" fn get_dht_record_key(
         async move {
             let veilid_api = get_veilid_api().await?;
 
-            let record_key = veilid_api.get_dht_record_key(schema, owner, encryption_key)?;
+            let record_key = veilid_api
+                .get_dht_record_key(schema, owner, encryption_key)
+                .await?;
             VeilidAPIResult::Ok(record_key)
         }
         .in_current_span(),

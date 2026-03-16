@@ -77,7 +77,7 @@ impl ProtocolNetworkConnection {
     pub async fn close(&self) -> io::Result<NetworkResult<()>> {
         match self {
             //            Self::Dummy(d) => d.close(),
-            Self::RawTcp(t) => t.close().await,
+            Self::RawTcp(t) => t.close(),
             Self::WsAccepted(w) => w.close().await,
             Self::Ws(w) => w.close().await,
             #[cfg(feature = "enable-protocol-wss")]
@@ -85,7 +85,7 @@ impl ProtocolNetworkConnection {
         }
     }
 
-    pub async fn send(&self, message: Vec<u8>) -> io::Result<NetworkResult<()>> {
+    pub async fn send(&self, message: Bytes) -> io::Result<NetworkResult<()>> {
         match self {
             //            Self::Dummy(d) => d.send(message),
             Self::RawTcp(t) => t.send(message).await,
@@ -95,7 +95,7 @@ impl ProtocolNetworkConnection {
             Self::Wss(w) => w.send(message).await,
         }
     }
-    pub async fn recv(&self) -> io::Result<NetworkResult<Vec<u8>>> {
+    pub async fn recv(&self) -> io::Result<NetworkResult<Bytes>> {
         match self {
             //            Self::Dummy(d) => d.recv(),
             Self::RawTcp(t) => t.recv().await,

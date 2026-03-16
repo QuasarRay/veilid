@@ -24,7 +24,7 @@ fn decode_value_data(
         None
     };
 
-    EncryptedValueData::new(seq, data, writer, nonce).map_err(RPCError::protocol)
+    EncryptedValueData::new(seq, data.into(), writer, nonce).map_err(RPCError::protocol)
 }
 
 pub fn decode_signed_value_data(

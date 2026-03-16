@@ -2,10 +2,6 @@ use futures_util::future::MaybeDone;
 
 use super::*;
 
-/// Number of concurrent network operations per transaction
-/// excluding keepalives. Applies only to get/set operations inside a begin state.
-const PER_TRANSACTION_OPERATION_CONCURRENCY: usize = 32;
-
 /// Collection of node xids per record
 pub(in crate::storage_manager) type PerRecordNodeTransactionIds =
     Vec<(OpaqueRecordKey, Vec<NodeTransactionId>)>;
@@ -24,6 +20,9 @@ pub(in crate::storage_manager) struct OutboundTransactionStageConsensus {
 /// State of a single transaction across multiple records
 #[derive(Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundTransactionState {
+    /// Registry for logging
+    #[serde(skip)]
+    opt_registry: Option<VeilidComponentRegistry>,
     /// The timestamp of when the transaction was created
     created_ts: Timestamp,
     /// State per record
@@ -35,6 +34,9 @@ pub(in crate::storage_manager) struct OutboundTransactionState {
     #[serde(skip)]
     #[serde(default = "default_operation_concurrency")]
     operation_concurrency: Arc<AsyncSemaphore>,
+    /// Safety routes locked during this transaction
+    #[serde(skip)]
+    locked_safety_routes: LockedSafetyRoutes,
 }
 
 fn default_operation_concurrency() -> Arc<AsyncSemaphore> {
@@ -64,19 +66,48 @@ record_infos:
     }
 }
 
+impl VeilidComponentRegistryAccessor for OutboundTransactionState {
+    fn registry(&self) -> VeilidComponentRegistry {
+        self.opt_registry.clone().unwrap_or_log()
+    }
+}
+
+impl Drop for OutboundTransactionState {
+    fn drop(&mut self) {
+        if self.opt_registry.is_none() {
+            eprintln!("BUG: OutboundTransactionState dropped without registry");
+            return;
+        }
+        if !self.locked_safety_routes.is_empty() {
+            veilid_log!(self error "OutboundTransactionState dropped with {} locked safety routes still held", self.locked_safety_routes.len());
+        }
+        let active_bg = self
+            .background_tokens
+            .iter()
+            .filter(|x| matches!(x, MaybeDone::Future(_)))
+            .count();
+        if active_bg > 0 {
+            veilid_log!(self error "OutboundTransactionState dropped with {} active background tokens", active_bg);
+        }
+    }
+}
+
 impl OutboundTransactionState {
-    pub fn new() -> Self {
+    pub fn new(registry: VeilidComponentRegistry) -> Self {
         Self {
+            opt_registry: Some(registry),
             created_ts: Timestamp::now(),
             record_states: vec![],
             background_tokens: vec![],
             operation_concurrency: Arc::new(AsyncSemaphore::new(
                 PER_TRANSACTION_OPERATION_CONCURRENCY,
             )),
+            locked_safety_routes: LockedSafetyRoutes::new(),
         }
     }
 
     pub fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) {
+        self.opt_registry = Some(routing_table.registry());
         for record_info in &mut self.record_states {
             record_info.prepare(routing_table, cur_ts);
         }
@@ -201,7 +232,7 @@ impl OutboundTransactionState {
         }
 
         self.record_states
-            .push(OutboundTransactionRecordState::new(params));
+            .push(OutboundTransactionRecordState::new(self.registry(), params));
 
         Ok(self.record_states.last_mut().unwrap_or_log())
     }
@@ -244,17 +275,30 @@ impl OutboundTransactionState {
         });
     }
 
-    pub fn into_background_tokens(self) -> Vec<StopToken> {
-        self.background_tokens
+    pub fn into_transaction_cleanup(
+        mut self,
+        transaction_handle: OutboundTransactionHandle,
+    ) -> TransactionCleanup {
+        let background_tokens = std::mem::take(&mut self.background_tokens)
             .into_iter()
             .filter_map(|x| match x {
                 MaybeDone::Future(fut) => Some(fut),
                 MaybeDone::Done(_) | MaybeDone::Gone => None,
             })
-            .collect()
+            .collect();
+        let locked_safety_routes = std::mem::take(&mut self.locked_safety_routes);
+        TransactionCleanup {
+            transaction_handle,
+            background_tokens,
+            locked_safety_routes,
+        }
     }
 
     pub fn get_operation_concurrency_semaphore(&self) -> Arc<AsyncSemaphore> {
         self.operation_concurrency.clone()
+    }
+
+    pub fn add_locked_safety_routes(&mut self, locked_safety_routes: LockedSafetyRoutes) {
+        self.locked_safety_routes.merge(locked_safety_routes);
     }
 }

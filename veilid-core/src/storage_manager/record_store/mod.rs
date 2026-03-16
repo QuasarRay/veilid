@@ -827,12 +827,16 @@ where
         &self,
         mut commit_action: CommitAction<D>,
     ) -> VeilidAPIResult<()> {
-        if let Err(e) = commit_action.commit().await {
+        let res = commit_action.commit().await;
+
+        if let Err(e) = res.as_ref() {
             veilid_log!(self error "Error committing record index: {}\n{:#?}", e, commit_action);
         }
 
         let mut inner = self.inner.lock();
-        inner.finish_commit_action(commit_action)
+        inner.finish_commit_action(commit_action);
+
+        res
     }
 
     #[cfg_attr(

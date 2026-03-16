@@ -24,6 +24,8 @@ pub async fn run_all_tests() {
     test_async_peek_stream::test_all().await;
     info!("TEST: exec_test_async_tag_lock");
     test_async_tag_lock::test_all().await;
+    info!("TEST: exec_test_async_tag_lock");
+    test_tag_lock::test_all();
     info!("TEST: exec_test_assembly_buffer");
     test_assembly_buffer::test_all().await;
 
@@ -116,6 +118,12 @@ cfg_if! {
             block_on(async {
                 test_async_tag_lock::test_all().await;
             });
+        }
+
+        #[test]
+        fn run_test_tag_lock() {
+            setup();
+            test_tag_lock::test_all();
         }
 
         #[test]

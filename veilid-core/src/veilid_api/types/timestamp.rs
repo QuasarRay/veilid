@@ -1,4 +1,5 @@
-/// Monotonically non-decreasing and monotonically increasing microseconds-since epoch timestamp
+//! Monotonically non-decreasing and monotonically increasing microseconds-since epoch timestamp
+
 use super::*;
 
 aligned_u64_type!(Timestamp);

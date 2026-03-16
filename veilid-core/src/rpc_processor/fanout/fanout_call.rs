@@ -166,19 +166,21 @@ pub fn capability_fanout_peer_info_filter(caps: Vec<VeilidCapability>) -> Fanout
 /// The algorithm is parameterized by:
 ///  * 'node_count' - the number of nodes to keep in the closest_nodes set
 ///  * 'fanout' - the number of concurrent calls being processed at the same time
-///  * 'consensus_count' - the number of nodes in the processed queue that need to be in the 'Accepted' state before we terminate the fanout early.
+///  * 'consensus_count' - the number of nodes in the processed queue that need to be in the 'Accepted' state before we terminate the fanout early. 0 means no consensus is required.
+///  * 'consensus_width' - the number of nodes away from the key that can be considered for fanout operations. 0 means no consensus width is applied.
 ///
 /// The algorithm returns early if 'check_done' returns some value, or if an error is found during the process.
 /// If the algorithm times out, a Timeout result is returned, however operations will still have been performed and a
 /// timeout is not necessarily indicative of an algorithmic 'failure', just that no definitive stopping condition was found
 /// in the given time
 pub(crate) struct FanoutCall<'a> {
-    name: String,
     routing_table: &'a RoutingTable,
+    name: String,
     hash_coordinate: HashCoordinate,
     node_count: usize,
     fanout_tasks: usize,
     consensus_count: usize,
+    consensus_width: usize,
     timeout: TimestampDuration,
     peer_info_filter: FanoutPeerInfoFilter,
     call_routine: FanoutCallRoutine,
@@ -191,28 +193,41 @@ impl VeilidComponentRegistryAccessor for FanoutCall<'_> {
     }
 }
 
+/// Parameters for a fanout call
+pub(crate) struct FanoutCallParams {
+    /// Name for debugging
+    pub name: String,
+    /// Hash coordinate for the record we are fanning out for
+    pub hash_coordinate: HashCoordinate,
+    /// Number of nodes to keep in the closest nodes set
+    pub node_count: usize,
+    /// Number of concurrent fanout lanes to run
+    pub fanout_tasks: usize,
+    /// Number of nodes in the processed queue that need to be in the 'Accepted' state before we terminate the fanout. 0 means no consensus is required.
+    pub consensus_count: usize,
+    /// Number of nodes away from the key that can be considered for fanout operations. 0 means no consensus width is applied.
+    pub consensus_width: usize,
+    /// Timeout for the fanout call
+    pub timeout: TimestampDuration,
+}
+
 impl<'a> FanoutCall<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        name: String,
         routing_table: &'a RoutingTable,
-        hash_coordinate: HashCoordinate,
-        node_count: usize,
-        fanout_tasks: usize,
-        consensus_count: usize,
-        timeout: TimestampDuration,
+        params: FanoutCallParams,
         peer_info_filter: FanoutPeerInfoFilter,
         call_routine: FanoutCallRoutine,
         check_done: FanoutCheckDone,
     ) -> Self {
         Self {
-            name,
             routing_table,
-            hash_coordinate,
-            node_count,
-            fanout_tasks,
-            consensus_count,
-            timeout,
+            name: params.name,
+            hash_coordinate: params.hash_coordinate,
+            node_count: params.node_count,
+            fanout_tasks: params.fanout_tasks,
+            consensus_count: params.consensus_count,
+            consensus_width: params.consensus_width,
+            timeout: params.timeout,
             peer_info_filter,
             call_routine,
             check_done,
@@ -252,13 +267,13 @@ impl<'a> FanoutCall<'a> {
                     }
                     FanoutNodeStage::Stale => {
                         // Node does not count toward consensus but does count toward value node list
-                        value_nodes.push(node.node_ref.clone());
+                        value_nodes.push(node.work_item.node_ref.clone());
                     }
                     FanoutNodeStage::Accepted => {
                         // Node counts toward consensus and value node list
-                        value_nodes.push(node.node_ref.clone());
+                        value_nodes.push(node.work_item.node_ref.clone());
 
-                        consensus_nodes.push(node.node_ref.clone());
+                        consensus_nodes.push(node.work_item.node_ref.clone());
                         if consensus.is_none() && consensus_nodes.len() >= self.consensus_count {
                             consensus = Some(true);
                         }
@@ -324,7 +339,7 @@ impl<'a> FanoutCall<'a> {
             };
 
             // Wait around for some work to do
-            let Ok(Ok(next_node)) = work_receiver
+            let Ok(Ok(work_item)) = work_receiver
                 .recv_async()
                 .timeout_at(stop_token.clone())
                 .await
@@ -334,9 +349,15 @@ impl<'a> FanoutCall<'a> {
                 break Ok(FanoutProcessorReturn::Done);
             };
 
+            let work_node = work_item.node_ref.clone();
+            let cancel_stop_token = work_item.cancel_stop_token.clone();
+
             // Do the call for this node
-            match (self.call_routine)(next_node.clone()).await {
-                Ok(output) => {
+            match (self.call_routine)(work_node.clone())
+                .timeout_at(cancel_stop_token)
+                .await
+            {
+                Ok(Ok(output)) => {
                     // Filter returned nodes
                     let filtered_v: Vec<Arc<PeerInfo>> = output
                         .peer_info_list
@@ -363,27 +384,27 @@ impl<'a> FanoutCall<'a> {
                         // Process disposition of the output of the fanout call routine
                         match output.disposition {
                             FanoutCallDisposition::Timeout => {
-                                context_locked.fanout_queue.timeout(next_node, cur_ts);
+                                context_locked.fanout_queue.timeout(work_node, cur_ts);
                             }
                             FanoutCallDisposition::Rejected => {
-                                context_locked.fanout_queue.rejected(next_node, cur_ts);
+                                context_locked.fanout_queue.rejected(work_node, cur_ts);
                             }
                             FanoutCallDisposition::Accepted => {
-                                context_locked.fanout_queue.accepted(next_node, cur_ts);
+                                context_locked.fanout_queue.accepted(work_node, cur_ts);
                             }
                             FanoutCallDisposition::AcceptedNewerRestart => {
                                 context_locked.fanout_queue.all_accepted_to_queued(cur_ts);
-                                context_locked.fanout_queue.accepted(next_node, cur_ts);
+                                context_locked.fanout_queue.accepted(work_node, cur_ts);
                             }
                             FanoutCallDisposition::AcceptedNewer => {
                                 context_locked.fanout_queue.all_accepted_to_stale(cur_ts);
-                                context_locked.fanout_queue.accepted(next_node, cur_ts);
+                                context_locked.fanout_queue.accepted(work_node, cur_ts);
                             }
                             FanoutCallDisposition::Invalid => {
-                                context_locked.fanout_queue.disqualified(next_node, cur_ts);
+                                context_locked.fanout_queue.disqualified(work_node, cur_ts);
                             }
                             FanoutCallDisposition::Stale => {
-                                context_locked.fanout_queue.stale(next_node, cur_ts);
+                                context_locked.fanout_queue.stale(work_node, cur_ts);
                             }
                         }
 
@@ -401,14 +422,18 @@ impl<'a> FanoutCall<'a> {
                                 break Ok(FanoutProcessorReturn::Done);
                             }
                             FanoutDoneDisposition::NotDone => {
-                                veilid_log!(self debug "{}[{}]: Work done, continuing lane processing", self.name, lane_name);
+                                veilid_log!(self debug "{}[{}]: Work done, lane checking for more work", self.name, lane_name);
                             }
                         }
                     }
                 }
-                Err(e) => {
-                    veilid_log!(self debug "{}[{}]: Error occurred: {}", self.name, lane_name, e);
+                Ok(Err(e)) => {
+                    veilid_log!(self debug "{}[{}]: Error occurred, terminating fanout: {}", self.name, lane_name, e);
                     break Err(e);
+                }
+                Err(_) => {
+                    // Cancelled
+                    veilid_log!(self debug "{}[{}]: Work cancelled, lane checking for more work", self.name, lane_name);
                 }
             };
         }
@@ -427,48 +452,40 @@ impl<'a> FanoutCall<'a> {
         let closest_nodes = {
             let peer_info_filter = self.peer_info_filter.clone();
             let filter = Box::new(
-                move |rti: &RoutingTableInner,
-                      opt_entry: Option<Arc<BucketEntry>>,
-                      _cur_ts: Timestamp| {
+                move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
                     // Exclude our own node
-                    if opt_entry.is_none() {
+                    let Some(snap) = opt_snap else {
                         return false;
-                    }
-                    let entry = opt_entry.unwrap_or_log();
+                    };
 
                     // Filter entries
-                    entry.with(rti, |_rti, e| {
-                        let Some(peer_info) = e.get_peer_info(RoutingDomain::PublicInternet) else {
-                            return false;
-                        };
-                        // Ensure only things that are valid/signed in the PublicInternet domain are returned
-                        if peer_info.signatures().is_empty() {
-                            return false;
-                        }
+                    let Some(peer_info) = snap.get_peer_info(RoutingDomain::PublicInternet) else {
+                        return false;
+                    };
+                    // Ensure only things that are valid/signed in the PublicInternet domain are returned
+                    if peer_info.signatures().is_empty() {
+                        return false;
+                    }
 
-                        // Check our node info filter
-                        if !(peer_info_filter)(peer_info.clone()) {
-                            return false;
-                        }
+                    // Check our node info filter
+                    if !(peer_info_filter)(peer_info) {
+                        return false;
+                    }
 
-                        true
-                    })
+                    true
                 },
             ) as RoutingTableEntryFilter;
             let filters = VecDeque::from([filter]);
 
-            let transform = |_rti: &RoutingTableInner, v: Option<Arc<BucketEntry>>| {
-                NodeRef::new(self.routing_table.registry(), v.unwrap_or_log().clone())
-            };
+            let transform =
+                |opt_snap: Option<BucketEntrySnapshot>| opt_snap.unwrap_or_log().node_ref.clone();
 
-            self.routing_table
-                .find_preferred_closest_nodes(
-                    self.node_count,
-                    self.hash_coordinate.clone(),
-                    filters,
-                    transform,
-                )
-                .map_err(RPCError::invalid_format)?
+            self.routing_table.get_preferred_closest_nodes(
+                self.node_count,
+                self.hash_coordinate.clone(),
+                filters,
+                transform,
+            )
         };
 
         context.fanout_queue.update(&closest_nodes, cur_ts);
@@ -486,7 +503,9 @@ impl<'a> FanoutCall<'a> {
         fanout_queue_mode: FanoutQueueMode,
     ) -> Result<FanoutResult, RPCError> {
         // Create context for this run
-        let node_sort = Box::new(make_closest_node_id_sort(self.hash_coordinate.clone()));
+        let node_sort = Box::new(RoutingTable::make_closest_node_id_sort(
+            self.hash_coordinate.clone(),
+        ));
         let context = Arc::new(Mutex::new(FanoutContext {
             fanout_queue: FanoutQueue::new(
                 self.name.clone(),
@@ -494,6 +513,7 @@ impl<'a> FanoutCall<'a> {
                 self.hash_coordinate.kind(),
                 node_sort,
                 self.consensus_count,
+                self.consensus_width,
                 match fanout_queue_mode {
                     FanoutQueueMode::ThrottleAtConsensus => Some(
                         self.timeout

@@ -21,7 +21,11 @@ export const asyncCallWithTimeout = async<T>(asyncPromise: Promise<T>, timeLimit
 }
 
 export const waitForPublicAttachment = async () => {
+  //console.log('waitForPublicAttachment...');
+
+  const startTime = Date.now();
   while (true) {
+
     const state = await veilidClient.getState();
     if (state.attachment.publicInternetReady) {
       let attached = false
@@ -38,8 +42,10 @@ export const waitForPublicAttachment = async () => {
         break;
       }
     }
-    await waitForMs(1000);
+    await waitForMs(250);
+    //console.log('waitForPublicAttachment loop...');
   }
+  console.log(`waitForPublicAttachment took ${Date.now() - startTime}ms`);
 }
 
 export const waitForDetached = async () => {
@@ -74,4 +80,24 @@ export const waitForOfflineSubkeyWrite = async (routingContext: VeilidRoutingCon
   while ((await routingContext.inspectDHTRecord(key)).offlineSubkeys.length != 0) {
     await waitForMs(200);
   }
+}
+
+export const getLogTimestamp = () => {
+  const now = new Date();
+
+  // Get time components
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const seconds = now.getSeconds();
+  const milliseconds = now.getMilliseconds();
+
+  // Pad with leading zeros where necessary to ensure two digits for hh, mm, ss
+  const hh = hours.toString().padStart(2, '0');
+  const mm = minutes.toString().padStart(2, '0');
+  const ss = seconds.toString().padStart(2, '0');
+
+  // Pad milliseconds with leading zeros to ensure three digits (000-999)
+  const msec = milliseconds.toString().padStart(3, '0');
+
+  return `${hh}:${mm}:${ss}.${msec}`;
 }

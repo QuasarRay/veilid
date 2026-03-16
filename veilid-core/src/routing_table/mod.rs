@@ -1,12 +1,17 @@
 mod bucket;
 mod bucket_entry;
+mod bucket_entry_snapshot;
 mod debug;
-mod find_peers;
+mod entry_snapshot;
+mod find_nodes;
 #[cfg(feature = "geolocation")]
 mod geolocation;
+mod get_nodes;
+mod health;
 mod node_ref;
 mod privacy;
 mod route_spec_store;
+mod routing_domains;
 mod routing_table_inner;
 mod stats_accounting;
 mod tasks;
@@ -17,9 +22,12 @@ mod types;
 pub mod tests_routing_table;
 
 pub(crate) use bucket_entry::*;
+pub(crate) use bucket_entry_snapshot::*;
+pub(crate) use entry_snapshot::*;
 pub(crate) use node_ref::*;
 pub(crate) use privacy::*;
 pub(crate) use route_spec_store::*;
+pub(crate) use routing_domains::*;
 pub(crate) use routing_table_inner::*;
 pub(crate) use stats_accounting::*;
 pub use types::*;
@@ -32,40 +40,17 @@ use crate::rpc_processor::*;
 
 use bucket::*;
 use hashlink::LruCache;
+use tasks::ping_validator::PingValidationEntry;
 
 impl_veilid_log_facility!("rtab");
 
 //////////////////////////////////////////////////////////////////////////
 
 /// Routing table bucket count (one per bit per 32 byte node id)
-pub const BUCKET_COUNT: usize = HASH_COORDINATE_LENGTH * 8;
-
-/// Minimum number of nodes we need, per crypto kind, per routing domain, or we trigger a bootstrap
-pub const MIN_BOOTSTRAP_CONNECTIVITY_PEERS: usize = 4;
-/// Set of routing domains that use the bootstrap mechanism
-pub const BOOTSTRAP_ROUTING_DOMAINS: [RoutingDomain; 1] = [RoutingDomain::PublicInternet];
-
-/// How frequently we tick the relay management routine
-pub const RELAY_MANAGEMENT_INTERVAL_SECS: u32 = 1;
-/// How frequently we optimize relays
-pub const RELAY_OPTIMIZATION_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
-/// What percentile to keep our relays optimized to
-pub const RELAY_OPTIMIZATION_PERCENTILE: f32 = 66.0;
-/// What percentile to choose our relays from (must be greater than RELAY_OPTIMIZATION_PERCENTILE)
-pub const RELAY_SELECTION_PERCENTILE: f32 = 85.0;
-
-/// How frequently we tick the private route management routine
-pub const PRIVATE_ROUTE_MANAGEMENT_INTERVAL_SECS: u32 = 1;
+const BUCKET_COUNT: usize = HASH_COORDINATE_LENGTH * 8;
 
 /// How frequently we flush the routing table and route spec store to storage
-pub const ROUTING_TABLE_FLUSH_INTERVAL_SECS: u32 = 30;
-
-// Connectionless protocols like UDP are dependent on a NAT translation timeout
-// We ping relays to maintain our UDP NAT state with a RELAY_KEEPALIVE_PING_INTERVAL_SECS=10 frequency
-// since 30 seconds is a typical UDP NAT state timeout  .
-// Non-relay flows are assumed to be alive for half the typical timeout and we regenerate the hole punch
-// if it the flow hasn't had any activity in this amount of time.
-pub const CONNECTIONLESS_TIMEOUT: TimestampDuration = TimestampDuration::new_secs(15);
+const ROUTING_TABLE_FLUSH_INTERVAL_SECS: u32 = 30;
 
 // Table store keys
 const ALL_ENTRY_BYTES: &[u8] = b"all_entry_bytes";
@@ -74,14 +59,13 @@ const SERIALIZED_BUCKET_MAP: &[u8] = b"serialized_bucket_map";
 const CACHE_VALIDITY_KEY: &[u8] = b"cache_validity_key";
 
 pub type RoutingTableEntryFilter<'t> =
-    Box<dyn FnMut(&RoutingTableInner, Option<Arc<BucketEntry>>, Timestamp) -> bool + Send + 't>;
+    Box<dyn FnMut(&Option<BucketEntrySnapshot>, Timestamp) -> bool + Send + 't>;
 pub type RoutingTableEntryPreSortFilter<'t> =
-    Box<dyn FnMut(&RoutingTableInner, &mut Vec<Option<Arc<BucketEntry>>>, Timestamp) + Send + 't>;
+    Box<dyn FnMut(&mut Vec<Option<BucketEntrySnapshot>>, Timestamp) + Send + 't>;
 pub type RoutingTableEntrySort<'t> = Box<
     dyn FnMut(
-            &RoutingTableInner,
-            Option<Arc<BucketEntry>>,
-            Option<Arc<BucketEntry>>,
+            &Option<BucketEntrySnapshot>,
+            &Option<BucketEntrySnapshot>,
             Timestamp,
         ) -> core::cmp::Ordering
         + Send
@@ -90,23 +74,6 @@ pub type RoutingTableEntrySort<'t> = Box<
 
 type SerializedBuckets = Vec<Vec<u8>>;
 type SerializedBucketMap = BTreeMap<CryptoKind, SerializedBuckets>;
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[must_use]
-pub struct RoutingTableHealth {
-    /// Number of reliable (long-term responsive) entries in the routing table
-    pub reliable_entry_count: usize,
-    /// Number of unreliable (occasionally unresponsive) entries in the routing table
-    pub unreliable_entry_count: usize,
-    /// Number of dead (always unresponsive) entries in the routing table
-    pub dead_entry_count: usize,
-    /// Number of live (responsive) entries in the routing table per RoutingDomain and CryptoKind
-    pub live_entry_counts: LiveEntryCounts,
-    /// If PublicInternet network class is valid yet
-    pub public_internet_ready: bool,
-    /// If LocalNetwork network class is valid yet
-    pub local_network_ready: bool,
-}
 
 pub type BucketIndex = (CryptoKind, usize);
 
@@ -136,14 +103,27 @@ impl Default for RoutingTableStartupContext {
 #[must_use]
 pub(crate) struct RoutingTable {
     registry: VeilidComponentRegistry,
-    inner: RwLock<RoutingTableInner>,
 
     // Startup context
     startup_context: RoutingTableStartupContext,
 
+    /// Routing table inner state
+    inner: RwLock<RoutingTableInner>,
+    /// Routing domains
+    routing_domains: Mutex<HashMap<RoutingDomain, Arc<dyn RoutingDomainController>>>,
+
+    // Ping validation channel sender (recreated on each startup/shutdown cycle)
+    ping_validation_sender: Mutex<flume::Sender<Vec<PingValidationEntry>>>,
+    // Ping validation channel receiver (taken during startup, recreated during shutdown)
+    ping_validation_receiver: Mutex<Option<flume::Receiver<Vec<PingValidationEntry>>>>,
+    // Ping validation processor join handle
+    ping_validation_processor_jh: Mutex<Option<MustJoinHandle<()>>>,
+    // Ping validation processor stop source
+    ping_validation_stop_source: Mutex<Option<StopSource>>,
+
     /// Node Ids
     node_ids: RwLock<NodeIdGroup>,
-    /// Public Keys
+    /// Public Keysyea
     public_keys: RwLock<PublicKeyGroup>,
     /// Secret Keys
     secret_keys: RwLock<SecretKeyGroup>,
@@ -151,6 +131,18 @@ pub(crate) struct RoutingTable {
     route_spec_store: RouteSpecStore,
     /// Buckets to kick on our next kick task
     kick_queue: Mutex<BTreeSet<BucketIndex>>,
+    /// Interim accounting mechanism for this node's RPC latency to any other node
+    self_latency_stats_accounting: Mutex<(LatencyStatsAccounting, LatencyStats)>,
+    /// Interim accounting mechanism for the total bandwidth to/from this node
+    self_transfer_stats_accounting: Mutex<(TransferStatsAccounting, TransferStatsDownUp)>,
+    /// Peers we have recently communicated with
+    recent_peers: Mutex<LruCache<NodeId, RecentPeersEntry>>,
+    /// Async tagged critical sections table
+    /// Tag: "tick" -> in ticker
+    critical_sections: AsyncTagLockTable<&'static str>,
+    /// Last routing table health summary
+    routing_table_health: Mutex<Arc<RoutingTableHealth>>,
+
     /// Background process for flushing the table to disk
     flush_task: TickTask<EyreReport>,
     /// Background process for computing statistics
@@ -161,24 +153,7 @@ pub(crate) struct RoutingTable {
     rolling_answers_task: TickTask<EyreReport>,
     /// Background process to purge dead routing table entries when necessary
     kick_buckets_task: TickTask<EyreReport>,
-    /// Background process to get our initial routing table
-    bootstrap_task: TickTask<EyreReport>,
-    /// Background process to ensure we have enough nodes in our routing table
-    peer_minimum_refresh_task: TickTask<EyreReport>,
-    /// Background process to ensure we have enough nodes close to our own in our routing table
-    closest_peers_refresh_task: TickTask<EyreReport>,
-    /// Background process to check PublicInternet nodes to see if they are still alive and for reliability
-    ping_validator_public_internet_task: TickTask<EyreReport>,
-    /// Background process to check LocalNetwork nodes to see if they are still alive and for reliability
-    ping_validator_local_network_task: TickTask<EyreReport>,
-    /// Background process to check PublicInternet relay nodes to see if they are still alive and for reliability
-    ping_validator_public_internet_relay_task: TickTask<EyreReport>,
-    /// Background process to check Active Watch nodes to see if they are still alive and for reliability
-    ping_validator_active_watch_task: TickTask<EyreReport>,
-    /// Background process to keep relays up
-    relay_management_task: TickTask<EyreReport>,
-    /// Background process to keep private routes up
-    private_route_management_task: TickTask<EyreReport>,
+
     /// Tick subscription
     tick_subscription: Mutex<Option<EventBusSubscription>>,
 }
@@ -199,18 +174,33 @@ impl RoutingTable {
         registry: VeilidComponentRegistry,
         startup_context: RoutingTableStartupContext,
     ) -> Self {
-        let config = registry.config();
         let inner = RwLock::new(RoutingTableInner::new(registry.clone()));
         let route_spec_store = RouteSpecStore::new(registry.clone());
+
+        // Create ping validation channel
+        let (ping_validation_sender, ping_validation_receiver) = flume::unbounded();
+
         let this = Self {
             registry,
             inner,
             startup_context,
-            node_ids: RwLock::new(NodeIdGroup::new()),
-            public_keys: RwLock::new(PublicKeyGroup::new()),
-            secret_keys: RwLock::new(SecretKeyGroup::new()),
             route_spec_store,
-            kick_queue: Mutex::new(BTreeSet::default()),
+
+            routing_domains: Default::default(),
+            node_ids: Default::default(),
+            public_keys: Default::default(),
+            secret_keys: Default::default(),
+            kick_queue: Default::default(),
+            ping_validation_sender: Mutex::new(ping_validation_sender),
+            ping_validation_receiver: Mutex::new(Some(ping_validation_receiver)),
+            ping_validation_processor_jh: Mutex::new(None),
+            ping_validation_stop_source: Mutex::new(None),
+            self_latency_stats_accounting: Default::default(),
+            self_transfer_stats_accounting: Default::default(),
+            recent_peers: Mutex::new(LruCache::new(RECENT_PEERS_TABLE_SIZE)),
+            critical_sections: AsyncTagLockTable::new(),
+            routing_table_health: Mutex::new(Arc::new(RoutingTableHealth::default())),
+
             flush_task: TickTask::new("flush_task", ROUTING_TABLE_FLUSH_INTERVAL_SECS),
             rolling_transfers_task: TickTask::new(
                 "rolling_transfers_task",
@@ -225,34 +215,8 @@ impl RoutingTable {
                 ROLLING_ANSWER_INTERVAL_SECS,
             ),
             kick_buckets_task: TickTask::new("kick_buckets_task", 1),
-            bootstrap_task: TickTask::new("bootstrap_task", 1),
-            peer_minimum_refresh_task: TickTask::new("peer_minimum_refresh_task", 1),
-            closest_peers_refresh_task: TickTask::new_ms(
-                "closest_peers_refresh_task",
-                config.network.dht.min_peer_refresh_time_ms,
-            ),
-            ping_validator_public_internet_task: TickTask::new(
-                "ping_validator_public_internet_task",
-                1,
-            ),
-            ping_validator_local_network_task: TickTask::new(
-                "ping_validator_local_network_task",
-                1,
-            ),
-            ping_validator_public_internet_relay_task: TickTask::new(
-                "ping_validator_public_internet_relay_task",
-                1,
-            ),
-            ping_validator_active_watch_task: TickTask::new("ping_validator_active_watch_task", 1),
-            relay_management_task: TickTask::new(
-                "relay_management_task",
-                RELAY_MANAGEMENT_INTERVAL_SECS,
-            ),
-            private_route_management_task: TickTask::new(
-                "private_route_management_task",
-                PRIVATE_ROUTE_MANAGEMENT_INTERVAL_SECS,
-            ),
-            tick_subscription: Mutex::new(None),
+
+            tick_subscription: Default::default(),
         };
 
         this.setup_tasks();
@@ -264,22 +228,46 @@ impl RoutingTable {
     // Initialization
 
     fn log_facilities_impl(&self) -> VeilidComponentLogFacilities {
-        VeilidComponentLogFacilities::new()
-            .with_facility(
-                VeilidComponentLogFacility::try_new_with_tags("rtab", ["#common"]).unwrap(),
-            )
-            .with_facility(
-                VeilidComponentLogFacility::try_new_with_tags("rtab::route", ["#common"]).unwrap(),
-            )
-            .with_facility(
-                VeilidComponentLogFacility::try_new_with_tags("network_result", ["#verbose"])
-                    .unwrap(),
-            )
+        let mut facilities = VeilidComponentLogFacilities::new();
+
+        facilities = facilities.with_facility(
+            VeilidComponentLogFacility::try_new_with_tags("rtab", ["#common"]).unwrap(),
+        );
+
+        facilities = facilities.with_facility(
+            VeilidComponentLogFacility::try_new_with_tags("rtab::route", ["#common"]).unwrap(),
+        );
+
+        facilities = facilities.with_facility(
+            VeilidComponentLogFacility::try_new_with_tags("network_result", ["#verbose"]).unwrap(),
+        );
+
+        #[cfg(feature = "geolocation")]
+        {
+            facilities = facilities.with_facility(
+                VeilidComponentLogFacility::try_new_with_tags("geolocation", ["#verbose"]).unwrap(),
+            );
+        }
+
+        facilities
     }
 
     /// Called to initialize the routing table after it is created
     async fn init_async(&self) -> EyreResult<()> {
         veilid_log!(self debug "starting routing table init");
+
+        // Set up routing domains (eventually make this pluggable or use features)
+        {
+            let mut routing_domains = self.routing_domains.lock();
+            routing_domains.insert(
+                RoutingDomain::PublicInternet,
+                Arc::new(PublicInternetRoutingDomainController::new(self.registry())),
+            );
+            routing_domains.insert(
+                RoutingDomain::LocalNetwork,
+                Arc::new(LocalNetworkRoutingDomainController::new(self.registry())),
+            );
+        }
 
         // Set up initial keys and node ids
         self.setup_public_keys().await?;
@@ -287,9 +275,11 @@ impl RoutingTable {
         // Set up routing buckets
         {
             let mut inner = self.inner.write();
-
             inner.init_buckets();
         }
+
+        // Clear out routing table health
+        *self.routing_table_health.lock() = Arc::new(RoutingTableHealth::default());
 
         // Load bucket entries from table db if possible
         veilid_log!(self debug "loading routing table entries");
@@ -316,12 +306,45 @@ impl RoutingTable {
         Ok(())
     }
 
-    pub(crate) fn startup(&self) -> EyreResult<()> {
+    pub(crate) async fn startup(&self) -> EyreResult<()> {
         let guard = self.startup_context.startup_lock.startup()?;
+
+        // Start all routing domain controllers
+        veilid_log!(self debug "starting routing domain controllers");
+        let mut started_rdcs: Vec<Arc<dyn RoutingDomainController>> = Vec::new();
+        for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
+            veilid_log!(self debug "  starting routing domain controller: {}", rdc.routing_domain());
+            if let Err(e) = rdc.startup().await {
+                veilid_log!(self debug "error starting routing domain controller: {}", e);
+                for started_rdc in started_rdcs {
+                    veilid_log!(self debug "  shutting down routing domain controller: {}", started_rdc.routing_domain());
+                    started_rdc.shutdown().await;
+                }
+
+                return Err(e);
+            }
+            started_rdcs.push(rdc);
+        }
+        veilid_log!(self debug "finished starting routing domain controllers");
+
+        // Start ping validation processor
+        veilid_log!(self debug "starting ping validation processor");
+        let rx = self
+            .ping_validation_receiver
+            .lock()
+            .take()
+            .expect("ping validation receiver already taken");
+        let stop_source = StopSource::new();
+        let stop_token = stop_source.token();
+        let jh = spawn(
+            "ping validation processor",
+            Self::ping_validation_processor(self.registry(), stop_token, rx),
+        );
+        *self.ping_validation_processor_jh.lock() = Some(jh);
+        *self.ping_validation_stop_source.lock() = Some(stop_source);
 
         // Register event handlers
         let tick_subscription = impl_subscribe_event_bus_async!(self, Self, tick_event_handler);
-
         *self.tick_subscription.lock() = Some(tick_subscription);
 
         guard.success();
@@ -343,16 +366,29 @@ impl RoutingTable {
             self.event_bus().unsubscribe(sub);
         }
 
+        veilid_log!(self debug "cancelling routing table tasks");
         self.cancel_tasks().await;
 
-        // Unpublish peer info
-        veilid_log!(self debug "unpublishing peer info");
-        {
-            let mut inner = self.inner.write();
-            for routing_domain in RoutingDomainSet::all() {
-                inner.unpublish_peer_info(routing_domain);
-            }
+        // Stop ping validation processor
+        veilid_log!(self debug "stopping ping validation processor");
+        drop(self.ping_validation_stop_source.lock().take());
+        let opt_jh = self.ping_validation_processor_jh.lock().take();
+        if let Some(jh) = opt_jh {
+            jh.await;
         }
+
+        // Recreate ping validation channel for potential re-attach
+        let (tx, rx) = flume::unbounded();
+        *self.ping_validation_sender.lock() = tx;
+        *self.ping_validation_receiver.lock() = Some(rx);
+
+        // Shutdown all routing domain controllers
+        veilid_log!(self debug "shutting down routing domain controllers");
+        for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
+            veilid_log!(self debug "  shutting down routing domain controller: {}", rdc.routing_domain());
+            rdc.shutdown().await;
+        }
+        veilid_log!(self debug "finished shutting down routing domain controllers");
 
         guard.success();
     }
@@ -375,10 +411,15 @@ impl RoutingTable {
 
         veilid_log!(self debug "shutting down routing table");
 
-        let mut inner = self.inner.write();
-        *inner = RoutingTableInner::new(self.registry());
+        {
+            let mut inner = self.inner.write();
+            *inner = RoutingTableInner::new(self.registry());
+        }
+        *self.routing_table_health.lock() = Arc::new(RoutingTableHealth::default());
 
         self.node_ids.write().clear();
+
+        self.routing_domains.lock().clear();
 
         veilid_log!(self debug "finished routing table terminate");
     }
@@ -394,6 +435,17 @@ impl RoutingTable {
     }
 
     ///////////////////////////////////////////////////////////////////
+
+    /// Create a point-in-time snapshot of all routing table entries matching the minimum state
+    pub fn snapshot_entries(
+        &self,
+        cur_ts: Timestamp,
+        min_state: BucketEntryState,
+    ) -> EntrySnapshot {
+        self.inner
+            .read()
+            .snapshot_entries(self.registry(), cur_ts, min_state)
+    }
 
     pub fn node_id(&self, kind: CryptoKind) -> NodeId {
         self.node_ids.read().get(kind).unwrap_or_log()
@@ -448,6 +500,12 @@ impl RoutingTable {
         false
     }
 
+    fn reset_low_water_mark(&self, routing_domain: RoutingDomain) {
+        let rdc = self.get_routing_domain_controller(routing_domain);
+        let rdd = rdc.read();
+        rdd.reset_low_water_mark();
+    }
+
     #[cfg(not(test))]
     async fn setup_public_key(
         &self,
@@ -482,15 +540,15 @@ impl RoutingTable {
             }
         }
         if public_key.is_none() {
-            veilid_log!(self debug "pulling {} from storage", table_key_node_id);
+            veilid_log!(self debug "pulling {} from deprecated storage", table_key_node_id);
             if let Ok(Some(stored_public_key)) = config_table
                 .load_json::<PublicKey>(0, table_key_node_id.as_bytes())
                 .await
             {
-                veilid_log!(self debug "{} found in storage", table_key_node_id);
+                veilid_log!(self debug "{} found in deprecated storage", table_key_node_id);
                 public_key = Some(stored_public_key);
             } else {
-                veilid_log!(self debug "{} not found in storage", table_key_node_id);
+                veilid_log!(self debug "{} not found in deprecated storage", table_key_node_id);
             }
         }
 
@@ -508,15 +566,15 @@ impl RoutingTable {
             }
         }
         if secret_key.is_none() {
-            veilid_log!(self debug "pulling {} from storage", table_key_node_id_secret);
+            veilid_log!(self debug "pulling {} from deprecated storage", table_key_node_id_secret);
             if let Ok(Some(stored_secret_key)) = config_table
                 .load_json::<SecretKey>(0, table_key_node_id_secret.as_bytes())
                 .await
             {
-                veilid_log!(self debug "{} found in storage", table_key_node_id_secret);
+                veilid_log!(self debug "{} found in deprecated storage", table_key_node_id_secret);
                 secret_key = Some(stored_secret_key);
             } else {
-                veilid_log!(self debug "{} not found in storage", table_key_node_id_secret);
+                veilid_log!(self debug "{} not found in deprecated storage", table_key_node_id_secret);
             }
         }
 
@@ -678,7 +736,7 @@ impl RoutingTable {
         let mut all_entry_bytes = Vec::with_capacity(all_entries.len());
         for entry in all_entries {
             // Serialize entry
-            let entry_bytes = entry.with_inner(|e| serialize_json_bytes(e));
+            let entry_bytes = entry.with(|e| serialize_json_bytes(e));
             all_entry_bytes.push(entry_bytes);
         }
 
@@ -767,6 +825,15 @@ impl RoutingTable {
         let inner = &mut *self.inner.write();
         Self::populate_routing_table_inner(inner, serialized_bucket_map, all_entry_bytes)?;
 
+        // // Make all entries live so they can be tested again
+        // let cur_ts = Timestamp::now();
+        // inner.with_entries(cur_ts, BucketEntryState::Dead, |v| {
+        //     v.with_mut(|e| {
+        //         e.make_not_dead(cur_ts);
+        //     });
+        //     Option::<()>::None
+        // });
+
         Ok(())
     }
 
@@ -820,121 +887,26 @@ impl RoutingTable {
         Ok(())
     }
 
-    /////////////////////////////////////
-    // Locked operations
-
-    pub fn routing_domain_for_address(&self, address: Address) -> Option<RoutingDomain> {
-        self.inner.read().routing_domain_for_address(address)
-    }
-
-    pub fn routing_domain_for_flow(&self, flow: Flow) -> Option<RoutingDomain> {
-        self.inner.read().routing_domain_for_flow(flow)
-    }
-
     pub fn route_spec_store(&self) -> &RouteSpecStore {
         &self.route_spec_store
     }
 
-    pub fn relays(&self, domain: RoutingDomain) -> Vec<RoutingDomainRelay> {
-        self.inner.read().relays(domain)
+    /// Record bytes sent/received from this node
+    pub fn record_sent_bytes(&self, bytes: ByteCount) {
+        self.self_transfer_stats_accounting.lock().0.add_up(bytes);
     }
 
-    pub fn relays_and_states(
-        &self,
-        domain: RoutingDomain,
-    ) -> Vec<(RoutingDomainRelay, RoutingDomainRelayState)> {
-        self.inner.read().relays_and_states(domain)
+    pub fn record_received_bytes(&self, bytes: ByteCount) {
+        self.self_transfer_stats_accounting.lock().0.add_down(bytes);
     }
 
-    pub fn routing_domain_state(&self, domain: RoutingDomain) -> RoutingDomainState {
-        self.inner.read().routing_domain_state(domain)
+    pub fn record_latency(&self, latency: TimestampDuration) {
+        let mut lsa = self.self_latency_stats_accounting.lock();
+        lsa.1 = lsa.0.record_latency(latency);
     }
 
-    pub fn dial_info_details(&self, domain: RoutingDomain) -> Vec<DialInfoDetail> {
-        self.inner.read().dial_info_details(domain)
-    }
-
-    pub fn routing_domain_debug(&self, domain: RoutingDomain, alt: bool) -> String {
-        self.inner
-            .read()
-            .with_routing_domain(domain, |_rti, rdd| rdd.debug(alt))
-    }
-
-    #[expect(dead_code)]
-    pub fn all_filtered_dial_info_details(
-        &self,
-        routing_domain_set: RoutingDomainSet,
-        filter: &DialInfoFilter,
-    ) -> Vec<DialInfoDetail> {
-        self.inner
-            .read()
-            .all_filtered_dial_info_details(routing_domain_set, filter)
-    }
-    pub fn get_node_info_routing_domains(&self, node_info: &NodeInfo) -> RoutingDomainSet {
-        self.inner.read().get_node_info_routing_domains(node_info)
-    }
-    pub fn origin_routing_domains(&self, routing_domain: RoutingDomain) -> RoutingDomainSet {
-        self.inner.read().origin_routing_domains(routing_domain)
-    }
-
-    /// Look up the best way for two nodes to reach each other over a specific routing domain
-    pub fn get_contact_method(
-        &self,
-        routing_domain: RoutingDomain,
-        peer_a: Arc<PeerInfo>,
-        peer_b: Arc<PeerInfo>,
-        dial_info_filter: DialInfoFilter,
-        sequencing: Sequencing,
-        context_sort: Option<&DialInfoDetailSort>,
-    ) -> ContactMethod {
-        self.inner.read().get_contact_method(
-            routing_domain,
-            peer_a,
-            peer_b,
-            dial_info_filter,
-            sequencing,
-            context_sort,
-        )
-    }
-
-    /// Edit the PublicInternet RoutingDomain
-    pub fn edit_public_internet_routing_domain(&self) -> RoutingDomainEditorPublicInternet<'_> {
-        RoutingDomainEditorPublicInternet::new(self)
-    }
-
-    /// Edit the LocalNetwork RoutingDomain
-    pub fn edit_local_network_routing_domain(&self) -> RoutingDomainEditorLocalNetwork<'_> {
-        RoutingDomainEditorLocalNetwork::new(self)
-    }
-
-    /// Return a copy of our node's peerinfo (may not yet be published)
-    pub fn get_published_peer_info(&self, routing_domain: RoutingDomain) -> Option<Arc<PeerInfo>> {
-        self.inner.read().get_published_peer_info(routing_domain)
-    }
-
-    /// Return a copy of our node's peerinfo (may not yet be published)
-    pub fn get_current_peer_info(&self, routing_domain: RoutingDomain) -> Arc<PeerInfo> {
-        self.inner.read().get_current_peer_info(routing_domain)
-    }
-
-    /// Return a list of the current valid bootstrap peers in a particular routing domain
-    #[expect(dead_code)]
-    pub fn get_bootstrap_peers(&self, routing_domain: RoutingDomain) -> Vec<NodeRef> {
-        self.inner.read().get_bootstrap_peers(routing_domain)
-    }
-
-    /// Return the domain's filter for what we can send out in the form of a dial info filter
-    pub fn get_outbound_dial_info_filter(&self, routing_domain: RoutingDomain) -> DialInfoFilter {
-        self.inner
-            .read()
-            .get_outbound_dial_info_filter(routing_domain)
-    }
-    /// Return the domain's filter for what we can receive in the form of a node ref filter
-    pub fn get_outbound_node_ref_filter(&self, routing_domain: RoutingDomain) -> NodeRefFilter {
-        self.inner
-            .read()
-            .get_outbound_node_ref_filter(routing_domain)
-    }
+    /////////////////////////////////////
+    // Locked operations
 
     /// Attempt to empty the routing table
     /// May not empty buckets completely if there are existing node_refs
@@ -945,17 +917,6 @@ impl RoutingTable {
     /// Attempt to remove last_connections from entries
     pub fn purge_last_connections(&self) {
         self.inner.write().purge_last_connections();
-    }
-
-    /// See which nodes need to be pinged
-    pub fn get_nodes_needing_ping(
-        &self,
-        routing_domain: RoutingDomain,
-        cur_ts: Timestamp,
-    ) -> Vec<FilteredNodeRef> {
-        self.inner
-            .read()
-            .get_nodes_needing_ping(routing_domain, cur_ts)
     }
 
     fn queue_bucket_kicks(&self, node_ids: NodeIdGroup) {
@@ -973,27 +934,234 @@ impl RoutingTable {
         }
     }
 
+    // Update buckets with new node ids we may have learned belong to this entry
+    fn update_bucket_entry_node_ids_inner(
+        &self,
+        inner: &mut RoutingTableInner,
+        entry: Arc<BucketEntry>,
+        node_ids: &[NodeId],
+    ) -> EyreResult<()> {
+        entry.with_mut(|e| {
+            let mut existing_node_ids = e.node_ids();
+
+            // Peer infos for all routing domains we have
+            let mut old_peer_infos = vec![];
+
+            for node_id in node_ids {
+                let ck = node_id.kind();
+                let is_existing_node_id = existing_node_ids.contains(node_id);
+
+                existing_node_ids.remove(ck);
+
+                // Skip node ids that exist already
+                if is_existing_node_id {
+                    continue;
+                }
+
+                // New node id, get the old peer info if we don't have it yet
+                if old_peer_infos.is_empty() {
+                    for rd in RoutingDomainSet::all() {
+                        if let Some(old_peer_info) = e.get_peer_info(rd) {
+                            old_peer_infos.push(old_peer_info);
+                        }
+                    }
+                }
+
+                // Add new node id to entry
+                if let Some(old_node_id) = e.add_node_id(node_id.clone())? {
+                    // Remove any old node id for this crypto kind
+                    if VALID_CRYPTO_KINDS.contains(&ck) {
+                        let bucket_index = self.calculate_bucket_index(&old_node_id)?;
+                        let bucket = inner.get_bucket_mut(bucket_index);
+                        bucket.remove_entry(old_node_id.ref_value());
+                        self.kick_queue.lock().insert(bucket_index);
+                    }
+                }
+
+                // Bucket the entry appropriately
+                if VALID_CRYPTO_KINDS.contains(&ck) {
+                    let bucket_index = self.calculate_bucket_index(node_id)?;
+                    let bucket = inner.get_bucket_mut(bucket_index);
+                    bucket.add_existing_entry(node_id.value(), entry.clone());
+
+                    // Kick bucket
+                    self.kick_queue.lock().insert(bucket_index);
+                }
+            }
+
+            // Remove from buckets if node id wasn't seen in new peer info list
+            for node_id in existing_node_ids.iter() {
+                let ck = node_id.kind();
+                if VALID_CRYPTO_KINDS.contains(&ck) {
+                    let bucket_index = self.calculate_bucket_index(node_id)?;
+                    let bucket = inner.get_bucket_mut(bucket_index);
+                    bucket.remove_entry(node_id.ref_value());
+                    entry.with_mut(|e| e.remove_node_id(ck));
+                }
+            }
+
+            // New node id, get the old peer info if we don't have it yet
+            if !old_peer_infos.is_empty() {
+                let mut new_peer_infos = vec![];
+                for rd in RoutingDomainSet::all() {
+                    if let Some(new_peer_info) = e.get_peer_info(rd) {
+                        new_peer_infos.push(new_peer_info);
+                    }
+                }
+
+                // adding a node id should never change what routing domains peers are in
+                // so we should have a 1:1 ordered mapping here to update with the new nodeids
+                assert_eq!(old_peer_infos.len(), new_peer_infos.len());
+                for (old_pi, new_pi) in old_peer_infos.into_iter().zip(new_peer_infos.into_iter()) {
+                    assert_eq!(old_pi.routing_domain(), new_pi.routing_domain());
+                    self.on_entry_peer_info_updated(Some(old_pi), Some(new_pi));
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Create a node reference, possibly creating a bucket entry
+    /// the 'update_func' closure is called on the node, and, if created,
+    /// in a locked fashion as to ensure the bucket entry state is always valid
+    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    fn create_node_ref<F>(&self, node_ids: &NodeIdGroup, update_func: F) -> EyreResult<NodeRef>
+    where
+        F: FnOnce(&mut BucketEntryInner),
+    {
+        if node_ids.is_empty() {
+            bail!("Can't create node with no node id");
+        }
+
+        // Ensure someone isn't trying register this node itself
+        if self.matches_own_node_id(node_ids) {
+            bail!("can't register own node");
+        }
+
+        // Look up all bucket entries and make sure we only have zero or one
+        // If we have more than one, pick the one with the best cryptokind to add node ids to
+
+        let entry = {
+            let mut inner = self.inner.write();
+
+            let mut best_entry: Option<Arc<BucketEntry>> = None;
+            let mut supported_node_ids = NodeIdGroup::new();
+            for node_id in node_ids.iter() {
+                // Ignore node ids we don't support
+                if !VALID_CRYPTO_KINDS.contains(&node_id.kind()) {
+                    continue;
+                }
+                supported_node_ids.add(node_id.clone());
+
+                // Find the first in crypto sort order
+                let bucket_index = self.calculate_bucket_index(node_id)?;
+                let bucket = inner.get_bucket(bucket_index);
+                if let Some(entry) = bucket.entry(node_id.ref_value()) {
+                    // Best entry is the first one in sorted order that exists from the node id list
+                    // Everything else that matches will be overwritten in the bucket and the
+                    // existing noderefs will eventually unref and drop the old unindexed bucketentry
+                    // We do this instead of merging for now. We could 'kill' entries and have node_refs
+                    // rewrite themselves to point to the merged entry upon dereference. The use case for this
+                    // may not be worth the effort.
+                    best_entry = Some(entry);
+                    break;
+                };
+            }
+
+            // If the entry does exist already, update it
+            let entry = if let Some(best_entry) = best_entry {
+                // Update the entry with all of the node ids
+                if let Err(e) = self.update_bucket_entry_node_ids_inner(
+                    &mut inner,
+                    best_entry.clone(),
+                    node_ids,
+                ) {
+                    bail!("Not registering new ids for existing node: {}", e);
+                }
+
+                best_entry
+            } else {
+                // Fail out if we can't handle this node
+                if supported_node_ids.is_empty() {
+                    bail!("Not registering node with no supported node ids");
+                }
+
+                // If no entry exists yet, add the first entry to a bucket, possibly evicting a bucket member
+                let first_node_id = supported_node_ids[0].clone();
+                let bucket_entry = self.calculate_bucket_index(&first_node_id)?;
+                let bucket = inner.get_bucket_mut(bucket_entry);
+                let new_entry = bucket.add_new_entry(first_node_id.value());
+                inner.all_entries.insert(new_entry.clone());
+                self.kick_queue.lock().insert(bucket_entry);
+
+                // Update the other bucket entries with the remaining node ids
+                if let Err(e) =
+                    self.update_bucket_entry_node_ids_inner(&mut inner, new_entry.clone(), node_ids)
+                {
+                    bail!("Not registering new node: {}", e);
+                }
+
+                new_entry
+            };
+
+            entry
+        };
+
+        // Make node ref to return
+        let nr = NodeRef::new(self.registry(), entry.clone());
+
+        // Update the entry with the update func
+        entry.with_mut(|e| update_func(e));
+
+        Ok(nr)
+    }
+
     /// Resolve an existing routing table entry using any crypto kind and return a reference to it
-    pub fn lookup_any_node_ref(&self, node_id_key: BareNodeId) -> EyreResult<Option<NodeRef>> {
-        self.inner.read().lookup_bare_node_ref(node_id_key)
+    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    pub fn lookup_bare_node_id(&self, node_id_key: BareNodeId) -> EyreResult<Option<NodeRef>> {
+        for ck in VALID_CRYPTO_KINDS {
+            if let Some(nr) = self.lookup_node_id(NodeId::new(ck, node_id_key.clone()))? {
+                return Ok(Some(nr));
+            }
+        }
+        Ok(None)
     }
 
     /// Resolve an existing routing table entry and return a reference to it
-    pub fn lookup_node_ref(&self, node_id: NodeId) -> EyreResult<Option<NodeRef>> {
-        self.inner.read().lookup_node_ref(node_id)
+    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    pub fn lookup_node_id(&self, node_id: NodeId) -> EyreResult<Option<NodeRef>> {
+        if self.matches_own_node_id(std::slice::from_ref(&node_id)) {
+            bail!("can't look up own node id in routing table");
+        }
+        if !VALID_CRYPTO_KINDS.contains(&node_id.kind()) {
+            bail!("can't look up node id with invalid crypto kind");
+        }
+
+        let bucket_index = self.calculate_bucket_index(&node_id)?;
+        let opt_entry = {
+            let inner = self.inner.read();
+            let bucket = inner.get_bucket(bucket_index);
+            bucket.entry(node_id.ref_value())
+        };
+        Ok(opt_entry.map(|e| NodeRef::new(self.registry(), e)))
     }
 
     /// Resolve an existing routing table entry and return a filtered reference to it
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub fn lookup_and_filter_noderef(
+    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    pub fn lookup_node_id_with_filter(
         &self,
         node_id: NodeId,
         routing_domain_set: RoutingDomainSet,
         dial_info_filter: DialInfoFilter,
     ) -> EyreResult<Option<FilteredNodeRef>> {
-        self.inner
-            .read()
-            .lookup_and_filter_noderef(node_id, routing_domain_set, dial_info_filter)
+        let nr = self.lookup_node_id(node_id)?;
+        Ok(nr.map(|nr| {
+            nr.custom_filtered(
+                NodeRefFilter::new()
+                    .with_dial_info_filter(dial_info_filter)
+                    .with_routing_domain_set(routing_domain_set),
+            )
+        }))
     }
 
     /// Shortcut function to add a node to our routing table if it doesn't exist
@@ -1005,9 +1173,56 @@ impl RoutingTable {
         peer_info: Arc<PeerInfo>,
         allow_invalid: bool,
     ) -> EyreResult<FilteredNodeRef> {
-        self.inner
-            .write()
-            .register_node_with_peer_info(peer_info, allow_invalid)
+        let routing_domain = peer_info.routing_domain();
+
+        // if our own node is in the list, then ignore it as we don't add ourselves to our own routing table
+        if self
+            .routing_table()
+            .matches_own_node_id(peer_info.node_ids())
+        {
+            bail!("can't register own node id in routing table");
+        }
+
+        // node can not be its own relay
+        let node_info = peer_info.node_info();
+        let relay_ids = node_info.relay_ids();
+        let node_ids = peer_info.node_ids().clone();
+        if node_ids.contains_any_from_iter(relay_ids.iter()) {
+            bail!("node can not be its own relay");
+        }
+
+        if !allow_invalid {
+            // verify signature
+            if peer_info.signatures().is_empty() {
+                bail!(
+                    "peerinfo for {:?} has no valid signature",
+                    peer_info.node_ids()
+                );
+            }
+        }
+        // verify node info is valid in this routing domain
+        let valid_routing_domains = self.get_node_info_routing_domains(node_info);
+        if !valid_routing_domains.contains(routing_domain) {
+            bail!(
+                "peerinfo for {:?} not valid in the {:?} routing domain",
+                peer_info.node_ids(),
+                routing_domain
+            );
+        }
+
+        let mut updated = false;
+        let mut old_peer_info = None;
+        let nr = self.create_node_ref(&node_ids, |e| {
+            old_peer_info = e.get_peer_info(routing_domain);
+            updated = e.update_peer_info(routing_domain, peer_info.clone());
+        })?;
+
+        // Process any new or updated PeerInfo
+        if old_peer_info.is_none() || updated {
+            self.on_entry_peer_info_updated(old_peer_info, Some(peer_info));
+        }
+
+        Ok(nr.custom_filtered(NodeRefFilter::new().with_routing_domain(routing_domain)))
     }
 
     /// Shortcut function to add a node to our routing table if it doesn't exist
@@ -1020,74 +1235,83 @@ impl RoutingTable {
         node_id: NodeId,
         timestamp: Timestamp,
     ) -> EyreResult<FilteredNodeRef> {
-        self.inner
-            .write()
-            .register_node_with_id(routing_domain, node_id, timestamp)
+        let nr = self.create_node_ref(&NodeIdGroup::from(node_id), |e| {
+            e.touch_last_seen(timestamp);
+        })?;
+
+        // Enforce routing domain
+        let nr = nr.custom_filtered(NodeRefFilter::new().with_routing_domain(routing_domain));
+        Ok(nr)
     }
 
-    //////////////////////////////////////////////////////////////////////
-    // Routing Table Health Metrics
-
-    pub fn get_routing_table_health(&self) -> RoutingTableHealth {
-        self.inner.read().get_routing_table_health()
-    }
-
-    pub fn cached_live_entry_counts(&self) -> Arc<LiveEntryCounts> {
-        self.inner.read().cached_live_entry_counts()
-    }
-
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub fn get_recent_peers(&self) -> Vec<(NodeId, RecentPeersEntry)> {
-        let mut recent_peers = Vec::new();
-        let mut dead_peers = Vec::new();
-        let mut out = Vec::new();
-
-        // collect all recent peers
-        {
-            let inner = self.inner.read();
-            for (k, _v) in &inner.recent_peers {
-                recent_peers.push(k.clone());
+    /// Called whenever a routing table entry is:
+    /// 1. created or updated with new peer information
+    /// 2. has a node id added or removed (per CryptoKind)
+    ///   * by a new peer info showing up with a different overlapping node id list
+    ///   * by a bucket kick removing an entry from a bucket for some cryptokind
+    /// 3. (todo) is removed from some routing domain (peer info gone)
+    ///
+    /// It is not called when:
+    /// 1. nodes are registered by id for an existing connection but have no peer info yet
+    /// 2. nodes are removed that don't have any peer info
+    fn on_entry_peer_info_updated(
+        &self,
+        old_peer_info: Option<Arc<PeerInfo>>,
+        new_peer_info: Option<Arc<PeerInfo>>,
+    ) {
+        let (routing_domain, node_ids) = match (old_peer_info.as_ref(), new_peer_info.as_ref()) {
+            (None, None) => {
+                return;
             }
+            (None, Some(new_pi)) => (new_pi.routing_domain(), new_pi.node_ids().clone()),
+            (Some(old_pi), None) => (old_pi.routing_domain(), old_pi.node_ids().clone()),
+            (Some(old_pi), Some(new_pi)) => {
+                assert_eq!(
+                    old_pi.routing_domain(),
+                    new_pi.routing_domain(),
+                    "routing domains should be the same here",
+                );
+                let mut node_ids = old_pi.node_ids().clone();
+                node_ids.add_all_from_iter(new_pi.node_ids().iter());
+                (new_pi.routing_domain(), node_ids)
+            }
+        };
+
+        // If this is our relay, then redo our own peerinfo because
+        // if we have relayed peerinfo, then changing the relay's peerinfo
+        // changes our own peer info
+        let rdc = self.get_routing_domain_controller(routing_domain);
+        let rdd = rdc.read();
+        let our_relay_node_ids = rdd
+            .relays()
+            .iter()
+            .flat_map(|rdr| rdr.relay_node.node_ids().to_vec())
+            .collect::<Vec<_>>();
+        if node_ids.contains_any_from_iter(our_relay_node_ids.iter()) {
+            rdd.refresh();
+            rdc.publish_peer_info();
         }
 
-        // look up each node and make sure the connection is still live
-        // (uses same logic as send_data, ensuring last_connection works for UDP)
-        for node_id in &recent_peers {
-            let mut dead = true;
-            if let Ok(Some(nr)) = self.lookup_node_ref(node_id.clone()) {
-                if let Some(last_connection) = nr.last_flow() {
-                    out.push((node_id.clone(), RecentPeersEntry { last_connection }));
-                    dead = false;
-                }
-            }
-            if dead {
-                dead_peers.push(node_id);
-            }
-        }
-
-        // purge dead recent peers
-        {
-            let mut inner = self.inner.write();
-            for d in dead_peers {
-                inner.recent_peers.remove(d);
-            }
-        }
-
-        out
+        // Update tables that use peer info
+        // if let Some(_old_pi) = old_peer_info {
+        //     // Remove old info
+        // }
+        // if let Some(_new_pi) = new_peer_info {
+        //     // Add new info
+        // }
     }
 
     pub fn clear_punishments(&self) {
         let cur_ts = Timestamp::now();
         self.inner
-            .write()
-            .with_entries_mut(cur_ts, BucketEntryState::Punished, |rti, e| {
-                e.with_mut(rti, |_rti, ei| ei.set_punished(None));
+            .read()
+            .with_entries(cur_ts, BucketEntryState::Punished, |e| {
+                e.with_mut(|ei| ei.set_punished(None));
                 Option::<()>::None
             });
     }
 
-    #[expect(clippy::unused_async)]
-    pub async fn get_outbound_relay_peer(
+    pub fn get_outbound_relay_peer(
         &self,
         _routing_domain: routing_table::RoutingDomain,
     ) -> Option<Arc<routing_table::PeerInfo>> {
@@ -1095,21 +1319,47 @@ impl RoutingTable {
         None
     }
 
-    //////////////////////////////////////////////////////////////////////
-    // Find Nodes
+    /// Find the first dial info that matches a routing domain set and filter
+    pub fn first_filtered_dial_info_detail(
+        &self,
+        routing_domain_set: RoutingDomainSet,
+        filter: &DialInfoFilter,
+    ) -> Option<DialInfoDetail> {
+        if filter.is_dead() || routing_domain_set.is_empty() {
+            return None;
+        }
+        for rdd in self.get_routing_domain_controllers(routing_domain_set) {
+            let rdd = rdd.read();
+            if let Some(did) = rdd
+                .dial_info_details()
+                .iter()
+                .find(|did| did.matches_filter(filter))
+                .cloned()
+            {
+                return Some(did);
+            }
+        }
+        None
+    }
 
     /// Makes a filter that finds nodes with a matching inbound dialinfo
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     pub fn make_inbound_dial_info_entry_filter<'a>(
+        &self,
         routing_domain: RoutingDomain,
         dial_info_filter: DialInfoFilter,
     ) -> RoutingTableEntryFilter<'a> {
+        let self_has_matching_dial_info = self
+            .first_filtered_dial_info_detail(routing_domain.into(), &dial_info_filter)
+            .is_some();
+
         // does it have matching public dial info?
-        Box::new(move |rti, e, _cur_ts| {
-            if let Some(e) = e {
-                e.with(rti, |_rti, e| {
-                    if let Some(ni) = e.node_info(routing_domain) {
-                        if ni
+        Box::new(
+            move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+                if let Some(snap) = opt_snap {
+                    if let Some(pi) = snap.get_peer_info(routing_domain) {
+                        if pi
+                            .node_info()
                             .first_filtered_dial_info_detail(DialInfoDetail::NO_SORT, &|did| {
                                 did.matches_filter(&dial_info_filter)
                             })
@@ -1119,24 +1369,31 @@ impl RoutingTable {
                         }
                     }
                     false
-                })
-            } else {
-                rti.first_filtered_dial_info_detail(routing_domain.into(), &dial_info_filter)
-                    .is_some()
-            }
-        })
+                } else {
+                    self_has_matching_dial_info
+                }
+            },
+        )
     }
 
     /// Makes a filter that finds nodes capable of dialing a particular outbound dialinfo
     pub fn make_outbound_dial_info_entry_filter<'a>(
+        &self,
         routing_domain: RoutingDomain,
         dial_info: DialInfo,
     ) -> RoutingTableEntryFilter<'a> {
+        let outbound_dial_info_filter = self
+            .get_routing_domain_controller(routing_domain)
+            .read()
+            .outbound_dial_info_filter();
+        let self_has_matching_dial_info = dial_info.matches_filter(&outbound_dial_info_filter);
+
         // does the node's outbound capabilities match the dialinfo?
-        Box::new(move |rti, e, _cur_ts| {
-            if let Some(e) = e {
-                e.with(rti, |_rti, e| {
-                    if let Some(ni) = e.node_info(routing_domain) {
+        Box::new(
+            move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+                if let Some(snap) = opt_snap {
+                    if let Some(pi) = snap.get_peer_info(routing_domain) {
+                        let ni = pi.node_info();
                         let dif = DialInfoFilter::all()
                             .with_protocol_type_set(ni.outbound_protocols())
                             .with_address_type_set(ni.address_types());
@@ -1145,71 +1402,14 @@ impl RoutingTable {
                         }
                     }
                     false
-                })
-            } else {
-                let dif = rti.get_outbound_dial_info_filter(routing_domain);
-                dial_info.matches_filter(&dif)
-            }
-        })
-    }
-
-    pub fn find_fast_non_local_nodes_filtered(
-        &self,
-        routing_domain: RoutingDomain,
-        node_count: usize,
-        filters: VecDeque<RoutingTableEntryFilter>,
-    ) -> Vec<NodeRef> {
-        self.inner.read().find_fast_non_local_nodes_filtered(
-            self.registry(),
-            routing_domain,
-            node_count,
-            filters,
+                } else {
+                    self_has_matching_dial_info
+                }
+            },
         )
     }
 
-    pub fn find_preferred_fastest_nodes<'a, T, O>(
-        &self,
-        node_count: usize,
-        filters: VecDeque<RoutingTableEntryFilter>,
-        transform: T,
-    ) -> Vec<O>
-    where
-        T: for<'r> FnMut(&'r RoutingTableInner, Option<Arc<BucketEntry>>) -> O + Send,
-    {
-        self.inner
-            .read()
-            .find_preferred_fastest_nodes(node_count, filters, transform)
-    }
-
-    pub fn find_preferred_closest_nodes<'a, T, O>(
-        &self,
-        node_count: usize,
-        hash_coordinate: HashCoordinate,
-        filters: VecDeque<RoutingTableEntryFilter>,
-        transform: T,
-    ) -> VeilidAPIResult<Vec<O>>
-    where
-        T: for<'r> FnMut(&'r RoutingTableInner, Option<Arc<BucketEntry>>) -> O + Send,
-    {
-        self.inner.read().find_preferred_closest_nodes(
-            node_count,
-            hash_coordinate,
-            filters,
-            transform,
-        )
-    }
-
-    #[expect(dead_code)]
-    pub fn sort_and_clean_closest_noderefs(
-        &self,
-        hash_coordinate: HashCoordinate,
-        closest_nodes: &[NodeRef],
-    ) -> Vec<NodeRef> {
-        self.inner
-            .read()
-            .sort_and_clean_closest_noderefs(hash_coordinate, closest_nodes)
-    }
-
+    /// Registers a set of PeerInfo with the routing table
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", skip(self, peer_info_list), fields(__VEILID_LOG_KEY = self.log_key()))
@@ -1235,150 +1435,6 @@ impl RoutingTable {
             }
         }
         out
-    }
-
-    /// Finds nodes near a particular node id
-    /// Ensures all returned nodes have a set of capabilities enabled
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub async fn find_nodes_close_to_node_id(
-        &self,
-        node_ref: FilteredNodeRef,
-        node_id: NodeId,
-        capabilities: Vec<VeilidCapability>,
-    ) -> EyreResult<NetworkResult<Vec<NodeRef>>> {
-        let rpc_processor = self.rpc_processor();
-
-        let res = network_result_try!(
-            Box::pin(rpc_processor.rpc_call_find_node(
-                Destination::direct(node_ref, None),
-                node_id,
-                capabilities
-            ))
-            .await?
-        );
-
-        // register nodes we'd found
-        Ok(NetworkResult::value(
-            self.register_nodes_with_peer_info_list(res.answer),
-        ))
-    }
-
-    /// Ask a remote node to list the nodes it has around the current node
-    /// Ensures all returned nodes have a set of capabilities enabled
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub async fn find_nodes_close_to_self(
-        &self,
-        crypto_kind: CryptoKind,
-        node_ref: FilteredNodeRef,
-        capabilities: Vec<VeilidCapability>,
-    ) -> EyreResult<NetworkResult<Vec<NodeRef>>> {
-        let self_node_id = self.node_id(crypto_kind);
-        Box::pin(self.find_nodes_close_to_node_id(node_ref, self_node_id, capabilities)).await
-    }
-
-    /// Ask a remote node to list the nodes it has around itself
-    /// Ensures all returned nodes have a set of capabilities enabled
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub async fn find_nodes_close_to_node_ref(
-        &self,
-        crypto_kind: CryptoKind,
-        node_ref: FilteredNodeRef,
-        capabilities: Vec<VeilidCapability>,
-    ) -> EyreResult<NetworkResult<Vec<NodeRef>>> {
-        let Some(target_node_id) = node_ref.node_ids().get(crypto_kind) else {
-            bail!("no target node ids for this crypto kind");
-        };
-        Box::pin(self.find_nodes_close_to_node_id(node_ref, target_node_id, capabilities)).await
-    }
-
-    /// Ask node to 'find node' on own node so we can get some more nodes near ourselves
-    /// and then contact those nodes to inform -them- that we exist
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub async fn reverse_find_node(
-        &self,
-        crypto_kind: CryptoKind,
-        node_ref: NodeRef,
-        wide: bool,
-        capabilities: Vec<VeilidCapability>,
-    ) {
-        // Ask node for nodes closest to our own node
-        let closest_nodes = network_result_value_or_log!(self match pin_future!(self.find_nodes_close_to_self(crypto_kind, node_ref.default_filtered_with_sequencing(Sequencing::PreferOrdered), capabilities.clone())).await {
-            Err(e) => {
-                veilid_log!(self error
-                    "find_self failed for {:?}: {:?}",
-                    &node_ref, e
-                );
-                return;
-            }
-            Ok(v) => v,
-        } => [ format!(": crypto_kind={} node_ref={} wide={}", crypto_kind, node_ref, wide) ] {
-            return;
-        });
-
-        // Ask each node near us to find us as well
-        if wide {
-            for closest_nr in closest_nodes {
-                network_result_value_or_log!(self match pin_future!(self.find_nodes_close_to_self(crypto_kind, closest_nr.default_filtered_with_sequencing(Sequencing::PreferOrdered), capabilities.clone())).await {
-                    Err(e) => {
-                        veilid_log!(self error
-                            "find_self failed for {:?}: {:?}",
-                            &closest_nr, e
-                        );
-                        continue;
-                    }
-                    Ok(v) => v,
-                } => [ format!(": crypto_kind={} closest_nr={} wide={}", crypto_kind, closest_nr, wide) ] {
-                    // Do nothing with non-values
-                    continue;
-                });
-            }
-        }
-    }
-
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", skip(self, filter, metric), ret, fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    #[expect(dead_code)]
-    pub fn find_fastest_node(
-        &self,
-        cur_ts: Timestamp,
-        filter: impl Fn(&BucketEntryInner) -> bool,
-        metric: impl Fn(&LatencyStats) -> TimestampDuration,
-    ) -> Option<NodeRef> {
-        let inner = self.inner.read();
-        inner.find_fastest_node(cur_ts, filter, metric)
-    }
-
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", skip(self, filter, metric), ret, fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    pub fn find_random_fast_node(
-        &self,
-        cur_ts: Timestamp,
-        filter: impl Fn(&BucketEntryInner) -> bool,
-        percentile: f32,
-        metric: impl Fn(&LatencyStats) -> TimestampDuration,
-    ) -> Option<NodeRef> {
-        let inner = self.inner.read();
-        inner.find_random_fast_node(cur_ts, filter, percentile, metric)
-    }
-
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", skip(self, filter, metric), ret, fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    #[expect(dead_code)]
-    pub fn get_node_speed_percentile(
-        &self,
-        node_id: NodeId,
-        cur_ts: Timestamp,
-        filter: impl Fn(&BucketEntryInner) -> bool,
-        metric: impl Fn(&LatencyStats) -> TimestampDuration,
-    ) -> Option<NodeRelativePerformance> {
-        let inner = self.inner.read();
-        inner.get_node_relative_performance(node_id, cur_ts, filter, metric)
     }
 
     /// Find the best routing domain for a node info

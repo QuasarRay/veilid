@@ -49,7 +49,7 @@ impl BootstrapRecord {
     }
 
     pub fn merge(&mut self, other: BootstrapRecord) {
-        self.public_keys.add_all_from_slice(&other.public_keys);
+        self.public_keys.add_all_from_iter(other.public_keys.iter());
         for x in other.envelope_support {
             if !self.envelope_support.contains(&x) {
                 self.envelope_support.push(x);

@@ -4,6 +4,7 @@ from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+import asyncio
 
 import veilid
 from veilid.json_api import _JsonVeilidAPI
@@ -24,5 +25,8 @@ async def api_connection() -> AsyncGenerator[_JsonVeilidAPI, None]:
     async with api:
         # purge routes to ensure we start fresh
         await api.debug("purge routes")
+
+        while not (await api.get_state()).attachment.public_internet_ready:
+            await asyncio.sleep(0.25)
 
         yield api

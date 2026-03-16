@@ -22,10 +22,9 @@ pub struct ValueData {
     #[schemars(with = "String")]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
-        serde(with = "serde_bytes"),
         tsify(type = "Uint8Array")
     )]
-    data: Vec<u8>,
+    data: Bytes,
 
     /// The public identity key of the writer of the data
     #[schemars(with = "String")]
@@ -36,7 +35,8 @@ pub struct ValueData {
 impl ValueData {
     pub const MAX_LEN: usize = 32768;
 
-    pub fn new(data: Vec<u8>, writer: PublicKey) -> VeilidAPIResult<Self> {
+    pub fn new<B: Into<Bytes>>(data: B, writer: PublicKey) -> VeilidAPIResult<Self> {
+        let data = data.into();
         if data.len() > Self::MAX_LEN {
             apibail_generic!("invalid size");
         }
@@ -46,14 +46,15 @@ impl ValueData {
             writer,
         })
     }
-    pub fn new_with_seq(
+    pub fn new_with_seq<B: Into<Bytes>>(
         seq: ValueSeqNum,
-        data: Vec<u8>,
+        data: B,
         writer: PublicKey,
     ) -> VeilidAPIResult<Self> {
         if seq.is_none() {
             apibail_generic!("invalid sequence number");
         }
+        let data = data.into();
         if data.len() > Self::MAX_LEN {
             apibail_generic!("invalid size");
         }
@@ -67,6 +68,11 @@ impl ValueData {
     #[must_use]
     pub fn data(&self) -> &[u8] {
         &self.data
+    }
+
+    #[must_use]
+    pub fn data_bytes(&self) -> Bytes {
+        self.data.clone()
     }
 
     #[must_use]

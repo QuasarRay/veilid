@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! fourcc_type {
     ($name:ident) => {
-        paste::paste! {
+        pastey::paste! {
             /// A four-character code
             #[derive(
                 Copy,

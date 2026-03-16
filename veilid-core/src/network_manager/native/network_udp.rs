@@ -3,7 +3,7 @@ use stop_token::future::FutureExt;
 
 impl Network {
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn create_udp_listener_tasks(&self) -> EyreResult<()> {
+    pub(super) fn create_udp_listener_tasks(&self) -> EyreResult<()> {
         // Spawn socket tasks
         let mut task_count = self.config().network.protocol.udp.socket_pool_size;
         if task_count == 0 {
@@ -65,7 +65,7 @@ impl Network {
 
                                     // Pass it up for processing
                                     if let Err(e) = network_manager
-                                        .on_recv_envelope(&mut data[..size], flow).measure_debug(TimestampDuration::new_ms(500), |x| {
+                                        .on_recv_envelope(Bytes::copy_from_slice(&data[..size]), flow).measure_debug(TimestampDuration::new_ms(500), |x| {
                                             veilid_log!(network_manager debug "on_recv_envelope: {} for {}", x, flow);
                                         })
                                         .await
@@ -108,7 +108,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    async fn create_udp_protocol_handler(&self, addr: SocketAddr) -> EyreResult<bool> {
+    fn create_udp_protocol_handler(&self, addr: SocketAddr) -> EyreResult<bool> {
         veilid_log!(self debug "create_udp_protocol_handler on {:?}", &addr);
 
         // Create a single-address-family UDP socket with default options bound to an address
@@ -131,7 +131,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn create_outbound_udp_protocol_handlers(&self) -> EyreResult<bool> {
+    pub(super) fn create_outbound_udp_protocol_handlers(&self) -> EyreResult<bool> {
         let last_network_state = self.last_network_state().unwrap_or_log();
 
         let enable_ipv4 =
@@ -145,12 +145,10 @@ impl Network {
                 .any(|x| x.0.is_ipv4());
             if !has_ipv4_handler {
                 // Needs ipv4 handler for outbound but we aren't listening on it, so make a random one
-                let bound = self
-                    .create_udp_protocol_handler(SocketAddr::V4(SocketAddrV4::new(
-                        Ipv4Addr::UNSPECIFIED,
-                        0,
-                    )))
-                    .await?;
+                let bound = self.create_udp_protocol_handler(SocketAddr::V4(SocketAddrV4::new(
+                    Ipv4Addr::UNSPECIFIED,
+                    0,
+                )))?;
                 if !bound {
                     bail!("unable to bind ipv4 default udp handler");
                 }
@@ -167,14 +165,12 @@ impl Network {
                 .any(|x| x.0.is_ipv6());
             if !has_ipv6_handler {
                 // Needs ipv6 handler for outbound but we aren't listening on it, so make a random one
-                let bound = self
-                    .create_udp_protocol_handler(SocketAddr::V6(SocketAddrV6::new(
-                        Ipv6Addr::UNSPECIFIED,
-                        0,
-                        0,
-                        0,
-                    )))
-                    .await?;
+                let bound = self.create_udp_protocol_handler(SocketAddr::V6(SocketAddrV6::new(
+                    Ipv6Addr::UNSPECIFIED,
+                    0,
+                    0,
+                    0,
+                )))?;
                 if !bound {
                     bail!("unable to bind ipv6 default udp handler");
                 }
@@ -184,7 +180,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn create_inbound_udp_protocol_handlers(
+    pub(super) fn create_inbound_udp_protocol_handlers(
         &self,
         bind_set: NetworkBindSet,
     ) -> EyreResult<bool> {
@@ -196,7 +192,7 @@ impl Network {
                 // see if we've already bound to this already
                 // if not, spawn a listener
                 if !self.inner.lock().udp_protocol_handlers.contains_key(&addr) {
-                    let bound = self.clone().create_udp_protocol_handler(addr).await?;
+                    let bound = self.clone().create_udp_protocol_handler(addr)?;
 
                     // Return interface dial infos we listen on
                     if bound {

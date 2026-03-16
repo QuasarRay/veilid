@@ -46,6 +46,10 @@ class DefaultVeilidFixture implements VeilidFixture {
     final logLevel = VeilidConfigLogLevel.fromJson(
         const String.fromEnvironment('LOG_LEVEL', defaultValue: 'info'));
 
+    final terminalLogLevel = VeilidConfigLogLevel.fromJson(
+        const String.fromEnvironment('TERMINAL_LOG_LEVEL',
+            defaultValue: 'off'));
+
     final flamePathStr = const String.fromEnvironment('FLAME').trim();
 
     final Map<String, dynamic> platformConfigJson;
@@ -69,8 +73,8 @@ class DefaultVeilidFixture implements VeilidFixture {
       final platformConfig = VeilidFFIConfig(
           logging: VeilidFFIConfigLogging(
               terminal: VeilidFFIConfigLoggingTerminal(
-                enabled: false,
-                level: VeilidConfigLogLevel.debug,
+                enabled: terminalLogLevel != VeilidConfigLogLevel.off,
+                level: terminalLogLevel,
                 ignoreLogTargets: ignoreLogTargets,
               ),
               otlp: VeilidFFIConfigLoggingOtlp(

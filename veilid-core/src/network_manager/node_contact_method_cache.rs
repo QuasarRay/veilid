@@ -43,9 +43,11 @@ impl From<Option<&NodeContactMethod>> for ContactMethodKind {
             Some(NodeContactMethod::SignalReverse { relay_di: _ }) => {
                 ContactMethodKind::SignalReverse
             }
-            Some(NodeContactMethod::SignalHolePunch { relay_di: _ }) => {
-                ContactMethodKind::SignalHolePunch
-            }
+            Some(NodeContactMethod::SignalHolePunch {
+                relay_di: _,
+                hole_punch_di: _,
+                reverse_hole_punch_di: _,
+            }) => ContactMethodKind::SignalHolePunch,
             Some(NodeContactMethod::InboundRelay { relay_di: _ }) => {
                 ContactMethodKind::InboundRelay
             }

@@ -131,7 +131,7 @@ impl<T> RPCErrorIgnoreOk<T> for Result<T, RPCError> {
 #[macro_export]
 macro_rules! rpc_ignore_missing_property {
     ($reader:expr, $propname:tt) => {
-        paste::paste! {
+        pastey::paste! {
             if !$reader.[<has_ $propname>]() {
                 return Err(RPCError::ignore(concat!("missing ", stringify!($propname))));
             }

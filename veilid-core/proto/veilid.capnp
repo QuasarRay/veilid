@@ -113,6 +113,7 @@ struct DialInfo @0xfd40924f8b57d9a5 {
 struct SignalInfoHolePunch @0xaa24841378d6dabf {
     receipt                 @0  :Data;                  # receipt to return with hole punch
     peerInfo                @1  :PeerInfo;              # peer info of the signal sender for hole punch attempt
+    dialInfo                @2  :DialInfo;              # (optional) dial info to use, otherwise rawudp dialinfo from the peerinfo is assumed 
 }
 
 struct SignalInfoReverseConnect @0x9be3baab08513db2 {

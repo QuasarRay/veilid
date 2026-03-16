@@ -125,7 +125,7 @@ impl NetworkManager {
             peers: {
                 let mut out = Vec::new();
                 for (k, v) in routing_table.get_recent_peers() {
-                    if let Ok(Some(nr)) = routing_table.lookup_node_ref(k) {
+                    if let Ok(Some(nr)) = routing_table.lookup_node_id(k) {
                         let peer_stats = nr.peer_stats();
                         let peer = PeerTableData {
                             node_ids: nr.node_ids().iter().cloned().collect(),

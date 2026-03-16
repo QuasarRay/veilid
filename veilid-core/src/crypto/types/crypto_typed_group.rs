@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! impl_crypto_typed_group {
     ($visibility:vis $name:ident) => {
-        paste::paste! {
+        pastey::paste! {
 
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(wasm_bindgen_derive::TryFromJsValue))]
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
@@ -32,7 +32,7 @@ macro_rules! impl_crypto_typed_group {
                     self.items.iter()
                 }
 
-                pub fn add_all_from_slice(&mut self, typed_keys: &[$name]) {
+                pub fn add_all_from_iter<'a>(&mut self, typed_keys: impl IntoIterator<Item = &'a $name>) {
                     'outer: for typed_key in typed_keys {
                         for x in &mut self.items {
                             if x.kind() == typed_key.kind() {
@@ -45,8 +45,8 @@ macro_rules! impl_crypto_typed_group {
                     self.items.sort()
                 }
 
-                pub fn contains_any_from_slice(&self, typed_keys: &[$name]) -> bool {
-                    typed_keys.iter().any(|typed_key| self.items.contains(typed_key))
+                pub fn contains_any_from_iter<'a>(&self, typed_keys: impl IntoIterator<Item = &'a $name>) -> bool {
+                    typed_keys.into_iter().any(|typed_key| self.items.contains(typed_key))
                 }
 
             }
@@ -145,7 +145,7 @@ macro_rules! impl_crypto_typed_group {
                 #[must_use]
                 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(js_name = containsAny))]
                 pub fn contains_any(&self, typed_keys: Vec<$name>) -> bool {
-                    self.contains_any_from_slice(&typed_keys)
+                    self.contains_any_from_iter(typed_keys.iter())
                 }
 
                 #[must_use]
@@ -167,7 +167,7 @@ macro_rules! impl_crypto_typed_group {
 
                 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(js_name = "addAll"))]
                 pub fn add_all(&mut self, typed_keys: Vec<$name>) {
-                    self.add_all_from_slice(&typed_keys)
+                    self.add_all_from_iter(typed_keys.iter())
                 }
 
                 pub fn clear(&mut self) {
@@ -234,7 +234,7 @@ macro_rules! impl_crypto_typed_group {
             {
                 fn from(x: Vec<$name>) -> Self {
                     let mut tks = [<$name Group>]::with_capacity(x.len());
-                    tks.add_all_from_slice(&x);
+                    tks.add_all_from_iter(x.iter());
                     tks
                 }
             }
@@ -242,7 +242,7 @@ macro_rules! impl_crypto_typed_group {
             {
                 fn from(x: &[$name]) -> Self {
                     let mut tks = [<$name Group>]::with_capacity(x.len());
-                    tks.add_all_from_slice(x);
+                    tks.add_all_from_iter(x.iter());
                     tks
                 }
             }

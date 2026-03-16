@@ -1,6 +1,6 @@
 macro_rules! untyped_vld0_serializers {
     ($rust_name:ident, $typed:ty, $bare:ty) => {
-        paste::paste! {
+        pastey::paste! {
             pub mod [< $rust_name _try_untyped_vld0 >] {
                 use crate::CRYPTO_KIND_VLD0;
                 use core::str::FromStr;

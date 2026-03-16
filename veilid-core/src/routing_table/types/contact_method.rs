@@ -12,7 +12,7 @@ pub enum ContactMethod {
     /// Request via signal the node connect back directly
     SignalReverse(DialInfo),
     /// Request via signal the node negotiate a hole punch
-    SignalHolePunch(DialInfo),
+    SignalHolePunch(DialInfo, DialInfo, DialInfo),
     /// Must use an inbound relay to reach the node
     InboundRelay(DialInfo),
     /// Must use outbound relay to reach the node

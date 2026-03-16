@@ -2,6 +2,7 @@ use futures_util::future::{select, Either};
 
 use super::*;
 
+#[allow(dead_code)]
 pub async fn record_duration_fut<F, R>(fut: F) -> R
 where
     F: Future<Output = R>,
@@ -13,6 +14,7 @@ where
     out
 }
 
+#[allow(dead_code)]
 pub fn record_duration<C, R>(closure: C) -> R
 where
     C: FnOnce() -> R,
@@ -24,7 +26,7 @@ where
     out
 }
 
-#[expect(dead_code)]
+#[allow(dead_code)]
 pub fn debug_duration<C, R, D>(closure: C, limit: TimestampDuration, callback: D) -> R
 where
     C: FnOnce() -> R,
@@ -82,6 +84,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 impl<T, D, M> MeasureDebugFuture<T, D> for M
 where
     D: Fn(String),

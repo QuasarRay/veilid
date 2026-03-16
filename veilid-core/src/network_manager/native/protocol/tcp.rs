@@ -36,7 +36,7 @@ impl RawTcpNetworkConnection {
         feature = "instrument",
         instrument(level = "trace", target = "protocol", err, skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn close(&self) -> io::Result<NetworkResult<()>> {
+    pub fn close(&self) -> io::Result<NetworkResult<()>> {
         // Drop the stream, without calling close, which calls shutdown, which causes TIME_WAIT regardless of SO_LINGER settings
         drop(self.stream.lock().take());
         // let _ = stream.close().await;
@@ -45,7 +45,7 @@ impl RawTcpNetworkConnection {
 
     async fn send_internal(
         stream: &mut AsyncPeekStream,
-        message: Vec<u8>,
+        message: Bytes,
     ) -> io::Result<NetworkResult<()>> {
         if message.len() > MAX_MESSAGE_SIZE {
             bail_io_error_other!("sending too large TCP message");
@@ -64,17 +64,17 @@ impl RawTcpNetworkConnection {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level="trace", target="protocol", err, skip(self, message), fields(network_result, message.len = message.len())))]
-    pub async fn send(&self, message: Vec<u8>) -> io::Result<NetworkResult<()>> {
+    pub async fn send(&self, message: Bytes) -> io::Result<NetworkResult<()>> {
         let Some(mut stream) = self.stream.lock().clone() else {
             bail_io_error_other!("already closed");
         };
         let out = Self::send_internal(&mut stream, message).await?;
         #[cfg(feature = "verbose-tracing")]
-        tracing::Span::current().record("network_result", &tracing::field::display(&out));
+        tracing::Span::current().record("network_result", tracing::field::display(&out));
         Ok(out)
     }
 
-    async fn recv_internal(stream: &mut AsyncPeekStream) -> io::Result<NetworkResult<Vec<u8>>> {
+    async fn recv_internal(stream: &mut AsyncPeekStream) -> io::Result<NetworkResult<Bytes>> {
         let mut header = [0u8; 4];
 
         network_result_try!(stream.read_exact(&mut header).await.into_network_result()?);
@@ -90,24 +90,24 @@ impl RawTcpNetworkConnection {
             ));
         }
 
-        let mut out: Vec<u8> = vec![0u8; len];
+        let mut out = BytesMut::zeroed(len);
         let nrout = stream.read_exact(&mut out).await.into_network_result()?;
         network_result_try!(nrout);
 
-        Ok(NetworkResult::Value(out))
+        Ok(NetworkResult::Value(out.into()))
     }
 
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "protocol", err, skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn recv(&self) -> io::Result<NetworkResult<Vec<u8>>> {
+    pub async fn recv(&self) -> io::Result<NetworkResult<Bytes>> {
         let Some(mut stream) = self.stream.lock().clone() else {
             bail_io_error_other!("already closed");
         };
         let out = Self::recv_internal(&mut stream).await?;
         #[cfg(feature = "verbose-tracing")]
-        tracing::Span::current().record("network_result", &tracing::field::display(&out));
+        tracing::Span::current().record("network_result", tracing::field::display(&out));
         Ok(out)
     }
 }

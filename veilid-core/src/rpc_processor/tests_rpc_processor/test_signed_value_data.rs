@@ -13,7 +13,7 @@ pub fn test_encode_and_decode_signed_value_data() {
     let signed_value_data = SignedValueData::new(
         EncryptedValueData::new(
             10.into(),
-            vec![1, 2, 3, 4, 5, 6],
+            Bytes::from(vec![1, 2, 3, 4, 5, 6]),
             keypair.key(),
             Some(fake_nonce),
         )
@@ -22,7 +22,12 @@ pub fn test_encode_and_decode_signed_value_data() {
     );
     encode_signed_value_data(&signed_value_data, &mut builder).unwrap();
 
-    let buffer = canonical_message_builder_to_vec_packed(message_builder).unwrap();
+    let buffer = canonical_message_builder_to_bytes_writer_packed(message_builder, |size| {
+        BytesWriter::with_capacity(size)
+    })
+    .unwrap()
+    .into_inner()
+    .freeze();
 
     println!("buffer[{}] = {:02x?}", buffer.len(), &buffer);
 

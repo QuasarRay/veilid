@@ -5,7 +5,6 @@ use core::convert::TryFrom;
 use core::fmt;
 use core::hash::Hash;
 
-use bytes::{Bytes, BytesMut};
 use data_encoding::BASE64URL_NOPAD;
 
 //////////////////////////////////////////////////////////////////////
@@ -31,17 +30,18 @@ macro_rules! byte_array_type {
         make_wasm_bindgen_stubs!($name);
 
         impl $name {
+            #[allow(dead_code)] // Not all implementors of this macro use this
             pub fn new(data: &[u8]) -> Self {
                 Self {
                     bytes: Bytes::copy_from_slice(data),
                 }
             }
-            fn new_from_bytes(bytes: Bytes) -> Self {
+            pub fn new_from_bytes(bytes: Bytes) -> Self {
                 Self { bytes }
             }
 
-            pub fn bytes(&self) -> &[u8] {
-                &self.bytes
+            pub fn bytes(&self) -> Bytes {
+                self.bytes.clone()
             }
 
             #[allow(dead_code)]
@@ -237,7 +237,7 @@ macro_rules! byte_array_type {
 
         impl AsRef<[u8]> for $name {
             fn as_ref(&self) -> &[u8] {
-                self.bytes()
+                self.bytes.as_ref()
             }
         }
         impl From<&[u8]> for $name {

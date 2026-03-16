@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use super::*;
 mod blake3digest512;
 
@@ -22,6 +24,56 @@ pub use vld0::*;
 // pub use vld1::*;
 
 pub use blake3digest512::*;
+
+pub trait CryptoSystemBuffer: AsRef<[u8]> + AsMut<[u8]> {
+    /// Get the length of the buffer
+    fn len(&self) -> usize;
+
+    /// Is the buffer empty?
+    fn is_empty(&self) -> bool;
+
+    /// Extend this buffer from the given slice
+    fn extend_from_slice(&mut self, other: &[u8]);
+
+    /// Truncate this buffer to the given size
+    fn truncate(&mut self, len: usize);
+}
+
+impl CryptoSystemBuffer for Vec<u8> {
+    fn len(&self) -> usize {
+        Vec::<u8>::len(self)
+    }
+
+    fn is_empty(&self) -> bool {
+        Vec::<u8>::is_empty(self)
+    }
+
+    fn extend_from_slice(&mut self, other: &[u8]) {
+        Vec::<u8>::extend_from_slice(self, other);
+    }
+
+    fn truncate(&mut self, len: usize) {
+        Vec::<u8>::truncate(self, len);
+    }
+}
+
+impl CryptoSystemBuffer for BytesMut {
+    fn len(&self) -> usize {
+        BytesMut::len(self)
+    }
+
+    fn is_empty(&self) -> bool {
+        BytesMut::is_empty(self)
+    }
+
+    fn extend_from_slice(&mut self, other: &[u8]) {
+        BytesMut::extend_from_slice(self, other);
+    }
+
+    fn truncate(&mut self, len: usize) {
+        BytesMut::truncate(self, len);
+    }
+}
 
 pub trait CryptoSystem {
     // Accessors
@@ -159,13 +211,38 @@ pub trait CryptoSystem {
     ) -> VeilidAPIResult<bool>;
 
     // Authentication
-    fn sign(&self, key: &PublicKey, secret: &SecretKey, data: &[u8]) -> VeilidAPIResult<Signature>;
-    fn verify(&self, key: &PublicKey, data: &[u8], signature: &Signature) -> VeilidAPIResult<bool>;
+    fn sign(
+        &self,
+        public_key: &PublicKey,
+        secret: &SecretKey,
+        data: &[u8],
+    ) -> VeilidAPIResult<Signature>;
+    fn sign_in_place(
+        &self,
+        public_key: &PublicKey,
+        secret: &SecretKey,
+        data: &mut [u8],
+        range: Range<usize>,
+        sig_idx: usize,
+    ) -> VeilidAPIResult<()>;
+    fn verify(
+        &self,
+        public_key: &PublicKey,
+        data: &[u8],
+        signature: &Signature,
+    ) -> VeilidAPIResult<bool>;
+    fn verify_in_place(
+        &self,
+        public_key: &PublicKey,
+        data: &[u8],
+        range: Range<usize>,
+        sig_idx: usize,
+    ) -> VeilidAPIResult<bool>;
 
     // AEAD Encrypt/Decrypt
     fn decrypt_in_place_aead(
         &self,
-        body: &mut Vec<u8>,
+        body: &mut dyn CryptoSystemBuffer,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
         associated_data: Option<&[u8]>,
@@ -179,7 +256,7 @@ pub trait CryptoSystem {
     ) -> VeilidAPIResult<Vec<u8>>;
     fn encrypt_in_place_aead(
         &self,
-        body: &mut Vec<u8>,
+        body: &mut dyn CryptoSystemBuffer,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
         associated_data: Option<&[u8]>,

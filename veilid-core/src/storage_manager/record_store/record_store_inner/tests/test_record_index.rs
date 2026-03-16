@@ -63,20 +63,18 @@ pub async fn test_record_index() {
                 for (test_name, test_func) in tests {
                     let context_name = format!("{}_{}_{}", prefix, parallel, vcrypto.kind());
 
+                    let record_table_name = format!("records_{}_{}", context_name, test_name);
+                    let subkey_table_name = format!("subkeys_{}_{}", context_name, test_name);
+
+                    let _ = table_store.delete(&record_table_name).await;
+                    let _ = table_store.delete(&subkey_table_name).await;
+
                     let record_table = table_store
-                        .open_pooled(
-                            &format!("records_{}_{}", context_name, test_name),
-                            1,
-                            parallel,
-                        )
+                        .open_pooled(&record_table_name, 1, parallel)
                         .await
                         .expect("should open");
                     let subkey_table = table_store
-                        .open_pooled(
-                            &format!("subkeys_{}_{}", context_name, test_name),
-                            1,
-                            parallel,
-                        )
+                        .open_pooled(&subkey_table_name, 1, parallel)
                         .await
                         .expect("should open");
 
@@ -111,7 +109,12 @@ fn random_opaque_record_key(vcrypto: &CryptoSystemGuard<'_>) -> OpaqueRecordKey 
 fn nth_opaque_record_key(vcrypto: &CryptoSystemGuard<'_>, n: usize) -> OpaqueRecordKey {
     OpaqueRecordKey::new(
         vcrypto.kind(),
-        BareOpaqueRecordKey::new(vcrypto.generate_hash(&n.to_le_bytes()).into_value().bytes()),
+        BareOpaqueRecordKey::new(
+            vcrypto
+                .generate_hash(&n.to_le_bytes())
+                .into_value()
+                .as_ref(),
+        ),
     )
 }
 
@@ -128,7 +131,7 @@ fn random_signed_value_data(
     );
     let data = vcrypto.random_bytes(size);
     Arc::new(SignedValueData::new(
-        EncryptedValueData::new(seq, data, random_keypair.key(), Some(random_nonce))
+        EncryptedValueData::new(seq, data.into(), random_keypair.key(), Some(random_nonce))
             .expect("should validate"),
         random_signature,
     ))
@@ -151,7 +154,7 @@ fn random_signed_value_descriptor(
 
     Arc::new(SignedValueDescriptor::new(
         random_keypair.key(),
-        random_schema_data,
+        random_schema_data.into(),
         random_signature,
     ))
 }
@@ -322,9 +325,7 @@ pub async fn test_subkey_access_range(
 
             commit_action.commit().await.expect("should commit");
 
-            record_index
-                .finish_commit_action(commit_action)
-                .expect("should finish commit action");
+            record_index.finish_commit_action(commit_action);
 
             let lar = record_index
                 .prepare_load_action(key.clone(), sk, false)
@@ -398,9 +399,7 @@ pub async fn test_subkey_access_range(
 
         commit_action.commit().await.expect("should commit");
 
-        record_index
-            .finish_commit_action(commit_action)
-            .expect("should finish commit action");
+        record_index.finish_commit_action(commit_action);
 
         let mut subkey_values2 = vec![];
         for sk in 0..=max_subkey {
@@ -573,9 +572,7 @@ pub async fn test_create_read_write_delete_loop(
 
             if let Some(mut commit_action) = record_index.maybe_prepare_commit_action() {
                 commit_action.commit().await.expect("should commit");
-                record_index
-                    .finish_commit_action(commit_action)
-                    .expect("should finish commit action");
+                record_index.finish_commit_action(commit_action);
             }
 
             assert_eq!(

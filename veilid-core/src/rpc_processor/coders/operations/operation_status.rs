@@ -9,9 +9,13 @@ impl RPCOperationStatusQ {
     pub fn new(node_status: Option<NodeStatus>) -> Self {
         Self { node_status }
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     // pub fn node_status(&self) -> Option<&NodeStatus> {
     //     self.node_status.as_ref()
@@ -61,9 +65,12 @@ impl RPCOperationStatusA {
         }
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn destructure(self) -> (Option<NodeStatus>, Option<SenderInfo>) {
         (self.node_status, self.sender_info)

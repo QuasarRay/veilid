@@ -55,7 +55,7 @@ impl fmt::Debug for CountryCode {
 impl FromStr for CountryCode {
     type Err = VeilidAPIError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::try_from(s.as_bytes())?)
+        Self::try_from(s.as_bytes())
     }
 }
 
@@ -64,6 +64,7 @@ mod tests {
     use crate::CountryCode;
     use core::str::FromStr;
     use std::collections::HashSet;
+    use veilid_tools::*;
 
     #[test]
     fn test_hash_country_code() {
@@ -71,9 +72,7 @@ mod tests {
 
         set.insert(CountryCode::from_str("aa").unwrap_or_log());
 
-        assert!(set
-            .get(&CountryCode::from_str("AA").unwrap_or_log())
-            .is_some());
+        assert!(set.contains(&CountryCode::from_str("AA").unwrap_or_log()));
     }
 
     #[test]

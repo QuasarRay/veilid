@@ -65,7 +65,7 @@ impl WebsocketNetworkConnection {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target="protocol", err, skip(self, message), fields(network_result, message.len = message.len())))]
-    pub async fn send(&self, message: Vec<u8>) -> io::Result<NetworkResult<()>> {
+    pub async fn send(&self, message: Bytes) -> io::Result<NetworkResult<()>> {
         if message.len() > MAX_MESSAGE_SIZE {
             bail_io_error_other!("sending too large WS message");
         }
@@ -73,7 +73,7 @@ impl WebsocketNetworkConnection {
             self.inner
                 .ws_stream
                 .clone()
-                .send(WsMessage::Binary(message)),
+                .send(WsMessage::Binary(message.to_vec())),
         )
         .await
         .map_err(ws_err_to_io_error)
@@ -85,13 +85,13 @@ impl WebsocketNetworkConnection {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target="protocol", err, skip(self), fields(network_result, ret.len)))]
-    pub async fn recv(&self) -> io::Result<NetworkResult<Vec<u8>>> {
+    pub async fn recv(&self) -> io::Result<NetworkResult<Bytes>> {
         let out = match SendWrapper::new(self.inner.ws_stream.clone().next()).await {
             Some(WsMessage::Binary(v)) => {
                 if v.len() > MAX_MESSAGE_SIZE {
                     return Ok(NetworkResult::invalid_message("too large ws message"));
                 }
-                NetworkResult::Value(v)
+                NetworkResult::Value(Bytes::from(v))
             }
             Some(_) => NetworkResult::no_connection_other(io::Error::new(
                 io::ErrorKind::ConnectionReset,
@@ -117,7 +117,7 @@ pub(in crate::network_manager) struct WebsocketProtocolHandler {}
 impl WebsocketProtocolHandler {
     #[cfg_attr(
         feature = "instrument",
-        instrument(level = "trace", target = "protocol", ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
+        instrument(level = "trace", target = "protocol", ret, err)
     )]
     pub async fn connect(
         registry: VeilidComponentRegistry,

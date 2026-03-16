@@ -21,7 +21,7 @@ impl RawUdpProtocolHandler {
             socket2_operation(socket.as_ref(), |s| s.unicast_hops_v6())
                 .expect_or_log("getting IPV6_UNICAST_HOPS should not fail")
         } else {
-            socket2_operation(socket.as_ref(), |s| s.ttl())
+            socket2_operation(socket.as_ref(), |s| s.ttl_v4())
                 .expect_or_log("getting IP_TTL should not fail")
         };
 
@@ -103,7 +103,7 @@ impl RawUdpProtocolHandler {
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "protocol", err, skip(self, data), fields(self.socket = ?self.socket, data.len = data.len(), ret.flow)))]
     pub async fn send_message(
         &self,
-        data: Vec<u8>,
+        data: Bytes,
         remote_addr: SocketAddr,
     ) -> io::Result<NetworkResult<Flow>> {
         if data.len() > MAX_MESSAGE_SIZE {
@@ -128,7 +128,7 @@ impl RawUdpProtocolHandler {
             }
 
             // Fragment and send
-            let sender = |framed_chunk: Vec<u8>, remote_addr: SocketAddr| async move {
+            let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| async move {
                 let len = network_result_try!(self
                     .socket
                     .send_to(&framed_chunk, remote_addr)
@@ -197,7 +197,7 @@ impl RawUdpProtocolHandler {
                 let ttl_res = if self.is_ipv6 {
                     s.set_unicast_hops_v6(ttl)
                 } else {
-                    s.set_ttl(ttl)
+                    s.set_ttl_v4(ttl)
                 };
                 ttl_res.inspect_err(|e| {
                     veilid_log!(self error "Failed to set TTL on holepunch UDP socket: {} remote_addr={:?}", e, remote_addr);
@@ -211,7 +211,7 @@ impl RawUdpProtocolHandler {
                 let ttl_res = if self.is_ipv6 {
                     s.set_unicast_hops_v6(self.default_ttl)
                 } else {
-                    s.set_ttl(self.default_ttl)
+                    s.set_ttl_v4(self.default_ttl)
                 };
                 ttl_res.inspect_err(|e| {
                     veilid_log!(self error "Failed to reset TTL on holepunch UDP socket: {} remote_addr={:?}", e, remote_addr);
@@ -251,7 +251,7 @@ impl RawUdpProtocolHandler {
         feature = "instrument",
         instrument(level = "trace", target = "protocol", skip(registry), err, fields(__VEILID_LOG_KEY = registry.log_key()))
     )]
-    pub async fn new_unspecified_bound_handler(
+    pub fn new_unspecified_bound_handler(
         registry: VeilidComponentRegistry,
         socket_addr: &SocketAddr,
     ) -> io::Result<RawUdpProtocolHandler> {

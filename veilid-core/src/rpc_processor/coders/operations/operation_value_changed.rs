@@ -44,7 +44,7 @@ impl RPCOperationValueChanged {
         })
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub fn validate(&self, _validate_context: &RPCValidateContext<'_>) -> Result<(), RPCError> {
         if self.watch_id == 0 {
             return Err(RPCError::protocol("ValueChanged does not have a valid id"));
         }

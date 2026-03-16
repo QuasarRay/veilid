@@ -7,29 +7,40 @@ impl RouteSpecStore {
         feature = "instrument",
         instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub fn assemble_single_private_route(
+    pub async fn assemble_single_private_route(
         &self,
         allocated_route_key: &PublicKey,
         optimized: Option<bool>,
-    ) -> VeilidAPIResult<PrivateRoute> {
-        let inner = self.inner.read();
-        let Some(rsid) = inner.content.get_id_by_key(allocated_route_key) else {
-            // Route doesn't exist
-            apibail_invalid_target!("route id does not exist");
+    ) -> VeilidAPIResult<Arc<PrivateRoute>> {
+        let (key, secret_key, hop_node_refs, optimized) = {
+            let inner = self.inner.read();
+            let Some(rsid) = inner.content.get_id_by_key(allocated_route_key) else {
+                // Route doesn't exist
+                apibail_invalid_target!("route id does not exist");
+            };
+            let Some(rssd) = inner.content.get_detail(&rsid) else {
+                apibail_internal!("route id does not exist");
+            };
+
+            // See if we can optimize this compilation yet
+            // We don't want to include full nodeinfo if we don't have to
+            let optimized =
+                optimized.unwrap_or(rssd.with_stats(|stats| stats.last_known_valid_ts.is_some()));
+
+            let rsd = rssd
+                .get_route_by_key(allocated_route_key)
+                .expect_or_log("route key index is broken");
+
+            (
+                allocated_route_key.clone(),
+                rsd.secret_key.clone(),
+                rssd.hop_node_refs(),
+                optimized,
+            )
         };
-        let Some(rssd) = inner.content.get_detail(&rsid) else {
-            apibail_internal!("route id does not exist");
-        };
 
-        // See if we can optimize this compilation yet
-        // We don't want to include full nodeinfo if we don't have to
-        let optimized = optimized.unwrap_or(rssd.get_stats().last_known_valid_ts.is_some());
-
-        let rsd = rssd
-            .get_route_by_key(allocated_route_key)
-            .expect_or_log("route key index is broken");
-
-        self.assemble_single_private_route_inner(allocated_route_key, rsd, rssd, optimized)
+        self.assemble_single_private_route_inner(&key, &secret_key, &hop_node_refs, optimized)
+            .await
     }
 
     /// Assemble private route set for publication
@@ -38,121 +49,142 @@ impl RouteSpecStore {
         feature = "instrument",
         instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub fn assemble_private_route_set(
+    pub async fn assemble_private_route_set(
         &self,
         id: &RouteId,
         optimized: Option<bool>,
-    ) -> VeilidAPIResult<Vec<PrivateRoute>> {
-        let inner = self.inner.read();
-        let Some(rssd) = inner.content.get_detail(id) else {
-            apibail_invalid_target!("route id does not exist");
+    ) -> VeilidAPIResult<Vec<Arc<PrivateRoute>>> {
+        let route_params = {
+            let inner = self.inner.read();
+            let Some(rssd) = inner.content.get_detail(id) else {
+                apibail_invalid_target!("route id does not exist");
+            };
+
+            // See if we can optimize this compilation yet
+            // We don't want to include full nodeinfo if we don't have to
+            let optimized =
+                optimized.unwrap_or(rssd.with_stats(|stats| stats.last_known_valid_ts.is_some()));
+
+            let mut route_params = Vec::new();
+            for (key, rsd) in rssd.iter_route_set() {
+                let secret_key = rsd.secret_key.clone();
+                let hop_node_refs = rssd.hop_node_refs();
+
+                route_params.push((key.clone(), secret_key, hop_node_refs, optimized));
+            }
+            route_params
         };
 
-        // See if we can optimize this compilation yet
-        // We don't want to include full nodeinfo if we don't have to
-        let optimized = optimized.unwrap_or(rssd.get_stats().last_known_valid_ts.is_some());
-
         let mut out = Vec::new();
-        for (key, rsd) in rssd.iter_route_set() {
-            out.push(self.assemble_single_private_route_inner(key, rsd, rssd, optimized)?);
+        for (key, secret_key, hop_node_refs, optimized) in route_params {
+            out.push(
+                self.assemble_single_private_route_inner(
+                    &key,
+                    &secret_key,
+                    &hop_node_refs,
+                    optimized,
+                )
+                .await?,
+            );
         }
         Ok(out)
     }
 
-    pub(super) fn assemble_single_private_route_inner(
+    pub(super) async fn assemble_single_private_route_inner(
         &self,
         key: &PublicKey,
-        rsd: &RouteSpecDetail,
-        rssd: &RouteSetSpecDetail,
+        secret_key: &SecretKey,
+        hop_node_refs: &[NodeRef],
         optimized: bool,
-    ) -> VeilidAPIResult<PrivateRoute> {
+    ) -> VeilidAPIResult<Arc<PrivateRoute>> {
         let routing_table = self.routing_table();
-        let rti = routing_table.inner.read();
-
         // Ensure we get the crypto for it
         let crypto = routing_table.network_manager().crypto();
         let crypto_kind = key.kind();
-        let Some(vcrypto) = crypto.get(crypto_kind) else {
+        let Some(vcrypto) = crypto.get_async(crypto_kind) else {
             apibail_invalid_argument!("crypto not supported for route", "crypto_kind", crypto_kind);
         };
 
-        // Ensure our network class is valid before attempting to assemble any routes
-        let Some(published_peer_info) = rti.get_published_peer_info(RoutingDomain::PublicInternet)
-        else {
-            apibail_try_again!("unable to assemble route until we have published peerinfo");
-        };
+        let (hop_info, mut route_hop) = {
+            // Ensure our network class is valid before attempting to assemble any routes
+            let Some(published_peer_info) =
+                routing_table.get_published_peer_info(RoutingDomain::PublicInternet)
+            else {
+                apibail_try_again!("unable to assemble route until we have published peerinfo");
+            };
 
-        // Make innermost route hop to our own node
-        let mut route_hop = RouteHop {
-            node: if optimized {
-                let Some(node_id) = routing_table.node_ids().get(crypto_kind) else {
+            // Make innermost route hop to our own node
+            let route_hop = RouteHop {
+                node: if optimized {
+                    let Some(node_id) = routing_table.node_ids().get(crypto_kind) else {
+                        apibail_invalid_argument!(
+                            "missing node id for crypto kind",
+                            "crypto_kind",
+                            crypto_kind
+                        );
+                    };
+                    RouteNode::NodeId(node_id)
+                } else {
+                    RouteNode::PeerInfo(published_peer_info)
+                },
+                next_hop: None,
+            };
+
+            // Iterate hops in private route order (reverse, but inside out)
+            let mut hop_info = Vec::with_capacity(hop_node_refs.len());
+            for hop_node_ref in hop_node_refs {
+                let Some(hop_node_id) = hop_node_ref.node_ids().get(crypto_kind) else {
                     apibail_invalid_argument!(
-                        "missing node id for crypto kind",
+                        "no hop node id for route hop",
                         "crypto_kind",
                         crypto_kind
                     );
                 };
-                RouteNode::NodeId(node_id)
-            } else {
-                RouteNode::PeerInfo(published_peer_info)
-            },
-            next_hop: None,
+                let Some(hop_public_key) = hop_node_ref
+                    .public_keys(RoutingDomain::PublicInternet)
+                    .get(crypto_kind)
+                else {
+                    apibail_invalid_argument!(
+                        "no hop public key for route hop",
+                        "crypto_kind",
+                        crypto_kind
+                    );
+                };
+                let Some(hop_peer_info) = hop_node_ref.get_peer_info(RoutingDomain::PublicInternet)
+                else {
+                    apibail_invalid_argument!(
+                        "no hop peer info for route hop",
+                        "crypto_kind",
+                        crypto_kind
+                    );
+                };
+                hop_info.push((hop_node_id, hop_public_key, hop_peer_info));
+            }
+
+            (hop_info, route_hop)
         };
-
-        // Iterate hops in private route order (reverse, but inside out)
-        let hop_node_refs = rssd.hop_node_refs();
-        let mut hop_info = Vec::with_capacity(hop_node_refs.len());
-        for hop_node_ref in hop_node_refs {
-            let hop_node_ref = hop_node_ref.locked(&rti);
-
-            let Some(hop_node_id) = hop_node_ref.node_ids().get(crypto_kind) else {
-                apibail_invalid_argument!(
-                    "no hop node id for route hop",
-                    "crypto_kind",
-                    crypto_kind
-                );
-            };
-            let Some(hop_public_key) = hop_node_ref
-                .public_keys(RoutingDomain::PublicInternet)
-                .get(crypto_kind)
-            else {
-                apibail_invalid_argument!(
-                    "no hop public key for route hop",
-                    "crypto_kind",
-                    crypto_kind
-                );
-            };
-            let Some(hop_peer_info) = hop_node_ref.get_peer_info(RoutingDomain::PublicInternet)
-            else {
-                apibail_invalid_argument!(
-                    "no hop peer info for route hop",
-                    "crypto_kind",
-                    crypto_kind
-                );
-            };
-            hop_info.push((hop_node_id, hop_public_key, hop_peer_info));
-        }
-
-        // Drop the routing table inner read lock since we don't need it during crypto operations
-        drop(rti);
 
         for (hop_node_id, hop_public_key, hop_peer_info) in hop_info {
             // Encrypt the previous blob ENC(nonce, DH(PKhop,SKpr))
-            let nonce = vcrypto.random_nonce();
+            let nonce = vcrypto.random_nonce().await;
 
             let blob_data = {
                 let mut rh_message = ::capnp::message::Builder::new_default();
                 let mut rh_builder = rh_message.init_root::<veilid_capnp::route_hop::Builder>();
                 encode_route_hop(&route_hop, &mut rh_builder)?;
-                canonical_message_builder_to_vec_packed(rh_message)?
+                canonical_message_builder_to_bytes_writer_packed(rh_message, |size| {
+                    BytesWriter::with_capacity(size + vcrypto.aead_overhead())
+                })?
+                .into_inner()
             };
 
-            let dh_secret = vcrypto.cached_dh(&hop_public_key, &rsd.secret_key)?;
-            let enc_msg_data =
-                vcrypto.encrypt_aead(blob_data.as_slice(), &nonce, &dh_secret, None)?;
+            let dh_secret = vcrypto.cached_dh(&hop_public_key, secret_key).await?;
+            let enc_msg_data = vcrypto
+                .encrypt_in_place_aead(blob_data, &nonce, &dh_secret, None)
+                .await?;
             let route_hop_data = RouteHopData {
                 nonce,
-                blob: enc_msg_data,
+                blob: enc_msg_data.into(),
             };
 
             route_hop = RouteHop {
@@ -167,10 +199,10 @@ impl RouteSpecStore {
             }
         }
 
-        let private_route = PrivateRoute {
+        let private_route = Arc::new(PrivateRoute {
             public_key: key.clone(),
             hops: PrivateRouteHops::FirstHop(Box::new(route_hop)),
-        };
+        });
         Ok(private_route)
     }
 }

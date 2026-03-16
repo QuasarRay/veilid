@@ -419,10 +419,8 @@ impl ConnectionManager {
         )
         .await
         else {
-            veilid_log!(self debug "== get_or_create_connection: connection busy, not connecting to dial_info={:?}", dial_info);
-            return Ok(NetworkResult::no_connection_other(
-                "connection endpoint busy",
-            ));
+            veilid_log!(self debug "== get_or_create_connection: connection timeout trying to connect to dial_info={:?}", dial_info);
+            return Ok(NetworkResult::no_connection_other("connection timeout"));
         };
 
         veilid_log!(self trace "== get_or_create_connection dial_info={:?}", dial_info);

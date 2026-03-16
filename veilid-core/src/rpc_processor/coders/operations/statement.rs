@@ -9,7 +9,7 @@ impl RPCStatement {
     pub fn new(detail: RPCStatementDetail) -> Self {
         Self { detail }
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub fn validate(&self, validate_context: &RPCValidateContext<'_>) -> Result<(), RPCError> {
         self.detail.validate(validate_context)
     }
     pub fn detail(&self) -> &RPCStatementDetail {
@@ -56,14 +56,14 @@ impl RPCStatementDetail {
             RPCStatementDetail::AppMessage(_) => "AppMessage",
         }
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub fn validate(&self, validate_context: &RPCValidateContext<'_>) -> Result<(), RPCError> {
         match self {
-            RPCStatementDetail::ValidateDialInfo(r) => r.validate(validate_context),
-            RPCStatementDetail::Route(r) => r.validate(validate_context),
+            RPCStatementDetail::ValidateDialInfo(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCStatementDetail::Route(_r) => Ok(()), // r.validate(validate_context).await,
             RPCStatementDetail::ValueChanged(r) => r.validate(validate_context),
             RPCStatementDetail::Signal(r) => r.validate(validate_context),
-            RPCStatementDetail::ReturnReceipt(r) => r.validate(validate_context),
-            RPCStatementDetail::AppMessage(r) => r.validate(validate_context),
+            RPCStatementDetail::ReturnReceipt(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCStatementDetail::AppMessage(_r) => Ok(()),    // r.validate(validate_context).await,
         }
     }
     pub fn decode(

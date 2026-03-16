@@ -9,7 +9,7 @@ impl_veilid_log_facility!("net");
 
 const EXTERNAL_INFO_NODE_COUNT: usize = 20;
 const EXTERNAL_INFO_CONCURRENCY: usize = 20;
-const EXTERNAL_INFO_VALIDATIONS: usize = 5;
+pub(in crate::network_manager::native) const EXTERNAL_INFO_VALIDATIONS: usize = 5;
 
 // Detection result of dial info detection futures
 #[derive(Clone, Debug)]
@@ -242,31 +242,29 @@ impl DiscoveryContext {
         let dial_info_filter = DialInfoFilter::all()
             .with_protocol_type(protocol_type)
             .with_address_type(address_type);
-        let inbound_dial_info_entry_filter =
-            RoutingTable::make_inbound_dial_info_entry_filter(routing_domain, dial_info_filter);
+        let inbound_dial_info_entry_filter = self
+            .routing_table()
+            .make_inbound_dial_info_entry_filter(routing_domain, dial_info_filter);
         let disallow_relays_filter = Box::new(
-            move |rti: &RoutingTableInner, v: Option<Arc<BucketEntry>>, _cur_ts: Timestamp| {
-                let v = v.unwrap_or_log();
-                v.with(rti, |_rti, e| {
-                    if let Some(n) = e.node_info(routing_domain) {
-                        n.relay_ids().is_empty()
-                    } else {
-                        false
-                    }
-                })
+            move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+                let snap = opt_snap.as_ref().unwrap_or_log();
+                if let Some(pi) = snap.get_peer_info(routing_domain) {
+                    pi.node_info().relay_ids().is_empty()
+                } else {
+                    false
+                }
             },
         ) as RoutingTableEntryFilter;
         let will_validate_dial_info_filter = Box::new(
-            move |rti: &RoutingTableInner, v: Option<Arc<BucketEntry>>, _cur_ts: Timestamp| {
-                let entry = v.unwrap_or_log();
-                entry.with(rti, move |_rti, e| {
-                    e.node_info(routing_domain)
-                        .map(|ni| {
-                            ni.has_capability(VEILID_CAPABILITY_VALIDATE_DIAL_INFO)
-                                && ni.is_fully_direct_inbound()
-                        })
-                        .unwrap_or(false)
-                })
+            move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+                let snap = opt_snap.as_ref().unwrap_or_log();
+                snap.get_peer_info(routing_domain)
+                    .map(|pi| {
+                        pi.node_info()
+                            .has_capability(VEILID_CAPABILITY_VALIDATE_DIAL_INFO)
+                            && pi.node_info().is_fully_direct_inbound()
+                    })
+                    .unwrap_or(false)
             },
         ) as RoutingTableEntryFilter;
 

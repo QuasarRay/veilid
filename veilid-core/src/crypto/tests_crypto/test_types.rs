@@ -1,4 +1,5 @@
 use super::*;
+use crate::routing_table::*;
 
 async fn test_generate_secret(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     // Verify keys generate
@@ -24,19 +25,22 @@ async fn test_sign_and_verify(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     // Make two keys
     let (public_key, secret_key) = vcrypto.generate_keypair().await.into_split();
     let (public_key2, secret_key2) = vcrypto.generate_keypair().await.into_split();
+
+    let lorem_ipsum = Bytes::copy_from_slice(LOREM_IPSUM);
+    let cheezburger = Bytes::copy_from_slice(CHEEZBURGER);
     // Sign the same message twice
     let sig = vcrypto
-        .sign(&public_key, &secret_key, LOREM_IPSUM)
+        .sign(&public_key, &secret_key, lorem_ipsum.clone())
         .await
         .unwrap();
     trace!("sig: {:?}", sig);
     let sig_b = vcrypto
-        .sign(&public_key, &secret_key, LOREM_IPSUM)
+        .sign(&public_key, &secret_key, lorem_ipsum.clone())
         .await
         .unwrap();
     // Sign a second message
     let sig_c = vcrypto
-        .sign(&public_key, &secret_key, CHEEZBURGER)
+        .sign(&public_key, &secret_key, cheezburger.clone())
         .await
         .unwrap();
     trace!("sig_c: {:?}", sig_c);
@@ -44,7 +48,7 @@ async fn test_sign_and_verify(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     assert_eq!(sig, sig_b);
     // Sign the same message with a different key
     let sig2 = vcrypto
-        .sign(&public_key2, &secret_key2, LOREM_IPSUM)
+        .sign(&public_key2, &secret_key2, lorem_ipsum.clone())
         .await
         .unwrap();
     // Verify a different key gives a different signature
@@ -52,73 +56,85 @@ async fn test_sign_and_verify(vcrypto: &AsyncCryptoSystemGuard<'_>) {
 
     // Try using the wrong secret to sign
     let a1 = vcrypto
-        .sign(&public_key, &secret_key, LOREM_IPSUM)
+        .sign(&public_key, &secret_key, lorem_ipsum.clone())
         .await
         .unwrap();
     let a2 = vcrypto
-        .sign(&public_key2, &secret_key2, LOREM_IPSUM)
+        .sign(&public_key2, &secret_key2, lorem_ipsum.clone())
         .await
         .unwrap();
     let _b1 = vcrypto
-        .sign(&public_key, &secret_key2, LOREM_IPSUM)
+        .sign(&public_key, &secret_key2, lorem_ipsum.clone())
         .await
         .unwrap_err();
     let _b2 = vcrypto
-        .sign(&public_key2, &secret_key, LOREM_IPSUM)
+        .sign(&public_key2, &secret_key, lorem_ipsum.clone())
         .await
         .unwrap_err();
 
     assert_ne!(a1, a2);
 
     assert_eq!(
-        vcrypto.verify(&public_key, LOREM_IPSUM, &a1).await,
+        vcrypto.verify(&public_key, lorem_ipsum.clone(), &a1).await,
         Ok(true)
     );
     assert_eq!(
-        vcrypto.verify(&public_key2, LOREM_IPSUM, &a2).await,
+        vcrypto.verify(&public_key2, lorem_ipsum.clone(), &a2).await,
         Ok(true)
     );
     assert_eq!(
-        vcrypto.verify(&public_key, LOREM_IPSUM, &a2).await,
+        vcrypto.verify(&public_key, lorem_ipsum.clone(), &a2).await,
         Ok(false)
     );
     assert_eq!(
-        vcrypto.verify(&public_key2, LOREM_IPSUM, &a1).await,
+        vcrypto.verify(&public_key2, lorem_ipsum.clone(), &a1).await,
         Ok(false)
     );
 
     // Try verifications that should work
     assert_eq!(
-        vcrypto.verify(&public_key, LOREM_IPSUM, &sig).await,
+        vcrypto.verify(&public_key, lorem_ipsum.clone(), &sig).await,
         Ok(true)
     );
     assert_eq!(
-        vcrypto.verify(&public_key, LOREM_IPSUM, &sig_b).await,
+        vcrypto
+            .verify(&public_key, lorem_ipsum.clone(), &sig_b)
+            .await,
         Ok(true)
     );
     assert_eq!(
-        vcrypto.verify(&public_key2, LOREM_IPSUM, &sig2).await,
+        vcrypto
+            .verify(&public_key2, lorem_ipsum.clone(), &sig2)
+            .await,
         Ok(true)
     );
     assert_eq!(
-        vcrypto.verify(&public_key, CHEEZBURGER, &sig_c).await,
+        vcrypto
+            .verify(&public_key, cheezburger.clone(), &sig_c)
+            .await,
         Ok(true)
     );
     // Try verifications that shouldn't work
     assert_eq!(
-        vcrypto.verify(&public_key2, LOREM_IPSUM, &sig).await,
+        vcrypto
+            .verify(&public_key2, lorem_ipsum.clone(), &sig)
+            .await,
         Ok(false)
     );
     assert_eq!(
-        vcrypto.verify(&public_key, LOREM_IPSUM, &sig2).await,
+        vcrypto
+            .verify(&public_key, lorem_ipsum.clone(), &sig2)
+            .await,
         Ok(false)
     );
     assert_eq!(
-        vcrypto.verify(&public_key2, CHEEZBURGER, &sig_c).await,
+        vcrypto
+            .verify(&public_key2, cheezburger.clone(), &sig_c)
+            .await,
         Ok(false)
     );
     assert_eq!(
-        vcrypto.verify(&public_key, CHEEZBURGER, &sig).await,
+        vcrypto.verify(&public_key, cheezburger.clone(), &sig).await,
         Ok(false)
     );
 }
@@ -286,12 +302,19 @@ pub fn test_typed_convert(vcrypto: &AsyncCryptoSystemGuard<'_>) {
 async fn test_hash(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     let mut s = BTreeSet::<HashDigest>::new();
 
-    let k1 = vcrypto.generate_hash("abc".as_bytes()).await;
-    let k2 = vcrypto.generate_hash("abcd".as_bytes()).await;
-    let k3 = vcrypto.generate_hash("".as_bytes()).await;
-    let k4 = vcrypto.generate_hash(" ".as_bytes()).await;
-    let k5 = vcrypto.generate_hash(LOREM_IPSUM).await;
-    let k6 = vcrypto.generate_hash(CHEEZBURGER).await;
+    let abc = Bytes::copy_from_slice(b"abc");
+    let abcd = Bytes::copy_from_slice(b"abcd");
+    let empty = Bytes::copy_from_slice(b"");
+    let space = Bytes::copy_from_slice(b" ");
+    let lorem_ipsum = Bytes::copy_from_slice(LOREM_IPSUM);
+    let cheezburger = Bytes::copy_from_slice(CHEEZBURGER);
+
+    let k1 = vcrypto.generate_hash(abc.clone()).await;
+    let k2 = vcrypto.generate_hash(abcd.clone()).await;
+    let k3 = vcrypto.generate_hash(empty.clone()).await;
+    let k4 = vcrypto.generate_hash(space.clone()).await;
+    let k5 = vcrypto.generate_hash(lorem_ipsum.clone()).await;
+    let k6 = vcrypto.generate_hash(cheezburger.clone()).await;
 
     s.insert(k1.clone());
     s.insert(k2.clone());
@@ -301,12 +324,12 @@ async fn test_hash(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     s.insert(k6.clone());
     assert_eq!(s.len(), 6);
 
-    let v1 = vcrypto.generate_hash("abc".as_bytes()).await;
-    let v2 = vcrypto.generate_hash("abcd".as_bytes()).await;
-    let v3 = vcrypto.generate_hash("".as_bytes()).await;
-    let v4 = vcrypto.generate_hash(" ".as_bytes()).await;
-    let v5 = vcrypto.generate_hash(LOREM_IPSUM).await;
-    let v6 = vcrypto.generate_hash(CHEEZBURGER).await;
+    let v1 = vcrypto.generate_hash(abc.clone()).await;
+    let v2 = vcrypto.generate_hash(abcd.clone()).await;
+    let v3 = vcrypto.generate_hash(empty.clone()).await;
+    let v4 = vcrypto.generate_hash(space.clone()).await;
+    let v5 = vcrypto.generate_hash(lorem_ipsum.clone()).await;
+    let v6 = vcrypto.generate_hash(cheezburger.clone()).await;
 
     assert_eq!(k1, v1);
     assert_eq!(k2, v2);
@@ -316,36 +339,39 @@ async fn test_hash(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     assert_eq!(k6, v6);
 
     vcrypto
-        .validate_hash("abc".as_bytes(), &v1)
+        .validate_hash(abc.clone(), &v1)
         .await
         .expect("should succeed");
     vcrypto
-        .validate_hash("abcd".as_bytes(), &v2)
+        .validate_hash(abcd.clone(), &v2)
         .await
         .expect("should succeed");
     vcrypto
-        .validate_hash("".as_bytes(), &v3)
+        .validate_hash(empty.clone(), &v3)
         .await
         .expect("should succeed");
     vcrypto
-        .validate_hash(" ".as_bytes(), &v4)
+        .validate_hash(space.clone(), &v4)
         .await
         .expect("should succeed");
     vcrypto
-        .validate_hash(LOREM_IPSUM, &v5)
+        .validate_hash(lorem_ipsum.clone(), &v5)
         .await
         .expect("should succeed");
     vcrypto
-        .validate_hash(CHEEZBURGER, &v6)
+        .validate_hash(cheezburger.clone(), &v6)
         .await
         .expect("should succeed");
 }
 
 async fn test_operations(vcrypto: &AsyncCryptoSystemGuard<'_>) {
-    // xxx we should make this fixed byte arrays when we add another cryptosystem
-    let k1 = vcrypto.generate_hash(LOREM_IPSUM).await;
-    let k2 = vcrypto.generate_hash(CHEEZBURGER).await;
-    let k3 = vcrypto.generate_hash("abc".as_bytes()).await;
+    let lorem_ipsum = Bytes::copy_from_slice(LOREM_IPSUM);
+    let cheezburger = Bytes::copy_from_slice(CHEEZBURGER);
+    let abc = Bytes::copy_from_slice(b"abc");
+
+    let k1 = vcrypto.generate_hash(lorem_ipsum.clone()).await;
+    let k2 = vcrypto.generate_hash(cheezburger.clone()).await;
+    let k3 = vcrypto.generate_hash(abc.clone()).await;
 
     // Get distance
     let d1 = k1.to_hash_coordinate().distance(&k2.to_hash_coordinate());

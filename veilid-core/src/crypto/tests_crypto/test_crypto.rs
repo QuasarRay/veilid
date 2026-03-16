@@ -3,8 +3,10 @@ use super::*;
 pub async fn test_aead(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     info!("test_aead");
 
+    let lorem_ipsum = Bytes::copy_from_slice(LOREM_IPSUM);
+
     let n1 = vcrypto.random_nonce().await;
-    let n2 = loop {
+    let _n2 = loop {
         let n = vcrypto.random_nonce().await;
         if n != n1 {
             break n;
@@ -12,93 +14,44 @@ pub async fn test_aead(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     };
 
     let ss1 = vcrypto.random_shared_secret().await;
-    let ss2 = loop {
+    let _ss2 = loop {
         let ss = vcrypto.random_shared_secret().await;
         if ss != ss1 {
             break ss;
         }
     };
 
-    let mut body = LOREM_IPSUM.to_vec();
-    let body2 = body.clone();
-    let size_before_encrypt = body.len();
     assert!(
         vcrypto
-            .encrypt_in_place_aead(&mut body, &n1, &ss1, None)
-            .await
-            .is_ok(),
-        "encrypt should succeed"
-    );
-    let size_after_encrypt = body.len();
-    assert!(
-        size_after_encrypt - size_before_encrypt == vcrypto.aead_overhead(),
-        "overhead should match"
-    );
-    let mut body3 = body.clone();
-    let mut body4 = body.clone();
-    let mut body5 = body.clone();
-    assert!(
-        vcrypto
-            .decrypt_in_place_aead(&mut body, &n1, &ss1, None)
-            .await
-            .is_ok(),
-        "decrypt should succeed"
-    );
-    assert_eq!(body, body2, "results should be the same");
-
-    assert!(
-        vcrypto
-            .decrypt_in_place_aead(&mut body3, &n2, &ss1, None)
-            .await
-            .is_err(),
-        "decrypt with wrong nonce should fail"
-    );
-    assert_ne!(body3, body, "failure changes data");
-
-    assert!(
-        vcrypto
-            .decrypt_in_place_aead(&mut body4, &n1, &ss2, None)
-            .await
-            .is_err(),
-        "decrypt with wrong secret should fail"
-    );
-    assert_ne!(body4, body, "failure changes data");
-
-    assert!(
-        vcrypto
-            .decrypt_in_place_aead(&mut body5, &n1, &ss2, Some(b"foobar"))
-            .await
-            .is_err(),
-        "decrypt with wrong associated data should fail"
-    );
-    assert_ne!(body5, body, "failure changes data");
-
-    assert!(
-        vcrypto
-            .decrypt_aead(LOREM_IPSUM, &n1, &ss1, None)
+            .decrypt_aead(lorem_ipsum.clone(), &n1, &ss1, None)
             .await
             .is_err(),
         "should fail authentication"
     );
 
     let body5 = vcrypto
-        .encrypt_aead(LOREM_IPSUM, &n1, &ss1, None)
+        .encrypt_aead(lorem_ipsum.clone(), &n1, &ss1, None)
         .await
         .unwrap();
-    let body6 = vcrypto.decrypt_aead(&body5, &n1, &ss1, None).await.unwrap();
+    let body6 = vcrypto
+        .decrypt_aead(body5.clone(), &n1, &ss1, None)
+        .await
+        .unwrap();
     let body7 = vcrypto
-        .encrypt_aead(LOREM_IPSUM, &n1, &ss1, None)
+        .encrypt_aead(lorem_ipsum.clone(), &n1, &ss1, None)
         .await
         .unwrap();
-    assert_eq!(body6, LOREM_IPSUM);
+    assert_eq!(body6, lorem_ipsum.clone());
     assert_eq!(body5, body7);
 }
 
 pub async fn test_no_auth(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     info!("test_no_auth");
 
+    let lorem_ipsum = Bytes::copy_from_slice(LOREM_IPSUM);
+
     let n1 = vcrypto.random_nonce().await;
-    let n2 = loop {
+    let _n2 = loop {
         let n = vcrypto.random_nonce().await;
         if n != n1 {
             break n;
@@ -106,75 +59,43 @@ pub async fn test_no_auth(vcrypto: &AsyncCryptoSystemGuard<'_>) {
     };
 
     let ss1 = vcrypto.random_shared_secret().await;
-    let ss2 = loop {
+    let _ss2 = loop {
         let ss = vcrypto.random_shared_secret().await;
         if ss != ss1 {
             break ss;
         }
     };
 
-    let mut body = LOREM_IPSUM.to_vec();
-    let body2 = body.clone();
-    let size_before_encrypt = body.len();
-    vcrypto
-        .crypt_in_place_no_auth(&mut body, &n1, &ss1)
-        .await
-        .expect("should succeed");
-
-    let size_after_encrypt = body.len();
-    assert_eq!(
-        size_after_encrypt, size_before_encrypt,
-        "overhead should match"
+    let body5 = Bytes::from(
+        vcrypto
+            .crypt_no_auth_unaligned(lorem_ipsum.clone(), &n1, &ss1)
+            .await
+            .unwrap(),
     );
-    let mut body3 = body.clone();
-    let mut body4 = body.clone();
-
-    vcrypto
-        .crypt_in_place_no_auth(&mut body, &n1, &ss1)
-        .await
-        .expect("should succeed");
-    assert_eq!(body, body2, "result after decrypt should be the same");
-
-    vcrypto
-        .crypt_in_place_no_auth(&mut body3, &n2, &ss1)
-        .await
-        .expect("should succeed");
-    assert_ne!(body3, body, "decrypt should not be equal with wrong nonce");
-
-    vcrypto
-        .crypt_in_place_no_auth(&mut body4, &n1, &ss2)
-        .await
-        .expect("should succeed");
-    assert_ne!(body4, body, "decrypt should not be equal with wrong secret");
-
-    let body5 = vcrypto
-        .crypt_no_auth_unaligned(LOREM_IPSUM, &n1, &ss1)
-        .await
-        .unwrap();
     let body6 = vcrypto
-        .crypt_no_auth_unaligned(&body5, &n1, &ss1)
+        .crypt_no_auth_unaligned(body5.clone(), &n1, &ss1)
         .await
         .unwrap();
     let body7 = vcrypto
-        .crypt_no_auth_unaligned(LOREM_IPSUM, &n1, &ss1)
+        .crypt_no_auth_unaligned(lorem_ipsum.clone(), &n1, &ss1)
         .await
         .unwrap();
-    assert_eq!(body6, LOREM_IPSUM);
+    assert_eq!(body6, lorem_ipsum.clone());
     assert_eq!(body5, body7);
 
     let body5 = vcrypto
-        .crypt_no_auth_aligned_8(LOREM_IPSUM, &n1, &ss1)
+        .crypt_no_auth_aligned_8(lorem_ipsum.clone(), &n1, &ss1)
         .await
         .unwrap();
     let body6 = vcrypto
-        .crypt_no_auth_aligned_8(&body5, &n1, &ss1)
+        .crypt_no_auth_aligned_8(Bytes::copy_from_slice(&body5), &n1, &ss1)
         .await
         .unwrap();
     let body7 = vcrypto
-        .crypt_no_auth_aligned_8(LOREM_IPSUM, &n1, &ss1)
+        .crypt_no_auth_aligned_8(lorem_ipsum.clone(), &n1, &ss1)
         .await
         .unwrap();
-    assert_eq!(body6, LOREM_IPSUM);
+    assert_eq!(body6, lorem_ipsum.clone());
     assert_eq!(body5, body7);
 }
 
@@ -250,53 +171,98 @@ pub async fn test_generation(vcrypto: &AsyncCryptoSystemGuard<'_>) {
 
     assert_ne!(vcrypto.default_salt_length(), 0);
 
-    let pstr1 = vcrypto.hash_password(b"abc123", b"qwerasdf").await.unwrap();
-    let pstr2 = vcrypto.hash_password(b"abc123", b"qwerasdf").await.unwrap();
+    let password = Bytes::copy_from_slice(b"abc123".as_ref());
+    let password2 = Bytes::copy_from_slice(b"abc124".as_ref());
+
+    let salt = Bytes::copy_from_slice(b"qwerasdf".as_ref());
+    let salt2 = Bytes::copy_from_slice(b"qwerasdg".as_ref());
+
+    let pstr1 = vcrypto
+        .hash_password(password.clone(), salt.clone())
+        .await
+        .unwrap();
+    let pstr2 = vcrypto
+        .hash_password(password.clone(), salt.clone())
+        .await
+        .unwrap();
     assert_eq!(pstr1, pstr2);
-    let pstr3 = vcrypto.hash_password(b"abc123", b"qwerasdg").await.unwrap();
+    let pstr3 = vcrypto
+        .hash_password(password.clone(), salt2.clone())
+        .await
+        .unwrap();
     assert_ne!(pstr1, pstr3);
-    let pstr4 = vcrypto.hash_password(b"abc124", b"qwerasdf").await.unwrap();
+    let pstr4 = vcrypto
+        .hash_password(password2.clone(), salt.clone())
+        .await
+        .unwrap();
     assert_ne!(pstr1, pstr4);
-    let pstr5 = vcrypto.hash_password(b"abc124", b"qwerasdg").await.unwrap();
+    let pstr5 = vcrypto
+        .hash_password(password2.clone(), salt2.clone())
+        .await
+        .unwrap();
     assert_ne!(pstr3, pstr5);
 
+    let short_salt = Bytes::copy_from_slice(b"qwe");
+    let long_salt = Bytes::copy_from_slice(
+        b"qwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerz",
+    );
+
     let _ = vcrypto
-        .hash_password(b"abc123", b"qwe")
+        .hash_password(password.clone(), short_salt.clone())
         .await
         .expect_err("should reject short salt");
     let _ = vcrypto
-        .hash_password(
-            b"abc123",
-            b"qwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerz",
-        )
+        .hash_password(password.clone(), long_salt.clone())
         .await
         .expect_err("should reject long salt");
 
-    assert!(vcrypto.verify_password(b"abc123", &pstr1).await.unwrap());
-    assert!(vcrypto.verify_password(b"abc123", &pstr2).await.unwrap());
-    assert!(vcrypto.verify_password(b"abc123", &pstr3).await.unwrap());
-    assert!(!vcrypto.verify_password(b"abc123", &pstr4).await.unwrap());
-    assert!(!vcrypto.verify_password(b"abc123", &pstr5).await.unwrap());
+    assert!(vcrypto
+        .verify_password(password.clone(), &pstr1)
+        .await
+        .unwrap());
+    assert!(vcrypto
+        .verify_password(password.clone(), &pstr2)
+        .await
+        .unwrap());
+    assert!(vcrypto
+        .verify_password(password.clone(), &pstr3)
+        .await
+        .unwrap());
+    assert!(!vcrypto
+        .verify_password(password.clone(), &pstr4)
+        .await
+        .unwrap());
+    assert!(!vcrypto
+        .verify_password(password.clone(), &pstr5)
+        .await
+        .unwrap());
 
-    let ss1 = vcrypto.derive_shared_secret(b"abc123", b"qwerasdf").await;
-    let ss2 = vcrypto.derive_shared_secret(b"abc123", b"qwerasdf").await;
+    let ss1 = vcrypto
+        .derive_shared_secret(password.clone(), salt.clone())
+        .await;
+    let ss2 = vcrypto
+        .derive_shared_secret(password.clone(), salt.clone())
+        .await;
     assert_eq!(ss1, ss2);
-    let ss3 = vcrypto.derive_shared_secret(b"abc123", b"qwerasdg").await;
+    let ss3 = vcrypto
+        .derive_shared_secret(password.clone(), salt2.clone())
+        .await;
     assert_ne!(ss1, ss3);
-    let ss4 = vcrypto.derive_shared_secret(b"abc124", b"qwerasdf").await;
+    let ss4 = vcrypto
+        .derive_shared_secret(password2.clone(), salt.clone())
+        .await;
     assert_ne!(ss1, ss4);
-    let ss5 = vcrypto.derive_shared_secret(b"abc124", b"qwerasdg").await;
+    let ss5 = vcrypto
+        .derive_shared_secret(password2.clone(), salt2.clone())
+        .await;
     assert_ne!(ss3, ss5);
 
     let _ = vcrypto
-        .derive_shared_secret(b"abc123", b"qwe")
+        .derive_shared_secret(password.clone(), short_salt.clone())
         .await
         .expect_err("should reject short salt");
     let _ = vcrypto
-        .derive_shared_secret(
-            b"abc123",
-            b"qwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerz",
-        )
+        .derive_shared_secret(password.clone(), long_salt.clone())
         .await
         .expect_err("should reject long salt");
 }

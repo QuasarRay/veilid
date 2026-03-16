@@ -134,6 +134,33 @@ impl StorageManager {
             )
             .await?;
 
+        // Keep the list of nodes that returned a value for later reference
+        let results_iter = outbound_inspect_result
+            .inspect_result
+            .subkeys()
+            .iter()
+            .map(ValueSubkeyRangeSet::single)
+            .zip(
+                outbound_inspect_result
+                    .subkey_fanout_results
+                    .clone()
+                    .into_iter(),
+            );
+
+        let existed = self.process_fanout_results(
+            opaque_record_key.clone(),
+            results_iter,
+            false,
+            self.config().network.dht.consensus_width as usize,
+        )?;
+
+        if !existed {
+            apibail_internal!(
+                "record was locked for inspect but is now missing: {}",
+                opaque_record_key
+            );
+        }
+
         // If online result had no subkeys, then trigger writing the entire record in the background
         if outbound_inspect_result.inspect_result.subkeys().is_empty()
             || outbound_inspect_result

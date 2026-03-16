@@ -606,7 +606,9 @@ pub fn get_dht_record_key(
 
         let veilid_api = get_veilid_api()?;
 
-        let key = veilid_api.get_dht_record_key(schema, owner, encryption_key)?;
+        let key = veilid_api
+            .get_dht_record_key(schema, owner, encryption_key)
+            .await?;
 
         VeilidAPIResult::Ok(key)
     })

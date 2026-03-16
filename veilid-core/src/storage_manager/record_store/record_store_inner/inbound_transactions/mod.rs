@@ -62,7 +62,6 @@ impl InboundTransactions {
         self.transaction_id_allocator.get_key(id).as_ref() == Some(rtk)
     }
 
-    #[expect(dead_code)]
     pub fn get(&self, rtk: &RecordTableKey) -> Option<&InboundTransactionList> {
         self.record_transactions.get(rtk)
     }

@@ -28,7 +28,7 @@ cfg_if::cfg_if! {
 cfg_if! {
     if #[cfg(test)] {
         use std::sync::Once;
-        use paste::paste;
+        use pastey::paste;
 
         // Utility function to wait for a debugger to attach
         #[allow(dead_code)]
@@ -104,6 +104,8 @@ cfg_if! {
 
 
         run_test!(common test_attachment_manager);
+        // run_test!(common test_dht_transactions);
+        // run_test!(common test_dht);
 
         run_test!(component crypto);
         run_test!(component table_store);

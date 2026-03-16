@@ -736,11 +736,11 @@ impl JsonRequestProcessor {
                 owner,
                 encryption_key,
             } => ResponseOp::GetDhtRecordKey {
-                result: to_json_api_result_with_string(self.api.get_dht_record_key(
-                    schema,
-                    owner,
-                    encryption_key,
-                )),
+                result: to_json_api_result_with_string(
+                    self.api
+                        .get_dht_record_key(schema, owner, encryption_key)
+                        .await,
+                ),
             },
             RequestOp::NewPrivateRoute => ResponseOp::NewPrivateRoute {
                 result: to_json_api_result(self.api.new_private_route().await),

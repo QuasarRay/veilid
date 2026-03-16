@@ -1,11 +1,13 @@
 use crate::{network_manager::StartupDisposition, *};
-use routing_table::RoutingTableHealth;
+use routing_table::{RoutingDomain, RoutingTableHealth};
 
 impl_veilid_log_facility!("attach");
 
 const TICK_INTERVAL_MSEC: u32 = 1000;
 const ATTACHMENT_MAINTAINER_INTERVAL_MSEC: u32 = 1000;
 const BIND_WAIT_DELAY: TimestampDuration = TimestampDuration::new_ms(10000);
+
+type UpdateStateCallback = Box<dyn FnOnce(MutexGuard<AttachmentManagerInner>)>;
 
 #[derive(Debug, Clone)]
 pub struct AttachmentManagerStartupContext {
@@ -34,13 +36,21 @@ pub struct TickEvent {
 }
 
 struct AttachmentManagerInner {
+    /// The current attachment state
     attachment_state: AttachmentState,
-    last_routing_table_health: Option<Arc<RoutingTableHealth>>,
+    /// The last VeilidStateAttachment that was calculated
+    last_veilid_state_attachment: Box<VeilidStateAttachment>,
+    /// Whether to maintain peers
     maintain_peers: bool,
+    /// The timestamp when the node started
     started_ts: Timestamp,
+    /// The timestamp when the node attached
     attach_ts: Option<Timestamp>,
+    /// The timestamp when the node should retry binding
     bind_retry_ts: Option<Timestamp>,
+    /// The timestamp of the last tick
     last_tick_ts: Option<Timestamp>,
+    /// The future for the attachment maintainer task
     tick_future: Option<PinBoxFutureStatic<()>>,
 }
 
@@ -48,7 +58,6 @@ impl fmt::Debug for AttachmentManagerInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AttachmentManagerInner")
             .field("attachment_state", &self.attachment_state)
-            .field("last_routing_table_health", &self.last_routing_table_health)
             .field("maintain_peers", &self.maintain_peers)
             .field("started_ts", &self.started_ts)
             .field("attach_ts", &self.attach_ts)
@@ -82,7 +91,7 @@ impl AttachmentManager {
     fn new_inner() -> AttachmentManagerInner {
         AttachmentManagerInner {
             attachment_state: AttachmentState::Detached,
-            last_routing_table_health: None,
+            last_veilid_state_attachment: Box::new(VeilidStateAttachment::default()),
             maintain_peers: false,
             started_ts: Timestamp::now(),
             attach_ts: None,
@@ -304,47 +313,41 @@ impl AttachmentManager {
         _last_ts: Timestamp,
         cur_ts: Timestamp,
     ) -> EyreResult<()> {
-        // Get the state to process
-        let (mut state, maintain_peers, bind_retry_waiting) = {
-            let mut inner = self.inner.lock();
-
-            // Check for bind wait retry timeout
-            let bind_retry_waiting =
-                if inner.bind_retry_ts.is_some() && inner.bind_retry_ts.unwrap() > cur_ts {
-                    true
-                } else {
-                    inner.bind_retry_ts = None;
-                    false
-                };
-
-            (
-                inner.attachment_state,
-                inner.maintain_peers,
-                bind_retry_waiting,
-            )
-        };
-
         // Enter the attachment lock and return if we are shutting down
         let Ok(_guard) = self.startup_context.attachment_lock.enter() else {
-            // Only shutdown is possible if we get here
-            match state {
-                AttachmentState::Detached | AttachmentState::Detaching => {
-                    // ok
+            let do_shutdown = {
+                let inner = self.inner.lock();
+                let current_attachment_state = inner.attachment_state;
+
+                // Only shutdown is possible if we get here
+                match current_attachment_state {
+                    AttachmentState::Detached | AttachmentState::Detaching => {
+                        // no need to shut down because if we got here we're already shutting down
+                        false
+                    }
+                    AttachmentState::Attaching
+                    | AttachmentState::AttachedWeak
+                    | AttachmentState::AttachedGood
+                    | AttachmentState::AttachedStrong
+                    | AttachmentState::FullyAttached
+                    | AttachmentState::OverAttached => {
+                        veilid_log!(self debug "terminating attachment maintainer task");
+                        self.transition_to_non_attached_state(
+                            inner,
+                            AttachmentState::Detaching,
+                            None,
+                        );
+
+                        // perform shutdown
+                        true
+                    }
                 }
-                AttachmentState::Attaching
-                | AttachmentState::AttachedWeak
-                | AttachmentState::AttachedGood
-                | AttachmentState::AttachedStrong
-                | AttachmentState::FullyAttached
-                | AttachmentState::OverAttached => {
-                    veilid_log!(self debug "terminating attachment maintainer task");
-                    self.update_non_attached_state(AttachmentState::Detaching);
-                    self.inner.lock().attachment_state = AttachmentState::Detaching;
-
-                    self.shutdown().await;
-
-                    self.update_non_attached_state(AttachmentState::Detached);
-                    self.inner.lock().attachment_state = AttachmentState::Detached;
+            };
+            if do_shutdown {
+                self.shutdown().await;
+                {
+                    let inner = self.inner.lock();
+                    self.transition_to_non_attached_state(inner, AttachmentState::Detached, None);
                 }
             }
 
@@ -353,67 +356,93 @@ impl AttachmentManager {
 
         // Process the attachment state machine
         loop {
-            let (next_state, continue_loop) = match state {
-                AttachmentState::Detached => {
-                    if maintain_peers && !bind_retry_waiting {
-                        veilid_log!(self debug "attachment starting");
+            let mut do_startup = false;
+            let mut do_shutdown = false;
+            let mut continue_loop = false;
 
-                        match self.startup().await {
-                            Err(err) => {
-                                error!("attachment startup failed: {}", err);
-                                (None, false)
-                            }
-                            Ok(StartupDisposition::BindRetry) => {
-                                veilid_log!(self info "waiting for network to bind...");
-                                self.inner.lock().bind_retry_ts =
-                                    Some(Timestamp::now_non_decreasing().later(BIND_WAIT_DELAY));
-                                (None, false)
-                            }
-                            Ok(StartupDisposition::Success) => {
-                                veilid_log!(self debug "started maintaining peers");
+            // Process the current state
+            {
+                let mut inner = self.inner.lock();
 
-                                self.update_non_attached_state(AttachmentState::Attaching);
-                                (Some(AttachmentState::Attaching), false)
-                            }
-                        }
+                let state = inner.attachment_state;
+                let maintain_peers = inner.maintain_peers;
+                let bind_retry_waiting =
+                    if inner.bind_retry_ts.is_some() && inner.bind_retry_ts.unwrap() > cur_ts {
+                        true
                     } else {
-                        (None, false)
+                        inner.bind_retry_ts = None;
+                        false
+                    };
+
+                match state {
+                    AttachmentState::Detached => {
+                        if maintain_peers && !bind_retry_waiting {
+                            veilid_log!(self debug "attachment starting");
+                            do_startup = true;
+                        }
                     }
-                }
-                AttachmentState::Attaching
-                | AttachmentState::AttachedWeak
-                | AttachmentState::AttachedGood
-                | AttachmentState::AttachedStrong
-                | AttachmentState::FullyAttached
-                | AttachmentState::OverAttached => {
-                    if maintain_peers {
-                        let network_manager = self.network_manager();
-                        if network_manager.network_needs_restart() {
-                            veilid_log!(self info "Restarting network");
-                            self.update_non_attached_state(AttachmentState::Detaching);
-                            (Some(AttachmentState::Detaching), true)
+                    AttachmentState::Attaching
+                    | AttachmentState::AttachedWeak
+                    | AttachmentState::AttachedGood
+                    | AttachmentState::AttachedStrong
+                    | AttachmentState::FullyAttached
+                    | AttachmentState::OverAttached => {
+                        if maintain_peers {
+                            let network_manager = self.network_manager();
+                            if network_manager.network_needs_restart() {
+                                veilid_log!(self info "Restarting network");
+                                self.transition_to_non_attached_state(
+                                    inner,
+                                    AttachmentState::Detaching,
+                                    None,
+                                );
+                                continue_loop = true;
+                            } else {
+                                self.update_attached_state(inner, None);
+                            }
                         } else {
-                            (self.update_attached_state(state), false)
+                            veilid_log!(self debug "stopped maintaining peers");
+                            self.transition_to_non_attached_state(
+                                inner,
+                                AttachmentState::Detaching,
+                                None,
+                            );
+                            continue_loop = true;
                         }
-                    } else {
-                        veilid_log!(self debug "stopped maintaining peers");
-                        (Some(AttachmentState::Detaching), true)
                     }
-                }
-                AttachmentState::Detaching => {
-                    veilid_log!(self debug "shutting down attachment");
-                    self.shutdown().await;
-
-                    self.update_non_attached_state(AttachmentState::Detached);
-                    (Some(AttachmentState::Detached), false)
+                    AttachmentState::Detaching => {
+                        veilid_log!(self debug "shutting down attachment");
+                        do_shutdown = true;
+                    }
                 }
             };
 
-            // Transition to next state if it changed
-            if let Some(next_state) = next_state {
-                let mut inner = self.inner.lock();
-                inner.attachment_state = next_state;
-                state = next_state;
+            if do_startup {
+                match self.startup().await {
+                    Err(err) => {
+                        error!("attachment startup failed: {}", err);
+                    }
+                    Ok(StartupDisposition::BindRetry) => {
+                        veilid_log!(self info "waiting for network to bind...");
+                        self.inner.lock().bind_retry_ts =
+                            Some(Timestamp::now_non_decreasing().later(BIND_WAIT_DELAY));
+                    }
+                    Ok(StartupDisposition::Success) => {
+                        veilid_log!(self debug "started maintaining peers");
+
+                        let inner = self.inner.lock();
+                        self.transition_to_non_attached_state(
+                            inner,
+                            AttachmentState::Attaching,
+                            None,
+                        );
+                    }
+                }
+            } else if do_shutdown {
+                self.shutdown().await;
+
+                let inner = self.inner.lock();
+                self.transition_to_non_attached_state(inner, AttachmentState::Detached, None);
             }
 
             // Loop again if we should process the next state immediately
@@ -426,6 +455,8 @@ impl AttachmentManager {
     }
 
     async fn startup(&self) -> EyreResult<StartupDisposition> {
+        veilid_log!(self info "Attaching...");
+
         let rpc_processor = self.rpc_processor();
         let network_manager = self.network_manager();
 
@@ -449,20 +480,23 @@ impl AttachmentManager {
 
         // Startup routing table
         let routing_table = self.routing_table();
-        if let Err(e) = routing_table.startup() {
+        if let Err(e) = routing_table.startup().await {
             rpc_processor.shutdown().await;
             network_manager.shutdown().await;
             return Err(e);
         }
 
         // Inform api clients that things have changed
-        veilid_log!(self trace "sending network state update to api clients");
         network_manager.send_network_update();
+
+        veilid_log!(self info "Attach successful");
 
         Ok(StartupDisposition::Success)
     }
 
     async fn shutdown(&self) {
+        veilid_log!(self info "Detaching...");
+
         let routing_table = self.routing_table();
         let rpc_processor = self.rpc_processor();
         let network_manager = self.network_manager();
@@ -477,8 +511,9 @@ impl AttachmentManager {
         rpc_processor.shutdown().await;
 
         // Send update
-        veilid_log!(self debug "sending network state update to api clients");
         network_manager.send_network_update();
+
+        veilid_log!(self info "Detach successful");
     }
 
     fn translate_routing_table_health(
@@ -519,134 +554,151 @@ impl AttachmentManager {
     /// and possibly send a VeilidUpdate::Attachment.
     fn update_attached_state(
         &self,
-        current_attachment_state: AttachmentState,
-    ) -> Option<AttachmentState> {
+        mut inner: MutexGuard<AttachmentManagerInner>,
+        opt_callback: Option<UpdateStateCallback>,
+    ) {
         // update the routing table health
         let routing_table = self.network_manager().routing_table();
         let health = routing_table.get_routing_table_health();
-        let (opt_update, opt_next_attachment_state) = {
-            let mut inner = self.inner.lock();
 
-            // Check if the routing table health is different
-            if let Some(last_routing_table_health) = &inner.last_routing_table_health {
-                // If things are the same, just return
-                if last_routing_table_health.as_ref() == &health {
-                    return None;
-                }
-            }
-
-            // Swap in new health numbers
-            let opt_previous_health = inner.last_routing_table_health.take();
-            inner.last_routing_table_health = Some(Arc::new(health.clone()));
-
-            // Calculate new attachment state
-            let config = self.config();
-            let routing_table_config = &config.network.routing_table;
-            let next_attachment_state =
-                AttachmentManager::translate_routing_table_health(&health, routing_table_config);
-
-            // Send update if one of:
-            // * the attachment state has changed
-            // * routing domain readiness has changed
-            // * this is our first routing table health check
-            let send_update = current_attachment_state != next_attachment_state
-                || opt_previous_health
-                    .map(|x| {
-                        x.public_internet_ready != health.public_internet_ready
-                            || x.local_network_ready != health.local_network_ready
-                    })
-                    .unwrap_or(true);
-            let opt_update = if send_update {
-                Some(Self::get_veilid_state_inner(&inner))
-            } else {
-                None
-            };
-            let opt_next_attachment_state = if current_attachment_state != next_attachment_state {
-                Some(next_attachment_state)
-            } else {
-                None
-            };
-
-            (opt_update, opt_next_attachment_state)
-        };
-
-        // Send the update outside of the lock
-        if let Some(update) = opt_update {
-            (self.update_callback())(VeilidUpdate::Attachment(update));
-        }
-
-        opt_next_attachment_state
-    }
-
-    fn update_non_attached_state(&self, current_attachment_state: AttachmentState) {
-        let uptime;
-        let attached_uptime;
-        {
-            let mut inner = self.inner.lock();
-
-            // Clear routing table health so when we start measuring it we start from scratch
-            inner.last_routing_table_health = None;
-
-            // Set timestamps
-            if current_attachment_state == AttachmentState::Attaching {
-                inner.attach_ts = Some(Timestamp::now_non_decreasing());
-            } else if current_attachment_state == AttachmentState::Detached {
-                inner.attach_ts = None;
-            } else if current_attachment_state == AttachmentState::Detaching {
-                // ok
-            } else {
-                unreachable!("don't use this for attached states, use update_attached_state()");
-            }
-
-            let now = Timestamp::now_non_decreasing();
-            uptime = now.duration_since(inner.started_ts);
-            attached_uptime = inner.attach_ts.map(|ts| now.duration_since(ts));
-        };
-
-        // Send update
-        (self.update_callback())(VeilidUpdate::Attachment(Box::new(VeilidStateAttachment {
-            state: current_attachment_state,
-            public_internet_ready: false,
-            local_network_ready: false,
-            uptime,
-            attached_uptime,
-        })))
-    }
-
-    fn get_veilid_state_inner(inner: &AttachmentManagerInner) -> Box<VeilidStateAttachment> {
+        // Update timestamps
         let now = Timestamp::now_non_decreasing();
         let uptime = now.duration_since(inner.started_ts);
         let attached_uptime = inner.attach_ts.map(|ts| now.duration_since(ts));
 
-        Box::new(VeilidStateAttachment {
+        // Calculate new attachment state
+        let config = self.config();
+        let routing_table_config = &config.network.routing_table;
+        inner.attachment_state =
+            AttachmentManager::translate_routing_table_health(&health, routing_table_config);
+
+        let veilid_state_attachment = Box::new(VeilidStateAttachment {
             state: inner.attachment_state,
-            public_internet_ready: inner
-                .last_routing_table_health
-                .as_ref()
-                .map(|x| x.public_internet_ready)
-                .unwrap_or(false),
-            local_network_ready: inner
-                .last_routing_table_health
-                .as_ref()
-                .map(|x| x.local_network_ready)
-                .unwrap_or(false),
+            public_internet_ready: health.routing_domain_ready(RoutingDomain::PublicInternet),
+            local_network_ready: health.routing_domain_ready(RoutingDomain::LocalNetwork),
             uptime,
             attached_uptime,
-        })
+        });
+
+        self.update_veilid_state_attachment(inner, veilid_state_attachment, opt_callback);
+    }
+
+    fn transition_to_non_attached_state(
+        &self,
+        mut inner: MutexGuard<AttachmentManagerInner>,
+        state: AttachmentState,
+        opt_callback: Option<UpdateStateCallback>,
+    ) {
+        // Update timestamps
+        let now = Timestamp::now_non_decreasing();
+        match state {
+            AttachmentState::Attaching => {
+                inner.attach_ts = Some(now);
+            }
+            AttachmentState::Detached => {
+                inner.attach_ts = None;
+            }
+            AttachmentState::Detaching => {
+                // ok
+            }
+            AttachmentState::AttachedWeak
+            | AttachmentState::AttachedGood
+            | AttachmentState::AttachedStrong
+            | AttachmentState::FullyAttached
+            | AttachmentState::OverAttached => {
+                unreachable!("don't use this for attached states, use update_attached_state()");
+            }
+        }
+        let uptime = now.duration_since(inner.started_ts);
+        let attached_uptime = inner.attach_ts.map(|ts| now.duration_since(ts));
+
+        // Update attachment state
+        inner.attachment_state = state;
+        let veilid_state_attachment = Box::new(VeilidStateAttachment {
+            state,
+            public_internet_ready: false,
+            local_network_ready: false,
+            uptime,
+            attached_uptime,
+        });
+        self.update_veilid_state_attachment(inner, veilid_state_attachment, opt_callback);
+    }
+
+    fn update_veilid_state_attachment(
+        &self,
+        mut inner: MutexGuard<AttachmentManagerInner>,
+        veilid_state_attachment: Box<VeilidStateAttachment>,
+        opt_callback: Option<UpdateStateCallback>,
+    ) {
+        // Send update if one of:
+        // * the attachment state has changed
+        // * routing domain readiness has changed
+        let send_update = inner.last_veilid_state_attachment.state != veilid_state_attachment.state
+            || inner.last_veilid_state_attachment.public_internet_ready
+                != veilid_state_attachment.public_internet_ready
+            || inner.last_veilid_state_attachment.local_network_ready
+                != veilid_state_attachment.local_network_ready;
+
+        let opt_update_to_send = if send_update {
+            Some(VeilidUpdate::Attachment(veilid_state_attachment.clone()))
+        } else {
+            None
+        };
+
+        inner.last_veilid_state_attachment = veilid_state_attachment;
+
+        if let Some(callback) = opt_callback {
+            callback(inner);
+        } else {
+            drop(inner);
+        }
+
+        // Send update
+        if let Some(update_to_send) = opt_update_to_send {
+            (self.update_callback())(update_to_send);
+        }
     }
 
     pub fn get_veilid_state(&self) -> Box<VeilidStateAttachment> {
-        let inner = self.inner.lock();
-        Self::get_veilid_state_inner(&inner)
+        // Update the attachment state immediately
+        let out_state = Arc::new(Mutex::new(None));
+        let out_state_clone = out_state.clone();
+        let update_out_state = Box::new(move |inner: MutexGuard<AttachmentManagerInner>| {
+            *out_state_clone.lock() = Some(inner.last_veilid_state_attachment.clone())
+        });
+        {
+            let inner = self.inner.lock();
+            let current_attachment_state = inner.attachment_state;
+            match current_attachment_state {
+                AttachmentState::Attaching
+                | AttachmentState::AttachedWeak
+                | AttachmentState::AttachedGood
+                | AttachmentState::AttachedStrong
+                | AttachmentState::FullyAttached
+                | AttachmentState::OverAttached => {
+                    // Update the attachment state immediately, possibly sending an update
+                    self.update_attached_state(inner, Some(update_out_state));
+                }
+                AttachmentState::Detached | AttachmentState::Detaching => {
+                    // Transition to the current state just returns the current state,
+                    // possibly sending an update
+                    self.transition_to_non_attached_state(
+                        inner,
+                        current_attachment_state,
+                        Some(update_out_state),
+                    )
+                }
+            }
+        }
+
+        // Return the last attachment state
+        let out = { out_state.lock().take() };
+        out.unwrap_or_default()
     }
 
-    #[expect(dead_code)]
-    pub fn get_attachment_state(&self) -> AttachmentState {
-        self.inner.lock().attachment_state
-    }
-
-    #[expect(dead_code)]
-    pub fn get_last_routing_table_health(&self) -> Option<Arc<RoutingTableHealth>> {
-        self.inner.lock().last_routing_table_health.clone()
+    pub fn debug_info_nodeinfo(&self) -> String {
+        let mut out = String::new();
+        out += &format!("VeilidStateAttachment: {:#?}\n", self.get_veilid_state());
+        out
     }
 }

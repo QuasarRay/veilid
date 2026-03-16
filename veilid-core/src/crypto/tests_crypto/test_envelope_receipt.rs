@@ -39,21 +39,21 @@ async fn test_envelope_round_trip(
     };
 
     // Create arbitrary body
-    let body = b"This is an arbitrary body";
+    let body = Bytes::copy_from_slice(b"This is an arbitrary body");
 
     // Serialize to bytes
     let enc_data = envelope
-        .to_encrypted_data(&crypto, body, &sender_secret, &network_key)
+        .to_encrypted_data(&crypto, body.clone(), &sender_secret, &network_key)
         .await
         .expect("failed to encrypt data");
 
     // Deserialize from bytes
-    let envelope2 = Envelope::try_from_signed_data(&crypto, &enc_data, &network_key)
+    let envelope2 = Envelope::try_from_signed_data(&crypto, enc_data.clone(), &network_key)
         .await
         .expect("failed to deserialize envelope from data");
 
     let body2 = envelope2
-        .decrypt_body(&crypto, &enc_data, &recipient_secret, &network_key)
+        .decrypt_body(&crypto, enc_data.clone(), &recipient_secret, &network_key)
         .await
         .expect("failed to decrypt envelope body");
 
@@ -63,18 +63,20 @@ async fn test_envelope_round_trip(
 
     // Deserialize from modified bytes
     let enc_data_len = enc_data.len();
-    let mut mod_enc_data = enc_data.clone();
+    let mut mod_enc_data: BytesMut = enc_data.clone().into();
     mod_enc_data[enc_data_len - 1] ^= 0x80u8;
+    let mod_enc_data = mod_enc_data.freeze();
     assert!(
-        Envelope::try_from_signed_data(&crypto, &mod_enc_data, &network_key)
+        Envelope::try_from_signed_data(&crypto, mod_enc_data, &network_key)
             .await
             .is_err(),
         "should have failed to decode envelope with modified signature"
     );
-    let mut mod_enc_data2 = enc_data.clone();
+    let mut mod_enc_data2: BytesMut = enc_data.clone().into();
     mod_enc_data2[enc_data_len - 65] ^= 0x80u8;
+    let mod_enc_data2 = mod_enc_data2.freeze();
     assert!(
-        Envelope::try_from_signed_data(&crypto, &mod_enc_data2, &network_key)
+        Envelope::try_from_signed_data(&crypto, mod_enc_data2, &network_key)
             .await
             .is_err(),
         "should have failed to decode envelope with modified data"
@@ -88,7 +90,7 @@ async fn test_receipt_round_trip(
     let crypto = vcrypto.crypto();
     info!("--- test receipt round trip ---");
     // Create arbitrary body
-    let body = b"This is an arbitrary body";
+    let body = Bytes::copy_from_slice(b"This is an arbitrary body");
 
     // Create receipt
     let nonce = vcrypto.random_nonce().await;
@@ -108,17 +110,22 @@ async fn test_receipt_round_trip(
     };
 
     // Serialize to bytes
-    let mut enc_data = receipt
+    let enc_data = receipt
         .to_signed_data(&crypto, &sender_secret)
+        .await
         .expect("failed to make signed data");
 
     // Deserialize from bytes
-    let receipt2 = Receipt::try_from_signed_data(&crypto, &enc_data)
+    let receipt2 = Receipt::try_from_signed_data(&crypto, enc_data.clone())
+        .await
         .expect("failed to deserialize envelope from data");
 
     // Should not validate even when a single bit is changed
-    enc_data[5] = 0x01;
-    let _ = Receipt::try_from_signed_data(&crypto, &enc_data)
+    let mut mod_enc_data: BytesMut = enc_data.clone().into();
+    mod_enc_data[5] = 0x01;
+    let mod_enc_data = mod_enc_data.freeze();
+    let _ = Receipt::try_from_signed_data(&crypto, mod_enc_data)
+        .await
         .expect_err("should have failed to decrypt using wrong secret");
 
     // Compare receipts

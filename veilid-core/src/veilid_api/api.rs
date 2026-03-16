@@ -49,12 +49,7 @@ impl VeilidAPI {
         record_duration(|| Self {
             inner: Arc::new(Mutex::new(VeilidAPIInner {
                 context: Some(context),
-                debug_cache: DebugCache {
-                    imported_routes: Vec::new(),
-                    opened_record_contexts: once_cell::sync::Lazy::new(
-                        hashlink::LinkedHashMap::new,
-                    ),
-                },
+                debug_cache: Default::default(),
             })),
         })
     }
@@ -240,13 +235,13 @@ impl VeilidAPI {
     /// Deterministicly builds the record key for a given schema and owner public key.
     /// The crypto kind of the record key will be that of the `owner` public key
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
-    pub fn get_dht_record_key(
+    pub async fn get_dht_record_key(
         &self,
         schema: DHTSchema,
         owner_key: PublicKey,
         encryption_key: Option<SharedSecret>,
     ) -> VeilidAPIResult<RecordKey> {
-        record_duration(|| {
+        record_duration_fut(async {
             veilid_log!(self debug
             "RoutingContext::get_dht_record_key(self: {:?} schema: {:?}, owner_key: {:?}, encryption_key: {:?}", self, schema, owner_key, encryption_key);
             schema.validate()?;
@@ -257,14 +252,14 @@ impl VeilidAPI {
             }
 
             let storage_manager = self.core_context()?.storage_manager();
-            storage_manager.get_record_key(schema, &owner_key, encryption_key)
-        }).inspect_err(log_veilid_api_error!(self))
+            storage_manager.get_record_key(schema, &owner_key, encryption_key).await
+        }).await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Create a new MemberId for use with in creating `DHTSchema`s.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(self), fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub fn generate_member_id(&self, writer_key: &PublicKey) -> VeilidAPIResult<MemberId> {
-        record_duration(|| {
+        record_duration(move || {
             veilid_log!(self debug "VeilidAPI::generate_member_id(writer_key: {:?}", writer_key);
 
             self.crypto()?.check_public_key(writer_key)?;
@@ -369,7 +364,7 @@ impl VeilidAPI {
                 automatic: false,
             };
             let RouteIdAndPublicKeys { route_id, public_keys:_ } =
-                rss.allocate_route(&allocate_route_params).await?;
+                rss.allocate_route(allocate_route_params).await?;
             match Box::pin(rss.test_route(route_id.clone())).await? {
                 Some(true) => {
                     // route tested okay
@@ -383,7 +378,7 @@ impl VeilidAPI {
                     apibail_try_again!("allocated route could not be tested");
                 }
             }
-            let private_routes = rss.assemble_private_route_set(&route_id, Some(true))?;
+            let private_routes = rss.assemble_private_route_set(&route_id, Some(true)).await?;
             let blob = match RouteSpecStore::private_routes_to_blob(&private_routes) {
                 Ok(v) => v,
                 Err(e) => {
@@ -394,7 +389,7 @@ impl VeilidAPI {
 
             rss.mark_route_published(&route_id, true)?;
 
-            Ok(RouteBlob { route_id, blob })
+            Ok(RouteBlob { route_id, blob: blob.into() })
         }).await.inspect_err(log_veilid_api_error!(self))
     }
 
@@ -455,7 +450,7 @@ impl VeilidAPI {
 
             let rpc_processor = self.core_context()?.rpc_processor();
             rpc_processor
-                .app_call_reply(call_id, message)
+                .app_call_reply(call_id, message.into())
                 .map_err(|e| e.into())
         }).await.inspect_err(log_veilid_api_error!(self))
     }

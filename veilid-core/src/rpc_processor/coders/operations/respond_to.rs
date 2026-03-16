@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) enum RespondTo {
     Sender,
-    PrivateRoute(PrivateRoute),
+    PrivateRoute(Arc<PrivateRoute>),
 }
 
 impl RespondTo {
@@ -16,7 +16,7 @@ impl RespondTo {
             veilid_capnp::question::respond_to::PrivateRoute(pr_reader) => {
                 let pr_reader = pr_reader?;
                 let pr = decode_private_route(decode_context, &pr_reader)?;
-                RespondTo::PrivateRoute(pr)
+                RespondTo::PrivateRoute(Arc::new(pr))
             }
         };
         Ok(respond_to)

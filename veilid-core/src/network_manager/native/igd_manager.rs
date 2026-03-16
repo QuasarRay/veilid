@@ -102,47 +102,43 @@ impl IGDManager {
         mapped_port: u16,
     ) -> Option<()> {
         let this = self.clone();
-        blocking_wrapper(
-            "igd unmap_port",
-            move || {
-                let mut inner = this.inner.lock();
+        blocking_wrapper(move || {
+            let mut inner = this.inner.lock();
 
-                // If we already have this port mapped, just return the existing portmap
-                let mut found = None;
-                for (pmk, pmv) in &inner.port_maps {
-                    if pmk.protocol_type == protocol_type
-                        && pmk.address_type == address_type
-                        && pmv.mapped_port == mapped_port
-                    {
-                        found = Some(*pmk);
-                        break;
-                    }
+            // If we already have this port mapped, just return the existing portmap
+            let mut found = None;
+            for (pmk, pmv) in &inner.port_maps {
+                if pmk.protocol_type == protocol_type
+                    && pmk.address_type == address_type
+                    && pmv.mapped_port == mapped_port
+                {
+                    found = Some(*pmk);
+                    break;
                 }
-                let pmk = found?;
-                let _pmv = inner
-                    .port_maps
-                    .remove(&pmk)
-                    .expect_or_log("key found but remove failed");
+            }
+            let pmk = found?;
+            let _pmv = inner
+                .port_maps
+                .remove(&pmk)
+                .expect_or_log("key found but remove failed");
 
-                // Get local ip address
-                let local_ip = this.find_local_ip_inner(&mut inner, address_type)?;
+            // Get local ip address
+            let local_ip = this.find_local_ip_inner(&mut inner, address_type)?;
 
-                // Find gateway
-                let gw = this.find_gateway_inner(&mut inner, local_ip)?;
+            // Find gateway
+            let gw = this.find_gateway_inner(&mut inner, local_ip)?;
 
-                // Unmap port
-                match gw.remove_port(convert_protocol_type(protocol_type), mapped_port) {
-                    Ok(()) => (),
-                    Err(e) => {
-                        // Failed to map external port
-                        veilid_log!(this debug "upnp failed to remove external port: {}", e);
-                        return None;
-                    }
-                };
-                Some(())
-            },
-            None,
-        )
+            // Unmap port
+            match gw.remove_port(convert_protocol_type(protocol_type), mapped_port) {
+                Ok(()) => (),
+                Err(e) => {
+                    // Failed to map external port
+                    veilid_log!(this debug "upnp failed to remove external port: {}", e);
+                    return None;
+                }
+            };
+            Some(())
+        })
         .await
     }
 
@@ -158,7 +154,7 @@ impl IGDManager {
         expected_external_address: Option<IpAddr>,
     ) -> Option<SocketAddr> {
         let this = self.clone();
-        blocking_wrapper("igd map_any_port", move || {
+        blocking_wrapper(move || {
             let mut inner = this.inner.lock();
 
             // If we already have this port mapped, just return the existing portmap
@@ -229,7 +225,7 @@ impl IGDManager {
 
             // Succeeded, return the externally mapped port
             Some(SocketAddr::new(ext_ip, mapped_port))
-        }, None)
+        })
         .await
     }
 
@@ -275,7 +271,6 @@ impl IGDManager {
 
         let this = self.clone();
         blocking_wrapper(
-            "igd tick",
             move || {
                 let mut inner = this.inner.lock();
 
@@ -385,8 +380,7 @@ impl IGDManager {
 
                 // Normal exit, no restart
                 Ok(true)
-            },
-            Err(eyre!("failed to process blocking task")),
+            }
         )
         .instrument(tracing::trace_span!("igd tick fut"))
         .await

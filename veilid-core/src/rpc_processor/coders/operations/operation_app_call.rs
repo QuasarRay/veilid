@@ -3,23 +3,35 @@ use super::*;
 const MAX_APP_CALL_Q_MESSAGE_LEN: usize = 32768;
 const MAX_APP_CALL_A_MESSAGE_LEN: usize = 32768;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(in crate::rpc_processor) struct RPCOperationAppCallQ {
-    message: Vec<u8>,
+    message: Bytes,
+}
+
+impl fmt::Debug for RPCOperationAppCallQ {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RPCOperationAppCallQ")
+            .field("message(len)", &self.message.len())
+            .field("message", &print_data(&self.message, Some(64)))
+            .finish()
+    }
 }
 
 impl RPCOperationAppCallQ {
-    pub fn new(message: Vec<u8>) -> Result<Self, RPCError> {
+    pub fn new(message: Bytes) -> Result<Self, RPCError> {
         if message.len() > MAX_APP_CALL_Q_MESSAGE_LEN {
             return Err(RPCError::internal("AppCallQ message too long to set"));
         }
         Ok(Self { message })
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
-    pub fn destructure(self) -> Vec<u8> {
+    pub fn destructure(self) -> Bytes {
         self.message
     }
 
@@ -31,7 +43,7 @@ impl RPCOperationAppCallQ {
         let mr = reader.get_message()?;
         rpc_ignore_max_len!(mr, MAX_APP_CALL_Q_MESSAGE_LEN);
 
-        RPCOperationAppCallQ::new(mr.to_vec())
+        RPCOperationAppCallQ::new(Bytes::copy_from_slice(mr))
     }
     pub fn encode(
         &self,
@@ -44,24 +56,36 @@ impl RPCOperationAppCallQ {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(in crate::rpc_processor) struct RPCOperationAppCallA {
-    message: Vec<u8>,
+    message: Bytes,
+}
+
+impl fmt::Debug for RPCOperationAppCallA {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RPCOperationAppCallA")
+            .field("message(len)", &self.message.len())
+            .field("message", &print_data(&self.message, Some(64)))
+            .finish()
+    }
 }
 
 impl RPCOperationAppCallA {
-    pub fn new(message: Vec<u8>) -> Result<Self, RPCError> {
+    pub fn new(message: Bytes) -> Result<Self, RPCError> {
         if message.len() > MAX_APP_CALL_A_MESSAGE_LEN {
             return Err(RPCError::ignore("AppCallA message too long to set"));
         }
         Ok(Self { message })
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
-    pub fn destructure(self) -> Vec<u8> {
+    pub fn destructure(self) -> Bytes {
         self.message
     }
 
@@ -72,7 +96,7 @@ impl RPCOperationAppCallA {
         rpc_ignore_missing_property!(reader, message);
         let mr = reader.get_message()?;
         rpc_ignore_max_len!(mr, MAX_APP_CALL_A_MESSAGE_LEN);
-        Self::new(mr.to_vec())
+        Self::new(Bytes::copy_from_slice(mr))
     }
     pub fn encode(
         &self,

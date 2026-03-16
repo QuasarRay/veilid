@@ -77,7 +77,7 @@ impl Envelope {
     )]
     pub async fn try_from_signed_data(
         crypto: &Crypto,
-        data: &[u8],
+        data: Bytes,
         network_key: &Option<BareSharedSecret>,
     ) -> VeilidAPIResult<Self> {
         // Ensure we are at least the length of the envelope
@@ -108,10 +108,10 @@ impl Envelope {
     pub async fn decrypt_body(
         &self,
         crypto: &Crypto,
-        data: &[u8],
+        data: Bytes,
         secret_key: &SecretKey,
         network_key: &Option<BareSharedSecret>,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    ) -> VeilidAPIResult<Bytes> {
         match self {
             Envelope::ENV0 { env0 } => {
                 env0.decrypt_body(crypto, data, secret_key, network_key)
@@ -127,10 +127,10 @@ impl Envelope {
     pub async fn to_encrypted_data(
         &self,
         crypto: &Crypto,
-        body: &[u8],
+        body: Bytes,
         secret_key: &SecretKey,
         network_key: &Option<BareSharedSecret>,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    ) -> VeilidAPIResult<Bytes> {
         match self {
             Envelope::ENV0 { env0 } => {
                 env0.to_encrypted_data(crypto, body, secret_key, network_key)
@@ -204,7 +204,7 @@ impl EnvelopeENV0 {
 
     async fn try_from_signed_data(
         crypto: &Crypto,
-        data: &[u8],
+        data: Bytes,
         network_key: &Option<BareSharedSecret>,
     ) -> VeilidAPIResult<Self> {
         // Ensure we are at least the length of the envelope
@@ -220,7 +220,7 @@ impl EnvelopeENV0 {
                 .map_err(VeilidAPIError::internal)?,
         );
 
-        let vcrypto = Self::validate_crypto_kind_async(crypto, crypto_kind)?;
+        let vcrypto = Self::validate_crypto_kind(crypto, crypto_kind)?.as_async();
 
         // Get size and ensure it matches the size of the envelope and is less than the maximum message size
         let size: u16 = u16::from_le_bytes(
@@ -299,7 +299,7 @@ impl EnvelopeENV0 {
         if !vcrypto
             .verify(
                 &sender_public_key,
-                &data[0..(data.len() - ENV0_SIGNATURE_LENGTH)],
+                data.slice(0..(data.len() - ENV0_SIGNATURE_LENGTH)),
                 &signature,
             )
             .await
@@ -321,10 +321,10 @@ impl EnvelopeENV0 {
     pub async fn decrypt_body(
         &self,
         crypto: &Crypto,
-        data: &[u8],
+        data: Bytes,
         secret_key: &SecretKey,
         network_key: &Option<BareSharedSecret>,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    ) -> VeilidAPIResult<Bytes> {
         // Get DH secret
         let vcrypto = crypto
             .get_async(self.crypto_kind)
@@ -349,8 +349,8 @@ impl EnvelopeENV0 {
         }
         // Decrypt message without authentication
         let body = vcrypto
-            .crypt_no_auth_aligned_8(
-                &data[0x6A..data.len() - ENV0_SIGNATURE_LENGTH],
+            .crypt_no_auth_unaligned(
+                data.slice(0x6A..data.len() - ENV0_SIGNATURE_LENGTH),
                 &self.nonce,
                 &dh_secret,
             )
@@ -359,16 +359,16 @@ impl EnvelopeENV0 {
         // Decompress body
         let body = decompress_size_prepended(&body, Some(ENV0_MAX_ENVELOPE_SIZE))?;
 
-        Ok(body)
+        Ok(body.into())
     }
 
     pub async fn to_encrypted_data(
         &self,
         crypto: &Crypto,
-        body: &[u8],
+        body: Bytes,
         secret_key: &SecretKey,
         network_key: &Option<BareSharedSecret>,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    ) -> VeilidAPIResult<Bytes> {
         let vcrypto = crypto
             .get_async(self.crypto_kind)
             .expect_or_log("need to ensure only valid crypto kinds here");
@@ -384,8 +384,7 @@ impl EnvelopeENV0 {
         }
 
         // Compress body
-        let body = compress_prepend_size(body);
-        sleep(0).await;
+        let body = Bytes::from(compress_prepend_size(&body));
 
         // Ensure body isn't too long
         let envelope_size: usize = body.len() + ENV0_MIN_ENVELOPE_SIZE;
@@ -404,7 +403,7 @@ impl EnvelopeENV0 {
         let mut dh_secret = vcrypto.cached_dh(&recipient_public_key, secret_key).await?;
 
         // Write envelope body
-        let mut data = vec![0u8; envelope_size];
+        let mut data = BytesMut::zeroed(envelope_size);
 
         // Write version
         data[0x00..0x04].copy_from_slice(&ENVELOPE_VERSION_ENV0.0);
@@ -442,33 +441,25 @@ impl EnvelopeENV0 {
                 SharedSecret::new(dh_secret.kind(), BareSharedSecret::new(&dh_secret_bytes));
         }
 
-        // Encrypt message
-        let encrypted_body = vcrypto
-            .crypt_no_auth_unaligned(&body, &self.nonce, &dh_secret)
+        // Encrypt message to body data
+        let data = vcrypto
+            .crypt_b2b_no_auth(body, data, 0x6A, &self.nonce, &dh_secret)
             .await?;
-
-        // Write body
-        if !encrypted_body.is_empty() {
-            data[0x6A..envelope_size - ENV0_SIGNATURE_LENGTH]
-                .copy_from_slice(encrypted_body.as_slice());
-        }
 
         // Sign the envelope
         let sender_public_key =
             PublicKey::new(self.crypto_kind, BarePublicKey::new(&self.bare_sender_id));
-
-        let signature = vcrypto
-            .sign(
+        let data = vcrypto
+            .sign_in_place(
                 &sender_public_key,
                 secret_key,
-                &data[0..(envelope_size - vcrypto.signature_length())],
+                data,
+                0..envelope_size - ENV0_SIGNATURE_LENGTH,
+                envelope_size - ENV0_SIGNATURE_LENGTH,
             )
             .await?;
 
-        // Append the signature
-        data[(envelope_size - ENV0_SIGNATURE_LENGTH)..].copy_from_slice(signature.ref_value());
-
-        Ok(data)
+        Ok(data.freeze())
     }
 
     pub fn get_crypto_kind(&self) -> CryptoKind {
@@ -495,26 +486,6 @@ impl EnvelopeENV0 {
     ) -> VeilidAPIResult<CryptoSystemGuard<'_>> {
         let vcrypto = crypto
             .get(crypto_kind)
-            .ok_or_else(|| VeilidAPIError::parse_error("unsupported crypto kind", crypto_kind))?;
-
-        // Verify crypto kind can be used with this envelope
-        if vcrypto.nonce_length() != ENV0_NONCE_LENGTH
-            || vcrypto.hash_digest_length() != HASH_COORDINATE_LENGTH
-            || vcrypto.public_key_length() != HASH_COORDINATE_LENGTH
-            || vcrypto.signature_length() != ENV0_SIGNATURE_LENGTH
-        {
-            apibail_generic!("unsupported crypto kind for this envelope type");
-        }
-
-        Ok(vcrypto)
-    }
-
-    fn validate_crypto_kind_async(
-        crypto: &Crypto,
-        crypto_kind: CryptoKind,
-    ) -> VeilidAPIResult<AsyncCryptoSystemGuard<'_>> {
-        let vcrypto = crypto
-            .get_async(crypto_kind)
             .ok_or_else(|| VeilidAPIError::parse_error("unsupported crypto kind", crypto_kind))?;
 
         // Verify crypto kind can be used with this envelope

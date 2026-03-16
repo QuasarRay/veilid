@@ -6,7 +6,7 @@ pub(in crate::rpc_processor) struct RoutedOperation {
     sequencing: Sequencing,
     signatures: Vec<Signature>,
     nonce: Nonce,
-    data: Vec<u8>,
+    data: Bytes,
 }
 
 impl fmt::Debug for RoutedOperation {
@@ -27,7 +27,7 @@ impl RoutedOperation {
         sequencing: Sequencing,
         signatures: Vec<Signature>,
         nonce: Nonce,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> Result<Self, RPCError> {
         if signatures.len() > MAX_CRYPTO_KINDS {
             return Err(RPCError::protocol("too many signatures"));
@@ -40,10 +40,14 @@ impl RoutedOperation {
             data,
         })
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        //xxx
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
+
     pub fn routing_domain(&self) -> RoutingDomain {
         self.origin_routing_domain
     }
@@ -65,8 +69,8 @@ impl RoutedOperation {
     pub fn nonce(&self) -> &Nonce {
         &self.nonce
     }
-    pub fn data(&self) -> &[u8] {
-        &self.data
+    pub fn data(&self) -> Bytes {
+        self.data.clone()
     }
 
     // pub fn destructure(self) -> (Sequencing, Vec<BareSignature>, BareNonce, Vec<u8>) {
@@ -97,14 +101,14 @@ impl RoutedOperation {
         let n_reader = reader.get_nonce()?;
         let nonce = decode_nonce(&n_reader)?;
         rpc_ignore_missing_property!(reader, data);
-        let data = reader.get_data()?;
+        let data = Bytes::copy_from_slice(reader.get_data()?);
 
         Self::new(
             decode_context.origin_routing_domain,
             sequencing,
             signatures,
             nonce,
-            data.to_vec(),
+            data,
         )
     }
 
@@ -135,28 +139,26 @@ impl RoutedOperation {
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationRoute {
-    safety_route: SafetyRoute,
+    safety_route: Arc<SafetyRoute>,
     operation: RoutedOperation,
 }
 
 impl RPCOperationRoute {
-    pub fn new(safety_route: SafetyRoute, operation: RoutedOperation) -> Self {
+    pub fn new(safety_route: Arc<SafetyRoute>, operation: RoutedOperation) -> Self {
         Self {
             safety_route,
             operation,
         }
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        self.operation.validate(validate_context)
-    }
 
-    pub fn safety_route(&self) -> &SafetyRoute {
-        &self.safety_route
-    }
-    // pub fn operation(&self) -> &RoutedOperation {
-    //     &self.operation
+    // pub async fn validate(
+    //     &self,
+    //     validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     self.operation.validate(validate_context).await
     // }
-    pub fn destructure(self) -> (SafetyRoute, RoutedOperation) {
+
+    pub fn destructure(self) -> (Arc<SafetyRoute>, RoutedOperation) {
         (self.safety_route, self.operation)
     }
 
@@ -166,7 +168,7 @@ impl RPCOperationRoute {
     ) -> Result<Self, RPCError> {
         rpc_ignore_missing_property!(reader, safety_route);
         let sr_reader = reader.get_safety_route()?;
-        let safety_route = decode_safety_route(decode_context, &sr_reader)?;
+        let safety_route = Arc::new(decode_safety_route(decode_context, &sr_reader)?);
 
         rpc_ignore_missing_property!(reader, operation);
         let o_reader = reader.get_operation()?;

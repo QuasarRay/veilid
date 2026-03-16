@@ -9,7 +9,7 @@ use super::*;
 pub(super) enum RelayWorkerRequestKind {
     Relay {
         relay_nr: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
         relay_kind: RelayKind,
     },
 }
@@ -88,8 +88,7 @@ impl NetworkManager {
                             // Inbound relay the packet to the desired destination
                             veilid_log!(self trace "inbound relaying {} bytes to {}", data.len(), relay_nr);
                             if let Err(e) =
-                                pin_future!(self.send_inbound_relay_data(relay_nr, data.to_vec()))
-                                    .await
+                                pin_future!(self.send_inbound_relay_data(relay_nr, data)).await
                             {
                                 veilid_log!(self debug "failed to inbound relay envelope: {}" ,e);
                             }
@@ -99,9 +98,7 @@ impl NetworkManager {
                             // Because the source was in the client allowlist, this node has opted in
                             // to making new flows and connections for the purposes of relaying
                             veilid_log!(self trace "outbound relaying {} bytes to {}", data.len(), relay_nr);
-                            if let Err(e) =
-                                pin_future!(self.send_data(relay_nr, data.to_vec())).await
-                            {
+                            if let Err(e) = pin_future!(self.send_data(relay_nr, data)).await {
                                 veilid_log!(self debug "failed to outbound relay envelope: {}" ,e);
                             }
                         }
@@ -125,7 +122,7 @@ impl NetworkManager {
     pub(super) fn enqueue_relay(
         &self,
         relay_nr: FilteredNodeRef,
-        data: Vec<u8>,
+        data: Bytes,
         relay_kind: RelayKind,
     ) -> EyreResult<()> {
         let _guard = self

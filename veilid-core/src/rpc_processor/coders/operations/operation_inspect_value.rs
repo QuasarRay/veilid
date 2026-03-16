@@ -31,9 +31,13 @@ impl RPCOperationInspectValueQ {
             want_descriptor,
         })
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn destructure(self) -> (OpaqueRecordKey, ValueSubkeyRangeSet, bool) {
         (self.key, self.subkeys, self.want_descriptor)
@@ -135,7 +139,10 @@ impl RPCOperationInspectValueA {
         })
     }
 
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         let question_context = validate_context
             .question_context
             .as_ref()
@@ -145,7 +152,7 @@ impl RPCOperationInspectValueA {
         };
 
         let crypto = validate_context.crypto();
-        let Some(vcrypto) = crypto.get(inspect_value_context.opaque_record_key.kind()) else {
+        let Some(vcrypto) = crypto.get_async(inspect_value_context.opaque_record_key.kind()) else {
             return Err(RPCError::protocol("unsupported cryptosystem"));
         };
 
@@ -172,6 +179,7 @@ impl RPCOperationInspectValueA {
             // Ensure the descriptor itself validates
             descriptor
                 .validate(&vcrypto, &inspect_value_context.opaque_record_key)
+                .await
                 .map_err(RPCError::protocol)?;
 
             // Ensure descriptor matches last one

@@ -7,7 +7,7 @@ import {
 } from './utils/veilid-config';
 
 import { VeilidState, veilidClient, veilidCrypto, KeyPair, Signature } from 'veilid-wasm';
-import { asyncCallWithTimeout, waitForDetached, waitForPublicAttachment, waitForShutdown } from './utils/wait-utils';
+import { asyncCallWithTimeout, getLogTimestamp, waitForDetached, waitForPublicAttachment, waitForShutdown } from './utils/wait-utils';
 import { textEncoder } from './utils/marshalling-utils';
 
 describe('veilidClient', () => {
@@ -19,7 +19,8 @@ describe('veilidClient', () => {
     await veilidClient.startupCore((_update) => {
       if (DEBUGGING) {
         if (_update.kind === 'Log') {
-          console.log(_update.message);
+          const logTimestamp = getLogTimestamp()
+          console.log(`${logTimestamp}: ${_update.message}`);
         }
       }
     }, veilidCoreStartupConfig);

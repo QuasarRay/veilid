@@ -1,7 +1,7 @@
 use super::*;
 
 /// Attachment abstraction for network 'signal strength'.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
@@ -9,6 +9,7 @@ use super::*;
 )]
 #[must_use]
 pub enum AttachmentState {
+    #[default]
     Detached = 0,
     Attaching = 1,
     AttachedWeak = 2,
@@ -79,7 +80,7 @@ impl TryFrom<&str> for AttachmentState {
 }
 
 /// Describe the attachment state of the Veilid node
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
@@ -117,7 +118,7 @@ pub struct PeerTableData {
 }
 
 /// Describe the current network state of the Veilid node
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
@@ -141,7 +142,7 @@ pub struct VeilidStateNetwork {
 }
 
 /// Describe a private route change that has happened
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
@@ -158,7 +159,7 @@ pub struct VeilidRouteChange {
 /// Currently this is only ever emitted once, however we reserve the right to
 /// add the ability to change the configuration or have it changed by the Veilid node
 /// itself during runtime.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
@@ -212,7 +213,7 @@ pub enum VeilidUpdate {
 }
 
 /// A queriable state of the internals of veilid-core.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),

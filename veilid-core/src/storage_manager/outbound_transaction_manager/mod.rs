@@ -1,31 +1,40 @@
+mod locked_safety_routes;
 mod node_transaction;
 mod node_transaction_id;
 mod outbound_transaction_record_state;
 mod outbound_transaction_stage;
 mod outbound_transaction_state;
 mod subkey_consensus;
+mod transaction_cleanup;
 
 use super::transaction::OutboundTransactionHandle;
 use super::transaction_begin::{OutboundTransactBeginParams, OutboundTransactBeginResult};
 use super::transaction_command::{
     OutboundTransactCommandNodes, OutboundTransactCommandParams,
     OutboundTransactCommandPerNodeResult, OutboundTransactCommandResult,
+    TransactCommandDisposition,
 };
 use super::*;
 
 use serde_with::serde_as;
 
+pub(in crate::storage_manager) use locked_safety_routes::*;
 pub(in crate::storage_manager) use node_transaction::*;
 pub(in crate::storage_manager) use node_transaction_id::*;
 pub(in crate::storage_manager) use outbound_transaction_record_state::*;
 pub(in crate::storage_manager) use outbound_transaction_stage::*;
 pub(in crate::storage_manager) use outbound_transaction_state::*;
 pub(in crate::storage_manager) use subkey_consensus::*;
+pub(in crate::storage_manager) use transaction_cleanup::*;
 
 impl_veilid_log_facility!("stor");
 
 /// The percentage of nodes to allow past the consensus count on a transaction begin to account for network errors, rounded up
-const CONSENSUS_TRIM_PERCENT: usize = 33;
+const CONSENSUS_TRIM_PERCENT: usize = 50;
+
+/// Number of concurrent network operations per transaction
+/// excluding keepalives. Applies only to get/set operations inside a begin state.
+const PER_TRANSACTION_OPERATION_CONCURRENCY: usize = 32;
 
 /// Outbound Transaction Manager is not currently serialized, so
 /// transactions do not survive across app restarts
@@ -116,7 +125,7 @@ impl OutboundTransactionManager {
         let transaction_handle = OutboundTransactionHandle::new(opaque_record_keys.clone());
 
         // Create a new outbound transaction state
-        let mut outbound_transaction_state = OutboundTransactionState::new();
+        let mut outbound_transaction_state = OutboundTransactionState::new(self.registry());
 
         // Add all records
         for rp in record_params {
@@ -216,6 +225,7 @@ impl OutboundTransactionManager {
         let mut out = vec![];
         for record_state in outbound_transaction_state.get_record_states() {
             out.push(OutboundTransactBeginParams {
+                transaction_handle: transaction_handle.clone(),
                 opaque_record_key: record_state.record_key().opaque(),
                 safety_selection: record_state.safety_selection().clone(),
                 signing_keypair: record_state.signing_keypair().clone(),
@@ -228,64 +238,81 @@ impl OutboundTransactionManager {
     /// Record begin transaction
     pub fn record_transact_begin_results(
         &mut self,
-        transaction_handle: OutboundTransactionHandle,
         results: Vec<OutboundTransactBeginResult>,
     ) -> VeilidAPIResult<()> {
+        #[cfg(feature = "verbose-tracing")]
         let registry = self.registry();
 
         // Get the required strict consensus count
         let required_strict_consensus_count = self.config().network.dht.set_value_count as usize;
 
-        // Get transaction
-        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
-
-        // Assert stage
-        if let Some(stage_consensus) = outbound_transaction_state.stage_consensus() {
-            apibail_generic!("stage was {:?}, wanted Init", stage_consensus.stage,);
-        }
-
         // Add all node transaction ids
+        // Each record must still be in Init state (no node_transactions yet) when being recorded
         for result in results {
-            // Ensure results came in with enough consensus
-            if result.node_transaction_params.len() < required_strict_consensus_count {
-                apibail_try_again!("did not get consensus of transaction ids as begin (rec={}, count={}, required_consensus={})",
-                    result.opaque_record_key,
-                    result.node_transaction_params.len(),
-                    required_strict_consensus_count);
-            }
+            let transaction_handle = result.params.transaction_handle.clone();
 
-            // Trim results down to a factor of the strict consensus count
-            // Ensure the nodes we take are the closest to the record key
-            let mut node_transaction_params = result.node_transaction_params.clone();
-            let sort = make_closest_node_id_sort(result.opaque_record_key.to_hash_coordinate());
-            node_transaction_params.sort_by(|a, b| {
-                sort(
-                    &a.node_ref.node_ids().get(a.kind).unwrap_or_log(),
-                    &b.node_ref.node_ids().get(b.kind).unwrap_or_log(),
-                )
-            });
-            let max_node_transaction_params_count = required_strict_consensus_count
-                + (required_strict_consensus_count * CONSENSUS_TRIM_PERCENT).div_ceil(100);
-            if node_transaction_params.len() > max_node_transaction_params_count {
-                veilid_log!(registry debug "trimming node transactions from {} to {} for record key {}", node_transaction_params.len(), max_node_transaction_params_count, result.opaque_record_key);
-                node_transaction_params.truncate(max_node_transaction_params_count);
-            }
+            // Get transaction
+            let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
 
-            // Update record state with results
+            // Get record state
             let Some(record_state) =
-                outbound_transaction_state.get_record_state_mut(&result.opaque_record_key)
+                outbound_transaction_state.get_record_state_mut(&result.params.opaque_record_key)
             else {
                 apibail_internal!(
-                    "unexpected record in begin results: {}",
-                    result.opaque_record_key
+                    "missing record during begin results recording: {}",
+                    result.params.opaque_record_key
                 );
             };
 
+            // Ensure results came in with enough consensus
+            let node_transaction_count = record_state.get_node_transactions().len();
+            if node_transaction_count < required_strict_consensus_count {
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(registry debug target: "dht", "Did not get a consensus of transaction ids for begin for handle={} record={}: merged_seqs={} with state: {}",
+                    transaction_handle,
+                    result.params.opaque_record_key,
+                    result.seqs.to_table_string(),
+                    record_state
+                );
+
+                apibail_try_again!("did not get consensus of transaction ids in begin (rec={}, count={}, required_consensus={})",
+                    result.params.opaque_record_key,
+                    node_transaction_count,
+                    required_strict_consensus_count
+                );
+            }
+
+            // Update record state with results
             record_state.update_descriptor(result.descriptor)?;
             record_state.update_begin_network_seqs(result.seqs)?;
-            for ntp in node_transaction_params {
-                record_state.new_node_transaction(ntp)?;
+
+            // Assert this record is now in the Begin state
+            let Some(stage_consensus) = record_state.stage_consensus() else {
+                apibail_generic!(
+                    "record {} has no stage consensus during begin results recording",
+                    result.params.opaque_record_key
+                );
+            };
+
+            if stage_consensus.stage != OutboundTransactionStage::Begin {
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(registry debug target: "dht", "record {} did not get Begin consensus with state: {}", result.params.opaque_record_key, record_state);
+
+                apibail_generic!(
+                    "record {} has stage consensus {:?} during begin results recording, wanted Begin",
+                    result.params.opaque_record_key,
+                    stage_consensus.stage
+                );
             }
+
+            // Trim the number of node transactions down to a multiplier of the strict consensus count
+            let max_node_transaction_params_count = required_strict_consensus_count
+                + (required_strict_consensus_count * CONSENSUS_TRIM_PERCENT).div_ceil(100);
+
+            record_state.trim_node_transactions(max_node_transaction_params_count);
+
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(registry debug target: "dht", "Begin results for record {}: {}", result.params.opaque_record_key, record_state);
         }
 
         Ok(())
@@ -333,14 +360,27 @@ impl OutboundTransactionManager {
                 .get_node_transaction_mut(&pnr.node_transaction_id)
                 .ok_or_else(|| VeilidAPIError::internal("missing node transaction"))?;
 
-            // If not valid, the server already rolled it back
-            if !pnr.transaction_valid {
-                node_transaction.set_stage(OutboundTransactionStage::Rollback, None);
-                continue;
+            match pnr.disposition {
+                TransactCommandDisposition::Invalid => {
+                    // If not valid, the server already rolled it back
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(node_transaction debug target: "dht", "transact_command_result: node={} INVALID (server rolled back) record={}",
+                        pnr.node_transaction_id, result.params.opaque_record_key);
+                    node_transaction.set_stage(OutboundTransactionStage::Rollback, None);
+                    continue;
+                }
+                TransactCommandDisposition::Skipped => {
+                    // Node was not waited for due to early consensus exit, leave its stage unchanged
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(node_transaction debug target: "dht", "transact_command_result: node={} SKIPPED (no response/early exit) record={} stage={:?}",
+                        pnr.node_transaction_id, result.params.opaque_record_key, node_transaction.stage());
+                    continue;
+                }
+                TransactCommandDisposition::Valid => {
+                    // If transaction is still valid, then call the processing callback
+                    callback(node_transaction, pnr)?;
+                }
             }
-
-            // If transaction is still valid, then call the processing callback
-            callback(node_transaction, pnr)?;
         }
 
         // Any commands that did not return a result have their node transactions marked as failed
@@ -352,6 +392,9 @@ impl OutboundTransactionManager {
                     missing_node_xid,
                 );
             };
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(node_transaction debug target: "dht", "transact_command_result: node={} MISSING result → Failed",
+                missing_node_xid);
             node_transaction.set_stage(OutboundTransactionStage::Failed, None);
         }
         Ok(callback)
@@ -392,6 +435,7 @@ impl OutboundTransactionManager {
 
             let safety_selection = record_state.safety_selection().clone();
             let nodes = record_state.get_transact_command_nodes(Some(&node_xids), None)?;
+            let required_strict_consensus_count = record_state.required_strict_consensus_count();
 
             out.push(OutboundTransactCommandParams {
                 opaque_record_key,
@@ -401,6 +445,7 @@ impl OutboundTransactionManager {
                 opt_seqs: None,
                 opt_subkey: None,
                 opt_value: None,
+                required_strict_consensus_count,
             });
         }
 
@@ -467,6 +512,7 @@ impl OutboundTransactionManager {
             let opaque_record_key = record_state.record_key().opaque();
             let safety_selection = record_state.safety_selection().clone();
             let nodes = record_state.get_transact_command_nodes(None, None)?;
+            let required_strict_consensus_count = record_state.required_strict_consensus_count();
 
             out.push(OutboundTransactCommandParams {
                 opaque_record_key,
@@ -476,6 +522,7 @@ impl OutboundTransactionManager {
                 opt_seqs: None,
                 opt_subkey: None,
                 opt_value: None,
+                required_strict_consensus_count,
             });
         }
 
@@ -551,12 +598,19 @@ impl OutboundTransactionManager {
         for record_state in outbound_transaction_state.get_record_states() {
             let opaque_record_key = record_state.record_key().opaque();
             let safety_selection = record_state.safety_selection().clone();
+            // commit_will_change_remote() logs internally when returning false
             let nodes = record_state.get_transact_command_nodes(
                 None,
                 Some(Box::new(|nt: &NodeTransaction| {
                     nt.commit_will_change_remote()
                 })),
             )?;
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(self debug target: "dht", "prepare_commit: record={} nodes_requiring_commit_rpc={} total_nodes={}",
+                opaque_record_key,
+                nodes.len(),
+                record_state.get_node_transactions().len());
+            let required_strict_consensus_count = record_state.required_strict_consensus_count();
 
             out.push(OutboundTransactCommandParams {
                 opaque_record_key,
@@ -566,6 +620,7 @@ impl OutboundTransactionManager {
                 opt_seqs: None,
                 opt_subkey: None,
                 opt_value: None,
+                required_strict_consensus_count,
             });
         }
 
@@ -600,6 +655,7 @@ impl OutboundTransactionManager {
         // transition them directly to the commit state.
         for record_state in outbound_transaction_state.get_record_states_mut() {
             for node_transaction in record_state.get_node_transactions_mut() {
+                // commit_will_change_remote() logs internally when returning false
                 if !node_transaction.commit_will_change_remote() {
                     node_transaction.set_stage(OutboundTransactionStage::Commit, None);
                 }
@@ -669,7 +725,14 @@ impl OutboundTransactionManager {
         }
 
         let safety_selection = record_state.safety_selection().clone();
-        let nodes = record_state.get_transact_command_nodes(None, None)?;
+        // Only send Set to Begin-stage nodes; Rollback nodes reject unconditionally.
+        let nodes = record_state.get_transact_command_nodes(
+            None,
+            Some(Box::new(|nt: &NodeTransaction| {
+                nt.stage() == OutboundTransactionStage::Begin
+            })),
+        )?;
+        let required_strict_consensus_count = record_state.required_strict_consensus_count();
 
         Ok(OutboundTransactCommandParams {
             opaque_record_key: opaque_record_key.clone(),
@@ -679,6 +742,7 @@ impl OutboundTransactionManager {
             opt_seqs: None,
             opt_subkey: Some(subkey),
             opt_value: Some(signed_value_data),
+            required_strict_consensus_count,
         })
     }
 
@@ -747,6 +811,10 @@ impl OutboundTransactionManager {
                     }
 
                     // Newer value found online
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(node_transaction debug target: "dht", "transact_set: node={} subkey={} NEWER value found online seq={} (our seq={}), write cancelled",
+                        node_transaction.node_xid(), subkey,
+                        newer_value.value_data().seq(), value.value_data().seq());
                     node_transaction.record_current_subkey_value(subkey, Some(newer_value.clone()));
                     node_transaction.record_updated_subkey_value(subkey, None);
 
@@ -755,6 +823,9 @@ impl OutboundTransactionManager {
                     opt_value
                 } else {
                     // Successful write
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(node_transaction debug target: "dht", "transact_set: node={} subkey={} write accepted seq={}",
+                        node_transaction.node_xid(), subkey, value.value_data().seq());
                     node_transaction.record_updated_subkey_value(subkey, Some(value.clone()));
 
                     Some(value.clone())
@@ -794,6 +865,9 @@ impl OutboundTransactionManager {
         } else {
             // If no consensus was reached, we eliminate the consensus records for this subkey
             // and return a try again error
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(record_state debug target: "dht", "transact_set: subkey={}:{} NO CONSENSUS reached (found_newer={}) → TryAgain",
+                record_state.record_key().opaque(), subkey, found_newer);
             record_state.updated_consensus_mut().record(subkey, None);
             record_state.current_consensus_mut().record(subkey, None);
             apibail_try_again!(
@@ -852,6 +926,9 @@ impl OutboundTransactionManager {
 
         let safety_selection = record_state.safety_selection().clone();
         let nodes = record_state.get_transact_command_nodes(None, None)?;
+        // Use get_value_count as GET consensus threshold so a single non-responding node
+        // won't force a costly retry that exceeds the outer timeout. (get_value_count <= set_value_count by config.)
+        let required_strict_consensus_count = self.config().network.dht.get_value_count as usize;
 
         Ok(OutboundTransactCommandParams {
             opaque_record_key: opaque_record_key.clone(),
@@ -861,6 +938,7 @@ impl OutboundTransactionManager {
             opt_seqs: None,
             opt_subkey: Some(subkey),
             opt_value: None,
+            required_strict_consensus_count,
         })
     }
 
@@ -906,6 +984,10 @@ impl OutboundTransactionManager {
             |node_transaction: &mut NodeTransaction, pnr: OutboundTransactCommandPerNodeResult| {
                 // Record subkey get for this node transaction
                 let opt_value = pnr.opt_value;
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(node_transaction debug target: "dht", "transact_get: node={} subkey={} returned seq={}",
+                    node_transaction.node_xid(), subkey,
+                    opt_value.as_ref().map(|v| v.value_data().seq().to_string()).unwrap_or_else(|| "None".to_string()));
                 node_transaction.record_current_subkey_value(subkey, opt_value.clone());
                 node_transaction.update_expiration(pnr.opt_expiration);
 
@@ -932,126 +1014,44 @@ impl OutboundTransactionManager {
         Ok(())
     }
 
-    /// Prepare to send keepalives if necessary
-    pub fn prepare_transact_keepalive_params(
-        &self,
-        transaction_handle: OutboundTransactionHandle,
-    ) -> VeilidAPIResult<Vec<OutboundTransactCommandParams>> {
-        // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
-
-        // Assert stage
-        let stage = outbound_transaction_state
-            .stage_consensus()
-            .ok_or_else(|| VeilidAPIError::generic("transaction not started"))?
-            .stage;
-        match stage {
-            OutboundTransactionStage::Begin => {}
-            OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
-            | OutboundTransactionStage::Rollback
-            | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
-            }
-        }
-
-        // See if keepalives are necessary
-        let mut still_in_use = false;
-        let mut need_keepalive_keys = vec![];
-        let cur_ts = Timestamp::now_non_decreasing();
-
-        // Keepalive duration is one RPC timeout (5 seconds), since the transaction timeout
-        // is double that, we only send keepalives for records that wil timeout sooner than that
-        let keepalive_duration =
-            TimestampDuration::new_ms(self.config().network.rpc.timeout_ms as u64);
-        for record_state in outbound_transaction_state.get_record_states() {
-            let Some(expiration_ts_record) = record_state.opt_expiration() else {
-                continue;
-            };
-
-            let time_until_expiration = expiration_ts_record.duration_since(cur_ts);
-            if time_until_expiration >= keepalive_duration {
-                still_in_use = true;
-            } else {
-                need_keepalive_keys.push(record_state.record_key().opaque());
-            }
-        }
-
-        // If all of the records are beyond the keepalive duration then don't bother sending one
-        if !still_in_use {
-            return Ok(vec![]);
-        }
-
-        // Otherwise, catch up all the records that are significantly behind the keepalive time
-        let mut out = vec![];
-
-        for need_keepalive_key in need_keepalive_keys {
-            let Some(record_state) =
-                outbound_transaction_state.get_record_state(&need_keepalive_key)
-            else {
-                apibail_invalid_argument!(
-                    "record not in transaction",
-                    "opaque_record_key",
-                    need_keepalive_key
-                );
-            };
-            let opaque_record_key = record_state.record_key().opaque();
-            let safety_selection = record_state.safety_selection().clone();
-            let nodes = record_state.get_transact_command_nodes(None, None)?;
-
-            out.push(OutboundTransactCommandParams {
-                opaque_record_key,
-                safety_selection,
-                nodes,
-                command: TransactCommand::Get,
-                opt_seqs: None,
-                opt_subkey: None,
-                opt_value: None,
-            });
-        }
-
-        Ok(out)
-    }
-
     /// Record keepalive results
-    pub fn record_transact_keepalive_results(
+    pub fn record_transact_keepalive_result(
         &mut self,
         transaction_handle: OutboundTransactionHandle,
-        results: Vec<OutboundTransactCommandResult>,
-    ) -> VeilidAPIResult<()> {
-        // Get transaction
-        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+        opaque_record_key: OpaqueRecordKey,
+        node_xid: NodeTransactionId,
+        expiration: Timestamp,
+    ) -> VeilidAPIResult<bool> {
+        #[cfg(feature = "verbose-tracing")]
+        let registry = self.registry();
 
-        // Assert stage
-        let stage = outbound_transaction_state
-            .stage_consensus()
-            .ok_or_else(|| VeilidAPIError::generic("transaction not started"))?
-            .stage;
-        match stage {
-            OutboundTransactionStage::Begin => {}
-            OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
-            | OutboundTransactionStage::Rollback
-            | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
-            }
+        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+        let Some(record_state) =
+            outbound_transaction_state.get_record_state_mut(&opaque_record_key)
+        else {
+            // Record was removed from transaction
+            return Ok(false);
+        };
+        let Some(nt) = record_state.get_node_transaction_mut(&node_xid) else {
+            // Node transaction was dropped from transaction
+            return Ok(false);
+        };
+
+        // Update expiration only if we're still in Begin or End stage
+        if matches!(
+            nt.stage(),
+            OutboundTransactionStage::Begin | OutboundTransactionStage::End
+        ) {
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(registry debug target: "dht", "Keepalive updated expiration: transaction_handle={} record={} node_xid={} expiration={}", transaction_handle, opaque_record_key, node_xid, expiration);
+
+            nt.update_expiration(Some(expiration));
+        } else {
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(registry debug target: "dht", "Keepalive update ignored: stage={} transaction_handle={} record={} node_xid={} expiration={}", nt.stage(), transaction_handle, opaque_record_key, node_xid, expiration);
         }
 
-        // Record results
-        Self::record_transact_command_results(
-            outbound_transaction_state,
-            results,
-            Box::new(
-                |node_transaction: &mut NodeTransaction,
-                 pnr: OutboundTransactCommandPerNodeResult| {
-                    // Update expiration only
-                    node_transaction.update_expiration(pnr.opt_expiration);
-                    Ok(())
-                },
-            ) as OutboundTransactionPerNodeResultHandler,
-        )?;
-
-        Ok(())
+        Ok(matches!(nt.stage(), OutboundTransactionStage::Begin))
     }
 
     /// Get an inspection report for a transaction

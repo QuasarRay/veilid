@@ -16,11 +16,14 @@ impl RPCOperationKind {
         }
     }
 
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         match self {
-            RPCOperationKind::Question(r) => r.validate(validate_context),
+            RPCOperationKind::Question(r) => r.validate(validate_context).await,
             RPCOperationKind::Statement(r) => r.validate(validate_context),
-            RPCOperationKind::Answer(r) => r.validate(validate_context),
+            RPCOperationKind::Answer(r) => r.validate(validate_context).await,
         }
     }
 
@@ -97,9 +100,12 @@ impl RPCOperation {
         }
     }
 
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         // Validate operation kind
-        self.kind.validate(validate_context)
+        self.kind.validate(validate_context).await
     }
 
     pub fn op_id(&self) -> OperationId {

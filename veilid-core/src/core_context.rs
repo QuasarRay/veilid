@@ -187,7 +187,7 @@ pub(crate) trait RegisteredComponents {
     fn attachment_manager<'a>(&self) -> VeilidComponentGuard<'a, AttachmentManager>;
 }
 
-impl<T: VeilidComponentRegistryAccessor> RegisteredComponents for T {
+impl<T: VeilidComponentRegistryAccessor + ?Sized> RegisteredComponents for T {
     fn protected_store<'a>(&self) -> VeilidComponentGuard<'a, ProtectedStore> {
         self.registry().lookup::<ProtectedStore>().unwrap_or_log()
     }

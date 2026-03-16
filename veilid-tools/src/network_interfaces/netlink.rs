@@ -5,14 +5,14 @@ use super::*;
 use futures_util::stream::TryStreamExt;
 use ifstructs::ifreq;
 use libc::{
-    close, if_indextoname, ioctl, socket, IFF_LOOPBACK, IFF_POINTOPOINT, IFF_RUNNING, IF_NAMESIZE,
-    SIOCGIFFLAGS, SOCK_DGRAM,
+    close, if_indextoname, ioctl, socket, AF_INET, IFA_F_DADFAILED, IFA_F_DEPRECATED,
+    IFA_F_OPTIMISTIC, IFA_F_PERMANENT, IFA_F_TEMPORARY, IFA_F_TENTATIVE, IFF_LOOPBACK,
+    IFF_POINTOPOINT, IFF_RUNNING, IF_NAMESIZE, SIOCGIFFLAGS, SOCK_DGRAM,
 };
-use netlink_packet_route::{
-    nlas::address::Nla, AddressMessage, AF_INET, AF_INET6, IFA_F_DADFAILED, IFA_F_DEPRECATED,
-    IFA_F_OPTIMISTIC, IFA_F_PERMANENT, IFA_F_TEMPORARY, IFA_F_TENTATIVE,
-};
-use rtnetlink::{new_connection_with_socket, Handle, IpVersion};
+use netlink_packet_route::address::{AddressAttribute, AddressMessage};
+use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
+use netlink_packet_route::AddressFamily;
+use rtnetlink::{new_connection_with_socket, Handle};
 use std::collections::btree_map::Entry;
 cfg_if! {
     if #[cfg(feature="rt-async-std")] {
@@ -23,7 +23,6 @@ cfg_if! {
         compile_error!("needs executor implementation");
     }
 }
-use std::convert::TryInto;
 use std::ffi::CStr;
 use std::io;
 use std::os::raw::c_int;
@@ -83,43 +82,64 @@ impl PlatformSupportNetlink {
     // Figure out which interfaces have default routes
     async fn refresh_default_route_interfaces(&mut self) {
         self.gateways.clear();
-        let mut routesv4 = self
+        let mut routes_req = self
             .handle
             .as_ref()
             .unwrap_or_log()
             .route()
-            .get(IpVersion::V4)
-            .execute();
+            .get(RouteMessage::default());
+
+        routes_req.message_mut().header.address_family = AddressFamily::Inet;
+        let mut routesv4 = routes_req.execute();
+
         while let Some(routev4) = routesv4.try_next().await.unwrap_or_default() {
-            if let Some(index) = routev4.output_interface() {
+            let opt_gateway_ipaddr = routev4.attributes.iter().find_map(|x| match x {
+                RouteAttribute::Gateway(RouteAddress::Inet(gateway)) => Some(IpAddr::V4(*gateway)),
+                _ => None,
+            });
+            let oif_index = routev4.attributes.iter().find_map(|x| match x {
+                RouteAttribute::Oif(index) => Some(*index),
+                _ => None,
+            });
+
+            if let (Some(gateway_ipaddr), Some(oif_index)) = (opt_gateway_ipaddr, oif_index) {
                 //info!("*** ipv4 route: {:#?}", routev4);
                 if routev4.header.destination_prefix_length == 0 {
-                    if let Some(gateway_ipaddr) = routev4.gateway() {
-                        self.gateways
-                            .entry(index)
-                            .or_default()
-                            .insert(gateway_ipaddr);
-                    }
+                    self.gateways
+                        .entry(oif_index)
+                        .or_default()
+                        .insert(gateway_ipaddr);
                 }
             }
         }
-        let mut routesv6 = self
+
+        let mut routes_req = self
             .handle
             .as_ref()
             .unwrap_or_log()
             .route()
-            .get(IpVersion::V6)
-            .execute();
+            .get(RouteMessage::default());
+
+        routes_req.message_mut().header.address_family = AddressFamily::Inet6;
+        let mut routesv6 = routes_req.execute();
+
         while let Some(routev6) = routesv6.try_next().await.unwrap_or_default() {
-            if let Some(index) = routev6.output_interface() {
+            let opt_gateway_ipaddr = routev6.attributes.iter().find_map(|x| match x {
+                RouteAttribute::Gateway(RouteAddress::Inet6(gateway)) => Some(IpAddr::V6(*gateway)),
+                _ => None,
+            });
+            let oif_index = routev6.attributes.iter().find_map(|x| match x {
+                RouteAttribute::Oif(index) => Some(*index),
+                _ => None,
+            });
+
+            if let (Some(gateway_ipaddr), Some(oif_index)) = (opt_gateway_ipaddr, oif_index) {
                 //info!("*** ipv6 route: {:#?}", routev6);
                 if routev6.header.destination_prefix_length == 0 {
-                    if let Some(gateway_ipaddr) = routev6.gateway() {
-                        self.gateways
-                            .entry(index)
-                            .or_default()
-                            .insert(gateway_ipaddr);
-                    }
+                    self.gateways
+                        .entry(oif_index)
+                        .or_default()
+                        .insert(gateway_ipaddr);
                 }
             }
         }
@@ -128,7 +148,7 @@ impl PlatformSupportNetlink {
     fn get_interface_flags(&self, ifname: &str) -> io::Result<InterfaceFlags> {
         let mut req = ifreq::from_name(ifname)?;
 
-        let sock = unsafe { socket(AF_INET as i32, SOCK_DGRAM, 0) };
+        let sock = unsafe { socket(AF_INET, SOCK_DGRAM, 0) };
         if sock < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -156,10 +176,9 @@ impl PlatformSupportNetlink {
 
     fn process_address_message_v4(msg: AddressMessage) -> Option<InterfaceAddress> {
         // Get ip address
-        let ip = msg.nlas.iter().find_map(|nla| {
-            if let Nla::Address(a) = nla {
-                let a: Option<[u8; 4]> = a.clone().try_into().ok();
-                a.map(Ipv4Addr::from)
+        let ip = msg.attributes.iter().find_map(|attr| {
+            if let AddressAttribute::Address(IpAddr::V4(a)) = attr {
+                Some(*a)
             } else {
                 None
             }
@@ -172,27 +191,26 @@ impl PlatformSupportNetlink {
         let netmask = Ipv4Addr::from(netmask);
 
         // get broadcast address
-        let broadcast = msg.nlas.iter().find_map(|nla| {
-            if let Nla::Broadcast(b) = nla {
-                let b: Option<[u8; 4]> = b.clone().try_into().ok();
-                b.map(Ipv4Addr::from)
+        let broadcast = msg.attributes.iter().find_map(|attr| {
+            if let AddressAttribute::Broadcast(b) = attr {
+                Some(*b)
             } else {
                 None
             }
         });
 
         // get address flags
-        let flags = msg
-            .nlas
+        let flags: u32 = msg
+            .attributes
             .iter()
-            .find_map(|nla| {
-                if let Nla::Flags(f) = nla {
-                    Some(*f)
+            .find_map(|attr| {
+                if let AddressAttribute::Flags(f) = attr {
+                    Some(f.bits())
                 } else {
                     None
                 }
             })
-            .unwrap_or(msg.header.flags as u32);
+            .unwrap_or(msg.header.flags.bits() as u32);
 
         Some(InterfaceAddress::new(
             IfAddr::V4(Ifv4Addr {
@@ -208,10 +226,9 @@ impl PlatformSupportNetlink {
 
     fn process_address_message_v6(msg: AddressMessage) -> Option<InterfaceAddress> {
         // Get ip address
-        let ip = msg.nlas.iter().find_map(|nla| {
-            if let Nla::Address(a) = nla {
-                let a: Option<[u8; 16]> = a.clone().try_into().ok();
-                a.map(Ipv6Addr::from)
+        let ip = msg.attributes.iter().find_map(|attr| {
+            if let AddressAttribute::Address(IpAddr::V6(a)) = attr {
+                Some(*a)
             } else {
                 None
             }
@@ -224,17 +241,17 @@ impl PlatformSupportNetlink {
         let netmask = Ipv6Addr::from(netmask);
 
         // get address flags
-        let flags = msg
-            .nlas
+        let flags: u32 = msg
+            .attributes
             .iter()
-            .find_map(|nla| {
-                if let Nla::Flags(f) = nla {
-                    Some(*f)
+            .find_map(|attr| {
+                if let AddressAttribute::Flags(f) = attr {
+                    Some(f.bits())
                 } else {
                     None
                 }
             })
-            .unwrap_or(msg.header.flags as u32);
+            .unwrap_or(msg.header.flags.bits() as u32);
 
         // Skip addresses going through duplicate address detection, or ones that have failed it
         if ((flags & IFA_F_TENTATIVE) != 0) || ((flags & IFA_F_DADFAILED) != 0) {
@@ -307,14 +324,14 @@ impl PlatformSupportNetlink {
             let intf = interfaces.get_mut(&ifname).unwrap_or_log();
 
             // Process the address
-            let intf_addr = match msg.header.family as u16 {
-                AF_INET => match Self::process_address_message_v4(msg) {
+            let intf_addr = match msg.header.family {
+                AddressFamily::Inet => match Self::process_address_message_v4(msg) {
                     Some(ia) => ia,
                     None => {
                         continue;
                     }
                 },
-                AF_INET6 => match Self::process_address_message_v6(msg) {
+                AddressFamily::Inet6 => match Self::process_address_message_v6(msg) {
                     Some(ia) => ia,
                     None => {
                         continue;

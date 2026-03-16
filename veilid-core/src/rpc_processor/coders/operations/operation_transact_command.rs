@@ -81,7 +81,7 @@ impl RPCOperationTransactCommandQ {
         })
     }
 
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub fn validate(&self, _validate_context: &RPCValidateContext<'_>) -> Result<(), RPCError> {
         // Descriptor not available at this time, so don't check those things, let StorageManager do it
 
         // Validate the presence of command arguments
@@ -323,7 +323,10 @@ impl RPCOperationTransactCommandA {
         })
     }
 
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         let question_context = validate_context
             .question_context
             .as_ref()
@@ -414,7 +417,8 @@ impl RPCOperationTransactCommandA {
         }
 
         let crypto = validate_context.crypto();
-        let Some(vcrypto) = crypto.get(transact_command_context.opaque_record_key.kind()) else {
+        let Some(vcrypto) = crypto.get_async(transact_command_context.opaque_record_key.kind())
+        else {
             return Err(RPCError::protocol("unsupported cryptosystem"));
         };
 
@@ -448,6 +452,7 @@ impl RPCOperationTransactCommandA {
                     subkey,
                     &vcrypto,
                 )
+                .await
                 .map_err(RPCError::protocol)?
             {
                 return Err(RPCError::protocol("signed value data did not validate"));

@@ -9,7 +9,7 @@ pub fn decode_route_hop_data(
     let nonce = decode_nonce(&reader.get_nonce()?)?;
 
     rpc_ignore_missing_property!(reader, blob);
-    let blob = reader.get_blob()?.to_vec();
+    let blob = Bytes::copy_from_slice(reader.get_blob()?);
 
     Ok(RouteHopData { nonce, blob })
 }
@@ -32,7 +32,7 @@ pub fn encode_route_hop_data(
                     "invalid blob length in route hop data",
                 ))?,
         );
-    blob_builder.copy_from_slice(route_hop_data.blob.as_slice());
+    blob_builder.copy_from_slice(&route_hop_data.blob);
     Ok(())
 }
 
@@ -151,7 +151,7 @@ pub fn decode_safety_route(
         }
         veilid_capnp::safety_route::hops::Which::Private(pr_reader) => {
             let pr_reader = pr_reader?;
-            SafetyRouteHops::Private(decode_private_route(decode_context, &pr_reader)?)
+            SafetyRouteHops::Private(Arc::new(decode_private_route(decode_context, &pr_reader)?))
         }
     };
 

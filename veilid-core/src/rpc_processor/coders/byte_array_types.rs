@@ -1,5 +1,5 @@
 use super::*;
-use paste::paste;
+use pastey::paste;
 
 // Utility Macros
 macro_rules! define_typed_byte_data_coder {

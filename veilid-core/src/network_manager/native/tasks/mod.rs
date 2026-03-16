@@ -43,26 +43,31 @@ impl Network {
     fn wants_update_dial_info_tick(&self) -> bool {
         let routing_table = self.routing_table();
 
-        let routing_domain_state =
-            routing_table.routing_domain_state(RoutingDomain::PublicInternet);
+        let (routing_domain_inbound_stage, current_peer_info, entry_summary) = {
+            let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
+            let state = rdc.state();
+            let rdd = rdc.read();
+            (
+                state.inbound_stage,
+                rdd.get_peer_info(),
+                rdd.get_entry_summary(),
+            )
+        };
 
-        let (state_wants_dial_info, state_is_publishable) = match routing_domain_state {
-            RoutingDomainState::Invalid | RoutingDomainState::Unusable => {
+        let (state_wants_dial_info, state_is_publishable) = match routing_domain_inbound_stage {
+            RoutingDomainInboundStage::Invalid | RoutingDomainInboundStage::Unusable => {
                 // Never tick if we haven't set up the network or the network is not usable
                 return false;
             }
-            RoutingDomainState::NeedsDialInfoConfirmation => {
+            RoutingDomainInboundStage::NeedsDialInfoConfirmation => {
                 // Still need to confirm dial info
                 (true, false)
             }
-            RoutingDomainState::NeedsRelays { relay_status: _ }
-            | RoutingDomainState::ReadyToPublish { relay_status: _ } => {
+            RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish => {
                 // Already have confirmed dialinfo
                 (false, true)
             }
         };
-
-        let current_peer_info = routing_table.get_current_peer_info(RoutingDomain::PublicInternet);
 
         let needs_update_dial_info = self.needs_update_dial_info();
         if needs_update_dial_info
@@ -71,24 +76,22 @@ impl Network {
                 && !current_peer_info.node_info().has_dial_info()
                 && self.inner.lock().next_outbound_only_dial_info_check <= Timestamp::now())
         {
-            let live_entry_counts = routing_table.cached_live_entry_counts();
-
-            // Bootstrap needs to have gotten us connectivity nodes
-            let mut has_at_least_two = true;
+            // Bootstrap needs to have gotten us enough connectivity nodes
+            let mut has_enough_nodes = true;
             for ck in VALID_CRYPTO_KINDS {
-                if live_entry_counts
-                    .connectivity_capabilities
-                    .get(&(RoutingDomain::PublicInternet, ck))
-                    .copied()
+                if entry_summary
+                    .per_crypto_kind
+                    .get(&ck)
+                    .map(|cc| cc.connectivity_capabilities.live)
                     .unwrap_or_default()
-                    < MIN_BOOTSTRAP_CONNECTIVITY_PEERS
+                    < EXTERNAL_INFO_VALIDATIONS
                 {
-                    has_at_least_two = false;
+                    has_enough_nodes = false;
                     break;
                 }
             }
 
-            has_at_least_two
+            has_enough_nodes
         } else {
             false
         }

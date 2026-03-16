@@ -107,12 +107,12 @@ pub mod as_human_base64 {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
-    pub fn serialize<S: Serializer>(v: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer, B: AsRef<[u8]>>(v: &B, s: S) -> Result<S::Ok, S::Error> {
         if s.is_human_readable() {
-            let base64 = BASE64URL_NOPAD.encode(v);
+            let base64 = BASE64URL_NOPAD.encode(v.as_ref());
             String::serialize(&base64, s)
         } else {
-            Vec::<u8>::serialize(v, s)
+            <[u8]>::serialize(v.as_ref(), s)
         }
     }
 
@@ -120,14 +120,15 @@ pub mod as_human_base64 {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>, B: From<Vec<u8>>>(d: D) -> Result<B, D::Error> {
         if d.is_human_readable() {
             let base64 = String::deserialize(d)?;
             BASE64URL_NOPAD
                 .decode(base64.as_bytes())
                 .map_err(serde::de::Error::custom)
+                .map(B::from)
         } else {
-            Vec::<u8>::deserialize(d)
+            Vec::<u8>::deserialize(d).map(B::from)
         }
     }
 }

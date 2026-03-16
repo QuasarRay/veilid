@@ -1,11 +1,6 @@
-pub mod bootstrap;
-pub mod closest_peers_refresh;
 pub mod flush;
 pub mod kick_buckets;
-pub mod peer_minimum_refresh;
 pub mod ping_validator;
-pub mod private_route_management;
-pub mod relay_management;
 pub mod update_statistics;
 
 use super::*;
@@ -44,74 +39,10 @@ impl RoutingTable {
         // Set kick buckets tick task
         impl_setup_task!(self, Self, kick_buckets_task, kick_buckets_task_routine);
 
-        // Set bootstrap tick task
-        impl_setup_task_async!(self, Self, bootstrap_task, bootstrap_task_routine);
-
-        // Set peer minimum refresh tick task
-        impl_setup_task_async!(
-            self,
-            Self,
-            peer_minimum_refresh_task,
-            peer_minimum_refresh_task_routine
-        );
-
-        // Set closest peers refresh tick task
-        impl_setup_task_async!(
-            self,
-            Self,
-            closest_peers_refresh_task,
-            closest_peers_refresh_task_routine
-        );
-
-        // Set ping validator PublicInternet tick task
-        impl_setup_task_async!(
-            self,
-            Self,
-            ping_validator_public_internet_task,
-            ping_validator_public_internet_task_routine
-        );
-
-        // Set ping validator LocalNetwork tick task
-        impl_setup_task_async!(
-            self,
-            Self,
-            ping_validator_local_network_task,
-            ping_validator_local_network_task_routine
-        );
-
-        // Set ping validator PublicInternet Relay tick task
-        impl_setup_task_async!(
-            self,
-            Self,
-            ping_validator_public_internet_relay_task,
-            ping_validator_public_internet_relay_task_routine
-        );
-
-        // Set ping validator Active Watch tick task
-        impl_setup_task_async!(
-            self,
-            Self,
-            ping_validator_active_watch_task,
-            ping_validator_active_watch_task_routine
-        );
-
-        // Set relay management tick task
-        impl_setup_task_async!(
-            self,
-            Self,
-            relay_management_task,
-            relay_management_task_routine
-        );
-
-        // Set private route management tick task
-        impl_setup_task_async!(
-            self,
-            Self,
-            private_route_management_task,
-            private_route_management_task_routine
-        );
+        // Note: ping validation processor is spawned in startup(), not as a TickTask
     }
 
+    /// Event bus handler for the ticker
     pub async fn tick_event_handler(&self, _evt: Arc<TickEvent>) {
         if let Err(e) = self.tick().await {
             error!("Error in routing table tick: {}", e);
@@ -130,11 +61,7 @@ impl RoutingTable {
         };
 
         // Don't tick if paused
-        let opt_tick_guard = {
-            let inner = self.inner.read();
-            inner.critical_sections.try_lock_tag(LOCK_TAG_TICK)
-        };
-        let Some(_tick_guard) = opt_tick_guard else {
+        let Some(_tick_guard) = self.critical_sections.try_lock_tag(LOCK_TAG_TICK) else {
             return Ok(());
         };
 
@@ -156,89 +83,18 @@ impl RoutingTable {
             self.kick_buckets_task.tick().await?;
         }
 
-        // Refresh entry counts
-        let live_entry_counts = {
-            let mut inner = self.inner.write();
-            inner.refresh_cached_live_entry_counts()
-        };
+        // Refresh summary of all entries in the routing table and cache them per routing domain
+        self.refresh_summaries();
 
-        // Only do the rest if the network has started
-        if !self.network_manager().network_is_started() {
-            return Ok(());
-        }
-
-        // Figure out if we need bootstrap
-        let mut needs_bootstrap = false;
-        for rd in BOOTSTRAP_ROUTING_DOMAINS {
-            for ck in VALID_CRYPTO_KINDS {
-                let eckey = (rd, ck);
-                let cnt = live_entry_counts
-                    .connectivity_capabilities
-                    .get(&eckey)
-                    .copied()
-                    .unwrap_or_default();
-                if cnt < MIN_BOOTSTRAP_CONNECTIVITY_PEERS {
-                    needs_bootstrap = true;
-                }
-            }
-            if needs_bootstrap {
-                self.bootstrap_task.tick().await?;
-            }
-        }
-
-        // Figure out if we need peer minimum refresh
-        // XXX: eventually this should probably be done per-routingdomain
-        let mut needs_peer_minimum_refresh = false;
-        if !needs_bootstrap {
-            let min_peer_count = self.config().network.dht.min_peer_count as usize;
-
-            for ck in VALID_CRYPTO_KINDS {
-                let eckey = (RoutingDomain::PublicInternet, ck);
-                let cnt = live_entry_counts
-                    .connectivity_capabilities
-                    .get(&eckey)
-                    .copied()
-                    .unwrap_or_default();
-                if cnt < min_peer_count {
-                    needs_peer_minimum_refresh = true;
-                }
-            }
-            if needs_peer_minimum_refresh {
-                self.peer_minimum_refresh_task.tick().await?;
-            }
-        }
-
-        // Ping validate some nodes to groom the table
-        self.ping_validator_public_internet_task.tick().await?;
-        self.ping_validator_local_network_task.tick().await?;
-        self.ping_validator_public_internet_relay_task
-            .tick()
-            .await?;
-        self.ping_validator_active_watch_task.tick().await?;
-
-        // Run the relay management task
-        self.relay_management_task.tick().await?;
-
-        // Get more nodes close to our node id
-        if !needs_bootstrap && !needs_peer_minimum_refresh {
-            // Run closest peers refresh task
-            self.closest_peers_refresh_task.tick().await?;
-        }
-
-        // Only perform these operations if we already have a published peer info
-        if self
-            .get_published_peer_info(RoutingDomain::PublicInternet)
-            .is_some()
-        {
-            // Run the private route management task
-            self.private_route_management_task.tick().await?;
+        // Process the routing domain detail ticks
+        for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
+            rdc.tick().await?;
         }
 
         Ok(())
     }
     pub async fn pause_tasks(&self) -> AsyncTagLockGuard<&'static str> {
-        let critical_sections = self.inner.read().critical_sections.clone();
-        critical_sections.lock_tag(LOCK_TAG_TICK).await
+        self.critical_sections.lock_tag(LOCK_TAG_TICK).await
     }
 
     pub async fn cancel_tasks(&self) {
@@ -263,43 +119,9 @@ impl RoutingTable {
         if let Err(e) = self.kick_buckets_task.stop().await {
             veilid_log!(self warn "kick_buckets_task not stopped: {}", e);
         }
-        veilid_log!(self debug "stopping bootstrap task");
-        if let Err(e) = self.bootstrap_task.stop().await {
-            veilid_log!(self warn "bootstrap_task not stopped: {}", e);
-        }
-        veilid_log!(self debug "stopping peer minimum refresh task");
-        if let Err(e) = self.peer_minimum_refresh_task.stop().await {
-            veilid_log!(self warn "peer_minimum_refresh_task not stopped: {}", e);
-        }
-
-        veilid_log!(self debug "stopping ping_validator tasks");
-        if let Err(e) = self.ping_validator_public_internet_task.stop().await {
-            veilid_log!(self warn "ping_validator_public_internet_task not stopped: {}", e);
-        }
-        if let Err(e) = self.ping_validator_local_network_task.stop().await {
-            veilid_log!(self warn "ping_validator_local_network_task not stopped: {}", e);
-        }
-        if let Err(e) = self.ping_validator_public_internet_relay_task.stop().await {
-            veilid_log!(self warn
-                "ping_validator_public_internet_relay_task not stopped: {}",
-                e
-            );
-        }
-        if let Err(e) = self.ping_validator_active_watch_task.stop().await {
-            veilid_log!(self warn "ping_validator_active_watch_task not stopped: {}", e);
-        }
-
-        veilid_log!(self debug "stopping relay management task");
-        if let Err(e) = self.relay_management_task.stop().await {
-            veilid_log!(self warn "relay_management_task not stopped: {}", e);
-        }
-        veilid_log!(self debug "stopping private route management task");
-        if let Err(e) = self.private_route_management_task.stop().await {
-            veilid_log!(self warn "private_route_management_task not stopped: {}", e);
-        }
-        veilid_log!(self debug "stopping closest peers refresh task");
-        if let Err(e) = self.closest_peers_refresh_task.stop().await {
-            veilid_log!(self warn "closest_peers_refresh_task not stopped: {}", e);
+        veilid_log!(self debug "stopping routing domain controller task");
+        for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
+            rdc.cancel_tasks().await;
         }
     }
 }

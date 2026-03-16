@@ -141,6 +141,7 @@ impl CryptoSystem for CryptoSystemNONE {
         random_bytes(&mut nonce);
         Nonce::new(&nonce)
     }
+
     fn random_shared_secret(&self) -> SharedSecret {
         let mut s = [0u8; NONE_SHARED_SECRET_LENGTH];
         random_bytes(&mut s);
@@ -261,9 +262,34 @@ impl CryptoSystem for CryptoSystemNONE {
         sig_bytes[0..32].copy_from_slice(&in_sig_bytes[0..32]);
         sig_bytes[32..64]
             .copy_from_slice(&do_xor_32(&in_sig_bytes[32..64], secret_key.ref_value())?);
-        let dht_sig = Signature::new(CRYPTO_KIND_NONE, BareSignature::new(&sig_bytes));
-        println!("DEBUG dht_sig: {:?}", dht_sig);
-        Ok(dht_sig)
+        let none_sig = Signature::new(CRYPTO_KIND_NONE, BareSignature::new(&sig_bytes));
+        Ok(none_sig)
+    }
+
+    fn sign_in_place(
+        &self,
+        public_key: &PublicKey,
+        secret_key: &SecretKey,
+        data: &mut [u8],
+        range: Range<usize>,
+        sig_idx: usize,
+    ) -> VeilidAPIResult<()> {
+        self.check_public_key(public_key)?;
+        self.check_secret_key(secret_key)?;
+
+        let mut dig = Blake3Digest512::new();
+        dig.update(
+            data.get(range)
+                .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
+        );
+        let sig = dig.finalize();
+        let in_sig_bytes: [u8; NONE_SIGNATURE_LENGTH] = sig.into();
+
+        data[sig_idx..sig_idx + 32].copy_from_slice(&in_sig_bytes[0..32]);
+        data[sig_idx + 32..sig_idx + 64]
+            .copy_from_slice(&do_xor_32(&in_sig_bytes[32..64], secret_key.ref_value())?);
+
+        Ok(())
     }
 
     fn verify(
@@ -302,10 +328,47 @@ impl CryptoSystem for CryptoSystemNONE {
         Ok(true)
     }
 
+    fn verify_in_place(
+        &self,
+        public_key: &PublicKey,
+        data: &[u8],
+        range: Range<usize>,
+        sig_idx: usize,
+    ) -> VeilidAPIResult<bool> {
+        self.check_public_key(public_key)?;
+
+        let mut dig = Blake3Digest512::new();
+        dig.update(
+            data.get(range)
+                .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
+        );
+        let sig = dig.finalize();
+        let in_sig_bytes: [u8; NONE_SIGNATURE_LENGTH] = sig.into();
+        let mut verify_bytes = [0u8; NONE_SIGNATURE_LENGTH];
+        let signature = data
+            .get(sig_idx..sig_idx + NONE_SIGNATURE_LENGTH)
+            .ok_or_else(|| VeilidAPIError::internal("signature index is out of bounds"))?;
+        verify_bytes[0..32].copy_from_slice(&do_xor_32(&in_sig_bytes[0..32], &signature[0..32])?);
+        verify_bytes[32..64]
+            .copy_from_slice(&do_xor_32(&in_sig_bytes[32..64], &signature[32..64])?);
+
+        if !is_bytes_eq_32(&verify_bytes[0..32], 0u8)? {
+            return Ok(false);
+        }
+        if !is_bytes_eq_32(
+            &do_xor_32(&verify_bytes[32..64], public_key.ref_value())?,
+            0xFFu8,
+        )? {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
     // AEAD Encrypt/Decrypt
     fn decrypt_in_place_aead(
         &self,
-        body: &mut Vec<u8>,
+        body: &mut dyn CryptoSystemBuffer,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
         _associated_data: Option<&[u8]>,
@@ -320,11 +383,11 @@ impl CryptoSystem for CryptoSystemNONE {
         if body.len() < NONE_AEAD_OVERHEAD {
             return Err(VeilidAPIError::generic("invalid length"));
         }
-        if body[body.len() - NONE_AEAD_OVERHEAD..] != blob {
+        if body.as_ref()[body.len() - NONE_AEAD_OVERHEAD..] != blob {
             return Err(VeilidAPIError::generic("invalid keyblob"));
         }
         body.truncate(body.len() - NONE_AEAD_OVERHEAD);
-        do_xor_inplace(body, &blob)
+        do_xor_inplace(body.as_mut(), &blob)
     }
 
     fn decrypt_aead(
@@ -346,7 +409,7 @@ impl CryptoSystem for CryptoSystemNONE {
 
     fn encrypt_in_place_aead(
         &self,
-        body: &mut Vec<u8>,
+        body: &mut dyn CryptoSystemBuffer,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
         _associated_data: Option<&[u8]>,
@@ -357,8 +420,8 @@ impl CryptoSystem for CryptoSystemNONE {
         let mut blob = nonce.to_vec();
         blob.extend_from_slice(&[0u8; 8]);
         let blob = do_xor_32(&blob, shared_secret.ref_value())?;
-        do_xor_inplace(body, &blob)?;
-        body.append(&mut blob.to_vec());
+        do_xor_inplace(body.as_mut(), &blob)?;
+        body.extend_from_slice(&blob);
         Ok(())
     }
 

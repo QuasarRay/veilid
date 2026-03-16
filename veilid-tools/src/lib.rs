@@ -24,6 +24,7 @@
 pub mod assembly_buffer;
 pub mod async_locks;
 pub mod async_peek_stream;
+pub mod bytes_writer;
 pub mod clone_stream;
 pub mod deferred_stream_processor;
 pub mod event_bus;
@@ -32,7 +33,6 @@ pub mod eventual_base;
 pub mod eventual_value;
 pub mod eventual_value_clone;
 pub mod future_queue;
-pub mod hash_atom;
 pub mod interval;
 pub mod ip_addr_port;
 pub mod ip_extra;
@@ -40,7 +40,6 @@ pub mod ipc;
 pub mod log_unwrap;
 pub mod must_join_handle;
 pub mod must_join_single_future;
-pub mod mutable_future;
 pub mod network_interfaces;
 pub mod network_result;
 pub mod pin;
@@ -55,6 +54,7 @@ pub mod spawn;
 pub mod split_url;
 pub mod startup_lock;
 pub mod static_string_table;
+pub mod tag_lock;
 pub mod tick_task;
 pub mod timeout;
 pub mod timeout_or;
@@ -151,6 +151,8 @@ pub use async_locks::*;
 #[doc(inline)]
 pub use async_peek_stream::*;
 #[doc(inline)]
+pub use bytes_writer::*;
+#[doc(inline)]
 pub use clone_stream::*;
 #[doc(inline)]
 pub use deferred_stream_processor::*;
@@ -167,8 +169,6 @@ pub use eventual_value_clone::*;
 #[doc(inline)]
 pub use future_queue::*;
 #[doc(inline)]
-pub use hash_atom::*;
-#[doc(inline)]
 pub use interval::*;
 #[doc(inline)]
 pub use ip_addr_port::*;
@@ -182,8 +182,6 @@ pub use log_unwrap::*;
 pub use must_join_handle::*;
 #[doc(inline)]
 pub use must_join_single_future::*;
-#[doc(inline)]
-pub use mutable_future::*;
 #[doc(inline)]
 pub use network_interfaces::*;
 #[doc(inline)]
@@ -211,6 +209,8 @@ pub use split_url::*;
 pub use startup_lock::*;
 #[doc(inline)]
 pub use static_string_table::*;
+#[doc(inline)]
+pub use tag_lock::*;
 #[doc(inline)]
 pub use tick_task::*;
 #[doc(inline)]
@@ -244,13 +244,16 @@ cfg_if! {
         }
     }
 }
+use bytes::*;
 use cfg_if::*;
 use futures_util::{AsyncRead, AsyncWrite};
 use parking_lot::*;
 use stop_token::*;
 use thiserror::Error as ThisError;
 
+pub use bytes;
 pub use fn_name;
+pub use parking_lot;
 
 // For iOS tests
 #[no_mangle]

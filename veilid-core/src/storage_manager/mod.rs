@@ -34,6 +34,7 @@ use super::*;
 
 use hashlink::{LinkedHashMap, LruCache};
 
+use inspect_record::OutboundInspectValueResult;
 use local_record_detail::*;
 use offline_subkey_writes::*;
 use outbound_transaction_manager::*;
@@ -46,6 +47,7 @@ use routing_table::*;
 use rpc_processor::*;
 use stop_token::future::FutureExt as _;
 use storage_manager_locks::*;
+use tasks::outbound_transaction_keepalive::OutboundTransactionKeepaliveProcessor;
 
 pub(crate) use get_value::InboundGetValueResult;
 pub(crate) use inspect_record::InboundInspectValueResult;
@@ -87,6 +89,8 @@ const RENEW_OUTBOUND_WATCHES_DURATION: TimestampDuration = TimestampDuration::ne
 const CHECK_INBOUND_WATCHES_INTERVAL_SECS: u32 = 1;
 /// Frequency to check for expired client-side transactions
 const CHECK_OUTBOUND_TRANSACTIONS_INTERVAL_SECS: u32 = 1;
+/// Multiplier applied to rpc_timeout_ms to derive the server-side transaction TTL
+const TRANSACTION_TIMEOUT_RPC_MULTIPLIER: u64 = 2;
 /// Frequency to check for expired server-side transactions
 const CHECK_INBOUND_TRANSACTIONS_INTERVAL_SECS: u32 = 1;
 /// Frequency to process record rehydration requests
@@ -146,8 +150,6 @@ struct StorageManagerInner {
     pub outbound_watch_manager: OutboundWatchManager,
     /// State management for outbound transactions
     pub outbound_transaction_manager: OutboundTransactionManager,
-    /// Active keepalives set for outbound transactions,
-    pub active_transaction_keepalives: HashSet<OpaqueRecordKey>,
     /// Storage manager metadata that is persistent, including copy of offline subkey writes
     pub metadata_db: Option<TableDB>,
     /// Peer info change subscription
@@ -208,8 +210,11 @@ pub(crate) struct StorageManager {
     // background operations the storage manager wants to perform
     background_operation_processor: DeferredStreamProcessor,
 
-    /// Cache of which nodes have seen descriptors for which records to optimize outbound set_value and transact_begin operations
+    // Cache of which nodes have seen descriptors for which records to optimize outbound set_value and transact_begin operations
     descriptor_cache: Arc<Mutex<LruCache<DescriptorCacheKey, ()>>>,
+
+    // Outbound transaction keepalive processor
+    outbound_transaction_keepalive_processor: OutboundTransactionKeepaliveProcessor,
 
     // Online check
     is_online: AtomicBool,
@@ -245,6 +250,9 @@ impl StorageManager {
             let kp = vcrypto.generate_keypair();
             anonymous_signing_keys.add(kp);
         }
+
+        let outbound_transaction_keepalive_processor =
+            OutboundTransactionKeepaliveProcessor::new(registry.clone());
 
         let this = StorageManager {
             registry,
@@ -287,6 +295,7 @@ impl StorageManager {
             record_lock_table: StorageManagerRecordLockTable::new(),
             anonymous_signing_keys,
             background_operation_processor: DeferredStreamProcessor::new(),
+            outbound_transaction_keepalive_processor,
             is_online: AtomicBool::new(false),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
         };
@@ -314,7 +323,8 @@ impl StorageManager {
             min_watch_expiration: TimestampDuration::new_ms(c.network.rpc.timeout_ms.into()),
             public_transaction_limit: c.network.dht.public_transaction_limit as usize,
             member_transaction_limit: c.network.dht.member_transaction_limit as usize,
-            transaction_timeout: TimestampDuration::new_ms((c.network.rpc.timeout_ms * 2).into()),
+            transaction_timeout: TimestampDuration::new_ms(c.network.rpc.timeout_ms as u64)
+                .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER),
             pool_concurrency: 1,
         }
     }
@@ -337,7 +347,8 @@ impl StorageManager {
             min_watch_expiration: TimestampDuration::new_ms(c.network.rpc.timeout_ms.into()),
             public_transaction_limit: c.network.dht.public_transaction_limit as usize,
             member_transaction_limit: c.network.dht.member_transaction_limit as usize,
-            transaction_timeout: TimestampDuration::new_ms((c.network.rpc.timeout_ms * 2).into()),
+            transaction_timeout: TimestampDuration::new_ms(c.network.rpc.timeout_ms as u64)
+                .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER),
             pool_concurrency: (get_concurrency() as usize)
                 .div_ceil(REMOTE_POOL_CONCURRENCY_DIVISOR),
         }
@@ -383,6 +394,9 @@ impl StorageManager {
 
         // Start deferred results processors
         self.background_operation_processor.init();
+
+        // Start outbound transaction keepalive processor
+        self.outbound_transaction_keepalive_processor.init();
 
         guard.success();
 
@@ -448,6 +462,11 @@ impl StorageManager {
 
         // Cancel all tasks associated with the tick future
         self.cancel_tasks().await;
+
+        // Stop outbound transaction keepalive processor
+        self.outbound_transaction_keepalive_processor
+            .terminate()
+            .await;
 
         // Stop deferred result processor
         self.background_operation_processor.terminate().await;

@@ -1,43 +1,46 @@
 use super::*;
 
 /// What remote private routes have seen
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct RemotePrivateRouteInfo {
     /// The private routes themselves
-    private_routes: Vec<PrivateRoute>,
+    private_routes: Vec<Arc<PrivateRoute>>,
     /// Did this remote private route see our node info due to no safety route in use
-    last_seen_our_node_info_ts: Timestamp,
+    last_seen_our_node_info_ts: AtomicOptionTimestamp,
     /// Last time this remote private route was requested for any reason (cache expiration)
-    last_touched_ts: Timestamp,
+    last_touched_ts: AtomicTimestamp,
     /// Stats
-    stats: RouteStats,
+    stats: RwLock<RouteStats>,
 }
 
 impl fmt::Display for RemotePrivateRouteInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (latency_stats, transfer_stats) = self.with_stats(|s| {
+            (
+                s.latency_stats().to_string(),
+                s.transfer_stats().to_string(),
+            )
+        });
         write!(
             f,
             "last_seen_our_ni={} last_touched={} latency={} transfer={}",
-            self.last_seen_our_node_info_ts,
-            self.last_touched_ts,
-            self.get_stats().latency_stats(),
-            self.get_stats().transfer_stats(),
+            self.last_seen_our_node_info_ts, self.last_touched_ts, latency_stats, transfer_stats
         )
     }
 }
 impl RemotePrivateRouteInfo {
-    pub fn new(private_routes: Vec<PrivateRoute>, cur_ts: Timestamp) -> Self {
+    pub fn new(private_routes: Vec<Arc<PrivateRoute>>, cur_ts: Timestamp) -> Self {
         RemotePrivateRouteInfo {
             private_routes,
-            last_seen_our_node_info_ts: Timestamp::new(0),
-            last_touched_ts: cur_ts,
-            stats: RouteStats::new(cur_ts),
+            last_seen_our_node_info_ts: AtomicOptionTimestamp::none(),
+            last_touched_ts: AtomicTimestamp::new(cur_ts),
+            stats: RwLock::new(RouteStats::new(cur_ts)),
         }
     }
-    pub fn get_private_routes(&self) -> &[PrivateRoute] {
+    pub fn get_private_routes(&self) -> &[Arc<PrivateRoute>] {
         &self.private_routes
     }
-    pub fn best_private_route(&self) -> Option<PrivateRoute> {
+    pub fn best_private_route(&self) -> Option<Arc<PrivateRoute>> {
         self.private_routes
             .iter()
             .reduce(|acc, x| {
@@ -50,34 +53,46 @@ impl RemotePrivateRouteInfo {
             .filter(|x| VALID_CRYPTO_KINDS.contains(&x.public_key.kind()))
             .cloned()
     }
-    pub fn get_stats(&self) -> &RouteStats {
-        &self.stats
+
+    pub fn with_stats<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&RouteStats) -> R,
+    {
+        let stats = self.stats.read();
+        f(&stats)
     }
-    pub fn get_stats_mut(&mut self) -> &mut RouteStats {
-        &mut self.stats
+    pub fn with_stats_mut<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut RouteStats) -> R,
+    {
+        let mut stats = self.stats.write();
+        f(&mut stats)
     }
 
     pub fn has_seen_our_node_info_ts(&self, our_node_info_ts: Timestamp) -> bool {
-        self.last_seen_our_node_info_ts == our_node_info_ts
+        self.last_seen_our_node_info_ts.get() == Some(our_node_info_ts)
     }
-    pub fn set_last_seen_our_node_info_ts(&mut self, last_seen_our_node_info_ts: Timestamp) {
-        self.last_seen_our_node_info_ts = last_seen_our_node_info_ts;
+    pub fn set_last_seen_our_node_info_ts(&self, last_seen_our_node_info_ts: Timestamp) {
+        self.last_seen_our_node_info_ts
+            .set(Some(last_seen_our_node_info_ts));
     }
 
     // Check to see if this remote private route has expired
     pub fn did_expire(&self, cur_ts: Timestamp) -> bool {
-        cur_ts.duration_since(self.last_touched_ts) >= REMOTE_PRIVATE_ROUTE_CACHE_EXPIRY
+        self.last_touched_ts
+            .expiration_state(cur_ts, REMOTE_PRIVATE_ROUTE_CACHE_EXPIRY)
+            == ExpirationState::Dead
     }
 
     /// Start fresh if this had expired
-    pub fn unexpire(&mut self, cur_ts: Timestamp) {
-        self.last_seen_our_node_info_ts = Timestamp::new(0);
-        self.last_touched_ts = cur_ts;
-        self.stats = RouteStats::new(cur_ts);
+    pub fn unexpire(&self, cur_ts: Timestamp) {
+        self.last_seen_our_node_info_ts.set(None);
+        self.last_touched_ts.set(cur_ts);
+        *self.stats.write() = RouteStats::new(cur_ts);
     }
 
     /// Note when this was last used
-    pub fn touch(&mut self, cur_ts: Timestamp) {
-        self.last_touched_ts = cur_ts;
+    pub fn touch(&self, cur_ts: Timestamp) {
+        self.last_touched_ts.set(cur_ts)
     }
 }

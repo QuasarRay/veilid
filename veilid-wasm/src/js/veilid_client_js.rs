@@ -376,7 +376,9 @@ impl VeilidClient {
 
         let veilid_api = get_veilid_api()?;
 
-        veilid_api.get_dht_record_key(schema, owner.clone(), encryption_key)
+        veilid_api
+            .get_dht_record_key(schema, owner.clone(), encryption_key)
+            .await
     }
 
     /// Allocate a new private route set with default cryptography and network options.

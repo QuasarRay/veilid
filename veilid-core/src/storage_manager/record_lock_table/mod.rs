@@ -78,7 +78,13 @@ impl<R: LockPurpose, S: LockPurpose> RecordLockTable<R, S> {
                     }
                 };
             } else {
-                let whole_record_lock_guard = record_lock.get_whole_record_lock().write_arc().await;
+                let whole_record_lock_guard = record_lock
+                    .get_whole_record_lock()
+                    .write_arc()
+                    .measure_debug(TimestampDuration::new_secs(10), |msg| {
+                        eprintln!("RecordLockTable::lock_record write_arc: {}", msg);
+                    })
+                    .await;
             }
         }
 
@@ -209,13 +215,24 @@ impl<R: LockPurpose, S: LockPurpose> RecordLockTable<R, S> {
                     }
                 };
             } else {
-                let whole_record_lock_guard = record_lock.get_whole_record_lock().read_arc().await;
+                let whole_record_lock_guard = record_lock
+                    .get_whole_record_lock()
+                    .read_arc()
+                    .measure_debug(TimestampDuration::new_secs(10), |msg| {
+                        eprintln!("RecordLockTable::lock_subkey read_arc: {}", msg);
+                    })
+                    .await;
             }
         }
 
         // Get subkey lock
         let subkey_lock = record_lock.get_subkey_lock(subkey);
-        let subkey_lock_guard = subkey_lock.lock_arc().await;
+        let subkey_lock_guard = subkey_lock
+            .lock_arc()
+            .measure_debug(TimestampDuration::new_secs(10), |msg| {
+                eprintln!("RecordLockTable::lock_subkey lock_arc: {}", msg);
+            })
+            .await;
         record_lock.set_subkey_purpose(subkey, purpose);
 
         SubkeyLockGuard::new(
@@ -282,7 +299,13 @@ impl<R: LockPurpose, S: LockPurpose> RecordLockTable<R, S> {
                     }
                 };
             } else {
-                let whole_record_lock_guard = record_lock.get_whole_record_lock().read_arc().await;
+                let whole_record_lock_guard = record_lock
+                    .get_whole_record_lock()
+                    .read_arc()
+                    .measure_debug(TimestampDuration::new_secs(10), |msg| {
+                        eprintln!("RecordLockTable::peek_lock read_arc: {}", msg);
+                    })
+                    .await;
             }
         }
 
@@ -291,6 +314,7 @@ impl<R: LockPurpose, S: LockPurpose> RecordLockTable<R, S> {
         PeekLockGuard::new(record_lock, whole_record_lock_guard)
     }
 
+    #[allow(dead_code)]
     pub fn try_peek_lock(&self, record: OpaqueRecordKey) -> Option<PeekLockGuard<R, S>> {
         // Get record lock
         let record_lock = {

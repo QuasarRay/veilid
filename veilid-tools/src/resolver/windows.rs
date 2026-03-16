@@ -26,6 +26,7 @@ impl Resolver {
                 &mut p_query_results as *mut *mut DNS_RECORDA,
                 None,
             )
+            .ok()
             .map_err(|e| ResolverError::Generic(format!("Failed to resolve TXT record: {}", e)))?;
 
             let mut p_record: *mut DNS_RECORDA = p_query_results;
@@ -83,6 +84,7 @@ impl Resolver {
                 &mut p_query_results as *mut *mut DNS_RECORDA,
                 None,
             )
+            .ok()
             .map_err(|e| ResolverError::Generic(format!("Failed to resolve PTR record: {}", e)))?;
 
             let mut p_record: *mut DNS_RECORDA = p_query_results;

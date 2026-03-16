@@ -1,5 +1,11 @@
 use super::*;
 
+pub async fn yielding<R, T: FnOnce() -> R>(x: T) -> R {
+    let out = x();
+    sleep(0).await;
+    out
+}
+
 cfg_if! {
     if #[cfg(feature="rt-wasm-bindgen")] {
         use async_executors::{Bindgen, LocalSpawnHandleExt, SpawnHandleExt};
@@ -120,6 +126,33 @@ cfg_if! {
                 .detach()
         }
 
+        /// For things that use locks or IO operations or cpu tasks that take between 10-100us
+        /// WASM version is a stub that just uses a yield point
+        pub async fn blocking_yielding<R: Send + 'static>(x: impl FnOnce() -> R + Send + 'static) -> R {
+            yielding(x).await
+        }
+
+        /// For heavy cpu-intensive tasks that do not use locks or IO operations > (100us)
+        /// WASM version is a stub that just uses a yield point
+        pub async fn cpu_yielding<R: Send + 'static>(x: impl FnOnce() -> R + Send + 'static) -> R {
+            yielding(x).await
+        }
+
+        /// Yielding that chooses the best mechanism using a scaled approach
+        pub async fn scaled_yielding<
+            N: PartialOrd,
+            R: Send + 'static,
+            T: FnOnce() -> R + Send + 'static,
+        >(
+            _n: N,
+            _yield_n: N,
+            _cpu_n: N,
+            x: T,
+        ) -> R {
+            // Due to speed issues and an inability to spawn in the WASM target, always yield
+            yielding(x).await
+        }
+
     } else {
 
         pub fn spawn<Out>(name: &str, future: impl Future<Output = Out> + Send + 'static) -> MustJoinHandle<Out>
@@ -186,8 +219,7 @@ cfg_if! {
             }
         }
 
-        #[allow(unused_variables)]
-        pub async fn blocking_wrapper<F, R>(name: &str, blocking_task: F, err_result: R) -> R
+        pub async fn blocking_wrapper<F, R>(blocking_task: F) -> R
         where
             F: FnOnce() -> R + Send + 'static,
             R: Send + 'static,
@@ -195,17 +227,48 @@ cfg_if! {
             // run blocking stuff in blocking thread
             cfg_if! {
                 if #[cfg(feature="rt-async-std")] {
-                    let _name = name;
-                    // async_std::task::Builder blocking doesn't work like spawn_blocking()
                     async_std::task::spawn_blocking(blocking_task).await
-                } else if #[cfg(all(tokio_unstable, feature="rt-tokio", feature="tracing"))] {
-                    tokio::task::Builder::new().name(name).spawn_blocking(blocking_task).unwrap_or_log().await.unwrap_or(err_result)
                 } else if #[cfg(feature="rt-tokio")] {
-                    let _name = name;
-                    tokio::task::spawn_blocking(blocking_task).await.unwrap_or(err_result)
+                    tokio::task::spawn_blocking(blocking_task).await.unwrap_or_log()
                 } else {
                     #[compile_error("must use an executor")]
                 }
+            }
+        }
+
+        /// For things that use locks or IO operations or cpu tasks that take between 10-100us
+        pub async fn blocking_yielding<R: Send + 'static>(x: impl FnOnce() -> R + Send + 'static) -> R
+        {
+            blocking_wrapper(x).await
+        }
+
+        /// For heavy cpu-intensive tasks that do not use locks or IO operations > (100us)
+        pub async fn cpu_yielding<R: Send + 'static>(x: impl FnOnce() -> R + Send + 'static) -> R {
+            let (tx, rx) = flume::bounded(1);
+            rayon::spawn_fifo(move || {
+                let result = x();
+                let _ = tx.send(result);
+            });
+            rx.recv_async().await.unwrap_or_log()
+        }
+
+        /// Yielding that chooses the best mechanism using a scaled approach
+        pub async fn scaled_yielding<
+            N: PartialOrd,
+            R: Send + 'static,
+            T: FnOnce() -> R + Send + 'static,
+            >(
+            n: N,
+            yield_n: N,
+            cpu_n: N,
+            x: T,
+            ) -> R {
+            if n < yield_n {
+                x()
+            } else if n < cpu_n {
+                yielding(x).await
+            } else {
+                cpu_yielding(x).await
             }
         }
 

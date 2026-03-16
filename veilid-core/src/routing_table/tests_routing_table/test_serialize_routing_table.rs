@@ -81,8 +81,8 @@ pub async fn test_routingtable_buckets_round_trip() {
                 {
                     assert_eq!(left_node_id, right_node_id);
 
-                    let s = left_entry.with(original_inner, |_rti, e| serialize_json(e));
-                    let s2 = right_entry.with(copy_inner, |_rti, e| serialize_json(e));
+                    let s = left_entry.with(|e| serialize_json(e));
+                    let s2 = right_entry.with(|e| serialize_json(e));
 
                     assert_eq!(s, s2);
                 }

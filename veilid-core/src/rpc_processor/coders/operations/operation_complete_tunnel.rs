@@ -18,7 +18,10 @@ impl RPCOperationCompleteTunnelQ {
             endpoint,
         }
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        _validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         Ok(())
     }
 
@@ -90,9 +93,13 @@ impl RPCOperationCompleteTunnelA {
     pub fn new_error(error: TunnelError) -> Self {
         Self::Error(error)
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn decode(
         reader: &veilid_capnp::operation_complete_tunnel_a::Reader,

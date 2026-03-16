@@ -1,6 +1,5 @@
 mod filtered_node_ref;
 mod node_ref_filter;
-mod node_ref_lock;
 mod traits;
 
 impl_veilid_log_facility!("rtab");
@@ -9,7 +8,6 @@ use super::*;
 
 pub(crate) use filtered_node_ref::*;
 pub(crate) use node_ref_filter::*;
-pub(crate) use node_ref_lock::*;
 pub(crate) use traits::*;
 
 ///////////////////////////////////////////////////////////////////////////
@@ -84,10 +82,6 @@ impl NodeRef {
             Sequencing::default(),
         )
     }
-
-    pub fn locked<'a>(&self, rti: &'a RoutingTableInner) -> LockedNodeRef<'a> {
-        LockedNodeRef::new(rti, self.clone())
-    }
 }
 
 impl NodeRefAccessorsTrait for NodeRef {
@@ -119,20 +113,16 @@ impl NodeRefAccessorsTrait for NodeRef {
 impl NodeRefOperateTrait for NodeRef {
     fn operate<T, F>(&self, f: F) -> T
     where
-        F: FnOnce(&RoutingTableInner, &BucketEntryInner) -> T,
+        F: FnOnce(&BucketEntryInner) -> T,
     {
-        let routing_table = self.routing_table();
-        let inner = &*routing_table.inner.read();
-        self.entry.with(inner, f)
+        self.entry.with(f)
     }
 
     fn operate_mut<T, F>(&self, f: F) -> T
     where
-        F: FnOnce(&mut RoutingTableInner, &mut BucketEntryInner) -> T,
+        F: FnOnce(&mut BucketEntryInner) -> T,
     {
-        let routing_table = self.routing_table();
-        let inner = &mut *routing_table.inner.write();
-        self.entry.with_mut(inner, f)
+        self.entry.with_mut(f)
     }
 }
 
@@ -153,9 +143,9 @@ impl Clone for NodeRef {
 
 impl fmt::Display for NodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(best_node_id) = self.entry.with_inner(|e| e.best_node_id()) {
+        if let Some(best_node_id) = self.entry.with(|e| e.best_node_id()) {
             return write!(f, "{}", best_node_id);
-        } else if let Some(node_id) = self.entry.with_inner(|e| e.node_ids().first().cloned()) {
+        } else if let Some(node_id) = self.entry.with(|e| e.node_ids().first().cloned()) {
             return write!(f, "{}", node_id);
         }
         write!(f, "*NONE*")
@@ -165,7 +155,7 @@ impl fmt::Display for NodeRef {
 impl fmt::Debug for NodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NodeRef")
-            .field("node_ids", &self.entry.with_inner(|e| e.node_ids()))
+            .field("node_ids", &self.entry.with(|e| e.node_ids()))
             .finish()
     }
 }
@@ -180,8 +170,22 @@ impl Drop for NodeRef {
         if new_ref_count == 0 {
             // get node ids with inner unlocked because nothing could be referencing this entry now
             // and we don't know when it will get dropped, possibly inside a lock
-            let node_ids = self.entry.with_inner(|e| e.node_ids());
+            let node_ids = self.entry.with(|e| e.node_ids());
             self.routing_table().queue_bucket_kicks(node_ids);
         }
     }
 }
+
+impl core::hash::Hash for NodeRef {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.entry).hash(state);
+    }
+}
+
+impl core::cmp::PartialEq for NodeRef {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.entry, &other.entry)
+    }
+}
+
+impl core::cmp::Eq for NodeRef {}

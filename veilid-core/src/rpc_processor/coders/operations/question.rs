@@ -10,8 +10,11 @@ impl RPCQuestion {
     pub fn new(respond_to: RespondTo, detail: RPCQuestionDetail) -> Self {
         Self { respond_to, detail }
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        self.detail.validate(validate_context)
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
+        self.detail.validate(validate_context).await
     }
     pub fn respond_to(&self) -> &RespondTo {
         &self.respond_to
@@ -90,27 +93,30 @@ impl RPCQuestionDetail {
             RPCQuestionDetail::CancelTunnelQ(_) => "CancelTunnelQ",
         }
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         match self {
-            RPCQuestionDetail::StatusQ(r) => r.validate(validate_context),
-            RPCQuestionDetail::FindNodeQ(r) => r.validate(validate_context),
-            RPCQuestionDetail::AppCallQ(r) => r.validate(validate_context),
-            RPCQuestionDetail::GetValueQ(r) => r.validate(validate_context),
-            RPCQuestionDetail::SetValueQ(r) => r.validate(validate_context),
-            RPCQuestionDetail::WatchValueQ(r) => r.validate(validate_context),
-            RPCQuestionDetail::InspectValueQ(r) => r.validate(validate_context),
-            RPCQuestionDetail::TransactBeginQ(r) => r.validate(validate_context),
+            RPCQuestionDetail::StatusQ(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCQuestionDetail::FindNodeQ(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCQuestionDetail::AppCallQ(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCQuestionDetail::GetValueQ(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCQuestionDetail::SetValueQ(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCQuestionDetail::WatchValueQ(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCQuestionDetail::InspectValueQ(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCQuestionDetail::TransactBeginQ(r) => r.validate(validate_context).await,
             RPCQuestionDetail::TransactCommandQ(r) => r.validate(validate_context),
             #[cfg(feature = "unstable-blockstore")]
-            RPCQuestionDetail::SupplyBlockQ(r) => r.validate(validate_context),
+            RPCQuestionDetail::SupplyBlockQ(r) => Ok(()), // r.validate(validate_context).await,
             #[cfg(feature = "unstable-blockstore")]
-            RPCQuestionDetail::FindBlockQ(r) => r.validate(validate_context),
+            RPCQuestionDetail::FindBlockQ(r) => Ok(()), // r.validate(validate_context).await,
             #[cfg(feature = "unstable-tunnels")]
-            RPCQuestionDetail::StartTunnelQ(r) => r.validate(validate_context),
+            RPCQuestionDetail::StartTunnelQ(r) => Ok(()), // r.validate(validate_context).await,
             #[cfg(feature = "unstable-tunnels")]
-            RPCQuestionDetail::CompleteTunnelQ(r) => r.validate(validate_context),
+            RPCQuestionDetail::CompleteTunnelQ(r) => Ok(()), // r.validate(validate_context).await,
             #[cfg(feature = "unstable-tunnels")]
-            RPCQuestionDetail::CancelTunnelQ(r) => r.validate(validate_context),
+            RPCQuestionDetail::CancelTunnelQ(r) => Ok(()), // r.validate(validate_context).await,
         }
     }
 

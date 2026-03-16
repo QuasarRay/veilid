@@ -1,9 +1,12 @@
 #[macro_use]
 mod aligned_u64;
 mod app_message_call;
+mod atomic_option_timestamp;
+mod atomic_timestamp;
 #[cfg(feature = "geolocation")]
 mod country_code;
 mod dht;
+mod expiration_state;
 mod fourcc;
 mod route_blob;
 mod safety;
@@ -22,9 +25,12 @@ use super::*;
 
 pub use aligned_u64::*;
 pub use app_message_call::*;
+pub use atomic_option_timestamp::*;
+pub use atomic_timestamp::*;
 #[cfg(feature = "geolocation")]
 pub use country_code::*;
 pub use dht::*;
+pub use expiration_state::*;
 pub use route_blob::*;
 pub use safety::*;
 pub use stats::*;

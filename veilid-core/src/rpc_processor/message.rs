@@ -2,11 +2,11 @@ use super::*;
 
 #[derive(Debug)]
 pub(in crate::rpc_processor) struct MessageData {
-    pub contents: Vec<u8>, // rpc messages must be a canonicalized single segment
+    contents: Bytes, // rpc messages must be a canonicalized single segment
 }
 
 impl MessageData {
-    pub fn new(contents: Vec<u8>) -> Self {
+    pub fn new(contents: Bytes) -> Self {
         Self { contents }
     }
 
@@ -14,7 +14,7 @@ impl MessageData {
         &self,
     ) -> Result<capnp::message::Reader<capnp::serialize::OwnedSegments>, RPCError> {
         capnp::serialize_packed::read_message(
-            self.contents.as_slice(),
+            self.contents.as_ref(),
             capnp::message::ReaderOptions::new(),
         )
         .map_err(RPCError::protocol)

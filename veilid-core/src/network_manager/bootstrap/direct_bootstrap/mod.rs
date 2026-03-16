@@ -42,9 +42,9 @@ impl NetworkManager {
     async fn direct_bootstrap_v0(&self, dial_info: DialInfo) -> EyreResult<Vec<Arc<PeerInfo>>> {
         let timeout_ms = self.config().network.rpc.timeout_ms;
         // Send boot magic to requested peer address
-        let data = BOOT_MAGIC.to_vec();
+        let data = Bytes::copy_from_slice(BOOT_MAGIC);
 
-        let out_data: Vec<u8> = network_result_value_or_log!(self self
+        let out_data = network_result_value_or_log!(self self
             .net()
             .send_recv_data_unbound_to_dial_info(dial_info, data, timeout_ms)
             .await? => [ format!(": dial_info={}, data.len={}", dial_info, data.len()) ]
@@ -75,9 +75,9 @@ impl NetworkManager {
         let timeout_ms = self.config().network.rpc.timeout_ms;
 
         // Send boot magic to requested peer address
-        let data = B01T_MAGIC.to_vec();
+        let data = Bytes::copy_from_slice(B01T_MAGIC);
 
-        let out_data: Vec<u8> = network_result_value_or_log!(self self
+        let out_data = network_result_value_or_log!(self self
             .net()
             .send_recv_data_unbound_to_dial_info(dial_info, data, timeout_ms)
             .await? => [ format!(": dial_info={}, data.len={}", dial_info, data.len()) ]
@@ -125,7 +125,7 @@ impl NetworkManager {
                     // and as such, a routing domain can not be determined for it
                     // by the code that receives the FindNodeA result
                     for pi in bootv1response.peers.iter().cloned() {
-                        if pi.node_info().public_keys().contains_any_from_slice(bsrec.public_keys()) {
+                        if pi.node_info().public_keys().contains_any_from_iter(bsrec.public_keys().iter()) {
                             return Some(pi);
                         }
                     }

@@ -5,7 +5,8 @@ use data_encoding::BASE64URL_NOPAD;
 #[must_use]
 pub struct EncryptedValueData {
     // capnp struct ValueData encoded without packing
-    blob: Vec<u8>,
+    #[get_size(size_fn = bytes_size_helper)]
+    blob: Bytes,
 }
 
 impl EncryptedValueData {
@@ -13,7 +14,7 @@ impl EncryptedValueData {
 
     pub fn new(
         seq: ValueSeqNum,
-        data: Vec<u8>,
+        data: Bytes,
         writer: PublicKey,
         nonce: Option<Nonce>,
     ) -> VeilidAPIResult<Self> {
@@ -39,8 +40,12 @@ impl EncryptedValueData {
             capnp_encode_nonce(&nonce_val, &mut nb);
         }
 
-        let blob = canonical_message_builder_to_vec_unpacked(message_builder)
-            .map_err(VeilidAPIError::internal)?;
+        let blob = canonical_message_builder_to_bytes_writer_unpacked(message_builder, |size| {
+            BytesWriter::with_capacity(size)
+        })
+        .map_err(VeilidAPIError::internal)?
+        .into_inner()
+        .freeze();
 
         // Ensure the blob could be decoded without errors, allowing to do unwrap() in getter methods
         validate_value_data_blob(&blob).map_err(VeilidAPIError::internal)?;
@@ -80,7 +85,7 @@ impl EncryptedValueData {
     }
 
     #[must_use]
-    pub fn data(&self) -> Vec<u8> {
+    pub fn data(&self) -> Bytes {
         let message_reader = capnp::serialize::read_message_from_flat_slice(
             &mut &self.blob[..],
             capnp::message::ReaderOptions::new(),
@@ -90,8 +95,7 @@ impl EncryptedValueData {
             .get_root::<veilid_capnp::value_data::Reader>()
             .unwrap_or_log();
 
-        // TODO: try to make this function return &[u8]
-        reader.get_data().unwrap_or_log().to_vec()
+        Bytes::copy_from_slice(reader.get_data().unwrap_or_log())
     }
 
     #[must_use]
@@ -227,10 +231,10 @@ impl<'de> serde::Deserialize<'de> for EncryptedValueData {
                     ))
                 })?;
 
-                Ok(EncryptedValueData { blob })
+                Ok(EncryptedValueData { blob: blob.into() })
             }
             Helper::Legacy(legacy) => {
-                EncryptedValueData::new(legacy.seq, legacy.data, legacy.writer, None)
+                EncryptedValueData::new(legacy.seq, legacy.data.into(), legacy.writer, None)
                     .map_err(serde::de::Error::custom)
             }
         }

@@ -1,5 +1,7 @@
 use super::*;
 
+impl_veilid_log_facility!("rtab");
+
 impl RoutingTable {
     // Compute transfer statistics to determine how 'fast' a node is
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
@@ -10,19 +12,21 @@ impl RoutingTable {
         cur_ts: Timestamp,
     ) -> EyreResult<()> {
         {
-            let inner = &mut *self.inner.write();
+            let self_transfer_stats_accounting = &mut *self.self_transfer_stats_accounting.lock();
 
             // Roll our own node's transfers
-            inner.self_transfer_stats_accounting.roll_transfers(
+            self_transfer_stats_accounting.0.roll_transfers(
                 last_ts,
                 cur_ts,
-                &mut inner.self_transfer_stats,
+                &mut self_transfer_stats_accounting.1,
             );
+        }
 
+        {
             // Roll all bucket entry transfers
-            let all_entries: Vec<Arc<BucketEntry>> = inner.all_entries.iter().collect();
+            let all_entries: Vec<Arc<BucketEntry>> = self.inner.read().all_entries.iter().collect();
             for entry in all_entries {
-                entry.with_mut(inner, |_rti, e| e.roll_transfers(last_ts, cur_ts));
+                entry.with_mut(|e| e.roll_transfers(last_ts, cur_ts));
             }
         }
 
@@ -40,14 +44,10 @@ impl RoutingTable {
         _last_ts: Timestamp,
         _cur_ts: Timestamp,
     ) -> EyreResult<()> {
-        {
-            let inner = &mut *self.inner.write();
-
-            // Roll all bucket entry transfers
-            let all_entries: Vec<Arc<BucketEntry>> = inner.all_entries.iter().collect();
-            for entry in all_entries {
-                entry.with_mut(inner, |_rti, e| e.update_state_stats());
-            }
+        // Roll all bucket entry transfers
+        let all_entries: Vec<Arc<BucketEntry>> = self.inner.read().all_entries.iter().collect();
+        for entry in all_entries {
+            entry.with_mut(|e| e.update_state_stats());
         }
 
         Ok(())
@@ -61,14 +61,10 @@ impl RoutingTable {
         _last_ts: Timestamp,
         cur_ts: Timestamp,
     ) -> EyreResult<()> {
-        {
-            let inner = &mut *self.inner.write();
-
-            // Roll all bucket entry answers stats
-            let all_entries: Vec<Arc<BucketEntry>> = inner.all_entries.iter().collect();
-            for entry in all_entries {
-                entry.with_mut(inner, |_rti, e| e.roll_answer_stats(cur_ts));
-            }
+        // Roll all bucket entry answers stats
+        let all_entries: Vec<Arc<BucketEntry>> = self.inner.read().all_entries.iter().collect();
+        for entry in all_entries {
+            entry.with_mut(|e| e.roll_answer_stats(cur_ts));
         }
 
         // Roll all route answers

@@ -6,12 +6,13 @@ use super::*;
 pub struct SignedValueDescriptor {
     #[serde(with = "public_key_try_untyped_vld0")]
     owner: PublicKey,
-    schema_data: Vec<u8>,
+    #[get_size(size_fn = bytes_size_helper)]
+    schema_data: Bytes,
     #[serde(with = "signature_try_untyped_vld0")]
     signature: Signature,
 }
 impl SignedValueDescriptor {
-    pub fn new(owner: PublicKey, schema_data: Vec<u8>, signature: Signature) -> Self {
+    pub fn new(owner: PublicKey, schema_data: Bytes, signature: Signature) -> Self {
         Self {
             owner,
             schema_data,
@@ -19,9 +20,9 @@ impl SignedValueDescriptor {
         }
     }
 
-    pub fn validate(
+    pub async fn validate(
         &self,
-        vcrypto: &CryptoSystemGuard<'_>,
+        vcrypto: &AsyncCryptoSystemGuard<'_>,
         opaque_record_key: &OpaqueRecordKey,
     ) -> VeilidAPIResult<()> {
         if self.owner.kind() != vcrypto.kind() {
@@ -37,21 +38,25 @@ impl SignedValueDescriptor {
             );
         }
         // validate signature
-        if !vcrypto.verify(&self.owner, &self.schema_data, &self.signature)? {
+        if !vcrypto
+            .verify(&self.owner, self.schema_data.clone(), &self.signature)
+            .await?
+        {
             apibail_parse_error!(
                 "failed to validate signature of signed value descriptor",
                 &self.signature
             );
         }
         // validate schema bytes
-        let _ = DHTSchema::try_from(self.schema_data.as_slice())?;
+        let _ = DHTSchema::try_from(self.schema_data.as_ref())?;
 
         // Verify record key matches
         let verify_key = StorageManager::make_opaque_record_key(
             vcrypto,
             self.ref_owner().ref_value(),
             self.schema_data(),
-        );
+        )
+        .await;
         if opaque_record_key != &verify_key {
             apibail_parse_error!("failed to validate record key match", verify_key);
         }
@@ -72,7 +77,7 @@ impl SignedValueDescriptor {
     }
 
     pub fn schema(&self) -> VeilidAPIResult<DHTSchema> {
-        DHTSchema::try_from(self.schema_data.as_slice())
+        DHTSchema::try_from(self.schema_data.as_ref())
     }
 
     #[expect(dead_code)]
@@ -84,10 +89,10 @@ impl SignedValueDescriptor {
         &self.signature
     }
 
-    pub fn make_signature(
+    pub async fn make_signature(
         owner: PublicKey,
-        schema_data: Vec<u8>,
-        vcrypto: &CryptoSystemGuard<'_>,
+        schema_data: Bytes,
+        vcrypto: &AsyncCryptoSystemGuard<'_>,
         owner_secret: SecretKey,
     ) -> VeilidAPIResult<Self> {
         if owner.kind() != vcrypto.kind() {
@@ -97,7 +102,9 @@ impl SignedValueDescriptor {
             );
         }
         // create signature
-        let signature = vcrypto.sign(&owner, &owner_secret, &schema_data)?;
+        let signature = vcrypto
+            .sign(&owner, &owner_secret, schema_data.clone())
+            .await?;
         Ok(Self {
             owner,
             schema_data,

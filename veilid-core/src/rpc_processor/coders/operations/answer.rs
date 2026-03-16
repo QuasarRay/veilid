@@ -9,8 +9,11 @@ impl RPCAnswer {
     pub fn new(detail: RPCAnswerDetail) -> Self {
         Self { detail }
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        self.detail.validate(validate_context)
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
+        self.detail.validate(validate_context).await
     }
     pub fn desc(&self) -> &'static str {
         self.detail.desc()
@@ -79,27 +82,30 @@ impl RPCAnswerDetail {
             RPCAnswerDetail::CancelTunnelA(_) => "CancelTunnelA",
         }
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
+    pub async fn validate(
+        &self,
+        validate_context: &RPCValidateContext<'_>,
+    ) -> Result<(), RPCError> {
         match self {
-            RPCAnswerDetail::StatusA(r) => r.validate(validate_context),
-            RPCAnswerDetail::FindNodeA(r) => r.validate(validate_context),
-            RPCAnswerDetail::AppCallA(r) => r.validate(validate_context),
-            RPCAnswerDetail::GetValueA(r) => r.validate(validate_context),
-            RPCAnswerDetail::SetValueA(r) => r.validate(validate_context),
-            RPCAnswerDetail::WatchValueA(r) => r.validate(validate_context),
-            RPCAnswerDetail::InspectValueA(r) => r.validate(validate_context),
-            RPCAnswerDetail::TransactBeginA(r) => r.validate(validate_context),
-            RPCAnswerDetail::TransactCommandA(r) => r.validate(validate_context),
+            RPCAnswerDetail::StatusA(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCAnswerDetail::FindNodeA(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCAnswerDetail::AppCallA(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCAnswerDetail::GetValueA(r) => r.validate(validate_context).await,
+            RPCAnswerDetail::SetValueA(r) => r.validate(validate_context).await,
+            RPCAnswerDetail::WatchValueA(_r) => Ok(()), // r.validate(validate_context).await,
+            RPCAnswerDetail::InspectValueA(r) => r.validate(validate_context).await,
+            RPCAnswerDetail::TransactBeginA(r) => r.validate(validate_context).await,
+            RPCAnswerDetail::TransactCommandA(r) => r.validate(validate_context).await,
             #[cfg(feature = "unstable-blockstore")]
-            RPCAnswerDetail::SupplyBlockA(r) => r.validate(validate_context),
+            RPCAnswerDetail::SupplyBlockA(r) => Ok(()), // r.validate(validate_context).await,
             #[cfg(feature = "unstable-blockstore")]
-            RPCAnswerDetail::FindBlockA(r) => r.validate(validate_context),
+            RPCAnswerDetail::FindBlockA(r) => Ok(()), // r.validate(validate_context).await,
             #[cfg(feature = "unstable-tunnels")]
-            RPCAnswerDetail::StartTunnelA(r) => r.validate(validate_context),
+            RPCAnswerDetail::StartTunnelA(r) => Ok(()), // r.validate(validate_context).await,
             #[cfg(feature = "unstable-tunnels")]
-            RPCAnswerDetail::CompleteTunnelA(r) => r.validate(validate_context),
+            RPCAnswerDetail::CompleteTunnelA(r) => Ok(()), // r.validate(validate_context).await,
             #[cfg(feature = "unstable-tunnels")]
-            RPCAnswerDetail::CancelTunnelA(r) => r.validate(validate_context),
+            RPCAnswerDetail::CancelTunnelA(r) => Ok(()), // r.validate(validate_context).await,
         }
     }
     pub fn decode(

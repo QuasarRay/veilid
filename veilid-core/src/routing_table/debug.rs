@@ -1,5 +1,7 @@
 use super::*;
 
+impl_veilid_log_facility!("rtab");
+
 impl RoutingTable {
     pub fn debug_info_nodeid(&self) -> String {
         let mut out = String::new();
@@ -10,8 +12,9 @@ impl RoutingTable {
     }
 
     pub fn debug_info_nodeinfo(&self) -> String {
+        let self_transfer_stats = self.self_transfer_stats_accounting.lock().1.clone();
+
         let mut out = String::new();
-        let inner = self.inner.read();
         out += &format!("Node Ids: {}\n", self.node_ids());
         out += &format!(
             "Version: {}{}\n",
@@ -21,7 +24,11 @@ impl RoutingTable {
         out += &format!("Features: {:?}\n", veilid_features());
         out += &format!(
             "Self Transfer Stats:\n{}",
-            indent_all_string(&inner.self_transfer_stats)
+            indent_all_string(&self_transfer_stats)
+        );
+        out += &format!(
+            "Routing Table Health: {:#?}\n",
+            self.get_routing_table_health()
         );
 
         out
@@ -31,24 +38,30 @@ impl RoutingTable {
         let mut out = String::new();
 
         for rd in RoutingDomainSet::all() {
-            out += &format!("{:?}:\n", rd);
+            let rdc = self.get_routing_domain_controller(rd);
+            let state = rdc.state();
+            let (dial_info_details, relays, debug) = {
+                let rdd = rdc.read();
+                let dial_info_details = rdd.dial_info_details().clone();
+                let relays = rdd.relays().clone();
+                let debug = rdd.debug(true);
+                (dial_info_details, relays, debug)
+            };
+
+            out += &format!("{:?}:\n--------------------------------\n", rd);
 
             let mut rdout = String::new();
             rdout += "Dial Info Details:\n";
-            let ldis = self.dial_info_details(rd);
-            for (n, ldi) in ldis.iter().enumerate() {
-                rdout += &indent_all_string(&format!("{:>2}: {}\n", n, ldi));
+            for (n, ldi) in dial_info_details.iter().enumerate() {
+                rdout += &indent_all_string(&format!("  {:>2}: {}\n", n, ldi));
             }
-            rdout += &format!(
-                "Routing Domain State:\n{:?}\n",
-                self.routing_domain_state(rd)
-            );
+            rdout += &format!("Routing Domain State: {:#?}\n", state);
             rdout += "Routing Domain Relays:\n";
-            for (n, rdr) in self.relays(rd).iter().enumerate() {
+            for (n, rdr) in relays.iter().enumerate() {
                 rdout += &indent_all_string(&format!("{:>2}: {:?}\n", n, rdr));
             }
             rdout += "Routing Domain Details:\n";
-            rdout += &self.routing_domain_debug(rd, true);
+            rdout += &debug;
 
             out += &(indent_all_string(&rdout) + "\n");
         }
@@ -198,7 +211,13 @@ impl RoutingTable {
         min_state: BucketEntryState,
         capabilities: Vec<VeilidCapability>,
     ) -> String {
-        let relay_node_filter = self.make_public_internet_relay_node_filter();
+        let rdc = self.get_routing_domain_controller(RoutingDomain::PublicInternet);
+        let relays = rdc.read().relays();
+        let relay_node_filter = rdc
+            .as_any()
+            .downcast_ref::<PublicInternetRoutingDomainController>()
+            .unwrap()
+            .make_relay_node_filter();
 
         let inner = self.inner.read();
         let inner = &*inner;
@@ -208,26 +227,30 @@ impl RoutingTable {
 
         out += &format!("Entries: {}\n", inner.bucket_entry_count());
         out += "   Live:\n";
-        for ec in inner.cached_live_entry_counts().any_capabilities.iter() {
-            let routing_domain = ec.0 .0;
-            let crypto_kind = ec.0 .1;
-            let count = ec.1;
-            out += &format!("{:?}: {}: {}\n", routing_domain, crypto_kind, count);
+        let rdds = self.get_routing_domain_controllers(RoutingDomainSet::all());
+        for rdd in rdds {
+            let rdd = rdd.read();
+            let entry_summary = rdd.get_entry_summary();
+            out += &format!("{:#}: {}\n", rdd.routing_domain(), entry_summary);
         }
         for ck in &VALID_CRYPTO_KINDS {
             let our_node_id = self.node_id(*ck);
 
             let mut filtered_total = 0;
+            let mut reliable_count = 0usize;
+            let mut unreliable_count = 0usize;
+            let mut dead_count = 0usize;
+            let mut punished_count = 0usize;
             let mut b = 0;
             let blen = inner.buckets[ck].len();
             while b < blen {
                 let filtered_entries: Vec<(&BareNodeId, &Arc<BucketEntry>)> = inner.buckets[ck][b]
                     .entries()
                     .filter(|e| {
-                        let cap_match = e.1.with(inner, |_rti, e| {
+                        let cap_match = e.1.with(|e| {
                             e.has_all_capabilities(RoutingDomain::PublicInternet, &capabilities)
                         });
-                        let state = e.1.with(inner, |_rti, e| e.state(cur_ts));
+                        let state = e.1.with(|e| e.state(cur_ts));
                         state >= min_state && cap_match
                     })
                     .collect();
@@ -237,9 +260,17 @@ impl RoutingTable {
                     for e in filtered_entries {
                         let node = e.0.clone();
 
-                        let can_be_relay = e.1.with(inner, |_rti, e| relay_node_filter(e));
-                        let is_relay = inner
-                            .relays(RoutingDomain::PublicInternet)
+                        // Count states
+                        match e.1.with(|e| e.state(cur_ts)) {
+                            BucketEntryState::Reliable => reliable_count += 1,
+                            BucketEntryState::Unreliable => unreliable_count += 1,
+                            BucketEntryState::Dead => dead_count += 1,
+                            BucketEntryState::Punished => punished_count += 1,
+                        }
+
+                        let entry_snap = e.1.snapshot(self.registry(), cur_ts);
+                        let can_be_relay = relay_node_filter(&entry_snap);
+                        let is_relay = relays
                             .iter()
                             .find_map(|r| {
                                 if r.relay_node.same_bucket_entry(e.1) {
@@ -251,7 +282,7 @@ impl RoutingTable {
                             .unwrap_or_default();
 
                         let is_relaying =
-                            e.1.with(inner, |_rti, e| {
+                            e.1.with(|e| {
                                 e.node_info(RoutingDomain::PublicInternet)
                                     .map(|ni| ni.relay_ids().contains(&our_node_id))
                             })
@@ -269,7 +300,7 @@ impl RoutingTable {
                         );
 
                         out += "    ";
-                        out += &e.1.with(inner, |_rti, e| {
+                        out += &e.1.with(|e| {
                             let node_id_str = NodeId::new(*ck, node).to_string();
                             Self::format_entry(cur_ts, &node_id_str, e, &relay_tag)
                         });
@@ -279,6 +310,36 @@ impl RoutingTable {
                 b += 1;
             }
             out += &format!("{} Filtered Total: {}\n", ck, filtered_total);
+            if filtered_total > 0 {
+                if reliable_count > 0 {
+                    out += &format!(
+                        "  Reliable: {} ({:.1}%)\n",
+                        reliable_count,
+                        (reliable_count as f64) * 100.0 / (filtered_total as f64)
+                    );
+                }
+                if unreliable_count > 0 {
+                    out += &format!(
+                        "  Unreliable: {} ({:.1}%)\n",
+                        unreliable_count,
+                        (unreliable_count as f64) * 100.0 / (filtered_total as f64)
+                    );
+                }
+                if dead_count > 0 {
+                    out += &format!(
+                        "  Dead: {} ({:.1}%)\n",
+                        dead_count,
+                        (dead_count as f64) * 100.0 / (filtered_total as f64)
+                    );
+                }
+                if punished_count > 0 {
+                    out += &format!(
+                        "  Punished: {} ({:.1}%)\n",
+                        punished_count,
+                        (punished_count as f64) * 100.0 / (filtered_total as f64)
+                    );
+                }
+            }
         }
 
         out
@@ -291,37 +352,45 @@ impl RoutingTable {
         node_count: usize,
     ) -> String {
         let cur_ts = Timestamp::now();
-        let relay_node_filter = self.make_public_internet_relay_node_filter();
+
+        let rdc = self.get_routing_domain_controller(RoutingDomain::PublicInternet);
+        let relays = rdc.read().relays();
+        let relay_node_filter = rdc
+            .as_any()
+            .downcast_ref::<PublicInternetRoutingDomainController>()
+            .unwrap()
+            .make_relay_node_filter();
+
         let our_node_ids = self.node_ids();
         let mut relay_count = 0usize;
         let mut relaying_count = 0usize;
+        let mut reliable_count = 0usize;
+        let mut unreliable_count = 0usize;
+        let mut dead_count = 0usize;
+        let mut punished_count = 0usize;
 
         let mut filters = VecDeque::new();
         filters.push_front(Box::new(
-            |rti: &RoutingTableInner, e: Option<Arc<BucketEntry>>, _cur_ts: Timestamp| {
-                let Some(e) = e else {
+            |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+                let Some(snap) = opt_snap else {
                     return false;
                 };
-                let cap_match = e.with(rti, |_rti, e| {
-                    e.has_all_capabilities(RoutingDomain::PublicInternet, &capabilities)
-                });
-                let state = e.with(rti, |_rti, e| e.state(cur_ts));
-                state >= min_state && cap_match
+                let cap_match =
+                    snap.has_all_capabilities(RoutingDomain::PublicInternet, &capabilities);
+                snap.state >= min_state && cap_match
             },
         ) as RoutingTableEntryFilter);
-        let nodes = self.find_preferred_fastest_nodes(
+        let nodes = self.get_preferred_fastest_nodes(
             node_count,
             filters,
-            |_rti, entry: Option<Arc<BucketEntry>>| {
-                NodeRef::new(self.registry(), entry.unwrap_or_log().clone())
-            },
+            |opt_snap: Option<BucketEntrySnapshot>| opt_snap.unwrap_or_log().node_ref.clone(),
         );
         let mut out = String::new();
         let entry_count = nodes.len();
         for node in nodes {
-            let can_be_relay = node.operate(|_rti, e| relay_node_filter(e));
-            let is_relay = self
-                .relays(RoutingDomain::PublicInternet)
+            let relay_snap = node.entry().snapshot(self.registry(), cur_ts);
+            let can_be_relay = relay_node_filter(&relay_snap);
+            let is_relay = relays
                 .iter()
                 .find_map(|r| {
                     if r.relay_node.same_entry(&node) {
@@ -333,9 +402,9 @@ impl RoutingTable {
                 .unwrap_or_default();
 
             let is_relaying = node
-                .operate(|_rti, e| {
+                .operate(|e| {
                     e.node_info(RoutingDomain::PublicInternet)
-                        .map(|ni| our_node_ids.contains_any_from_slice(&ni.relay_ids()))
+                        .map(|ni| our_node_ids.contains_any_from_iter(ni.relay_ids().iter()))
                 })
                 .unwrap_or(false);
 
@@ -357,10 +426,17 @@ impl RoutingTable {
                 relaying_count += 1;
             }
 
+            match node.operate(|e| e.state(cur_ts)) {
+                BucketEntryState::Reliable => reliable_count += 1,
+                BucketEntryState::Unreliable => unreliable_count += 1,
+                BucketEntryState::Dead => dead_count += 1,
+                BucketEntryState::Punished => punished_count += 1,
+            }
+
             let node_id_str = node.to_string();
 
             out += "    ";
-            out += &node.operate(|_rti, e| Self::format_entry(cur_ts, &node_id_str, e, &relay_tag));
+            out += &node.operate(|e| Self::format_entry(cur_ts, &node_id_str, e, &relay_tag));
             out += "\n";
         }
 
@@ -371,6 +447,36 @@ impl RoutingTable {
             (relay_count as f64) * 100.0 / (entry_count as f64),
             relaying_count,
         );
+        if entry_count > 0 {
+            if reliable_count > 0 {
+                out += &format!(
+                    "Reliable: {} ({:.1}%)\n",
+                    reliable_count,
+                    (reliable_count as f64) * 100.0 / (entry_count as f64)
+                );
+            }
+            if unreliable_count > 0 {
+                out += &format!(
+                    "Unreliable: {} ({:.1}%)\n",
+                    unreliable_count,
+                    (unreliable_count as f64) * 100.0 / (entry_count as f64)
+                );
+            }
+            if dead_count > 0 {
+                out += &format!(
+                    "Dead: {} ({:.1}%)\n",
+                    dead_count,
+                    (dead_count as f64) * 100.0 / (entry_count as f64)
+                );
+            }
+            if punished_count > 0 {
+                out += &format!(
+                    "Punished: {} ({:.1}%)\n",
+                    punished_count,
+                    (punished_count as f64) * 100.0 / (entry_count as f64)
+                );
+            }
+        }
 
         out
     }
@@ -379,7 +485,7 @@ impl RoutingTable {
         let cur_ts = Timestamp::now();
 
         let mut out = String::new();
-        out += &node_ref.operate(|_rti, e| {
+        out += &node_ref.operate(|e| {
             let state_reason = e.state_reason(cur_ts);
             format!(
                 "{}\nstate: {}\n",
@@ -409,7 +515,7 @@ impl RoutingTable {
                 while c < COLS {
                     let mut cnt = 0;
                     for e in inner.buckets[ck][b].entries() {
-                        if e.1.with(inner, |_rti, e| e.state(cur_ts) >= min_state) {
+                        if e.1.with(|e| e.state(cur_ts) >= min_state) {
                             cnt += 1;
                         }
                     }

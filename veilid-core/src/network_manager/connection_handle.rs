@@ -4,20 +4,20 @@ use super::*;
 pub struct ConnectionHandle {
     connection_id: NetworkConnectionId,
     flow: Flow,
-    channel: flume::Sender<(Option<Id>, Vec<u8>)>,
+    channel: flume::Sender<(Option<Id>, Bytes)>,
 }
 
 #[derive(Debug)]
 pub enum ConnectionHandleSendResult {
     Sent,
-    NotSent(Vec<u8>),
+    NotSent(Bytes),
 }
 
 impl ConnectionHandle {
     pub(super) fn new(
         connection_id: NetworkConnectionId,
         flow: Flow,
-        channel: flume::Sender<(Option<Id>, Vec<u8>)>,
+        channel: flume::Sender<(Option<Id>, Bytes)>,
     ) -> Self {
         Self {
             connection_id,
@@ -44,7 +44,7 @@ impl ConnectionHandle {
     }
 
     // #[cfg_attr(feature = "instrument", instrument(level="trace", target="net", skip(self, message), fields(message.len = message.len())))]
-    // pub fn send(&self, message: Vec<u8>) -> ConnectionHandleSendResult {
+    // pub fn send(&self, message: Bytes) -> ConnectionHandleSendResult {
     //     match self.channel.send((Span::current().id(), message)) {
     //         Ok(()) => ConnectionHandleSendResult::Sent,
     //         Err(e) => ConnectionHandleSendResult::NotSent(e.0 .1),
@@ -52,7 +52,7 @@ impl ConnectionHandle {
     // }
 
     #[cfg_attr(feature = "instrument", instrument(level="trace", target="net", skip(self, message), fields(message.len = message.len())))]
-    pub async fn send_async(&self, message: Vec<u8>) -> ConnectionHandleSendResult {
+    pub async fn send_async(&self, message: Bytes) -> ConnectionHandleSendResult {
         match self
             .channel
             .send_async((Span::current().id(), message))

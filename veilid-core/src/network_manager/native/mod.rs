@@ -20,10 +20,14 @@ use protocol::udp::RawUdpProtocolHandler;
 use protocol::ws::WebsocketProtocolHandler;
 use start_protocols::*;
 
-use async_tls::TlsAcceptor;
+use futures_rustls::{
+    pki_types::{
+        pem::PemObject as _, CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer,
+    },
+    rustls::server::ServerConfig,
+    TlsAcceptor,
+};
 use futures_util::StreamExt;
-use rustls::{Certificate, PrivateKey, ServerConfig};
-use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
@@ -160,24 +164,41 @@ impl Network {
         this
     }
 
-    fn load_certs(path: &Path) -> io::Result<Vec<Certificate>> {
-        let cvec = certs(&mut BufReader::new(File::open(path)?))
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid TLS certificate"))?;
-        Ok(cvec.into_iter().map(Certificate).collect())
+    fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
+        let cvec = CertificateDer::<'static>::pem_reader_iter(&mut BufReader::new(
+            // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
+            File::open(path)?,
+        ))
+        .collect::<Result<Vec<CertificateDer<'static>>, futures_rustls::pki_types::pem::Error>>()
+        .map_err(io::Error::other)?;
+        Ok(cvec)
     }
 
-    fn load_keys(path: &Path) -> io::Result<Vec<PrivateKey>> {
+    fn load_keys(path: &Path) -> io::Result<Vec<PrivateKeyDer<'static>>> {
         {
-            if let Ok(v) = rsa_private_keys(&mut BufReader::new(File::open(path)?)) {
+            if let Ok(v) = PrivatePkcs1KeyDer::<'static>::pem_reader_iter(&mut BufReader::new(
+                // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
+                File::open(path)?,
+            ))
+            .collect::<Result<Vec<PrivatePkcs1KeyDer<'static>>, futures_rustls::pki_types::pem::Error>>()
+            {
                 if !v.is_empty() {
-                    return Ok(v.into_iter().map(PrivateKey).collect());
+                    return Ok(v
+                        .into_iter()
+                        .map(PrivateKeyDer::Pkcs1)
+                        .collect::<Vec<PrivateKeyDer<'static>>>());
                 }
             }
         }
         {
-            if let Ok(v) = pkcs8_private_keys(&mut BufReader::new(File::open(path)?)) {
+            if let Ok(v) = PrivatePkcs8KeyDer::<'static>::pem_reader_iter(&mut BufReader::new(
+                // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
+                File::open(path)?,
+            ))
+            .collect::<Result<Vec<PrivatePkcs8KeyDer<'static>>,futures_rustls::pki_types::pem::Error>>()
+            {
                 if !v.is_empty() {
-                    return Ok(v.into_iter().map(PrivateKey).collect());
+                    return Ok(v.into_iter().map(PrivateKeyDer::Pkcs8).collect());
                 }
             }
         }
@@ -195,7 +216,8 @@ impl Network {
             "loading certificate from {}",
             config.network.tls.certificate_path
         );
-        let certs = Self::load_certs(&PathBuf::from(&config.network.tls.certificate_path))?;
+        let certs_path = PathBuf::from(&config.network.tls.certificate_path);
+        let certs = Self::load_certs(&certs_path)?;
         veilid_log!(self trace "loaded {} certificates", certs.len());
         if certs.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Certificates at {} could not be loaded.\nEnsure it is in PEM format, beginning with '-----BEGIN CERTIFICATE-----'",config.network.tls.certificate_path)));
@@ -205,14 +227,14 @@ impl Network {
             "loading private key from {}",
             config.network.tls.private_key_path
         );
-        let mut keys = Self::load_keys(&PathBuf::from(&config.network.tls.private_key_path))?;
+        let keys_path = PathBuf::from(&config.network.tls.private_key_path);
+        let mut keys = Self::load_keys(&keys_path)?;
         veilid_log!(self trace "loaded {} keys", keys.len());
         if keys.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Private key at {} could not be loaded.\nEnsure it is unencrypted and in RSA or PKCS8 format, beginning with '-----BEGIN RSA PRIVATE KEY-----' or '-----BEGIN PRIVATE KEY-----'",config.network.tls.private_key_path)));
         }
 
         let config = ServerConfig::builder()
-            .with_safe_defaults()
             .with_no_client_auth()
             .with_single_cert(certs, keys.remove(0))
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
@@ -323,7 +345,7 @@ impl Network {
     pub async fn send_data_unbound_to_dial_info(
         &self,
         dial_info: DialInfo,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<()>> {
         let _guard = self.startup_lock.enter()?;
 
@@ -348,7 +370,6 @@ impl Network {
                             self.registry(),
                             &peer_socket_addr,
                         )
-                        .await
                         .wrap_err("create socket failure")?;
                         let _ = network_result_try!(h
                             .send_message(data, peer_socket_addr)
@@ -412,9 +433,9 @@ impl Network {
     pub async fn send_recv_data_unbound_to_dial_info(
         &self,
         dial_info: DialInfo,
-        data: Vec<u8>,
+        data: Bytes,
         timeout_ms: u32,
-    ) -> EyreResult<NetworkResult<Vec<u8>>> {
+    ) -> EyreResult<NetworkResult<Bytes>> {
         let _guard = self.startup_lock.enter()?;
 
         self.record_dial_info_failure(
@@ -439,7 +460,6 @@ impl Network {
                             self.registry(),
                             &peer_socket_addr,
                         )
-                        .await
                         .wrap_err("create socket failure")?;
                         network_result_try!(h
                             .send_message(data, peer_socket_addr)
@@ -451,7 +471,7 @@ impl Network {
                         );
 
                         // receive single response
-                        let mut out = vec![0u8; MAX_MESSAGE_SIZE];
+                        let mut out = BytesMut::zeroed(MAX_MESSAGE_SIZE);
                         let (recv_len, recv_addr) = network_result_try!(timeout(
                             timeout_ms,
                             h.recv_message(&mut out).in_current_span()
@@ -471,7 +491,7 @@ impl Network {
                             bail!("wrong address");
                         }
                         out.resize(recv_len, 0u8);
-                        Ok(NetworkResult::Value(out))
+                        Ok(NetworkResult::Value(out.into()))
                     }
                     // Connection-oriented protocols
                     _ => {
@@ -543,7 +563,7 @@ impl Network {
     pub async fn send_data_to_existing_flow(
         &self,
         flow: Flow,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<SendDataToExistingFlowResult> {
         let _guard = self.startup_lock.enter()?;
 
@@ -614,7 +634,7 @@ impl Network {
     pub async fn send_data_to_dial_info(
         &self,
         dial_info: DialInfo,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         let _guard = self.startup_lock.enter()?;
 
@@ -685,7 +705,8 @@ impl Network {
             dial_info.clone(),
             async move {
                 let unique_flow;
-                if dial_info.protocol_type() == ProtocolType::UDP {
+                if dial_info.protocol_type().low_level_protocol_type() == LowLevelProtocolType::UDP
+                {
                     // Handle connectionless protocol
                     let peer_socket_addr = dial_info.to_socket_addr();
                     let ph = match self.find_best_udp_protocol_handler(&peer_socket_addr, &None) {
@@ -830,7 +851,7 @@ impl Network {
                 .inbound
                 .contains(ProtocolType::UDP)
             {
-                let res = self.bind_udp_protocol_handlers().await;
+                let res = self.bind_udp_protocol_handlers();
                 if !matches!(res, Ok(StartupDisposition::Success)) {
                     return res;
                 }
@@ -840,7 +861,7 @@ impl Network {
                 .inbound
                 .contains(ProtocolType::WS)
             {
-                let res = self.start_ws_listeners().await;
+                let res = self.start_ws_listeners();
                 if !matches!(res, Ok(StartupDisposition::Success)) {
                     return res;
                 }
@@ -852,7 +873,7 @@ impl Network {
                 .inbound
                 .contains(ProtocolType::WSS)
             {
-                let res = self.start_wss_listeners().await;
+                let res = self.start_wss_listeners();
                 if !matches!(res, Ok(StartupDisposition::Success)) {
                     return res;
                 }
@@ -862,15 +883,14 @@ impl Network {
                 .inbound
                 .contains(ProtocolType::TCP)
             {
-                let res = self.start_tcp_listeners().await;
+                let res = self.start_tcp_listeners();
                 if !matches!(res, Ok(StartupDisposition::Success)) {
                     return res;
                 }
             }
 
             // Register all dialinfo
-            self.register_all_dial_info(&mut editor_public_internet, &mut editor_local_network)
-                .await?;
+            self.register_all_dial_info(&mut editor_public_internet, &mut editor_local_network)?;
 
             // Commit routing domain edits
             if editor_public_internet.commit(true).await {
@@ -902,7 +922,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", err, skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn register_all_dial_info(
+    pub(super) fn register_all_dial_info(
         &self,
         editor_public_internet: &mut RoutingDomainEditorPublicInternet<'_>,
         editor_local_network: &mut RoutingDomainEditorLocalNetwork<'_>,
@@ -918,21 +938,17 @@ impl Network {
         };
 
         if protocol_config.inbound.contains(ProtocolType::UDP) {
-            self.register_udp_dial_info(editor_public_internet, editor_local_network)
-                .await?;
+            self.register_udp_dial_info(editor_public_internet, editor_local_network)?;
         }
         if protocol_config.inbound.contains(ProtocolType::WS) {
-            self.register_ws_dial_info(editor_public_internet, editor_local_network)
-                .await?;
+            self.register_ws_dial_info(editor_public_internet, editor_local_network)?;
         }
         #[cfg(feature = "enable-protocol-wss")]
         if protocol_config.inbound.contains(ProtocolType::WSS) {
-            self.register_wss_dial_info(editor_public_internet, editor_local_network)
-                .await?;
+            self.register_wss_dial_info(editor_public_internet, editor_local_network)?;
         }
         if protocol_config.inbound.contains(ProtocolType::TCP) {
-            self.register_tcp_dial_info(editor_public_internet, editor_local_network)
-                .await?;
+            self.register_tcp_dial_info(editor_public_internet, editor_local_network)?;
         }
 
         Ok(())
@@ -944,7 +960,7 @@ impl Network {
 
         match self.startup_internal().await {
             Ok(StartupDisposition::Success) => {
-                veilid_log!(self info "network started");
+                veilid_log!(self debug "Network started");
                 guard.success();
                 Ok(StartupDisposition::Success)
             }
@@ -997,12 +1013,12 @@ impl Network {
 
         routing_table
             .edit_public_internet_routing_domain()
-            .shutdown()
+            .reset()
             .await;
 
         routing_table
             .edit_local_network_routing_domain()
-            .shutdown()
+            .reset()
             .await;
 
         // Reset state including network class

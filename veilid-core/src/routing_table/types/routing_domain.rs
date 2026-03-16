@@ -38,9 +38,16 @@ impl RoutingDomain {
 
 impl fmt::Display for RoutingDomain {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RoutingDomain::LocalNetwork => write!(f, "loc"),
-            RoutingDomain::PublicInternet => write!(f, "pub"),
+        if f.alternate() {
+            match self {
+                RoutingDomain::LocalNetwork => write!(f, "LocalNetwork"),
+                RoutingDomain::PublicInternet => write!(f, "PublicInternet"),
+            }
+        } else {
+            match self {
+                RoutingDomain::LocalNetwork => write!(f, "loc"),
+                RoutingDomain::PublicInternet => write!(f, "pub"),
+            }
         }
     }
 }

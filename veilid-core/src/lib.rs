@@ -85,6 +85,8 @@ pub use tracing;
 pub use tracing_subscriber;
 /// Re-exported from `veilid-tools` crate
 pub use veilid_tools as tools;
+/// Re-exported from `bytes` crate
+pub use veilid_tools::bytes;
 
 #[cfg(target_os = "android")]
 pub use veilid_api::android::veilid_core_setup_android;
@@ -159,19 +161,21 @@ use self::logging::{
 };
 use self::stats_accounting::*;
 
+use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::*;
 use cfg_if::*;
 use enumset::*;
 use eyre::{bail, eyre, Report as EyreReport, Result as EyreResult, WrapErr};
 use futures_util::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
-use get_size::*;
+use get_size2::*;
 use indent::*;
-use parking_lot::*;
 use schemars::JsonSchema;
 use serde::*;
 use stop_token::{future::FutureExt as _, *};
 use thiserror::Error as ThisError;
 use tracing::*;
+use veilid_tools::bytes::*;
+use veilid_tools::parking_lot::*;
 use veilid_tools::*;
 
 /////////////////////////////////////////////////////////////////////////

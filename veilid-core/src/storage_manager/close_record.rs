@@ -21,9 +21,11 @@ impl StorageManager {
             .await;
 
         // Attempt to close the record
-        let background_tokens = self.close_record_locked(&record_lock)?;
+        let opt_cleanup = self.close_record_locked(&record_lock)?;
 
-        Self::wait_for_background_tokens(background_tokens).await;
+        if let Some(cleanup) = opt_cleanup {
+            self.process_transaction_cleanup(cleanup).await;
+        }
 
         Ok(())
     }
@@ -49,21 +51,25 @@ impl StorageManager {
                 .await
         };
 
-        let mut all_background_tokens = vec![];
+        let mut all_cleanup: Option<TransactionCleanup> = None;
         let mut opt_error = None;
         for record_lock_guard in record_locks.record_lock_guards() {
             let res = self.close_record_locked(record_lock_guard);
             match res {
-                Ok(mut v) => {
-                    all_background_tokens.append(&mut v);
-                }
+                Ok(Some(cleanup)) => match &mut all_cleanup {
+                    Some(existing) => existing.merge(cleanup),
+                    None => all_cleanup = Some(cleanup),
+                },
+                Ok(None) => {}
                 Err(e) => {
                     opt_error = Some(e);
                 }
             }
         }
 
-        Self::wait_for_background_tokens(all_background_tokens).await;
+        if let Some(cleanup) = all_cleanup {
+            self.process_transaction_cleanup(cleanup).await;
+        }
 
         if let Some(e) = opt_error {
             return Err(e);
@@ -77,7 +83,7 @@ impl StorageManager {
     pub(super) fn close_record_locked(
         &self,
         record_lock: &StorageManagerRecordLockGuard,
-    ) -> VeilidAPIResult<Vec<StopToken>> {
+    ) -> VeilidAPIResult<Option<TransactionCleanup>> {
         let opaque_record_key = record_lock.record();
 
         let local_record_store = self.get_local_record_store()?;
@@ -85,7 +91,7 @@ impl StorageManager {
             apibail_key_not_found!(opaque_record_key.clone());
         }
 
-        let mut all_background_tokens = vec![];
+        let mut opt_cleanup = None;
         {
             let mut inner = self.inner.lock();
             if let Some(opened_record) = inner.opened_records.remove(&opaque_record_key) {
@@ -105,17 +111,16 @@ impl StorageManager {
                     .outbound_transaction_manager
                     .get_transaction_by_record(&opaque_record_key)
                 {
-                    if let Some(mut background_tokens) = inner
+                    if let Some(state) = inner
                         .outbound_transaction_manager
-                        .drop_transaction(transaction_handle)
-                        .map(|state| state.into_background_tokens())
+                        .drop_transaction(transaction_handle.clone())
                     {
-                        all_background_tokens.append(&mut background_tokens);
+                        opt_cleanup = Some(state.into_transaction_cleanup(transaction_handle));
                     }
                 }
             }
         }
 
-        Ok(all_background_tokens)
+        Ok(opt_cleanup)
     }
 }

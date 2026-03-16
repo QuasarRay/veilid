@@ -5,6 +5,8 @@ impl_veilid_log_facility!("rtab");
 type PermReturnType = (Vec<usize>, SequenceOrderingSet);
 type PermFunc<'t> = Box<dyn FnMut(&[usize]) -> Option<PermReturnType> + Send + 't>;
 
+const ALLOCATION_HIGH_PASS_FILTER_FACTOR: f32 = 0.8;
+
 /// number of route permutations is the number of unique orderings
 /// for a set of nodes, given that the first node is fixed
 #[expect(dead_code)]
@@ -91,7 +93,17 @@ impl RouteSpecStore {
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target="rtab::route", skip(self), ret, err(level=Level::TRACE), fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn allocate_route(
         &self,
-        params: &AllocateRouteParams,
+        params: AllocateRouteParams,
+    ) -> VeilidAPIResult<RouteIdAndPublicKeys> {
+        let allocate_route_lock_guard = self.allocate_route_lock.lock().await;
+        self.allocate_route_inner(&allocate_route_lock_guard, params)
+            .await
+    }
+
+    pub async fn allocate_route_inner(
+        &self,
+        _lock: &AsyncMutexGuard<'_, ()>,
+        params: AllocateRouteParams,
     ) -> VeilidAPIResult<RouteIdAndPublicKeys> {
         let safety_spec = params.safety_spec.clone();
         if params.safety_spec.preferred_route.is_some() {
@@ -121,26 +133,28 @@ impl RouteSpecStore {
         let cur_ts = Timestamp::now();
         let (hop_node_refs, orderings, hop_node_ids_per_crypto_kind) = {
             let routing_table = self.routing_table();
-            let rti = &*routing_table.inner.read();
 
             let Some(published_peer_info) =
-                rti.get_published_peer_info(RoutingDomain::PublicInternet)
+                routing_table.get_published_peer_info(RoutingDomain::PublicInternet)
             else {
                 apibail_try_again!(
                     "unable to allocate route until we have a valid PublicInternet network class"
                 );
             };
 
-            let inner = self.inner.read();
+            // Take a snapshot to allocate from
+            let snapshot = routing_table.snapshot_entries(cur_ts, BucketEntryState::Unreliable);
 
-            // Get list of all nodes, and sort them for selection
+            // Make the node filter
             let filter = self.make_route_allocation_entry_filter(
-                rti,
                 &params.crypto_kinds,
                 &params.safety_spec,
                 &params.avoid_nodes,
                 published_peer_info.clone(),
             );
+
+            let inner = self.inner.read();
+
             let filters = VecDeque::from([filter]);
             let compare = self.make_route_allocation_entry_sort(
                 &inner,
@@ -149,13 +163,12 @@ impl RouteSpecStore {
                 published_peer_info.clone(),
             );
             let pre_sort_filter = self.make_route_allocation_pre_sort_filter(&params.safety_spec);
-            let transform =
-                |_rti: &RoutingTableInner, entry: Option<Arc<BucketEntry>>| -> NodeRef {
-                    NodeRef::new(self.registry(), entry.unwrap_or_log())
-                };
+            let transform = |entry: Option<BucketEntrySnapshot>| -> BucketEntrySnapshot {
+                entry.unwrap_or_log()
+            };
 
             // Pull the whole routing table in sorted order
-            let nodes: Vec<NodeRef> = rti.find_peers_with_sort_and_filter(
+            let nodes: Vec<BucketEntrySnapshot> = snapshot.get_peers_with_sort_and_filter(
                 usize::MAX,
                 cur_ts,
                 filters,
@@ -166,52 +179,72 @@ impl RouteSpecStore {
 
             // If we couldn't find enough nodes, wait until we have more nodes in the routing table
             if nodes.len() < safety_spec.hop_count {
+                veilid_log!(self debug "not enough nodes to construct route at this time: ({}/{})", nodes.len(), safety_spec.hop_count);
                 apibail_try_again!("not enough nodes to construct route at this time");
             }
 
             // Now go through nodes and try to build a route we haven't seen yet
-            let mut perm_func = self.make_route_allocation_permutation_function(
-                &inner,
-                rti,
-                &nodes,
-                params.directions,
-                &params.safety_spec,
-                published_peer_info.clone(),
-            );
-
+            // First pass: prefer routes with relay-capable last hop for better
+            // reachability to destination nodes behind firewalls
             let mut route_nodes: Vec<usize> = Vec::new();
             let mut orderings = SequenceOrderingSet::new();
-            for start in 0..(nodes.len() - params.safety_spec.hop_count) {
-                // Try the permutations available starting with 'start'
-                if let Some((rn, ord)) =
-                    with_route_permutations(params.safety_spec.hop_count, start, &mut perm_func)
-                {
-                    route_nodes = rn;
-                    orderings = ord;
-                    break;
+            {
+                let mut perm_func = self.make_route_allocation_permutation_function(
+                    &inner,
+                    &nodes,
+                    params.directions,
+                    &params.safety_spec,
+                    published_peer_info.clone(),
+                    true,
+                );
+                for start in 0..(nodes.len() - params.safety_spec.hop_count) {
+                    if let Some((rn, ord)) =
+                        with_route_permutations(params.safety_spec.hop_count, start, &mut perm_func)
+                    {
+                        route_nodes = rn;
+                        orderings = ord;
+                        break;
+                    }
                 }
             }
+
+            // Fallback: accept any valid route if no relay-capable last hop found
+            if route_nodes.is_empty() {
+                let mut perm_func = self.make_route_allocation_permutation_function(
+                    &inner,
+                    &nodes,
+                    params.directions,
+                    &params.safety_spec,
+                    published_peer_info.clone(),
+                    false,
+                );
+                for start in 0..(nodes.len() - params.safety_spec.hop_count) {
+                    if let Some((rn, ord)) =
+                        with_route_permutations(params.safety_spec.hop_count, start, &mut perm_func)
+                    {
+                        route_nodes = rn;
+                        orderings = ord;
+                        break;
+                    }
+                }
+            }
+
             if route_nodes.is_empty() {
                 apibail_try_again!("unable to find unique route at this time");
             }
 
-            drop(perm_func);
             drop(inner);
 
             // Got a unique route, lets build the details, register it, and return it
-            let hop_node_refs: Vec<NodeRef> =
-                route_nodes.iter().map(|k| nodes[*k].clone()).collect();
+            let hop_node_refs: Vec<NodeRef> = route_nodes
+                .iter()
+                .map(|k| nodes[*k].node_ref.clone())
+                .collect();
             let mut hop_node_ids_per_crypto_kind = Vec::new();
             for crypto_kind in params.crypto_kinds.iter().copied() {
                 let hops: Vec<NodeId> = route_nodes
                     .iter()
-                    .map(|v| {
-                        nodes[*v]
-                            .locked(rti)
-                            .node_ids()
-                            .get(crypto_kind)
-                            .unwrap_or_log()
-                    })
+                    .map(|v| nodes[*v].node_ids.get(crypto_kind).unwrap_or_log())
                     .collect();
                 hop_node_ids_per_crypto_kind.push((crypto_kind, hops));
             }
@@ -251,10 +284,13 @@ impl RouteSpecStore {
         )?;
 
         // Make route id
-        let route_id = self.generate_allocated_route_id(&rssd).await?;
+        let route_id = self.generate_allocated_route_id(&rssd)?;
 
         // Get public keys to return
         let public_keys = rssd.get_route_set_keys();
+
+        // Debug print the allocated route
+        veilid_log!(self debug "Allocated route: {}", rssd);
 
         // Add to cache and keep route in spec store
         let inner = &mut *self.inner.write();
@@ -279,8 +315,10 @@ impl RouteSpecStore {
         };
 
         // Remove from hop cache
-        if !inner.cache.remove_from_cache(id, &rssd) {
-            panic!("hop cache should have contained cache key");
+        if !inner.cache.remove_from_cache(id, &rssd, |dead_key| {
+            self.invalidate_compiled_route_cache(dead_key);
+        }) {
+            veilid_log!(self error "hop cache should have contained cache key");
         }
 
         true
@@ -288,148 +326,162 @@ impl RouteSpecStore {
 
     fn make_route_allocation_entry_filter<'t>(
         &self,
-        rti: &RoutingTableInner,
         crypto_kinds: &'t [CryptoKind],
         safety_spec: &'t SafetySpec,
         avoid_nodes: &'t [NodeId],
         published_peer_info: Arc<PeerInfo>,
     ) -> RoutingTableEntryFilter<'t> {
         // Get our relay nodes if we have them
-        let own_relay_atoms = rti
+        let own_relay_nrs: HashSet<NodeRef> = self
+            .routing_table()
             .relays(RoutingDomain::PublicInternet)
             .iter()
-            .map(|x| x.relay_node.entry().hash_atom())
-            .collect::<HashSet<_>>();
+            .map(|x| x.relay_node.unfiltered())
+            .collect();
 
         #[cfg(feature = "geolocation")]
         let country_code_denylist = self.config().network.privacy.country_code_denylist.clone();
 
-        // #[cfg(feature = "geolocation")]
-        // let registry = self.registry();
+        #[cfg(feature = "geolocation")]
+        let registry = self.registry();
         Box::new(
-            move |rti: &RoutingTableInner,
-                  entry: Option<Arc<BucketEntry>>,
-                  _cur_ts: Timestamp|
-                  -> bool {
+            move |entry: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| -> bool {
                 // Exclude our own node from routes
-                let Some(entry) = entry else {
+                let Some(snap) = entry else {
                     return false;
                 };
 
                 // Exclude our relay if we have one
-                if own_relay_atoms.contains(&entry.clone().hash_atom()) {
+                if own_relay_nrs.contains(&snap.node_ref) {
                     return false;
                 }
 
-                // Process node info exclusions
-                entry.with(rti, |_rti, e| {
-                    // Exclude nodes that don't have our requested crypto kinds
-                    let common_ck = e.common_crypto_kinds(crypto_kinds);
-                    if common_ck.len() != crypto_kinds.len() {
-                        return false;
-                    }
+                // Exclude nodes that don't have our requested crypto kinds
+                let common_ck: Vec<CryptoKind> = snap
+                    .node_ids
+                    .kinds()
+                    .into_iter()
+                    .filter(|k| crypto_kinds.contains(k))
+                    .collect();
+                if common_ck.len() != crypto_kinds.len() {
+                    return false;
+                }
 
-                    // Exclude nodes we have specifically chosen to avoid
-                    if e.node_ids().contains_any_from_slice(avoid_nodes) {
-                        return false;
-                    }
+                // Exclude nodes we have specifically chosen to avoid
+                if snap.node_ids.contains_any_from_iter(avoid_nodes.iter()) {
+                    return false;
+                }
 
-                    // Exclude nodes on our local network
-                    if e.node_info(RoutingDomain::LocalNetwork).is_some() {
-                        return false;
-                    }
+                // Exclude nodes on our local network
+                if snap
+                    .routing_domain_set()
+                    .contains(RoutingDomain::LocalNetwork)
+                {
+                    return false;
+                }
 
-                    // Exclude nodes that have no publicinternet signednodeinfo
-                    let Some(their_ni) = e.node_info(RoutingDomain::PublicInternet) else {
+                // Exclude nodes that have no publicinternet signednodeinfo
+                let Some(their_pi) = snap.get_peer_info(RoutingDomain::PublicInternet) else {
+                    return false;
+                };
+                let their_ni = their_pi.node_info();
+
+                // Exclude nodes with no compatible dialinfo
+                if !their_ni.has_sequencing_matched_dial_info(safety_spec.sequencing) {
+                    return false;
+                }
+
+                // Exclude nodes that have don't advertise route capability
+                if !their_ni.has_capability(VEILID_CAPABILITY_ROUTE) {
+                    return false;
+                }
+
+                // Exclude nodes that haven't been tested for reachability
+                if snap
+                    .peer_stats
+                    .rpc_stats
+                    .first_consecutive_seen_ts
+                    .is_none()
+                    || snap.peer_stats.latency.is_none()
+                {
+                    return false;
+                }
+
+                // Exclude nodes from denylisted countries
+                #[cfg(feature = "geolocation")]
+                if !country_code_denylist.is_empty() {
+                    let geolocation_info =
+                        their_ni.get_geolocation_info(RoutingDomain::PublicInternet);
+
+                    // Since denylist is used, consider nodes with unknown countries to be automatically excluded
+                    let Some(node_country_code) = geolocation_info.country_code() else {
+                        veilid_log!(registry debug target:"geolocation",
+                            "allocate_route_inner: skipping node {:?} from unknown country",
+                            snap.best_node_id()
+                        );
+                        return false;
+                    };
+                    // The same thing applies to relays used by the node
+                    // They must all be from a known country
+                    let relay_country_codes: Option<Vec<CountryCode>> = geolocation_info
+                        .relay_country_codes()
+                        .iter()
+                        .cloned()
+                        .collect();
+                    let Some(relay_country_codes) = relay_country_codes else {
+                        veilid_log!(registry debug target:"geolocation",
+                        "allocate_route_inner: skipping node {:?} using relay from unknown country",
+                            snap.best_node_id()
+                        );
                         return false;
                     };
 
-                    // Exclude nodes with no compatible dialinfo
-                    if !their_ni.has_sequencing_matched_dial_info(safety_spec.sequencing) {
+                    // Ensure that node is not excluded
+                    if country_code_denylist.contains(&node_country_code) {
+                        veilid_log!(registry debug target:"geolocation",
+                            "allocate_route_inner: skipping node {:?} from excluded country {}",
+                            snap.best_node_id(),
+                            node_country_code
+                        );
                         return false;
                     }
 
-                    // Exclude nodes that have don't advertise route capability
-                    if !their_ni.has_capability(VEILID_CAPABILITY_ROUTE) {
+                    // Ensure that node relays are not excluded
+                    if let Some(cc) = relay_country_codes
+                        .iter()
+                        .find(|cc| country_code_denylist.contains(cc))
+                    {
+                        veilid_log!(registry debug target:"geolocation",
+                            "allocate_route_inner: skipping node {:?} using relay from excluded country {}",
+                            snap.best_node_id(),
+                            cc
+                        );
                         return false;
                     }
+                }
 
-                    // Exclude nodes from denylisted countries
-                    #[cfg(feature = "geolocation")]
-                    if !country_code_denylist.is_empty() {
-                        let geolocation_info =
-                            their_ni.get_geolocation_info(RoutingDomain::PublicInternet);
+                // Filter out nodes that have our same public IP address
+                // Use whole ipv6 address so we don't filter out nodes in the same network
+                // These will be deprioritized in the sort later, though.
+                if published_peer_info
+                    .node_info()
+                    .is_on_same_ipblock(their_ni, 128)
+                {
+                    return false;
+                }
 
-                        // Since denylist is used, consider nodes with unknown countries to be automatically excluded
-                        let Some(node_country_code) = geolocation_info.country_code() else {
-                            // veilid_log!(registry
-                            //     debug "allocate_route_inner: skipping node {:?} from unknown country",
-                            //     e.best_node_id()
-                            // );
-                            return false;
-                        };
-                        // The same thing applies to relays used by the node
-                        // They must all be from a known country
-                        let relay_country_codes: Option<Vec<CountryCode>> = geolocation_info
-                            .relay_country_codes()
-                            .iter()
-                            .cloned()
-                            .collect();
-                        let Some(relay_country_codes) = relay_country_codes else {
-                            // veilid_log!(registry
-                            //     debug "allocate_route_inner: skipping node {:?} using relay from unknown country",
-                            //     e.best_node_id()
-                            // );
-                            return false;
-                        };
-
-                        // Ensure that node is not excluded
-                        if country_code_denylist.contains(&node_country_code) {
-                            // veilid_log!(registry
-                            //     debug "allocate_route_inner: skipping node {:?} from excluded country {}",
-                            //     e.best_node_id(),
-                            //     node_country_code
-                            // );
-                            return false;
-                        }
-
-                        // Ensure that node relays are not excluded
-                        if let Some(_cc) = relay_country_codes
-                            .iter()
-                            .filter(|cc| country_code_denylist.contains(cc))
-                            .next()
-                        {
-                            // veilid_log!(registry
-                            //     debug "allocate_route_inner: skipping node {:?} using relay from excluded country {}",
-                            //     e.best_node_id(),
-                            //     cc
-                            // );
-                            return false;
-                        }
-                    }
-
-                    // Filter out nodes that have our same public IP address
-                    // Use whole ipv6 address so we don't filter out nodes in the same network
-                    // These will be deprioritized in the sort later, though.
-                    if published_peer_info
-                        .node_info()
-                        .is_on_same_ipblock(their_ni, 128)
+                // Relay check
+                for their_relay_info in their_ni.relay_info_list() {
+                    // Exclude nodes whose relays we have chosen to avoid
+                    if their_relay_info
+                        .node_ids()
+                        .contains_any_from_iter(avoid_nodes.iter())
                     {
                         return false;
                     }
+                }
 
-                    // Relay check
-                    for their_relay_info in their_ni.relay_info_list() {
-                        // Exclude nodes whose relays we have chosen to avoid
-                        if their_relay_info
-                            .node_ids()
-                            .contains_any_from_slice(avoid_nodes)
-                        {
-                            return false;
-                        }
-                    }
-                    true
-                })
+                true
             },
         )
     }
@@ -437,45 +489,36 @@ impl RouteSpecStore {
     fn make_route_allocation_entry_sort<'t>(
         &self,
         inner: &'t RouteSpecStoreInner,
-        cur_ts: Timestamp,
+        _cur_ts: Timestamp,
         safety_spec: &'t SafetySpec,
         published_peer_info: Arc<PeerInfo>,
     ) -> RoutingTableEntrySort<'t> {
         let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
 
         Box::new(
-            move |_rti: &RoutingTableInner,
-                  entry1: Option<Arc<BucketEntry>>,
-                  entry2: Option<Arc<BucketEntry>>,
+            move |entry1: &Option<BucketEntrySnapshot>,
+                  entry2: &Option<BucketEntrySnapshot>,
                   _cur_ts: Timestamp|
                   -> cmp::Ordering {
                 // Our own node is filtered out, so it is safe to unwrap here
-                let entry1 = entry1.as_ref().unwrap_or_log().clone();
-                let entry2 = entry2.as_ref().unwrap_or_log().clone();
-                let entry1_node_ids = entry1.with_inner(|e| e.node_ids());
-                let entry2_node_ids = entry2.with_inner(|e| e.node_ids());
-                let entry1_node_info = entry1.with_inner(|e| {
-                    e.node_info(RoutingDomain::PublicInternet)
-                        .cloned()
-                        .unwrap_or_log()
-                });
-                let entry2_node_info = entry2.with_inner(|e| {
-                    e.node_info(RoutingDomain::PublicInternet)
-                        .cloned()
-                        .unwrap_or_log()
-                });
+                let snap1 = entry1.as_ref().unwrap_or_log();
+                let snap2 = entry2.as_ref().unwrap_or_log();
+                let entry1_peer_info = snap1
+                    .get_peer_info(RoutingDomain::PublicInternet)
+                    .unwrap_or_log();
+                let entry1_node_info = entry1_peer_info.node_info();
+                let entry2_peer_info = snap2
+                    .get_peer_info(RoutingDomain::PublicInternet)
+                    .unwrap_or_log();
+                let entry2_node_info = entry2_peer_info.node_info();
 
-                // deprioritize nodes that we have already used as end points
-                let e1_used_end = inner.cache.get_used_end_node_count(&entry1_node_ids);
-                let e2_used_end = inner.cache.get_used_end_node_count(&entry2_node_ids);
-                let cmp_used_end = e1_used_end.cmp(&e2_used_end);
-                if !matches!(cmp_used_end, cmp::Ordering::Equal) {
-                    return cmp_used_end;
-                }
-
-                // deprioritize nodes we have used already anywhere
-                let e1_used = inner.cache.get_used_node_count(&entry1_node_ids);
-                let e2_used = inner.cache.get_used_node_count(&entry2_node_ids);
+                // deprioritize nodes we have used already anywhere for a route of the same hop count
+                let e1_used = inner
+                    .cache
+                    .get_used_node_count(&snap1.node_ids, safety_spec.hop_count);
+                let e2_used = inner
+                    .cache
+                    .get_used_node_count(&snap2.node_ids, safety_spec.hop_count);
                 let cmp_used = e1_used.cmp(&e2_used);
                 if !matches!(cmp_used, cmp::Ordering::Equal) {
                     return cmp_used;
@@ -485,10 +528,10 @@ impl RouteSpecStore {
                 // this check also checks if the ipv4 address is the same but we filtered that out already
                 let e1_same_ipblock = published_peer_info
                     .node_info()
-                    .is_any_node_on_same_ipblock(&entry1_node_info, ip6_prefix_size);
+                    .is_any_node_on_same_ipblock(entry1_node_info, ip6_prefix_size);
                 let e2_same_ipblock = published_peer_info
                     .node_info()
-                    .is_any_node_on_same_ipblock(&entry2_node_info, ip6_prefix_size);
+                    .is_any_node_on_same_ipblock(entry2_node_info, ip6_prefix_size);
                 let cmp_same_ipblock = e1_same_ipblock.cmp(&e2_same_ipblock);
                 if !matches!(cmp_same_ipblock, cmp::Ordering::Equal) {
                     return cmp_same_ipblock;
@@ -498,24 +541,12 @@ impl RouteSpecStore {
                 // ensureordered will be taken care of by filter
                 // and nopreference doesn't care
                 if matches!(safety_spec.sequencing, Sequencing::PreferOrdered) {
-                    let cmp_seq = entry1.with_inner(|e1| {
-                        entry2.with_inner(|e2| {
-                            let e1_can_do_ordered = e1
-                                .node_info(RoutingDomain::PublicInternet)
-                                .map(|ni| {
-                                    ni.has_sequencing_matched_dial_info(safety_spec.sequencing)
-                                })
-                                .unwrap_or(false);
-                            let e2_can_do_ordered = e2
-                                .node_info(RoutingDomain::PublicInternet)
-                                .map(|ni| {
-                                    ni.has_sequencing_matched_dial_info(safety_spec.sequencing)
-                                })
-                                .unwrap_or(false);
-                            // Reverse this comparison because ordered is preferable (less)
-                            e2_can_do_ordered.cmp(&e1_can_do_ordered)
-                        })
-                    });
+                    let e1_can_do_ordered =
+                        entry1_node_info.has_sequencing_matched_dial_info(safety_spec.sequencing);
+                    let e2_can_do_ordered =
+                        entry2_node_info.has_sequencing_matched_dial_info(safety_spec.sequencing);
+                    // Reverse this comparison because ordered is preferable (less)
+                    let cmp_seq = e2_can_do_ordered.cmp(&e1_can_do_ordered);
                     if !matches!(cmp_seq, cmp::Ordering::Equal) {
                         return cmp_seq;
                     }
@@ -523,16 +554,12 @@ impl RouteSpecStore {
 
                 // apply stability preference
                 // always prioritize reliable nodes, but sort by oldest or fastest
-                entry1.with_inner(|e1| {
-                    entry2.with_inner(|e2| match safety_spec.stability {
-                        Stability::LowLatency => {
-                            BucketEntryInner::cmp_fastest_reliable(cur_ts, e1, e2, |ls| ls.tm90)
-                        }
-                        Stability::Reliable => {
-                            BucketEntryInner::cmp_oldest_reliable(cur_ts, e1, e2)
-                        }
-                    })
-                })
+                match safety_spec.stability {
+                    Stability::LowLatency => {
+                        BucketEntrySnapshot::cmp_fastest_reliable(snap1, snap2, |ls| ls.tm90)
+                    }
+                    Stability::Reliable => BucketEntrySnapshot::cmp_oldest_reliable(snap1, snap2),
+                }
             },
         ) as RoutingTableEntrySort
     }
@@ -542,21 +569,19 @@ impl RouteSpecStore {
         safety_spec: &'t SafetySpec,
     ) -> RoutingTableEntryPreSortFilter<'t> {
         Box::new(
-            move |_rti: &RoutingTableInner,
-                  all_entries: &mut Vec<Option<Arc<BucketEntry>>>,
-                  _cur_ts: Timestamp| {
-                // Remove the slowest 20% of the entries from consideration
+            move |all_entries: &mut Vec<Option<BucketEntrySnapshot>>, _cur_ts: Timestamp| {
+                // Remove the slowest (100% - ALLOCATION_HIGH_PASS_FILTER_FACTOR) of the entries from consideration
                 let mut sorted_entry_indices = (0..all_entries.len()).collect::<Vec<_>>();
                 sorted_entry_indices.sort_by(|i1, i2| {
-                    let entry1 = all_entries[*i1].as_ref().unwrap_or_log();
-                    let entry2 = all_entries[*i2].as_ref().unwrap_or_log();
+                    let snap1 = all_entries[*i1].as_ref().unwrap_or_log();
+                    let snap2 = all_entries[*i2].as_ref().unwrap_or_log();
 
-                    entry1.with_inner(|e1| {
-                        entry2.with_inner(|e2| BucketEntryInner::cmp_fastest(e1, e2, |ls| ls.tm90))
-                    })
+                    BucketEntrySnapshot::cmp_fastest(snap1, snap2, |ls| ls.tm90)
                 });
 
-                let reduce = sorted_entry_indices.len() / 5;
+                let reduce = (sorted_entry_indices.len() as f32
+                    * (1.0 - ALLOCATION_HIGH_PASS_FILTER_FACTOR))
+                    as usize;
                 let keep_count = (sorted_entry_indices.len() - reduce).max(safety_spec.hop_count);
                 if keep_count < sorted_entry_indices.len() {
                     for i in keep_count..sorted_entry_indices.len() {
@@ -574,14 +599,13 @@ impl RouteSpecStore {
     // Get the hop cache key for a particular route permutation
     // uses the same algorithm as RouteSetSpecDetail::make_cache_key
     fn route_permutation_to_hop_cache(
-        rti: &RoutingTableInner,
-        nodes: &[NodeRef],
+        nodes: &[BucketEntrySnapshot],
         perm: &[usize],
     ) -> Option<Vec<u8>> {
         let mut cachelen = 0usize;
         let mut nodebytes = Vec::<BareNodeId>::with_capacity(perm.len());
         for n in perm {
-            let b = nodes[*n].locked(rti).best_node_id()?.value();
+            let b = nodes[*n].best_node_id()?.value();
             cachelen += b.len();
             nodebytes.push(b);
         }
@@ -595,46 +619,84 @@ impl RouteSpecStore {
     fn make_route_allocation_permutation_function<'t>(
         &self,
         inner: &'t RouteSpecStoreInner,
-        rti: &'t RoutingTableInner,
-        nodes: &'t [NodeRef],
+        nodes: &'t [BucketEntrySnapshot],
         directions: DirectionSet,
         safety_spec: &'t SafetySpec,
         published_peer_info: Arc<PeerInfo>,
+        require_relay_last_hop: bool,
     ) -> PermFunc<'t> {
         // Get peer info for everything
         let nodes_pi: Vec<Arc<PeerInfo>> = nodes
             .iter()
             .map(|nr| {
-                nr.locked(rti)
-                    .get_peer_info(RoutingDomain::PublicInternet)
+                nr.get_peer_info(RoutingDomain::PublicInternet)
                     .unwrap_or_log()
             })
             .collect();
 
+        let registry = self.registry();
+        let routing_table = self.routing_table();
+
+        let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
+
+        let relay_node_filter = {
+            let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
+            rdc.as_any()
+                .downcast_ref::<PublicInternetRoutingDomainController>()
+                .unwrap()
+                .make_relay_node_filter()
+        };
+
         Box::new(move |permutation: &[usize]| {
-            let cache_key = Self::route_permutation_to_hop_cache(rti, nodes, permutation)?;
+            let routing_table = registry.routing_table();
+
+            let cache_key = Self::route_permutation_to_hop_cache(nodes, permutation)?;
 
             // Skip routes we have already seen
             if inner.cache.contains_route(&cache_key) {
                 return None;
             }
 
+            // Ensure the route doesn't contain two nodes on the same ipblock or with relays on the same ipblock
+            let mut seen_ipblocks: HashSet<IpAddr> = HashSet::new();
+            for n in permutation {
+                let node = nodes.get(*n).unwrap_or_log();
+                let peer_info = node.get_peer_info(RoutingDomain::PublicInternet)?;
+                let node_info = peer_info.node_info();
+
+                let ipblocks = node_info.get_ipblocks(ip6_prefix_size);
+                for ipblock in ipblocks {
+                    if !seen_ipblocks.insert(ipblock) {
+                        return None;
+                    }
+                }
+                for relay_info in node_info.relay_info_list() {
+                    let ipblocks = relay_info.get_ipblocks(ip6_prefix_size);
+                    for ipblock in ipblocks {
+                        if !seen_ipblocks.insert(ipblock) {
+                            return None;
+                        }
+                    }
+                }
+            }
+
             // Ensure the route doesn't contain both a node and its relay
             let mut seen_nodes: HashSet<NodeId> = HashSet::new();
             for n in permutation {
                 let node = nodes.get(*n).unwrap_or_log();
-                for nid in node.locked(rti).node_ids().iter() {
+                for nid in node.node_ids.iter() {
                     if !seen_nodes.insert(nid.clone()) {
                         // Already seen this node, should not be in the route twice
                         return None;
                     }
                 }
-                for rids in node.locked(rti).relay_ids(RoutingDomain::PublicInternet) {
-                    for rid in rids.iter() {
-                        if !seen_nodes.insert(rid.clone()) {
-                            // Already seen this node, should not be in the route twice
-                            return None;
-                        }
+
+                let peer_info = node.get_peer_info(RoutingDomain::PublicInternet)?;
+                let node_info = peer_info.node_info();
+                for rid in node_info.relay_ids() {
+                    if !seen_nodes.insert(rid.clone()) {
+                        // Already seen this node, should not be in the route twice
+                        return None;
                     }
                 }
             }
@@ -646,7 +708,7 @@ impl RouteSpecStore {
                 let mut reachable = true;
                 for n in permutation {
                     let current_node = nodes_pi.get(*n).cloned().unwrap_or_log();
-                    let cm = rti.get_contact_method(
+                    let cm = routing_table.get_contact_method(
                         RoutingDomain::PublicInternet,
                         previous_node.clone(),
                         current_node.clone(),
@@ -661,7 +723,7 @@ impl RouteSpecStore {
 
                     // Check if we can do each ordering strictly
                     for ordering in orderings {
-                        let cm = rti.get_contact_method(
+                        let cm = routing_table.get_contact_method(
                             RoutingDomain::PublicInternet,
                             previous_node.clone(),
                             current_node.clone(),
@@ -685,7 +747,7 @@ impl RouteSpecStore {
                 let mut reachable = true;
                 for n in permutation.iter().rev() {
                     let current_node = nodes_pi.get(*n).cloned().unwrap_or_log();
-                    let cm = rti.get_contact_method(
+                    let cm = routing_table.get_contact_method(
                         RoutingDomain::PublicInternet,
                         next_node.clone(),
                         current_node.clone(),
@@ -700,7 +762,7 @@ impl RouteSpecStore {
 
                     // Check if we can do each ordering strictly
                     for ordering in orderings {
-                        let cm = rti.get_contact_method(
+                        let cm = routing_table.get_contact_method(
                             RoutingDomain::PublicInternet,
                             next_node.clone(),
                             current_node.clone(),
@@ -718,6 +780,18 @@ impl RouteSpecStore {
                     return None;
                 }
             }
+
+            // Prefer relay-capable nodes as the last hop for better
+            // reachability to destination nodes behind firewalls
+            if require_relay_last_hop {
+                let last_hop_idx = *permutation.last().unwrap_or_log();
+                let last_hop_node = nodes.get(last_hop_idx).unwrap_or_log();
+
+                if !relay_node_filter(last_hop_node) {
+                    return None;
+                }
+            }
+
             // Keep this route
             let route_nodes = permutation.to_vec();
             Some((route_nodes, orderings))
@@ -725,10 +799,7 @@ impl RouteSpecStore {
     }
 
     /// Generate RouteId from typed key set of route public keys
-    async fn generate_allocated_route_id(
-        &self,
-        rssd: &RouteSetSpecDetail,
-    ) -> VeilidAPIResult<RouteId> {
+    fn generate_allocated_route_id(&self, rssd: &RouteSetSpecDetail) -> VeilidAPIResult<RouteId> {
         let route_set_keys = rssd.get_route_set_keys();
         let crypto = self.crypto();
 
@@ -749,11 +820,11 @@ impl RouteSpecStore {
         let Some(best_kind) = best_kind else {
             apibail_internal!("no compatible crypto kinds in route");
         };
-        let vcrypto = crypto.get_async(best_kind).unwrap_or_log();
+        let vcrypto = crypto.get(best_kind).unwrap_or_log();
 
         Ok(RouteId::new(
             vcrypto.kind(),
-            BareRouteId::new(vcrypto.generate_hash(&pkbytes).await.ref_value()),
+            BareRouteId::new(vcrypto.generate_hash(&pkbytes).ref_value()),
         ))
     }
 }

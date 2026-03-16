@@ -7,8 +7,10 @@ pub(in crate::storage_manager) struct OutboundTransactionRecordParams {
     pub record_key: RecordKey,
     /// The signer key being used to authenticate the transaction
     pub signing_keypair: KeyPair,
-    /// Consensus count required for this record to transact
+    /// Consensus count required for this record to transact (set_value_count)
     pub required_strict_consensus_count: usize,
+    /// Minimum read consensus count for this record (get_value_count)
+    pub required_get_consensus_count: usize,
     /// Safety selection to use for this record
     pub safety_selection: SafetySelection,
 }
@@ -33,6 +35,9 @@ type GetTransactCommandNodesFilter<'a> = Box<dyn Fn(&'a NodeTransaction) -> bool
 /// State per record
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundTransactionRecordState {
+    /// Registry for logging
+    #[serde(skip)]
+    opt_registry: Option<VeilidComponentRegistry>,
     /// The record key being transacted over
     record_key: RecordKey,
     /// The signer key being used to authenticate the transaction
@@ -43,8 +48,10 @@ pub(in crate::storage_manager) struct OutboundTransactionRecordState {
     begin_network_seqs: Vec<ValueSeqNum>,
     /// The timestamp of when the transaction record was created
     created_ts: Timestamp,
-    /// Consensus count required for this record to transact
+    /// Consensus count required for this record to transact (set_value_count)
     required_strict_consensus_count: usize,
+    /// Minimum read consensus count for this record (get_value_count)
+    required_get_consensus_count: usize,
     /// Safety selection to use for this record
     safety_selection: SafetySelection,
     /// Descriptor for the record
@@ -115,9 +122,19 @@ impl fmt::Display for OutboundTransactionRecordState {
     }
 }
 
+impl VeilidComponentRegistryAccessor for OutboundTransactionRecordState {
+    fn registry(&self) -> VeilidComponentRegistry {
+        self.opt_registry.clone().unwrap_or_log()
+    }
+}
+
 impl OutboundTransactionRecordState {
-    pub(super) fn new(params: OutboundTransactionRecordParams) -> Self {
+    pub(super) fn new(
+        registry: VeilidComponentRegistry,
+        params: OutboundTransactionRecordParams,
+    ) -> Self {
         Self {
+            opt_registry: Some(registry),
             record_key: params.record_key,
             signing_keypair: params.signing_keypair,
             safety_selection: params.safety_selection,
@@ -125,6 +142,7 @@ impl OutboundTransactionRecordState {
             begin_network_seqs: vec![],
             created_ts: Timestamp::now(),
             required_strict_consensus_count: params.required_strict_consensus_count,
+            required_get_consensus_count: params.required_get_consensus_count,
             descriptor: None,
             schema: None,
             local_snapshot: None,
@@ -153,13 +171,21 @@ impl OutboundTransactionRecordState {
                     if opt_best_stage.is_none() {
                         opt_best_stage = Some(st);
                     } else {
-                        // If more than one stage has met the strict consensus, then we say this is Failed
+                        // Multiple stages met strict consensus (should not happen) — log and mark Failed.
+                        #[cfg(feature = "verbose-tracing")]
+                        veilid_log!(self debug target: "dht", "stage_consensus: ambiguous — multiple stages met threshold {} for record {}: {:?}",
+                            self.required_strict_consensus_count, self.record_key.opaque(), stage_consensus_map);
                         opt_best_stage = Some(OutboundTransactionStage::Failed);
                         break;
                     }
                 }
             }
             // If no stage has met the strict consensus, this is also failed
+            #[cfg(feature = "verbose-tracing")]
+            if opt_best_stage.is_none() {
+                veilid_log!(self debug target: "dht", "stage_consensus: no stage reached required threshold={} for record {}: stage_map={:?}",
+                    self.required_strict_consensus_count, self.record_key.opaque(), stage_consensus_map);
+            }
             opt_best_stage.unwrap_or(OutboundTransactionStage::Failed)
         };
 
@@ -174,9 +200,15 @@ impl OutboundTransactionRecordState {
             OutboundTransactionStage::Begin | OutboundTransactionStage::End => {
                 if self.local_snapshot.is_none() {
                     // Snapshot lost when this deserialized, so stage is now Failed
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug target: "dht", "stage_consensus: local_snapshot missing for record {} at stage {:?} → Failed",
+                        self.record_key.opaque(), stage);
                     OutboundTransactionStage::Failed
                 } else if self.descriptor.is_none() {
                     // Descriptor was never found, stage is Failed
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug target: "dht", "stage_consensus: descriptor missing for record {} at stage {:?} → Failed",
+                        self.record_key.opaque(), stage);
                     OutboundTransactionStage::Failed
                 } else {
                     // We have what we need, stage is the same
@@ -237,6 +269,9 @@ impl OutboundTransactionRecordState {
 
                 if force_fail {
                     // Don't bother dropping any nodes, only roll back everything
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug target: "dht", "stage_consensus: force_fail at Begin for record {} — End/Commit nodes present, map={:?}",
+                        self.record_key.opaque(), stage_consensus_map);
                     let node_xids_to_rollback =
                         Self::get_all_rollbacks_internal(&stage_consensus_map);
                     OutboundTransactionRecordStageConsensus {
@@ -287,6 +322,9 @@ impl OutboundTransactionRecordState {
 
                 if force_fail {
                     // Don't bother dropping any nodes, only roll back everything
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug target: "dht", "stage_consensus: force_fail at End for record {} — Commit nodes present while End consensus, map={:?}",
+                        self.record_key.opaque(), stage_consensus_map);
                     let node_xids_to_rollback =
                         Self::get_all_rollbacks_internal(&stage_consensus_map);
                     OutboundTransactionRecordStageConsensus {
@@ -304,6 +342,12 @@ impl OutboundTransactionRecordState {
                 }
             }
         };
+
+        #[cfg(feature = "verbose-tracing")]
+        veilid_log!(self debug target: "dht", "stage_consensus: record={} result=stage:{:?} rollback_count={} drop_count={}",
+            self.record_key.opaque(), stage_consensus.stage,
+            stage_consensus.node_xids_to_rollback.len(),
+            stage_consensus.node_xids_to_drop.len());
 
         Some(stage_consensus)
     }
@@ -357,16 +401,26 @@ impl OutboundTransactionRecordState {
     }
 
     pub fn opt_expiration(&self) -> Option<Timestamp> {
-        self.node_transactions
+        // Collect Begin-node expirations only; use the (count-required)'th smallest so we
+        // tolerate losing up to (required-1) nodes before the keepalive fires urgently.
+        let mut begin_expirations: Vec<Timestamp> = self
+            .node_transactions
             .iter()
-            .map(|x| x.opt_expiration())
-            .reduce(|a, b| match (a, b) {
-                (None, None) => None,
-                (None, Some(b)) => Some(b),
-                (Some(a), None) => Some(a),
-                (Some(a), Some(b)) => Some(a.min(b)),
-            })
-            .flatten()
+            .filter(|nt| nt.stage() == OutboundTransactionStage::Begin)
+            .filter_map(|nt| nt.opt_expiration())
+            .collect();
+
+        if begin_expirations.is_empty() {
+            return None;
+        }
+
+        begin_expirations.sort();
+
+        // idx=max(0, count-required): first expiry in the required-node majority (e.g. 8 nodes, required=5 → idx=3).
+        let idx = begin_expirations
+            .len()
+            .saturating_sub(self.required_strict_consensus_count);
+        Some(begin_expirations[idx])
     }
 
     pub fn stage_ts(&self) -> Timestamp {
@@ -394,6 +448,7 @@ impl OutboundTransactionRecordState {
     }
 
     pub fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) {
+        self.opt_registry = Some(routing_table.registry());
         self.node_transactions
             .retain_mut(|x| x.prepare(routing_table, cur_ts));
     }
@@ -499,6 +554,7 @@ impl OutboundTransactionRecordState {
         }
 
         self.node_transactions.push(NodeTransaction::new(
+            self.registry(),
             node_xid.clone(),
             params.node_ref,
             params.expiration,
@@ -527,7 +583,6 @@ impl OutboundTransactionRecordState {
             .find(|nx| nx.node_xid() == node_xid)
     }
 
-    #[expect(dead_code)]
     pub fn get_node_transactions(&self) -> &[NodeTransaction] {
         &self.node_transactions
     }
@@ -690,5 +745,22 @@ impl OutboundTransactionRecordState {
             }
         }
         removed
+    }
+
+    pub fn trim_node_transactions(&mut self, max_node_transaction_params_count: usize) {
+        if self.node_transactions.len() <= max_node_transaction_params_count {
+            return;
+        }
+
+        veilid_log!(self debug "trimming node transactions from {} to {} for record key {}", self.node_transactions.len(), max_node_transaction_params_count, self.record_key.opaque());
+
+        // Mark excess nodes as failed so they will be rolled back and dropped from the transaction at the next opportunity
+        for ntp in self
+            .node_transactions
+            .iter_mut()
+            .skip(max_node_transaction_params_count)
+        {
+            ntp.set_stage(OutboundTransactionStage::Failed, None);
+        }
     }
 }

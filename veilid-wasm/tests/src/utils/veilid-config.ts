@@ -14,7 +14,7 @@ export const veilidCoreInitConfig: VeilidWASMConfig = {
       level: DEBUGGING ? "Debug" : "Info",
       logsInTimings: false,
       logsInConsole: DEBUGGING ? "NoColor" : "Off",
-      ignoreLogTargets: DEBUGGING ? ["-veilid_api"] : [""],
+      ignoreLogTargets: DEBUGGING ? ["-veilid_api", "-dht", "-fanout", "-network_result" /*, "-rpc_message"*/] : [""],
     },
   },
 };

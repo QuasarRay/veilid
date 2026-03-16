@@ -43,6 +43,27 @@ impl Network {
             .any(|x| x.ip() == addr)
     }
 
+    fn check_ipv4_routable() -> (bool, bool) {
+        let ipv4addr = "1.2.3.4".parse::<Ipv4Addr>().unwrap();
+        let sockaddrv4 = SocketAddr::V4(SocketAddrV4::new(ipv4addr, 5155));
+        let res = std::net::UdpSocket::bind("0.0.0.0:0");
+        println!("UDPv4 bind: {:?}", res);
+        if let Ok(socket) = res {
+            return (true, socket.connect(sockaddrv4).is_ok());
+        }
+        (false, false)
+    }
+
+    fn check_ipv6_routable() -> (bool, bool) {
+        let ipv6addr = "2222::1".parse::<Ipv6Addr>().unwrap();
+        let sockaddrv6 = SocketAddr::V6(SocketAddrV6::new(ipv6addr, 5155, 0, 0));
+        let res = std::net::UdpSocket::bind("[::]:0");
+        if let Ok(socket) = res {
+            return (true, socket.connect(sockaddrv6).is_ok());
+        }
+        (false, false)
+    }
+
     pub(super) async fn refresh_network_state(&self) -> EyreResult<Option<Arc<NetworkState>>> {
         // Get last network state
         let last_network_state = self.inner.lock().network_state.clone();
@@ -75,40 +96,19 @@ impl Network {
         }
 
         // Determine if we have ipv4/ipv6 addresses
-        let mut enable_ipv4_local = false;
-        let mut enable_ipv6_local = false;
-        let mut enable_ipv4_global = false;
-        let mut enable_ipv6_global = false;
-
-        for addr in interface_address_state.interface_addresses.iter() {
-            match addr {
-                IfAddr::V4(_) => {
-                    enable_ipv4_local = true;
-                }
-                IfAddr::V6(_) => {
-                    enable_ipv6_local = true;
-                }
-            }
+        let (enable_ipv4_local, enable_ipv4_global) = Self::check_ipv4_routable();
+        let (enable_ipv6_local, enable_ipv6_global) = Self::check_ipv6_routable();
+        if enable_ipv4_local {
+            veilid_log!(self debug "Local IPV4 detected by bind test");
         }
-
-        // If we have local address families, check for routability
-        for gateway_ip in interface_address_state.gateway_addresses.iter() {
-            match gateway_ip {
-                IpAddr::V4(v4) => {
-                    // If we have a gateway that isn't a loopback or local only we should try publicinternet global ipv4
-                    if enable_ipv4_local && (!v4.is_loopback() && !v4.is_link_local()) {
-                        veilid_log!(self debug "Global IPV4 detected via gateway");
-                        enable_ipv4_global = true;
-                    }
-                }
-                IpAddr::V6(v6) => {
-                    // If we have a gateway that isn't a loopback or local only we should try publicinternet global ipv4
-                    if enable_ipv6_local && (!v6.is_loopback() && !v6.is_unicast_link_local()) {
-                        veilid_log!(self debug "Global IPV6 detected via gateway");
-                        enable_ipv6_global = true;
-                    }
-                }
-            }
+        if enable_ipv4_global {
+            veilid_log!(self debug "Global IPV4 detected by connect test");
+        }
+        if enable_ipv6_local {
+            veilid_log!(self debug "Local IPV6 detected by bind test");
+        }
+        if enable_ipv6_global {
+            veilid_log!(self debug "Global IPV6 detected by connect test");
         }
 
         // Get protocol config

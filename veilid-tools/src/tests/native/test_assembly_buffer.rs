@@ -21,7 +21,7 @@ pub async fn test_single_out_in() {
     let assbuf_out = AssemblyBuffer::new();
     let assbuf_in = AssemblyBuffer::new();
     let (net_tx, net_rx) = flume::unbounded();
-    let sender = |framed_chunk: Vec<u8>, remote_addr: SocketAddr| {
+    let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| {
         let net_tx = net_tx.clone();
         async move {
             net_tx
@@ -34,8 +34,9 @@ pub async fn test_single_out_in() {
 
     for _ in 0..1000 {
         let random_len = (get_random_u32() % 1000) as usize;
-        let mut message = vec![1u8; random_len];
+        let mut message = BytesMut::zeroed(random_len);
         random_bytes(&mut message);
+        let message: Bytes = message.into();
         let remote_addr = random_sockaddr();
 
         // Send single message below fragmentation limit
@@ -70,7 +71,7 @@ pub async fn test_one_frag_out_in() {
     let assbuf_out = AssemblyBuffer::new();
     let assbuf_in = AssemblyBuffer::new();
     let (net_tx, net_rx) = flume::unbounded();
-    let sender = |framed_chunk: Vec<u8>, remote_addr: SocketAddr| {
+    let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| {
         let net_tx = net_tx.clone();
         async move {
             net_tx
@@ -88,8 +89,9 @@ pub async fn test_one_frag_out_in() {
     for _ in 0..10000 {
         let to_send = loop {
             let random_len = (get_random_u32() % 1000) as usize + FRAGMENT_LEN;
-            let mut message = vec![1u8; random_len];
+            let mut message = BytesMut::zeroed(random_len);
             random_bytes(&mut message);
+            let message: Bytes = message.into();
             let remote_addr = random_sockaddr();
 
             let to_send = (message, remote_addr);
@@ -139,7 +141,7 @@ pub async fn test_many_frags_out_in() {
     let assbuf_out = AssemblyBuffer::new();
     let assbuf_in = AssemblyBuffer::new();
     let (net_tx, net_rx) = flume::unbounded();
-    let sender = |framed_chunk: Vec<u8>, remote_addr: SocketAddr| {
+    let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| {
         let net_tx = net_tx.clone();
         async move {
             net_tx
@@ -158,8 +160,9 @@ pub async fn test_many_frags_out_in() {
     for _ in 0..1000 {
         let to_send = loop {
             let random_len = (get_random_u32() % 65536) as usize;
-            let mut message = vec![1u8; random_len];
+            let mut message = BytesMut::zeroed(random_len);
             random_bytes(&mut message);
+            let message: Bytes = message.into();
             let remote_addr = random_sockaddr();
             let to_send = (message, remote_addr);
 
@@ -210,7 +213,7 @@ pub async fn test_many_frags_out_in_single_host() {
     let assbuf_out = AssemblyBuffer::new();
     let assbuf_in = AssemblyBuffer::new();
     let (net_tx, net_rx) = flume::unbounded();
-    let sender = |framed_chunk: Vec<u8>, remote_addr: SocketAddr| {
+    let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| {
         let net_tx = net_tx.clone();
         async move {
             net_tx
@@ -230,10 +233,11 @@ pub async fn test_many_frags_out_in_single_host() {
         let to_send = loop {
             let remote_addr = random_sockaddr();
             let random_len = (get_random_u32() % 65536) as usize;
-            let mut message = vec![1u8; random_len];
+            let mut message = BytesMut::zeroed(random_len);
             random_bytes(&mut message);
+            let message: Bytes = message.into();
 
-            let to_send = (message.clone(), remote_addr);
+            let to_send = (message, remote_addr);
 
             if !all_sent.contains(&to_send) {
                 break to_send;
@@ -284,7 +288,7 @@ pub async fn test_many_frags_with_drops() {
 
     let first = Arc::new(AtomicBool::new(true));
 
-    let sender = |framed_chunk: Vec<u8>, remote_addr: SocketAddr| {
+    let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| {
         let net_tx = net_tx.clone();
         let first = first.clone();
         async move {
@@ -312,10 +316,11 @@ pub async fn test_many_frags_with_drops() {
             if random_len > FRAGMENT_LEN {
                 total_fragged += 1;
             }
-            let mut message = vec![1u8; random_len];
+            let mut message = BytesMut::zeroed(random_len);
             random_bytes(&mut message);
+            let message: Bytes = message.into();
 
-            let to_send = (message.clone(), remote_addr);
+            let to_send = (message, remote_addr);
 
             if !all_sent.contains(&to_send) {
                 break to_send;
@@ -368,7 +373,7 @@ pub async fn test_many_frags_reordered() {
     let (net_tx, net_rx) = flume::unbounded();
 
     let reorder_buffer = Arc::new(Mutex::new(Vec::new()));
-    let sender = |framed_chunk: Vec<u8>, remote_addr: SocketAddr| {
+    let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| {
         let reorder_buffer = reorder_buffer.clone();
         async move {
             reorder_buffer.lock().push((framed_chunk, remote_addr));
@@ -385,11 +390,12 @@ pub async fn test_many_frags_reordered() {
     for _ in 0..1000 {
         let to_send = loop {
             let random_len = (get_random_u32() % 65536) as usize;
-            let mut message = vec![1u8; random_len];
+            let mut message = BytesMut::zeroed(random_len);
             random_bytes(&mut message);
+            let message: Bytes = message.into();
             let remote_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 5678));
 
-            let to_send = (message.clone(), remote_addr);
+            let to_send = (message, remote_addr);
 
             if !all_sent.contains(&to_send) {
                 break to_send;

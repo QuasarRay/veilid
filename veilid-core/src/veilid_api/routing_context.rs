@@ -218,11 +218,7 @@ impl RoutingContext {
     // App-level Messaging
 
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(message), fields(duration, __VEILID_LOG_KEY = self.log_key(), message_len = message.len(), ret.len)))]
-    async fn internal_app_call(
-        &self,
-        target: Target,
-        message: Vec<u8>,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    async fn internal_app_call(&self, target: Target, message: Bytes) -> VeilidAPIResult<Bytes> {
         record_duration_fut(async {
             veilid_log!(self debug
                 "RoutingContext::app_call(self: {:?}, target: {:?}, message_len: {:?})", self, target, message.len());
@@ -266,7 +262,9 @@ impl RoutingContext {
     ///
     /// Returns an answer blob of up to 32768 bytes.
     pub async fn app_call(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<Vec<u8>> {
-        self.internal_app_call(target, message).await
+        self.internal_app_call(target, message.into())
+            .await
+            .map(|x| x.into())
     }
 
     #[cfg(not(feature = "footgun"))]
@@ -280,7 +278,10 @@ impl RoutingContext {
     /// Returns an answer blob of up to 32768 bytes.
     pub async fn app_call(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<Vec<u8>> {
         match target {
-            Target::RouteId(_) => self.internal_app_call(target, message).await,
+            Target::RouteId(_) => self
+                .internal_app_call(target, message.into())
+                .await
+                .map(|x| x.into()),
             Target::NodeId(_) => Err(VeilidAPIError::invalid_target(
                 "Only RouteId targets are allowed without the footgun feature",
             )),
@@ -288,7 +289,7 @@ impl RoutingContext {
     }
 
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(message), fields(duration, __VEILID_LOG_KEY = self.log_key(), message_len = message.len()), ret))]
-    async fn internal_app_message(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<()> {
+    async fn internal_app_message(&self, target: Target, message: Bytes) -> VeilidAPIResult<()> {
         record_duration_fut(async {
             veilid_log!(self debug
                 "RoutingContext::app_message(self: {:?}, target: {:?}, message_len: {})", self, target, message.len());
@@ -327,7 +328,7 @@ impl RoutingContext {
     /// * `target` - can be either a direct node id or a private route.
     /// * `message` - an arbitrary message blob of up to 32768 bytes.
     pub async fn app_message(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<()> {
-        self.internal_app_message(target, message).await
+        self.internal_app_message(target, message.into()).await
     }
 
     #[cfg(not(feature = "footgun"))]
@@ -339,7 +340,7 @@ impl RoutingContext {
     /// * `message` - an arbitrary message blob of up to 32768 bytes.
     pub async fn app_message(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<()> {
         match target {
-            Target::RouteId(_) => self.internal_app_message(target, message).await,
+            Target::RouteId(_) => self.internal_app_message(target, message.into()).await,
             Target::NodeId(_) => Err(VeilidAPIError::invalid_target(
                 "Only PrivateRoute targets are allowed without the footgun feature",
             )),

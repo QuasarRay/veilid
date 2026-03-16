@@ -7,7 +7,6 @@ mod log_key_filter;
 
 use super::*;
 
-use arc_swap::ArcSwap;
 use tracing::level_filters::LevelFilter;
 use tracing::subscriber::Interest;
 use tracing_subscriber::layer;
@@ -264,6 +263,10 @@ impl VeilidLayerFilter {
         self.inner.rcu(|inner| {
             let mut inner = Arc::as_ref(inner).clone();
             let config = &mut inner.current_config;
+            let opt_common_level = inner
+                .facility_enable_map
+                .get_tag("#common")
+                .map(|state| state.level);
 
             for change in target_change {
                 if change.is_empty() {
@@ -282,9 +285,16 @@ impl VeilidLayerFilter {
                         .with_directives([VeilidLogDirective::global_level(None)]);
                 } else if let Some(target) = change.strip_prefix('-') {
                     if VeilidLogDirective::check_valid_log_facility(target).is_ok() {
-                        config.apply_directives(
-                            VeilidLogDirective::try_facility_level(target, None).unwrap(),
-                        );
+                        if let Some(common_level) = opt_common_level {
+                            config.apply_directives(
+                                VeilidLogDirective::try_facility_level(target, Some(common_level))
+                                    .unwrap(),
+                            );
+                        } else {
+                            config.apply_directives(
+                                VeilidLogDirective::try_facility_level(target, None).unwrap(),
+                            );
+                        }
                     }
                 } else if VeilidLogDirective::check_valid_log_facility(change).is_ok() {
                     config.apply_directives(

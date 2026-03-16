@@ -1,5 +1,8 @@
 use super::*;
 
+/// Number of consecutive successful pings required to consider a route tested
+const ROUTE_TEST_PING_COUNT: usize = 3;
+
 impl RouteSpecStore {
     /// Test an allocated route for continuity
     #[cfg_attr(
@@ -42,7 +45,7 @@ impl RouteSpecStore {
             };
 
             // Get the private route to send to
-            let private_route = match self.assemble_single_private_route(&key, None) {
+            let private_route = match self.assemble_single_private_route(&key, None).await {
                 Ok(v) => v,
                 Err(VeilidAPIError::InvalidTarget { message: _ }) => {
                     // Route missing means its dead
@@ -81,20 +84,22 @@ impl RouteSpecStore {
             )
         };
 
-        // Test with double-round trip ping to self
+        // Test with multiple round-trip pings to self to ensure route reliability
         let rpc_processor = self.rpc_processor();
-        let _res = match Box::pin(rpc_processor.rpc_call_status(dest)).await? {
-            NetworkResult::Value(v) => v,
-            _ => {
-                // Did not error, but did not come back, mark the nodes as failed to send, and then return false
-                // This will prevent those node from immediately being included in the next allocated route,
-                // avoiding the same route being constructed to replace this one when it is removed.
-                for hop in hops {
-                    hop.report_failed_route_test();
+        for _ping in 0..ROUTE_TEST_PING_COUNT {
+            let _res = match Box::pin(rpc_processor.rpc_call_status(dest.clone())).await? {
+                NetworkResult::Value(v) => v,
+                _ => {
+                    // Did not error, but did not come back, mark the nodes as failed to send, and then return false
+                    // This will prevent those node from immediately being included in the next allocated route,
+                    // avoiding the same route being constructed to replace this one when it is removed.
+                    for hop in hops {
+                        hop.report_failed_route_test();
+                    }
+                    return Ok(Some(false));
                 }
-                return Ok(Some(false));
-            }
-        };
+            };
+        }
 
         Ok(Some(true))
     }

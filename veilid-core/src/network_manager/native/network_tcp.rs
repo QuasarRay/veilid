@@ -1,5 +1,4 @@
 use super::*;
-use async_tls::TlsAcceptor;
 use stop_token::future::FutureExt;
 
 /////////////////////////////////////////////////////////////////
@@ -32,7 +31,7 @@ impl Network {
         let server_config = self
             .load_server_config()
             .wrap_err("Couldn't create TLS configuration")?;
-        let acceptor = TlsAcceptor::from(server_config);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
         self.inner.lock().tls_acceptor = Some(acceptor.clone());
         Ok(acceptor)
     }
@@ -222,7 +221,7 @@ impl Network {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    async fn spawn_socket_listener(&self, addr: SocketAddr) -> EyreResult<bool> {
+    fn spawn_socket_listener(&self, addr: SocketAddr) -> EyreResult<bool> {
         // Get config
         let config = self.config();
         let connection_initial_timeout_ms = config.network.connection_initial_timeout_ms;
@@ -294,7 +293,7 @@ impl Network {
 
     // TCP listener that multiplexes ports so multiple protocols can exist on a single port
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub(super) async fn start_tcp_listener(
+    pub(super) fn start_tcp_listener(
         &self,
         bind_set: NetworkBindSet,
         is_tls: bool,
@@ -310,7 +309,7 @@ impl Network {
                 // if not, spawn a listener
                 let mut got_listener = false;
                 if !self.inner.lock().listener_states.contains_key(&addr) {
-                    if self.clone().spawn_socket_listener(addr).await? {
+                    if self.clone().spawn_socket_listener(addr)? {
                         got_listener = true;
                     }
                 } else {

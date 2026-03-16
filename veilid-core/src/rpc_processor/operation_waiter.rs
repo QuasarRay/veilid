@@ -100,18 +100,21 @@ where
 
     /// Set up wait for operation to complete
     pub fn add_op_waiter(&self, op_id: OperationId, context: C) -> OperationWaitHandle<T, C> {
-        let mut inner = self.inner.lock();
         let (result_sender, result_receiver) = flume::bounded(1);
         let waiting_op = OperationWaitingOp {
             context,
             timestamp: Timestamp::now_non_decreasing(),
             result_sender,
         };
-        if inner.waiting_op_table.insert(op_id, waiting_op).is_some() {
-            error!(
-                "add_op_waiter collision should not happen for op_id {}",
-                op_id
-            );
+
+        {
+            let mut inner = self.inner.lock();
+            if inner.waiting_op_table.insert(op_id, waiting_op).is_some() {
+                error!(
+                    "add_op_waiter collision should not happen for op_id {}",
+                    op_id
+                );
+            }
         }
 
         OperationWaitHandle {
@@ -156,11 +159,7 @@ where
     )]
     fn cancel_op_waiter(&self, op_id: OperationId) {
         let mut inner = self.inner.lock();
-        {
-            let waiting_op = inner.waiting_op_table.remove(&op_id);
-            drop(waiting_op);
-        }
-        drop(inner);
+        inner.waiting_op_table.remove(&op_id);
     }
 
     /// Complete the waiting op
@@ -169,23 +168,20 @@ where
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub fn complete_op_waiter(&self, op_id: OperationId, message: T) -> Result<(), RPCError> {
-        let mut inner = self.inner.lock();
-        let res = {
-            let waiting_op =
-                inner
-                    .waiting_op_table
-                    .remove(&op_id)
-                    .ok_or_else(RPCError::else_ignore(format!(
-                        "Unmatched operation id: {}",
-                        op_id
-                    )))?;
-            waiting_op
-                .result_sender
-                .send((Span::current(), message))
-                .map_err(RPCError::ignore)
+        let waiting_op = {
+            let mut inner = self.inner.lock();
+            inner
+                .waiting_op_table
+                .remove(&op_id)
+                .ok_or_else(RPCError::else_ignore(format!(
+                    "Unmatched operation id: {}",
+                    op_id
+                )))?
         };
-        drop(inner);
-        res
+        waiting_op
+            .result_sender
+            .send((Span::current(), message))
+            .map_err(RPCError::ignore)
     }
 
     /// Wait for operation to complete

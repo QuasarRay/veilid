@@ -4,6 +4,7 @@ pub mod check_outbound_transactions;
 pub mod check_outbound_watches;
 pub mod flush_record_stores;
 pub mod offline_subkey_writes;
+pub mod outbound_transaction_keepalive;
 pub mod rehydrate_records;
 pub mod save_metadata;
 pub mod send_value_changes;

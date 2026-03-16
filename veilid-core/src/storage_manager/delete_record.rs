@@ -22,8 +22,10 @@ impl StorageManager {
             )
             .await;
 
-        let background_tokens = self.close_record_locked(&record_lock)?;
-        Self::wait_for_background_tokens(background_tokens).await;
+        let opt_cleanup = self.close_record_locked(&record_lock)?;
+        if let Some(cleanup) = opt_cleanup {
+            self.process_transaction_cleanup(cleanup).await;
+        }
 
         // Remove the record from the local store
         local_record_store.delete_record(&opaque_record_key).await?;

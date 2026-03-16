@@ -342,29 +342,40 @@ impl Crypto {
     ) -> VeilidAPIResult<SharedSecret> {
         vcrypto.check_public_key(key)?;
         vcrypto.check_secret_key(secret)?;
-        let inner = &mut *self.inner.lock();
+
         let dh_cache_key = DHCacheKey {
             key: key.clone(),
             secret: secret.clone(),
         };
-        let res = inner.dh_cache.entry_with_callback(dh_cache_key, |_, _| {
-            inner.dh_cache_lru += 1;
-        });
-        Ok(match res {
-            Entry::Occupied(e) => {
-                inner.dh_cache_hits += 1;
-                e.get().shared_secret.clone()
-            }
-            Entry::Vacant(e) => {
-                inner.dh_cache_misses += 1;
 
-                let shared_secret = vcrypto.compute_dh(key, secret)?;
-                e.insert(DHCacheValue {
-                    shared_secret: shared_secret.clone(),
-                });
-                shared_secret
+        {
+            let inner = &mut *self.inner.lock();
+            if let Some(value) = inner.dh_cache.get(&dh_cache_key) {
+                inner.dh_cache_hits += 1;
+                return Ok(value.shared_secret.clone());
             }
-        })
+        }
+        let shared_secret = vcrypto.compute_dh(key, secret)?;
+
+        {
+            let inner = &mut *self.inner.lock();
+            let res = inner.dh_cache.entry_with_callback(dh_cache_key, |_, _| {
+                inner.dh_cache_lru += 1;
+            });
+            match res {
+                Entry::Occupied(_) => {
+                    inner.dh_cache_hits += 1;
+                }
+                Entry::Vacant(e) => {
+                    inner.dh_cache_misses += 1;
+                    e.insert(DHCacheValue {
+                        shared_secret: shared_secret.clone(),
+                    });
+                }
+            }
+        }
+
+        Ok(shared_secret)
     }
 
     pub(crate) fn validate_crypto_kind(kind: CryptoKind) -> VeilidAPIResult<()> {

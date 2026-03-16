@@ -1,25 +1,31 @@
 use super::*;
 use lz4_flex::block;
 
-#[cfg_attr(
-    feature = "instrument",
-    instrument(level = "trace", target = "compression", skip_all)
-)]
-#[must_use]
-pub fn compress_prepend_size(input: &[u8]) -> Vec<u8> {
-    block::compress_prepend_size(input)
-}
+impl_veilid_log_facility!("compression");
 
 #[cfg_attr(
     feature = "instrument",
     instrument(level = "trace", target = "compression", skip_all)
 )]
-pub fn decompress_size_prepended(
+#[must_use]
+pub(crate) fn compress_prepend_size(input: &[u8]) -> Vec<u8> {
+    block::compress_prepend_size(input)
+}
+
+#[cfg_attr(
+    feature = "instrument",
+    instrument(level = "trace", target = "compression", skip_all, err)
+)]
+pub(crate) fn decompress_size_prepended(
     input: &[u8],
     max_size: Option<usize>,
 ) -> VeilidAPIResult<Vec<u8>> {
-    let (uncompressed_size, input) =
-        block::uncompressed_size(input).map_err(VeilidAPIError::generic)?;
+    let (uncompressed_size, input) = match block::uncompressed_size(input) {
+        Ok(v) => v,
+        Err(e) => {
+            apibail_generic!("failed to get uncompressed size: {}", e);
+        }
+    };
     if let Some(max_size) = max_size {
         if uncompressed_size > max_size {
             apibail_generic!(
@@ -29,5 +35,16 @@ pub fn decompress_size_prepended(
             );
         }
     }
-    block::decompress(input, uncompressed_size).map_err(VeilidAPIError::generic)
+    match block::decompress(input, uncompressed_size) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            apibail_generic!(
+                "failed to decompress: {}:data_len={}\ndata={}\nbacktrace:\n{:#?}",
+                e,
+                input.len(),
+                print_data(input, Some(256)),
+                backtrace::Backtrace::new()
+            );
+        }
+    }
 }

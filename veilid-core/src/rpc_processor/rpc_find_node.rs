@@ -13,7 +13,7 @@ impl RPCProcessor {
     pub async fn rpc_call_find_node(
         &self,
         dest: Destination,
-        node_id: NodeId,
+        hash_coordinate: HashCoordinate,
         capabilities: Vec<VeilidCapability>,
     ) -> RPCNetworkResult<Answer<Vec<Arc<PeerInfo>>>> {
         let _guard = self
@@ -36,14 +36,14 @@ impl RPCProcessor {
         }
 
         let find_node_q_detail = RPCQuestionDetail::FindNodeQ(Box::new(
-            RPCOperationFindNodeQ::new(node_id.clone(), capabilities.clone())?,
+            RPCOperationFindNodeQ::new(hash_coordinate.clone(), capabilities.clone())?,
         ));
         let find_node_q = RPCQuestion::new(
             network_result_try!(self.get_destination_respond_to(&dest).await?),
             find_node_q_detail,
         );
 
-        let debug_string = format!("FindNode(node_id={}) => {}", node_id, dest);
+        let debug_string = format!("FindNode(node_id={}) => {}", hash_coordinate, dest);
 
         // Send the find_node request
         let waitable_reply =
@@ -107,17 +107,17 @@ impl RPCProcessor {
             },
             _ => panic!("not a question"),
         };
-        let (node_id, capabilities) = find_node_q.destructure();
+        let (hash_coordinate, capabilities) = find_node_q.destructure();
 
         // Get a chunk of the routing table near the requested node id
         let routing_table = self.routing_table();
         let routing_domain = msg.header.routing_domain();
 
-        let closest_nodes = network_result_try!(routing_table.find_preferred_closest_peers(
+        let closest_nodes = routing_table.get_preferred_closest_nodes_peer_info(
             routing_domain,
-            node_id.to_hash_coordinate(),
-            &capabilities
-        ));
+            hash_coordinate,
+            &capabilities,
+        );
 
         // Make FindNode answer
         let find_node_a = RPCOperationFindNodeA::new(closest_nodes)?;

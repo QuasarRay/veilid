@@ -1,42 +1,27 @@
 use super::*;
 impl_veilid_log_facility!("rtab");
 
-// Compiled route key for caching
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct CompiledRouteCacheKey {
-    sr_pubkey: PublicKey,
-    pr_pubkey: PublicKey,
-}
-
-/// Compiled route (safety route + private route)
-#[derive(Clone, Debug)]
-pub struct CompiledRoute {
-    /// The safety route attached to the private route
-    pub safety_route: SafetyRoute,
-    /// The secret used to encrypt the message payload
-    pub secret: SecretKey,
-    /// The node ref to the first hop in the compiled route
-    /// filtered to the safetyselection it was compiled with
-    pub first_hop: FilteredNodeRef,
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct UsedNodesKey {
+    pub node_id: NodeId,
+    pub hop_count: usize,
 }
 
 /// Ephemeral data used to help the RouteSpecStore operate efficiently
 #[derive(Debug)]
-pub struct RouteSpecStoreCache {
+pub(super) struct RouteSpecStoreCache {
     /// Registry accessor
     registry: VeilidComponentRegistry,
     /// How many times nodes have been used
-    used_nodes: HashMap<NodeId, usize>,
+    used_nodes: HashMap<UsedNodesKey, usize>,
     /// How many times nodes have been used at the terminal point of a route
-    used_end_nodes: HashMap<NodeId, usize>,
+    used_end_nodes: HashMap<UsedNodesKey, usize>,
     /// Route spec hop cache, used to quickly disqualify routes
     hop_cache: HashSet<Vec<u8>>,
     /// Remote private routes we've imported and statistics
     remote_private_route_set_cache: LruCache<RouteId, RemotePrivateRouteInfo>,
     /// Remote private route ids indexed by route's public key
     remote_private_routes_by_key: HashMap<PublicKey, RouteId>,
-    /// Compiled route cache
-    compiled_route_cache: LruCache<CompiledRouteCacheKey, SafetyRoute>,
     /// List of dead allocated routes
     dead_routes: Vec<RouteId>,
     /// List of dead remote routes
@@ -54,7 +39,6 @@ impl RouteSpecStoreCache {
             hop_cache: Default::default(),
             remote_private_route_set_cache: LruCache::new(REMOTE_PRIVATE_ROUTE_CACHE_SIZE),
             remote_private_routes_by_key: HashMap::new(),
-            compiled_route_cache: LruCache::new(COMPILED_ROUTE_CACHE_SIZE),
             dead_routes: Default::default(),
             dead_remote_routes: Default::default(),
         }
@@ -64,17 +48,27 @@ impl RouteSpecStoreCache {
     pub fn add_to_cache(&mut self, rssd: &RouteSetSpecDetail) {
         let cache_key = rssd.make_cache_key();
         if !self.hop_cache.insert(cache_key) {
-            panic!("route should never be inserted twice");
+            veilid_log!(self error "route should never be inserted twice");
+            return;
         }
         for (_pk, rsd) in rssd.iter_route_set() {
             for h in &rsd.hops {
+                let key = UsedNodesKey {
+                    node_id: h.clone(),
+                    hop_count: rsd.hops.len(),
+                };
+
                 self.used_nodes
-                    .entry(h.clone())
+                    .entry(key)
                     .and_modify(|e| *e += 1)
                     .or_insert(1);
             }
+            let key = UsedNodesKey {
+                node_id: rsd.hops.last().unwrap_or_log().clone(),
+                hop_count: rsd.hops.len(),
+            };
             self.used_end_nodes
-                .entry(rsd.hops.last().unwrap_or_log().clone())
+                .entry(key)
                 .and_modify(|e| *e += 1)
                 .or_insert(1);
         }
@@ -86,7 +80,15 @@ impl RouteSpecStoreCache {
     }
 
     /// removes an allocated route set from our cache
-    pub fn remove_from_cache(&mut self, id: RouteId, rssd: &RouteSetSpecDetail) -> bool {
+    pub fn remove_from_cache<C>(
+        &mut self,
+        id: RouteId,
+        rssd: &RouteSetSpecDetail,
+        invalidation_callback: C,
+    ) -> bool
+    where
+        C: Fn(&PublicKey),
+    {
         let cache_key = rssd.make_cache_key();
 
         // Remove from hop cache
@@ -96,7 +98,11 @@ impl RouteSpecStoreCache {
         for (pk, rsd) in rssd.iter_route_set() {
             for h in &rsd.hops {
                 // Remove from used nodes cache
-                match self.used_nodes.entry(h.clone()) {
+                let key = UsedNodesKey {
+                    node_id: h.clone(),
+                    hop_count: rsd.hops.len(),
+                };
+                match self.used_nodes.entry(key) {
                     std::collections::hash_map::Entry::Occupied(mut o) => {
                         *o.get_mut() -= 1;
                         if *o.get() == 0 {
@@ -104,15 +110,17 @@ impl RouteSpecStoreCache {
                         }
                     }
                     std::collections::hash_map::Entry::Vacant(_) => {
-                        panic!("used_nodes cache should have contained hop");
+                        veilid_log!(self error "used_nodes cache should have contained hop");
                     }
                 }
             }
             // Remove from end nodes cache
-            match self
-                .used_end_nodes
-                .entry(rsd.hops.last().cloned().unwrap_or_log())
-            {
+            let key = UsedNodesKey {
+                node_id: rsd.hops.last().unwrap_or_log().clone(),
+                hop_count: rsd.hops.len(),
+            };
+
+            match self.used_end_nodes.entry(key) {
                 std::collections::hash_map::Entry::Occupied(mut o) => {
                     *o.get_mut() -= 1;
                     if *o.get() == 0 {
@@ -120,12 +128,12 @@ impl RouteSpecStoreCache {
                     }
                 }
                 std::collections::hash_map::Entry::Vacant(_) => {
-                    panic!("used_end_nodes cache should have contained hop");
+                    veilid_log!(self error "used_end_nodes cache should have contained hop");
                 }
             }
 
             // Invalidate compiled route cache
-            self.invalidate_compiled_route_cache(pk);
+            invalidation_callback(pk);
         }
 
         // Mark it as dead for the update if it wasn't automatically created
@@ -137,21 +145,37 @@ impl RouteSpecStoreCache {
     }
 
     /// calculate how many times a node with a particular node id set has been used anywhere in the path of our allocated routes
-    pub fn get_used_node_count(&self, node_ids: &NodeIdGroup) -> usize {
+    pub fn get_used_node_count(&self, node_ids: &NodeIdGroup, hop_count: usize) -> usize {
         node_ids.iter().fold(0usize, |acc, k| {
-            acc + self.used_nodes.get(k).cloned().unwrap_or_default()
+            let key = UsedNodesKey {
+                node_id: k.clone(),
+                hop_count,
+            };
+            acc + self.used_nodes.get(&key).cloned().unwrap_or_default()
         })
     }
 
     /// calculate how many times a node with a particular node id set has been used at the end of the path of our allocated routes
-    pub fn get_used_end_node_count(&self, node_ids: &NodeIdGroup) -> usize {
+    #[expect(dead_code)]
+    pub fn get_used_end_node_count(&self, node_ids: &NodeIdGroup, hop_count: usize) -> usize {
         node_ids.iter().fold(0usize, |acc, k| {
-            acc + self.used_end_nodes.get(k).cloned().unwrap_or_default()
+            let key = UsedNodesKey {
+                node_id: k.clone(),
+                hop_count,
+            };
+            acc + self.used_end_nodes.get(&key).cloned().unwrap_or_default()
         })
     }
 
     /// add remote private route to caches
-    fn add_remote_private_route(&mut self, id: RouteId, rprinfo: RemotePrivateRouteInfo) {
+    fn add_remote_private_route<C>(
+        &mut self,
+        id: RouteId,
+        rprinfo: RemotePrivateRouteInfo,
+        invalidation_callback: C,
+    ) where
+        C: Fn(&PublicKey),
+    {
         // also store in id by key table
         for private_route in rprinfo.get_private_routes() {
             self.remote_private_routes_by_key
@@ -175,7 +199,7 @@ impl RouteSpecStoreCache {
                     .remote_private_routes_by_key
                     .remove(&dead_private_route.public_key)
                     .unwrap_or_log();
-                self.invalidate_compiled_route_cache(&dead_private_route.public_key);
+                invalidation_callback(&dead_private_route.public_key);
             }
             self.dead_remote_routes.push(dead_id);
         }
@@ -202,23 +226,7 @@ impl RouteSpecStoreCache {
         cur_ts: Timestamp,
         id: &RouteId,
     ) -> Option<&RemotePrivateRouteInfo> {
-        if let Some(rpri) = self.remote_private_route_set_cache.get_mut(id) {
-            if !rpri.did_expire(cur_ts) {
-                rpri.touch(cur_ts);
-                return Some(rpri);
-            }
-        }
-        None
-    }
-
-    /// mutable remote private route cache accessor
-    /// will LRU entries and may expire entries and not return them if they are stale
-    pub fn get_remote_private_route_mut(
-        &mut self,
-        cur_ts: Timestamp,
-        id: &RouteId,
-    ) -> Option<&mut RemotePrivateRouteInfo> {
-        if let Some(rpri) = self.remote_private_route_set_cache.get_mut(id) {
+        if let Some(rpri) = self.remote_private_route_set_cache.get(id) {
             if !rpri.did_expire(cur_ts) {
                 rpri.touch(cur_ts);
                 return Some(rpri);
@@ -236,21 +244,6 @@ impl RouteSpecStoreCache {
     ) -> Option<&RemotePrivateRouteInfo> {
         if let Some(rpri) = self.remote_private_route_set_cache.peek(id) {
             if !rpri.did_expire(cur_ts) {
-                return Some(rpri);
-            }
-        }
-        None
-    }
-
-    /// mutable remote private route cache accessor without lru action
-    /// will not LRU entries but may expire entries and not return them if they are stale
-    pub fn peek_remote_private_route_mut(
-        &mut self,
-        cur_ts: Timestamp,
-        id: &RouteId,
-    ) -> Option<&mut RemotePrivateRouteInfo> {
-        if let Some(rpri) = self.remote_private_route_set_cache.peek_mut(id) {
-            if !rpri.did_expire(cur_ts) {
                 rpri.touch(cur_ts);
                 return Some(rpri);
             }
@@ -267,14 +260,17 @@ impl RouteSpecStoreCache {
     /// may LRU and/or expire other cache entries to make room for the new one
     /// or update an existing entry with the same private route set
     /// returns the route set id
-    pub fn cache_remote_private_route(
+    pub fn cache_remote_private_route<C>(
         &mut self,
         cur_ts: Timestamp,
         id: RouteId,
-        private_routes: Vec<PrivateRoute>,
-    ) {
+        private_routes: Vec<Arc<PrivateRoute>>,
+        invalidation_callback: C,
+    ) where
+        C: Fn(&PublicKey),
+    {
         // get id for this route set
-        if let Some(rpri) = self.get_remote_private_route_mut(cur_ts, &id) {
+        if let Some(rpri) = self.get_remote_private_route(cur_ts, &id) {
             if rpri.did_expire(cur_ts) {
                 // Start fresh if this had expired
                 rpri.unexpire(cur_ts);
@@ -286,15 +282,18 @@ impl RouteSpecStoreCache {
             // New remote private route cache entry
             let rpri = RemotePrivateRouteInfo::new(private_routes, cur_ts);
 
-            self.add_remote_private_route(id.clone(), rpri);
-            if self.peek_remote_private_route_mut(cur_ts, &id).is_none() {
-                panic!("remote private route should exist");
+            self.add_remote_private_route(id.clone(), rpri, invalidation_callback);
+            if self.peek_remote_private_route(cur_ts, &id).is_none() {
+                veilid_log!(self error "remote private route should exist");
             };
         };
     }
 
     /// remove a remote private route from the cache
-    pub fn remove_remote_private_route(&mut self, id: RouteId) -> bool {
+    pub fn remove_remote_private_route<C>(&mut self, id: RouteId, invalidation_callback: C) -> bool
+    where
+        C: Fn(&PublicKey),
+    {
         let Some(rprinfo) = self.remote_private_route_set_cache.remove(&id) else {
             return false;
         };
@@ -303,48 +302,10 @@ impl RouteSpecStoreCache {
                 .remote_private_routes_by_key
                 .remove(&private_route.public_key)
                 .unwrap_or_log();
-            self.invalidate_compiled_route_cache(&private_route.public_key);
+            invalidation_callback(&private_route.public_key);
         }
         self.dead_remote_routes.push(id);
         true
-    }
-
-    /// Stores a compiled 'safety + private' route so we don't have to compile it again later
-    pub fn add_to_compiled_route_cache(&mut self, pr_pubkey: PublicKey, safety_route: SafetyRoute) {
-        let key = CompiledRouteCacheKey {
-            sr_pubkey: safety_route.public_key.clone(),
-            pr_pubkey: pr_pubkey.clone(),
-        };
-
-        if let Some(v) = self.compiled_route_cache.insert(key, safety_route) {
-            veilid_log!(self error "route cache already contained key: sr_pubkey={:?}, pr_pubkey={:?}", v.public_key, pr_pubkey);
-        }
-    }
-
-    /// Looks up an existing compiled route from the safety and private route components
-    pub fn lookup_compiled_route_cache(
-        &mut self,
-        sr_pubkey: PublicKey,
-        pr_pubkey: PublicKey,
-    ) -> Option<SafetyRoute> {
-        let key = CompiledRouteCacheKey {
-            sr_pubkey,
-            pr_pubkey,
-        };
-        self.compiled_route_cache.get(&key).cloned()
-    }
-
-    /// When routes are dropped, they should be removed from the compiled route cache
-    fn invalidate_compiled_route_cache(&mut self, dead_key: &PublicKey) {
-        let mut dead_entries = Vec::new();
-        for (k, _v) in self.compiled_route_cache.iter() {
-            if k.sr_pubkey == *dead_key || k.pr_pubkey == *dead_key {
-                dead_entries.push(k.clone());
-            }
-        }
-        for d in dead_entries {
-            self.compiled_route_cache.remove(&d);
-        }
     }
 
     /// Take the dead local and remote routes so we can update clients
@@ -360,23 +321,23 @@ impl RouteSpecStoreCache {
 
     /// Clean up imported remote routes
     /// Resets statistics for when our node info changes
-    pub fn reset_remote_private_routes(&mut self) {
+    pub fn reset_remote_private_routes(&self) {
         // Restart stats for routes so we test the route again
-        for (_k, v) in self.remote_private_route_set_cache.iter_mut() {
-            v.get_stats_mut().reset();
+        for (_k, v) in self.remote_private_route_set_cache.iter() {
+            v.with_stats_mut(|s| s.reset());
         }
     }
 
     /// Roll transfer statistics
-    pub fn roll_transfers(&mut self, last_ts: Timestamp, cur_ts: Timestamp) {
-        for (_k, v) in self.remote_private_route_set_cache.iter_mut() {
-            v.get_stats_mut().roll_transfers(last_ts, cur_ts);
+    pub fn roll_transfers(&self, last_ts: Timestamp, cur_ts: Timestamp) {
+        for (_k, v) in self.remote_private_route_set_cache.iter() {
+            v.with_stats_mut(|s| s.roll_transfers(last_ts, cur_ts));
         }
     }
     /// Roll answer statistics
-    pub fn roll_answers(&mut self, cur_ts: Timestamp) {
-        for (_k, v) in self.remote_private_route_set_cache.iter_mut() {
-            v.get_stats_mut().roll_answers(cur_ts);
+    pub fn roll_answers(&self, cur_ts: Timestamp) {
+        for (_k, v) in self.remote_private_route_set_cache.iter() {
+            v.with_stats_mut(|s| s.roll_answers(cur_ts));
         }
     }
 }

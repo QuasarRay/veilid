@@ -39,6 +39,7 @@ mod byte_array_types;
 mod crypto_typed;
 mod crypto_typed_group;
 mod keypair;
+mod nonce;
 mod record_key;
 
 pub use byte_array_types::*;

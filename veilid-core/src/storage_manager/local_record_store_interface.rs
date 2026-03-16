@@ -247,7 +247,7 @@ impl StorageManager {
             d.nodes
                 .keys()
                 .cloned()
-                .filter_map(|nr| routing_table.lookup_node_ref(nr).ok().flatten())
+                .filter_map(|nr| routing_table.lookup_node_id(nr).ok().flatten())
                 .collect()
         });
 

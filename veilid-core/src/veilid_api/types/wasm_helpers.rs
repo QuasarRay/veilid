@@ -12,7 +12,7 @@ type Opaque<T, S extends symbol> = (T & OpaqueNewType<S>) | OpaqueNewType<S>
 #[macro_export]
 macro_rules! impl_opaque_newtype {
     ($name:ident, $base:ident) => {
-        paste::paste! {
+        pastey::paste! {
             #[wasm_bindgen(typescript_custom_section)]
             const [< IMPL_OPAQUE_NEW_TYPE_ $name:upper >]: &'static str = concat!(r#"
 declare const "#, stringify!($name), r#"Symbol: unique symbol
@@ -25,7 +25,7 @@ export type "#, stringify!($name), r#" = Opaque<"#, stringify!($base), r#", type
 #[macro_export]
 macro_rules! make_wasm_bindgen_stubs {
     ($name:ident) => {
-        paste::paste! {
+        pastey::paste! {
             #[wasm_bindgen]
             extern "C" {
                 #[wasm_bindgen(typescript_type = $name)]

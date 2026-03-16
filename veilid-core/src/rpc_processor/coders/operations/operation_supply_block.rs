@@ -11,9 +11,13 @@ impl RPCOperationSupplyBlockQ {
     pub fn new(block_id: PublicKey) -> Self {
         Self { block_id }
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn destructure(self) -> PublicKey {
         self.block_id
@@ -55,9 +59,14 @@ impl RPCOperationSupplyBlockA {
         }
         Ok(Self { duration, peers })
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
+
     pub fn destructure(self) -> (u64, Vec<PeerInfo>) {
         (self.expiration, self.peers)
     }

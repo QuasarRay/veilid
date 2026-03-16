@@ -102,7 +102,7 @@ pub(crate) struct NetworkConnection {
     /// Statistics about network traffic
     stats: Arc<Mutex<NetworkConnectionStats>>,
     /// To send data out this connection, it is placed in this channel
-    sender: flume::Sender<(Option<Id>, Vec<u8>)>,
+    sender: flume::Sender<(Option<Id>, Bytes)>,
     /// Drop this when we want to drop the connection
     stop_source: Option<StopSource>,
     /// The node we are responsible for protecting the connection for if it is protected
@@ -280,7 +280,7 @@ impl NetworkConnection {
     async fn send_internal(
         protocol_connection: &ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
-        message: Vec<u8>,
+        message: Bytes,
     ) -> io::Result<NetworkResult<()>> {
         let ts = Timestamp::now_non_decreasing();
         network_result_try!(protocol_connection.send(message).await?);
@@ -294,7 +294,7 @@ impl NetworkConnection {
     async fn recv_internal(
         protocol_connection: &ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
-    ) -> io::Result<NetworkResult<Vec<u8>>> {
+    ) -> io::Result<NetworkResult<Bytes>> {
         let ts = Timestamp::now_non_decreasing();
         let out = network_result_try!(protocol_connection.recv().await?);
 
@@ -326,7 +326,7 @@ impl NetworkConnection {
         manager_stop_token: StopToken,
         connection_id: NetworkConnectionId,
         flow: Flow,
-        receiver: flume::Receiver<(Option<Id>, Vec<u8>)>,
+        receiver: flume::Receiver<(Option<Id>, Bytes)>,
         protocol_connection: ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
     ) -> PinBoxFutureStatic<()> {
@@ -342,24 +342,38 @@ impl NetworkConnection {
             let mut need_receiver = true;
             let mut need_sender = true;
 
-            // Push mutable timer so we can reset it
-            // Normally we would use an io::timeout here, but WASM won't support that, so we use a mutable sleep future
-            let new_timer = || {
-                sleep(connection_manager.connection_inactivity_timeout_ms()).then(|_| async {
-                    // timeout
-                    veilid_log!(connection_manager trace "Connection timeout on {:?}", flow);
+            // Add activity timer to unord
+            let inactivity_duration = TimestampDuration::new_ms(connection_manager.connection_inactivity_timeout_ms() as u64);
+            let last_activity_timestamp = Arc::new(AtomicTimestamp::now());
+            let last_activity_timestamp_clone = last_activity_timestamp.clone();
+            let inactivity_timer = Box::pin(async move {
+                    loop {
+                        let cur_ts = Timestamp::now_non_decreasing();
+
+                        let last_activity_ts = last_activity_timestamp_clone.get();
+                        let duration_since_last_activity = cur_ts.duration_since(last_activity_ts);
+                        if duration_since_last_activity >= inactivity_duration {
+                            break;
+                        }
+                        let ms_remaining_until_next_timeout = (inactivity_duration.saturating_sub(duration_since_last_activity)).millis_u32().unwrap_or(0);
+                        sleep(ms_remaining_until_next_timeout).await;
+                    }
+
+                    veilid_log!(registry trace "Connection inactivity timeout on {:?}", flow);
                     RecvLoopAction::Timeout
-                })
-            };
-            let timer = MutableFuture::new(new_timer());
+                }).in_current_span();
 
-            unord.push(pin_dyn_future!(timer.clone().in_current_span()));
+            unord.push(pin_dyn_future!(inactivity_timer));
 
+            // Do unord loop
+            let registry = connection_manager.registry();
             loop {
                 // Add another message sender future if necessary
                 if need_sender {
                     need_sender = false;
+                    let registry = registry.clone();
                     let sender_fut = receiver.recv_async().then(|res| async {
+                        let registry = registry;
                         match res {
                             Ok((_span_id, message)) => {
                                 // Touch the LRU for this connection
@@ -394,6 +408,7 @@ impl NetworkConnection {
                             }
                         }
                     }.in_current_span());
+
                     unord.push(pin_dyn_future!(sender_fut.in_current_span()));
                 }
 
@@ -427,13 +442,13 @@ impl NetworkConnection {
                                     }
 
                                     // Log other network results
-                                    let mut message = network_result_value_or_log!(registry v => [ format!(": recv via protocol_connection={:?}", protocol_connection) ] {
+                                    let message = network_result_value_or_log!(registry v => [ format!(": recv via protocol_connection={:?}", protocol_connection) ] {
                                         return RecvLoopAction::Finish;
                                     });
 
                                     // Pass received messages up to the network manager for processing
                                     if let Err(e) = network_manager
-                                        .on_recv_envelope(message.as_mut_slice(), flow).measure_debug(TimestampDuration::new_ms(500), |x| {
+                                        .on_recv_envelope(message, flow).measure_debug(TimestampDuration::new_ms(500), |x| {
                                             veilid_log!(registry debug "on_recv_envelope: {} for {} ", x, protocol_connection.flow());
                                         })
                                         .await
@@ -472,7 +487,7 @@ impl NetworkConnection {
                     }
                     Ok(Some(RecvLoopAction::Recv)) => {
                         // Reset inactivity timer since we got something from this connection
-                        timer.set(new_timer());
+                        last_activity_timestamp.set(Timestamp::now());
 
                         need_receiver = true;
                     }

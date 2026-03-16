@@ -44,7 +44,7 @@ where
         instrument(level = "trace", target = "stor", skip_all, err)
     )]
     pub fn prepare_begin_inbound_transaction(
-        &mut self,
+        &self,
         opaque_record_key: &OpaqueRecordKey,
         opt_descriptor: Option<SignedValueDescriptor>,
         want_descriptor: bool,
@@ -52,7 +52,7 @@ where
     ) -> VeilidAPIResult<PrepareBeginInboundTransactionResult> {
         // Get descriptor
         let opt_existing_descriptor =
-            self.with_record(opaque_record_key, |record| record.descriptor())?;
+            self.peek_record(opaque_record_key, |record| record.descriptor());
         let descriptor = match opt_existing_descriptor {
             Some(x) => x,
             None => {
@@ -86,7 +86,7 @@ where
         let mut transaction_count = 0;
         let is_member = member_check(&signing_member_id);
 
-        if let Some(active_transaction_list) = self.inbound_transactions.get_mut(&rtk) {
+        if let Some(active_transaction_list) = self.inbound_transactions.get(&rtk) {
             // Total up the number of transactions for this key
             for t in active_transaction_list.transactions() {
                 // See if this transactions should be counted toward any limits
@@ -338,7 +338,7 @@ where
         };
 
         let transaction = {
-            let Some(active_transaction_list) = self.inbound_transactions.get_mut(&rtk) else {
+            let Some(active_transaction_list) = self.inbound_transactions.get(&rtk) else {
                 return Ok(InboundTransactCommandResult::InvalidTransaction);
             };
 
@@ -355,7 +355,7 @@ where
             }
 
             // Get the inbound transaction if it is still valid
-            let Some(inbound_transaction) = active_transaction_list.get_mut(transaction_id) else {
+            let Some(inbound_transaction) = active_transaction_list.get(transaction_id) else {
                 apibail_internal!("inbound transaction missing even though it is locked");
             };
 
@@ -466,13 +466,9 @@ where
             return Ok(InboundTransactCommandResult::InvalidTransaction);
         };
 
-        if active_transaction_list.is_locked_by(transaction_id) {
-            self.inbound_transactions
-                .remove_transaction(transaction_id)
-                .unwrap_or_else(veilid_log_err!(self));
-            veilid_log!(self debug "{}","get after end");
-            return Ok(InboundTransactCommandResult::InvalidTransaction);
-        }
+        // Do not reject Get when locked (End already called): out-of-order delivery can bring
+        // a keepalive Get after End. Honor it to keep the transaction alive for Commit;
+        // removing it would cause Commit to return InvalidTransaction.
 
         // Get the inbound transaction if it is still valid
         let Some(inbound_transaction) = active_transaction_list.get_mut(transaction_id) else {

@@ -41,6 +41,17 @@ impl FanoutNodeStatus {
         self.stage
     }
 
+    pub fn is_finished(&self) -> bool {
+        match self.stage {
+            FanoutNodeStage::Queued | FanoutNodeStage::InProgress => false,
+            FanoutNodeStage::Timeout
+            | FanoutNodeStage::Rejected
+            | FanoutNodeStage::Disqualified
+            | FanoutNodeStage::Accepted
+            | FanoutNodeStage::Stale => true,
+        }
+    }
+
     pub fn queued(timestamp: Timestamp) -> Self {
         FanoutNodeStatus {
             stage: FanoutNodeStage::Queued,
@@ -96,9 +107,10 @@ impl fmt::Display for FanoutNodeStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FanoutNode {
-    pub node_ref: NodeRef,
+    pub work_item: FanoutWorkItem,
+    pub cancel_stop_source: Option<StopSource>,
     pub status: FanoutNodeStatus,
 }
 
@@ -115,13 +127,13 @@ impl fmt::Display for FanoutNode {
         write!(
             f,
             "{}{}: {}",
-            self.node_ref,
+            self.work_item.node_ref,
             if total_duration.is_zero() {
                 "".to_string()
             } else {
                 format!(" ({})", total_duration)
             },
-            self.status
+            self.status,
         )
     }
 }
@@ -157,8 +169,14 @@ impl FanoutWorkRequest {
     }
 }
 
-pub type FanoutWorkReceiver = flume::Receiver<NodeRef>;
-pub type FanoutWorkSender = flume::Sender<NodeRef>;
+#[derive(Debug, Clone)]
+pub struct FanoutWorkItem {
+    pub node_ref: NodeRef,
+    pub cancel_stop_token: StopToken,
+}
+
+pub type FanoutWorkReceiver = flume::Receiver<FanoutWorkItem>;
+pub type FanoutWorkSender = flume::Sender<FanoutWorkItem>;
 
 pub struct FanoutQueue<'a> {
     /// Name for debugging
@@ -178,6 +196,8 @@ pub struct FanoutQueue<'a> {
     work_request_receiver: flume::Receiver<FanoutWorkRequest>,
     /// Consensus count to use
     consensus_count: usize,
+    /// Number of nodes away from the key that can be considered for fanout operations
+    consensus_width: usize,
     /// Whether or not to stop handing out work when queue consensus is met
     /// Duration at which to start a new node when throttled
     opt_throttle_duration: Option<TimestampDuration>,
@@ -193,6 +213,7 @@ impl fmt::Debug for FanoutQueue<'_> {
             .field("work_request_sender", &self.work_request_sender)
             .field("work_request_receiver", &self.work_request_receiver)
             .field("consensus_count", &self.consensus_count)
+            .field("consensus_width", &self.consensus_width)
             .field("opt_throttle_duration", &self.opt_throttle_duration)
             .finish()
     }
@@ -220,6 +241,7 @@ impl<'a> FanoutQueue<'a> {
         crypto_kind: CryptoKind,
         node_sort: FanoutQueueSort<'a>,
         consensus_count: usize,
+        consensus_width: usize,
         opt_throttle_duration: Option<TimestampDuration>,
     ) -> Self {
         let (sender, receiver) = flume::unbounded();
@@ -233,6 +255,7 @@ impl<'a> FanoutQueue<'a> {
             work_request_sender: sender,
             work_request_receiver: receiver,
             consensus_count,
+            consensus_width,
             opt_throttle_duration,
         }
     }
@@ -268,11 +291,21 @@ impl<'a> FanoutQueue<'a> {
             if self.nodes.contains_key(&key) {
                 continue;
             }
+
+            // Create a cancellation token for the node,
+            // so we can stop processing the fanout lane immediately if needed
+            let cancel_stop_source = StopSource::new();
+            let cancel_stop_token = cancel_stop_source.token();
+
             // Add the new node
             self.nodes.insert(
                 key.clone(),
                 FanoutNode {
-                    node_ref: node_ref.clone(),
+                    work_item: FanoutWorkItem {
+                        node_ref: node_ref.clone(),
+                        cancel_stop_token,
+                    },
+                    cancel_stop_source: Some(cancel_stop_source),
                     status: FanoutNodeStatus::queued(cur_ts),
                 },
             );
@@ -351,11 +384,11 @@ impl<'a> FanoutQueue<'a> {
                         let request_ts = work_request.request_ts();
                         let work_sender = work_request.into_work_sender();
 
-                        let node_ref = node.node_ref.clone();
-                        if work_sender.send(node_ref).is_ok() {
+                        let work_item = node.work_item.clone();
+                        if work_sender.send(work_item).is_ok() {
                             // Queued -> InProgress
                             node.status.transition(FanoutNodeStage::InProgress, cur_ts);
-                            veilid_log!(registry debug "{}: Queue sent more work {} after request to {} => {}", self.name, cur_ts.duration_since(request_ts), lane_name, node.node_ref);
+                            veilid_log!(registry debug "{}: Queue sent more work {} after request to {} => {}", self.name, cur_ts.duration_since(request_ts), lane_name, node.work_item.node_ref);
                             break;
                         }
                     }
@@ -366,7 +399,7 @@ impl<'a> FanoutQueue<'a> {
                     if let Some(throttle_duration) = self.opt_throttle_duration {
                         let stage_duration = cur_ts.duration_since(node.status.transition_ts);
                         if stage_duration > throttle_duration {
-                            slow_nodes.push(node.node_ref.clone());
+                            slow_nodes.push(node.work_item.node_ref.clone());
                         } else {
                             // If we would like this node to finish before we allow consensus
                             // then we have to stop count here until it has reached the throttle duration
@@ -384,7 +417,7 @@ impl<'a> FanoutQueue<'a> {
                     }
 
                     // If this node was a slow node, remove it from the slow node list since we finished it
-                    slow_nodes.retain(|x| !x.same_entry(&node.node_ref));
+                    slow_nodes.retain(|x| !x.same_entry(&node.work_item.node_ref));
                 }
                 FanoutNodeStage::Timeout
                 | FanoutNodeStage::Rejected
@@ -392,7 +425,7 @@ impl<'a> FanoutQueue<'a> {
                     // Does not count toward consensus or stop counting it
 
                     // If this node was a slow node, remove it from the slow node list since we finished it
-                    slow_nodes.retain(|x| !x.same_entry(&node.node_ref));
+                    slow_nodes.retain(|x| !x.same_entry(&node.work_item.node_ref));
                 }
             }
         }
@@ -480,13 +513,16 @@ impl<'a> FanoutQueue<'a> {
         }
     }
 
-    /// Transition Queued -> Disqualified that are too far away from the record key
+    /// Transition InProgress | Queued -> Disqualified if they are too far away from the record key
     fn disqualify(&mut self, cur_ts: Timestamp) {
         let mut consecutive_rejections = 0usize;
         let mut rejected_consensus = false;
-        for node_id in &self.sorted_nodes {
+        for (index, node_id) in self.sorted_nodes.iter().enumerate() {
             let node = self.nodes.get_mut(node_id).unwrap_or_log();
-            if !rejected_consensus {
+
+            // If the node is finished already we don't have to consider it
+            if node.status.is_finished() {
+                // Count up consecutive rejections
                 if matches!(node.status.stage, FanoutNodeStage::Rejected) {
                     consecutive_rejections += 1;
                     if consecutive_rejections >= self.consensus_count {
@@ -496,9 +532,19 @@ impl<'a> FanoutQueue<'a> {
                 } else {
                     consecutive_rejections = 0;
                 }
-            } else if matches!(node.status.stage, FanoutNodeStage::Queued) {
+
+                continue;
+            }
+
+            // If the node is too far away from the key or we have had enough consecutive rejections,
+            // cancel it immediately and disqualify it
+            if (self.consensus_width > 0 && index >= self.consensus_width) || rejected_consensus {
                 node.status
                     .transition(FanoutNodeStage::Disqualified, cur_ts);
+                if let Some(css) = node.cancel_stop_source.take() {
+                    // Drop the stop source to force the lane to stop processing this node
+                    drop(css);
+                }
             }
         }
     }

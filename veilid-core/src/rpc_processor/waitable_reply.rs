@@ -10,6 +10,7 @@ pub(super) struct WaitableReplyContext {
     pub safety_route: Option<PublicKey>,
     pub remote_private_route: Option<PublicKey>,
     pub reply_private_route: Option<PublicKey>,
+    pub destination: Destination,
 }
 
 impl WaitableReplyContext {
@@ -34,11 +35,12 @@ impl WaitableReplyContext {
         };
 
         format!(
-            "timeout={} send_ts={} send_data_result={} node={}{}{}{}",
+            "timeout={} send_ts={} send_data_result={} node={} dest={}{}{}{}",
             self.timeout,
             self.send_ts,
             self.send_data_result,
             self.node_ref,
+            self.destination,
             if let Some(srstr) = opt_srstr {
                 format!("\nsafety_route={}", srstr)
             } else {

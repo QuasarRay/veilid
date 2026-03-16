@@ -1,7 +1,7 @@
 use super::*;
 
 use core::sync::atomic::{AtomicU64, Ordering};
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 
 type TickTaskRoutine<E> =
     dyn Fn(StopToken, u64, u64) -> PinBoxFutureStatic<Result<(), E>> + Send + Sync + 'static;
@@ -13,7 +13,7 @@ pub struct TickTask<E: Send + 'static> {
     name: String,
     last_timestamp_us: AtomicU64,
     tick_period_us: u64,
-    routine: OnceCell<Box<TickTaskRoutine<E>>>,
+    routine: OnceLock<Box<TickTaskRoutine<E>>>,
     stop_source: AsyncMutex<Option<StopSource>>,
     single_future: MustJoinSingleFuture<Result<(), E>>,
     running: Arc<AtomicBool>,
@@ -26,7 +26,7 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
             name: name.to_string(),
             last_timestamp_us: AtomicU64::new(0),
             tick_period_us,
-            routine: OnceCell::new(),
+            routine: OnceLock::new(),
             stop_source: AsyncMutex::new(None),
             single_future: MustJoinSingleFuture::new(),
             running: Arc::new(AtomicBool::new(false)),
@@ -38,7 +38,7 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
             name: name.to_string(),
             last_timestamp_us: AtomicU64::new(0),
             tick_period_us: (tick_period_ms as u64) * 1000u64,
-            routine: OnceCell::new(),
+            routine: OnceLock::new(),
             stop_source: AsyncMutex::new(None),
             single_future: MustJoinSingleFuture::new(),
             running: Arc::new(AtomicBool::new(false)),
@@ -50,7 +50,7 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
             name: name.to_string(),
             last_timestamp_us: AtomicU64::new(0),
             tick_period_us: (tick_period_sec as u64) * 1000000u64,
-            routine: OnceCell::new(),
+            routine: OnceLock::new(),
             stop_source: AsyncMutex::new(None),
             single_future: MustJoinSingleFuture::new(),
             running: Arc::new(AtomicBool::new(false)),

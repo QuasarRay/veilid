@@ -20,7 +20,7 @@ impl StorageManager {
 
     /// Encrypt value data if the record key contains an encryption key.
     /// Leave it unchanged otherwise.
-    pub(super) fn maybe_encrypt_value_data(
+    pub(super) async fn maybe_encrypt_value_data(
         &self,
         record_key: &RecordKey,
         value_data: &ValueData,
@@ -28,25 +28,30 @@ impl StorageManager {
         if let Some(encryption_key) = record_key.ref_value().ref_encryption_key() {
             let crypto = self.registry.crypto();
 
-            let Some(vcrypto) = crypto.get(record_key.kind()) else {
+            let Some(vcrypto) = crypto.get_async(record_key.kind()) else {
                 apibail_generic!("decrypt_value_data: unsupported crypto kind")
             };
 
-            let mut data = value_data.data().to_vec();
-            let nonce = vcrypto.random_nonce();
+            let nonce = vcrypto.random_nonce().await;
             let encryption_key = SharedSecret::new(record_key.kind(), encryption_key.clone());
-            vcrypto.crypt_in_place_no_auth(&mut data, &nonce, &encryption_key)?;
+
+            let in_data = value_data.data_bytes();
+            let out_data = BytesMut::zeroed(value_data.data_bytes().len());
+
+            let out_data = vcrypto
+                .crypt_b2b_no_auth(in_data, out_data, 0, &nonce, &encryption_key)
+                .await?;
 
             Ok(EncryptedValueData::new(
                 value_data.seq(),
-                data,
+                out_data.freeze(),
                 value_data.writer(),
                 Some(nonce),
             )?)
         } else {
             Ok(EncryptedValueData::new(
                 value_data.seq(),
-                value_data.data().to_vec(),
+                value_data.data_bytes(),
                 value_data.writer(),
                 None,
             )?)
@@ -56,7 +61,7 @@ impl StorageManager {
     /// Decrypt value data if the record key contains an encryption key and value data contains nonce.
     /// Leave data unchanged if both are none.
     /// Returns error if either encryption key or nonce is None.
-    pub(super) fn maybe_decrypt_value_data(
+    pub(super) async fn maybe_decrypt_value_data(
         &self,
         record_key: &RecordKey,
         encrypted_value_data: &EncryptedValueData,
@@ -68,22 +73,27 @@ impl StorageManager {
             (Some(encryption_key), Some(nonce)) => {
                 let crypto = self.registry.crypto();
 
-                let Some(vcrypto) = crypto.get(record_key.kind()) else {
+                let Some(vcrypto) = crypto.get_async(record_key.kind()) else {
                     apibail_generic!("cannot decrypt value data: unsupported crypto kind")
                 };
 
-                let mut data = encrypted_value_data.data().to_vec();
+                let data = encrypted_value_data.data().to_vec();
                 let encryption_key = SharedSecret::new(record_key.kind(), encryption_key.clone());
-                vcrypto.crypt_in_place_no_auth(&mut data, &nonce, &encryption_key)?;
+
+                let in_data = Bytes::from(data);
+                let out_data = BytesMut::zeroed(in_data.len());
+                let out_data = vcrypto
+                    .crypt_b2b_no_auth(in_data, out_data, 0, &nonce, &encryption_key)
+                    .await?;
                 Ok(ValueData::new_with_seq(
                     encrypted_value_data.seq(),
-                    data,
+                    out_data.freeze(),
                     encrypted_value_data.writer(),
                 )?)
             }
             (None, None) => Ok(ValueData::new_with_seq(
                 encrypted_value_data.seq(),
-                encrypted_value_data.data().to_vec(),
+                encrypted_value_data.data(),
                 encrypted_value_data.writer(),
             )?),
             (Some(_), None) => {

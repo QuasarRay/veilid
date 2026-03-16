@@ -134,58 +134,59 @@ impl Bucket {
         let mut dead_node_ids: BTreeSet<BareNodeId> = BTreeSet::new();
         let mut extra_entries = bucket_len - bucket_depth;
 
-        // Get the sorted list of entries by their kick order
-        let mut sorted_entries: Vec<(BareNodeId, Arc<BucketEntry>)> = self
-            .entries
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        // Get the sorted list of kickable entries by their kick order
+        // Pre-snapshot mutable fields to avoid total-ordering violations from
+        // concurrent updates between comparisons (Rust 1.81+ driftsort)
         let cur_ts = Timestamp::now();
+        let mut sorted_entries: Vec<(BareNodeId, Arc<BucketEntry>, BucketEntryState, Timestamp)> =
+            self.entries
+                .iter()
+                .filter(|(k, v)| {
+                    // Skip entries with active NodeRef references
+                    if v.ref_count.load(Ordering::Acquire) > 0 {
+                        return false;
+                    }
+                    // Skip exempt entries
+                    if exempt_peers.contains(k) {
+                        return false;
+                    }
+                    true
+                })
+                .map(|(k, v)| {
+                    let (state, time_added) =
+                        v.with(|e| (e.state(cur_ts), e.peer_stats().time_added));
+                    (k.clone(), v.clone(), state, time_added)
+                })
+                .collect();
         sorted_entries.sort_by(|a, b| -> core::cmp::Ordering {
             if a.0 == b.0 {
                 return core::cmp::Ordering::Equal;
             }
-            a.1.with_inner(|ea| {
-                b.1.with_inner(|eb| {
-                    let astate = ea.state(cur_ts).ordering();
-                    let bstate = eb.state(cur_ts).ordering();
-                    // first kick punished nodes, then dead nodes, then unreliable nodes
-                    if astate < bstate {
-                        return core::cmp::Ordering::Less;
-                    }
-                    if astate > bstate {
-                        return core::cmp::Ordering::Greater;
-                    }
-                    // then kick by time added, most recent nodes are kicked first
-                    let ata = ea.peer_stats().time_added;
-                    let bta = eb.peer_stats().time_added;
-                    bta.cmp(&ata)
-                })
-            })
+            let astate = a.2.ordering();
+            let bstate = b.2.ordering();
+            // first kick punished nodes, then dead nodes, then unreliable nodes
+            if astate < bstate {
+                return core::cmp::Ordering::Less;
+            }
+            if astate > bstate {
+                return core::cmp::Ordering::Greater;
+            }
+            // then kick by time added, most recent nodes are kicked first
+            b.3.cmp(&a.3)
         });
 
-        for entry in sorted_entries {
-            // If we're not evicting more entries, exit, noting this may be the newest entry
+        for (bare_node_id, entry, _, _) in sorted_entries {
+            // If we're not evicting more entries, exit
             if extra_entries == 0 {
                 break;
             }
             extra_entries -= 1;
 
-            // if this entry has NodeRef references we can't drop it yet
-            if entry.1.ref_count.load(Ordering::Acquire) > 0 {
-                continue;
-            }
-
-            // if this entry is one of our exempt entries, don't drop it
-            if exempt_peers.contains(&entry.0) {
-                continue;
-            }
-
             // if no references, lets evict it
-            dead_node_ids.insert(entry.0);
+            dead_node_ids.insert(bare_node_id);
 
             // And remove the node id from the entry
-            entry.1.with_mut_inner(|e| e.remove_node_id(self.kind));
+            entry.with_mut(|e| e.remove_node_id(self.kind));
         }
 
         // Now purge the dead node ids

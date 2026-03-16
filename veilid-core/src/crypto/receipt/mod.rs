@@ -53,12 +53,12 @@ impl Receipt {
         feature = "instrument",
         instrument(level = "trace", target = "envelope", skip_all, fields(__VEILID_LOG_KEY = crypto.log_key()))
     )]
-    pub fn try_new_rcp0<D: AsRef<[u8]>>(
+    pub fn try_new_rcp0(
         crypto: &Crypto,
         crypto_kind: CryptoKind,
         nonce: Nonce,
         sender_id: NodeId,
-        extra_data: D,
+        extra_data: Bytes,
     ) -> VeilidAPIResult<Self> {
         Ok(Self::RCP0 {
             rcp0: ReceiptRCP0::try_new(crypto, crypto_kind, nonce, sender_id, extra_data)?,
@@ -69,7 +69,7 @@ impl Receipt {
         feature = "instrument",
         instrument(level = "trace", target = "receipt", skip_all, err, fields(__VEILID_LOG_KEY = crypto.log_key()))
     )]
-    pub fn try_from_signed_data(crypto: &Crypto, data: &[u8]) -> VeilidAPIResult<Receipt> {
+    pub async fn try_from_signed_data(crypto: &Crypto, data: Bytes) -> VeilidAPIResult<Receipt> {
         // Ensure we are at least the length of the envelope
         if data.len() < 4 {
             apibail_parse_error!("receipt header too small", data.len());
@@ -82,7 +82,7 @@ impl Receipt {
 
         match version {
             RECEIPT_VERSION_RCP0 => Ok(Self::RCP0 {
-                rcp0: ReceiptRCP0::try_from_signed_data(crypto, data)?,
+                rcp0: ReceiptRCP0::try_from_signed_data(crypto, data).await?,
             }),
             _ => {
                 apibail_parse_error!("unsupported receipt version", version);
@@ -94,13 +94,13 @@ impl Receipt {
         feature = "instrument",
         instrument(level = "trace", target = "envelope", skip_all, fields(__VEILID_LOG_KEY = crypto.log_key()))
     )]
-    pub fn to_signed_data(
+    pub async fn to_signed_data(
         &self,
         crypto: &Crypto,
         secret_key: &SecretKey,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    ) -> VeilidAPIResult<Bytes> {
         match self {
-            Receipt::RCP0 { rcp0 } => rcp0.to_signed_data(crypto, secret_key),
+            Receipt::RCP0 { rcp0 } => rcp0.to_signed_data(crypto, secret_key).await,
         }
     }
 
@@ -143,16 +143,16 @@ pub struct ReceiptRCP0 {
     crypto_kind: CryptoKind,
     nonce: Nonce,
     bare_sender_id: BareNodeId,
-    extra_data: Vec<u8>,
+    extra_data: Bytes,
 }
 
 impl ReceiptRCP0 {
-    pub fn try_new<D: AsRef<[u8]>>(
+    pub fn try_new(
         crypto: &Crypto,
         crypto_kind: CryptoKind,
         nonce: Nonce,
         sender_id: NodeId,
-        extra_data: D,
+        extra_data: Bytes,
     ) -> VeilidAPIResult<Self> {
         let vcrypto = Self::validate_crypto_kind(crypto, crypto_kind)?;
 
@@ -170,7 +170,7 @@ impl ReceiptRCP0 {
             crypto_kind,
             nonce,
             bare_sender_id: sender_id.value(),
-            extra_data: Vec::from(extra_data.as_ref()),
+            extra_data,
         })
     }
 
@@ -178,7 +178,7 @@ impl ReceiptRCP0 {
         feature = "instrument",
         instrument(level = "trace", target = "receipt", skip_all, err, fields(__VEILID_LOG_KEY = crypto.log_key()))
     )]
-    pub fn try_from_signed_data(crypto: &Crypto, data: &[u8]) -> VeilidAPIResult<Self> {
+    pub async fn try_from_signed_data(crypto: &Crypto, data: Bytes) -> VeilidAPIResult<Self> {
         // Ensure we are at least the length of the envelope
         if data.len() < RCP0_MIN_RECEIPT_SIZE {
             apibail_parse_error!("receipt too small", data.len());
@@ -186,7 +186,7 @@ impl ReceiptRCP0 {
 
         // Check crypto kind
         let crypto_kind = CryptoKind::try_from(&data[0x04..0x08])?;
-        let vcrypto = Self::validate_crypto_kind(crypto, crypto_kind)?;
+        let vcrypto = Self::validate_crypto_kind(crypto, crypto_kind)?.as_async();
 
         // Get size and ensure it matches the size of the envelope and is less than the maximum message size
         let size: u16 = u16::from_le_bytes(
@@ -223,7 +223,12 @@ impl ReceiptRCP0 {
 
         // Validate signature
         if !vcrypto
-            .verify(&sender_public_key, &data[0..(data.len() - 64)], &signature)
+            .verify(
+                &sender_public_key,
+                data.slice(0..(data.len() - 64)),
+                &signature,
+            )
+            .await
             .map_err(VeilidAPIError::generic)?
         {
             apibail_parse_error!("signature failure in receipt", signature);
@@ -237,7 +242,7 @@ impl ReceiptRCP0 {
         );
 
         // Get extra data and signature
-        let extra_data: Vec<u8> = Vec::from(&data[0x42..(data.len() - 64)]);
+        let extra_data = Bytes::copy_from_slice(&data[0x42..(data.len() - 64)]);
 
         // Return receipt
         Ok(Self {
@@ -252,13 +257,13 @@ impl ReceiptRCP0 {
         feature = "instrument",
         instrument(level = "trace", target = "receipt", skip_all, err, fields(__VEILID_LOG_KEY = crypto.log_key()))
     )]
-    pub fn to_signed_data(
+    pub async fn to_signed_data(
         &self,
         crypto: &Crypto,
         secret_key: &SecretKey,
-    ) -> VeilidAPIResult<Vec<u8>> {
+    ) -> VeilidAPIResult<Bytes> {
         let vcrypto = crypto
-            .get(self.crypto_kind)
+            .get_async(self.crypto_kind)
             .expect_or_log("need to ensure only valid crypto kinds here");
         vcrypto.check_secret_key(secret_key)?;
 
@@ -268,7 +273,7 @@ impl ReceiptRCP0 {
             apibail_parse_error!("receipt too large", receipt_size);
         }
 
-        let mut data: Vec<u8> = vec![0u8; receipt_size];
+        let mut data = BytesMut::zeroed(receipt_size);
 
         // Write version
         data[0x00..0x04].copy_from_slice(&RECEIPT_VERSION_RCP0.0);
@@ -282,23 +287,25 @@ impl ReceiptRCP0 {
         data[0x22..0x42].copy_from_slice(&self.bare_sender_id);
         // Write extra data
         if !self.extra_data.is_empty() {
-            data[0x42..(receipt_size - RCP0_SIGNATURE_LENGTH)]
-                .copy_from_slice(self.extra_data.as_slice());
+            data[0x42..(receipt_size - RCP0_SIGNATURE_LENGTH)].copy_from_slice(&self.extra_data);
         }
+
         // Sign the receipt
         let sender_public_key =
             PublicKey::new(self.crypto_kind, BarePublicKey::new(&self.bare_sender_id));
-        let signature = vcrypto
-            .sign(
+
+        let data = vcrypto
+            .sign_in_place(
                 &sender_public_key,
                 secret_key,
-                &data[0..(receipt_size - RCP0_SIGNATURE_LENGTH)],
+                data,
+                0..(receipt_size - RCP0_SIGNATURE_LENGTH),
+                receipt_size - RCP0_SIGNATURE_LENGTH,
             )
+            .await
             .map_err(VeilidAPIError::generic)?;
-        // Append the signature
-        data[(receipt_size - 64)..].copy_from_slice(signature.ref_value());
 
-        Ok(data)
+        Ok(data.freeze())
     }
 
     pub fn get_crypto_kind(&self) -> CryptoKind {

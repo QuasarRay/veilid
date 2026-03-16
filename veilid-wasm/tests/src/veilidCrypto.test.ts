@@ -8,6 +8,7 @@ import {
 
 import { veilidClient, veilidCrypto } from 'veilid-wasm';
 import { textEncoder, unmarshallBytes } from './utils/marshalling-utils';
+import { getLogTimestamp } from './utils/wait-utils';
 
 describe('veilidCrypto', () => {
   before('veilid startup', async () => {
@@ -15,7 +16,8 @@ describe('veilidCrypto', () => {
     await veilidClient.startupCore((_update) => {
       if (DEBUGGING) {
         if (_update.kind === 'Log') {
-          console.log(_update.message);
+          const logTimestamp = getLogTimestamp()
+          console.log(`${logTimestamp}: ${_update.message}`);
         }
       }
     }, veilidCoreStartupConfig);

@@ -13,9 +13,13 @@ impl RPCOperationFindBlockQ {
     pub fn new(block_id: PublicKey) -> Self {
         Self { block_id }
     }
-    pub fn validate(&self, _validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     _validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn block_id(&self) -> PublicKey {
         self.block_id
@@ -79,9 +83,13 @@ impl RPCOperationFindBlockA {
             peers,
         })
     }
-    pub fn validate(&self, validate_context: &RPCValidateContext) -> Result<(), RPCError> {
-        Ok(())
-    }
+
+    // pub async fn validate(
+    //     &self,
+    //     validate_context: &RPCValidateContext<'_>,
+    // ) -> Result<(), RPCError> {
+    //     Ok(())
+    // }
 
     pub fn data(&self) -> &[u8] {
         &self.data
