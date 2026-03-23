@@ -486,9 +486,7 @@ class VeilidAPI(ABC):
     @abstractmethod
     async def new_custom_private_route(
         self,
-        kinds: list[types.CryptoKind],
-        stability: types.Stability,
-        sequencing: types.Sequencing,
+        private_spec: types.PrivateSpec,
     ) -> types.RouteBlob:
         pass
 

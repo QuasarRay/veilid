@@ -80,17 +80,14 @@ impl OutboundTransactionKeepaliveDeadlines {
 
     /// Cancel all scheduled deadlines for a transaction and mark it cancelled so
     /// completing in-flight RPCs will not reschedule new ones.
-    fn remove_transaction(&mut self, transaction_handle: &OutboundTransactionHandle) {
-        let mut empty_timestamps = vec![];
-        for (ts, entries) in self.deadlines.iter_mut() {
+    fn cancel_deadlines(&mut self, transaction_handle: &OutboundTransactionHandle) {
+        // Remove deadlines associated with this transaction handle
+        self.deadlines.retain(|_ts, entries| {
             entries.retain(|keepalive| &keepalive.transaction_handle != transaction_handle);
-            if entries.is_empty() {
-                empty_timestamps.push(*ts);
-            }
-        }
-        for ts in empty_timestamps {
-            self.deadlines.remove(&ts);
-        }
+            !entries.is_empty()
+        });
+
+        // Mark the transaction as cancelled so new deadlines are not scheduled
         self.cancelled.insert(transaction_handle.clone());
     }
 
@@ -203,9 +200,7 @@ impl OutboundTransactionKeepaliveProcessor {
     /// Must always be paired with a later call to `cleanup_transaction` to free
     /// the handle from the cancelled set; this is done by `process_transaction_cleanup`.
     pub fn unregister(&self, transaction_handle: OutboundTransactionHandle) {
-        self.deadlines
-            .lock()
-            .remove_transaction(&transaction_handle);
+        self.deadlines.lock().cancel_deadlines(&transaction_handle);
     }
 
     /// Release all tracking state for a transaction after commit or rollback.

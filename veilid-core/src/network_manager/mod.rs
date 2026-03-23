@@ -1283,11 +1283,16 @@ impl NetworkManager {
                 match rpc
                     .resolve_node(
                         recipient_id.clone(),
-                        SafetySelection::Unsafe(Sequencing::default()),
+                        SafetySelection::Unsafe(Sequencing::NoPreference),
                     )
                     .await
                 {
-                    Ok(v) => v.map(|nr| (nr.default_filtered(), RelayKind::Outbound)),
+                    Ok(v) => v.map(|nr| {
+                        (
+                            nr.sequencing_filtered(Sequencing::NoPreference),
+                            RelayKind::Outbound,
+                        )
+                    }),
                     Err(e) => {
                         veilid_log!(self debug "failed to resolve recipient node for relay, dropping relayed envelope: {}" ,e);
                         return Ok(false);
@@ -1313,7 +1318,12 @@ impl NetworkManager {
                 // should be mutually in each others routing tables. The node needing the relay will be
                 // pinging this node regularly to keep itself in the routing table
                 match routing_table.lookup_node_id(recipient_id) {
-                    Ok(v) => v.map(|nr| (nr.default_filtered(), RelayKind::Inbound)),
+                    Ok(v) => v.map(|nr| {
+                        (
+                            nr.sequencing_filtered(Sequencing::NoPreference),
+                            RelayKind::Inbound,
+                        )
+                    }),
                     Err(e) => {
                         veilid_log!(self debug "failed to look up recipient node for relay, dropping relayed envelope: {}" ,e);
                         return Ok(false);

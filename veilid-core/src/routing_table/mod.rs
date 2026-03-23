@@ -327,6 +327,10 @@ impl RoutingTable {
         }
         veilid_log!(self debug "finished starting routing domain controllers");
 
+        // Update routing table health now that routing domains are started, the rest will happen in the ticker
+        //   - Reset all the routing domain low water marks to the value at startup
+        self.refresh_summaries(RoutingDomainSet::all());
+
         // Start ping validation processor
         veilid_log!(self debug "starting ping validation processor");
         let rx = self
@@ -389,6 +393,10 @@ impl RoutingTable {
             rdc.shutdown().await;
         }
         veilid_log!(self debug "finished shutting down routing domain controllers");
+
+        // Update routing table health now that routing domains are shut down
+        //   - Don't change the low water marks at all
+        self.refresh_summaries(RoutingDomainSet::empty());
 
         guard.success();
     }
@@ -498,12 +506,6 @@ impl RoutingTable {
             }
         }
         false
-    }
-
-    fn reset_low_water_mark(&self, routing_domain: RoutingDomain) {
-        let rdc = self.get_routing_domain_controller(routing_domain);
-        let rdd = rdc.read();
-        rdd.reset_low_water_mark();
     }
 
     #[cfg(not(test))]

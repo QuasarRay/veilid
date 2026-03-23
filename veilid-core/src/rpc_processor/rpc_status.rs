@@ -73,11 +73,8 @@ impl RPCProcessor {
         // Note what kind of ping this was and to what peer scope
         let send_data_method = waitable_reply.context.send_data_result.clone();
 
-        // Keep the reply private route that was used to return with the answer
-        let reply_private_route = waitable_reply.context.reply_private_route.clone();
-
         // Wait for reply
-        let (msg, latency) = match self.wait_for_reply(waitable_reply, debug_string).await? {
+        let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {
             TimeoutOr::Timeout => return Ok(NetworkResult::Timeout),
             TimeoutOr::Value(v) => v,
         };
@@ -150,8 +147,7 @@ impl RPCProcessor {
             }
         };
         Ok(NetworkResult::value(Answer::new(
-            latency,
-            reply_private_route,
+            answer_context,
             StatusResult {
                 opt_sender_info,
                 opt_previous_sender_info,

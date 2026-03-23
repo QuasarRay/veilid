@@ -265,7 +265,9 @@ impl RoutingDomainEditorCommonTrait for RoutingDomainEditorPublicInternet<'_> {
         let changed = rdc.publish_peer_info();
         if changed {
             // Clear the routespecstore cache if our PublicInternet dial info has changed
-            self.routing_table.route_spec_store().reset_cache();
+            self.routing_table
+                .route_spec_store()
+                .report_peer_info_changed();
         }
     }
 
@@ -278,7 +280,9 @@ impl RoutingDomainEditorCommonTrait for RoutingDomainEditorPublicInternet<'_> {
         rdc.unpublish_peer_info();
 
         // Clear the routespecstore cache on unpublish
-        self.routing_table.route_spec_store().reset_cache();
+        self.routing_table
+            .route_spec_store()
+            .report_peer_info_changed();
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]

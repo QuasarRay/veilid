@@ -1,20 +1,22 @@
 import { VeilidWASMConfig, veilidClient, } from 'veilid-wasm';
 
-export const DEBUGGING = process.env.DEBUG == "1" || process.env.DEBUG == "true";
+export const LOG_LEVEL = (process.env.LOG_LEVEL == "info" || process.env.INFO == "1" || process.env.INFO == "true") ? "Info" : (process.env.LOG_LEVEL == "debug" || process.env.DEBUG == "1" || process.env.DEBUG == "true") ? "Debug" : "Off";
+export const DEBUG = process.env.LOG_LEVEL == "debug" || process.env.DEBUG == "1" || process.env.DEBUG == "true";
+export const STRESS = process.env.STRESS == "1" || process.env.STRESS == "true";
 
 export const veilidCoreInitConfig: VeilidWASMConfig = {
   logging: {
     api: {
-      enabled: !DEBUGGING,
+      enabled: LOG_LEVEL === "Off",
       level: "Info",
-      ignoreLogTargets: [],
     },
     performance: {
-      enabled: DEBUGGING,
-      level: DEBUGGING ? "Debug" : "Info",
-      logsInTimings: false,
-      logsInConsole: DEBUGGING ? "NoColor" : "Off",
-      ignoreLogTargets: DEBUGGING ? ["-veilid_api", "-dht", "-fanout", "-network_result" /*, "-rpc_message"*/] : [""],
+      enabled: LOG_LEVEL !== "Off",
+      level: LOG_LEVEL,
+      console: {
+        enabled: true,
+      },
+      directives: LOG_LEVEL == "Debug" ? ["veilid_api=debug", "dht=debug", "fanout=debug", "network_result=debug" /*, "rpc_message=debug"*/] : [""],
     },
   },
 };

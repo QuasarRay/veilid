@@ -34,9 +34,9 @@ pub(in crate::storage_manager) struct OutboundTransactionState {
     #[serde(skip)]
     #[serde(default = "default_operation_concurrency")]
     operation_concurrency: Arc<AsyncSemaphore>,
-    /// Safety routes locked during this transaction
+    /// Routes locked during this transaction
     #[serde(skip)]
-    locked_safety_routes: LockedSafetyRoutes,
+    locked_routes: Option<LockedRoutes>,
 }
 
 fn default_operation_concurrency() -> Arc<AsyncSemaphore> {
@@ -78,8 +78,8 @@ impl Drop for OutboundTransactionState {
             eprintln!("BUG: OutboundTransactionState dropped without registry");
             return;
         }
-        if !self.locked_safety_routes.is_empty() {
-            veilid_log!(self error "OutboundTransactionState dropped with {} locked safety routes still held", self.locked_safety_routes.len());
+        if let Some(lsr) = &self.locked_routes {
+            veilid_log!(self error "OutboundTransactionState dropped with {} locked safety routes still held", lsr.len());
         }
         let active_bg = self
             .background_tokens
@@ -102,7 +102,7 @@ impl OutboundTransactionState {
             operation_concurrency: Arc::new(AsyncSemaphore::new(
                 PER_TRANSACTION_OPERATION_CONCURRENCY,
             )),
-            locked_safety_routes: LockedSafetyRoutes::new(),
+            locked_routes: None,
         }
     }
 
@@ -286,19 +286,29 @@ impl OutboundTransactionState {
                 MaybeDone::Done(_) | MaybeDone::Gone => None,
             })
             .collect();
-        let locked_safety_routes = std::mem::take(&mut self.locked_safety_routes);
-        TransactionCleanup {
-            transaction_handle,
-            background_tokens,
-            locked_safety_routes,
-        }
+
+        let storage_manager = self.storage_manager();
+        storage_manager
+            .outbound_transaction_keepalive_processor
+            .unregister(transaction_handle.clone());
+        storage_manager
+            .outbound_transaction_keepalive_processor
+            .cleanup_transaction(transaction_handle);
+
+        drop(std::mem::take(&mut self.locked_routes));
+
+        TransactionCleanup::new(background_tokens)
     }
 
     pub fn get_operation_concurrency_semaphore(&self) -> Arc<AsyncSemaphore> {
         self.operation_concurrency.clone()
     }
 
-    pub fn add_locked_safety_routes(&mut self, locked_safety_routes: LockedSafetyRoutes) {
-        self.locked_safety_routes.merge(locked_safety_routes);
+    pub fn add_locked_routes(&mut self, mut locked_routes: LockedRoutes) {
+        if let Some(self_locked_routes) = self.locked_routes.as_mut() {
+            self_locked_routes.take_from(&mut locked_routes);
+        } else {
+            self.locked_routes = Some(locked_routes);
+        }
     }
 }

@@ -40,18 +40,16 @@ pub struct CompiledRoute {
 
 /// Internal parameters for building route hops, shared between optimized and unoptimized compilation
 struct RouteCompileContext {
+    /// The public key of the safety route
     sr_pubkey: PublicKey,
+    /// The first hop in the compiled route filtered to the safety selection it was compiled with
     first_hop: FilteredNodeRef,
+    /// The secret for the safety route
     secret: SecretKey,
+    /// The node refs of the hops in the safety route
     hop_node_refs: Vec<NodeRef>,
-}
-
-/// Result of checking a cached compiled route for usability
-enum CacheHitAction {
-    /// Return the cached route as-is
-    UseCached(Arc<CompiledRoute>),
-    /// Cached route is stale or upgradeable, recompile needed
-    Recompile,
+    /// Whether this compiled route can be built with optimized hop encoding (NodeId only vs full PeerInfo)
+    optimize: bool,
 }
 
 impl RouteSpecStore {
@@ -62,134 +60,43 @@ impl RouteSpecStore {
         sr_pubkey: PublicKey,
         safety_spec: &SafetySpec,
     ) -> VeilidAPIResult<RouteCompileContext> {
-        let inner = self.inner.read();
+        let cache = self.cache.read();
 
-        let Some(safety_rssd) = inner.content.get_detail(safety_route_id) else {
-            apibail_internal!("safety route set detail missing");
-        };
-        let Some(safety_rsd) = safety_rssd.get_route_by_key(&sr_pubkey) else {
-            apibail_internal!("safety route detail missing");
+        let Some(safety_arce) = cache.get_allocated_route_by_id(safety_route_id) else {
+            apibail_internal!("safety route not in cache");
         };
 
         // Get the first hop noderef of the safety route
-        let first_hop = safety_rssd.hop_node_ref(0).unwrap_or_log();
+        let first_hop = safety_arce.hop_node_ref(0).unwrap_or_log();
 
         // Ensure sequencing requirement is set on first hop
-        let mut first_hop = first_hop.default_filtered_with_sequencing(safety_spec.sequencing);
+        let mut first_hop = first_hop.sequencing_filtered(safety_spec.sequencing);
 
         // Enforce the routing domain
         first_hop
             .merge_filter(NodeRefFilter::new().with_routing_domain(RoutingDomain::PublicInternet));
 
-        let secret = safety_rsd.secret_key.clone();
-        let hop_node_refs = safety_rssd.hop_node_refs();
+        let secret = safety_arce.route_set_secret_for_key(&sr_pubkey)?;
+
+        let optimize = safety_arce.with_stats(|stats| stats.last_known_valid_ts.is_some());
+
+        let hop_node_refs = safety_arce.hop_node_refs();
 
         Ok(RouteCompileContext {
             sr_pubkey,
             first_hop,
             secret,
             hop_node_refs,
+            optimize,
         })
     }
 
-    /// Check if a safety route has been validated and can use optimized hop encoding
-    fn is_safety_route_optimizable(&self, safety_route_id: &RouteId) -> bool {
-        let inner = self.inner.read();
-        let Some(safety_rssd) = inner.content.get_detail(safety_route_id) else {
-            return false;
-        };
-        safety_rssd.with_stats(|stats| stats.last_known_valid_ts.is_some())
-    }
-
-    /// Check a cached compiled route and determine if it can be used as-is or needs recompilation.
-    /// If the cached route is unoptimized but the safety route has since been validated,
-    /// removes the stale cache entry and signals recompilation.
-    fn check_compiled_route_cache_hit(
-        &self,
-        compiled_route: Arc<CompiledRoute>,
-        cache_key: &CompiledRouteCacheKey,
-    ) -> CacheHitAction {
-        if compiled_route.optimized {
-            return CacheHitAction::UseCached(compiled_route);
-        }
-
-        // Unoptimized cached route — check if the safety route has since been validated
-        let should_recompile = {
-            let inner = self.inner.read();
-            match inner
-                .content
-                .get_id_by_key(&compiled_route.safety_route.public_key)
-            {
-                None => {
-                    // Safety route no longer exists
-                    true
-                }
-                Some(safety_route_id) => {
-                    match inner.content.get_detail(&safety_route_id) {
-                        None => true,
-                        Some(safety_rssd) => {
-                            // Upgrade to optimized if route has been validated
-                            safety_rssd.with_stats(|stats| stats.last_known_valid_ts.is_some())
-                        }
-                    }
-                }
-            }
-        };
-
-        if should_recompile {
-            self.remove_from_compiled_route_cache(cache_key);
-            CacheHitAction::Recompile
-        } else {
-            CacheHitAction::UseCached(compiled_route)
-        }
-    }
-
-    /// Build route hops with optimized encoding (NodeId only, no PeerInfo)
-    async fn compile_optimized_route(
-        &self,
+    /// Build the encrypted hop chain
+    async fn compile_route_inner(
+        routing_table: &RoutingTable,
         params: &CompileRouteParams,
         ctx: RouteCompileContext,
     ) -> VeilidAPIResult<Arc<CompiledRoute>> {
-        let hops = self.build_route_hops(params, &ctx, true).await?;
-
-        Ok(Arc::new(CompiledRoute {
-            safety_route: Arc::new(SafetyRoute {
-                public_key: ctx.sr_pubkey,
-                hops,
-            }),
-            secret: ctx.secret,
-            first_hop: ctx.first_hop,
-            optimized: true,
-        }))
-    }
-
-    /// Build route hops with unoptimized encoding (full PeerInfo for each hop)
-    async fn compile_unoptimized_route(
-        &self,
-        params: &CompileRouteParams,
-        ctx: RouteCompileContext,
-    ) -> VeilidAPIResult<Arc<CompiledRoute>> {
-        let hops = self.build_route_hops(params, &ctx, false).await?;
-
-        Ok(Arc::new(CompiledRoute {
-            safety_route: Arc::new(SafetyRoute {
-                public_key: ctx.sr_pubkey,
-                hops,
-            }),
-            secret: ctx.secret,
-            first_hop: ctx.first_hop,
-            optimized: false,
-        }))
-    }
-
-    /// Build the encrypted hop chain for a safety route
-    async fn build_route_hops(
-        &self,
-        params: &CompileRouteParams,
-        ctx: &RouteCompileContext,
-        optimize: bool,
-    ) -> VeilidAPIResult<SafetyRouteHops> {
-        let routing_table = self.routing_table();
         let crypto_kind = params.private_route.crypto_kind();
         let crypto = routing_table.crypto();
         let Some(vcrypto) = crypto.get_async(crypto_kind) else {
@@ -293,7 +200,7 @@ impl RouteSpecStore {
 
                 // Make route hop
                 let route_hop = RouteHop {
-                    node: if optimize {
+                    node: if ctx.optimize {
                         // Optimized, no peer info, just the dht key
                         RouteNode::NodeId(hop_node_id)
                     } else {
@@ -337,7 +244,17 @@ impl RouteSpecStore {
             blob: enc_blob_data.freeze(),
         };
 
-        Ok(SafetyRouteHops::Data(route_hop_data))
+        let hops = SafetyRouteHops::Data(route_hop_data);
+
+        Ok(Arc::new(CompiledRoute {
+            safety_route: Arc::new(SafetyRoute {
+                public_key: ctx.sr_pubkey,
+                hops,
+            }),
+            secret: ctx.secret,
+            first_hop: ctx.first_hop,
+            optimized: ctx.optimize,
+        }))
     }
 
     /// Compiles a safety route to the private route, with caching
@@ -365,23 +282,18 @@ impl RouteSpecStore {
         &self,
         params: &CompileRouteParams,
     ) -> VeilidAPIResult<Arc<CompiledRoute>> {
+        #[cfg(feature = "verbose-tracing")]
         let profile_start_ts = Timestamp::now();
         let compiled_route_cache_key: CompiledRouteCacheKey = params.into();
 
         let opt_compile_lock = {
+            let cache = self.cache.read();
             if let Some(compiled_route) =
-                self.lookup_compiled_route_cache(&compiled_route_cache_key)
+                cache.lookup_compiled_route_cache(&compiled_route_cache_key)
             {
-                match self.check_compiled_route_cache_hit(compiled_route, &compiled_route_cache_key)
-                {
-                    CacheHitAction::UseCached(compiled_route) => {
-                        veilid_log!(self trace "compile_route profile (fast path cached): {}", Timestamp::now().duration_since(profile_start_ts));
-                        return Ok(compiled_route);
-                    }
-                    CacheHitAction::Recompile => {
-                        // Fall through to recompile
-                    }
-                }
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self trace "compile_route profile (fast path cached): {}", Timestamp::now().duration_since(profile_start_ts));
+                return Ok(compiled_route);
             }
             self.compile_lock_table
                 .try_lock_tag(compiled_route_cache_key.clone())
@@ -403,20 +315,13 @@ impl RouteSpecStore {
                 .await;
 
             // Check again due to race condition on route cache
+            let cache = self.cache.read();
             if let Some(compiled_route) =
-                self.lookup_compiled_route_cache(&compiled_route_cache_key)
+                cache.lookup_compiled_route_cache(&compiled_route_cache_key)
             {
-                match self.check_compiled_route_cache_hit(compiled_route, &compiled_route_cache_key)
-                {
-                    CacheHitAction::UseCached(compiled_route) => {
-                        #[cfg(feature = "verbose-tracing")]
-                        veilid_log!(self debug "compile_route profile (slow path cached): {}", Timestamp::now().duration_since(profile_start_ts));
-                        return Ok(compiled_route);
-                    }
-                    CacheHitAction::Recompile => {
-                        // Fall through to recompile
-                    }
-                }
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self debug "compile_route profile (slow path cached): {}", Timestamp::now().duration_since(profile_start_ts));
+                return Ok(compiled_route);
             }
 
             compile_lock
@@ -456,7 +361,7 @@ impl RouteSpecStore {
                 };
 
                 // Set sequencing requirement
-                let mut first_hop = first_hop.default_filtered_with_sequencing(*sequencing);
+                let mut first_hop = first_hop.sequencing_filtered(*sequencing);
 
                 // Enforce the routing domain
                 first_hop.merge_filter(
@@ -475,7 +380,7 @@ impl RouteSpecStore {
                 });
 
                 // Cache the compiled route stub
-                self.add_to_compiled_route_cache(
+                self.cache.read().add_to_compiled_route_cache(
                     compiled_route_cache_key,
                     stub_compiled_route.clone(),
                 )?;
@@ -488,8 +393,8 @@ impl RouteSpecStore {
 
         // If the safety route requested is also the private route, this is a loopback test, just accept it
         let opt_safety_route_id_and_public_key = {
-            let inner = self.inner.read();
-            let opt_private_route_id = inner.content.get_id_by_key(&pr_pubkey);
+            let cache = self.cache.read();
+            let opt_private_route_id = cache.get_allocated_route_id_by_key(&pr_pubkey);
 
             if safety_spec.preferred_route.is_some()
                 && safety_spec.preferred_route == opt_private_route_id
@@ -502,7 +407,7 @@ impl RouteSpecStore {
                         // Symmetric routing: Use the reply private route as the safety route
                         // XXX: add a safety selection switch to use asymmetric routes
                         let Some(reply_private_route_id) =
-                            inner.content.get_id_by_key(pr_public_key)
+                            cache.get_allocated_route_id_by_key(pr_public_key)
                         else {
                             apibail_generic!("safety route id missing");
                         };
@@ -525,15 +430,18 @@ impl RouteSpecStore {
                 };
                 let select_params = RouteSelectParams {
                     crypto_kind,
-                    safety_spec: safety_spec.clone(),
+                    preferred_route: safety_spec.preferred_route.clone(),
+                    hop_count: safety_spec.hop_count,
+                    stability: safety_spec.stability,
+                    sequencing: safety_spec.sequencing,
                     directions: Direction::Out.into(),
                     avoid_nodes: vec![avoid_node_id],
                     is_destination_safe: !params.private_route.is_stub(),
                 };
 
-                let RouteIdAndPublicKeys {
+                let RouteIdAndKeys {
                     route_id,
-                    public_keys,
+                    route_set_keys: public_keys,
                 } = self.select_single_route(select_params).await?;
                 (route_id, public_keys.get(crypto_kind).unwrap())
             };
@@ -541,20 +449,18 @@ impl RouteSpecStore {
         // Get the compile context (shared state for both optimized and unoptimized paths)
         let ctx = self.get_route_compile_context(&safety_route_id, sr_pubkey, safety_spec)?;
 
-        // Check if the route can use optimized hop encoding
-        let optimize = self.is_safety_route_optimizable(&safety_route_id);
+        #[cfg(feature = "verbose-tracing")]
+        let optimize = ctx.optimize;
 
         // Compile using the appropriate method
-        let compiled_route = if optimize {
-            self.compile_optimized_route(params, ctx).await?
-        } else {
-            self.compile_unoptimized_route(params, ctx).await?
-        };
+        let compiled_route = Self::compile_route_inner(&routing_table, params, ctx).await?;
 
         // Always cache the compiled route (both optimized and unoptimized)
         // Unoptimized routes are cached to pin the safety route selection,
         // and will be upgraded to optimized on cache hit once validated
-        self.add_to_compiled_route_cache(compiled_route_cache_key, compiled_route.clone())?;
+        self.cache
+            .read()
+            .add_to_compiled_route_cache(compiled_route_cache_key, compiled_route.clone())?;
 
         // Release compile lock (doing this explicitly here for clarity)
         drop(compile_lock);
@@ -562,6 +468,7 @@ impl RouteSpecStore {
         // Return compiled route
         #[cfg(feature = "verbose-tracing")]
         veilid_log!(self debug "compile_route profile (uncached{}): {}", if optimize { "" } else { " unoptimized" }, Timestamp::now().duration_since(profile_start_ts));
+
         Ok(compiled_route)
     }
 }

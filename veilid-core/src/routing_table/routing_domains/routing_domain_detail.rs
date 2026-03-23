@@ -61,11 +61,11 @@ pub trait RoutingDomainDetail:
     fn add_bootstrap_peer(&self, bootstrap_peer: NodeRef);
 
     /// Update the low water mark of nodes since the last peer minimum refresh
-    fn update_low_water_mark(&self, low_water_mark: RoutingDomainLowWaterMark);
+    fn update_low_water_mark(&self, low_water_mark: Arc<LowWaterMark>);
     /// Reset the low water mark of nodes, will be set on the next update
     fn reset_low_water_mark(&self);
     /// Get the low water mark of nodes at the time of the last peer minimum refresh
-    fn get_low_water_mark(&self) -> RoutingDomainLowWaterMark;
+    fn get_low_water_mark(&self) -> Arc<LowWaterMark>;
 
     /// Return the last set of entry summary for this domain
     fn get_entry_summary(&self) -> Arc<EntrySummary>;

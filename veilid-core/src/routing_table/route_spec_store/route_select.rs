@@ -3,7 +3,10 @@ use super::*;
 #[derive(Clone, Debug)]
 pub struct RouteSelectParams {
     pub crypto_kind: CryptoKind,
-    pub safety_spec: SafetySpec,
+    pub preferred_route: Option<RouteId>,
+    pub hop_count: usize,
+    pub stability: Stability,
+    pub sequencing: Sequencing,
     pub directions: DirectionSet,
     pub avoid_nodes: Vec<NodeId>,
     pub is_destination_safe: bool,
@@ -21,9 +24,9 @@ struct FirstAvailableRouteParams {
 }
 
 #[derive(Clone, Debug)]
-pub struct RouteIdAndPublicKeys {
+pub struct RouteIdAndKeys {
     pub route_id: RouteId,
-    pub public_keys: PublicKeyGroup,
+    pub route_set_keys: PublicKeyGroup,
 }
 
 impl RouteSpecStore {
@@ -36,57 +39,56 @@ impl RouteSpecStore {
     pub async fn select_single_route(
         &self,
         mut params: RouteSelectParams,
-    ) -> VeilidAPIResult<RouteIdAndPublicKeys> {
+    ) -> VeilidAPIResult<RouteIdAndKeys> {
         // Ensure the total hop count isn't too long for our config
-        if params.safety_spec.hop_count == 0 {
+        if params.hop_count == 0 {
             apibail_invalid_argument!(
                 "safety route hop count is zero",
-                "safety_spec.hop_count",
-                params.safety_spec.hop_count
+                "hop_count",
+                params.hop_count
             );
         }
 
-        if params.safety_spec.hop_count > self.get_max_route_hop_count() {
+        if params.hop_count > self.get_max_route_hop_count() {
             apibail_invalid_argument!(
                 "safety route hop count too long",
-                "safety_spec.hop_count",
-                params.safety_spec.hop_count
+                "hop_count",
+                params.hop_count
             );
         }
 
         // Increase hop count if too short when targeting unsafe destinations
         if !params.is_destination_safe
-            && params.safety_spec.hop_count < self.get_default_route_hop_count_unsafe()
+            && params.hop_count < self.get_default_route_hop_count_unsafe()
         {
-            params.safety_spec.hop_count =
-                (params.safety_spec.hop_count * 2).min(self.get_max_route_hop_count());
+            params.hop_count = (params.hop_count * 2).min(self.get_max_route_hop_count());
         };
 
         let first_available_route_params = FirstAvailableRouteParams {
             crypto_kind: params.crypto_kind,
-            min_hop_count: params.safety_spec.hop_count,
-            max_hop_count: params.safety_spec.hop_count,
-            stability: params.safety_spec.stability,
-            sequencing: params.safety_spec.sequencing,
+            min_hop_count: params.hop_count,
+            max_hop_count: params.hop_count,
+            stability: params.stability,
+            sequencing: params.sequencing,
             directions: params.directions,
             avoid_nodes: params.avoid_nodes,
         };
 
         let opt_allocate_route_lock_guard = {
-            let inner = self.inner.read();
+            let cache = self.cache.read();
 
             // See if the preferred route is already available
-            if let Some(preferred_route) = &params.safety_spec.preferred_route {
-                if let Some(preferred_rssd) = inner.content.get_detail(preferred_route) {
+            if let Some(preferred_route) = &params.preferred_route {
+                if let Some(preferred_arce) = cache.get_allocated_route_by_id(preferred_route) {
                     // Only use the preferred route if it has the desired crypto kind
-                    let public_keys = preferred_rssd.get_route_set_keys();
+                    let public_keys = preferred_arce.route_set_keys();
                     if public_keys.contains_kind(params.crypto_kind) {
                         // Only use the preferred route if it doesn't contain the avoid nodes
-                        if !preferred_rssd.contains_nodes(&first_available_route_params.avoid_nodes)
+                        if !preferred_arce.contains_nodes(&first_available_route_params.avoid_nodes)
                         {
-                            return Ok(RouteIdAndPublicKeys {
+                            return Ok(RouteIdAndKeys {
                                 route_id: preferred_route.clone(),
-                                public_keys,
+                                route_set_keys: public_keys.clone(),
                             });
                         }
                     }
@@ -96,7 +98,7 @@ impl RouteSpecStore {
             // Select a safety route from the pool or make one if we don't have one that matches
             // Try this outside of the allocate lock to see if we can do this lock-free first
             if let Some(sr_route_id_and_public_keys) = Self::first_available_route_inner(
-                &inner,
+                &cache,
                 &first_available_route_params,
                 &self.route_selection_counter,
             ) {
@@ -123,9 +125,9 @@ impl RouteSpecStore {
 
                 // Must re-check first available route to avoid race condition due to await
                 // Because during the time we didn't hold the allocate lock, the first available route may have been allocated
-                let inner = self.inner.read();
+                let cache = self.cache.read();
                 if let Some(sr_route_id_and_public_keys) = Self::first_available_route_inner(
-                    &inner,
+                    &cache,
                     &first_available_route_params,
                     &self.route_selection_counter,
                 ) {
@@ -137,13 +139,14 @@ impl RouteSpecStore {
             }
         };
 
+        // Note: `crypto_kind` and `directions` from params is only for selection, not for allocation.
+        // Automatic routes should always use all crypto kinds and be bidirectional.
         let params = AllocateRouteParams {
-            crypto_kinds: vec![params.crypto_kind],
-            safety_spec: SafetySpec {
-                preferred_route: None,
-                ..params.safety_spec
-            },
-            directions: params.directions,
+            crypto_kinds: VALID_CRYPTO_KINDS.to_vec(),
+            hop_count: params.hop_count,
+            stability: params.stability,
+            sequencing: params.sequencing,
+            directions: DirectionSet::all(),
             avoid_nodes: first_available_route_params.avoid_nodes,
             automatic: true,
         };
@@ -159,37 +162,40 @@ impl RouteSpecStore {
         instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = inner.cache.log_key()))
     )]
     fn first_available_route_inner(
-        inner: &RouteSpecStoreInner,
+        cache: &RouteSpecStoreCache,
         params: &FirstAvailableRouteParams,
         route_selection_counter: &AtomicUsize,
-    ) -> Option<RouteIdAndPublicKeys> {
+    ) -> Option<RouteIdAndKeys> {
         let cur_ts = Timestamp::now();
 
         let mut routes = Vec::new();
 
         // Get all valid routes, allow routes that need testing
         // but definitely prefer routes that have been recently tested
-        for (id, rssd) in inner.content.iter_details() {
-            if rssd.is_sequencing_match(params.sequencing)
-                && rssd.hop_count() >= params.min_hop_count
-                && rssd.hop_count() <= params.max_hop_count
-                && rssd.get_directions().is_superset(params.directions)
-                && rssd
-                    .get_route_set_keys()
+        for (id, arce) in cache.iter_allocated_routes() {
+            if arce.is_sequencing_match(params.sequencing)
+                && arce.hop_count() >= params.min_hop_count
+                && arce.hop_count() <= params.max_hop_count
+                && arce.directions().is_superset(params.directions)
+                && arce
+                    .route_set_keys()
                     .iter()
                     .any(|x| x.kind() == params.crypto_kind)
-                && !rssd.is_published()
-                && !rssd.contains_nodes(&params.avoid_nodes)
+                && !arce.is_published()
+                && !arce.contains_nodes(&params.avoid_nodes)
             {
-                routes.push((id, rssd));
+                // snapshot stats (interior mutability) to avoid race conditions and sort instability
+                let stats = arce.with_stats(|stats| stats.clone());
+
+                routes.push((id, arce, stats));
             }
         }
 
         // Sort the routes by preference
         routes.sort_by(|a, b| {
             // Prefer routes that don't need testing
-            let a_needs_testing = a.1.needs_testing(cur_ts);
-            let b_needs_testing = b.1.needs_testing(cur_ts);
+            let a_needs_testing = a.2.needs_testing(cur_ts);
+            let b_needs_testing = b.2.needs_testing(cur_ts);
             if !a_needs_testing && b_needs_testing {
                 return cmp::Ordering::Less;
             }
@@ -198,8 +204,8 @@ impl RouteSpecStore {
             }
 
             // Prefer routes that meet the stability selection
-            let a_meets_stability = a.1.get_stability() >= params.stability;
-            let b_meets_stability = b.1.get_stability() >= params.stability;
+            let a_meets_stability = a.1.stability() >= params.stability;
+            let b_meets_stability = b.1.stability() >= params.stability;
             if a_meets_stability && !b_meets_stability {
                 return cmp::Ordering::Less;
             }
@@ -208,8 +214,8 @@ impl RouteSpecStore {
             }
 
             // Prefer faster routes
-            let a_latency = a.1.with_stats(|stats| stats.latency_stats().average);
-            let b_latency = b.1.with_stats(|stats| stats.latency_stats().average);
+            let a_latency = a.2.latency_stats().average;
+            let b_latency = b.2.latency_stats().average;
 
             a_latency.cmp(&b_latency)
         });
@@ -217,9 +223,9 @@ impl RouteSpecStore {
         // Count top-tier routes (don't need testing and meet stability requirement)
         let good_count = routes
             .iter()
-            .take_while(|(_, rssd)| {
-                let needs_testing = rssd.needs_testing(cur_ts);
-                let meets_stability = rssd.get_stability() >= params.stability;
+            .take_while(|(_, rssd, stats)| {
+                let needs_testing = stats.needs_testing(cur_ts);
+                let meets_stability = rssd.stability() >= params.stability;
                 !needs_testing && meets_stability
             })
             .count();
@@ -227,15 +233,15 @@ impl RouteSpecStore {
         if good_count > 1 {
             // Round-robin among top-tier routes to distribute load
             let idx = route_selection_counter.fetch_add(1, Ordering::Relaxed) % good_count;
-            routes.get(idx).map(|r| RouteIdAndPublicKeys {
+            routes.get(idx).map(|r| RouteIdAndKeys {
                 route_id: r.0.clone(),
-                public_keys: r.1.get_route_set_keys().clone(),
+                route_set_keys: r.1.route_set_keys().clone(),
             })
         } else {
             // Only one or zero good routes, just return the best available
-            routes.first().map(|r| RouteIdAndPublicKeys {
+            routes.first().map(|r| RouteIdAndKeys {
                 route_id: r.0.clone(),
-                public_keys: r.1.get_route_set_keys().clone(),
+                route_set_keys: r.1.route_set_keys().clone(),
             })
         }
     }

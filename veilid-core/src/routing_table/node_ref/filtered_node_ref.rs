@@ -126,7 +126,7 @@ impl FilteredNodeRef {
         let nrf = if let Some(filter) = filter {
             nr.custom_filtered(filter)
         } else {
-            nr.default_filtered()
+            nr.sequencing_filtered(Sequencing::NoPreference)
         };
         let opt_nrf = if let Some(seq) = seq {
             Some(nrf.with_sequencing(seq))

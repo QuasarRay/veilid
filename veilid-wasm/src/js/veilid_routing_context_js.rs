@@ -53,9 +53,12 @@ impl VeilidRoutingContext {
     /// Returns a new instance of VeilidRoutingContext - does not mutate.
     pub fn withSafety(
         &self,
-        safety_selection: SafetySelection,
+        safety_selection: ts::SafetySelection,
     ) -> VeilidAPIResult<VeilidRoutingContext> {
         let routing_context = self.getRoutingContext()?;
+        let safety_selection = safety_selection
+            .try_into()
+            .map_err(VeilidAPIError::generic)?;
         Ok(VeilidRoutingContext {
             inner_routing_context: routing_context.with_safety(safety_selection)?,
         })
@@ -72,11 +75,11 @@ impl VeilidRoutingContext {
 
     /// Get the safety selection in use on this routing context
     /// @returns the SafetySelection currently in use if successful.
-    pub fn safety(&self) -> VeilidAPIResult<SafetySelection> {
+    pub fn safety(&self) -> VeilidAPIResult<ts::SafetySelection> {
         let routing_context = self.getRoutingContext()?;
 
         let safety_selection = routing_context.safety();
-        Ok(safety_selection)
+        Ok(safety_selection.into())
     }
     /// App-level unidirectional message that does not expect any value to be returned.
     ///
@@ -84,9 +87,9 @@ impl VeilidRoutingContext {
     ///
     /// @param {string} target - a private route id, or in 'footgun' mode, a direct node id
     /// @param {string} message - an arbitrary message blob of up to `32768` bytes.
-    #[wasm_bindgen(skip_jsdoc)]
-    pub async fn appMessage(&self, target: Target, message: Box<[u8]>) -> VeilidAPIResult<()> {
+    pub async fn appMessage(&self, target: ts::Target, message: Box<[u8]>) -> VeilidAPIResult<()> {
         let routing_context = self.getRoutingContext()?;
+        let target = target.try_into().map_err(VeilidAPIError::generic)?;
         let message = message.into_vec();
         routing_context.app_message(target, message).await
     }
@@ -95,14 +98,17 @@ impl VeilidRoutingContext {
     ///
     /// Veilid apps may use this for arbitrary message passing.
     ///
-    /// @param {string} target - a private route id, or in 'footgun' mode, a direct node id
+    /// @param {Target} target - a private route id, or in 'footgun' mode, a direct node id
     /// @param {Uint8Array} message - an arbitrary message blob of up to `32768` bytes.
     /// @returns {Uint8Array} an answer blob of up to `32768` bytes.
-    #[wasm_bindgen(skip_jsdoc)]
-    pub async fn appCall(&self, target: Target, request: Box<[u8]>) -> VeilidAPIResult<Uint8Array> {
+    pub async fn appCall(
+        &self,
+        target: ts::Target,
+        request: Box<[u8]>,
+    ) -> VeilidAPIResult<Uint8Array> {
         let request: Vec<u8> = request.into_vec();
         let routing_context = self.getRoutingContext()?;
-
+        let target = target.try_into().map_err(VeilidAPIError::generic)?;
         let answer = routing_context.app_call(target, request).await?;
         let answer = Uint8Array::from(answer.as_slice());
         Ok(answer)
@@ -153,9 +159,8 @@ impl VeilidRoutingContext {
     /// safety selection.
     ///
     /// @returns the DHT record descriptor for the opened record if successful.
-    /// @param {string} key - key of the DHT record.
+    /// @param {string} recordKey - key of the DHT record.
     /// @param {string} defaultWriter - the writer keypair to use for set value operations by default
-    #[wasm_bindgen(skip_jsdoc)]
     pub async fn openDHTRecord(
         &self,
         recordKey: &RecordKey,

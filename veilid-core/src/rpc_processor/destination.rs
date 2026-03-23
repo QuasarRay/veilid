@@ -317,7 +317,7 @@ impl RPCProcessor {
                     }
                 };
                 // Apply sequencing to match safety selection
-                let nr = nr.default_filtered_with_sequencing(safety_selection.get_sequencing());
+                let nr = nr.sequencing_filtered(safety_selection.get_sequencing());
 
                 Ok(rpc_processor::Destination::Direct {
                     node: nr,
@@ -365,14 +365,17 @@ impl RPCProcessor {
                         .best_node_id()
                         .ok_or_else(|| RPCError::protocol("no supported node id"))?
                         .kind();
-                    let RouteIdAndPublicKeys {
+                    let RouteIdAndKeys {
                         route_id: _,
-                        public_keys,
+                        route_set_keys: public_keys,
                     } = network_result_try!(rss
                         .select_single_route(RouteSelectParams {
                             crypto_kind,
-                            safety_spec: safety_spec.clone(),
-                            directions: DirectionSet::all(),
+                            preferred_route: safety_spec.preferred_route.clone(),
+                            hop_count: safety_spec.hop_count,
+                            stability: safety_spec.stability,
+                            sequencing: safety_spec.sequencing,
+                            directions: Direction::In.into(),
                             avoid_nodes: target.node_ids().to_vec(),
                             is_destination_safe: false,
                         })
@@ -454,14 +457,17 @@ impl RPCProcessor {
                             network_result_try!(rss
                                 .select_single_route(RouteSelectParams {
                                     crypto_kind,
-                                    safety_spec: safety_spec.clone(),
-                                    directions: DirectionSet::all(),
+                                    preferred_route: safety_spec.preferred_route.clone(),
+                                    hop_count: safety_spec.hop_count,
+                                    stability: safety_spec.stability,
+                                    sequencing: safety_spec.sequencing,
+                                    directions: Direction::In.into(),
                                     avoid_nodes: vec![avoid_node_id],
                                     is_destination_safe: true,
                                 })
                                 .await
                                 .to_rpc_network_result()?)
-                            .public_keys
+                            .route_set_keys
                             .get(crypto_kind)
                             .unwrap_or_log()
                         };

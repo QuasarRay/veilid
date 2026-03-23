@@ -99,9 +99,13 @@ impl RoutingTable {
     ///
     /// - Entry summaries per routing domain and crypto kind
     /// - Low water marks per routing domain
+    ///   - Optionally reset the low water mark for specific domains
     /// - Total and live entry counts
     /// - Routing table health summary
-    pub(in crate::routing_table) fn refresh_summaries(&self) {
+    pub(in crate::routing_table) fn refresh_summaries(
+        &self,
+        reset_low_water_mark_domains: RoutingDomainSet,
+    ) {
         // Take a single snapshot for all the entry summaries, including -all- entries (dead and punished as well)
         let entry_snapshot = self.snapshot_entries(Timestamp::now(), BucketEntryState::Punished);
 
@@ -140,16 +144,16 @@ impl RoutingTable {
             }
 
             // Make a low water mark
-            let mut low_water_mark = RoutingDomainLowWaterMark::new();
+            let mut low_water_mark = LowWaterMark::new();
 
             for ck in VALID_CRYPTO_KINDS {
-                let mut count = 0usize;
+                let mut count = CapabilityCounts::new();
                 for entry in entry_snapshot.entries().iter() {
                     if entry.state >= BucketEntryState::Unreliable
                         && entry.routing_domain_set().contains(routing_domain)
                         && entry.crypto_kinds().contains(&ck)
                     {
-                        count += 1;
+                        count.add_entry(routing_domain, entry);
                     }
                 }
                 low_water_mark.set(ck, count);
@@ -164,8 +168,12 @@ impl RoutingTable {
                     // Store cached entry summary (must come before get_health, because that uses the summary)
                     rdd.set_entry_summary(Arc::new(entry_summary));
 
+                    if reset_low_water_mark_domains.contains(routing_domain) {
+                        rdd.reset_low_water_mark();
+                    }
+
                     // Update low water mark
-                    rdd.update_low_water_mark(low_water_mark);
+                    rdd.update_low_water_mark(Arc::new(low_water_mark));
                 }
 
                 // Update routing domain health in the routing table health
@@ -184,10 +192,38 @@ impl RoutingTable {
             core::mem::replace(&mut *rth_lock, routing_table_health)
         };
 
+        let mut readiness_changed = false;
+        for routing_domain in RoutingDomainSet::all() {
+            let last_inbound_ready = last_routing_table_health
+                .routing_domain_health
+                .get(&routing_domain)
+                .map(|h| h.is_ready_inbound);
+            let last_outbound_ready = last_routing_table_health
+                .routing_domain_health
+                .get(&routing_domain)
+                .map(|h| h.is_ready_outbound);
+            let current_inbound_ready = current_routing_table_health
+                .routing_domain_health
+                .get(&routing_domain)
+                .map(|h| h.is_ready_inbound);
+            let current_outbound_ready = current_routing_table_health
+                .routing_domain_health
+                .get(&routing_domain)
+                .map(|h| h.is_ready_outbound);
+
+            if last_inbound_ready != current_inbound_ready
+                || last_outbound_ready != current_outbound_ready
+            {
+                readiness_changed = true;
+                break;
+            }
+        }
+
         if last_routing_table_health.live_entry_count()
             != current_routing_table_health.live_entry_count()
+            || readiness_changed
         {
-            veilid_log!(self debug "Routing Table Health: {}", current_routing_table_health);
+            veilid_log!(self debug "Routing Table Health:\n{}", indent_all_string(&current_routing_table_health));
         }
     }
 }

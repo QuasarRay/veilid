@@ -401,26 +401,16 @@ impl OutboundTransactionRecordState {
     }
 
     pub fn opt_expiration(&self) -> Option<Timestamp> {
-        // Collect Begin-node expirations only; use the (count-required)'th smallest so we
-        // tolerate losing up to (required-1) nodes before the keepalive fires urgently.
-        let mut begin_expirations: Vec<Timestamp> = self
-            .node_transactions
+        self.node_transactions
             .iter()
-            .filter(|nt| nt.stage() == OutboundTransactionStage::Begin)
-            .filter_map(|nt| nt.opt_expiration())
-            .collect();
-
-        if begin_expirations.is_empty() {
-            return None;
-        }
-
-        begin_expirations.sort();
-
-        // idx=max(0, count-required): first expiry in the required-node majority (e.g. 8 nodes, required=5 → idx=3).
-        let idx = begin_expirations
-            .len()
-            .saturating_sub(self.required_strict_consensus_count);
-        Some(begin_expirations[idx])
+            .map(|x| x.opt_expiration())
+            .reduce(|a, b| match (a, b) {
+                (None, None) => None,
+                (None, Some(b)) => Some(b),
+                (Some(a), None) => Some(a),
+                (Some(a), Some(b)) => Some(a.min(b)),
+            })
+            .flatten()
     }
 
     pub fn stage_ts(&self) -> Timestamp {

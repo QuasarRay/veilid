@@ -141,16 +141,16 @@ pub struct VeilidStateNetwork {
     pub node_ids: Vec<NodeId>,
 }
 
-/// Describe a private route change that has happened
+/// Describe a private or safety route change that has happened
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
 pub struct VeilidRouteChange {
-    /// If a private route that was allocated has died, it is listed here.
+    /// If an allocated route dies or was released, it is listed here.
     #[schemars(with = "Vec<String>")]
     pub dead_routes: Vec<RouteId>,
-    /// If a private route that was imported has died, it is listed here.
+    /// If an imported remote private route has died, it is listed here.
     #[schemars(with = "Vec<String>")]
     pub dead_remote_routes: Vec<RouteId>,
 }

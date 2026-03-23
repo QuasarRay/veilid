@@ -66,7 +66,7 @@ String wrapWithLogColor(LogLevel? level, String text) {
 void setRootLogLevel(LogLevel? level) {
   Loggy('').level = getLogOptions(level);
   Veilid.instance.changeLogLevel(
-      'all', '#enabled=${convertToVeilidConfigLogLevel(level)}');
+      'all', '#enabled=${convertToVeilidConfigLogLevel(level).name}');
 }
 
 extension PrettyPrintLogRecord on LogRecord {

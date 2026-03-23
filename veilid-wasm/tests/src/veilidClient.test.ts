@@ -1,14 +1,15 @@
 import { expect } from '@wdio/globals';
 
 import {
-  DEBUGGING,
+  LOG_LEVEL,
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
 } from './utils/veilid-config';
 
-import { VeilidState, veilidClient, veilidCrypto, KeyPair, Signature } from 'veilid-wasm';
+import { veilidClient, veilidCrypto, KeyPair, Signature, CryptoKind /*, Sequencing, Stability */ } from 'veilid-wasm';
 import { asyncCallWithTimeout, getLogTimestamp, waitForDetached, waitForPublicAttachment, waitForShutdown } from './utils/wait-utils';
 import { textEncoder } from './utils/marshalling-utils';
+
 
 describe('veilidClient', () => {
   before('veilid startup', async () => {
@@ -17,11 +18,10 @@ describe('veilidClient', () => {
     // console.log("---Startup---");
     // console.log("config: ", veilidCoreStartupConfig);
     await veilidClient.startupCore((_update) => {
-      if (DEBUGGING) {
-        if (_update.kind === 'Log') {
-          const logTimestamp = getLogTimestamp()
-          console.log(`${logTimestamp}: ${_update.message}`);
-        }
+      // Only print API logs to console if performance logs are disabled
+      if (LOG_LEVEL === "Off" && _update.kind === 'Log') {
+        const logTimestamp = getLogTimestamp()
+        console.log(`${logTimestamp}: ${_update.message}`);
       }
     }, veilidCoreStartupConfig);
     // console.log("---Started Up---");
@@ -60,25 +60,24 @@ describe('veilidClient', () => {
 
   it('should attach and detach', async () => {
     await veilidClient.attach();
-    await asyncCallWithTimeout(waitForPublicAttachment(), 10000);
+    await asyncCallWithTimeout(waitForPublicAttachment(), 30_000);
     await veilidClient.detach();
-    await asyncCallWithTimeout(waitForDetached(), 10000);
+    await asyncCallWithTimeout(waitForDetached(), 20_000);
   });
 
   describe('kitchen sink', () => {
     before('attach', async () => {
       await veilidClient.attach();
-      await asyncCallWithTimeout(waitForPublicAttachment(), 10000);
+      await asyncCallWithTimeout(waitForPublicAttachment(), 30_000);
     });
     after('detach', async () => {
       await veilidClient.detach();
-      await asyncCallWithTimeout(waitForDetached(), 10000);
+      await asyncCallWithTimeout(waitForDetached(), 20_000);
     });
 
-    let state: VeilidState;
 
     it('should get state', async () => {
-      state = await veilidClient.getState();
+      const state = await veilidClient.getState();
       await expect(state.attachment).toBeDefined();
       await expect(state.config.config).toBeDefined();
       await expect(state.network).toBeDefined();
@@ -89,6 +88,129 @@ describe('veilidClient', () => {
       await expect(response).toBeDefined();
       await expect(response.length).toBeGreaterThan(0);
     });
+  });
+
+  describe('global private route functions', () => {
+    before('attach', async () => {
+      await veilidClient.attach();
+      await asyncCallWithTimeout(waitForPublicAttachment(), 30_000);
+    });
+    after('detach', async () => {
+      await veilidClient.detach();
+      await asyncCallWithTimeout(waitForDetached(), 20_000);
+    });
+
+    it('should create/release a new private route', async () => {
+      const routeBlob = await veilidClient.newPrivateRoute();
+      await expect(routeBlob).toBeDefined();
+      await expect(routeBlob.blob.length).toBeGreaterThan(0);
+      await expect(routeBlob.routeId).toBeDefined();
+
+      veilidClient.releasePrivateRoute(routeBlob.routeId);
+    });
+
+    it('should create/release a new custom private route with default values', async () => {
+      const routeBlob = await veilidClient.newCustomPrivateRoute({});
+      await expect(routeBlob).toBeDefined();
+      await expect(routeBlob.blob.length).toBeGreaterThan(0);
+      await expect(routeBlob.routeId).toBeDefined();
+
+      veilidClient.releasePrivateRoute(routeBlob.routeId);
+    });
+
+    it('should create/release a new custom private route with specified values', async () => {
+      let routeBlob = await veilidClient.newCustomPrivateRoute({
+        cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
+        hopCount: 1,
+        stability: "LowLatency",
+        sequencing: "EnsureOrdered",
+      });
+      await expect(routeBlob).toBeDefined();
+      await expect(routeBlob.blob.length).toBeGreaterThan(0);
+      await expect(routeBlob.routeId).toBeDefined();
+
+      veilidClient.releasePrivateRoute(routeBlob.routeId);
+
+      routeBlob = await veilidClient.newCustomPrivateRoute({
+        cryptoKinds: [],
+        hopCount: 0,
+        stability: "LowLatency",
+        sequencing: "EnsureOrdered",
+      });
+      await expect(routeBlob).toBeDefined();
+      await expect(routeBlob.blob.length).toBeGreaterThan(0);
+      await expect(routeBlob.routeId).toBeDefined();
+
+      veilidClient.releasePrivateRoute(routeBlob.routeId);
+    });
+
+    it('should fail to create a new custom private route with invalid crypto kind', async () => {
+      try {
+        await veilidClient.newCustomPrivateRoute({
+          cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0, "BAAD" as CryptoKind],
+          hopCount: 1,
+          stability: "LowLatency",
+          sequencing: "EnsureOrdered",
+        });
+      } catch (error) {
+        await expect(error).toMatchObject({ kind: "Generic" });
+      }
+    });
+
+    // // Can't catch WASM trap errors
+    // it('should fail to create a new custom private route with negative hop count', async () => {
+    //   try {
+    //     await veilidClient.newCustomPrivateRoute({
+    //       cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
+    //       hopCount: -1,
+    //       stability: "LowLatency",
+    //       sequencing: "EnsureOrdered",
+    //     })
+    //   } catch (error) {
+    //     await expect(error).toBeDefined();
+    //   }
+    // });
+
+    it('should fail to create a new custom private route with large hop count', async () => {
+      try {
+        await veilidClient.newCustomPrivateRoute({
+          cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
+          hopCount: 100,
+          stability: "LowLatency",
+          sequencing: "EnsureOrdered",
+        });
+      } catch (error) {
+        await expect(error).toMatchObject({ kind: "InvalidArgument" });
+      }
+    });
+
+    // // Can't catch WASM trap errors
+    // it('should fail to create a new custom private route with invalid stability', async () => {
+    //   try {
+    //     await veilidClient.newCustomPrivateRoute({
+    //       cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
+    //       hopCount: 1,
+    //       stability: "BadLatency" as Stability,
+    //       sequencing: "EnsureOrdered",
+    //     })
+    //   } catch (error) {
+    //     await expect(error).toBeDefined();
+    //   }
+    // });
+
+    // // Can't catch WASM trap errors
+    // it('should fail to create a new custom private route with invalid sequencing', async () => {
+    //   try {
+    //     await veilidClient.newCustomPrivateRoute({
+    //       cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
+    //       hopCount: 1,
+    //       stability: "LowLatency",
+    //       sequencing: "BadOrdered" as Sequencing,
+    //     });
+    //   } catch (error) {
+    //     await expect(error).toBeDefined();
+    //   }
+    // });
   });
 
   describe('global crypto functions', () => {

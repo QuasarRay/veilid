@@ -108,6 +108,7 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
     fn state(&self) -> RoutingDomainState {
         let detail = self.read();
         let entry_summary = detail.get_entry_summary();
+        let low_water_mark = detail.get_low_water_mark();
 
         // Determine inbound stage
         let (inbound_stage, relay_status, current_peer_info) = {
@@ -158,6 +159,7 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
             relay_status,
             current_peer_info,
             entry_summary,
+            low_water_mark,
             is_ready_inbound,
             is_ready_outbound,
         }
@@ -167,6 +169,8 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
         let state = self.state();
 
         let entry_summary = state.entry_summary;
+        let low_water_mark = state.low_water_mark;
+
         let is_ready_inbound = matches!(
             state.inbound_stage,
             RoutingDomainInboundStage::ReadyToPublish
@@ -178,6 +182,7 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
 
         RoutingDomainHealth {
             entry_summary,
+            low_water_mark,
             is_ready_inbound,
             is_ready_outbound,
         }

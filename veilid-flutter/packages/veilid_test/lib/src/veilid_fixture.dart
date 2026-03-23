@@ -37,66 +37,91 @@ class DefaultVeilidFixture implements VeilidFixture {
 
     _updateStreamController = StreamController.broadcast();
 
-    final ignoreLogTargetsStr =
-        const String.fromEnvironment('IGNORE_LOG_TARGETS').trim();
+    final ignoreLogTargetsStr = const String.fromEnvironment(
+      'IGNORE_LOG_TARGETS',
+    ).trim();
+    final logDirectivesStr = const String.fromEnvironment(
+      'LOG_DIRECTIVES',
+    ).trim();
     final ignoreLogTargets = ignoreLogTargetsStr.isEmpty
         ? <String>[]
         : ignoreLogTargetsStr.split(',').map((e) => e.trim()).toList();
+    final logDirectives = logDirectivesStr.isEmpty
+        ? <String>[]
+        : logDirectivesStr.split(',').map((e) => e.trim()).toList();
 
     final logLevel = VeilidConfigLogLevel.fromJson(
-        const String.fromEnvironment('LOG_LEVEL', defaultValue: 'info'));
+      const String.fromEnvironment('LOG_LEVEL', defaultValue: 'info'),
+    );
 
     final terminalLogLevel = VeilidConfigLogLevel.fromJson(
-        const String.fromEnvironment('TERMINAL_LOG_LEVEL',
-            defaultValue: 'off'));
+      const String.fromEnvironment('TERMINAL_LOG_LEVEL', defaultValue: 'off'),
+    );
 
     final flamePathStr = const String.fromEnvironment('FLAME').trim();
 
     final Map<String, dynamic> platformConfigJson;
     if (kIsWeb) {
       final platformConfig = VeilidWASMConfig(
-          logging: VeilidWASMConfigLogging(
-              performance: VeilidWASMConfigLoggingPerformance(
-                enabled: true,
-                level: logLevel,
-                logsInTimings: true,
-                logsInConsole: VeilidWASMConfigLoggingLogsInConsole.noColor,
-                ignoreLogTargets: ignoreLogTargets,
-              ),
-              api: VeilidWASMConfigLoggingApi(
-                enabled: true,
-                level: logLevel,
-                ignoreLogTargets: ignoreLogTargets,
-              )));
+        logging: VeilidWASMConfigLogging(
+          performance: VeilidWASMConfigLoggingPerformance(
+            enabled: true,
+            level: logLevel,
+            directives: logDirectives,
+            // pass through for backwards compatibility
+            // ignore: deprecated_member_use
+            ignoreLogTargets: ignoreLogTargets,
+          ),
+          api: VeilidWASMConfigLoggingApi(
+            enabled: true,
+            level: logLevel,
+            directives: logDirectives,
+            // pass through for backwards compatibility
+            // ignore: deprecated_member_use
+            ignoreLogTargets: ignoreLogTargets,
+          ),
+        ),
+      );
       platformConfigJson = platformConfig.toJson();
     } else {
       final platformConfig = VeilidFFIConfig(
-          logging: VeilidFFIConfigLogging(
-              terminal: VeilidFFIConfigLoggingTerminal(
-                enabled: terminalLogLevel != VeilidConfigLogLevel.off,
-                level: terminalLogLevel,
-                ignoreLogTargets: ignoreLogTargets,
-              ),
-              otlp: VeilidFFIConfigLoggingOtlp(
-                enabled: false,
-                level: VeilidConfigLogLevel.trace,
-                grpcEndpoint: 'localhost:4317',
-                serviceName: 'Veilid Tests',
-                ignoreLogTargets: ignoreLogTargets,
-              ),
-              api: VeilidFFIConfigLoggingApi(
-                enabled: true,
-                level: logLevel,
-                ignoreLogTargets: ignoreLogTargets,
-              ),
-              flame: VeilidFFIConfigLoggingFlame(
-                  enabled: flamePathStr.isNotEmpty, path: flamePathStr)));
+        logging: VeilidFFIConfigLogging(
+          terminal: VeilidFFIConfigLoggingTerminal(
+            enabled: terminalLogLevel != VeilidConfigLogLevel.off,
+            level: terminalLogLevel,
+            directives: logDirectives,
+            // pass through for backwards compatibility
+            // ignore: deprecated_member_use
+            ignoreLogTargets: ignoreLogTargets,
+          ),
+          api: VeilidFFIConfigLoggingApi(
+            enabled: true,
+            level: logLevel,
+            directives: logDirectives,
+            // pass through for backwards compatibility
+            // ignore: deprecated_member_use
+            ignoreLogTargets: ignoreLogTargets,
+          ),
+          otlp: VeilidFFIConfigLoggingOtlp(
+            enabled: false,
+            level: VeilidConfigLogLevel.trace,
+            grpcEndpoint: 'localhost:4317',
+            serviceName: 'Veilid Tests',
+            directives: logDirectives,
+            // pass through for backwards compatibility
+            // ignore: deprecated_member_use
+            ignoreLogTargets: ignoreLogTargets,
+          ),
+          flame: VeilidFFIConfigLoggingFlame(
+            enabled: flamePathStr.isNotEmpty,
+            path: flamePathStr,
+          ),
+        ),
+      );
       platformConfigJson = platformConfig.toJson();
     }
 
     Veilid.instance.initializeVeilidCore(platformConfigJson);
-
-    print('got here');
 
     var config = await getDefaultVeilidConfig(
       isWeb: kIsWeb,
@@ -109,12 +134,15 @@ class DefaultVeilidFixture implements VeilidFixture {
       networkKeyPassword: const String.fromEnvironment('NETWORK_KEY'),
     );
 
-    config =
-        config.copyWith(tableStore: config.tableStore.copyWith(delete: true));
     config = config.copyWith(
-        protectedStore: config.protectedStore.copyWith(delete: true));
-    config =
-        config.copyWith(blockStore: config.blockStore.copyWith(delete: true));
+      tableStore: config.tableStore.copyWith(delete: true),
+    );
+    config = config.copyWith(
+      protectedStore: config.protectedStore.copyWith(delete: true),
+    );
+    config = config.copyWith(
+      blockStore: config.blockStore.copyWith(delete: true),
+    );
     config = config.copyWith(
       capabilities:
           // XXX: Remove after https://gitlab.com/veilid/veilid/-/issues/492
@@ -122,18 +150,25 @@ class DefaultVeilidFixture implements VeilidFixture {
       protectedStore:
           // Linux often does not have a secret storage mechanism installed
           config.protectedStore.copyWith(
-        allowInsecureFallback: !kIsWeb && Platform.isLinux,
-      ),
+            allowInsecureFallback: !kIsWeb && Platform.isLinux,
+          ),
     );
 
-    final us =
-        _veilidUpdateStream = await Veilid.instance.startupVeilidCore(config);
+    final us = _veilidUpdateStream = await Veilid.instance.startupVeilidCore(
+      config,
+    );
 
     _veilidUpdateSubscription = us.listen((update) {
       if (update is VeilidLog) {
+        final datetime = DateTime.now();
+        final timestamp =
+            '${datetime.hour.toString().padLeft(2, '0')}:${datetime.minute.toString().padLeft(2, '0')}:${datetime.second.toString().padLeft(2, '0')}.${datetime.millisecond.toString().padLeft(3, '0')}';
+
         // Tests should print logs
         // ignore: avoid_print
-        print(update.message);
+        print(
+          '$timestamp ${update.logLevel.name.toUpperCase()} ${update.message}',
+        );
       } else if (update is VeilidUpdateAttachment) {
       } else if (update is VeilidUpdateConfig) {
       } else if (update is VeilidUpdateNetwork) {
@@ -178,13 +213,36 @@ class DefaultVeilidFixture implements VeilidFixture {
       if (done) {
         break;
       }
-      await Future<void>.delayed(const Duration(seconds: 1));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
   }
 
   @override
   Future<void> detach() async {
     await Veilid.instance.detach();
+
+    // Wait for detached state
+    while (true) {
+      final state = await Veilid.instance.getVeilidState();
+      var done = false;
+      switch (state.attachment.state) {
+        case AttachmentState.detached:
+          done = true;
+          break;
+        case AttachmentState.attaching:
+        case AttachmentState.detaching:
+        case AttachmentState.attachedGood:
+        case AttachmentState.attachedStrong:
+        case AttachmentState.attachedWeak:
+        case AttachmentState.overAttached:
+        case AttachmentState.fullyAttached:
+          break;
+      }
+      if (done) {
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
   }
 
   @override

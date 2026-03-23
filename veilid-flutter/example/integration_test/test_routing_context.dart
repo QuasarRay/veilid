@@ -5,6 +5,27 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
 
+/// Max retries for transient network errors in tests
+const _kMaxRetries = 5;
+
+/// Retry an async operation on transient Veilid network errors (TryAgain,
+/// Timeout). These are expected on a live network when relay/hop nodes are
+/// unreachable.
+Future<T> _retryOnNetworkError<T>(Future<T> Function() fn,
+    {int maxRetries = _kMaxRetries, String label = 'operation'}) async {
+  for (var attempt = 0;; attempt++) {
+    try {
+      return await fn();
+    } on VeilidAPIExceptionTryAgain {
+      if (attempt >= maxRetries - 1) rethrow;
+      print('$label: TryAgain, retrying (attempt ${attempt + 1}/$maxRetries)');
+    } on VeilidAPIExceptionTimeout {
+      if (attempt >= maxRetries - 1) rethrow;
+      print('$label: Timeout, retrying (attempt ${attempt + 1}/$maxRetries)');
+    }
+  }
+}
+
 Future<void> testRoutingContexts() async {
   {
     final rc = await Veilid.instance.routingContext();
@@ -60,13 +81,13 @@ Future<void> testAppMessageLoopback(Stream<VeilidUpdate> updateStream) async {
     }
   });
   try {
-    await Veilid.instance.debug('purge routes');
-
     // make a routing context that uses a safety route
     final rc = await Veilid.instance.routingContext();
     try {
-      // make a new local private route
-      final prl = await Veilid.instance.newPrivateRoute();
+      // make a new local private route (retry on transient network errors)
+      final prl = await _retryOnNetworkError(
+          () => Veilid.instance.newPrivateRoute(),
+          label: 'newPrivateRoute');
       try {
         // import it as a remote route as well so we can send to it
         final prr = await Veilid.instance.importRemotePrivateRoute(prl.blob);
@@ -102,13 +123,16 @@ Future<void> testAppCallLoopback(Stream<VeilidUpdate> updateStream) async {
     }
   });
   try {
-    await Veilid.instance.debug('purge routes');
-
     // make a routing context that uses a safety route
     final rc = await Veilid.instance.routingContext();
     try {
-      // make a new local private route
-      final prl = await Veilid.instance.newPrivateRoute();
+      // make a new local private route (retry on transient network errors)
+      final prl = await _retryOnNetworkError(
+          () => Veilid.instance.newCustomPrivateRoute(PrivateSpec(
+              hopCount: 2,
+              sequencing: Sequencing.ensureOrdered,
+              stability: Stability.lowLatency)),
+          label: 'newCustomPrivateRoute');
       try {
         // import it as a remote route as well so we can send to it
         final prr = await Veilid.instance.importRemotePrivateRoute(prl.blob);
@@ -162,13 +186,13 @@ Future<void> testAppMessageLoopbackBigPackets(
       .getCryptoSystem(Veilid.instance.validCryptoKinds().first);
 
   try {
-    await Veilid.instance.debug('purge routes');
-
     // make a routing context that uses a safety route
     final rc = await Veilid.instance.routingContext();
     try {
-      // make a new local private route
-      final prl = await Veilid.instance.newPrivateRoute();
+      // make a new local private route (retry on transient network errors)
+      final prl = await _retryOnNetworkError(
+          () => Veilid.instance.newPrivateRoute(),
+          label: 'newPrivateRoute');
       try {
         // import it as a remote route as well so we can send to it
         final prr = await Veilid.instance.importRemotePrivateRoute(prl.blob);
@@ -213,54 +237,46 @@ Future<void> testAppCallLoopbackBigPackets(
   final appCallQueue = StreamController<VeilidAppCall>();
   final appMessageSubscription = updateStream.listen((update) {
     if (update is VeilidAppCall) {
+      print('received app call ${update.callId}');
       appCallQueue.sink.add(update);
     }
   });
   final appCallQueueHandler = () async {
     await for (final update in appCallQueue.stream) {
+      print('replying to app call ${update.callId}');
       await Veilid.instance.appCallReply(update.callId, update.message);
     }
   }();
 
-  final sentMessages = <String>{};
   final random = Random.secure();
   final cs = await Veilid.instance
       .getCryptoSystem(Veilid.instance.validCryptoKinds().first);
 
   try {
-    await Veilid.instance.debug('purge routes');
-
     // make a routing context that uses a safety route
     final rc = await Veilid.instance.routingContext();
     try {
-      // make a new local private route
-      final prl = await Veilid.instance.newPrivateRoute();
+      // make a new local private route (retry on transient network errors)
+      final prl = await _retryOnNetworkError(
+          () => Veilid.instance.newPrivateRoute(),
+          label: 'newPrivateRoute');
       try {
         // import it as a remote route as well so we can send to it
         final prr = await Veilid.instance.importRemotePrivateRoute(prl.blob);
-        final appMessageQueueIterator = StreamIterator(appCallQueue.stream);
 
         try {
           for (var i = 0; i < 5; i++) {
-            // send an app message to our own private route
+            // send an app call to our own private route
             final message = await cs.randomBytes(random.nextInt(32768));
-            final outmessage =
-                await rc.appCall(TargetRouteId(routeId: prr), message);
+            print('sending app call $i');
+            final outmessage = await _retryOnNetworkError(
+                () => rc.appCall(TargetRouteId(routeId: prr), message),
+                maxRetries: 3,
+                label: 'appCall[$i]');
+            print('finished app call $i');
             expect(message, equals(outmessage));
           }
-
-          // we should get the same messages back
-          for (var i = 0; i < sentMessages.length; i++) {
-            if (await appMessageQueueIterator.moveNext()) {
-              final update = appMessageQueueIterator.current;
-              expect(sentMessages.contains(base64Url.encode(update.message)),
-                  isTrue);
-            } else {
-              fail('not enough messages in the queue');
-            }
-          }
         } finally {
-          await appMessageQueueIterator.cancel();
           await Veilid.instance.releasePrivateRoute(prr);
         }
       } finally {

@@ -4,15 +4,9 @@ use super::*;
 
 /// Atomic wrapper for optional timestamps used in structs so we can avoid locks
 /// for LRU and similar operations
-#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, GetSize)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[derive(Debug, Default, Serialize, Deserialize, GetSize)]
 #[serde(from = "Option<Timestamp>", into = "Option<Timestamp>")]
+#[must_use]
 pub struct AtomicOptionTimestamp(AtomicU64);
 
 impl Clone for AtomicOptionTimestamp {

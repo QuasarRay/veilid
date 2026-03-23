@@ -99,7 +99,9 @@ define_string_destructor!(free_string);
 pub struct VeilidFFIConfigLoggingTerminal {
     pub enabled: bool,
     pub level: VeilidConfigLogLevel,
+    #[deprecated(note = "Use directives instead")]
     pub ignore_log_targets: Vec<String>,
+    pub directives: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -109,7 +111,9 @@ pub struct VeilidFFIConfigLoggingOtlp {
     pub level: VeilidConfigLogLevel,
     pub grpc_endpoint: String,
     pub service_name: String,
+    #[deprecated(note = "Use directives instead")]
     pub ignore_log_targets: Vec<String>,
+    pub directives: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -117,7 +121,9 @@ pub struct VeilidFFIConfigLoggingOtlp {
 pub struct VeilidFFIConfigLoggingApi {
     pub enabled: bool,
     pub level: VeilidConfigLogLevel,
+    #[deprecated(note = "Use directives instead")]
     pub ignore_log_targets: Vec<String>,
+    pub directives: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -131,8 +137,8 @@ pub struct VeilidFFIConfigLoggingFlame {
 #[serde(rename_all = "camelCase")]
 pub struct VeilidFFIConfigLogging {
     pub terminal: VeilidFFIConfigLoggingTerminal,
-    pub otlp: VeilidFFIConfigLoggingOtlp,
     pub api: VeilidFFIConfigLoggingApi,
+    pub otlp: VeilidFFIConfigLoggingOtlp,
     pub flame: VeilidFFIConfigLoggingFlame,
 }
 
@@ -235,43 +241,54 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
 
     // Terminal logger
     if platform_config.logging.terminal.enabled {
+        let timer = time::format_description::parse("[hour]:[minute]:[second]")
+            .expect("invalid time format");
+
+        // Get time offset for local timezone from UTC
+        // let time_offset =
+        //     time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
+        // nerd fight: https://www.reddit.com/r/learnrust/comments/1bgc4p7/time_crate_never_manages_to_get_local_time/
+        // Use chrono instead of time crate to get local offset
+        let offset_in_sec = chrono::Local::now().offset().local_minus_utc();
+        let time_offset =
+            time::UtcOffset::from_whole_seconds(offset_in_sec).expect("invalid utc offset");
+        let timer = tracing_subscriber::fmt::time::OffsetTime::new(time_offset, timer);
+
+        let filter = VeilidLayerFilter::new_with_config(
+            VeilidLayerFilterConfig::new()
+                .with_common_log_level(platform_config.logging.terminal.level),
+        );
+        #[allow(deprecated)]
+        filter.apply_ignore_change_list(&platform_config.logging.terminal.ignore_log_targets);
+        filter
+            .try_apply_directives(platform_config.logging.terminal.directives)
+            .expect_or_log("failed to apply terminal logging directives");
+
         cfg_if! {
             if #[cfg(target_os = "android")] {
-                let filter = VeilidLayerFilter::new_with_config(
-                    VeilidLayerFilterConfig::new().with_common_log_level(platform_config.logging.terminal.level),
-                );
-                #[allow(deprecated)]
-                filter.apply_ignore_change_list(&platform_config.logging.terminal.ignore_log_targets);
                 let layer = paranoid_android::layer("com.veilid.veilid-flutter")
                     .map_fmt_fields(FmtStripVeilidFields::mapper())
+                    .with_timer(timer)
                     .with_target(true)
                     .with_ansi(false)
                     .with_filter(filter.clone());
                 filters.insert("terminal", filter);
                 layers.push(layer.boxed());
             } else if #[cfg(target_os = "ios")] {
-                let filter = VeilidLayerFilter::new_with_config(
-                    VeilidLayerFilterConfig::new().with_common_log_level(platform_config.logging.terminal.level),
-                );
-                #[allow(deprecated)]
-                filter.apply_ignore_change_list(&platform_config.logging.terminal.ignore_log_targets);
                 let layer = tracing_subscriber::fmt::Layer::new()
                     .compact()
                     .map_fmt_fields(FmtStripVeilidFields::mapper())
+                    .with_timer(timer)
                     .with_ansi(false)
                     .with_writer(std::io::stdout)
                     .with_filter(filter.clone());
                 filters.insert("terminal", filter);
                 layers.push(layer.boxed());
             } else {
-                let filter = VeilidLayerFilter::new_with_config(
-                    VeilidLayerFilterConfig::new().with_common_log_level(platform_config.logging.terminal.level),
-                );
-                #[allow(deprecated)]
-                filter.apply_ignore_change_list(&platform_config.logging.terminal.ignore_log_targets);
                 let layer = tracing_subscriber::fmt::Layer::new()
                     .compact()
                     .map_fmt_fields(FmtStripVeilidFields::mapper())
+                    .with_timer(timer)
                     .with_writer(std::io::stdout)
                     .with_filter(filter.clone());
                 filters.insert("terminal", filter);
@@ -279,6 +296,22 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
             }
         }
     };
+
+    // API logger
+    if platform_config.logging.api.enabled {
+        let filter = VeilidLayerFilter::new_with_config(
+            VeilidLayerFilterConfig::new().with_common_log_level(platform_config.logging.api.level),
+        );
+        #[allow(deprecated)]
+        filter.apply_ignore_change_list(&platform_config.logging.api.ignore_log_targets);
+        filter
+            .try_apply_directives(platform_config.logging.api.directives)
+            .expect_or_log("failed to apply api logging directives");
+
+        let layer = ApiTracingLayer::init().with_filter(filter.clone());
+        filters.insert("api", filter);
+        layers.push(layer.boxed());
+    }
 
     // OpenTelemetry logger
     cfg_if! {
@@ -315,6 +348,9 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
 
                 #[allow(deprecated)]
                 filter.apply_ignore_change_list(&platform_config.logging.otlp.ignore_log_targets);
+                filter
+                    .try_apply_directives(platform_config.logging.api.directives)
+                    .expect_or_log("failed to apply otlp logging directives");
 
                 let layer = tracing_opentelemetry::layer()
                     .with_tracer(tracer)
@@ -337,19 +373,6 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
                 .with_empty_samples(false)
                 .boxed(),
         );
-    }
-
-    // API logger
-    if platform_config.logging.api.enabled {
-        let filter = VeilidLayerFilter::new_with_config(
-            VeilidLayerFilterConfig::new().with_common_log_level(platform_config.logging.api.level),
-        );
-        #[allow(deprecated)]
-        filter.apply_ignore_change_list(&platform_config.logging.api.ignore_log_targets);
-
-        let layer = ApiTracingLayer::init().with_filter(filter.clone());
-        filters.insert("api", filter);
-        layers.push(layer.boxed());
     }
 
     let subscriber = subscriber.with(layers);
@@ -942,17 +965,15 @@ pub extern "C" fn new_private_route(port: i64) {
 
 #[no_mangle]
 #[instrument(level = "trace", target = "ffi", skip_all)]
-pub extern "C" fn new_custom_private_route(port: i64, stability: FfiStr, sequencing: FfiStr) {
-    let stability: Stability = deserialize_opt_json(stability.into_opt_string()).unwrap_or_log();
-    let sequencing: Sequencing = deserialize_opt_json(sequencing.into_opt_string()).unwrap_or_log();
+pub extern "C" fn new_custom_private_route(port: i64, private_spec: FfiStr) {
+    let private_spec: PrivateSpec =
+        deserialize_opt_json(private_spec.into_opt_string()).unwrap_or_log();
 
     DartIsolateWrapper::new(port).spawn_result_json(
         async move {
             let veilid_api = get_veilid_api().await?;
 
-            let route_blob = veilid_api
-                .new_custom_private_route(&VALID_CRYPTO_KINDS, stability, sequencing)
-                .await?;
+            let route_blob = veilid_api.new_custom_private_route(private_spec).await?;
 
             VeilidAPIResult::Ok(route_blob)
         }

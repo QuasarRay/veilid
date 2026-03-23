@@ -136,28 +136,22 @@
     {
       "type": "object",
       "properties": {
-        "kinds": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
         "op": {
           "type": "string",
           "const": "NewCustomPrivateRoute"
         },
-        "sequencing": {
-          "$ref": "#/$defs/Sequencing",
-          "default": "NoPreference"
-        },
-        "stability": {
-          "$ref": "#/$defs/Stability",
-          "default": "LowLatency"
+        "private_spec": {
+          "$ref": "#/$defs/PrivateSpec",
+          "default": {
+            "crypto_kinds": [],
+            "hop_count": 0,
+            "sequencing": "PreferOrdered",
+            "stability": "Reliable"
+          }
         }
       },
       "required": [
-        "op",
-        "kinds"
+        "op"
       ]
     },
     {
@@ -533,6 +527,10 @@
   "$defs": {
     "AllowOffline": {
       "type": "boolean"
+    },
+    "CryptoKind": {
+      "description": "A four-character code",
+      "type": "string"
     },
     "CryptoSystemRequest": {
       "type": "object",
@@ -1404,6 +1402,37 @@
         "dhttx_id"
       ]
     },
+    "PrivateSpec": {
+      "description": "Options for private routes (receiver privacy).",
+      "type": "object",
+      "properties": {
+        "crypto_kinds": {
+          "description": "Empty value here will use all the available crypto kinds",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CryptoKind"
+          }
+        },
+        "hop_count": {
+          "description": "If zero this will be set to to the default route hop count",
+          "type": "integer",
+          "format": "uint",
+          "default": 0,
+          "minimum": 0
+        },
+        "sequencing": {
+          "description": "Prefer connection-oriented sequenced protocols.",
+          "$ref": "#/$defs/Sequencing",
+          "default": "PreferOrdered"
+        },
+        "stability": {
+          "description": "Prefer reliability over speed.",
+          "$ref": "#/$defs/Stability",
+          "default": "Reliable"
+        }
+      }
+    },
     "RoutingContextRequest": {
       "type": "object",
       "properties": {
@@ -1805,9 +1834,10 @@
       "type": "object",
       "properties": {
         "hop_count": {
-          "description": "Must be greater than 0.",
+          "description": "If zero this will be set to to the default route hop count",
           "type": "integer",
           "format": "uint",
+          "default": 0,
           "minimum": 0
         },
         "preferred_route": {
@@ -1815,22 +1845,20 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "default": null
         },
         "sequencing": {
           "description": "Prefer connection-oriented sequenced protocols.",
-          "$ref": "#/$defs/Sequencing"
+          "$ref": "#/$defs/Sequencing",
+          "default": "PreferOrdered"
         },
         "stability": {
           "description": "Prefer reliability over speed.",
-          "$ref": "#/$defs/Stability"
+          "$ref": "#/$defs/Stability",
+          "default": "Reliable"
         }
-      },
-      "required": [
-        "hop_count",
-        "stability",
-        "sequencing"
-      ]
+      }
     },
     "Sequencing": {
       "type": "string",

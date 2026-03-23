@@ -149,7 +149,7 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
         self.common.add_bootstrap_peer(bootstrap_peer);
     }
 
-    fn update_low_water_mark(&self, low_water_mark: RoutingDomainLowWaterMark) {
+    fn update_low_water_mark(&self, low_water_mark: Arc<LowWaterMark>) {
         self.common.update_low_water_mark(low_water_mark);
     }
 
@@ -157,7 +157,7 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
         self.common.reset_low_water_mark();
     }
 
-    fn get_low_water_mark(&self) -> RoutingDomainLowWaterMark {
+    fn get_low_water_mark(&self) -> Arc<LowWaterMark> {
         self.common.get_low_water_mark()
     }
 

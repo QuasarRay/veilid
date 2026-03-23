@@ -45,6 +45,8 @@ pub struct RoutingDomainState {
     pub current_peer_info: Arc<PeerInfo>,
     /// The entry snapshot used to calculate this routing domain's state
     pub entry_summary: Arc<EntrySummary>,
+    /// The low water mark of the routing domain
+    pub low_water_mark: Arc<LowWaterMark>,
     /// If this routing domain is ready for inbound use (dialinfo, relays, peer info, etc)
     pub is_ready_inbound: bool,
     /// If this routing domain is ready for outbound use (dialinfo, bootstrapped, safety routes, etc)

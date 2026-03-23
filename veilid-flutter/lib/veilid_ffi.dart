@@ -114,9 +114,8 @@ typedef _TransactDHTRecordsDart =
 
 // fn new_private_route(port: i64)
 typedef _NewPrivateRouteDart = void Function(int);
-// fn new_custom_private_route(port: i64, stability: FfiStr, sequencing: FfiStr)
-typedef _NewCustomPrivateRouteDart =
-    void Function(int, Pointer<Utf8>, Pointer<Utf8>);
+// fn new_custom_private_route(port: i64, private_spec: FfiStr)
+typedef _NewCustomPrivateRouteDart = void Function(int, Pointer<Utf8>);
 // fn import_remote_private_route(port: i64, blob: FfiStr)
 typedef _ImportRemotePrivateRouteDart = void Function(int, Pointer<Utf8>);
 // fn release_private_route(port:i64, key: FfiStr)
@@ -1990,7 +1989,7 @@ class VeilidFFI extends Veilid {
           ),
       _newCustomPrivateRoute = dylib
           .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>),
+            Void Function(Int64, Pointer<Utf8>),
             _NewCustomPrivateRouteDart
           >('new_custom_private_route'),
       _importRemotePrivateRoute = dylib
@@ -2530,16 +2529,12 @@ class VeilidFFI extends Veilid {
   }
 
   @override
-  Future<RouteBlob> newCustomPrivateRoute(
-    Stability stability,
-    Sequencing sequencing,
-  ) {
+  Future<RouteBlob> newCustomPrivateRoute(PrivateSpec privateSpec) {
     final recvPort = ReceivePort('new_custom_private_route');
     final sendPort = recvPort.sendPort;
     _newCustomPrivateRoute(
       sendPort.nativePort,
-      jsonEncode(stability).toNativeUtf8(),
-      jsonEncode(sequencing).toNativeUtf8(),
+      jsonEncode(privateSpec).toNativeUtf8(),
     );
 
     return processFutureJson(RouteBlob.fromJson, recvPort.first);

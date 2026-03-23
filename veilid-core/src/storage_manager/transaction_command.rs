@@ -38,7 +38,7 @@ pub(in crate::storage_manager) enum TransactCommandDisposition {
 }
 
 /// The result of the outbound_transact_command operation
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(in crate::storage_manager) struct OutboundTransactCommandPerNodeResult {
     /// The node transaction id this is for
     pub node_transaction_id: NodeTransactionId,
@@ -56,7 +56,7 @@ pub(in crate::storage_manager) struct OutboundTransactCommandPerNodeResult {
 }
 
 /// The result of the outbound_transact_command operation
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(in crate::storage_manager) struct OutboundTransactCommandResult {
     /// Copy of the params used to produce these results
     pub params: OutboundTransactCommandParams,

@@ -5,6 +5,7 @@ use super::*;
     Copy,
     Clone,
     Debug,
+    Default,
     PartialEq,
     Eq,
     PartialOrd,
@@ -21,10 +22,9 @@ use super::*;
     tsify(from_wasm_abi, into_wasm_abi, namespace)
 )]
 #[must_use]
-#[derive(Default)]
 pub enum Sequencing {
-    #[default]
     NoPreference = 0,
+    #[default]
     PreferOrdered = 1,
     EnsureOrdered = 2,
 }
@@ -74,7 +74,9 @@ impl FromStr for Sequencing {
 
 // Ordering here matters, >= is used to check strength of sequencing requirement
 #[allow(clippy::derived_hash_with_manual_eq)]
-#[derive(Debug, PartialOrd, Ord, EnumSetType, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Default, PartialOrd, Ord, EnumSetType, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
@@ -84,6 +86,7 @@ impl FromStr for Sequencing {
 #[enumset(repr = "u8")]
 pub enum SequenceOrdering {
     Unordered = 0,
+    #[default]
     Ordered = 1,
 }
 
@@ -118,6 +121,7 @@ pub type SequenceOrderingSet = EnumSet<SequenceOrdering>;
     Copy,
     Clone,
     Debug,
+    Default,
     PartialEq,
     Eq,
     PartialOrd,
@@ -134,10 +138,9 @@ pub type SequenceOrderingSet = EnumSet<SequenceOrdering>;
     tsify(from_wasm_abi, into_wasm_abi, namespace)
 )]
 #[must_use]
-#[derive(Default)]
 pub enum Stability {
-    #[default]
     LowLatency = 0,
+    #[default]
     Reliable = 1,
 }
 
@@ -171,11 +174,6 @@ impl FromStr for Stability {
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, GetSize,
 )]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi, namespace)
-)]
 #[must_use]
 pub enum SafetySelection {
     /// Don't use a safety route, only specify the sequencing preference.
@@ -199,31 +197,67 @@ impl SafetySelection {
     }
 }
 
-impl Default for SafetySelection {
-    fn default() -> Self {
-        Self::Unsafe(Sequencing::NoPreference)
-    }
-}
-
 /// Options for safety routes (sender privacy).
 #[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, GetSize,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    GetSize,
 )]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
 pub struct SafetySpec {
     /// Preferred safety route set id if it still exists.
     #[schemars(with = "Option<String>")]
-    #[cfg_attr(
-        all(target_arch = "wasm32", target_os = "unknown"),
-        tsify(optional, type = "string")
-    )]
+    #[serde(default)]
     pub preferred_route: Option<RouteId>,
-    /// Must be greater than 0.
+    /// If zero this will be set to to the default route hop count
+    #[serde(default)]
     pub hop_count: usize,
     /// Prefer reliability over speed.
+    #[serde(default)]
     pub stability: Stability,
     /// Prefer connection-oriented sequenced protocols.
+    #[serde(default)]
+    pub sequencing: Sequencing,
+}
+
+/// Options for private routes (receiver privacy).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    GetSize,
+)]
+#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[must_use]
+pub struct PrivateSpec {
+    /// Empty value here will use all the available crypto kinds
+    #[serde(default)]
+    pub crypto_kinds: Vec<CryptoKind>,
+    /// If zero this will be set to to the default route hop count
+    #[serde(default)]
+    pub hop_count: usize,
+    /// Prefer reliability over speed.
+    #[serde(default)]
+    pub stability: Stability,
+    /// Prefer connection-oriented sequenced protocols.
+    #[serde(default)]
     pub sequencing: Sequencing,
 }

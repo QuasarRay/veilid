@@ -141,27 +141,32 @@ impl Crypto {
     )]
     pub(crate) async fn table_store_setup(&self, table_store: &TableStore) -> EyreResult<()> {
         // load caches if they are valid for this node id
-        let caches_valid = {
-            let db = table_store
-                .open("crypto_caches", 1)
-                .await
-                .wrap_err("failed to open crypto_caches")?;
-
-            let mut caches_valid = true;
-            if let Some(b) = db.load(0, b"dh_cache").await? {
-                let mut inner = self.inner.lock();
-                if let Ok(dh_cache) = bytes_to_cache(&b) {
-                    inner.dh_cache = dh_cache;
-                } else {
-                    caches_valid = false;
+        let caches_valid = if let Ok(db) = table_store.open("crypto_caches", 1).await {
+            match db.load(0, b"dh_cache").await {
+                Ok(Some(b)) => {
+                    let mut inner = self.inner.lock();
+                    if let Ok(dh_cache) = bytes_to_cache(&b) {
+                        inner.dh_cache = dh_cache;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Ok(None) => false,
+                Err(e) => {
+                    veilid_log!(self error "failed to load dh_cache: {}", e);
+                    false
                 }
             }
-
-            caches_valid
+        } else {
+            veilid_log!(self error "failed to open crypto_caches, purging");
+            false
         };
 
         if !caches_valid {
-            table_store.delete("crypto_caches").await?;
+            if let Err(e) = table_store.delete("crypto_caches").await {
+                veilid_log!(self error "failed to delete crypto_caches: {}", e);
+            }
         }
 
         Ok(())

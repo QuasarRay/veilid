@@ -10,6 +10,8 @@ struct OutboundTransactBeginContext {
     pub opt_descriptor: Option<Arc<SignedValueDescriptor>>,
     /// The best sequence numbers so far
     pub seqs: Vec<ValueSeqNum>,
+    /// The routes that were locked by this transaction
+    pub locked_routes: LockedRoutes,
 }
 
 /// parameters required to begin a transaction
@@ -26,7 +28,7 @@ pub(super) struct OutboundTransactBeginParams {
 }
 
 /// The result of the outbound_transact_begin operation
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct OutboundTransactBeginResult {
     /// The parameters used for this begin
     pub params: OutboundTransactBeginParams,
@@ -36,6 +38,8 @@ pub(super) struct OutboundTransactBeginResult {
     pub seqs: Vec<ValueSeqNum>,
     /// The descriptor for the record
     pub descriptor: Arc<SignedValueDescriptor>,
+    /// The routes that were locked by this transaction
+    pub locked_routes: LockedRoutes,
 }
 
 /// The result of the inbound_transact_begin operation
@@ -116,6 +120,7 @@ impl StorageManager {
         let context = Arc::new(Mutex::new(OutboundTransactBeginContext {
             opt_descriptor,
             seqs: vec![],
+            locked_routes: LockedRoutes::new(self.registry()),
         }));
 
         let descriptor_cache = self.descriptor_cache.clone();
@@ -154,26 +159,25 @@ impl StorageManager {
                         let tva = loop {
                             // send across the wire
                             let tva = match
-                            rpc_processor
-                                .rpc_call_transact_begin(
-                                    dest.clone(),
-                                    opaque_record_key.clone(),
-                                    descriptor_mode.clone(),
-                                    signing_keypair.clone(),
-                                )
-                                .await? {
-                                NetworkResult::Timeout => {
-                                    return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Timeout});
-                                }
-                                NetworkResult::ServiceUnavailable(_) |
-                                NetworkResult::NoConnection(_)  |
-                                NetworkResult::AlreadyExists(_) |
-                                NetworkResult::InvalidMessage(_) => {
-                                    return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
-                                }
-                                NetworkResult::Value(v) => v
-                            };
-
+                                rpc_processor
+                                    .rpc_call_transact_begin(
+                                        dest.clone(),
+                                        opaque_record_key.clone(),
+                                        descriptor_mode.clone(),
+                                        signing_keypair.clone(),
+                                    )
+                                    .await? {
+                                    NetworkResult::Timeout => {
+                                        return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Timeout});
+                                    }
+                                    NetworkResult::ServiceUnavailable(_) |
+                                    NetworkResult::NoConnection(_)  |
+                                    NetworkResult::AlreadyExists(_) |
+                                    NetworkResult::InvalidMessage(_) => {
+                                        return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                                    }
+                                    NetworkResult::Value(v) => v
+                                };
                             // Do a retry if we needed to send the descriptor
                             // (if the cache was wrong)
                             if tva.answer.accepted && tva.answer.descriptor_mode.is_want() {
@@ -186,6 +190,13 @@ impl StorageManager {
                                         descriptor_mode = DescriptorMode::Send(signed_value_descriptor);
 
                                         veilid_log!(registry debug target:"network_result", "Retrying to send descriptor");
+                                        // Save locked routes in the context
+                                        {
+                                            let mut ctx = context.lock();
+                                            if let Some(mut locked_routes) = tva.answer_context.waitable_reply_context.opt_locked_routes {
+                                                ctx.locked_routes.take_from(&mut locked_routes);
+                                            }
+                                        }
                                         continue;
                                     }
                                     DescriptorMode::Send(_) => {
@@ -197,6 +208,15 @@ impl StorageManager {
 
                             break tva;
                         };
+
+                        // Save locked routes in the context
+                        {
+                            let mut ctx = context.lock();
+                            if let Some(mut locked_routes) = tva.answer_context.waitable_reply_context.opt_locked_routes {
+                                ctx.locked_routes.take_from(&mut locked_routes);
+                            }
+                        }
+
 
                         let answer = tva.answer;
 
@@ -348,7 +368,7 @@ impl StorageManager {
             .run(init_fanout_queue, FanoutQueueMode::ThrottleAtConsensus)
             .await?;
 
-        let ctx = context.lock();
+        let mut ctx = context.lock();
 
         veilid_log!(self debug target: "network_result", "TransactBegin Fanout: {:#}", fanout_result);
 
@@ -374,6 +394,7 @@ impl StorageManager {
             fanout_result,
             seqs,
             descriptor,
+            locked_routes: ctx.locked_routes.take(),
         };
 
         Ok(result)

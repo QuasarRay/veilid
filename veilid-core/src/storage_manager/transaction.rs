@@ -254,9 +254,6 @@ impl StorageManager {
                 return Err(begin_error);
             }
 
-            // Lock safety routes to prevent invalidation during the transaction
-            self.lock_transaction_safety_routes(&transaction_handle);
-
             // Otherwise return handle
             Ok(transaction_handle)
         })
@@ -590,8 +587,8 @@ impl StorageManager {
             (keys_and_subkeys, cleanup)
         };
 
-        // Unlock safety routes and wait for background operations to finish
-        self.process_transaction_cleanup(cleanup).await;
+        // Wait for background operations to finish
+        cleanup.await;
 
         // Record the set values locally since they were successfully set online
         if let Err(e) = self
@@ -646,7 +643,8 @@ impl StorageManager {
             .await?;
 
         // Transaction is done successfully, drop it and wait for background tasks to complete if any
-        self.drop_transaction_and_wait(transaction_handle).await;
+        self.drop_transaction_and_wait_locked(&records_lock, transaction_handle)
+            .await;
 
         Ok(())
     }
@@ -1190,10 +1188,10 @@ impl StorageManager {
                 }
             }
 
-            // Move the stop source in here and drop it when we're done
+            // If the transaction still exists, remove the completed background tokens
+            // It may not exist other errors happened after the the partial_drop_and_background_rollback_locked
             {
                 let mut inner = this.inner.lock();
-                drop(stop_source);
                 if let Ok(transaction_state) = inner
                     .outbound_transaction_manager
                     .get_transaction_state_mut(&transaction_handle)
@@ -1201,6 +1199,9 @@ impl StorageManager {
                     transaction_state.remove_completed_background_tokens();
                 }
             }
+
+            // Move the stop source in here and drop it when we're done
+            drop(stop_source);
         };
 
         // Attach this stop token to the transaction
@@ -1248,7 +1249,8 @@ impl StorageManager {
                 }
 
                 // Drop the transaction and wait for background tasks to complete if any
-                self.drop_transaction_and_wait(transaction_handle).await;
+                self.drop_transaction_and_wait_locked(records_lock, transaction_handle)
+                    .await;
 
                 return Err(e);
             }
@@ -1256,7 +1258,7 @@ impl StorageManager {
 
         // If we have cleanup to do, process it
         if let Some(cleanup) = opt_cleanup {
-            self.process_transaction_cleanup(cleanup).await;
+            cleanup.await;
         }
 
         out
@@ -1335,83 +1337,10 @@ impl StorageManager {
         Ok(value)
     }
 
-    /// Lock safety routes used by a transaction to prevent invalidation during the transaction
-    fn lock_transaction_safety_routes(&self, transaction_handle: &OutboundTransactionHandle) {
-        let routing_table = self.network_manager().routing_table();
-        let rss = routing_table.route_spec_store();
-
-        // Collect safety selections from all records in the transaction
-        let safety_selections: Vec<SafetySelection> = {
-            let inner = self.inner.lock();
-            let Ok(state) = inner
-                .outbound_transaction_manager
-                .get_transaction_state(transaction_handle)
-            else {
-                return;
-            };
-            state
-                .get_record_states()
-                .iter()
-                .map(|r| r.safety_selection().clone())
-                .collect()
-        };
-
-        // Find and lock the safety routes
-        let mut locked_safety_routes = LockedSafetyRoutes::new();
-        for ss in &safety_selections {
-            for key in rss.get_safety_route_keys_for_selection(ss) {
-                rss.lock_route(&key);
-                locked_safety_routes.insert(key);
-            }
-        }
-
-        // Store the locked routes in the transaction state for later unlock
-        if !locked_safety_routes.is_empty() {
-            let mut inner = self.inner.lock();
-            if let Ok(state) = inner
-                .outbound_transaction_manager
-                .get_transaction_state_mut(transaction_handle)
-            {
-                state.add_locked_safety_routes(locked_safety_routes);
-            }
-        }
-    }
-
-    /// Unlock safety routes that were locked for a transaction
-    fn unlock_safety_routes(&self, locked_safety_routes: LockedSafetyRoutes) {
-        if locked_safety_routes.is_empty() {
-            return;
-        }
-        let routing_table = self.network_manager().routing_table();
-        let rss = routing_table.route_spec_store();
-        for (key, count) in locked_safety_routes.into_iter() {
-            for _ in 0..count {
-                rss.unlock_route_and_check(&key);
-            }
-        }
-    }
-
-    /// Process transaction cleanup: unregister keepalives, unlock safety routes, and wait for background tokens
-    pub(super) async fn process_transaction_cleanup(&self, cleanup: TransactionCleanup) {
-        self.outbound_transaction_keepalive_processor
-            .unregister(cleanup.transaction_handle.clone());
-        self.outbound_transaction_keepalive_processor
-            .cleanup_transaction(cleanup.transaction_handle);
-        self.unlock_safety_routes(cleanup.locked_safety_routes);
-        if !cleanup.background_tokens.is_empty() {
-            Self::wait_for_background_tokens(cleanup.background_tokens).await;
-        }
-    }
-
-    /// Wait for a list of background tokens to drop
-    pub(super) async fn wait_for_background_tokens(background_tokens: Vec<StopToken>) {
-        let mut unord = FuturesUnordered::from_iter(background_tokens.into_iter());
-        while (unord.next().await).is_some() {}
-    }
-
     /// Convenience function to drop transaction and wait for background tasks to complete
-    pub(super) async fn drop_transaction_and_wait(
+    async fn drop_transaction_and_wait_locked(
         &self,
+        _records_lock: &StorageManagerRecordsLockGuard,
         transaction_handle: OutboundTransactionHandle,
     ) {
         let opt_cleanup = {
@@ -1422,7 +1351,7 @@ impl StorageManager {
                 .map(|state| state.into_transaction_cleanup(transaction_handle))
         };
         if let Some(cleanup) = opt_cleanup {
-            self.process_transaction_cleanup(cleanup).await;
+            cleanup.await;
         }
     }
 
@@ -1436,7 +1365,7 @@ impl StorageManager {
         self.background_operation_processor.add_future(async move {
             let this = registry.storage_manager();
 
-            let _records_lock = this
+            let records_lock = this
                 .record_lock_table
                 .lock_records(
                     transaction_handle.keys().to_vec(),
@@ -1445,7 +1374,8 @@ impl StorageManager {
                 .await;
 
             // Drop the transaction and wait for background tasks to complete if any
-            this.drop_transaction_and_wait(transaction_handle).await;
+            this.drop_transaction_and_wait_locked(&records_lock, transaction_handle)
+                .await;
         });
     }
 }

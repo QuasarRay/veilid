@@ -80,11 +80,11 @@ impl PublicInternetRoutingDomainController {
         let mut automatic_unsafe_routes = Vec::<(RouteId, u64)>::new();
         let mut expired_routes = Vec::<RouteId>::new();
         rss.list_allocated_routes(|k, v| {
-            // Ignore routes that don't need testing (locked routes never need testing)
-            if !v.needs_testing(cur_ts) {
-                return Option::<()>::None;
-            }
             v.with_stats(|stats| {
+                // Ignore routes that don't need or want testing
+                if !stats.needs_testing(cur_ts) {
+                    return Option::<()>::None;
+                }
                 // If this has been published, always test if we need it
                 // Also if the route has never been tested, test it at least once
                 if v.is_published() || stats.last_known_valid_ts.is_none() {
@@ -211,18 +211,13 @@ impl PublicInternetRoutingDomainController {
             if route_count < background_safety_route_count {
                 let routes_to_allocate = background_safety_route_count - route_count;
 
-                // Parameters here must be the most inclusive safety route spec
+                // Parameters here must be the most inclusive route allocation spec
                 // These will be used by test_remote_route as well
-                let safety_spec = SafetySpec {
-                    preferred_route: None,
+                let params = AllocateRouteParams {
+                    crypto_kinds: VALID_CRYPTO_KINDS.to_vec(),
                     hop_count,
                     stability: Stability::Reliable,
                     sequencing: Sequencing::PreferOrdered,
-                };
-
-                let params = AllocateRouteParams {
-                    crypto_kinds: VALID_CRYPTO_KINDS.to_vec(),
-                    safety_spec,
                     directions: DirectionSet::all(),
                     avoid_nodes: Vec::new(),
                     automatic: true,

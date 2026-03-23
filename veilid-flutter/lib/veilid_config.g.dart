@@ -9,8 +9,15 @@ part of 'veilid_config.dart';
 _VeilidFFIConfigLoggingTerminal _$VeilidFFIConfigLoggingTerminalFromJson(
   Map<String, dynamic> json,
 ) => _VeilidFFIConfigLoggingTerminal(
-  enabled: json['enabled'] as bool,
-  level: VeilidConfigLogLevel.fromJson(json['level']),
+  enabled: json['enabled'] as bool? ?? true,
+  level: json['level'] == null
+      ? VeilidConfigLogLevel.info
+      : VeilidConfigLogLevel.fromJson(json['level']),
+  directives:
+      (json['directives'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList() ??
+      const [],
   ignoreLogTargets:
       (json['ignoreLogTargets'] as List<dynamic>?)
           ?.map((e) => e as String)
@@ -23,16 +30,24 @@ Map<String, dynamic> _$VeilidFFIConfigLoggingTerminalToJson(
 ) => <String, dynamic>{
   'enabled': instance.enabled,
   'level': instance.level.toJson(),
+  'directives': instance.directives,
   'ignoreLogTargets': instance.ignoreLogTargets,
 };
 
 _VeilidFFIConfigLoggingOtlp _$VeilidFFIConfigLoggingOtlpFromJson(
   Map<String, dynamic> json,
 ) => _VeilidFFIConfigLoggingOtlp(
-  enabled: json['enabled'] as bool,
-  level: VeilidConfigLogLevel.fromJson(json['level']),
+  enabled: json['enabled'] as bool? ?? true,
+  level: json['level'] == null
+      ? VeilidConfigLogLevel.trace
+      : VeilidConfigLogLevel.fromJson(json['level']),
   grpcEndpoint: json['grpcEndpoint'] as String,
   serviceName: json['serviceName'] as String,
+  directives:
+      (json['directives'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList() ??
+      const [],
   ignoreLogTargets:
       (json['ignoreLogTargets'] as List<dynamic>?)
           ?.map((e) => e as String)
@@ -47,14 +62,22 @@ Map<String, dynamic> _$VeilidFFIConfigLoggingOtlpToJson(
   'level': instance.level.toJson(),
   'grpcEndpoint': instance.grpcEndpoint,
   'serviceName': instance.serviceName,
+  'directives': instance.directives,
   'ignoreLogTargets': instance.ignoreLogTargets,
 };
 
 _VeilidFFIConfigLoggingApi _$VeilidFFIConfigLoggingApiFromJson(
   Map<String, dynamic> json,
 ) => _VeilidFFIConfigLoggingApi(
-  enabled: json['enabled'] as bool,
-  level: VeilidConfigLogLevel.fromJson(json['level']),
+  enabled: json['enabled'] as bool? ?? true,
+  level: json['level'] == null
+      ? VeilidConfigLogLevel.info
+      : VeilidConfigLogLevel.fromJson(json['level']),
+  directives:
+      (json['directives'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList() ??
+      const [],
   ignoreLogTargets:
       (json['ignoreLogTargets'] as List<dynamic>?)
           ?.map((e) => e as String)
@@ -67,13 +90,14 @@ Map<String, dynamic> _$VeilidFFIConfigLoggingApiToJson(
 ) => <String, dynamic>{
   'enabled': instance.enabled,
   'level': instance.level.toJson(),
+  'directives': instance.directives,
   'ignoreLogTargets': instance.ignoreLogTargets,
 };
 
 _VeilidFFIConfigLoggingFlame _$VeilidFFIConfigLoggingFlameFromJson(
   Map<String, dynamic> json,
 ) => _VeilidFFIConfigLoggingFlame(
-  enabled: json['enabled'] as bool,
+  enabled: json['enabled'] as bool? ?? true,
   path: json['path'] as String,
 );
 
@@ -84,18 +108,30 @@ Map<String, dynamic> _$VeilidFFIConfigLoggingFlameToJson(
 _VeilidFFIConfigLogging _$VeilidFFIConfigLoggingFromJson(
   Map<String, dynamic> json,
 ) => _VeilidFFIConfigLogging(
-  terminal: VeilidFFIConfigLoggingTerminal.fromJson(json['terminal']),
-  otlp: VeilidFFIConfigLoggingOtlp.fromJson(json['otlp']),
-  api: VeilidFFIConfigLoggingApi.fromJson(json['api']),
-  flame: VeilidFFIConfigLoggingFlame.fromJson(json['flame']),
+  terminal: json['terminal'] == null
+      ? const VeilidFFIConfigLoggingTerminal(enabled: false)
+      : VeilidFFIConfigLoggingTerminal.fromJson(json['terminal']),
+  api: json['api'] == null
+      ? const VeilidFFIConfigLoggingApi(enabled: false)
+      : VeilidFFIConfigLoggingApi.fromJson(json['api']),
+  otlp: json['otlp'] == null
+      ? const VeilidFFIConfigLoggingOtlp(
+          enabled: false,
+          grpcEndpoint: '',
+          serviceName: '',
+        )
+      : VeilidFFIConfigLoggingOtlp.fromJson(json['otlp']),
+  flame: json['flame'] == null
+      ? const VeilidFFIConfigLoggingFlame(enabled: false, path: '')
+      : VeilidFFIConfigLoggingFlame.fromJson(json['flame']),
 );
 
 Map<String, dynamic> _$VeilidFFIConfigLoggingToJson(
   _VeilidFFIConfigLogging instance,
 ) => <String, dynamic>{
   'terminal': instance.terminal.toJson(),
-  'otlp': instance.otlp.toJson(),
   'api': instance.api.toJson(),
+  'otlp': instance.otlp.toJson(),
   'flame': instance.flame.toJson(),
 };
 
@@ -105,15 +141,41 @@ _VeilidFFIConfig _$VeilidFFIConfigFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$VeilidFFIConfigToJson(_VeilidFFIConfig instance) =>
     <String, dynamic>{'logging': instance.logging.toJson()};
 
+_VeilidWASMConfigLoggingPerformanceConsole
+_$VeilidWASMConfigLoggingPerformanceConsoleFromJson(
+  Map<String, dynamic> json,
+) => _VeilidWASMConfigLoggingPerformanceConsole(
+  enabled: json['enabled'] as bool? ?? true,
+  color: json['color'] as bool? ?? true,
+  timestamp: json['timestamp'] as bool? ?? true,
+  originBaseUrl: json['originBaseUrl'] as String?,
+);
+
+Map<String, dynamic> _$VeilidWASMConfigLoggingPerformanceConsoleToJson(
+  _VeilidWASMConfigLoggingPerformanceConsole instance,
+) => <String, dynamic>{
+  'enabled': instance.enabled,
+  'color': instance.color,
+  'timestamp': instance.timestamp,
+  'originBaseUrl': instance.originBaseUrl,
+};
+
 _VeilidWASMConfigLoggingPerformance
 _$VeilidWASMConfigLoggingPerformanceFromJson(Map<String, dynamic> json) =>
     _VeilidWASMConfigLoggingPerformance(
-      enabled: json['enabled'] as bool,
-      level: VeilidConfigLogLevel.fromJson(json['level']),
-      logsInTimings: json['logsInTimings'] as bool,
-      logsInConsole: VeilidWASMConfigLoggingLogsInConsole.fromJson(
-        json['logsInConsole'],
-      ),
+      enabled: json['enabled'] as bool? ?? true,
+      level: json['level'] == null
+          ? VeilidConfigLogLevel.info
+          : VeilidConfigLogLevel.fromJson(json['level']),
+      timings: json['timings'] as bool? ?? false,
+      console: json['console'] == null
+          ? const VeilidWASMConfigLoggingPerformanceConsole(enabled: true)
+          : VeilidWASMConfigLoggingPerformanceConsole.fromJson(json['console']),
+      directives:
+          (json['directives'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          const [],
       ignoreLogTargets:
           (json['ignoreLogTargets'] as List<dynamic>?)
               ?.map((e) => e as String)
@@ -126,16 +188,24 @@ Map<String, dynamic> _$VeilidWASMConfigLoggingPerformanceToJson(
 ) => <String, dynamic>{
   'enabled': instance.enabled,
   'level': instance.level.toJson(),
-  'logsInTimings': instance.logsInTimings,
-  'logsInConsole': instance.logsInConsole.toJson(),
+  'timings': instance.timings,
+  'console': instance.console.toJson(),
+  'directives': instance.directives,
   'ignoreLogTargets': instance.ignoreLogTargets,
 };
 
 _VeilidWASMConfigLoggingApi _$VeilidWASMConfigLoggingApiFromJson(
   Map<String, dynamic> json,
 ) => _VeilidWASMConfigLoggingApi(
-  enabled: json['enabled'] as bool,
-  level: VeilidConfigLogLevel.fromJson(json['level']),
+  enabled: json['enabled'] as bool? ?? true,
+  level: json['level'] == null
+      ? VeilidConfigLogLevel.info
+      : VeilidConfigLogLevel.fromJson(json['level']),
+  directives:
+      (json['directives'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList() ??
+      const [],
   ignoreLogTargets:
       (json['ignoreLogTargets'] as List<dynamic>?)
           ?.map((e) => e as String)
@@ -148,14 +218,19 @@ Map<String, dynamic> _$VeilidWASMConfigLoggingApiToJson(
 ) => <String, dynamic>{
   'enabled': instance.enabled,
   'level': instance.level.toJson(),
+  'directives': instance.directives,
   'ignoreLogTargets': instance.ignoreLogTargets,
 };
 
 _VeilidWASMConfigLogging _$VeilidWASMConfigLoggingFromJson(
   Map<String, dynamic> json,
 ) => _VeilidWASMConfigLogging(
-  performance: VeilidWASMConfigLoggingPerformance.fromJson(json['performance']),
-  api: VeilidWASMConfigLoggingApi.fromJson(json['api']),
+  performance: json['performance'] == null
+      ? const VeilidWASMConfigLoggingPerformance(enabled: false)
+      : VeilidWASMConfigLoggingPerformance.fromJson(json['performance']),
+  api: json['api'] == null
+      ? const VeilidWASMConfigLoggingApi(enabled: false)
+      : VeilidWASMConfigLoggingApi.fromJson(json['api']),
 );
 
 Map<String, dynamic> _$VeilidWASMConfigLoggingToJson(
@@ -167,7 +242,9 @@ Map<String, dynamic> _$VeilidWASMConfigLoggingToJson(
 
 _VeilidWASMConfig _$VeilidWASMConfigFromJson(Map<String, dynamic> json) =>
     _VeilidWASMConfig(
-      logging: VeilidWASMConfigLogging.fromJson(json['logging']),
+      logging: json['logging'] == null
+          ? const VeilidWASMConfigLogging()
+          : VeilidWASMConfigLogging.fromJson(json['logging']),
     );
 
 Map<String, dynamic> _$VeilidWASMConfigToJson(_VeilidWASMConfig instance) =>

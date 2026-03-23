@@ -1,11 +1,10 @@
-@Timeout(Duration(seconds: 500))
-
 library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:veilid/veilid.dart';
 import 'package:veilid_test/veilid_test.dart';
+// import 'package:test_api/src/backend/invoker.dart';
 
 import 'test_crypto.dart';
 import 'test_dht.dart';
@@ -21,77 +20,106 @@ void main() {
   final fixture =
       DefaultVeilidFixture(programName: 'veilid_flutter integration test');
 
-  group('Unstarted Tests', () {
-    test('veilid config defaults', testVeilidConfigDefaults);
+  // setUp(() {
+  //   final liveTest = Invoker.current?.liveTest;
+  //   print('setUp ${liveTest?.test.name}');
+  // });
+  // tearDown(() {
+  //   final liveTest = Invoker.current?.liveTest;
+  //   print('tearDown ${liveTest?.test.name}');
+  // });
+
+  group('Uninitialized', () {
+    test('veilid config defaults', testVeilidConfigDefaults, tags: ['config']);
   });
 
-  group('Started Tests', () {
+  group('Initialized', () {
     setUpAll(fixture.setUp);
     tearDownAll(fixture.tearDown);
 
-    group('Crypto Tests', () {
-      test('list cryptosystems', testListCryptoSystems);
-      test('get cryptosystem', testGetCryptoSystems);
-      test('get cryptosystem invalid', testGetCryptoSystemInvalid);
-      test('hash and verify password', testHashAndVerifyPassword);
+    group('Crypto', () {
+      test('list cryptosystems', testListCryptoSystems, tags: ['crypto']);
+      test('get cryptosystem', testGetCryptoSystems, tags: ['crypto']);
+      test('get cryptosystem invalid', testGetCryptoSystemInvalid,
+          tags: ['crypto']);
+      test('hash and verify password', testHashAndVerifyPassword,
+          tags: ['crypto']);
       test('sign and verify signature', testSignAndVerifySignature);
-      test('sign and verify signatures', testSignAndVerifySignatures);
+      test('sign and verify signatures', testSignAndVerifySignatures,
+          tags: ['crypto']);
     });
 
-    group('Table DB Tests', () {
-      test('delete table db nonexistent', testDeleteTableDbNonExistent);
-      test('open delete table db', testOpenDeleteTableDb);
-      test('open twice table db', testOpenTwiceTableDb);
-      test('open twice table db store load', testOpenTwiceTableDbStoreLoad);
+    group('Table DB', () {
+      test('delete table db nonexistent', testDeleteTableDbNonExistent,
+          tags: ['table_db']);
+      test('open delete table db', testOpenDeleteTableDb, tags: ['table_db']);
+      test('open twice table db', testOpenTwiceTableDb, tags: ['table_db']);
+      test('open twice table db store load', testOpenTwiceTableDbStoreLoad,
+          tags: ['table_db']);
       test('open twice table db store delete load',
-          testOpenTwiceTableDbStoreDeleteLoad);
-      test('resize table db', testResizeTableDb);
+          testOpenTwiceTableDbStoreDeleteLoad,
+          tags: ['table_db']);
+      test('resize table db', testResizeTableDb, tags: ['table_db']);
     });
 
-    group('Attached Tests', () {
+    group('Attached', () {
       setUpAll(fixture.attach);
       tearDownAll(fixture.detach);
 
       group('Routing Contexts', () {
         test('routing contexts', testRoutingContexts);
         test('app message loopback',
-            () => testAppMessageLoopback(fixture.updateStream));
+            () => testAppMessageLoopback(fixture.updateStream),
+            tags: ['routing_context', 'app_message']);
         test('app call loopback',
-            () => testAppCallLoopback(fixture.updateStream));
+            () => testAppCallLoopback(fixture.updateStream),
+            tags: ['routing_context', 'app_call']);
         test('app message loopback big packets',
-            () => testAppMessageLoopbackBigPackets(fixture.updateStream));
+            () => testAppMessageLoopbackBigPackets(fixture.updateStream),
+            tags: ['routing_context', 'app_message_big']);
         test('app call loopback big packets',
-            () => testAppCallLoopbackBigPackets(fixture.updateStream));
+            () => testAppCallLoopbackBigPackets(fixture.updateStream),
+            tags: ['routing_context', 'app_call_big']);
       });
 
       for (final cryptoKind in Veilid.instance.validCryptoKinds()) {
-        group('Veilid DHT $cryptoKind', () {
+        group('DHT $cryptoKind', () {
           final testDHT = TestDHT(cryptoKind);
           setUpAll(testDHT.setUpAll);
           tearDownAll(testDHT.tearDownAll);
 
-          test('get dht value unopened', testDHT.testGetDHTValueUnopened);
+          test('get dht value unopened', testDHT.testGetDHTValueUnopened,
+              tags: ['dht']);
           test('open dht record nonexistent no writer',
-              testDHT.testOpenDHTRecordNonexistentNoWriter);
+              testDHT.testOpenDHTRecordNonexistentNoWriter,
+              tags: ['dht']);
           test('close dht record nonexistent',
-              testDHT.testCloseDHTRecordNonexistent);
+              testDHT.testCloseDHTRecordNonexistent,
+              tags: ['dht']);
           test('delete dht record nonexistent',
-              testDHT.testDeleteDHTRecordNonexistent);
+              testDHT.testDeleteDHTRecordNonexistent,
+              tags: ['dht']);
           test('create delete dht record simple',
-              testDHT.testCreateDeleteDHTRecordSimple);
+              testDHT.testCreateDeleteDHTRecordSimple,
+              tags: ['dht']);
           test('create delete dht record no close',
-              testDHT.testCreateDeleteDHTRecordNoClose);
+              testDHT.testCreateDeleteDHTRecordNoClose,
+              tags: ['dht']);
           test('create delete dht record with deterministic key',
-              testDHT.testCreateDHTRecordWithDeterministicKey);
+              testDHT.testCreateDHTRecordWithDeterministicKey,
+              tags: ['dht']);
           test('get dht value nonexistent', testDHT.testGetDHTValueNonexistent);
-          test('set get dht value', testDHT.testSetGetDHTValue);
+          test('set get dht value', testDHT.testSetGetDHTValue, tags: ['dht']);
           test('set get dht value with owner',
-              testDHT.testSetGetDHTValueWithOwner);
-          test('open writer dht value', testDHT.testOpenWriterDHTValue);
-          test('inspect dht record', testDHT.testInspectDHTRecord);
+              testDHT.testSetGetDHTValueWithOwner,
+              tags: ['dht']);
+          test('open writer dht value', testDHT.testOpenWriterDHTValue,
+              tags: ['dht']);
+          test('inspect dht record', testDHT.testInspectDHTRecord,
+              tags: ['dht']);
         });
 
-        group('Veilid DHT Transactions $cryptoKind', () {
+        group('DHT Transactions $cryptoKind', () {
           final testDHTTransactions = TestDHTTransactions(cryptoKind);
           setUpAll(testDHTTransactions.setUpAll);
           tearDownAll(testDHTTransactions.tearDownAll);
@@ -100,26 +128,34 @@ void main() {
           tearDown(testDHTTransactions.tearDown);
 
           test('should create empty transaction and drop it explicitly',
-              testDHTTransactions.testEmptyTxAndDrop);
+              testDHTTransactions.testEmptyTxAndDrop,
+              tags: ['dht_transactions']);
           test('should create empty transaction and rollback',
-              testDHTTransactions.testEmptyTxAndRollback);
+              testDHTTransactions.testEmptyTxAndRollback,
+              tags: ['dht_transactions']);
           test('should create empty transaction and commit',
-              testDHTTransactions.testEmptyTxAndCommit);
+              testDHTTransactions.testEmptyTxAndCommit,
+              tags: ['dht_transactions']);
           test('should create transaction, add sets, and rollback',
-              testDHTTransactions.testTxAddSetsAndRollback);
+              testDHTTransactions.testTxAddSetsAndRollback,
+              tags: ['dht_transactions']);
           test('should create transaction, add sets, and commit',
-              testDHTTransactions.testTxAddSetsAndCommit);
+              testDHTTransactions.testTxAddSetsAndCommit,
+              tags: ['dht_transactions']);
           test('should create transaction, add sets, gets, and commit',
-              testDHTTransactions.testTxAddSetsGetsAndCommit);
+              testDHTTransactions.testTxAddSetsGetsAndCommit,
+              tags: ['dht_transactions']);
           test(
               'should create empty transaction, fail non-transactional sets and'
               ' then rollback',
-              testDHTTransactions.testTxFailNonTxSetsAndRollback);
+              testDHTTransactions.testTxFailNonTxSetsAndRollback,
+              tags: ['dht_transactions']);
           test(
               'should create transaction, inspect, add sets to subkey 1, '
               ' inspect and commit. Then a new transaction inspect, and gets, '
               'and commit',
-              testDHTTransactions.testTxInspectAddInspectCommit);
+              testDHTTransactions.testTxInspectAddInspectCommit,
+              tags: ['dht_transactions']);
         });
 
         group('Veilid DHT Transactions Full $cryptoKind', () {
@@ -132,12 +168,13 @@ void main() {
 
           test('should create empty transaction, inspect, add gets and commit',
               testDHTTransactionsFull.testEmptyTxInspectGetsAndCommit,
-              timeout: const Timeout(Duration(seconds: 120)));
+              timeout: const Timeout(Duration(seconds: 120)), tags: ['stress']);
           test(
               'should create transaction, fill all records, commit, and then'
               ' get all records and rollback',
               testDHTTransactionsFull.testTxFillCommitTxGetRollback,
-              timeout: const Timeout(Duration(seconds: 300)));
+              timeout: const Timeout(Duration(seconds: 300)),
+              tags: ['stress']);
         });
       }
     });

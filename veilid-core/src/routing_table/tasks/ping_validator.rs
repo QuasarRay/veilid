@@ -396,12 +396,11 @@ impl RoutingTable {
         priority: usize,
     ) -> Option<PingValidationEntry> {
         // Get the best route key and hop refs
-        let (key, hops) = match rss.get_route_test_info(route_id) {
-            Some(v) => v,
-            None => {
-                // Route doesn't exist or has no best key
-                return None;
-            }
+        let Some(AllocatedRouteTestInfo { key, hops }) =
+            rss.get_allocated_route_test_info(route_id)
+        else {
+            // Route doesn't exist or has no best key
+            return None;
         };
 
         // Assemble the private route
@@ -424,10 +423,9 @@ impl RoutingTable {
         };
 
         // Build the loopback destination
-        let hop_count = hops.len();
         let safety_spec = SafetySpec {
             preferred_route: Some(route_id.clone()),
-            hop_count,
+            hop_count: hops.len(),
             stability: Stability::Reliable,
             sequencing: Sequencing::PreferOrdered,
         };

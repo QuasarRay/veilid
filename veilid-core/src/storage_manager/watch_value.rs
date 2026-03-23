@@ -404,7 +404,10 @@ impl StorageManager {
                     watch_id: wva.answer.watch_id,
                     node_ref: watch_node,
                     expiration: wva.answer.expiration,
-                    opt_value_changed_route: wva.reply_private_route,
+                    opt_value_changed_route: wva
+                        .answer_context
+                        .waitable_reply_context
+                        .opt_reply_private_route,
                 }],
                 rejected: vec![],
                 ignored: vec![],
@@ -532,7 +535,7 @@ impl StorageManager {
                                     watch_id: wva.answer.watch_id,
                                     node_ref: next_node.clone(),
                                     expiration: wva.answer.expiration,
-                                    opt_value_changed_route: wva.reply_private_route,
+                                    opt_value_changed_route: wva.answer_context.waitable_reply_context.opt_reply_private_route,
                                 });
 
                                 FanoutCallDisposition::Accepted

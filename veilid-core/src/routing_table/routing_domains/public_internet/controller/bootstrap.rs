@@ -25,7 +25,7 @@ impl PublicInternetRoutingDomainController {
         }
 
         // Reset the low water mark for this routing domain
-        routing_table.reset_low_water_mark(RoutingDomain::PublicInternet);
+        routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
 
         // See if we are specifying a direct dialinfo for bootstrap, if so use the direct mechanism
         // Otherwise treat them as txt names for the normal dns-based bootstrap mechanism
@@ -150,6 +150,9 @@ impl PublicInternetRoutingDomainController {
         let end_ts = Timestamp::now();
         let duration = end_ts.duration_since(cur_ts);
 
+        // Reset the low water mark for this routing domain
+        routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
+
         veilid_log!(self info "Bootstrap finished in {} via {:?}", duration, valid_bootstraps);
 
         Ok(())
@@ -191,7 +194,7 @@ impl PublicInternetRoutingDomainController {
 
                     // Get what contact method would be used for contacting the bootstrap
                     let bsdi = match network_manager
-                        .get_node_contact_method(nr.default_filtered_with_sequencing(Sequencing::PreferOrdered))
+                        .get_node_contact_method(nr.sequencing_filtered(Sequencing::PreferOrdered))
                     {
                         Ok(Some(ncm)) if ncm.is_direct() => ncm.direct_dial_info().unwrap_or_log(),
                         Ok(v) => {
@@ -209,7 +212,7 @@ impl PublicInternetRoutingDomainController {
 
                     // Need VALID signed peer info, so ask bootstrap to find_node of itself
                     // which will ensure it has the bootstrap's signed peer info as part of the response
-                    let _ = Box::pin(routing_table.find_nodes_close_to_node_ref(crypto_kind, nr.default_filtered_with_sequencing(Sequencing::PreferOrdered), vec![])).await;
+                    let _ = Box::pin(routing_table.find_nodes_close_to_node_ref(crypto_kind, nr.sequencing_filtered(Sequencing::PreferOrdered), vec![])).await;
 
                     // Ensure we got the signed peer info
                     if !nr.peer_info_has_valid_signature(routing_domain) {

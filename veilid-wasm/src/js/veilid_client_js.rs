@@ -138,22 +138,27 @@ impl VeilidClient {
             );
             #[allow(deprecated)]
             filter.apply_ignore_change_list(&platformConfig.logging.performance.ignore_log_targets);
+            filter
+                .try_apply_directives(platformConfig.logging.performance.directives)
+                .expect_or_log("failed to apply performance logging directives");
 
-            let layer = WASMLayer::new(
-                WASMLayerConfig::new()
-                    .with_report_logs_in_timings(platformConfig.logging.performance.logs_in_timings)
-                    .with_console_config(match platformConfig.logging.performance.logs_in_console {
-                        VeilidWASMConfigLoggingLogsInConsole::Off => ConsoleConfig::NoReporting,
-                        VeilidWASMConfigLoggingLogsInConsole::NoColor => {
-                            ConsoleConfig::ReportWithoutConsoleColor
-                        }
-                        VeilidWASMConfigLoggingLogsInConsole::Color => {
-                            ConsoleConfig::ReportWithConsoleColor
-                        }
-                    })
-                    .with_field_filter(Some(Arc::new(|k| k != VEILID_LOG_KEY_FIELD))),
-            )
-            .with_filter(filter.clone());
+            let mut config = WasmLayerConfig::new();
+            if !platformConfig.logging.performance.timings {
+                config = config.remove_timings();
+            }
+            if !platformConfig.logging.performance.console.enabled {
+                config = config.remove_console();
+            }
+            if !platformConfig.logging.performance.console.color {
+                config = config.remove_color();
+            }
+            if !platformConfig.logging.performance.console.timestamp {
+                config = config.remove_timestamp();
+            }
+
+            let layer = WasmLayer::new(config)
+                .with_field_filter(Some(Arc::new(|k| k != VEILID_LOG_KEY_FIELD)))
+                .with_filter(filter.clone());
             filters.insert("performance", filter);
             layers.push(layer.boxed());
         };
@@ -166,6 +171,9 @@ impl VeilidClient {
             );
             #[allow(deprecated)]
             filter.apply_ignore_change_list(&platformConfig.logging.api.ignore_log_targets);
+            filter
+                .try_apply_directives(platformConfig.logging.api.directives)
+                .expect_or_log("failed to apply performance logging directives");
 
             let layer = ApiTracingLayer::init().with_filter(filter.clone());
             filters.insert("api", filter);
@@ -386,17 +394,18 @@ impl VeilidClient {
     /// Those nodes importing the blob will have their choice of which crypto kind to use.
     ///
     /// Returns a route id and 'blob' that can be published over some means (DHT or otherwise) to be imported by another Veilid node.
-    pub async fn newPrivateRoute() -> VeilidAPIResult<RouteBlob> {
+    pub async fn newPrivateRoute() -> VeilidAPIResult<ts::RouteBlob> {
         let veilid_api = get_veilid_api()?;
 
-        veilid_api.new_private_route().await
+        let route_blob = veilid_api.new_private_route().await?;
+        Ok(route_blob.into())
     }
 
     /// Import a private route blob as a remote private route.
     ///
     /// Returns a route id that can be used to send private messages to the node creating this route.
     #[allow(clippy::boxed_local)]
-    pub fn importRemotePrivateRoute(&self, blob: Box<[u8]>) -> VeilidAPIResult<RouteId> {
+    pub fn importRemotePrivateRoute(blob: Box<[u8]>) -> VeilidAPIResult<RouteId> {
         let veilid_api = get_veilid_api()?;
         veilid_api.import_remote_private_route(blob.to_vec())
     }
@@ -407,14 +416,13 @@ impl VeilidClient {
     ///
     /// Returns a route id and 'blob' that can be published over some means (DHT or otherwise) to be imported by another Veilid node.
     pub async fn newCustomPrivateRoute(
-        stability: Stability,
-        sequencing: Sequencing,
-    ) -> VeilidAPIResult<RouteBlob> {
+        private_spec: ts::PrivateSpec,
+    ) -> VeilidAPIResult<ts::RouteBlob> {
         let veilid_api = get_veilid_api()?;
+        let private_spec = private_spec.try_into().map_err(VeilidAPIError::generic)?;
 
-        veilid_api
-            .new_custom_private_route(&VALID_CRYPTO_KINDS, stability, sequencing)
-            .await
+        let route_blob = veilid_api.new_custom_private_route(private_spec).await?;
+        Ok(route_blob.into())
     }
 
     /// Release either a locally allocated or remotely imported private route.

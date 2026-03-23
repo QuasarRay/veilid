@@ -745,17 +745,13 @@ impl JsonRequestProcessor {
             RequestOp::NewPrivateRoute => ResponseOp::NewPrivateRoute {
                 result: to_json_api_result(self.api.new_private_route().await),
             },
-            RequestOp::NewCustomPrivateRoute {
-                kinds,
-                stability,
-                sequencing,
-            } => ResponseOp::NewCustomPrivateRoute {
-                result: to_json_api_result(
-                    self.api
-                        .new_custom_private_route(&kinds, stability, sequencing)
-                        .await,
-                ),
-            },
+            RequestOp::NewCustomPrivateRoute { private_spec } => {
+                ResponseOp::NewCustomPrivateRoute {
+                    result: to_json_api_result(
+                        self.api.new_custom_private_route(private_spec).await,
+                    ),
+                }
+            }
             RequestOp::ImportRemotePrivateRoute { blob } => ResponseOp::ImportRemotePrivateRoute {
                 result: to_json_api_result_with_string(self.api.import_remote_private_route(blob)),
             },

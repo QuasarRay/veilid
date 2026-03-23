@@ -18,7 +18,7 @@ pub struct RoutingDomainDetailCommon {
     capabilities: Vec<VeilidCapability>,
     dial_info_details: Vec<DialInfoDetail>,
     confirmed: bool,
-    low_water_mark: Mutex<(bool, RoutingDomainLowWaterMark)>,
+    low_water_mark: Mutex<(bool, Arc<LowWaterMark>)>,
     // caches
     current_peer_info_cache: Mutex<Option<Arc<PeerInfo>>>,
     bootstrap_peers: Mutex<Vec<NodeRef>>,
@@ -58,7 +58,7 @@ impl RoutingDomainDetailCommon {
             capabilities: Default::default(),
             dial_info_details: Default::default(),
             confirmed: false,
-            low_water_mark: Mutex::new((true, RoutingDomainLowWaterMark::default())),
+            low_water_mark: Mutex::new((true, Default::default())),
             current_peer_info_cache: Mutex::new(Default::default()),
             bootstrap_peers: Mutex::new(Default::default()),
             entry_summary: Mutex::new(Default::default()),
@@ -101,12 +101,14 @@ impl RoutingDomainDetailCommon {
         bootstrap_peers.push(bootstrap_peer);
     }
 
-    pub fn update_low_water_mark(&self, mut low_water_mark: RoutingDomainLowWaterMark) {
+    pub fn update_low_water_mark(&self, mut low_water_mark: Arc<LowWaterMark>) {
         let mut lwm = self.low_water_mark.lock();
         let (reset, last_low_water_mark) = lwm.clone();
 
         if !reset {
-            low_water_mark.min_assign(&last_low_water_mark);
+            let mut new_low_water_mark = low_water_mark.as_ref().clone();
+            new_low_water_mark.merge(&last_low_water_mark);
+            low_water_mark = Arc::new(new_low_water_mark);
         }
 
         if last_low_water_mark != low_water_mark {
@@ -119,7 +121,7 @@ impl RoutingDomainDetailCommon {
         self.low_water_mark.lock().0 = true;
     }
 
-    pub fn get_low_water_mark(&self) -> RoutingDomainLowWaterMark {
+    pub fn get_low_water_mark(&self) -> Arc<LowWaterMark> {
         self.low_water_mark.lock().1.clone()
     }
 

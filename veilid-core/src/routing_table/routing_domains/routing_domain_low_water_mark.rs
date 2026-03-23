@@ -4,49 +4,51 @@ impl_veilid_log_facility!("rtab");
 
 /// Minimum number of nodes after initial discovery for a routing domain
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RoutingDomainLowWaterMark {
-    lwm_per_crypto_kind: BTreeMap<CryptoKind, usize>,
+pub struct LowWaterMark {
+    pub per_crypto_kind: BTreeMap<CryptoKind, CapabilityCounts>,
 }
 
-impl RoutingDomainLowWaterMark {
+impl LowWaterMark {
     pub fn new() -> Self {
         Self {
-            lwm_per_crypto_kind: BTreeMap::new(),
+            per_crypto_kind: BTreeMap::new(),
         }
     }
 
-    pub fn set(&mut self, crypto_kind: CryptoKind, count: usize) {
-        self.lwm_per_crypto_kind.insert(crypto_kind, count);
+    pub fn set(&mut self, crypto_kind: CryptoKind, count: CapabilityCounts) {
+        self.per_crypto_kind.insert(crypto_kind, count);
     }
 
-    pub fn get(&self, crypto_kind: CryptoKind) -> Option<usize> {
-        self.lwm_per_crypto_kind.get(&crypto_kind).copied()
-    }
-
-    pub fn min_assign(&mut self, other: &RoutingDomainLowWaterMark) {
-        for (crypto_kind, count) in other.lwm_per_crypto_kind.iter() {
-            self.lwm_per_crypto_kind
+    pub fn merge(&mut self, other: &LowWaterMark) {
+        for (crypto_kind, count) in other.per_crypto_kind.iter() {
+            self.per_crypto_kind
                 .entry(*crypto_kind)
-                .and_modify(|x| x.min_assign(*count))
+                .and_modify(|x| x.min_assign(count))
                 .or_insert(*count);
         }
     }
 }
 
-impl fmt::Display for RoutingDomainLowWaterMark {
+impl fmt::Display for LowWaterMark {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.lwm_per_crypto_kind.is_empty() {
-            write!(f, "[empty]")
+        if f.alternate() {
+            let mut out = Vec::new();
+            for (ck, cc) in self.per_crypto_kind.iter() {
+                out.push(format!("{:#}:\n{:#}", ck, indent_all_string(cc)));
+            }
+            if out.is_empty() {
+                out.push("none".to_string());
+            }
+            write!(f, "{}", out.join("\n"))
         } else {
-            write!(
-                f,
-                "[{}]",
-                self.lwm_per_crypto_kind
-                    .iter()
-                    .map(|(ck, count)| format!("{}={}", ck, count))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )
+            let mut out = Vec::new();
+            for (ck, cc) in self.per_crypto_kind.iter() {
+                out.push(format!("{}({})", ck, cc));
+            }
+            if out.is_empty() {
+                out.push("none".to_string());
+            }
+            write!(f, "{}", out.join(", "))
         }
     }
 }

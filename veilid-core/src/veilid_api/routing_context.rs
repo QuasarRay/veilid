@@ -8,11 +8,6 @@ impl_veilid_log_facility!("veilid_api");
 #[derive(
     Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi, namespace)
-)]
 #[must_use]
 pub enum Target {
     /// Node by its node id
@@ -105,7 +100,7 @@ impl RoutingContext {
 
     /// Use a custom [SafetySelection]. Can be used to disable safety via [SafetySelection::Unsafe].
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
-    pub fn with_safety(self, safety_selection: SafetySelection) -> VeilidAPIResult<Self> {
+    pub fn with_safety(self, mut safety_selection: SafetySelection) -> VeilidAPIResult<Self> {
         let this = self.clone();
         record_duration(|| {
             veilid_log!(self debug
@@ -114,18 +109,25 @@ impl RoutingContext {
             if let SafetySelection::Unsafe(_) = &safety_selection {
                 #[cfg(not(feature = "footgun"))]
                 {
-                    return Err(VeilidAPIError::generic(
-                        "Unsafe routing mode is not allowed without the 'footgun' feature enabled",
-                    ));
+                    apibail_generic!("Unsafe routing mode is not allowed without the 'footgun' feature enabled"); 
                 }
             }
 
-            if let SafetySelection::Safe(safe) = &safety_selection {
+            if let SafetySelection::Safe(safe) = &mut safety_selection {
                 if let Some(preferred_route) = &safe.preferred_route {
                     self.api
                         .core_context()?
                         .routing_table()
                         .check_route_id(preferred_route)?;
+                }
+                let config = self.api.config()?;
+                let default_route_hop_count = config.network.rpc.default_route_hop_count as usize;
+                let max_route_hop_count = config.network.rpc.max_route_hop_count as usize;
+
+                if safe.hop_count == 0 {
+                    safe.hop_count = default_route_hop_count;
+                } else if safe.hop_count > max_route_hop_count {
+                    apibail_generic!("hop count must be less than or equal to configured max route hop count");
                 }
             }
 

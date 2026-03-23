@@ -242,9 +242,12 @@ async def test_routing_context_app_call_loopback_big_packets():
             async with rc:
                 # make a new local private route
                 route_blob = await api.new_custom_private_route(
-                    [veilid.CryptoKind.CRYPTO_KIND_VLD0], 
-                    veilid.Stability.RELIABLE, 
-                    veilid.Sequencing.ENSURE_ORDERED)
+                    veilid.PrivateSpec(
+                        crypto_kinds=[veilid.CryptoKind.CRYPTO_KIND_VLD0],
+                        stability=veilid.Stability.RELIABLE,
+                        sequencing=veilid.Sequencing.ENSURE_ORDERED
+                    )
+                )
                 try:
                     # import it as a remote route as well so we can send to it
                     prr = await api.import_remote_private_route(route_blob.blob)

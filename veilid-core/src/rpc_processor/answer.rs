@@ -1,23 +1,24 @@
 use super::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug)]
+pub struct AnswerContext {
+    /// How long it took to get this answer
+    pub latency: TimestampDuration,
+    /// The context of the waitable reply that produced this answer
+    pub waitable_reply_context: WaitableReplyContext,
+}
+
+#[derive(Debug)]
 pub struct Answer<T> {
-    /// Hpw long it took to get this answer
-    pub _latency: TimestampDuration,
-    /// The private route requested to receive the reply
-    pub reply_private_route: Option<PublicKey>,
+    /// The context of the answer
+    pub answer_context: AnswerContext,
     /// The answer itself
     pub answer: T,
 }
 impl<T> Answer<T> {
-    pub fn new(
-        latency: TimestampDuration,
-        reply_private_route: Option<PublicKey>,
-        answer: T,
-    ) -> Self {
+    pub fn new(answer_context: AnswerContext, answer: T) -> Self {
         Self {
-            _latency: latency,
-            reply_private_route,
+            answer_context,
             answer,
         }
     }

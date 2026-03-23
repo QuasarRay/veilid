@@ -84,7 +84,8 @@ impl RoutingTable {
         }
 
         // Refresh summary of all entries in the routing table and cache them per routing domain
-        self.refresh_summaries();
+        //   - Don't reset the low water marks
+        self.refresh_summaries(RoutingDomainSet::empty());
 
         // Process the routing domain detail ticks
         for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {

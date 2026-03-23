@@ -25,7 +25,7 @@ impl RPCProcessor {
 
         // Apply sequencing preference and require routing domain to remain the same (for now)
         let next_hop_nr = next_hop_nr
-            .default_filtered_with_sequencing(routed_operation.sequencing())
+            .sequencing_filtered(routed_operation.sequencing())
             .with_routing_domain(RoutingDomain::PublicInternet);
 
         // Pass along the route
@@ -77,7 +77,7 @@ impl RPCProcessor {
 
         // Apply sequencing preference and require routing domain to be PublicInternet for now
         let next_hop_nr = next_hop_nr
-            .default_filtered_with_sequencing(routed_operation.sequencing())
+            .sequencing_filtered(routed_operation.sequencing())
             .with_routing_domain(RoutingDomain::PublicInternet);
 
         // Pass along the route

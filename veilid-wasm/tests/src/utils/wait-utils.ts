@@ -4,10 +4,10 @@ export const waitForMs = (milliseconds: number) => {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 };
 
-export const asyncCallWithTimeout = async<T>(asyncPromise: Promise<T>, timeLimit: number) => {
+export const asyncCallWithTimeout = async<T>(asyncPromise: Promise<T>, timeLimit: number): Promise<T> => {
   let timeoutHandle: ReturnType<typeof setTimeout>;
 
-  const timeoutPromise = new Promise((_resolve, reject) => {
+  const timeoutPromise = new Promise<T>((_resolve, reject) => {
     timeoutHandle = setTimeout(
       () => reject(new Error('Async call timeout limit reached')),
       timeLimit
@@ -62,7 +62,7 @@ export const waitForDetached = async () => {
     if (detached) {
       break;
     }
-    await waitForMs(1000);
+    await waitForMs(250);
   }
 }
 
@@ -72,13 +72,13 @@ export const waitForShutdown = async () => {
     if (isShutdown) {
       break;
     }
-    await waitForMs(1000);
+    await waitForMs(250);
   }
 }
 
 export const waitForOfflineSubkeyWrite = async (routingContext: VeilidRoutingContext, key: RecordKey) => {
   while ((await routingContext.inspectDHTRecord(key)).offlineSubkeys.length != 0) {
-    await waitForMs(200);
+    await waitForMs(250);
   }
 }
 
@@ -100,4 +100,25 @@ export const getLogTimestamp = () => {
   const msec = milliseconds.toString().padStart(3, '0');
 
   return `${hh}:${mm}:${ss}.${msec}`;
+}
+
+export const waitForSingleEvent = <T extends Event>(element: EventTarget, eventName: string): Promise<T> => {
+
+  let send: (value: T) => void;
+  const promise = new Promise<T>((resolve) => {
+    send = resolve;
+  });
+
+  // Define the listener function
+  const listener = (event: Event) => {
+    // Remove the listener once the event fires to prevent memory leaks
+    element.removeEventListener(eventName, listener);
+    // Resolve the promise with the event data
+    send(event as T);
+  };
+
+  // Add the listener immediately
+  element.addEventListener(eventName, listener);
+
+  return promise;
 }

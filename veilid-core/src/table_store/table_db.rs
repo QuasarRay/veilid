@@ -518,7 +518,7 @@ impl TableDBTransaction {
         };
 
         if dbt.ops.is_empty() {
-            veilid_log!(self debug "attempted to commit an empty transaction");
+            // Empty transactions are effectively rollbacks, so just return
             return Ok(());
         }
 

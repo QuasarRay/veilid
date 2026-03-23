@@ -4,10 +4,10 @@ impl_veilid_log_facility!("rtab");
 
 /// Minimum number of nodes we need, per crypto kind or we trigger a bootstrap
 const MIN_BOOTSTRAP_CONNECTIVITY_PEERS: usize = 4;
-/// Fraction of the total nodes we need to have tested to allocate routes
-const ALLOCATION_TOTAL_NODES_TESTED_FACTOR: f32 = 0.5;
+/// Fraction of the connectivity nodes we need to have tested to allocate routes
+const ALLOCATION_CONNECTIVITY_NODES_TESTED_FACTOR: f32 = 0.25;
 /// Fraction of the low water mark nodes we need to have tested to allocate routes
-const ALLOCATION_LOW_WATER_MARK_NODES_TESTED_FACTOR: f32 = 0.8;
+const ALLOCATION_LOW_WATER_MARK_NODES_TESTED_FACTOR: f32 = 0.5;
 
 /// Description of which nodes this routing domain needs per crypto kind to operate properly
 pub struct NodesNeeded {
@@ -25,6 +25,7 @@ impl PublicInternetRoutingDomainController {
             address_types,
             outbound_protocols,
             entry_summary,
+            low_water_mark,
             relays,
         ) = {
             let detail = self.read();
@@ -34,6 +35,7 @@ impl PublicInternetRoutingDomainController {
             let address_types = detail.address_types();
             let outbound_protocols = detail.outbound_protocols();
             let entry_summary = detail.get_entry_summary();
+            let low_water_mark = detail.get_low_water_mark();
             let relays = detail.relays();
 
             (
@@ -43,6 +45,7 @@ impl PublicInternetRoutingDomainController {
                 address_types,
                 outbound_protocols,
                 entry_summary,
+                low_water_mark,
                 relays,
             )
         };
@@ -100,6 +103,7 @@ impl PublicInternetRoutingDomainController {
             relay_status,
             current_peer_info,
             entry_summary,
+            low_water_mark,
             is_ready_inbound,
             is_ready_outbound,
         }
@@ -124,7 +128,7 @@ impl PublicInternetRoutingDomainController {
             let cnt = entry_summary
                 .per_crypto_kind
                 .get(&ck)
-                .map(|x| x.connectivity_capabilities.live)
+                .map(|x| x.live.connectivity_capabilities)
                 .unwrap_or_default();
             if cnt < MIN_BOOTSTRAP_CONNECTIVITY_PEERS {
                 needs_bootstrap.push(ck);
@@ -133,23 +137,32 @@ impl PublicInternetRoutingDomainController {
             }
 
             // See if we need more tested nodes
-            let any_capabilities_nodes = entry_summary
+            let live_count = entry_summary
                 .per_crypto_kind
                 .get(&ck)
-                .map(|x| x.any_capabilities)
+                .map(|x| x.live)
                 .unwrap_or_default();
-            let low_water_mark_count = low_water_mark.get(ck).unwrap_or_default();
-            let required_tested_total_nodes = (any_capabilities_nodes.live as f32
-                * ALLOCATION_TOTAL_NODES_TESTED_FACTOR)
+            let tested_count = entry_summary
+                .per_crypto_kind
+                .get(&ck)
+                .map(|x| x.tested)
+                .unwrap_or_default();
+            let low_water_mark_count = low_water_mark
+                .per_crypto_kind
+                .get(&ck)
+                .copied()
+                .unwrap_or_default();
+            let required_tested_connectivity_nodes = (live_count.connectivity_capabilities as f32
+                * ALLOCATION_CONNECTIVITY_NODES_TESTED_FACTOR)
                 as usize;
-            let required_tested_low_water_mark_nodes = (low_water_mark_count as f32
-                * ALLOCATION_LOW_WATER_MARK_NODES_TESTED_FACTOR)
-                as usize;
-            let required_tested_nodes = usize::max(
-                required_tested_total_nodes,
-                required_tested_low_water_mark_nodes,
+            let required_tested_low_water_mark_connectivity_nodes =
+                (low_water_mark_count.connectivity_capabilities as f32
+                    * ALLOCATION_LOW_WATER_MARK_NODES_TESTED_FACTOR) as usize;
+            let required_tested_connectivity_nodes = usize::max(
+                required_tested_connectivity_nodes,
+                required_tested_low_water_mark_connectivity_nodes,
             );
-            if any_capabilities_nodes.tested < required_tested_nodes {
+            if tested_count.connectivity_capabilities < required_tested_connectivity_nodes {
                 needs_more_tested_nodes.push(ck);
             }
         }

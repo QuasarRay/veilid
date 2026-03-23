@@ -96,22 +96,27 @@ pub fn initialize_veilid_core(platform_config: String) {
         );
         #[allow(deprecated)]
         filter.apply_ignore_change_list(&platform_config.logging.performance.ignore_log_targets);
+        filter
+            .try_apply_directives(platform_config.logging.performance.directives)
+            .expect_or_log("failed to apply performance logging directives");
 
-        let layer = WASMLayer::new(
-            WASMLayerConfig::new()
-                .with_report_logs_in_timings(platform_config.logging.performance.logs_in_timings)
-                .with_console_config(match platform_config.logging.performance.logs_in_console {
-                    VeilidWASMConfigLoggingLogsInConsole::Off => ConsoleConfig::NoReporting,
-                    VeilidWASMConfigLoggingLogsInConsole::NoColor => {
-                        ConsoleConfig::ReportWithoutConsoleColor
-                    }
-                    VeilidWASMConfigLoggingLogsInConsole::Color => {
-                        ConsoleConfig::ReportWithConsoleColor
-                    }
-                })
-                .with_field_filter(Some(Arc::new(|k| k != veilid_core::VEILID_LOG_KEY_FIELD))),
-        )
-        .with_filter(filter.clone());
+        let mut config = WasmLayerConfig::new();
+        if !platform_config.logging.performance.timings {
+            config = config.remove_timings();
+        }
+        if !platform_config.logging.performance.console.enabled {
+            config = config.remove_console();
+        }
+        if !platform_config.logging.performance.console.color {
+            config = config.remove_color();
+        }
+        if !platform_config.logging.performance.console.timestamp {
+            config = config.remove_timestamp();
+        }
+
+        let layer = WasmLayer::new(config)
+            .with_field_filter(Some(Arc::new(|k| k != VEILID_LOG_KEY_FIELD)))
+            .with_filter(filter.clone());
         filters.insert("performance", filter);
         layers.push(layer.boxed());
     };
@@ -123,8 +128,11 @@ pub fn initialize_veilid_core(platform_config: String) {
         );
         #[allow(deprecated)]
         filter.apply_ignore_change_list(&platform_config.logging.api.ignore_log_targets);
+        filter
+            .try_apply_directives(platform_config.logging.api.directives)
+            .expect_or_log("failed to apply performance logging directives");
 
-        let layer = veilid_core::ApiTracingLayer::init().with_filter(filter.clone());
+        let layer = ApiTracingLayer::init().with_filter(filter.clone());
         filters.insert("api", filter);
         layers.push(layer.boxed());
     }
@@ -626,18 +634,14 @@ pub fn new_private_route() -> Promise {
 }
 
 #[wasm_bindgen()]
-pub fn new_custom_private_route(stability: String, sequencing: String) -> Promise {
+pub fn new_custom_private_route(private_spec: String) -> Promise {
     wrap_api_future_json(async move {
-        let stability: veilid_core::Stability =
-            veilid_core::deserialize_json(&stability).map_err(VeilidAPIError::generic)?;
-        let sequencing: veilid_core::Sequencing =
-            veilid_core::deserialize_json(&sequencing).map_err(VeilidAPIError::generic)?;
+        let private_spec: veilid_core::PrivateSpec =
+            veilid_core::deserialize_json(&private_spec).map_err(VeilidAPIError::generic)?;
 
         let veilid_api = get_veilid_api()?;
 
-        let route_blob = veilid_api
-            .new_custom_private_route(&veilid_core::VALID_CRYPTO_KINDS, stability, sequencing)
-            .await?;
+        let route_blob = veilid_api.new_custom_private_route(private_spec).await?;
 
         VeilidAPIResult::Ok(route_blob)
     })

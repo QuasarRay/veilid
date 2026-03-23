@@ -24,7 +24,7 @@ impl StorageManager {
         let opt_cleanup = self.close_record_locked(&record_lock)?;
 
         if let Some(cleanup) = opt_cleanup {
-            self.process_transaction_cleanup(cleanup).await;
+            cleanup.await;
         }
 
         Ok(())
@@ -68,7 +68,7 @@ impl StorageManager {
         }
 
         if let Some(cleanup) = all_cleanup {
-            self.process_transaction_cleanup(cleanup).await;
+            cleanup.await;
         }
 
         if let Some(e) = opt_error {

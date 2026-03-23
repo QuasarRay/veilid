@@ -2,14 +2,15 @@ use super::*;
 
 #[derive(Debug)]
 #[must_use]
-pub(super) struct WaitableReplyContext {
+pub struct WaitableReplyContext {
     pub timeout: TimestampDuration,
     pub send_ts: Timestamp,
     pub send_data_result: SendDataResult,
     pub node_ref: NodeRef,
-    pub safety_route: Option<PublicKey>,
-    pub remote_private_route: Option<PublicKey>,
-    pub reply_private_route: Option<PublicKey>,
+    pub opt_safety_route: Option<PublicKey>,
+    pub opt_remote_private_route: Option<PublicKey>,
+    pub opt_reply_private_route: Option<PublicKey>,
+    pub opt_locked_routes: Option<LockedRoutes>,
     pub destination: Destination,
 }
 
@@ -19,15 +20,15 @@ impl WaitableReplyContext {
         let rss = routing_table.route_spec_store();
 
         let opt_srstr = self
-            .safety_route
+            .opt_safety_route
             .as_ref()
             .map(|key| rss.display_route_by_key(key));
         let opt_remprstr = self
-            .remote_private_route
+            .opt_remote_private_route
             .as_ref()
             .map(|key| rss.display_route_by_key(key));
-        let opt_repprstr = if self.reply_private_route != self.safety_route {
-            self.reply_private_route
+        let opt_repprstr = if self.opt_reply_private_route != self.opt_safety_route {
+            self.opt_reply_private_route
                 .as_ref()
                 .map(|key| rss.display_route_by_key(key))
         } else {
@@ -35,7 +36,7 @@ impl WaitableReplyContext {
         };
 
         format!(
-            "timeout={} send_ts={} send_data_result={} node={} dest={}{}{}{}",
+            "timeout={} send_ts={} send_data_result={} node={} dest={}{}{}{}{}",
             self.timeout,
             self.send_ts,
             self.send_data_result,
@@ -53,6 +54,11 @@ impl WaitableReplyContext {
             },
             if let Some(repprstr) = opt_repprstr {
                 format!("\nreply_private_route={}", repprstr)
+            } else {
+                "".to_string()
+            },
+            if let Some(locked_routes) = &self.opt_locked_routes {
+                format!("\nlocked_routes={}", locked_routes)
             } else {
                 "".to_string()
             },

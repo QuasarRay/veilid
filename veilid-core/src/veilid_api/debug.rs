@@ -734,9 +734,8 @@ fn get_route_key(
         match PublicKey::from_str(text).ok() {
             Some(key) => {
                 if allow_allocated {
-                    let allocated_route_keys = rss.list_allocated_routes(|_, v| {
-                        Some(v.iter_route_set().map(|k| k.0.clone()).collect::<Vec<_>>())
-                    });
+                    let allocated_route_keys =
+                        rss.list_allocated_routes(|_, arce| Some(arce.route_set_keys().to_vec()));
                     if let Some(found_key) = allocated_route_keys
                         .into_iter()
                         .flatten()
@@ -763,9 +762,8 @@ fn get_route_key(
             }
             None => {
                 if allow_allocated {
-                    let allocated_route_keys = rss.list_allocated_routes(|_, v| {
-                        Some(v.iter_route_set().map(|k| k.0.clone()).collect::<Vec<_>>())
-                    });
+                    let allocated_route_keys =
+                        rss.list_allocated_routes(|_, arce| Some(arce.route_set_keys().to_vec()));
                     for r in allocated_route_keys.into_iter().flatten() {
                         let rkey = r.to_string();
                         if rkey.starts_with(text)
@@ -831,8 +829,8 @@ fn get_safety_selection(
             // Safe
             let mut preferred_route = None;
             let mut hop_count = default_route_hop_count;
-            let mut stability = Stability::default();
-            let mut sequencing = Sequencing::default();
+            let mut stability = Stability::Reliable;
+            let mut sequencing = Sequencing::NoPreference;
             for x in text.split(',') {
                 let x = x.trim();
                 if let Some(pr) = get_route_id(registry.clone(), true, false)(x) {
@@ -862,7 +860,7 @@ fn get_safety_selection(
 
 fn get_node_ref_modifiers(node_ref: NodeRef) -> impl FnOnce(&str) -> Option<FilteredNodeRef> {
     move |text| {
-        let mut node_ref = node_ref.default_filtered();
+        let mut node_ref = node_ref.sequencing_filtered(Sequencing::NoPreference);
         for m in text.split('/') {
             if let Some(pt) = get_protocol_type(m) {
                 node_ref.merge_filter(NodeRefFilter::new().with_protocol_type(pt));
@@ -994,7 +992,7 @@ fn resolve_filtered_node_ref(
             if let Some(mods) = mods {
                 Some(get_node_ref_modifiers(nr)(mods)?)
             } else {
-                Some(nr.default_filtered())
+                Some(nr.sequencing_filtered(Sequencing::NoPreference))
             }
         })
     }
@@ -1294,7 +1292,10 @@ impl VeilidAPI {
                 n,
                 "debug_relay",
                 "node_id",
-                resolve_node_ref(registry.clone(), SafetySelection::default()),
+                resolve_node_ref(
+                    registry.clone(),
+                    SafetySelection::Unsafe(Sequencing::NoPreference),
+                ),
             )
             .await
             .ok();
@@ -1774,17 +1775,12 @@ impl VeilidAPI {
             ai += 1;
         }
 
-        let safety_spec = SafetySpec {
-            preferred_route: None,
-            hop_count,
-            stability,
-            sequencing,
-        };
-
         // Allocate route
         let allocate_route_params = AllocateRouteParams {
             crypto_kinds: VALID_CRYPTO_KINDS.to_vec(),
-            safety_spec,
+            hop_count,
+            stability,
+            sequencing,
             directions,
             avoid_nodes: Vec::new(),
             automatic: false,
@@ -3155,7 +3151,8 @@ impl VeilidAPI {
                     // Direct
                     let target_nr = resolve_filtered_node_ref(
                         registry.clone(),
-                        ss.clone().unwrap_or_default(),
+                        ss.clone()
+                            .unwrap_or(SafetySelection::Unsafe(Sequencing::NoPreference)),
                     )(text)
                     .await?;
 

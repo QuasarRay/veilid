@@ -77,7 +77,9 @@ fn with_route_permutations(
 #[derive(Clone, Debug)]
 pub struct AllocateRouteParams {
     pub crypto_kinds: Vec<CryptoKind>,
-    pub safety_spec: SafetySpec,
+    pub hop_count: usize,
+    pub stability: Stability,
+    pub sequencing: Sequencing,
     pub directions: DirectionSet,
     pub avoid_nodes: Vec<NodeId>,
     pub automatic: bool,
@@ -94,7 +96,7 @@ impl RouteSpecStore {
     pub async fn allocate_route(
         &self,
         params: AllocateRouteParams,
-    ) -> VeilidAPIResult<RouteIdAndPublicKeys> {
+    ) -> VeilidAPIResult<RouteIdAndKeys> {
         let allocate_route_lock_guard = self.allocate_route_lock.lock().await;
         self.allocate_route_inner(&allocate_route_lock_guard, params)
             .await
@@ -103,31 +105,29 @@ impl RouteSpecStore {
     pub async fn allocate_route_inner(
         &self,
         _lock: &AsyncMutexGuard<'_, ()>,
-        params: AllocateRouteParams,
-    ) -> VeilidAPIResult<RouteIdAndPublicKeys> {
-        let safety_spec = params.safety_spec.clone();
-        if params.safety_spec.preferred_route.is_some() {
-            apibail_generic!("safety_spec.preferred_route must be empty when allocating new route");
-        }
-
-        if params.safety_spec.hop_count < 1 {
+        mut params: AllocateRouteParams,
+    ) -> VeilidAPIResult<RouteIdAndKeys> {
+        if params.hop_count < 1 {
             apibail_invalid_argument!(
                 "Not allocating route less than one hop in length",
                 "hop_count",
-                params.safety_spec.hop_count
+                params.hop_count
             );
         }
 
-        if params.safety_spec.hop_count > self.get_max_route_hop_count() {
+        if params.hop_count > self.get_max_route_hop_count() {
             apibail_invalid_argument!(
                 "Not allocating route longer than max route hop count",
                 "hop_count",
-                params.safety_spec.hop_count
+                params.hop_count
             );
         }
         if params.crypto_kinds.is_empty() {
             apibail_missing_argument!("No crypto kinds provided", "crypto_kinds");
         }
+
+        // Ensure best crypto kind is first
+        params.crypto_kinds.sort();
 
         // Get our peer info
         let cur_ts = Timestamp::now();
@@ -146,23 +146,19 @@ impl RouteSpecStore {
             let snapshot = routing_table.snapshot_entries(cur_ts, BucketEntryState::Unreliable);
 
             // Make the node filter
-            let filter = self.make_route_allocation_entry_filter(
-                &params.crypto_kinds,
-                &params.safety_spec,
-                &params.avoid_nodes,
-                published_peer_info.clone(),
-            );
+            let filter =
+                self.make_route_allocation_entry_filter(&params, published_peer_info.clone());
 
-            let inner = self.inner.read();
+            let cache = self.cache.read();
 
             let filters = VecDeque::from([filter]);
             let compare = self.make_route_allocation_entry_sort(
-                &inner,
+                &cache,
                 cur_ts,
-                &params.safety_spec,
+                &params,
                 published_peer_info.clone(),
             );
-            let pre_sort_filter = self.make_route_allocation_pre_sort_filter(&params.safety_spec);
+            let pre_sort_filter = self.make_route_allocation_pre_sort_filter(&params);
             let transform = |entry: Option<BucketEntrySnapshot>| -> BucketEntrySnapshot {
                 entry.unwrap_or_log()
             };
@@ -178,8 +174,8 @@ impl RouteSpecStore {
             );
 
             // If we couldn't find enough nodes, wait until we have more nodes in the routing table
-            if nodes.len() < safety_spec.hop_count {
-                veilid_log!(self debug "not enough nodes to construct route at this time: ({}/{})", nodes.len(), safety_spec.hop_count);
+            if nodes.len() < params.hop_count {
+                veilid_log!(self debug "not enough nodes to construct route at this time: ({}/{})", nodes.len(), params.hop_count);
                 apibail_try_again!("not enough nodes to construct route at this time");
             }
 
@@ -190,16 +186,15 @@ impl RouteSpecStore {
             let mut orderings = SequenceOrderingSet::new();
             {
                 let mut perm_func = self.make_route_allocation_permutation_function(
-                    &inner,
+                    &cache,
                     &nodes,
-                    params.directions,
-                    &params.safety_spec,
+                    &params,
                     published_peer_info.clone(),
                     true,
                 );
-                for start in 0..(nodes.len() - params.safety_spec.hop_count) {
+                for start in 0..(nodes.len() - params.hop_count) {
                     if let Some((rn, ord)) =
-                        with_route_permutations(params.safety_spec.hop_count, start, &mut perm_func)
+                        with_route_permutations(params.hop_count, start, &mut perm_func)
                     {
                         route_nodes = rn;
                         orderings = ord;
@@ -211,16 +206,15 @@ impl RouteSpecStore {
             // Fallback: accept any valid route if no relay-capable last hop found
             if route_nodes.is_empty() {
                 let mut perm_func = self.make_route_allocation_permutation_function(
-                    &inner,
+                    &cache,
                     &nodes,
-                    params.directions,
-                    &params.safety_spec,
+                    &params,
                     published_peer_info.clone(),
                     false,
                 );
-                for start in 0..(nodes.len() - params.safety_spec.hop_count) {
+                for start in 0..(nodes.len() - params.hop_count) {
                     if let Some((rn, ord)) =
-                        with_route_permutations(params.safety_spec.hop_count, start, &mut perm_func)
+                        with_route_permutations(params.hop_count, start, &mut perm_func)
                     {
                         route_nodes = rn;
                         orderings = ord;
@@ -233,7 +227,7 @@ impl RouteSpecStore {
                 apibail_try_again!("unable to find unique route at this time");
             }
 
-            drop(inner);
+            drop(cache);
 
             // Got a unique route, lets build the details, register it, and return it
             let hop_node_refs: Vec<NodeRef> = route_nodes
@@ -273,12 +267,14 @@ impl RouteSpecStore {
             );
         }
 
+        if route_set.is_empty() {
+            apibail_generic!("no route set available for crypto kinds provided");
+        }
+
         let rssd = RouteSetSpecDetail::new(
-            cur_ts,
             route_set,
-            hop_node_refs,
             params.directions,
-            params.safety_spec.stability,
+            params.stability,
             orderings,
             params.automatic,
         )?;
@@ -287,19 +283,24 @@ impl RouteSpecStore {
         let route_id = self.generate_allocated_route_id(&rssd)?;
 
         // Get public keys to return
-        let public_keys = rssd.get_route_set_keys();
+        let route_set_keys = rssd.get_route_set_keys();
 
         // Debug print the allocated route
-        veilid_log!(self debug "Allocated route: {}", rssd);
+        veilid_log!(self debug "Allocated route: id={}\n    {}\n    keys={}", route_id, rssd, route_set_keys);
 
         // Add to cache and keep route in spec store
-        let inner = &mut *self.inner.write();
-        inner.cache.add_to_cache(&rssd);
-        inner.content.add_detail(route_id.clone(), rssd);
+        {
+            // Careful with locking order here, we need to lock the content before the cache
+            let mut content = self.content.write();
+            let mut cache = self.cache.write();
 
-        Ok(RouteIdAndPublicKeys {
+            cache.add_allocated_route(route_id.clone(), &rssd, hop_node_refs)?;
+            content.add_detail(route_id.clone(), rssd);
+        }
+
+        Ok(RouteIdAndKeys {
             route_id,
-            public_keys,
+            route_set_keys,
         })
     }
 
@@ -309,15 +310,17 @@ impl RouteSpecStore {
         instrument(level = "trace", target = "rtab::route", skip(self), ret, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub(super) fn release_allocated_route(&self, id: RouteId) -> bool {
-        let mut inner = self.inner.write();
-        let Some(rssd) = inner.content.remove_detail(&id) else {
+        // Careful with locking order here, we need to lock the content before the cache
+        let mut content = self.content.write();
+        let mut cache = self.cache.write();
+
+        let Some(rssd) = content.remove_detail(&id) else {
             return false;
         };
+        veilid_log!(self debug "releasing allocated route {}: keys={}", id, rssd.get_route_set_keys());
 
         // Remove from hop cache
-        if !inner.cache.remove_from_cache(id, &rssd, |dead_key| {
-            self.invalidate_compiled_route_cache(dead_key);
-        }) {
+        if !cache.remove_allocated_route(id, rssd.is_automatic()) {
             veilid_log!(self error "hop cache should have contained cache key");
         }
 
@@ -326,9 +329,7 @@ impl RouteSpecStore {
 
     fn make_route_allocation_entry_filter<'t>(
         &self,
-        crypto_kinds: &'t [CryptoKind],
-        safety_spec: &'t SafetySpec,
-        avoid_nodes: &'t [NodeId],
+        params: &'t AllocateRouteParams,
         published_peer_info: Arc<PeerInfo>,
     ) -> RoutingTableEntryFilter<'t> {
         // Get our relay nodes if we have them
@@ -361,14 +362,17 @@ impl RouteSpecStore {
                     .node_ids
                     .kinds()
                     .into_iter()
-                    .filter(|k| crypto_kinds.contains(k))
+                    .filter(|k| params.crypto_kinds.contains(k))
                     .collect();
-                if common_ck.len() != crypto_kinds.len() {
+                if common_ck.len() != params.crypto_kinds.len() {
                     return false;
                 }
 
                 // Exclude nodes we have specifically chosen to avoid
-                if snap.node_ids.contains_any_from_iter(avoid_nodes.iter()) {
+                if snap
+                    .node_ids
+                    .contains_any_from_iter(params.avoid_nodes.iter())
+                {
                     return false;
                 }
 
@@ -387,7 +391,7 @@ impl RouteSpecStore {
                 let their_ni = their_pi.node_info();
 
                 // Exclude nodes with no compatible dialinfo
-                if !their_ni.has_sequencing_matched_dial_info(safety_spec.sequencing) {
+                if !their_ni.has_sequencing_matched_dial_info(params.sequencing) {
                     return false;
                 }
 
@@ -475,7 +479,7 @@ impl RouteSpecStore {
                     // Exclude nodes whose relays we have chosen to avoid
                     if their_relay_info
                         .node_ids()
-                        .contains_any_from_iter(avoid_nodes.iter())
+                        .contains_any_from_iter(params.avoid_nodes.iter())
                     {
                         return false;
                     }
@@ -488,9 +492,9 @@ impl RouteSpecStore {
 
     fn make_route_allocation_entry_sort<'t>(
         &self,
-        inner: &'t RouteSpecStoreInner,
+        cache: &'t RouteSpecStoreCache,
         _cur_ts: Timestamp,
-        safety_spec: &'t SafetySpec,
+        params: &'t AllocateRouteParams,
         published_peer_info: Arc<PeerInfo>,
     ) -> RoutingTableEntrySort<'t> {
         let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
@@ -513,12 +517,8 @@ impl RouteSpecStore {
                 let entry2_node_info = entry2_peer_info.node_info();
 
                 // deprioritize nodes we have used already anywhere for a route of the same hop count
-                let e1_used = inner
-                    .cache
-                    .get_used_node_count(&snap1.node_ids, safety_spec.hop_count);
-                let e2_used = inner
-                    .cache
-                    .get_used_node_count(&snap2.node_ids, safety_spec.hop_count);
+                let e1_used = cache.get_used_node_count(&snap1.node_ids, params.hop_count);
+                let e2_used = cache.get_used_node_count(&snap2.node_ids, params.hop_count);
                 let cmp_used = e1_used.cmp(&e2_used);
                 if !matches!(cmp_used, cmp::Ordering::Equal) {
                     return cmp_used;
@@ -540,11 +540,11 @@ impl RouteSpecStore {
                 // apply sequencing preference
                 // ensureordered will be taken care of by filter
                 // and nopreference doesn't care
-                if matches!(safety_spec.sequencing, Sequencing::PreferOrdered) {
+                if matches!(params.sequencing, Sequencing::PreferOrdered) {
                     let e1_can_do_ordered =
-                        entry1_node_info.has_sequencing_matched_dial_info(safety_spec.sequencing);
+                        entry1_node_info.has_sequencing_matched_dial_info(params.sequencing);
                     let e2_can_do_ordered =
-                        entry2_node_info.has_sequencing_matched_dial_info(safety_spec.sequencing);
+                        entry2_node_info.has_sequencing_matched_dial_info(params.sequencing);
                     // Reverse this comparison because ordered is preferable (less)
                     let cmp_seq = e2_can_do_ordered.cmp(&e1_can_do_ordered);
                     if !matches!(cmp_seq, cmp::Ordering::Equal) {
@@ -554,7 +554,7 @@ impl RouteSpecStore {
 
                 // apply stability preference
                 // always prioritize reliable nodes, but sort by oldest or fastest
-                match safety_spec.stability {
+                match params.stability {
                     Stability::LowLatency => {
                         BucketEntrySnapshot::cmp_fastest_reliable(snap1, snap2, |ls| ls.tm90)
                     }
@@ -566,7 +566,7 @@ impl RouteSpecStore {
 
     fn make_route_allocation_pre_sort_filter<'t>(
         &self,
-        safety_spec: &'t SafetySpec,
+        params: &'t AllocateRouteParams,
     ) -> RoutingTableEntryPreSortFilter<'t> {
         Box::new(
             move |all_entries: &mut Vec<Option<BucketEntrySnapshot>>, _cur_ts: Timestamp| {
@@ -582,7 +582,7 @@ impl RouteSpecStore {
                 let reduce = (sorted_entry_indices.len() as f32
                     * (1.0 - ALLOCATION_HIGH_PASS_FILTER_FACTOR))
                     as usize;
-                let keep_count = (sorted_entry_indices.len() - reduce).max(safety_spec.hop_count);
+                let keep_count = (sorted_entry_indices.len() - reduce).max(params.hop_count);
                 if keep_count < sorted_entry_indices.len() {
                     for i in keep_count..sorted_entry_indices.len() {
                         all_entries[sorted_entry_indices[i]] = None;
@@ -597,31 +597,24 @@ impl RouteSpecStore {
     }
 
     // Get the hop cache key for a particular route permutation
-    // uses the same algorithm as RouteSetSpecDetail::make_cache_key
-    fn route_permutation_to_hop_cache(
+    fn route_permutation_to_hop_cache_key(
+        crypto_kind: CryptoKind,
         nodes: &[BucketEntrySnapshot],
         perm: &[usize],
-    ) -> Option<Vec<u8>> {
-        let mut cachelen = 0usize;
-        let mut nodebytes = Vec::<BareNodeId>::with_capacity(perm.len());
+    ) -> RouteHopCacheKey {
+        let mut node_refs = Vec::<NodeRef>::with_capacity(perm.len());
         for n in perm {
-            let b = nodes[*n].best_node_id()?.value();
-            cachelen += b.len();
-            nodebytes.push(b);
+            node_refs.push(nodes[*n].node_ref.clone());
         }
-        let mut cache: Vec<u8> = Vec::with_capacity(cachelen);
-        for b in nodebytes {
-            cache.extend_from_slice(&b);
-        }
-        Some(cache)
+
+        RouteHopCacheKey::from_hop_node_refs(crypto_kind, &node_refs)
     }
 
     fn make_route_allocation_permutation_function<'t>(
         &self,
-        inner: &'t RouteSpecStoreInner,
+        cache: &'t RouteSpecStoreCache,
         nodes: &'t [BucketEntrySnapshot],
-        directions: DirectionSet,
-        safety_spec: &'t SafetySpec,
+        params: &'t AllocateRouteParams,
         published_peer_info: Arc<PeerInfo>,
         require_relay_last_hop: bool,
     ) -> PermFunc<'t> {
@@ -647,13 +640,16 @@ impl RouteSpecStore {
                 .make_relay_node_filter()
         };
 
+        let best_crypto_kind = params.crypto_kinds.first().copied().unwrap_or_log();
+
         Box::new(move |permutation: &[usize]| {
             let routing_table = registry.routing_table();
 
-            let cache_key = Self::route_permutation_to_hop_cache(nodes, permutation)?;
+            let cache_key =
+                Self::route_permutation_to_hop_cache_key(best_crypto_kind, nodes, permutation);
 
             // Skip routes we have already seen
-            if inner.cache.contains_route(&cache_key) {
+            if cache.contains_allocated_route_with_hops(&cache_key) {
                 return None;
             }
 
@@ -703,7 +699,7 @@ impl RouteSpecStore {
 
             // Ensure this route is viable by checking that each node can contact the next one
             let mut orderings = SequenceOrderingSet::all();
-            if directions.contains(Direction::Out) {
+            if params.directions.contains(Direction::Out) {
                 let mut previous_node = published_peer_info.clone();
                 let mut reachable = true;
                 for n in permutation {
@@ -713,7 +709,7 @@ impl RouteSpecStore {
                         previous_node.clone(),
                         current_node.clone(),
                         DialInfoFilter::all(),
-                        safety_spec.sequencing,
+                        params.sequencing,
                         None,
                     );
                     if matches!(cm, ContactMethod::Unreachable) {
@@ -742,7 +738,7 @@ impl RouteSpecStore {
                     return None;
                 }
             }
-            if directions.contains(Direction::In) {
+            if params.directions.contains(Direction::In) {
                 let mut next_node = published_peer_info.clone();
                 let mut reachable = true;
                 for n in permutation.iter().rev() {
@@ -752,7 +748,7 @@ impl RouteSpecStore {
                         next_node.clone(),
                         current_node.clone(),
                         DialInfoFilter::all(),
-                        safety_spec.sequencing,
+                        params.sequencing,
                         None,
                     );
                     if matches!(cm, ContactMethod::Unreachable) {

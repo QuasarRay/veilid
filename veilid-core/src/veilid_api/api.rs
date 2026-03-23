@@ -185,8 +185,8 @@ impl VeilidAPI {
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
     pub async fn attach(&self) -> VeilidAPIResult<()> {
         record_duration_fut(async {
-            veilid_log!(self debug
-                "VeilidAPI::attach()");
+            veilid_log!(self debug "VeilidAPI::attach()");
+
             let attachment_manager = self.core_context()?.attachment_manager();
             if !Box::pin(attachment_manager.attach()).await {
                 apibail_generic!("Already attached");
@@ -201,8 +201,7 @@ impl VeilidAPI {
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
     pub async fn detach(&self) -> VeilidAPIResult<()> {
         record_duration_fut(async {
-            veilid_log!(self debug
-            "VeilidAPI::detach()");
+            veilid_log!(self debug "VeilidAPI::detach()");
 
             let attachment_manager = self.core_context()?.attachment_manager();
             if !Box::pin(attachment_manager.detach()).await {
@@ -221,8 +220,7 @@ impl VeilidAPI {
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
     pub fn routing_context(&self) -> VeilidAPIResult<RoutingContext> {
         record_duration(|| {
-            veilid_log!(self debug
-                "VeilidAPI::routing_context()");
+            veilid_log!(self debug "VeilidAPI::routing_context()");
 
             RoutingContext::try_new(self.clone())
         })
@@ -308,12 +306,7 @@ impl VeilidAPI {
     /// imported by another Veilid node.
     pub async fn new_private_route(&self) -> VeilidAPIResult<RouteBlob> {
         record_duration_fut(async {
-            Box::pin(self.new_custom_private_route(
-                &VALID_CRYPTO_KINDS,
-                Stability::Reliable,
-                Sequencing::PreferOrdered,
-            ))
-            .await
+            Box::pin(self.new_custom_private_route(PrivateSpec::default())).await
         })
         .await
     }
@@ -329,42 +322,40 @@ impl VeilidAPI {
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip(self), ret))]
     pub async fn new_custom_private_route(
         &self,
-        crypto_kinds: &[CryptoKind],
-        stability: Stability,
-        sequencing: Sequencing,
+        mut private_spec: PrivateSpec,
     ) -> VeilidAPIResult<RouteBlob> {
         record_duration_fut(async {
-            veilid_log!(self debug
-                "VeilidAPI::new_custom_private_route(crypto_kinds: {:?}, stability: {:?}, sequencing: {:?})",
-                crypto_kinds,
-                stability,
-                sequencing);
-
-            for kind in crypto_kinds {
-                Crypto::validate_crypto_kind(*kind)?;
-            }
+            veilid_log!(self debug "VeilidAPI::new_custom_private_route(private_spec: {:?})", private_spec);
 
             let default_route_hop_count: usize =
                 self.config()?.network.rpc.default_route_hop_count.into();
 
-            let safety_spec = SafetySpec {
-                preferred_route: None,
-                hop_count: default_route_hop_count,
-                stability,
-                sequencing,
-            };
+            if private_spec.crypto_kinds.is_empty() {
+                private_spec.crypto_kinds = VALID_CRYPTO_KINDS.to_vec();
+            } else {
+                for kind in &private_spec.crypto_kinds {
+                    Crypto::validate_crypto_kind(*kind)?;
+                }
+            }
+            if private_spec.hop_count == 0 {
+                private_spec.hop_count = default_route_hop_count;
+            }
 
             let routing_table = self.core_context()?.routing_table();
             let rss = routing_table.route_spec_store();
             let allocate_route_params = AllocateRouteParams {
-                crypto_kinds: crypto_kinds.to_vec(),
-                safety_spec,
+                crypto_kinds: private_spec.crypto_kinds,
+                hop_count: private_spec.hop_count,
+                stability: private_spec.stability,
+                sequencing: private_spec.sequencing,
                 directions: DirectionSet::all(),
                 avoid_nodes: Vec::new(),
                 automatic: false,
             };
-            let RouteIdAndPublicKeys { route_id, public_keys:_ } =
-                rss.allocate_route(allocate_route_params).await?;
+            let RouteIdAndKeys {
+                route_id,
+                route_set_keys: _,
+            } = rss.allocate_route(allocate_route_params).await?;
             match Box::pin(rss.test_route(route_id.clone())).await? {
                 Some(true) => {
                     // route tested okay
@@ -378,7 +369,9 @@ impl VeilidAPI {
                     apibail_try_again!("allocated route could not be tested");
                 }
             }
-            let private_routes = rss.assemble_private_route_set(&route_id, Some(true)).await?;
+            let private_routes = rss
+                .assemble_private_route_set(&route_id, Some(true))
+                .await?;
             let blob = match RouteSpecStore::private_routes_to_blob(&private_routes) {
                 Ok(v) => v,
                 Err(e) => {
@@ -389,8 +382,13 @@ impl VeilidAPI {
 
             rss.mark_route_published(&route_id, true)?;
 
-            Ok(RouteBlob { route_id, blob: blob.into() })
-        }).await.inspect_err(log_veilid_api_error!(self))
+            Ok(RouteBlob {
+                route_id,
+                blob: blob.into(),
+            })
+        })
+        .await
+        .inspect_err(log_veilid_api_error!(self))
     }
 
     /// Import a private route blob as a remote private route.

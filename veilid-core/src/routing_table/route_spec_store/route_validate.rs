@@ -17,35 +17,36 @@ impl RouteSpecStore {
         let crypto = self.crypto();
 
         let (hop_node_refs, secret_key, safety_spec) = {
-            let inner = self.inner.read();
+            let cache = self.cache.read();
 
-            let Some(rsid) = inner.content.get_id_by_key(public_key) else {
-                veilid_log!(self debug target: "network_result", "route id does not exist: {:?}", public_key.ref_value());
+            let Some(id) = cache.get_allocated_route_id_by_key(public_key) else {
+                veilid_log!(self debug target: "network_result", "route id does not exist for key: {}", public_key);
                 return None;
             };
-            let Some(rssd) = inner.content.get_detail(&rsid) else {
-                veilid_log!(self debug "route detail does not exist: {:?}", rsid);
+            let Some(arce) = cache.get_allocated_route_by_id(&id) else {
+                veilid_log!(self debug "route does not exist for id: {}", id);
                 return None;
             };
-            let Some(rsd) = rssd.get_route_by_key(public_key) else {
-                veilid_log!(self debug "route set {:?} does not have key: {:?}", rsid, public_key.ref_value());
+
+            let Ok(secret_key) = arce.route_set_secret_for_key(public_key) else {
+                veilid_log!(self error "no secret key for public key: {}", public_key);
                 return None;
             };
 
             // Ensure we have the right number of signatures
-            if signatures.len() != rsd.hops.len() - 1 {
+            if signatures.len() != arce.hop_count() - 1 {
                 // Wrong number of signatures
-                veilid_log!(self debug "wrong number of signatures ({} should be {}) for routed operation on private route {}", signatures.len(), rsd.hops.len() - 1, public_key);
+                veilid_log!(self debug "wrong number of signatures ({} should be {}) for routed operation on private route {}", signatures.len(), arce.hop_count() - 1, public_key);
                 return None;
             }
 
             (
-                rssd.hop_node_refs(),
-                rsd.secret_key.clone(),
+                arce.hop_node_refs(),
+                secret_key,
                 SafetySpec {
-                    preferred_route: Some(rsid),
-                    hop_count: rssd.hop_count(),
-                    stability: rssd.get_stability(),
+                    preferred_route: Some(id),
+                    hop_count: arce.hop_count(),
+                    stability: arce.stability(),
                     sequencing,
                 },
             )

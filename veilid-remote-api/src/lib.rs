@@ -79,12 +79,8 @@ pub enum RequestOp {
     },
     NewPrivateRoute,
     NewCustomPrivateRoute {
-        #[schemars(with = "Vec<String>")]
-        kinds: Vec<CryptoKind>,
         #[serde(default)]
-        stability: Stability,
-        #[serde(default)]
-        sequencing: Sequencing,
+        private_spec: PrivateSpec,
     },
     ImportRemotePrivateRoute {
         #[serde(with = "as_human_base64")]

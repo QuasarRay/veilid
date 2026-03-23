@@ -2,9 +2,6 @@ PODS:
   - Flutter (1.0.0)
   - integration_test (0.0.1):
     - Flutter
-  - path_provider_foundation (0.0.1):
-    - Flutter
-    - FlutterMacOS
   - system_info_plus (0.0.1):
     - Flutter
   - veilid (0.0.1):
@@ -13,7 +10,6 @@ PODS:
 DEPENDENCIES:
   - Flutter (from `Flutter`)
   - integration_test (from `.symlinks/plugins/integration_test/ios`)
-  - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
   - system_info_plus (from `.symlinks/plugins/system_info_plus/ios`)
   - veilid (from `.symlinks/plugins/veilid/ios`)
 
@@ -22,8 +18,6 @@ EXTERNAL SOURCES:
     :path: Flutter
   integration_test:
     :path: ".symlinks/plugins/integration_test/ios"
-  path_provider_foundation:
-    :path: ".symlinks/plugins/path_provider_foundation/darwin"
   system_info_plus:
     :path: ".symlinks/plugins/system_info_plus/ios"
   veilid:
@@ -32,7 +26,6 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
-  path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
   system_info_plus: 555ce7047fbbf29154726db942ae785c29211740
   veilid: 3ce560a4f2b568a77a9fd5e23090f2fa97581019
 

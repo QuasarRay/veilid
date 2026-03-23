@@ -1,7 +1,7 @@
 import { expect } from '@wdio/globals';
 
 import {
-  DEBUGGING,
+  LOG_LEVEL,
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
 } from './utils/veilid-config';
@@ -14,11 +14,10 @@ describe('veilidCrypto', () => {
   before('veilid startup', async () => {
     await veilidClient.initializeCore(veilidCoreInitConfig);
     await veilidClient.startupCore((_update) => {
-      if (DEBUGGING) {
-        if (_update.kind === 'Log') {
-          const logTimestamp = getLogTimestamp()
-          console.log(`${logTimestamp}: ${_update.message}`);
-        }
+      // Only print API logs to console if performance logs are disabled
+      if (LOG_LEVEL === "Off" && _update.kind === 'Log') {
+        const logTimestamp = getLogTimestamp()
+        console.log(`${logTimestamp}: ${_update.message}`);
       }
     }, veilidCoreStartupConfig);
   });
@@ -33,7 +32,7 @@ describe('veilidCrypto', () => {
   });
 
   for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
-    it(`should generate key pair for ${cryptoKind}`, async () => {
+    it(`should generate key pair for ${cryptoKind as string}`, async () => {
       const vcrypto = veilidClient.getCrypto(cryptoKind)
       const keypair = vcrypto.generateKeyPair();
       await expect(typeof keypair).toBe('object');
@@ -55,7 +54,7 @@ describe('veilidCrypto', () => {
   }
 
   for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
-    it(`should generate random bytes for ${cryptoKind}`, async () => {
+    it(`should generate random bytes for ${cryptoKind as string}`, async () => {
       const vcrypto = veilidClient.getCrypto(cryptoKind)
       const bytes = vcrypto.randomBytes(64);
       await expect(bytes instanceof Uint8Array).toBe(true);
@@ -65,7 +64,7 @@ describe('veilidCrypto', () => {
   }
 
   for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
-    it(`should hash data and validate hash for ${cryptoKind}`, async () => {
+    it(`should hash data and validate hash for ${cryptoKind as string}`, async () => {
       const vcrypto = veilidClient.getCrypto(cryptoKind)
       const data = textEncoder.encode('this is my data🚀');
       const hash = vcrypto.generateHash(data);
@@ -79,7 +78,7 @@ describe('veilidCrypto', () => {
   }
 
   for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
-    it(`should hash and validate password for ${cryptoKind}`, async () => {
+    it(`should hash and validate password for ${cryptoKind as string}`, async () => {
       const vcrypto = veilidClient.getCrypto(cryptoKind)
 
       const password = textEncoder.encode('this is my data🚀');
@@ -100,7 +99,7 @@ describe('veilidCrypto', () => {
   }
 
   for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
-    it(`should aead encrypt and decrypt for ${cryptoKind}`, async () => {
+    it(`should aead encrypt and decrypt for ${cryptoKind as string}`, async () => {
       const vcrypto = veilidClient.getCrypto(cryptoKind)
       const body = textEncoder.encode(
         'This is an encoded body with my secret data in it🔥'
@@ -137,7 +136,7 @@ describe('veilidCrypto', () => {
     });
   }
   for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
-    it(`should sign and verify for ${cryptoKind}`, async () => {
+    it(`should sign and verify for ${cryptoKind as string}`, async () => {
       const vcrypto = veilidClient.getCrypto(cryptoKind)
       const keypair = vcrypto.generateKeyPair();
       const data = textEncoder.encode(

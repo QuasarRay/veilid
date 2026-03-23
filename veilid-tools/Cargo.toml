@@ -185,7 +185,7 @@ winapi = { version = "0.3.9", features = [
     "iphlpapi",
     "iptypes",
     "winerror",
-    "winsock2"
+    "winsock2",
 ] }
 windows = { version = "0.62.2", features = [
     "Win32_NetworkManagement_Dns",
@@ -211,7 +211,7 @@ env_logger = "0.11.8"
 console_error_panic_hook = "0.1.7"
 wasm-bindgen-test = "0.3.58"
 wasm-logger = "0.2.0"
-veilid-tracing-wasm = "=0.1.0"
+veilid-tracing-wasm = "0.2.0"
 
 ### BUILD OPTIONS
 

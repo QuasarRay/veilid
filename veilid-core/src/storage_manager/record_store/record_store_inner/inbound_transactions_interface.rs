@@ -182,6 +182,8 @@ where
         opaque_record_key: &OpaqueRecordKey,
         transaction_id: InboundTransactionId,
     ) -> VeilidAPIResult<PrepareEndInboundTransactionResult> {
+        let registry = self.registry();
+
         let rtk = RecordTableKey {
             record_key: opaque_record_key.clone(),
         };
@@ -193,26 +195,35 @@ where
                 ));
             };
 
-            // If the lock id is ours, then someone tried to 'end' twice, so invalidate the transaction.
-            // We don't lock here yet to allow for an unchanged transaction to finish regardless of an
-            // existing lock held by another transaction
-            if active_transaction_list.is_locked_by(transaction_id) {
-                self.inbound_transactions
-                    .remove_transaction(transaction_id)
-                    .unwrap_or_else(veilid_log_err!(self));
-                veilid_log!(self debug "{}","ended twice");
-                return Ok(PrepareEndInboundTransactionResult::Done(
-                    InboundTransactCommandResult::InvalidTransaction,
-                ));
-            }
+            // Check if locked by us already
+            let is_locked_by_us = active_transaction_list.is_locked_by(transaction_id);
 
             // Get the inbound transaction if it is still valid
-            let Some(inbound_transaction) = active_transaction_list.get(transaction_id) else {
+            let Some(inbound_transaction) = active_transaction_list.get_mut(transaction_id) else {
                 // Nothing to drop
                 return Ok(PrepareEndInboundTransactionResult::Done(
                     InboundTransactCommandResult::InvalidTransaction,
                 ));
             };
+
+            // If the lock id is ours, then someone tried to 'end' twice, so invalidate the transaction.
+            // We don't lock here yet to allow for an unchanged transaction to finish regardless of an
+            // existing lock held by another transaction
+            if is_locked_by_us {
+                veilid_log!(registry debug "transaction ended twice, just extending expiration: id={}", transaction_id);
+
+                let expiration =
+                    Timestamp::now().later(self.unlocked_inner.limits.transaction_timeout);
+                inbound_transaction.update_expiration(expiration);
+                return Ok(PrepareEndInboundTransactionResult::Done(
+                    InboundTransactCommandResult::Success(TransactCommandSuccess {
+                        expiration,
+                        opt_seqs: Default::default(),
+                        opt_subkey: Default::default(),
+                        opt_value: Default::default(),
+                    }),
+                ));
+            }
 
             // If there's no changes, we can just quit early with a zero expiration to indicate no commit or rollback is necessary
             // No lock check is required here because

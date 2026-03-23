@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'routing_context.dart';
+part of 'veilid_types.dart';
 
 // **************************************************************************
 // JsonSerializableGenerator
@@ -73,9 +73,13 @@ Map<String, dynamic> _$ValueDataToJson(_ValueData instance) =>
     };
 
 _SafetySpec _$SafetySpecFromJson(Map<String, dynamic> json) => _SafetySpec(
-  hopCount: (json['hopCount'] as num).toInt(),
-  stability: Stability.fromJson(json['stability']),
-  sequencing: Sequencing.fromJson(json['sequencing']),
+  hopCount: (json['hopCount'] as num?)?.toInt() ?? 0,
+  stability: json['stability'] == null
+      ? Stability.reliable
+      : Stability.fromJson(json['stability']),
+  sequencing: json['sequencing'] == null
+      ? Sequencing.preferOrdered
+      : Sequencing.fromJson(json['sequencing']),
   preferredRoute: json['preferredRoute'] == null
       ? null
       : Typed<BareRouteId>.fromJson(json['preferredRoute']),
@@ -87,6 +91,27 @@ Map<String, dynamic> _$SafetySpecToJson(_SafetySpec instance) =>
       'stability': instance.stability.toJson(),
       'sequencing': instance.sequencing.toJson(),
       'preferredRoute': instance.preferredRoute?.toJson(),
+    };
+
+_PrivateSpec _$PrivateSpecFromJson(Map<String, dynamic> json) => _PrivateSpec(
+  cryptoKinds: json['cryptoKinds'] == null
+      ? const []
+      : cryptoKindsFromJson(json['cryptoKinds']),
+  hopCount: (json['hopCount'] as num?)?.toInt() ?? 0,
+  stability: json['stability'] == null
+      ? Stability.reliable
+      : Stability.fromJson(json['stability']),
+  sequencing: json['sequencing'] == null
+      ? Sequencing.preferOrdered
+      : Sequencing.fromJson(json['sequencing']),
+);
+
+Map<String, dynamic> _$PrivateSpecToJson(_PrivateSpec instance) =>
+    <String, dynamic>{
+      'cryptoKinds': cryptoKindsToJson(instance.cryptoKinds),
+      'hopCount': instance.hopCount,
+      'stability': instance.stability.toJson(),
+      'sequencing': instance.sequencing.toJson(),
     };
 
 _RouteBlob _$RouteBlobFromJson(Map<String, dynamic> json) => _RouteBlob(
@@ -135,3 +160,17 @@ Map<String, dynamic> _$SetDHTValueOptionsToJson(_SetDHTValueOptions instance) =>
       'writer': instance.writer?.toJson(),
       'allowOffline': instance.allowOffline,
     };
+
+_TransactDHTRecordsOptions _$TransactDHTRecordsOptionsFromJson(
+  Map<String, dynamic> json,
+) => _TransactDHTRecordsOptions(
+  defaultSigningKeyPair: json['defaultSigningKeyPair'] == null
+      ? null
+      : KeyPair.fromJson(json['defaultSigningKeyPair']),
+);
+
+Map<String, dynamic> _$TransactDHTRecordsOptionsToJson(
+  _TransactDHTRecordsOptions instance,
+) => <String, dynamic>{
+  'defaultSigningKeyPair': instance.defaultSigningKeyPair?.toJson(),
+};

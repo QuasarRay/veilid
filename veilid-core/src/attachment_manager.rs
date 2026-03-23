@@ -40,6 +40,10 @@ struct AttachmentManagerInner {
     attachment_state: AttachmentState,
     /// The last VeilidStateAttachment that was calculated
     last_veilid_state_attachment: Box<VeilidStateAttachment>,
+    /// The last time PublicInternet changed readiness
+    last_public_internet_ready_changed_ts: Option<Timestamp>,
+    /// The last time LocalNetwork changed readiness
+    last_local_network_ready_changed_ts: Option<Timestamp>,
     /// Whether to maintain peers
     maintain_peers: bool,
     /// The timestamp when the node started
@@ -58,6 +62,18 @@ impl fmt::Debug for AttachmentManagerInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AttachmentManagerInner")
             .field("attachment_state", &self.attachment_state)
+            .field(
+                "last_veilid_state_attachment",
+                &self.last_veilid_state_attachment,
+            )
+            .field(
+                "last_public_internet_ready_changed_ts",
+                &self.last_public_internet_ready_changed_ts,
+            )
+            .field(
+                "last_local_network_ready_changed_ts",
+                &self.last_local_network_ready_changed_ts,
+            )
             .field("maintain_peers", &self.maintain_peers)
             .field("started_ts", &self.started_ts)
             .field("attach_ts", &self.attach_ts)
@@ -92,6 +108,8 @@ impl AttachmentManager {
         AttachmentManagerInner {
             attachment_state: AttachmentState::Detached,
             last_veilid_state_attachment: Box::new(VeilidStateAttachment::default()),
+            last_public_internet_ready_changed_ts: None,
+            last_local_network_ready_changed_ts: None,
             maintain_peers: false,
             started_ts: Timestamp::now(),
             attach_ts: None,
@@ -594,9 +612,13 @@ impl AttachmentManager {
         match state {
             AttachmentState::Attaching => {
                 inner.attach_ts = Some(now);
+                inner.last_public_internet_ready_changed_ts = Some(now);
+                inner.last_local_network_ready_changed_ts = Some(now);
             }
             AttachmentState::Detached => {
                 inner.attach_ts = None;
+                inner.last_public_internet_ready_changed_ts = None;
+                inner.last_local_network_ready_changed_ts = None;
             }
             AttachmentState::Detaching => {
                 // ok
@@ -630,14 +652,40 @@ impl AttachmentManager {
         veilid_state_attachment: Box<VeilidStateAttachment>,
         opt_callback: Option<UpdateStateCallback>,
     ) {
+        // Print PublicInternet readiness change
+        let mut public_internet_ready_changed = false;
+        if inner.last_veilid_state_attachment.public_internet_ready
+            != veilid_state_attachment.public_internet_ready
+        {
+            let cur_ts = Timestamp::now_non_decreasing();
+            if let Some(last_changed_ts) = inner.last_public_internet_ready_changed_ts {
+                let dur = cur_ts.duration_since(last_changed_ts);
+                veilid_log!(self info "PublicInternet {} in {}", if veilid_state_attachment.public_internet_ready { "ready" } else { "unavailable" }, dur);
+            }
+            inner.last_public_internet_ready_changed_ts = Some(cur_ts);
+            public_internet_ready_changed = true;
+        }
+
+        // Print LocalNetwork readiness change
+        let mut local_network_ready_changed = false;
+        if inner.last_veilid_state_attachment.local_network_ready
+            != veilid_state_attachment.local_network_ready
+        {
+            let cur_ts = Timestamp::now_non_decreasing();
+            if let Some(last_changed_ts) = inner.last_local_network_ready_changed_ts {
+                let dur = cur_ts.duration_since(last_changed_ts);
+                veilid_log!(self info "LocalNetwork {} in {}", if veilid_state_attachment.local_network_ready { "ready" } else { "unavailable" }, dur);
+            }
+            inner.last_local_network_ready_changed_ts = Some(cur_ts);
+            local_network_ready_changed = true;
+        }
+
         // Send update if one of:
         // * the attachment state has changed
         // * routing domain readiness has changed
         let send_update = inner.last_veilid_state_attachment.state != veilid_state_attachment.state
-            || inner.last_veilid_state_attachment.public_internet_ready
-                != veilid_state_attachment.public_internet_ready
-            || inner.last_veilid_state_attachment.local_network_ready
-                != veilid_state_attachment.local_network_ready;
+            || public_internet_ready_changed
+            || local_network_ready_changed;
 
         let opt_update_to_send = if send_update {
             Some(VeilidUpdate::Attachment(veilid_state_attachment.clone()))

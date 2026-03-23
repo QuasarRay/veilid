@@ -39,34 +39,40 @@ impl RoutingTableHealth {
 
 impl fmt::Display for RoutingTableHealth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut domains_ready = Vec::new();
-        for (rd, h) in self.routing_domain_health.iter() {
-            let mut ready = Vec::new();
-            if h.is_ready_inbound {
-                ready.push("in".to_string());
-            }
-            if h.is_ready_outbound {
-                ready.push("out".to_string())
-            }
-            if ready.is_empty() {
-                ready.push("none".to_string());
-            }
-            domains_ready.push(format!("{}={}", rd, ready.join(",")));
-        }
-        if domains_ready.is_empty() {
-            domains_ready.push("none".to_string());
-        }
+        if f.alternate() {
+            let mut domains_health = Vec::new();
 
-        write!(
-            f,
-            "[total={}, live={} (reliable={}, unreliable={}), dead={}, punished={}]: {}",
-            self.total_entry_count,
-            self.live_entry_count(),
-            self.reliable_entry_count,
-            self.unreliable_entry_count,
-            self.dead_entry_count,
-            self.punished_entry_count,
-            domains_ready.join(" ")
-        )
+            domains_health.push(format!(
+                "all:\n    total={}\n    live={} (reliable={}, unreliable={})\n    dead={}\n    punished={}",
+                self.total_entry_count,
+                self.live_entry_count(),
+                self.reliable_entry_count,
+                self.unreliable_entry_count,
+                self.dead_entry_count,
+                self.punished_entry_count
+            ));
+
+            for (rd, h) in self.routing_domain_health.iter() {
+                domains_health.push(format!("{:#}:\n{:#}", rd, indent_all_string(h)));
+            }
+            write!(f, "{}", domains_health.join("\n"))
+        } else {
+            let mut domains_health = Vec::new();
+
+            domains_health.push(format!(
+                "all:[total={}, live={} (reliable={}, unreliable={}), dead={}, punished={}]",
+                self.total_entry_count,
+                self.live_entry_count(),
+                self.reliable_entry_count,
+                self.unreliable_entry_count,
+                self.dead_entry_count,
+                self.punished_entry_count
+            ));
+
+            for (rd, h) in self.routing_domain_health.iter() {
+                domains_health.push(format!("{}:[{}]", rd, h));
+            }
+            write!(f, "{}", domains_health.join("\n"))
+        }
     }
 }

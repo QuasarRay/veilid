@@ -3,17 +3,17 @@ use super::*;
 impl RouteSpecStore {
     /// Choose the best private route from a private route set to communicate with
     pub fn best_remote_private_route(&self, id: &RouteId) -> Option<Arc<PrivateRoute>> {
-        let mut inner = self.inner.write();
+        let mut cache = self.cache.write();
         let cur_ts = Timestamp::now();
-        let rpri = inner.cache.get_remote_private_route(cur_ts, id)?;
-        rpri.best_private_route()
+        let rrce = cache.get_remote_route(cur_ts, id)?;
+        rrce.best_private_route()
     }
 
     /// Check if a route id is remote or not
     pub fn is_route_id_remote(&self, id: &RouteId) -> bool {
-        let inner = self.inner.read();
+        let cache = self.cache.read();
         let cur_ts = Timestamp::now();
-        inner.cache.peek_remote_private_route(cur_ts, id).is_some()
+        cache.peek_remote_route(cur_ts, id).is_some()
     }
 
     /// Import a remote private route set blob for compilation
@@ -33,24 +33,15 @@ impl RouteSpecStore {
         let id = self.generate_remote_route_id(&private_routes)?;
 
         // validate the private routes
-        let mut inner = self.inner.write();
+        let mut cache = self.cache.write();
         for private_route in &private_routes {
             // ensure private route has first hop
             if !matches!(private_route.hops, PrivateRouteHops::FirstHop(_)) {
                 apibail_generic!("private route must have first hop");
             }
-
-            // ensure this isn't also an allocated route
-            // if inner.content.get_id_by_key(&private_route.public_key.value).is_some() {
-            //     bail!("should not import allocated route");
-            // }
         }
 
-        inner
-            .cache
-            .cache_remote_private_route(cur_ts, id.clone(), private_routes, |dead_key| {
-                self.invalidate_compiled_route_cache(dead_key);
-            });
+        cache.add_remote_route(cur_ts, id.clone(), private_routes);
 
         Ok(id)
     }
@@ -82,14 +73,9 @@ impl RouteSpecStore {
             }
         }
 
-        self.inner.write().cache.cache_remote_private_route(
-            cur_ts,
-            id.clone(),
-            private_routes,
-            |dead_key| {
-                self.invalidate_compiled_route_cache(dead_key);
-            },
-        );
+        self.cache
+            .write()
+            .add_remote_route(cur_ts, id.clone(), private_routes);
 
         Ok(id)
     }
@@ -100,24 +86,22 @@ impl RouteSpecStore {
         instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub(super) fn release_remote_route_id(&self, id: RouteId) -> bool {
-        self.inner
-            .write()
-            .cache
-            .remove_remote_private_route(id, |dead_key| {
-                self.invalidate_compiled_route_cache(dead_key);
-            })
+        self.cache.write().remove_remote_route(id)
     }
 
     /// Get a route id for a route's public key
     pub fn get_route_id_for_key(&self, key: &PublicKey) -> Option<RouteId> {
-        let inner = self.inner.read();
+        // Careful with locking order here, we need to lock the content before the cache
+        let content = self.content.read();
+        let cache = self.cache.read();
+
         // Check for allocated route
-        if let Some(id) = inner.content.get_id_by_key(key) {
+        if let Some(id) = content.get_id_by_key(key) {
             return Some(id);
         }
 
         // Check for remote route
-        if let Some(rrid) = inner.cache.get_remote_private_route_id_by_key(key) {
+        if let Some(rrid) = cache.get_remote_route_id_by_key(key) {
             return Some(rrid);
         }
 
@@ -131,19 +115,19 @@ impl RouteSpecStore {
         key: &PublicKey,
         published_peer_info: &PeerInfo,
     ) -> bool {
-        let inner = self.inner.read();
+        let cache = self.cache.read();
 
         // Check for allocated route. If this is not a remote private route,
         // we may be running a test and using our own allocated route as the destination private route.
         // In that case we definitely have already seen our own node info
-        if inner.content.get_id_by_key(key).is_some() {
+        if cache.get_allocated_route_id_by_key(key).is_some() {
             return true;
         }
 
-        if let Some(rrid) = inner.cache.get_remote_private_route_id_by_key(key) {
+        if let Some(rrid) = cache.get_remote_route_id_by_key(key) {
             let cur_ts = Timestamp::now();
-            if let Some(rpri) = inner.cache.peek_remote_private_route(cur_ts, &rrid) {
-                return rpri.has_seen_our_node_info_ts(published_peer_info.node_info().timestamp());
+            if let Some(rrce) = cache.peek_remote_route(cur_ts, &rrid) {
+                return rrce.has_seen_our_node_info_ts(published_peer_info.node_info().timestamp());
             }
         }
 
@@ -169,18 +153,18 @@ impl RouteSpecStore {
             apibail_internal!("peer info is not yet published");
         };
 
-        let inner = self.inner.read();
+        let cache = self.cache.read();
 
         // Check for allocated route. If this is not a remote private route
         // then we just skip the recording. We may be running a test and using
         // our own allocated route as the destination private route.
-        if inner.content.get_id_by_key(key).is_some() {
+        if cache.get_allocated_route_id_by_key(key).is_some() {
             return Ok(());
         }
 
-        if let Some(rrid) = inner.cache.get_remote_private_route_id_by_key(key) {
-            if let Some(rpri) = inner.cache.peek_remote_private_route(cur_ts, &rrid) {
-                rpri.set_last_seen_our_node_info_ts(our_node_info_ts);
+        if let Some(rrid) = cache.get_remote_route_id_by_key(key) {
+            if let Some(rrce) = cache.peek_remote_route(cur_ts, &rrid) {
+                rrce.set_last_seen_our_node_info_ts(our_node_info_ts);
                 return Ok(());
             }
         }

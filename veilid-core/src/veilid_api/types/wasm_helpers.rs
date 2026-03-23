@@ -98,7 +98,7 @@ pub mod ts {
     }
 
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
+    #[tsify(from_wasm_abi, into_wasm_abi, namespace)]
     pub enum DHTSchema {
         DFLT(DHTSchemaDFLT),
         SMPL(DHTSchemaSMPL),
@@ -143,6 +143,85 @@ pub mod ts {
         #[tsify(type = "PublicKey")]
         #[serde(with = "serde_wasm_bindgen::preserve")]
         pub writer: JsValue,
+    }
+
+    /// Safety spec
+    #[derive(Serialize, Deserialize, Clone, Tsify)]
+    #[tsify(from_wasm_abi, into_wasm_abi)]
+    #[serde(rename_all = "camelCase")]
+    pub struct SafetySpec {
+        #[tsify(optional)]
+        #[serde(default)]
+        pub hop_count: usize,
+        #[tsify(optional)]
+        #[serde(default)]
+        pub stability: Stability,
+        #[tsify(optional)]
+        #[serde(default)]
+        pub sequencing: Sequencing,
+        #[tsify(type = "RouteId", optional)]
+        #[serde(default, with = "serde_wasm_bindgen::preserve")]
+        pub preferred_route: JsValue,
+    }
+
+    /// Private spec
+    #[derive(Serialize, Deserialize, Clone, Tsify)]
+    #[tsify(from_wasm_abi, into_wasm_abi)]
+    #[serde(rename_all = "camelCase")]
+    pub struct PrivateSpec {
+        #[tsify(optional)]
+        #[serde(default)]
+        pub crypto_kinds: Vec<CryptoKind>,
+        #[tsify(optional)]
+        #[serde(default)]
+        pub hop_count: usize,
+        #[tsify(optional)]
+        #[serde(default)]
+        pub stability: Stability,
+        #[tsify(optional)]
+        #[serde(default)]
+        pub sequencing: Sequencing,
+    }
+
+    /// Route blob
+    #[derive(Clone, Deserialize, Serialize, Tsify)]
+    #[tsify(from_wasm_abi, into_wasm_abi)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RouteBlob {
+        #[tsify(type = "RouteId")]
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        pub route_id: JsValue,
+        #[serde(with = "serde_bytes")]
+        #[tsify(type = "Uint8Array")]
+        pub blob: Vec<u8>,
+    }
+
+    /// The choice of safety route to include in compiled routes.
+    #[derive(Clone, Serialize, Deserialize, Tsify)]
+    #[tsify(from_wasm_abi, into_wasm_abi, namespace)]
+    pub enum SafetySelection {
+        /// Don't use a safety route, only specify the sequencing preference.
+        Unsafe(Sequencing),
+        /// Use a safety route and parameters specified by a SafetySpec.
+        Safe(ts::SafetySpec),
+    }
+
+    /// The choice of safety route to include in compiled routes.
+    #[derive(Clone, Serialize, Deserialize, Tsify)]
+    #[tsify(from_wasm_abi, into_wasm_abi, namespace)]
+    pub enum Target {
+        /// Node by its node id
+        NodeId(
+            #[tsify(type = "NodeId")]
+            #[serde(with = "serde_wasm_bindgen::preserve")]
+            JsValue,
+        ),
+        /// Remote private route by its id.
+        RouteId(
+            #[tsify(type = "RouteId")]
+            #[serde(with = "serde_wasm_bindgen::preserve")]
+            JsValue,
+        ),
     }
 }
 
@@ -191,11 +270,7 @@ impl TryFrom<ts::DHTSchemaSMPLMember> for DHTSchemaSMPLMember {
             wasm_bindgen_derive::try_from_js_option::<BareMemberId>(value.m_key.clone())
                 .map_err(VeilidAPIError::generic)?
         else {
-            apibail_invalid_argument!(
-                "m_key must not be undefined",
-                "m_key",
-                value.m_key.as_string().unwrap_or_default()
-            );
+            apibail_missing_argument!("m_key must not be undefined", "m_key");
         };
         let m_cnt = value.m_cnt;
         Ok(DHTSchemaSMPLMember { m_key, m_cnt })
@@ -265,21 +340,13 @@ impl TryFrom<ts::DHTRecordDescriptor> for DHTRecordDescriptor {
         let Some(key) = wasm_bindgen_derive::try_from_js_option::<RecordKey>(value.key.clone())
             .map_err(VeilidAPIError::generic)?
         else {
-            apibail_invalid_argument!(
-                "key must not be undefined",
-                "key",
-                value.key.as_string().unwrap_or_default()
-            );
+            apibail_missing_argument!("key must not be undefined", "key");
         };
         let (owner, owner_secret) =
             match wasm_bindgen_derive::try_from_js_option::<KeyPair>(value.owner.clone()) {
                 Ok(Some(v)) => (v.key(), Some(v.secret())),
                 Ok(None) => {
-                    apibail_invalid_argument!(
-                        "owner must not be undefined",
-                        "owner",
-                        value.owner.as_string().unwrap_or_default()
-                    );
+                    apibail_missing_argument!("owner must not be undefined", "owner");
                 }
                 Err(_) => {
                     match wasm_bindgen_derive::try_from_js_option::<PublicKey>(value.owner.clone())
@@ -287,11 +354,7 @@ impl TryFrom<ts::DHTRecordDescriptor> for DHTRecordDescriptor {
                         Ok(Some(v)) => (v, None),
                         Err(e) => apibail_generic!(e),
                         Ok(None) => {
-                            apibail_invalid_argument!(
-                                "owner must not be undefined",
-                                "owner",
-                                value.owner.as_string().unwrap_or_default()
-                            );
+                            apibail_missing_argument!("owner must not be undefined", "owner");
                         }
                     }
                 }
@@ -322,6 +385,131 @@ impl From<ValueData> for ts::ValueData {
             seq: value.seq(),
             data: value.data().to_vec(),
             writer: value.writer().into(),
+        }
+    }
+}
+
+impl TryFrom<ts::SafetySpec> for SafetySpec {
+    type Error = VeilidAPIError;
+
+    fn try_from(value: ts::SafetySpec) -> Result<Self, Self::Error> {
+        let hop_count = value.hop_count;
+        let stability = value.stability;
+        let sequencing = value.sequencing;
+        let preferred_route =
+            wasm_bindgen_derive::try_from_js_option::<RouteId>(value.preferred_route)
+                .map_err(VeilidAPIError::generic)?;
+        Ok(SafetySpec {
+            hop_count,
+            stability,
+            sequencing,
+            preferred_route,
+        })
+    }
+}
+
+impl From<SafetySpec> for ts::SafetySpec {
+    fn from(value: SafetySpec) -> Self {
+        ts::SafetySpec {
+            hop_count: value.hop_count,
+            stability: value.stability,
+            sequencing: value.sequencing,
+            preferred_route: value.preferred_route.into(),
+        }
+    }
+}
+
+impl TryFrom<ts::PrivateSpec> for PrivateSpec {
+    type Error = VeilidAPIError;
+
+    fn try_from(value: ts::PrivateSpec) -> Result<Self, Self::Error> {
+        let crypto_kinds = value.crypto_kinds;
+        let hop_count = value.hop_count;
+        let stability = value.stability;
+        let sequencing = value.sequencing;
+        Ok(PrivateSpec {
+            crypto_kinds,
+            hop_count,
+            stability,
+            sequencing,
+        })
+    }
+}
+
+impl From<PrivateSpec> for ts::PrivateSpec {
+    fn from(value: PrivateSpec) -> Self {
+        ts::PrivateSpec {
+            crypto_kinds: value.crypto_kinds,
+            hop_count: value.hop_count,
+            stability: value.stability,
+            sequencing: value.sequencing,
+        }
+    }
+}
+
+impl TryFrom<ts::RouteBlob> for RouteBlob {
+    type Error = VeilidAPIError;
+
+    fn try_from(value: ts::RouteBlob) -> Result<Self, Self::Error> {
+        let Some(route_id) = wasm_bindgen_derive::try_from_js_option::<RouteId>(value.route_id)
+            .map_err(VeilidAPIError::generic)?
+        else {
+            apibail_missing_argument!("route_id must not be undefined", "route_id");
+        };
+        let blob = value.blob;
+        Ok(RouteBlob { route_id, blob })
+    }
+}
+
+impl From<RouteBlob> for ts::RouteBlob {
+    fn from(value: RouteBlob) -> Self {
+        ts::RouteBlob {
+            route_id: value.route_id.into(),
+            blob: value.blob,
+        }
+    }
+}
+
+impl TryFrom<ts::SafetySelection> for SafetySelection {
+    type Error = VeilidAPIError;
+
+    fn try_from(value: ts::SafetySelection) -> Result<Self, Self::Error> {
+        match value {
+            ts::SafetySelection::Unsafe(seq) => Ok(SafetySelection::Unsafe(seq)),
+            ts::SafetySelection::Safe(ss) => Ok(SafetySelection::Safe(ss.try_into()?)),
+        }
+    }
+}
+
+impl From<SafetySelection> for ts::SafetySelection {
+    fn from(value: SafetySelection) -> Self {
+        match value {
+            SafetySelection::Unsafe(seq) => ts::SafetySelection::Unsafe(seq),
+            SafetySelection::Safe(ss) => ts::SafetySelection::Safe(ss.into()),
+        }
+    }
+}
+
+impl TryFrom<ts::Target> for Target {
+    type Error = VeilidAPIError;
+
+    fn try_from(value: ts::Target) -> Result<Self, Self::Error> {
+        match value {
+            ts::Target::NodeId(node_id) => Ok(Target::NodeId(
+                NodeId::try_from(&node_id).map_err(VeilidAPIError::generic)?,
+            )),
+            ts::Target::RouteId(route_id) => Ok(Target::RouteId(
+                RouteId::try_from(&route_id).map_err(VeilidAPIError::generic)?,
+            )),
+        }
+    }
+}
+
+impl From<Target> for ts::Target {
+    fn from(value: Target) -> Self {
+        match value {
+            Target::NodeId(node_id) => ts::Target::NodeId(node_id.into()),
+            Target::RouteId(route_id) => ts::Target::RouteId(route_id.into()),
         }
     }
 }

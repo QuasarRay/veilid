@@ -82,7 +82,7 @@ impl Network {
                 if entry_summary
                     .per_crypto_kind
                     .get(&ck)
-                    .map(|cc| cc.connectivity_capabilities.live)
+                    .map(|cc| cc.live.connectivity_capabilities)
                     .unwrap_or_default()
                     < EXTERNAL_INFO_VALIDATIONS
                 {

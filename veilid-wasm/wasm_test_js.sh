@@ -11,10 +11,13 @@ TESTS=""
 DEBUG_MODE=""
 
 # Parse arguments
-PASSTHROUGH_ARGS=()
 for arg in "$@"; do
   case "$arg" in
+    
     release)
+      WASM_PACK_FLAGS="--release"
+      ;;
+    --release-build)
       WASM_PACK_FLAGS="--release"
       ;;
     --tests=*)
@@ -27,10 +30,10 @@ for arg in "$@"; do
       DEBUG_MODE=1
       ;;
     --help|-h)
-      echo "Usage: $0 [release] [--tests=LIST] [--verbose-tracing] [--debug] [-- wdio args...]"
+      echo "Usage: $0 [options] [-- wdio args...]"
       echo ""
       echo "Options:"
-      echo "  release             Build in release mode (default: dev)"
+      echo "  --release-build     Build in release mode (default: dev)"
       echo "  --tests=LIST        Comma-separated list of test groups to run."
       echo "                      If omitted, all tests are run."
       echo "                      Available groups:"
@@ -46,18 +49,23 @@ for arg in "$@"; do
       echo ""
       echo "Examples:"
       echo "  $0                                    # Run all tests"
-      echo "  $0 --tests=transactions --debug       # Run DHT transaction tests with debug"
+      echo "  $0 --tests=transactions --debug       # Run DHT transaction tests with debugging output"
       echo "  $0 --tests=client,crypto              # Run client and crypto tests"
-      echo "  $0 release --tests=routing             # Release build, routing tests only"
+      echo "  $0 --release-build --tests=routing    # Release build, routing tests only"
       popd &> /dev/null
       exit 0
       ;;
     --)
+      # Stop parsing arguments if -- is encountered
+      shift
+      break 
       ;;
-    *)
-      PASSTHROUGH_ARGS+=("$arg")
+    --*)
+      echo "Unknown argument: $arg"
+      exit 1
       ;;
   esac
+  shift
 done
 
 # Build wasm into an npm package, output into ./pkg
@@ -126,7 +134,7 @@ if [[ -n "$DEBUG_MODE" ]]; then
   export DEBUG=1
 fi
 
-WDIO_HEADLESS=true npx wdio run ./wdio.conf.ts "${WDIO_ARGS[@]}" "${PASSTHROUGH_ARGS[@]}"
+WDIO_HEADLESS=true npx wdio run ./wdio.conf.ts "${WDIO_ARGS[@]}" $@
 
 export TMPDIR=$original_tmpdir
 

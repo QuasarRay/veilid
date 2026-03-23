@@ -1,15 +1,10 @@
-use super::*;
 use std::sync::atomic::AtomicU64;
+
+use super::*;
 
 /// Atomic wrapper for timestamps used in structs so we can avoid locks
 /// for LRU and similar operations
-#[derive(Debug, Default, Serialize, Deserialize, JsonSchema, GetSize)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[derive(Debug, Default, Serialize, Deserialize, GetSize)]
 #[serde(from = "Timestamp", into = "Timestamp")]
 #[must_use]
 pub struct AtomicTimestamp(AtomicU64);

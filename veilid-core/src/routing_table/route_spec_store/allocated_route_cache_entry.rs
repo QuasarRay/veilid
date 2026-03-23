@@ -1,0 +1,179 @@
+use super::*;
+
+/// Ephemeral data for allocated routes
+#[derive(Debug)]
+pub struct AllocatedRouteCacheEntry {
+    /// Keys for this route's crypto kinds
+    route_set_keys: PublicKeyGroup,
+
+    /// Secrets for this route's crypto kinds
+    route_set_secrets: SecretKeyGroup,
+
+    /// Route noderefs
+    hop_node_refs: Vec<NodeRef>,
+
+    /// Hop cache key representing this route's node permutation order
+    hop_cache_key: RouteHopCacheKey,
+
+    /// Automatically allocated route vs manually allocated route
+    automatic: bool,
+
+    /// Directions this route is guaranteed to work in
+    directions: DirectionSet,
+
+    /// Stability preference (prefer reliable nodes over faster)
+    stability: Stability,
+
+    /// Sequencing capability (connection oriented protocols vs datagram)
+    orderings: SequenceOrderingSet,
+
+    /// If the route is published yet or not (upon node restart, this is reset to false to force republication)
+    published: AtomicBool,
+
+    /// Stats
+    stats: RwLock<RouteStats>,
+}
+
+impl fmt::Display for AllocatedRouteCacheEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (latency_stats, transfer_stats) = self.with_stats(|s| {
+            (
+                s.latency_stats().to_string(),
+                s.transfer_stats().to_string(),
+            )
+        });
+        write!(
+            f,
+            "count={} keys={} hops=[{}] auto={:?} dirs={:?} stability={:?} orderings={:?} published={:?} latency={} transfer={}",
+            self.hop_node_refs.len(),
+            self.route_set_keys,
+            self.hop_node_refs.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(","),
+            self.automatic,
+            self.directions,
+            self.stability,
+            self.orderings,
+            self.published.load(Ordering::Relaxed),
+            latency_stats,
+            transfer_stats
+        )
+    }
+}
+impl AllocatedRouteCacheEntry {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        route_set_keys: PublicKeyGroup,
+        route_set_secrets: SecretKeyGroup,
+        hop_node_refs: Vec<NodeRef>,
+        hop_cache_key: RouteHopCacheKey,
+        automatic: bool,
+        directions: DirectionSet,
+        stability: Stability,
+        orderings: SequenceOrderingSet,
+        stats: RouteSetSpecDetailStats,
+    ) -> Self {
+        AllocatedRouteCacheEntry {
+            route_set_keys,
+            route_set_secrets,
+            hop_node_refs,
+            hop_cache_key,
+            automatic,
+            directions,
+            stability,
+            orderings,
+            published: AtomicBool::new(false),
+            stats: RwLock::new(RouteStats::new_from_spec_detail_stats(stats)),
+        }
+    }
+
+    pub fn route_set_keys(&self) -> &PublicKeyGroup {
+        &self.route_set_keys
+    }
+
+    pub fn route_set_secret_for_key(&self, key: &PublicKey) -> VeilidAPIResult<SecretKey> {
+        if !self.route_set_keys.contains(key) {
+            apibail_internal!("route set key not found: {}", key);
+        }
+        let Some(secret_key) = self.route_set_secrets.get(key.kind()) else {
+            apibail_internal!("route set secret not found for key: {}", key);
+        };
+        Ok(secret_key)
+    }
+
+    pub fn best_route_set_key(&self) -> Option<PublicKey> {
+        self.route_set_keys().first().cloned()
+    }
+
+    #[must_use]
+    pub fn is_published(&self) -> bool {
+        self.published.load(Ordering::Relaxed)
+    }
+    pub fn set_published(&self, published: bool) {
+        self.published.store(published, Ordering::Relaxed);
+    }
+    #[must_use]
+    pub fn hop_count(&self) -> usize {
+        self.hop_node_refs.len()
+    }
+    pub fn hop_node_refs(&self) -> Vec<NodeRef> {
+        self.hop_node_refs.clone()
+    }
+    pub fn hop_node_ref(&self, idx: usize) -> Option<NodeRef> {
+        self.hop_node_refs.get(idx).cloned()
+    }
+    pub fn hop_cache_key(&self) -> RouteHopCacheKey {
+        self.hop_cache_key.clone()
+    }
+
+    pub fn contains_nodes(&self, nodes: &[NodeId]) -> bool {
+        for node in nodes {
+            for hop_node_ref in self.hop_node_refs.iter() {
+                if hop_node_ref.node_ids().contains(node) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn is_automatic(&self) -> bool {
+        self.automatic
+    }
+
+    pub fn directions(&self) -> DirectionSet {
+        self.directions
+    }
+
+    pub fn stability(&self) -> Stability {
+        self.stability
+    }
+
+    pub fn is_sequencing_match(&self, sequencing: Sequencing) -> bool {
+        for ordering in self.orderings.iter() {
+            if sequencing.matches_ordering(ordering) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn is_route_optimizable(&self) -> bool {
+        self.with_stats(|stats| stats.last_known_valid_ts.is_some())
+    }
+
+    pub fn with_stats<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&RouteStats) -> R,
+    {
+        let stats = self.stats.read();
+        f(&stats)
+    }
+
+    pub(super) fn with_stats_mut<F>(&self, f: F) -> VeilidAPIResult<RouteStatsDisposition>
+    where
+        F: FnOnce(&mut RouteStats) -> VeilidAPIResult<()>,
+    {
+        let mut stats = self.stats.write();
+        f(&mut stats)?;
+        Ok(stats.disposition())
+    }
+}

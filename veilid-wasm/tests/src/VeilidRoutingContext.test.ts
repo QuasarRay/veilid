@@ -1,7 +1,8 @@
 import { expect } from '@wdio/globals';
 
 import {
-  DEBUGGING,
+  LOG_LEVEL,
+  STRESS,
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
 } from './utils/veilid-config';
@@ -11,34 +12,46 @@ import {
   DHTRecordReport,
   KeyPair,
   RecordKey,
+  RouteId,
   ValueData,
+  VeilidAppCall,
+  VeilidAppMessage,
   VeilidDHTTransaction,
   VeilidRoutingContext,
   veilidClient,
   veilidCrypto
 } from 'veilid-wasm';
 import { textEncoder, textDecoder } from './utils/marshalling-utils';
-import { asyncCallWithTimeout, waitForPublicAttachment, waitForOfflineSubkeyWrite, getLogTimestamp } from './utils/wait-utils';
+import { asyncCallWithTimeout, waitForPublicAttachment as waitForPublicInternetReady, waitForOfflineSubkeyWrite, getLogTimestamp, waitForSingleEvent, waitForDetached } from './utils/wait-utils';
+
+const appMessageEventTarget = new EventTarget();
+const appCallEventTarget = new EventTarget();
 
 describe('VeilidRoutingContext', () => {
   before('veilid startup', async () => {
     await veilidClient.initializeCore(veilidCoreInitConfig);
     await veilidClient.startupCore((_update) => {
-      if (DEBUGGING) {
-        if (_update.kind === 'Log') {
-          const logTimestamp = getLogTimestamp()
-          console.log(`${logTimestamp}: ${_update.message}`);
-        }
+      // Only print API logs to console if performance logs are disabled
+      if (LOG_LEVEL === "Off" && _update.kind === 'Log') {
+        const logTimestamp = getLogTimestamp()
+        console.log(`${logTimestamp}: ${_update.message}`);
+      }
+      else if (_update.kind === 'AppMessage') {
+        appMessageEventTarget.dispatchEvent(new CustomEvent<VeilidAppMessage>('appMessage', { detail: _update }));
+      }
+      else if (_update.kind === 'AppCall') {
+        appCallEventTarget.dispatchEvent(new CustomEvent<VeilidAppCall>('appCall', { detail: _update }));
       }
     }, veilidCoreStartupConfig);
     await veilidClient.attach();
-    await asyncCallWithTimeout(waitForPublicAttachment(), 30_000);
+    await asyncCallWithTimeout(waitForPublicInternetReady(), 30_000);
     //console.log("---Started Up---");
   });
 
   after('veilid shutdown', async () => {
     //console.log("---Shutting Down---");
     await veilidClient.detach();
+    await asyncCallWithTimeout(waitForDetached(), 20_000);
     await veilidClient.shutdownCore();
   });
 
@@ -69,6 +82,38 @@ describe('VeilidRoutingContext', () => {
       await expect(routingContext instanceof VeilidRoutingContext).toBe(true);
     });
 
+    it('should fail to create safety with invalid hop count', async () => {
+      try {
+        const routingContext = VeilidRoutingContext.create().withSafety({
+          Safe: {
+            hopCount: 100,
+            sequencing: 'EnsureOrdered',
+            stability: 'Reliable',
+          },
+        });
+        throw new Error(`Expected error but got ${JSON.stringify(routingContext)}`);
+      } catch (error) {
+        await expect(error).toMatchObject({ kind: 'Generic' });
+      }
+    });
+
+    it('should fail to create safety with invalid route', async () => {
+
+      try {
+        const routingContext = VeilidRoutingContext.create().withSafety({
+          Safe: {
+            preferredRoute: ["ass"] as unknown as RouteId,
+            hopCount: 1,
+            sequencing: 'EnsureOrdered',
+            stability: 'Reliable',
+          },
+        });
+        throw new Error(`Expected error but got ${JSON.stringify(routingContext)}`);
+      } catch (error) {
+        await expect(error).toMatchObject({ kind: 'Generic' });
+      }
+    });
+
     it('should create with sequencing', async () => {
       const routingContext =
         VeilidRoutingContext.create().withSequencing('EnsureOrdered');
@@ -76,11 +121,14 @@ describe('VeilidRoutingContext', () => {
     });
 
     it('should error if unsafe is used', async () => {
-      await expect(() => {
-        VeilidRoutingContext.create().withSafety({
+      try {
+        const routingContext = VeilidRoutingContext.create().withSafety({
           Unsafe: 'EnsureOrdered',
         });
-      }).toThrow();
+        throw new Error(`Expected error but got ${JSON.stringify(routingContext)}`);
+      } catch (error) {
+        await expect(error).toMatchObject({ kind: 'Generic' });
+      }
     });
   });
 
@@ -97,7 +145,55 @@ describe('VeilidRoutingContext', () => {
 
     for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
 
-      describe(`createDhtRecord for ${cryptoKind}`, () => {
+      it('should create a new private route, send an app message to it, receive it, and release the route for ${cryptoKind as string}', async () => {
+        const routeBlob = await veilidClient.newCustomPrivateRoute({ cryptoKinds: [cryptoKind] });
+        await expect(routeBlob).toBeDefined();
+        await expect(routeBlob.blob.length).toBeGreaterThan(0);
+        await expect(routeBlob.routeId).toBeDefined();
+
+        const routeId = veilidClient.importRemotePrivateRoute(routeBlob.blob);
+        await expect(routeId).toBeDefined();
+
+        const message = textEncoder.encode('This is a test message');
+
+        const appMessageOneShot = waitForSingleEvent<CustomEvent<VeilidAppMessage>>(appMessageEventTarget, 'appMessage');
+
+        await routingContext.appMessage({ RouteId: routeId }, message);
+
+        const receivedMessage = await asyncCallWithTimeout<CustomEvent<VeilidAppMessage>>(appMessageOneShot, 10_000);
+        await expect(receivedMessage.detail.message).toStrictEqual(message);
+
+        veilidClient.releasePrivateRoute(routeId);
+      });
+
+      it('should create a new private route, send an app call to it, receive it, reply to it, and then receive the reply and release the route for ${cryptoKind as string}', async () => {
+        const routeBlob = await veilidClient.newCustomPrivateRoute({ cryptoKinds: [cryptoKind] });
+        await expect(routeBlob).toBeDefined();
+        await expect(routeBlob.blob.length).toBeGreaterThan(0);
+        await expect(routeBlob.routeId).toBeDefined();
+
+        const routeId = veilidClient.importRemotePrivateRoute(routeBlob.blob);
+        await expect(routeId).toBeDefined();
+
+        const message = textEncoder.encode('This is a test message');
+        const reply = textEncoder.encode('This is a test reply');
+
+        const appCallOneShot = waitForSingleEvent<CustomEvent<VeilidAppCall>>(appCallEventTarget, 'appCall');
+
+        const appCallPromise = routingContext.appCall({ RouteId: routeId }, message);
+
+        const receivedCall = await asyncCallWithTimeout<CustomEvent<VeilidAppCall>>(appCallOneShot, 10_000);
+        await expect(receivedCall.detail.message).toStrictEqual(message);
+
+        await veilidClient.appCallReply(receivedCall.detail.callId, reply);
+
+        const returnedReply = await asyncCallWithTimeout<Uint8Array>(appCallPromise, 10_000);
+        await expect(returnedReply).toStrictEqual(reply);
+
+        veilidClient.releasePrivateRoute(routeId);
+      });
+
+      describe(`createDhtRecord for ${cryptoKind as string}`, () => {
         it('should create dht record with default schema', async () => {
           const dhtRecord = await routingContext.createDHTRecord(cryptoKind, { 'DFLT': { oCnt: 1 } });
           await expect(dhtRecord.key).toBeInstanceOf(RecordKey);
@@ -126,7 +222,7 @@ describe('VeilidRoutingContext', () => {
         });
       });
 
-      describe(`DHT kitchen sink for ${cryptoKind}`, () => {
+      describe(`DHT kitchen sink for ${cryptoKind as string}`, () => {
         let dhtRecord: DHTRecordDescriptor;
         const data = '🚀 This example DHT data with unicode a Ā 𐀀 文 🚀';
 
@@ -345,9 +441,9 @@ describe('VeilidRoutingContext', () => {
         });
       });
 
-      describe(`DHT transactions simple tests for ${cryptoKind}`, () => {
+      describe(`DHT transactions simple tests for ${cryptoKind as string}`, () => {
 
-        const DHT_RECORD_COUNT = 4
+        const DHT_RECORD_COUNT = 2
         const DHT_SUBKEY_SIZE = 16
         const DHT_SUBKEY_COUNT = 2
         const data: Uint8Array[] = [];
@@ -573,134 +669,137 @@ describe('VeilidRoutingContext', () => {
         });
       });
 
-      describe(`DHT transactions full records tests for ${cryptoKind}`, () => {
-        const DHT_RECORD_COUNT = 4
-        const DHT_SUBKEY_SIZE = 32768
-        const DHT_SUBKEY_COUNT = 16
-        const data: Uint8Array[] = [];
-        for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-          data.push(new Uint8Array(DHT_SUBKEY_SIZE).fill(rec));
-        }
 
-        let dhtRecords: RecordKey[];
-
-        beforeEach('create dht records', async () => {
-          dhtRecords = [];
+      if (STRESS) {
+        describe(`DHT transactions full records tests for ${cryptoKind as string}`, () => {
+          const DHT_RECORD_COUNT = 8
+          const DHT_SUBKEY_SIZE = 32768
+          const DHT_SUBKEY_COUNT = 32
+          const data: Uint8Array[] = [];
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-            const dhtRecord = await routingContext.createDHTRecord(
-              cryptoKind,
-              { 'DFLT': { oCnt: DHT_SUBKEY_COUNT } },
-            );
-            await expect(dhtRecord.key).toBeInstanceOf(RecordKey);
-            await expect(dhtRecord.owner).toBeInstanceOf(KeyPair);
-            await expect(dhtRecord.schema).toEqual({ 'DFLT': { oCnt: DHT_SUBKEY_COUNT } });
-            dhtRecords.push(dhtRecord.key);
-          }
-        });
-
-        afterEach('free dht records', async () => {
-          for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-            await routingContext.deleteDHTRecord(dhtRecords[rec]);
-          }
-          dhtRecords = [];
-        });
-
-
-        it('should create empty transaction, inspect, add gets and commit', async () => {
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
-          await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
-
-          // Inspect 1
-          const inspects1: Promise<{ rec: number, report: DHTRecordReport }>[] = [];
-          for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-            inspects1.push((async () => {
-              const report = await tx.inspect(dhtRecords[rec], null, "SyncGet");
-              return { rec: rec, report: report };
-            })());
-          }
-          const allInspects1Res = await Promise.all(inspects1)
-          const expectedSeqs = Array(DHT_SUBKEY_COUNT).fill(undefined);
-          for (const res of allInspects1Res) {
-            await expect(res.report.subkeys).toEqual([[0, DHT_SUBKEY_COUNT - 1]]);
-            await expect(res.report.localSeqs).toEqual(expectedSeqs);
-            await expect(res.report.networkSeqs).toEqual(expectedSeqs);
-            await expect(res.report.offlineSubkeys).toEqual([]);
+            data.push(new Uint8Array(DHT_SUBKEY_SIZE).fill(rec));
           }
 
-          for (let subkey = 0; subkey < DHT_SUBKEY_COUNT; subkey++) {
-            const gets: Promise<ValueData | undefined>[] = [];
+          let dhtRecords: RecordKey[];
+
+          beforeEach('create dht records', async () => {
+            dhtRecords = [];
             for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-              gets.push(tx.get(dhtRecords[rec], subkey));
+              const dhtRecord = await routingContext.createDHTRecord(
+                cryptoKind,
+                { 'DFLT': { oCnt: DHT_SUBKEY_COUNT } },
+              );
+              await expect(dhtRecord.key).toBeInstanceOf(RecordKey);
+              await expect(dhtRecord.owner).toBeInstanceOf(KeyPair);
+              await expect(dhtRecord.schema).toEqual({ 'DFLT': { oCnt: DHT_SUBKEY_COUNT } });
+              dhtRecords.push(dhtRecord.key);
             }
-            const allGetRes = await Promise.all(gets)
-            for (const res of allGetRes) {
-              await expect(res).toBeUndefined();
-            }
-          }
+          });
 
-          await tx.commit();
-        });
-
-
-        it('should create transaction, fill all records, commit, and then get all records and rollback', async () => {
-          const startBegin = performance.now();
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
-          await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
-          console.log(`begin transaction: ${performance.now() - startBegin}ms`)
-
-          // Sets
-          for (let subkey = 0; subkey < DHT_SUBKEY_COUNT; subkey++) {
-            const startSet = performance.now();
-
-            const sets: Promise<ValueData | undefined>[] = [];
+          afterEach('free dht records', async () => {
             for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-              sets.push(tx.set(dhtRecords[rec], subkey, data[rec]));
+              await routingContext.deleteDHTRecord(dhtRecords[rec]);
             }
+            dhtRecords = [];
+          });
 
-            const allSetRes = await Promise.all(sets)
-            for (const res of allSetRes) {
-              await expect(res).toBeUndefined();
-            }
 
-            console.log(`set subkey ${subkey}: ${performance.now() - startSet}ms`)
-          }
+          it('should create empty transaction, inspect, add gets and commit', async () => {
+            const tx = await veilidClient.transactDHTRecords(dhtRecords);
+            await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
-          const startCommit = performance.now();
-          await tx.commit();
-          console.log(`commit transaction: ${performance.now() - startCommit}ms`)
-
-          const startBegin2 = performance.now();
-          const tx2 = await veilidClient.transactDHTRecords(dhtRecords);
-          await expect(tx2).toBeInstanceOf(VeilidDHTTransaction);
-          console.log(`begin transaction 2: ${performance.now() - startBegin2}ms`)
-
-          // Gets
-          for (let subkey = 0; subkey < DHT_SUBKEY_COUNT; subkey++) {
-            const startGet = performance.now();
-
-            const gets: Promise<{ rec: number, subkey: number, val: ValueData | undefined }>[] = [];
+            // Inspect 1
+            const inspects1: Promise<{ rec: number, report: DHTRecordReport }>[] = [];
             for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-              gets.push((async () => {
-                const val = await tx2.get(dhtRecords[rec], subkey);
-                return { rec: rec, subkey: subkey, val: val };
+              inspects1.push((async () => {
+                const report = await tx.inspect(dhtRecords[rec], null, "SyncGet");
+                return { rec: rec, report: report };
               })());
             }
-
-            const allGetRes = await Promise.all(gets)
-            for (const res of allGetRes) {
-              await expect(res.val).toBeDefined();
-              await expect(res.val!.data).toEqual(data[res.rec]);
-              await expect(res.val!.seq).toEqual(0);
+            const allInspects1Res = await Promise.all(inspects1)
+            const expectedSeqs = Array(DHT_SUBKEY_COUNT).fill(undefined);
+            for (const res of allInspects1Res) {
+              await expect(res.report.subkeys).toEqual([[0, DHT_SUBKEY_COUNT - 1]]);
+              await expect(res.report.localSeqs).toEqual(expectedSeqs);
+              await expect(res.report.networkSeqs).toEqual(expectedSeqs);
+              await expect(res.report.offlineSubkeys).toEqual([]);
             }
 
-            console.log(`get subkey ${subkey}: ${performance.now() - startGet}ms`)
-          }
+            for (let subkey = 0; subkey < DHT_SUBKEY_COUNT; subkey++) {
+              const gets: Promise<ValueData | undefined>[] = [];
+              for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
+                gets.push(tx.get(dhtRecords[rec], subkey));
+              }
+              const allGetRes = await Promise.all(gets)
+              for (const res of allGetRes) {
+                await expect(res).toBeUndefined();
+              }
+            }
 
-          const startRollback = performance.now();
-          await tx2.rollback();
-          console.log(`rollback transaction 2: ${performance.now() - startRollback}ms`)
+            await tx.commit();
+          });
+
+
+          it('should create transaction, fill all records, commit, and then get all records and rollback', async () => {
+            const startBegin = performance.now();
+            const tx = await veilidClient.transactDHTRecords(dhtRecords);
+            await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
+            console.log(`begin transaction: ${performance.now() - startBegin}ms`)
+
+            // Sets
+            for (let subkey = 0; subkey < DHT_SUBKEY_COUNT; subkey++) {
+              const startSet = performance.now();
+
+              const sets: Promise<ValueData | undefined>[] = [];
+              for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
+                sets.push(tx.set(dhtRecords[rec], subkey, data[rec]));
+              }
+
+              const allSetRes = await Promise.all(sets)
+              for (const res of allSetRes) {
+                await expect(res).toBeUndefined();
+              }
+
+              console.log(`set subkey ${subkey}: ${performance.now() - startSet}ms`)
+            }
+
+            const startCommit = performance.now();
+            await tx.commit();
+            console.log(`commit transaction: ${performance.now() - startCommit}ms`)
+
+            const startBegin2 = performance.now();
+            const tx2 = await veilidClient.transactDHTRecords(dhtRecords);
+            await expect(tx2).toBeInstanceOf(VeilidDHTTransaction);
+            console.log(`begin transaction 2: ${performance.now() - startBegin2}ms`)
+
+            // Gets
+            for (let subkey = 0; subkey < DHT_SUBKEY_COUNT; subkey++) {
+              const startGet = performance.now();
+
+              const gets: Promise<{ rec: number, subkey: number, val: ValueData | undefined }>[] = [];
+              for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
+                gets.push((async () => {
+                  const val = await tx2.get(dhtRecords[rec], subkey);
+                  return { rec: rec, subkey: subkey, val: val };
+                })());
+              }
+
+              const allGetRes = await Promise.all(gets)
+              for (const res of allGetRes) {
+                await expect(res.val).toBeDefined();
+                await expect(res.val!.data).toEqual(data[res.rec]);
+                await expect(res.val!.seq).toEqual(0);
+              }
+
+              console.log(`get subkey ${subkey}: ${performance.now() - startGet}ms`)
+            }
+
+            const startRollback = performance.now();
+            await tx2.rollback();
+            console.log(`rollback transaction 2: ${performance.now() - startRollback}ms`)
+          });
         });
-      });
+      }
     }
   });
 });

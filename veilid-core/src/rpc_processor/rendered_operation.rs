@@ -13,11 +13,13 @@ pub struct RenderedOperation {
     /// Optional relay dialinfo to send directly to
     pub opt_relay_di: Option<DialInfo>,
     /// The safety route used to send the message
-    pub safety_route: Option<PublicKey>,
+    pub opt_safety_route: Option<PublicKey>,
     /// The private route used to send the message
-    pub remote_private_route: Option<PublicKey>,
+    pub opt_remote_private_route: Option<PublicKey>,
     /// The private route requested to receive the reply
-    pub reply_private_route: Option<PublicKey>,
+    pub opt_reply_private_route: Option<PublicKey>,
+    /// The route lock guards to ensure the routes remain locked until the operation is processed
+    pub opt_locked_routes: Option<LockedRoutes>,
 }
 
 impl fmt::Debug for RenderedOperation {
@@ -27,9 +29,10 @@ impl fmt::Debug for RenderedOperation {
             .field("message(len)", &self.message.len())
             .field("node_ref", &self.node_ref)
             .field("opt_relay_di", &self.opt_relay_di)
-            .field("safety_route", &self.safety_route)
-            .field("remote_private_route", &self.remote_private_route)
-            .field("reply_private_route", &self.reply_private_route)
+            .field("opt_safety_route", &self.opt_safety_route)
+            .field("opt_remote_private_route", &self.opt_remote_private_route)
+            .field("opt_reply_private_route", &self.opt_reply_private_route)
+            .field("opt_locked_routes", &self.opt_locked_routes)
             .finish()
     }
 }

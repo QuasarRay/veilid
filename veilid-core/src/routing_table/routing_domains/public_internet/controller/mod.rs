@@ -141,7 +141,9 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
     /// Shut down the routing domain controller
     fn shutdown(&self) -> PinBoxFuture<'_, ()> {
         Box::pin(async move {
-            // Nothing to do
+            // Unpublish peer info
+            veilid_log!(self debug "PublicInternet: unpublishing peer info");
+            self.unpublish_peer_info();
         })
     }
 
@@ -161,11 +163,13 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         let state = self.state();
 
         let entry_summary = state.entry_summary;
+        let low_water_mark = state.low_water_mark;
         let is_ready_inbound = state.is_ready_inbound;
         let is_ready_outbound = state.is_ready_outbound;
 
         RoutingDomainHealth {
             entry_summary,
+            low_water_mark,
             is_ready_inbound,
             is_ready_outbound,
         }

@@ -104,12 +104,8 @@ impl RPCProcessor {
                 .await?
         );
 
-        // Keep the reply private route that was used to return with the answer
-        let reply_private_route = waitable_reply.context.reply_private_route.clone();
-
         // Wait for reply
-        let send_ts = waitable_reply.context.send_ts;
-        let (msg, latency) = match self.wait_for_reply(waitable_reply, debug_string).await? {
+        let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {
             TimeoutOr::Timeout => return Ok(NetworkResult::Timeout),
             TimeoutOr::Value(v) => v,
         };
@@ -148,7 +144,7 @@ impl RPCProcessor {
                     "".to_string()
                 },
                 dest,
-                latency,
+                answer_context.latency,
                 if let Some(seqs) = &opt_seqs {
                     format!(" seqs:{}", seqs.to_table_string())
                 } else {
@@ -164,15 +160,20 @@ impl RPCProcessor {
         let opt_expiration = if duration.is_zero() {
             None
         } else {
-            Some(send_ts.later(latency.div(2)).later(duration))
+            Some(
+                answer_context
+                    .waitable_reply_context
+                    .send_ts
+                    .later(answer_context.latency.div(2))
+                    .later(duration),
+            )
         };
 
         #[cfg(feature = "verbose-tracing")]
-        tracing::Span::current().record("ret.latency", latency.as_u64());
+        tracing::Span::current().record("ret.latency", answer_context.latency.as_u64());
 
         Ok(NetworkResult::value(Answer::new(
-            latency,
-            reply_private_route,
+            answer_context,
             TransactCommandAnswer {
                 transaction_valid,
                 opt_expiration,

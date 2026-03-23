@@ -9,14 +9,13 @@ export const veildCoreInitConfig: VeilidWASMConfig = {
         api: {
             enabled: true,
             level: 'Info',
-            ignoreLogTargets: [],
         },
         performance: {
             enabled: false,
             level: 'Info',
-            logsInTimings: false,
-            logsInConsole: "Off",
-            ignoreLogTargets: [],
+            logsInConsole: {
+                enabled: true,
+            },
         },
     },
 };

@@ -1067,16 +1067,11 @@ class VeilidJS extends Veilid {
       _wasmPromiseJson('new_private_route', RouteBlob.fromJson, []);
 
   @override
-  Future<RouteBlob> newCustomPrivateRoute(
-    Stability stability,
-    Sequencing sequencing,
-  ) {
-    final stabilityString = jsonEncode(stability);
-    final sequencingString = jsonEncode(sequencing);
+  Future<RouteBlob> newCustomPrivateRoute(PrivateSpec privateSpec) {
+    final privateSpecString = jsonEncode(privateSpec);
 
-    return _wasmPromiseJson('new_private_route', RouteBlob.fromJson, [
-      stabilityString.toJS,
-      sequencingString.toJS,
+    return _wasmPromiseJson('new_custom_private_route', RouteBlob.fromJson, [
+      privateSpecString.toJS,
     ]);
   }
 

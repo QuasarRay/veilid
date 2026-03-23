@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$VeilidFFIConfigLoggingTerminal implements DiagnosticableTreeMixin {
 
- bool get enabled; VeilidConfigLogLevel get level; List<String> get ignoreLogTargets;
+ bool get enabled; VeilidConfigLogLevel get level; List<String> get directives;@Deprecated('Use directives instead') List<String> get ignoreLogTargets;
 /// Create a copy of VeilidFFIConfigLoggingTerminal
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -29,21 +29,21 @@ $VeilidFFIConfigLoggingTerminalCopyWith<VeilidFFIConfigLoggingTerminal> get copy
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLoggingTerminal'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLoggingTerminal&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLoggingTerminal&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other.directives, directives)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(directives),const DeepCollectionEquality().hash(ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLoggingTerminal(enabled: $enabled, level: $level, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidFFIConfigLoggingTerminal(enabled: $enabled, level: $level, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -54,7 +54,7 @@ abstract mixin class $VeilidFFIConfigLoggingTerminalCopyWith<$Res>  {
   factory $VeilidFFIConfigLoggingTerminalCopyWith(VeilidFFIConfigLoggingTerminal value, $Res Function(VeilidFFIConfigLoggingTerminal) _then) = _$VeilidFFIConfigLoggingTerminalCopyWithImpl;
 @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
@@ -71,11 +71,12 @@ class _$VeilidFFIConfigLoggingTerminalCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLoggingTerminal
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? ignoreLogTargets = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_self.copyWith(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
-as VeilidConfigLogLevel,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as VeilidConfigLogLevel,directives: null == directives ? _self.directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
@@ -158,10 +159,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingTerminal() when $default != null:
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);case _:
   return orElse();
 
 }
@@ -179,10 +180,10 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingTerminal():
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);}
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -196,10 +197,10 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingTerminal() when $default != null:
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);case _:
   return null;
 
 }
@@ -211,13 +212,20 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
 @JsonSerializable()
 
 class _VeilidFFIConfigLoggingTerminal with DiagnosticableTreeMixin implements VeilidFFIConfigLoggingTerminal {
-  const _VeilidFFIConfigLoggingTerminal({required this.enabled, required this.level, final  List<String> ignoreLogTargets = const []}): _ignoreLogTargets = ignoreLogTargets;
+  const _VeilidFFIConfigLoggingTerminal({this.enabled = true, this.level = VeilidConfigLogLevel.info, final  List<String> directives = const [], @Deprecated('Use directives instead') final  List<String> ignoreLogTargets = const []}): _directives = directives,_ignoreLogTargets = ignoreLogTargets;
   factory _VeilidFFIConfigLoggingTerminal.fromJson(Map<String, dynamic> json) => _$VeilidFFIConfigLoggingTerminalFromJson(json);
 
-@override final  bool enabled;
-@override final  VeilidConfigLogLevel level;
+@override@JsonKey() final  bool enabled;
+@override@JsonKey() final  VeilidConfigLogLevel level;
+ final  List<String> _directives;
+@override@JsonKey() List<String> get directives {
+  if (_directives is EqualUnmodifiableListView) return _directives;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_directives);
+}
+
  final  List<String> _ignoreLogTargets;
-@override@JsonKey() List<String> get ignoreLogTargets {
+@override@JsonKey()@Deprecated('Use directives instead') List<String> get ignoreLogTargets {
   if (_ignoreLogTargets is EqualUnmodifiableListView) return _ignoreLogTargets;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_ignoreLogTargets);
@@ -238,21 +246,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLoggingTerminal'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLoggingTerminal&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLoggingTerminal&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other._directives, _directives)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(_ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(_directives),const DeepCollectionEquality().hash(_ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLoggingTerminal(enabled: $enabled, level: $level, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidFFIConfigLoggingTerminal(enabled: $enabled, level: $level, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -263,7 +271,7 @@ abstract mixin class _$VeilidFFIConfigLoggingTerminalCopyWith<$Res> implements $
   factory _$VeilidFFIConfigLoggingTerminalCopyWith(_VeilidFFIConfigLoggingTerminal value, $Res Function(_VeilidFFIConfigLoggingTerminal) _then) = __$VeilidFFIConfigLoggingTerminalCopyWithImpl;
 @override @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
@@ -280,11 +288,12 @@ class __$VeilidFFIConfigLoggingTerminalCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLoggingTerminal
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? ignoreLogTargets = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_VeilidFFIConfigLoggingTerminal(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
-as VeilidConfigLogLevel,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as VeilidConfigLogLevel,directives: null == directives ? _self._directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
@@ -296,7 +305,7 @@ as List<String>,
 /// @nodoc
 mixin _$VeilidFFIConfigLoggingOtlp implements DiagnosticableTreeMixin {
 
- bool get enabled; VeilidConfigLogLevel get level; String get grpcEndpoint; String get serviceName; List<String> get ignoreLogTargets;
+ bool get enabled; VeilidConfigLogLevel get level; String get grpcEndpoint; String get serviceName; List<String> get directives;@Deprecated('Use directives instead') List<String> get ignoreLogTargets;
 /// Create a copy of VeilidFFIConfigLoggingOtlp
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -310,21 +319,21 @@ $VeilidFFIConfigLoggingOtlpCopyWith<VeilidFFIConfigLoggingOtlp> get copyWith => 
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLoggingOtlp'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('grpcEndpoint', grpcEndpoint))..add(DiagnosticsProperty('serviceName', serviceName))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('grpcEndpoint', grpcEndpoint))..add(DiagnosticsProperty('serviceName', serviceName))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLoggingOtlp&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&(identical(other.grpcEndpoint, grpcEndpoint) || other.grpcEndpoint == grpcEndpoint)&&(identical(other.serviceName, serviceName) || other.serviceName == serviceName)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLoggingOtlp&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&(identical(other.grpcEndpoint, grpcEndpoint) || other.grpcEndpoint == grpcEndpoint)&&(identical(other.serviceName, serviceName) || other.serviceName == serviceName)&&const DeepCollectionEquality().equals(other.directives, directives)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,grpcEndpoint,serviceName,const DeepCollectionEquality().hash(ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,grpcEndpoint,serviceName,const DeepCollectionEquality().hash(directives),const DeepCollectionEquality().hash(ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLoggingOtlp(enabled: $enabled, level: $level, grpcEndpoint: $grpcEndpoint, serviceName: $serviceName, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidFFIConfigLoggingOtlp(enabled: $enabled, level: $level, grpcEndpoint: $grpcEndpoint, serviceName: $serviceName, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -335,7 +344,7 @@ abstract mixin class $VeilidFFIConfigLoggingOtlpCopyWith<$Res>  {
   factory $VeilidFFIConfigLoggingOtlpCopyWith(VeilidFFIConfigLoggingOtlp value, $Res Function(VeilidFFIConfigLoggingOtlp) _then) = _$VeilidFFIConfigLoggingOtlpCopyWithImpl;
 @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, String grpcEndpoint, String serviceName, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, String grpcEndpoint, String serviceName, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
@@ -352,13 +361,14 @@ class _$VeilidFFIConfigLoggingOtlpCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLoggingOtlp
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? grpcEndpoint = null,Object? serviceName = null,Object? ignoreLogTargets = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? grpcEndpoint = null,Object? serviceName = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_self.copyWith(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
 as VeilidConfigLogLevel,grpcEndpoint: null == grpcEndpoint ? _self.grpcEndpoint : grpcEndpoint // ignore: cast_nullable_to_non_nullable
 as String,serviceName: null == serviceName ? _self.serviceName : serviceName // ignore: cast_nullable_to_non_nullable
-as String,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as String,directives: null == directives ? _self.directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
@@ -441,10 +451,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  String grpcEndpoint,  String serviceName,  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  String grpcEndpoint,  String serviceName,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingOtlp() when $default != null:
-return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_that.directives,_that.ignoreLogTargets);case _:
   return orElse();
 
 }
@@ -462,10 +472,10 @@ return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  String grpcEndpoint,  String serviceName,  List<String> ignoreLogTargets)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  String grpcEndpoint,  String serviceName,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingOtlp():
-return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_that.ignoreLogTargets);}
+return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_that.directives,_that.ignoreLogTargets);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -479,10 +489,10 @@ return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  String grpcEndpoint,  String serviceName,  List<String> ignoreLogTargets)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  String grpcEndpoint,  String serviceName,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingOtlp() when $default != null:
-return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_that.directives,_that.ignoreLogTargets);case _:
   return null;
 
 }
@@ -494,15 +504,22 @@ return $default(_that.enabled,_that.level,_that.grpcEndpoint,_that.serviceName,_
 @JsonSerializable()
 
 class _VeilidFFIConfigLoggingOtlp with DiagnosticableTreeMixin implements VeilidFFIConfigLoggingOtlp {
-  const _VeilidFFIConfigLoggingOtlp({required this.enabled, required this.level, required this.grpcEndpoint, required this.serviceName, final  List<String> ignoreLogTargets = const []}): _ignoreLogTargets = ignoreLogTargets;
+  const _VeilidFFIConfigLoggingOtlp({this.enabled = true, this.level = VeilidConfigLogLevel.trace, required this.grpcEndpoint, required this.serviceName, final  List<String> directives = const [], @Deprecated('Use directives instead') final  List<String> ignoreLogTargets = const []}): _directives = directives,_ignoreLogTargets = ignoreLogTargets;
   factory _VeilidFFIConfigLoggingOtlp.fromJson(Map<String, dynamic> json) => _$VeilidFFIConfigLoggingOtlpFromJson(json);
 
-@override final  bool enabled;
-@override final  VeilidConfigLogLevel level;
+@override@JsonKey() final  bool enabled;
+@override@JsonKey() final  VeilidConfigLogLevel level;
 @override final  String grpcEndpoint;
 @override final  String serviceName;
+ final  List<String> _directives;
+@override@JsonKey() List<String> get directives {
+  if (_directives is EqualUnmodifiableListView) return _directives;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_directives);
+}
+
  final  List<String> _ignoreLogTargets;
-@override@JsonKey() List<String> get ignoreLogTargets {
+@override@JsonKey()@Deprecated('Use directives instead') List<String> get ignoreLogTargets {
   if (_ignoreLogTargets is EqualUnmodifiableListView) return _ignoreLogTargets;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_ignoreLogTargets);
@@ -523,21 +540,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLoggingOtlp'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('grpcEndpoint', grpcEndpoint))..add(DiagnosticsProperty('serviceName', serviceName))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('grpcEndpoint', grpcEndpoint))..add(DiagnosticsProperty('serviceName', serviceName))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLoggingOtlp&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&(identical(other.grpcEndpoint, grpcEndpoint) || other.grpcEndpoint == grpcEndpoint)&&(identical(other.serviceName, serviceName) || other.serviceName == serviceName)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLoggingOtlp&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&(identical(other.grpcEndpoint, grpcEndpoint) || other.grpcEndpoint == grpcEndpoint)&&(identical(other.serviceName, serviceName) || other.serviceName == serviceName)&&const DeepCollectionEquality().equals(other._directives, _directives)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,grpcEndpoint,serviceName,const DeepCollectionEquality().hash(_ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,grpcEndpoint,serviceName,const DeepCollectionEquality().hash(_directives),const DeepCollectionEquality().hash(_ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLoggingOtlp(enabled: $enabled, level: $level, grpcEndpoint: $grpcEndpoint, serviceName: $serviceName, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidFFIConfigLoggingOtlp(enabled: $enabled, level: $level, grpcEndpoint: $grpcEndpoint, serviceName: $serviceName, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -548,7 +565,7 @@ abstract mixin class _$VeilidFFIConfigLoggingOtlpCopyWith<$Res> implements $Veil
   factory _$VeilidFFIConfigLoggingOtlpCopyWith(_VeilidFFIConfigLoggingOtlp value, $Res Function(_VeilidFFIConfigLoggingOtlp) _then) = __$VeilidFFIConfigLoggingOtlpCopyWithImpl;
 @override @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, String grpcEndpoint, String serviceName, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, String grpcEndpoint, String serviceName, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
@@ -565,13 +582,14 @@ class __$VeilidFFIConfigLoggingOtlpCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLoggingOtlp
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? grpcEndpoint = null,Object? serviceName = null,Object? ignoreLogTargets = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? grpcEndpoint = null,Object? serviceName = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_VeilidFFIConfigLoggingOtlp(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
 as VeilidConfigLogLevel,grpcEndpoint: null == grpcEndpoint ? _self.grpcEndpoint : grpcEndpoint // ignore: cast_nullable_to_non_nullable
 as String,serviceName: null == serviceName ? _self.serviceName : serviceName // ignore: cast_nullable_to_non_nullable
-as String,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as String,directives: null == directives ? _self._directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
@@ -583,7 +601,7 @@ as List<String>,
 /// @nodoc
 mixin _$VeilidFFIConfigLoggingApi implements DiagnosticableTreeMixin {
 
- bool get enabled; VeilidConfigLogLevel get level; List<String> get ignoreLogTargets;
+ bool get enabled; VeilidConfigLogLevel get level; List<String> get directives;@Deprecated('Use directives instead') List<String> get ignoreLogTargets;
 /// Create a copy of VeilidFFIConfigLoggingApi
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -597,21 +615,21 @@ $VeilidFFIConfigLoggingApiCopyWith<VeilidFFIConfigLoggingApi> get copyWith => _$
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLoggingApi'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLoggingApi&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLoggingApi&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other.directives, directives)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(directives),const DeepCollectionEquality().hash(ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLoggingApi(enabled: $enabled, level: $level, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidFFIConfigLoggingApi(enabled: $enabled, level: $level, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -622,7 +640,7 @@ abstract mixin class $VeilidFFIConfigLoggingApiCopyWith<$Res>  {
   factory $VeilidFFIConfigLoggingApiCopyWith(VeilidFFIConfigLoggingApi value, $Res Function(VeilidFFIConfigLoggingApi) _then) = _$VeilidFFIConfigLoggingApiCopyWithImpl;
 @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
@@ -639,11 +657,12 @@ class _$VeilidFFIConfigLoggingApiCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLoggingApi
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? ignoreLogTargets = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_self.copyWith(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
-as VeilidConfigLogLevel,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as VeilidConfigLogLevel,directives: null == directives ? _self.directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
@@ -726,10 +745,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingApi() when $default != null:
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);case _:
   return orElse();
 
 }
@@ -747,10 +766,10 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingApi():
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);}
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -764,10 +783,10 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLoggingApi() when $default != null:
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);case _:
   return null;
 
 }
@@ -779,13 +798,20 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
 @JsonSerializable()
 
 class _VeilidFFIConfigLoggingApi with DiagnosticableTreeMixin implements VeilidFFIConfigLoggingApi {
-  const _VeilidFFIConfigLoggingApi({required this.enabled, required this.level, final  List<String> ignoreLogTargets = const []}): _ignoreLogTargets = ignoreLogTargets;
+  const _VeilidFFIConfigLoggingApi({this.enabled = true, this.level = VeilidConfigLogLevel.info, final  List<String> directives = const [], @Deprecated('Use directives instead') final  List<String> ignoreLogTargets = const []}): _directives = directives,_ignoreLogTargets = ignoreLogTargets;
   factory _VeilidFFIConfigLoggingApi.fromJson(Map<String, dynamic> json) => _$VeilidFFIConfigLoggingApiFromJson(json);
 
-@override final  bool enabled;
-@override final  VeilidConfigLogLevel level;
+@override@JsonKey() final  bool enabled;
+@override@JsonKey() final  VeilidConfigLogLevel level;
+ final  List<String> _directives;
+@override@JsonKey() List<String> get directives {
+  if (_directives is EqualUnmodifiableListView) return _directives;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_directives);
+}
+
  final  List<String> _ignoreLogTargets;
-@override@JsonKey() List<String> get ignoreLogTargets {
+@override@JsonKey()@Deprecated('Use directives instead') List<String> get ignoreLogTargets {
   if (_ignoreLogTargets is EqualUnmodifiableListView) return _ignoreLogTargets;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_ignoreLogTargets);
@@ -806,21 +832,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLoggingApi'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLoggingApi&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLoggingApi&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other._directives, _directives)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(_ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(_directives),const DeepCollectionEquality().hash(_ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLoggingApi(enabled: $enabled, level: $level, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidFFIConfigLoggingApi(enabled: $enabled, level: $level, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -831,7 +857,7 @@ abstract mixin class _$VeilidFFIConfigLoggingApiCopyWith<$Res> implements $Veili
   factory _$VeilidFFIConfigLoggingApiCopyWith(_VeilidFFIConfigLoggingApi value, $Res Function(_VeilidFFIConfigLoggingApi) _then) = __$VeilidFFIConfigLoggingApiCopyWithImpl;
 @override @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
@@ -848,11 +874,12 @@ class __$VeilidFFIConfigLoggingApiCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLoggingApi
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? ignoreLogTargets = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_VeilidFFIConfigLoggingApi(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
-as VeilidConfigLogLevel,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as VeilidConfigLogLevel,directives: null == directives ? _self._directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
@@ -1059,10 +1086,10 @@ return $default(_that.enabled,_that.path);case _:
 @JsonSerializable()
 
 class _VeilidFFIConfigLoggingFlame with DiagnosticableTreeMixin implements VeilidFFIConfigLoggingFlame {
-  const _VeilidFFIConfigLoggingFlame({required this.enabled, required this.path});
+  const _VeilidFFIConfigLoggingFlame({this.enabled = true, required this.path});
   factory _VeilidFFIConfigLoggingFlame.fromJson(Map<String, dynamic> json) => _$VeilidFFIConfigLoggingFlameFromJson(json);
 
-@override final  bool enabled;
+@override@JsonKey() final  bool enabled;
 @override final  String path;
 
 /// Create a copy of VeilidFFIConfigLoggingFlame
@@ -1136,7 +1163,7 @@ as String,
 /// @nodoc
 mixin _$VeilidFFIConfigLogging implements DiagnosticableTreeMixin {
 
- VeilidFFIConfigLoggingTerminal get terminal; VeilidFFIConfigLoggingOtlp get otlp; VeilidFFIConfigLoggingApi get api; VeilidFFIConfigLoggingFlame get flame;
+ VeilidFFIConfigLoggingTerminal get terminal; VeilidFFIConfigLoggingApi get api; VeilidFFIConfigLoggingOtlp get otlp; VeilidFFIConfigLoggingFlame get flame;
 /// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -1150,21 +1177,21 @@ $VeilidFFIConfigLoggingCopyWith<VeilidFFIConfigLogging> get copyWith => _$Veilid
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLogging'))
-    ..add(DiagnosticsProperty('terminal', terminal))..add(DiagnosticsProperty('otlp', otlp))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('flame', flame));
+    ..add(DiagnosticsProperty('terminal', terminal))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('otlp', otlp))..add(DiagnosticsProperty('flame', flame));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLogging&&(identical(other.terminal, terminal) || other.terminal == terminal)&&(identical(other.otlp, otlp) || other.otlp == otlp)&&(identical(other.api, api) || other.api == api)&&(identical(other.flame, flame) || other.flame == flame));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLogging&&(identical(other.terminal, terminal) || other.terminal == terminal)&&(identical(other.api, api) || other.api == api)&&(identical(other.otlp, otlp) || other.otlp == otlp)&&(identical(other.flame, flame) || other.flame == flame));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,terminal,otlp,api,flame);
+int get hashCode => Object.hash(runtimeType,terminal,api,otlp,flame);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLogging(terminal: $terminal, otlp: $otlp, api: $api, flame: $flame)';
+  return 'VeilidFFIConfigLogging(terminal: $terminal, api: $api, otlp: $otlp, flame: $flame)';
 }
 
 
@@ -1175,11 +1202,11 @@ abstract mixin class $VeilidFFIConfigLoggingCopyWith<$Res>  {
   factory $VeilidFFIConfigLoggingCopyWith(VeilidFFIConfigLogging value, $Res Function(VeilidFFIConfigLogging) _then) = _$VeilidFFIConfigLoggingCopyWithImpl;
 @useResult
 $Res call({
- VeilidFFIConfigLoggingTerminal terminal, VeilidFFIConfigLoggingOtlp otlp, VeilidFFIConfigLoggingApi api, VeilidFFIConfigLoggingFlame flame
+ VeilidFFIConfigLoggingTerminal terminal, VeilidFFIConfigLoggingApi api, VeilidFFIConfigLoggingOtlp otlp, VeilidFFIConfigLoggingFlame flame
 });
 
 
-$VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal;$VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp;$VeilidFFIConfigLoggingApiCopyWith<$Res> get api;$VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame;
+$VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal;$VeilidFFIConfigLoggingApiCopyWith<$Res> get api;$VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp;$VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame;
 
 }
 /// @nodoc
@@ -1192,12 +1219,12 @@ class _$VeilidFFIConfigLoggingCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? terminal = null,Object? otlp = null,Object? api = null,Object? flame = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? terminal = null,Object? api = null,Object? otlp = null,Object? flame = null,}) {
   return _then(_self.copyWith(
 terminal: null == terminal ? _self.terminal : terminal // ignore: cast_nullable_to_non_nullable
-as VeilidFFIConfigLoggingTerminal,otlp: null == otlp ? _self.otlp : otlp // ignore: cast_nullable_to_non_nullable
-as VeilidFFIConfigLoggingOtlp,api: null == api ? _self.api : api // ignore: cast_nullable_to_non_nullable
-as VeilidFFIConfigLoggingApi,flame: null == flame ? _self.flame : flame // ignore: cast_nullable_to_non_nullable
+as VeilidFFIConfigLoggingTerminal,api: null == api ? _self.api : api // ignore: cast_nullable_to_non_nullable
+as VeilidFFIConfigLoggingApi,otlp: null == otlp ? _self.otlp : otlp // ignore: cast_nullable_to_non_nullable
+as VeilidFFIConfigLoggingOtlp,flame: null == flame ? _self.flame : flame // ignore: cast_nullable_to_non_nullable
 as VeilidFFIConfigLoggingFlame,
   ));
 }
@@ -1214,19 +1241,19 @@ $VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal {
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp {
+$VeilidFFIConfigLoggingApiCopyWith<$Res> get api {
   
-  return $VeilidFFIConfigLoggingOtlpCopyWith<$Res>(_self.otlp, (value) {
-    return _then(_self.copyWith(otlp: value));
+  return $VeilidFFIConfigLoggingApiCopyWith<$Res>(_self.api, (value) {
+    return _then(_self.copyWith(api: value));
   });
 }/// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$VeilidFFIConfigLoggingApiCopyWith<$Res> get api {
+$VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp {
   
-  return $VeilidFFIConfigLoggingApiCopyWith<$Res>(_self.api, (value) {
-    return _then(_self.copyWith(api: value));
+  return $VeilidFFIConfigLoggingOtlpCopyWith<$Res>(_self.otlp, (value) {
+    return _then(_self.copyWith(otlp: value));
   });
 }/// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
@@ -1316,10 +1343,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingFlame flame)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLogging() when $default != null:
-return $default(_that.terminal,_that.otlp,_that.api,_that.flame);case _:
+return $default(_that.terminal,_that.api,_that.otlp,_that.flame);case _:
   return orElse();
 
 }
@@ -1337,10 +1364,10 @@ return $default(_that.terminal,_that.otlp,_that.api,_that.flame);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingFlame flame)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLogging():
-return $default(_that.terminal,_that.otlp,_that.api,_that.flame);}
+return $default(_that.terminal,_that.api,_that.otlp,_that.flame);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -1354,10 +1381,10 @@ return $default(_that.terminal,_that.otlp,_that.api,_that.flame);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingFlame flame)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLogging() when $default != null:
-return $default(_that.terminal,_that.otlp,_that.api,_that.flame);case _:
+return $default(_that.terminal,_that.api,_that.otlp,_that.flame);case _:
   return null;
 
 }
@@ -1369,13 +1396,13 @@ return $default(_that.terminal,_that.otlp,_that.api,_that.flame);case _:
 @JsonSerializable()
 
 class _VeilidFFIConfigLogging with DiagnosticableTreeMixin implements VeilidFFIConfigLogging {
-  const _VeilidFFIConfigLogging({required this.terminal, required this.otlp, required this.api, required this.flame});
+  const _VeilidFFIConfigLogging({this.terminal = const VeilidFFIConfigLoggingTerminal(enabled: false), this.api = const VeilidFFIConfigLoggingApi(enabled: false), this.otlp = const VeilidFFIConfigLoggingOtlp(enabled: false, grpcEndpoint: '', serviceName: ''), this.flame = const VeilidFFIConfigLoggingFlame(enabled: false, path: '')});
   factory _VeilidFFIConfigLogging.fromJson(Map<String, dynamic> json) => _$VeilidFFIConfigLoggingFromJson(json);
 
-@override final  VeilidFFIConfigLoggingTerminal terminal;
-@override final  VeilidFFIConfigLoggingOtlp otlp;
-@override final  VeilidFFIConfigLoggingApi api;
-@override final  VeilidFFIConfigLoggingFlame flame;
+@override@JsonKey() final  VeilidFFIConfigLoggingTerminal terminal;
+@override@JsonKey() final  VeilidFFIConfigLoggingApi api;
+@override@JsonKey() final  VeilidFFIConfigLoggingOtlp otlp;
+@override@JsonKey() final  VeilidFFIConfigLoggingFlame flame;
 
 /// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
@@ -1391,21 +1418,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLogging'))
-    ..add(DiagnosticsProperty('terminal', terminal))..add(DiagnosticsProperty('otlp', otlp))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('flame', flame));
+    ..add(DiagnosticsProperty('terminal', terminal))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('otlp', otlp))..add(DiagnosticsProperty('flame', flame));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLogging&&(identical(other.terminal, terminal) || other.terminal == terminal)&&(identical(other.otlp, otlp) || other.otlp == otlp)&&(identical(other.api, api) || other.api == api)&&(identical(other.flame, flame) || other.flame == flame));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLogging&&(identical(other.terminal, terminal) || other.terminal == terminal)&&(identical(other.api, api) || other.api == api)&&(identical(other.otlp, otlp) || other.otlp == otlp)&&(identical(other.flame, flame) || other.flame == flame));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,terminal,otlp,api,flame);
+int get hashCode => Object.hash(runtimeType,terminal,api,otlp,flame);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLogging(terminal: $terminal, otlp: $otlp, api: $api, flame: $flame)';
+  return 'VeilidFFIConfigLogging(terminal: $terminal, api: $api, otlp: $otlp, flame: $flame)';
 }
 
 
@@ -1416,11 +1443,11 @@ abstract mixin class _$VeilidFFIConfigLoggingCopyWith<$Res> implements $VeilidFF
   factory _$VeilidFFIConfigLoggingCopyWith(_VeilidFFIConfigLogging value, $Res Function(_VeilidFFIConfigLogging) _then) = __$VeilidFFIConfigLoggingCopyWithImpl;
 @override @useResult
 $Res call({
- VeilidFFIConfigLoggingTerminal terminal, VeilidFFIConfigLoggingOtlp otlp, VeilidFFIConfigLoggingApi api, VeilidFFIConfigLoggingFlame flame
+ VeilidFFIConfigLoggingTerminal terminal, VeilidFFIConfigLoggingApi api, VeilidFFIConfigLoggingOtlp otlp, VeilidFFIConfigLoggingFlame flame
 });
 
 
-@override $VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal;@override $VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp;@override $VeilidFFIConfigLoggingApiCopyWith<$Res> get api;@override $VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame;
+@override $VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal;@override $VeilidFFIConfigLoggingApiCopyWith<$Res> get api;@override $VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp;@override $VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame;
 
 }
 /// @nodoc
@@ -1433,12 +1460,12 @@ class __$VeilidFFIConfigLoggingCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? terminal = null,Object? otlp = null,Object? api = null,Object? flame = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? terminal = null,Object? api = null,Object? otlp = null,Object? flame = null,}) {
   return _then(_VeilidFFIConfigLogging(
 terminal: null == terminal ? _self.terminal : terminal // ignore: cast_nullable_to_non_nullable
-as VeilidFFIConfigLoggingTerminal,otlp: null == otlp ? _self.otlp : otlp // ignore: cast_nullable_to_non_nullable
-as VeilidFFIConfigLoggingOtlp,api: null == api ? _self.api : api // ignore: cast_nullable_to_non_nullable
-as VeilidFFIConfigLoggingApi,flame: null == flame ? _self.flame : flame // ignore: cast_nullable_to_non_nullable
+as VeilidFFIConfigLoggingTerminal,api: null == api ? _self.api : api // ignore: cast_nullable_to_non_nullable
+as VeilidFFIConfigLoggingApi,otlp: null == otlp ? _self.otlp : otlp // ignore: cast_nullable_to_non_nullable
+as VeilidFFIConfigLoggingOtlp,flame: null == flame ? _self.flame : flame // ignore: cast_nullable_to_non_nullable
 as VeilidFFIConfigLoggingFlame,
   ));
 }
@@ -1456,19 +1483,19 @@ $VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal {
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp {
+$VeilidFFIConfigLoggingApiCopyWith<$Res> get api {
   
-  return $VeilidFFIConfigLoggingOtlpCopyWith<$Res>(_self.otlp, (value) {
-    return _then(_self.copyWith(otlp: value));
+  return $VeilidFFIConfigLoggingApiCopyWith<$Res>(_self.api, (value) {
+    return _then(_self.copyWith(api: value));
   });
 }/// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$VeilidFFIConfigLoggingApiCopyWith<$Res> get api {
+$VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp {
   
-  return $VeilidFFIConfigLoggingApiCopyWith<$Res>(_self.api, (value) {
-    return _then(_self.copyWith(api: value));
+  return $VeilidFFIConfigLoggingOtlpCopyWith<$Res>(_self.otlp, (value) {
+    return _then(_self.copyWith(otlp: value));
   });
 }/// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
@@ -1771,9 +1798,287 @@ $VeilidFFIConfigLoggingCopyWith<$Res> get logging {
 
 
 /// @nodoc
+mixin _$VeilidWASMConfigLoggingPerformanceConsole implements DiagnosticableTreeMixin {
+
+ bool get enabled; bool get color; bool get timestamp; String? get originBaseUrl;
+/// Create a copy of VeilidWASMConfigLoggingPerformanceConsole
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidWASMConfigLoggingPerformanceConsoleCopyWith<VeilidWASMConfigLoggingPerformanceConsole> get copyWith => _$VeilidWASMConfigLoggingPerformanceConsoleCopyWithImpl<VeilidWASMConfigLoggingPerformanceConsole>(this as VeilidWASMConfigLoggingPerformanceConsole, _$identity);
+
+  /// Serializes this VeilidWASMConfigLoggingPerformanceConsole to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLoggingPerformanceConsole'))
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('color', color))..add(DiagnosticsProperty('timestamp', timestamp))..add(DiagnosticsProperty('originBaseUrl', originBaseUrl));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidWASMConfigLoggingPerformanceConsole&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.color, color) || other.color == color)&&(identical(other.timestamp, timestamp) || other.timestamp == timestamp)&&(identical(other.originBaseUrl, originBaseUrl) || other.originBaseUrl == originBaseUrl));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,enabled,color,timestamp,originBaseUrl);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidWASMConfigLoggingPerformanceConsole(enabled: $enabled, color: $color, timestamp: $timestamp, originBaseUrl: $originBaseUrl)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res>  {
+  factory $VeilidWASMConfigLoggingPerformanceConsoleCopyWith(VeilidWASMConfigLoggingPerformanceConsole value, $Res Function(VeilidWASMConfigLoggingPerformanceConsole) _then) = _$VeilidWASMConfigLoggingPerformanceConsoleCopyWithImpl;
+@useResult
+$Res call({
+ bool enabled, bool color, bool timestamp, String? originBaseUrl
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidWASMConfigLoggingPerformanceConsoleCopyWithImpl<$Res>
+    implements $VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res> {
+  _$VeilidWASMConfigLoggingPerformanceConsoleCopyWithImpl(this._self, this._then);
+
+  final VeilidWASMConfigLoggingPerformanceConsole _self;
+  final $Res Function(VeilidWASMConfigLoggingPerformanceConsole) _then;
+
+/// Create a copy of VeilidWASMConfigLoggingPerformanceConsole
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? color = null,Object? timestamp = null,Object? originBaseUrl = freezed,}) {
+  return _then(_self.copyWith(
+enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
+as bool,color: null == color ? _self.color : color // ignore: cast_nullable_to_non_nullable
+as bool,timestamp: null == timestamp ? _self.timestamp : timestamp // ignore: cast_nullable_to_non_nullable
+as bool,originBaseUrl: freezed == originBaseUrl ? _self.originBaseUrl : originBaseUrl // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidWASMConfigLoggingPerformanceConsole].
+extension VeilidWASMConfigLoggingPerformanceConsolePatterns on VeilidWASMConfigLoggingPerformanceConsole {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidWASMConfigLoggingPerformanceConsole value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingPerformanceConsole() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidWASMConfigLoggingPerformanceConsole value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingPerformanceConsole():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidWASMConfigLoggingPerformanceConsole value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingPerformanceConsole() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  bool color,  bool timestamp,  String? originBaseUrl)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingPerformanceConsole() when $default != null:
+return $default(_that.enabled,_that.color,_that.timestamp,_that.originBaseUrl);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  bool color,  bool timestamp,  String? originBaseUrl)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingPerformanceConsole():
+return $default(_that.enabled,_that.color,_that.timestamp,_that.originBaseUrl);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  bool color,  bool timestamp,  String? originBaseUrl)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingPerformanceConsole() when $default != null:
+return $default(_that.enabled,_that.color,_that.timestamp,_that.originBaseUrl);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidWASMConfigLoggingPerformanceConsole with DiagnosticableTreeMixin implements VeilidWASMConfigLoggingPerformanceConsole {
+  const _VeilidWASMConfigLoggingPerformanceConsole({this.enabled = true, this.color = true, this.timestamp = true, this.originBaseUrl});
+  factory _VeilidWASMConfigLoggingPerformanceConsole.fromJson(Map<String, dynamic> json) => _$VeilidWASMConfigLoggingPerformanceConsoleFromJson(json);
+
+@override@JsonKey() final  bool enabled;
+@override@JsonKey() final  bool color;
+@override@JsonKey() final  bool timestamp;
+@override final  String? originBaseUrl;
+
+/// Create a copy of VeilidWASMConfigLoggingPerformanceConsole
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidWASMConfigLoggingPerformanceConsoleCopyWith<_VeilidWASMConfigLoggingPerformanceConsole> get copyWith => __$VeilidWASMConfigLoggingPerformanceConsoleCopyWithImpl<_VeilidWASMConfigLoggingPerformanceConsole>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidWASMConfigLoggingPerformanceConsoleToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLoggingPerformanceConsole'))
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('color', color))..add(DiagnosticsProperty('timestamp', timestamp))..add(DiagnosticsProperty('originBaseUrl', originBaseUrl));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidWASMConfigLoggingPerformanceConsole&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.color, color) || other.color == color)&&(identical(other.timestamp, timestamp) || other.timestamp == timestamp)&&(identical(other.originBaseUrl, originBaseUrl) || other.originBaseUrl == originBaseUrl));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,enabled,color,timestamp,originBaseUrl);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidWASMConfigLoggingPerformanceConsole(enabled: $enabled, color: $color, timestamp: $timestamp, originBaseUrl: $originBaseUrl)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res> implements $VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res> {
+  factory _$VeilidWASMConfigLoggingPerformanceConsoleCopyWith(_VeilidWASMConfigLoggingPerformanceConsole value, $Res Function(_VeilidWASMConfigLoggingPerformanceConsole) _then) = __$VeilidWASMConfigLoggingPerformanceConsoleCopyWithImpl;
+@override @useResult
+$Res call({
+ bool enabled, bool color, bool timestamp, String? originBaseUrl
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidWASMConfigLoggingPerformanceConsoleCopyWithImpl<$Res>
+    implements _$VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res> {
+  __$VeilidWASMConfigLoggingPerformanceConsoleCopyWithImpl(this._self, this._then);
+
+  final _VeilidWASMConfigLoggingPerformanceConsole _self;
+  final $Res Function(_VeilidWASMConfigLoggingPerformanceConsole) _then;
+
+/// Create a copy of VeilidWASMConfigLoggingPerformanceConsole
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? color = null,Object? timestamp = null,Object? originBaseUrl = freezed,}) {
+  return _then(_VeilidWASMConfigLoggingPerformanceConsole(
+enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
+as bool,color: null == color ? _self.color : color // ignore: cast_nullable_to_non_nullable
+as bool,timestamp: null == timestamp ? _self.timestamp : timestamp // ignore: cast_nullable_to_non_nullable
+as bool,originBaseUrl: freezed == originBaseUrl ? _self.originBaseUrl : originBaseUrl // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
 mixin _$VeilidWASMConfigLoggingPerformance implements DiagnosticableTreeMixin {
 
- bool get enabled; VeilidConfigLogLevel get level; bool get logsInTimings; VeilidWASMConfigLoggingLogsInConsole get logsInConsole; List<String> get ignoreLogTargets;
+ bool get enabled; VeilidConfigLogLevel get level; bool get timings; VeilidWASMConfigLoggingPerformanceConsole get console; List<String> get directives;@Deprecated('Use directives instead') List<String> get ignoreLogTargets;
 /// Create a copy of VeilidWASMConfigLoggingPerformance
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -1787,21 +2092,21 @@ $VeilidWASMConfigLoggingPerformanceCopyWith<VeilidWASMConfigLoggingPerformance> 
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLoggingPerformance'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('logsInTimings', logsInTimings))..add(DiagnosticsProperty('logsInConsole', logsInConsole))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('timings', timings))..add(DiagnosticsProperty('console', console))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidWASMConfigLoggingPerformance&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&(identical(other.logsInTimings, logsInTimings) || other.logsInTimings == logsInTimings)&&(identical(other.logsInConsole, logsInConsole) || other.logsInConsole == logsInConsole)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidWASMConfigLoggingPerformance&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&(identical(other.timings, timings) || other.timings == timings)&&(identical(other.console, console) || other.console == console)&&const DeepCollectionEquality().equals(other.directives, directives)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,logsInTimings,logsInConsole,const DeepCollectionEquality().hash(ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,timings,console,const DeepCollectionEquality().hash(directives),const DeepCollectionEquality().hash(ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidWASMConfigLoggingPerformance(enabled: $enabled, level: $level, logsInTimings: $logsInTimings, logsInConsole: $logsInConsole, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidWASMConfigLoggingPerformance(enabled: $enabled, level: $level, timings: $timings, console: $console, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -1812,11 +2117,11 @@ abstract mixin class $VeilidWASMConfigLoggingPerformanceCopyWith<$Res>  {
   factory $VeilidWASMConfigLoggingPerformanceCopyWith(VeilidWASMConfigLoggingPerformance value, $Res Function(VeilidWASMConfigLoggingPerformance) _then) = _$VeilidWASMConfigLoggingPerformanceCopyWithImpl;
 @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, bool logsInTimings, VeilidWASMConfigLoggingLogsInConsole logsInConsole, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, bool timings, VeilidWASMConfigLoggingPerformanceConsole console, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
-
+$VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res> get console;
 
 }
 /// @nodoc
@@ -1829,17 +2134,27 @@ class _$VeilidWASMConfigLoggingPerformanceCopyWithImpl<$Res>
 
 /// Create a copy of VeilidWASMConfigLoggingPerformance
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? logsInTimings = null,Object? logsInConsole = null,Object? ignoreLogTargets = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? timings = null,Object? console = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_self.copyWith(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
-as VeilidConfigLogLevel,logsInTimings: null == logsInTimings ? _self.logsInTimings : logsInTimings // ignore: cast_nullable_to_non_nullable
-as bool,logsInConsole: null == logsInConsole ? _self.logsInConsole : logsInConsole // ignore: cast_nullable_to_non_nullable
-as VeilidWASMConfigLoggingLogsInConsole,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as VeilidConfigLogLevel,timings: null == timings ? _self.timings : timings // ignore: cast_nullable_to_non_nullable
+as bool,console: null == console ? _self.console : console // ignore: cast_nullable_to_non_nullable
+as VeilidWASMConfigLoggingPerformanceConsole,directives: null == directives ? _self.directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
-
+/// Create a copy of VeilidWASMConfigLoggingPerformance
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res> get console {
+  
+  return $VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res>(_self.console, (value) {
+    return _then(_self.copyWith(console: value));
+  });
+}
 }
 
 
@@ -1918,10 +2233,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  bool logsInTimings,  VeilidWASMConfigLoggingLogsInConsole logsInConsole,  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  bool timings,  VeilidWASMConfigLoggingPerformanceConsole console,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLoggingPerformance() when $default != null:
-return $default(_that.enabled,_that.level,_that.logsInTimings,_that.logsInConsole,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.timings,_that.console,_that.directives,_that.ignoreLogTargets);case _:
   return orElse();
 
 }
@@ -1939,10 +2254,10 @@ return $default(_that.enabled,_that.level,_that.logsInTimings,_that.logsInConsol
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  bool logsInTimings,  VeilidWASMConfigLoggingLogsInConsole logsInConsole,  List<String> ignoreLogTargets)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  bool timings,  VeilidWASMConfigLoggingPerformanceConsole console,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLoggingPerformance():
-return $default(_that.enabled,_that.level,_that.logsInTimings,_that.logsInConsole,_that.ignoreLogTargets);}
+return $default(_that.enabled,_that.level,_that.timings,_that.console,_that.directives,_that.ignoreLogTargets);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -1956,10 +2271,10 @@ return $default(_that.enabled,_that.level,_that.logsInTimings,_that.logsInConsol
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  bool logsInTimings,  VeilidWASMConfigLoggingLogsInConsole logsInConsole,  List<String> ignoreLogTargets)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  bool timings,  VeilidWASMConfigLoggingPerformanceConsole console,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLoggingPerformance() when $default != null:
-return $default(_that.enabled,_that.level,_that.logsInTimings,_that.logsInConsole,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.timings,_that.console,_that.directives,_that.ignoreLogTargets);case _:
   return null;
 
 }
@@ -1971,15 +2286,22 @@ return $default(_that.enabled,_that.level,_that.logsInTimings,_that.logsInConsol
 @JsonSerializable()
 
 class _VeilidWASMConfigLoggingPerformance with DiagnosticableTreeMixin implements VeilidWASMConfigLoggingPerformance {
-  const _VeilidWASMConfigLoggingPerformance({required this.enabled, required this.level, required this.logsInTimings, required this.logsInConsole, final  List<String> ignoreLogTargets = const []}): _ignoreLogTargets = ignoreLogTargets;
+  const _VeilidWASMConfigLoggingPerformance({this.enabled = true, this.level = VeilidConfigLogLevel.info, this.timings = false, this.console = const VeilidWASMConfigLoggingPerformanceConsole(enabled: true), final  List<String> directives = const [], @Deprecated('Use directives instead') final  List<String> ignoreLogTargets = const []}): _directives = directives,_ignoreLogTargets = ignoreLogTargets;
   factory _VeilidWASMConfigLoggingPerformance.fromJson(Map<String, dynamic> json) => _$VeilidWASMConfigLoggingPerformanceFromJson(json);
 
-@override final  bool enabled;
-@override final  VeilidConfigLogLevel level;
-@override final  bool logsInTimings;
-@override final  VeilidWASMConfigLoggingLogsInConsole logsInConsole;
+@override@JsonKey() final  bool enabled;
+@override@JsonKey() final  VeilidConfigLogLevel level;
+@override@JsonKey() final  bool timings;
+@override@JsonKey() final  VeilidWASMConfigLoggingPerformanceConsole console;
+ final  List<String> _directives;
+@override@JsonKey() List<String> get directives {
+  if (_directives is EqualUnmodifiableListView) return _directives;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_directives);
+}
+
  final  List<String> _ignoreLogTargets;
-@override@JsonKey() List<String> get ignoreLogTargets {
+@override@JsonKey()@Deprecated('Use directives instead') List<String> get ignoreLogTargets {
   if (_ignoreLogTargets is EqualUnmodifiableListView) return _ignoreLogTargets;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_ignoreLogTargets);
@@ -2000,21 +2322,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLoggingPerformance'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('logsInTimings', logsInTimings))..add(DiagnosticsProperty('logsInConsole', logsInConsole))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('timings', timings))..add(DiagnosticsProperty('console', console))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidWASMConfigLoggingPerformance&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&(identical(other.logsInTimings, logsInTimings) || other.logsInTimings == logsInTimings)&&(identical(other.logsInConsole, logsInConsole) || other.logsInConsole == logsInConsole)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidWASMConfigLoggingPerformance&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&(identical(other.timings, timings) || other.timings == timings)&&(identical(other.console, console) || other.console == console)&&const DeepCollectionEquality().equals(other._directives, _directives)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,logsInTimings,logsInConsole,const DeepCollectionEquality().hash(_ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,timings,console,const DeepCollectionEquality().hash(_directives),const DeepCollectionEquality().hash(_ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidWASMConfigLoggingPerformance(enabled: $enabled, level: $level, logsInTimings: $logsInTimings, logsInConsole: $logsInConsole, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidWASMConfigLoggingPerformance(enabled: $enabled, level: $level, timings: $timings, console: $console, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -2025,11 +2347,11 @@ abstract mixin class _$VeilidWASMConfigLoggingPerformanceCopyWith<$Res> implemen
   factory _$VeilidWASMConfigLoggingPerformanceCopyWith(_VeilidWASMConfigLoggingPerformance value, $Res Function(_VeilidWASMConfigLoggingPerformance) _then) = __$VeilidWASMConfigLoggingPerformanceCopyWithImpl;
 @override @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, bool logsInTimings, VeilidWASMConfigLoggingLogsInConsole logsInConsole, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, bool timings, VeilidWASMConfigLoggingPerformanceConsole console, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
-
+@override $VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res> get console;
 
 }
 /// @nodoc
@@ -2042,25 +2364,35 @@ class __$VeilidWASMConfigLoggingPerformanceCopyWithImpl<$Res>
 
 /// Create a copy of VeilidWASMConfigLoggingPerformance
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? logsInTimings = null,Object? logsInConsole = null,Object? ignoreLogTargets = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? timings = null,Object? console = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_VeilidWASMConfigLoggingPerformance(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
-as VeilidConfigLogLevel,logsInTimings: null == logsInTimings ? _self.logsInTimings : logsInTimings // ignore: cast_nullable_to_non_nullable
-as bool,logsInConsole: null == logsInConsole ? _self.logsInConsole : logsInConsole // ignore: cast_nullable_to_non_nullable
-as VeilidWASMConfigLoggingLogsInConsole,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as VeilidConfigLogLevel,timings: null == timings ? _self.timings : timings // ignore: cast_nullable_to_non_nullable
+as bool,console: null == console ? _self.console : console // ignore: cast_nullable_to_non_nullable
+as VeilidWASMConfigLoggingPerformanceConsole,directives: null == directives ? _self._directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
 
-
+/// Create a copy of VeilidWASMConfigLoggingPerformance
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res> get console {
+  
+  return $VeilidWASMConfigLoggingPerformanceConsoleCopyWith<$Res>(_self.console, (value) {
+    return _then(_self.copyWith(console: value));
+  });
+}
 }
 
 
 /// @nodoc
 mixin _$VeilidWASMConfigLoggingApi implements DiagnosticableTreeMixin {
 
- bool get enabled; VeilidConfigLogLevel get level; List<String> get ignoreLogTargets;
+ bool get enabled; VeilidConfigLogLevel get level; List<String> get directives;@Deprecated('Use directives instead') List<String> get ignoreLogTargets;
 /// Create a copy of VeilidWASMConfigLoggingApi
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -2074,21 +2406,21 @@ $VeilidWASMConfigLoggingApiCopyWith<VeilidWASMConfigLoggingApi> get copyWith => 
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLoggingApi'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidWASMConfigLoggingApi&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidWASMConfigLoggingApi&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other.directives, directives)&&const DeepCollectionEquality().equals(other.ignoreLogTargets, ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(directives),const DeepCollectionEquality().hash(ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidWASMConfigLoggingApi(enabled: $enabled, level: $level, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidWASMConfigLoggingApi(enabled: $enabled, level: $level, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -2099,7 +2431,7 @@ abstract mixin class $VeilidWASMConfigLoggingApiCopyWith<$Res>  {
   factory $VeilidWASMConfigLoggingApiCopyWith(VeilidWASMConfigLoggingApi value, $Res Function(VeilidWASMConfigLoggingApi) _then) = _$VeilidWASMConfigLoggingApiCopyWithImpl;
 @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
@@ -2116,11 +2448,12 @@ class _$VeilidWASMConfigLoggingApiCopyWithImpl<$Res>
 
 /// Create a copy of VeilidWASMConfigLoggingApi
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? ignoreLogTargets = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? level = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_self.copyWith(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
-as VeilidConfigLogLevel,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as VeilidConfigLogLevel,directives: null == directives ? _self.directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self.ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
@@ -2203,10 +2536,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLoggingApi() when $default != null:
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);case _:
   return orElse();
 
 }
@@ -2224,10 +2557,10 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLoggingApi():
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);}
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -2241,10 +2574,10 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  List<String> ignoreLogTargets)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  VeilidConfigLogLevel level,  List<String> directives, @Deprecated('Use directives instead')  List<String> ignoreLogTargets)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLoggingApi() when $default != null:
-return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
+return $default(_that.enabled,_that.level,_that.directives,_that.ignoreLogTargets);case _:
   return null;
 
 }
@@ -2256,13 +2589,20 @@ return $default(_that.enabled,_that.level,_that.ignoreLogTargets);case _:
 @JsonSerializable()
 
 class _VeilidWASMConfigLoggingApi with DiagnosticableTreeMixin implements VeilidWASMConfigLoggingApi {
-  const _VeilidWASMConfigLoggingApi({required this.enabled, required this.level, final  List<String> ignoreLogTargets = const []}): _ignoreLogTargets = ignoreLogTargets;
+  const _VeilidWASMConfigLoggingApi({this.enabled = true, this.level = VeilidConfigLogLevel.info, final  List<String> directives = const [], @Deprecated('Use directives instead') final  List<String> ignoreLogTargets = const []}): _directives = directives,_ignoreLogTargets = ignoreLogTargets;
   factory _VeilidWASMConfigLoggingApi.fromJson(Map<String, dynamic> json) => _$VeilidWASMConfigLoggingApiFromJson(json);
 
-@override final  bool enabled;
-@override final  VeilidConfigLogLevel level;
+@override@JsonKey() final  bool enabled;
+@override@JsonKey() final  VeilidConfigLogLevel level;
+ final  List<String> _directives;
+@override@JsonKey() List<String> get directives {
+  if (_directives is EqualUnmodifiableListView) return _directives;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_directives);
+}
+
  final  List<String> _ignoreLogTargets;
-@override@JsonKey() List<String> get ignoreLogTargets {
+@override@JsonKey()@Deprecated('Use directives instead') List<String> get ignoreLogTargets {
   if (_ignoreLogTargets is EqualUnmodifiableListView) return _ignoreLogTargets;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_ignoreLogTargets);
@@ -2283,21 +2623,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLoggingApi'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('level', level))..add(DiagnosticsProperty('directives', directives))..add(DiagnosticsProperty('ignoreLogTargets', ignoreLogTargets));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidWASMConfigLoggingApi&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidWASMConfigLoggingApi&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.level, level) || other.level == level)&&const DeepCollectionEquality().equals(other._directives, _directives)&&const DeepCollectionEquality().equals(other._ignoreLogTargets, _ignoreLogTargets));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(_ignoreLogTargets));
+int get hashCode => Object.hash(runtimeType,enabled,level,const DeepCollectionEquality().hash(_directives),const DeepCollectionEquality().hash(_ignoreLogTargets));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidWASMConfigLoggingApi(enabled: $enabled, level: $level, ignoreLogTargets: $ignoreLogTargets)';
+  return 'VeilidWASMConfigLoggingApi(enabled: $enabled, level: $level, directives: $directives, ignoreLogTargets: $ignoreLogTargets)';
 }
 
 
@@ -2308,7 +2648,7 @@ abstract mixin class _$VeilidWASMConfigLoggingApiCopyWith<$Res> implements $Veil
   factory _$VeilidWASMConfigLoggingApiCopyWith(_VeilidWASMConfigLoggingApi value, $Res Function(_VeilidWASMConfigLoggingApi) _then) = __$VeilidWASMConfigLoggingApiCopyWithImpl;
 @override @useResult
 $Res call({
- bool enabled, VeilidConfigLogLevel level, List<String> ignoreLogTargets
+ bool enabled, VeilidConfigLogLevel level, List<String> directives,@Deprecated('Use directives instead') List<String> ignoreLogTargets
 });
 
 
@@ -2325,11 +2665,12 @@ class __$VeilidWASMConfigLoggingApiCopyWithImpl<$Res>
 
 /// Create a copy of VeilidWASMConfigLoggingApi
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? ignoreLogTargets = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? level = null,Object? directives = null,Object? ignoreLogTargets = null,}) {
   return _then(_VeilidWASMConfigLoggingApi(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
 as bool,level: null == level ? _self.level : level // ignore: cast_nullable_to_non_nullable
-as VeilidConfigLogLevel,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
+as VeilidConfigLogLevel,directives: null == directives ? _self._directives : directives // ignore: cast_nullable_to_non_nullable
+as List<String>,ignoreLogTargets: null == ignoreLogTargets ? _self._ignoreLogTargets : ignoreLogTargets // ignore: cast_nullable_to_non_nullable
 as List<String>,
   ));
 }
@@ -2554,11 +2895,11 @@ return $default(_that.performance,_that.api);case _:
 @JsonSerializable()
 
 class _VeilidWASMConfigLogging with DiagnosticableTreeMixin implements VeilidWASMConfigLogging {
-  const _VeilidWASMConfigLogging({required this.performance, required this.api});
+  const _VeilidWASMConfigLogging({this.performance = const VeilidWASMConfigLoggingPerformance(enabled: false), this.api = const VeilidWASMConfigLoggingApi(enabled: false)});
   factory _VeilidWASMConfigLogging.fromJson(Map<String, dynamic> json) => _$VeilidWASMConfigLoggingFromJson(json);
 
-@override final  VeilidWASMConfigLoggingPerformance performance;
-@override final  VeilidWASMConfigLoggingApi api;
+@override@JsonKey() final  VeilidWASMConfigLoggingPerformance performance;
+@override@JsonKey() final  VeilidWASMConfigLoggingApi api;
 
 /// Create a copy of VeilidWASMConfigLogging
 /// with the given fields replaced by the non-null parameter values.
@@ -2852,10 +3193,10 @@ return $default(_that.logging);case _:
 @JsonSerializable()
 
 class _VeilidWASMConfig with DiagnosticableTreeMixin implements VeilidWASMConfig {
-  const _VeilidWASMConfig({required this.logging});
+  const _VeilidWASMConfig({this.logging = const VeilidWASMConfigLogging()});
   factory _VeilidWASMConfig.fromJson(Map<String, dynamic> json) => _$VeilidWASMConfigFromJson(json);
 
-@override final  VeilidWASMConfigLogging logging;
+@override@JsonKey() final  VeilidWASMConfigLogging logging;
 
 /// Create a copy of VeilidWASMConfig
 /// with the given fields replaced by the non-null parameter values.

@@ -2,7 +2,7 @@ use super::*;
 
 /// What remote private routes have seen
 #[derive(Debug, Default)]
-pub struct RemotePrivateRouteInfo {
+pub struct RemoteRouteCacheEntry {
     /// The private routes themselves
     private_routes: Vec<Arc<PrivateRoute>>,
     /// Did this remote private route see our node info due to no safety route in use
@@ -13,7 +13,7 @@ pub struct RemotePrivateRouteInfo {
     stats: RwLock<RouteStats>,
 }
 
-impl fmt::Display for RemotePrivateRouteInfo {
+impl fmt::Display for RemoteRouteCacheEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (latency_stats, transfer_stats) = self.with_stats(|s| {
             (
@@ -28,9 +28,9 @@ impl fmt::Display for RemotePrivateRouteInfo {
         )
     }
 }
-impl RemotePrivateRouteInfo {
+impl RemoteRouteCacheEntry {
     pub fn new(private_routes: Vec<Arc<PrivateRoute>>, cur_ts: Timestamp) -> Self {
-        RemotePrivateRouteInfo {
+        RemoteRouteCacheEntry {
             private_routes,
             last_seen_our_node_info_ts: AtomicOptionTimestamp::none(),
             last_touched_ts: AtomicTimestamp::new(cur_ts),
@@ -61,12 +61,14 @@ impl RemotePrivateRouteInfo {
         let stats = self.stats.read();
         f(&stats)
     }
-    pub fn with_stats_mut<F, R>(&self, f: F) -> R
+
+    pub(super) fn with_stats_mut<F>(&self, f: F) -> VeilidAPIResult<RouteStatsDisposition>
     where
-        F: FnOnce(&mut RouteStats) -> R,
+        F: FnOnce(&mut RouteStats) -> VeilidAPIResult<()>,
     {
         let mut stats = self.stats.write();
-        f(&mut stats)
+        f(&mut stats)?;
+        Ok(stats.disposition())
     }
 
     pub fn has_seen_our_node_info_ts(&self, our_node_info_ts: Timestamp) -> bool {

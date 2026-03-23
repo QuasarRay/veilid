@@ -33,6 +33,7 @@ from .types import (
     PublicKey,
     RouteId,
     SafetySelection,
+    PrivateSpec,
     SecretKey,
     Sequencing,
     SetDHTValueOptions,
@@ -381,21 +382,15 @@ class _JsonVeilidAPI(VeilidAPI):
         )
 
     async def new_custom_private_route(
-        self, kinds: list[CryptoKind], stability: Stability, sequencing: Sequencing
+        self, private_spec: PrivateSpec,
     ) -> RouteBlob:
-        assert isinstance(kinds, list)
-        for k in kinds:
-            assert isinstance(k, CryptoKind)
-        assert isinstance(stability, Stability)
-        assert isinstance(sequencing, Sequencing)
+        assert isinstance(private_spec, PrivateSpec)
 
         return RouteBlob.from_json(
             raise_api_result(
                 await self.send_ndjson_request(
                     Operation.NEW_CUSTOM_PRIVATE_ROUTE,
-                    kinds=kinds,
-                    stability=stability,
-                    sequencing=sequencing,
+                    private_spec=private_spec,
                 )
             )
         )

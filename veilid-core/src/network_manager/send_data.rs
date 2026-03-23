@@ -351,11 +351,11 @@ impl NetworkManager {
         let seq_target_node_ref = if seq_dif.is_ordered_only() {
             target_node_ref
                 .unfiltered()
-                .default_filtered_with_sequencing(Sequencing::EnsureOrdered)
+                .sequencing_filtered(Sequencing::EnsureOrdered)
         } else {
             target_node_ref
                 .unfiltered()
-                .default_filtered_with_sequencing(Sequencing::NoPreference)
+                .sequencing_filtered(Sequencing::NoPreference)
         };
 
         // First try to send data to the last flow we've seen this peer on
@@ -441,11 +441,11 @@ impl NetworkManager {
         let seq_target_node_ref = if seq_dif.is_ordered_only() {
             target_node_ref
                 .unfiltered()
-                .default_filtered_with_sequencing(Sequencing::EnsureOrdered)
+                .sequencing_filtered(Sequencing::EnsureOrdered)
         } else {
             target_node_ref
                 .unfiltered()
-                .default_filtered_with_sequencing(Sequencing::NoPreference)
+                .sequencing_filtered(Sequencing::NoPreference)
         };
 
         // First try to send data to the last flow we've seen this peer on

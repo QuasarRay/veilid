@@ -1,4 +1,3 @@
-mod locked_safety_routes;
 mod node_transaction;
 mod node_transaction_id;
 mod outbound_transaction_record_state;
@@ -18,7 +17,6 @@ use super::*;
 
 use serde_with::serde_as;
 
-pub(in crate::storage_manager) use locked_safety_routes::*;
 pub(in crate::storage_manager) use node_transaction::*;
 pub(in crate::storage_manager) use node_transaction_id::*;
 pub(in crate::storage_manager) use outbound_transaction_record_state::*;
@@ -253,6 +251,9 @@ impl OutboundTransactionManager {
 
             // Get transaction
             let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+
+            // Add locked routes to transaction state
+            outbound_transaction_state.add_locked_routes(result.locked_routes);
 
             // Get record state
             let Some(record_state) =

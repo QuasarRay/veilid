@@ -3342,9 +3342,10 @@
       "type": "object",
       "properties": {
         "hop_count": {
-          "description": "Must be greater than 0.",
+          "description": "If zero this will be set to to the default route hop count",
           "type": "integer",
           "format": "uint",
+          "default": 0,
           "minimum": 0
         },
         "preferred_route": {
@@ -3352,22 +3353,20 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "default": null
         },
         "sequencing": {
           "description": "Prefer connection-oriented sequenced protocols.",
-          "$ref": "#/$defs/Sequencing"
+          "$ref": "#/$defs/Sequencing",
+          "default": "PreferOrdered"
         },
         "stability": {
           "description": "Prefer reliability over speed.",
-          "$ref": "#/$defs/Stability"
+          "$ref": "#/$defs/Stability",
+          "default": "Reliable"
         }
-      },
-      "required": [
-        "hop_count",
-        "stability",
-        "sequencing"
-      ]
+      }
     },
     "Sequencing": {
       "type": "string",

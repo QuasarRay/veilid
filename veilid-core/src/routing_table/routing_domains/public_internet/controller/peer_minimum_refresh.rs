@@ -146,7 +146,7 @@ impl PublicInternetRoutingDomainController {
         while let Ok(Some(_)) = ord.next().timeout_at(stop_token.clone()).await {}
 
         // Reset the low water mark for this routing domain
-        routing_table.reset_low_water_mark(RoutingDomain::PublicInternet);
+        routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
 
         // Log what we found
         for (crypto_kind, nodes_found) in nodes_found_per_crypto_kind.lock().iter() {

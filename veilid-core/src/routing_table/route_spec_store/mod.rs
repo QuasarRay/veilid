@@ -1,10 +1,12 @@
 use super::*;
 use crate::veilid_api::*;
 
-mod remote_private_route_info;
+mod allocated_route_cache_entry;
+mod remote_route_cache_entry;
 mod route_allocate;
 mod route_assemble;
 mod route_compile;
+mod route_lock;
 mod route_remote;
 mod route_select;
 mod route_set_spec_detail;
@@ -14,7 +16,8 @@ mod route_stats;
 mod route_test;
 mod route_validate;
 
-use remote_private_route_info::*;
+use allocated_route_cache_entry::*;
+use remote_route_cache_entry::*;
 use route_compile::*;
 use route_set_spec_detail::*;
 use route_spec_store_cache::*;
@@ -22,41 +25,34 @@ use route_spec_store_content::*;
 
 pub(crate) use route_allocate::AllocateRouteParams;
 pub(crate) use route_compile::{CompileRouteParams, CompiledRoute};
-pub(crate) use route_select::{RouteIdAndPublicKeys, RouteSelectParams};
+pub(crate) use route_lock::LockedRoutes;
+pub(crate) use route_select::{RouteIdAndKeys, RouteSelectParams};
 pub use route_stats::*;
+pub(crate) use route_test::AllocatedRouteTestInfo;
 
 impl_veilid_log_facility!("rtab");
 
 /// The size of the remote private route cache
-const REMOTE_PRIVATE_ROUTE_CACHE_SIZE: usize = 1024;
+const REMOTE_ROUTE_CACHE_SIZE: usize = 1024;
 /// Remote private route cache entries expire in 5 minutes if they haven't been used
 const REMOTE_PRIVATE_ROUTE_CACHE_EXPIRY: TimestampDuration = TimestampDuration::new(300_000_000u64);
 /// Amount of time a route can remain idle before it gets tested
 const ROUTE_MIN_IDLE_TIME_MS: u32 = 30_000;
-/// The size of the compiled route cache
-const COMPILED_ROUTE_CACHE_SIZE: usize = 1024;
 /// Number of unique failing destinations before invalidating compiled route cache for a route
-const ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD: u32 = 5;
+const ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD: usize = 5;
 /// Number of consecutive send failures before invalidating compiled route cache for a safety route
-const ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD: u32 = 1;
-
-#[derive(Debug)]
-struct RouteSpecStoreInner {
-    /// Serialize RouteSpecStore content
-    content: RouteSpecStoreContent,
-    /// RouteSpecStore cache
-    cache: RouteSpecStoreCache,
-}
+const ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD: usize = 1;
 
 /// The routing table's storage for private/safety routes
+/// Lock order is always content before cache
 #[derive(Debug)]
 #[must_use]
 pub(crate) struct RouteSpecStore {
     registry: VeilidComponentRegistry,
-    /// RouteSpecStore locked inner
-    inner: RwLock<RouteSpecStoreInner>,
-    /// Compiled route cache
-    compiled_route_cache: Mutex<LruCache<CompiledRouteCacheKey, Arc<CompiledRoute>>>,
+    /// Allocated route content
+    content: RwLock<RouteSpecStoreContent>,
+    /// Allocated and compiled route caches, as well as imported remote routes (not persisted)
+    cache: RwLock<RouteSpecStoreCache>,
     /// Ensure we don't compile the same route more than once at a time
     compile_lock_table: AsyncTagLockTable<CompiledRouteCacheKey>,
     /// Ensure we don't try to select the first available route for more the same parameters than once at a time
@@ -84,11 +80,8 @@ impl RouteSpecStore {
 
         Self {
             registry: registry.clone(),
-            inner: RwLock::new(RouteSpecStoreInner {
-                content: RouteSpecStoreContent::default(),
-                cache: RouteSpecStoreCache::new(registry.clone()),
-            }),
-            compiled_route_cache: Mutex::new(LruCache::new(COMPILED_ROUTE_CACHE_SIZE)),
+            content: RwLock::new(RouteSpecStoreContent::new(registry.clone())),
+            cache: RwLock::new(RouteSpecStoreCache::new(registry.clone())),
             compile_lock_table: AsyncTagLockTable::new(),
             allocate_route_lock: AsyncMutex::new(()),
             max_route_hop_count,
@@ -115,10 +108,8 @@ impl RouteSpecStore {
         instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub fn reset(&self) {
-        *self.inner.write() = RouteSpecStoreInner {
-            content: RouteSpecStoreContent::default(),
-            cache: RouteSpecStoreCache::new(self.registry()),
-        };
+        self.content.write().reset();
+        *self.cache.write() = RouteSpecStoreCache::new(self.registry());
     }
 
     #[cfg_attr(
@@ -126,28 +117,33 @@ impl RouteSpecStore {
         instrument(level = "trace", target = "rtab::route", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub async fn load(&self) -> EyreResult<()> {
-        let inner = {
-            let table_store = self.table_store();
-            let routing_table = self.routing_table();
+        // Get frozen blob from table store
+        let mut content = RouteSpecStoreContent::load(self.registry()).await?;
+        let mut cache = RouteSpecStoreCache::new(self.registry());
 
-            // Get frozen blob from table store
-            let content = RouteSpecStoreContent::load(&table_store, &routing_table).await?;
-
-            let mut inner = RouteSpecStoreInner {
-                content,
-                cache: RouteSpecStoreCache::new(self.registry()),
+        // Rebuild the routespecstore cache from the persisted content
+        let routing_table = self.routing_table();
+        let mut dead_specs = Vec::new();
+        for (rsid, rssd) in content.iter_details() {
+            // Look up node refs
+            let Some(hop_node_refs) = rssd.lookup_node_refs(&routing_table) else {
+                dead_specs.push(rsid.clone());
+                continue;
             };
-
-            // Rebuild the routespecstore cache
-            for (_, rssd) in inner.content.iter_details() {
-                inner.cache.add_to_cache(rssd);
+            if let Err(e) = cache.add_allocated_route(rsid.clone(), rssd, hop_node_refs) {
+                veilid_log!(self error "Error adding allocated route: {}", e);
+                dead_specs.push(rsid.clone());
             }
+        }
 
-            inner
-        };
+        // Drop the dead route specs that we could not longer resolve node refs for
+        for rsid in dead_specs {
+            content.remove_detail(&rsid);
+        }
 
         // Return the loaded RouteSpecStore
-        *self.inner.write() = inner;
+        *self.content.write() = content;
+        *self.cache.write() = cache;
 
         Ok(())
     }
@@ -157,16 +153,11 @@ impl RouteSpecStore {
         instrument(level = "trace", target = "rtab::route", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub async fn save(&self) -> EyreResult<()> {
-        let content = {
-            let inner = self.inner.read();
-            inner.content.clone()
-        };
+        // Snapshot our content so save it since this is an async operation
+        let content = self.content.read().clone();
 
-        // Save our content
-        let table_store = self.table_store();
-        content.save(&table_store).await?;
-
-        Ok(())
+        // Save our content to the tablestore
+        content.save().await
     }
 
     #[cfg_attr(
@@ -175,8 +166,8 @@ impl RouteSpecStore {
     )]
     pub fn send_route_update(&self) {
         let (dead_routes, dead_remote_routes) = {
-            let mut inner = self.inner.write();
-            let Some(dr) = inner.cache.take_dead_routes() else {
+            let mut cache = self.cache.write();
+            let Some(dr) = cache.take_dead_routes() else {
                 // Nothing to do
                 return;
             };
@@ -199,11 +190,16 @@ impl RouteSpecStore {
 
         let _tick_guard = routing_table.pause_tasks().await;
         routing_table.cancel_tasks().await;
+
+        // Careful with locking order here, we need to lock the content before the cache
         {
-            let inner = &mut *self.inner.write();
-            inner.content = Default::default();
-            inner.cache = RouteSpecStoreCache::new(self.registry());
+            let mut content = self.content.write();
+            let mut cache = self.cache.write();
+
+            content.reset();
+            *cache = RouteSpecStoreCache::new(self.registry());
         }
+
         self.save().await.map_err(VeilidAPIError::internal)
     }
 
@@ -221,31 +217,21 @@ impl RouteSpecStore {
         }
     }
 
-    /// Get route test info for an allocated route: (best_key, hop_node_refs)
-    /// Returns None if the route doesn't exist or has no best key
-    pub fn get_route_test_info(&self, route_id: &RouteId) -> Option<(PublicKey, Vec<NodeRef>)> {
-        let inner = self.inner.read();
-        let rssd = inner.content.get_detail(route_id)?;
-        let key = rssd.get_best_route_set_key()?;
-        let hops = rssd.hop_node_refs();
-        Some((key, hops))
-    }
-
-    /// List all allocated routes
+    /// List all allocated routes with a filter. Filter must not access the route spec store due to locking.
     pub fn list_allocated_routes<F, R>(&self, mut filter: F) -> Vec<R>
     where
-        F: FnMut(&RouteId, &RouteSetSpecDetail) -> Option<R>,
+        F: FnMut(&RouteId, &AllocatedRouteCacheEntry) -> Option<R>,
     {
-        let inner = self.inner.read();
-        let mut out = Vec::with_capacity(inner.content.get_detail_count());
-        let mut details = inner.content.iter_details().collect::<Vec<_>>();
-        details.sort_by(|a, b| {
+        let cache = self.cache.read();
+        let mut out = Vec::with_capacity(cache.get_allocated_route_count());
+        let mut entries = cache.iter_allocated_routes().collect::<Vec<_>>();
+        entries.sort_by(|a, b| {
             let cmp_hop_count = a.1.hop_count().cmp(&b.1.hop_count());
             if cmp_hop_count != cmp::Ordering::Equal {
                 return cmp_hop_count;
             }
-            let avg_a = a.1.with_stats(|sa| sa.latency_stats().average);
-            let avg_b = b.1.with_stats(|sb| sb.latency_stats().average);
+            let avg_a = a.1.with_stats(|sa| sa.latency.average);
+            let avg_b = b.1.with_stats(|sb| sb.latency.average);
             let cmp_avg_latency = avg_a.cmp(&avg_b);
             if cmp_avg_latency != cmp::Ordering::Equal {
                 return cmp_avg_latency;
@@ -253,7 +239,7 @@ impl RouteSpecStore {
             a.0.cmp(b.0)
         });
 
-        for detail in details {
+        for detail in entries {
             if let Some(x) = filter(detail.0, detail.1) {
                 out.push(x);
             }
@@ -261,23 +247,18 @@ impl RouteSpecStore {
         out
     }
 
-    /// List all allocated routes
+    /// List all allocated routes with a filter. Filter must not access the route spec store due to locking.
     pub fn list_remote_routes<F, R>(&self, mut filter: F) -> Vec<R>
     where
-        F: FnMut(&RouteId, &RemotePrivateRouteInfo) -> Option<R>,
+        F: FnMut(&RouteId, &RemoteRouteCacheEntry) -> Option<R>,
     {
-        let inner = self.inner.read();
+        let cache = self.cache.read();
         let cur_ts = Timestamp::now();
-        let remote_route_ids = inner.cache.get_remote_private_route_ids(cur_ts);
+        let remote_route_ids = cache.get_remote_route_ids(cur_ts);
 
         let remote_routes = remote_route_ids
             .iter()
-            .filter_map(|id| {
-                inner
-                    .cache
-                    .peek_remote_private_route(cur_ts, id)
-                    .map(|x| (id, x))
-            })
+            .filter_map(|id| cache.peek_remote_route(cur_ts, id).map(|x| (id, x)))
             .collect::<Vec<_>>();
         let mut out = Vec::with_capacity(remote_routes.len());
 
@@ -289,29 +270,27 @@ impl RouteSpecStore {
         out
     }
 
-    /// Clear caches when our local node info changes
+    /// Invalidate caches when our local peer info changes
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "rtab::route", skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub fn reset_cache(&self) {
-        veilid_log!(self debug "resetting route cache");
+    pub fn report_peer_info_changed(&self) {
+        veilid_log!(self debug "route cache invalidated due to local node info change");
 
-        let inner = self.inner.read();
+        // Careful with locking order here, we need to lock the content before the cache
+        let cache = self.cache.read();
 
-        // Clean up allocated routes (does not delete allocated routes, set republication flag)
-        inner.content.reset_details();
-
-        // Reset private route cache (does not delete imported routes)
-        inner.cache.reset_remote_private_routes();
+        // Reset cache entries and require republication of routes
+        cache.report_peer_info_changed();
     }
 
     /// Mark route as published
     /// When first deserialized, routes must be re-published in order to ensure they remain
     /// in the RouteSpecStore.
     pub fn mark_route_published(&self, id: &RouteId, published: bool) -> VeilidAPIResult<()> {
-        let inner = self.inner.read();
-        let Some(rssd) = inner.content.get_detail(id) else {
+        let cache = self.cache.read();
+        let Some(rssd) = cache.get_allocated_route_by_id(id) else {
             apibail_invalid_target!("route does not exist");
         };
         rssd.set_published(published);
@@ -348,152 +327,106 @@ impl RouteSpecStore {
         Ok(buffer.freeze())
     }
 
-    /// Stores a compiled 'safety + private' route so we don't have to compile it again later
-    pub(super) fn add_to_compiled_route_cache(
-        &self,
-        key: CompiledRouteCacheKey,
-        compiled_route: Arc<CompiledRoute>,
-    ) -> VeilidAPIResult<()> {
-        let mut compiled_route_cache = self.compiled_route_cache.lock();
-
-        if let Some(existing_compiled_route) =
-            compiled_route_cache.insert(key, compiled_route.clone())
-        {
-            apibail_internal!("route cache should not contain duplicate entries: existing_compiled_route={:?}, compiled_route={:?}", existing_compiled_route, compiled_route);
-        }
-        Ok(())
-    }
-
-    /// Looks up an existing compiled route from the safety and private route components
-    pub(super) fn lookup_compiled_route_cache(
-        &self,
-        key: &CompiledRouteCacheKey,
-    ) -> Option<Arc<CompiledRoute>> {
-        let mut compiled_route_cache = self.compiled_route_cache.lock();
-        compiled_route_cache.get(key).cloned()
-    }
-
-    /// Removes a specific entry from the compiled route cache
-    pub(super) fn remove_from_compiled_route_cache(&self, key: &CompiledRouteCacheKey) {
-        let mut compiled_route_cache = self.compiled_route_cache.lock();
-        compiled_route_cache.remove(key);
-    }
-
-    /// When routes are dropped or have accumulated failures,
-    /// they should be removed from the compiled route cache
-    pub(crate) fn invalidate_compiled_route_cache(&self, dead_key: &PublicKey) {
-        let mut compiled_route_cache = self.compiled_route_cache.lock();
-        let compiled_route_cache = &mut *compiled_route_cache;
-        let mut dead_entries = Vec::new();
-        for (k, v) in compiled_route_cache.iter() {
-            if &v.safety_route.public_key == dead_key
-                || &k.pr_pubkey == dead_key
-                || k.opt_reply_pr_pubkey
-                    .as_ref()
-                    .map(|k| k == dead_key)
-                    .unwrap_or(false)
-            {
-                dead_entries.push(k.clone());
-            }
-        }
-        for d in dead_entries {
-            compiled_route_cache.remove(&d);
-        }
-    }
-
-    /// Get safety route public keys currently compiled for a given safety selection
-    pub fn get_safety_route_keys_for_selection(
-        &self,
-        safety_selection: &SafetySelection,
-    ) -> Vec<PublicKey> {
-        if matches!(safety_selection, SafetySelection::Unsafe(_)) {
-            return Vec::new();
-        }
-        let compiled_route_cache = self.compiled_route_cache.lock();
-        let mut keys = HashSet::new();
-        for (k, v) in compiled_route_cache.iter() {
-            if k.safety_selection == *safety_selection {
-                keys.insert(v.safety_route.public_key.clone());
-            }
-        }
-        keys.into_iter().collect()
-    }
-
     /// Display debugging for routes by their public key
     pub fn display_route_by_key(&self, key: &PublicKey) -> String {
-        if let Some(id) = self.get_route_id_for_key(key) {
-            if let Some(s) = self.display_route(&id) {
-                format!("{{key={}, id={}, {}}}", key, id, s)
+        let cache = self.cache.read();
+
+        // Check for allocated route
+        if let Some(id) = cache.get_allocated_route_id_by_key(key) {
+            let rstr = if let Some(arce) = cache.get_allocated_route_by_id(&id) {
+                format!("allocated: {}", arce)
             } else {
-                format!("{{key={}, id={}, (route missing)}}", key, id)
-            }
-        } else {
-            format!("{{key={}, id=(missing)", key)
+                "(route missing)".to_string()
+            };
+            return format!("{{key={}, id={}, {}}}", key, id, rstr);
         }
+
+        // Check for remote route
+        if let Some(rrid) = cache.get_remote_route_id_by_key(key) {
+            let cur_ts = Timestamp::now();
+            let rstr = if let Some(rpri) = cache.peek_remote_route(cur_ts, &rrid) {
+                format!("remote: {}", rpri)
+            } else {
+                "(route missing)".to_string()
+            };
+            return format!("{{key={}, id={}, {}}}", key, rrid, rstr);
+        }
+
+        format!("{{key={}, id=(missing)", key)
     }
 
     /// Display debugging for routes by their route id
     #[expect(dead_code)]
     pub fn display_route_by_id(&self, id: &RouteId) -> String {
-        if let Some(s) = self.display_route(id) {
-            format!("{{id={}, {}}}", id, s)
-        } else {
-            format!("{{id={}, (route missing)}}", id)
-        }
-    }
+        let cache = self.cache.read();
 
-    /// Get the display description of a route
-    fn display_route(&self, id: &RouteId) -> Option<String> {
-        let inner = self.inner.read();
         let cur_ts = Timestamp::now();
-        if let Some(rpri) = inner.cache.peek_remote_private_route(cur_ts, id) {
-            return Some(format!("remote: {}", rpri));
-        }
-        if let Some(rssd) = inner.content.get_detail(id) {
-            return Some(format!("allocated: {}", rssd));
-        }
-        None
+
+        let rstr = if let Some(arce) = cache.get_allocated_route_by_id(id) {
+            format!("allocated: {}", arce)
+        } else if let Some(rrce) = cache.peek_remote_route(cur_ts, id) {
+            format!("remote: {}", rrce)
+        } else {
+            "(route missing)".to_string()
+        };
+        format!("{{id={}, {}}}", id, rstr)
     }
 
     /// Debug debugging for routes by their public key
     pub fn debug_route_by_key(&self, key: &PublicKey) -> String {
-        if let Some(id) = self.get_route_id_for_key(key) {
-            let s = if let Some(s) = self.debug_route(&id) {
-                s
+        // Careful with locking order here, we need to lock the content before the cache
+        let content = self.content.read();
+        let cache = self.cache.read();
+
+        // Check for allocated route
+        if let Some(id) = content.get_id_by_key(key) {
+            let rstr = if let Some(rssd) = content.get_detail(&id) {
+                format!("allocated: {:#?}", rssd)
             } else {
                 "(route missing)".to_string()
             };
-            format!(
-                "{{\n    key={},\n    id={},\n{}\n}}",
+            return format!(
+                "{{\n    key={:?},\n    id={:?},\n    {}\n}}",
                 key,
                 id,
-                indent_all_string(&s)
-            )
-        } else {
-            format!("{{\n    key={},\n    id=(missing)\n}}", key)
+                indent_all_string(&rstr)
+            );
         }
+
+        // Check for remote route
+        if let Some(rrid) = cache.get_remote_route_id_by_key(key) {
+            let cur_ts = Timestamp::now();
+            let rstr = if let Some(rpri) = cache.peek_remote_route(cur_ts, &rrid) {
+                format!("remote: {:#?}", rpri)
+            } else {
+                "(route missing)".to_string()
+            };
+            return format!(
+                "{{\n    key={:?},\n    id={:?},\n    {}\n}}",
+                key,
+                rrid,
+                indent_all_string(&rstr)
+            );
+        }
+
+        format!("{{\n    key={:?},\n    id=(missing)\n}}", key)
     }
 
     /// Debug debugging for routes by their route id
     pub fn debug_route_by_id(&self, id: &RouteId) -> String {
-        let s = if let Some(s) = self.debug_route(id) {
-            s
+        // Careful with locking order here, we need to lock the content before the cache
+        let content = self.content.read();
+        let cache = self.cache.read();
+
+        let cur_ts = Timestamp::now();
+
+        let rstr = if let Some(rssd) = content.get_detail(id) {
+            format!("allocated: {:#?}", rssd)
+        } else if let Some(rpri) = cache.peek_remote_route(cur_ts, id) {
+            format!("remote: {:#?}", rpri)
         } else {
             "(route missing)".to_string()
         };
-        format!("{{\n    id={},\n{}\n}}", id, indent_all_string(&s))
-    }
-
-    /// Get the debug description of a route
-    fn debug_route(&self, id: &RouteId) -> Option<String> {
-        let inner = self.inner.read();
-        let cur_ts = Timestamp::now();
-        if let Some(rpri) = inner.cache.peek_remote_private_route(cur_ts, id) {
-            return Some(format!("remote: {:#?}", rpri));
-        }
-        if let Some(rssd) = inner.content.get_detail(id) {
-            return Some(format!("allocated: {:#?}", rssd));
-        }
-        None
+        format!("{{\n    id={:?},\n    {}\n}}", id, indent_all_string(&rstr))
     }
 }

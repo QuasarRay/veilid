@@ -50,6 +50,12 @@ class CryptoKind extends Equatable {
   List<Object?> get props => [kind];
 }
 
+List<CryptoKind> cryptoKindsFromJson(dynamic json) =>
+    (json as List<dynamic>).map((x) => CryptoKind.fromInt(x as int)).toList();
+
+List<int> cryptoKindsToJson(List<CryptoKind> x) =>
+    x.map((x) => x.toInt()).toList();
+
 const cryptoKindVLD0 = CryptoKind.fromInt(
   $V << 24 | $L << 16 | $D << 8 | $0 << 0,
 ); // "VLD0"

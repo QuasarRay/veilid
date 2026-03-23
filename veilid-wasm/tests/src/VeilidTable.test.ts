@@ -1,7 +1,7 @@
 import { expect } from '@wdio/globals';
 
 import {
-  DEBUGGING,
+  LOG_LEVEL,
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
 } from './utils/veilid-config';
@@ -17,11 +17,10 @@ describe('VeilidTable', () => {
   before('veilid startup', async () => {
     await veilidClient.initializeCore(veilidCoreInitConfig);
     await veilidClient.startupCore((_update) => {
-      if (DEBUGGING) {
-        if (_update.kind === 'Log') {
-          const logTimestamp = getLogTimestamp()
-          console.log(`${logTimestamp}: ${_update.message}`);
-        }
+      // Only print API logs to console if performance logs are disabled
+      if (LOG_LEVEL === "Off" && _update.kind === 'Log') {
+        const logTimestamp = getLogTimestamp()
+        console.log(`${logTimestamp}: ${_update.message}`);
       }
     }, veilidCoreStartupConfig);
   });

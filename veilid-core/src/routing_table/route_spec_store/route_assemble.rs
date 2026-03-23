@@ -13,34 +13,39 @@ impl RouteSpecStore {
         optimized: Option<bool>,
     ) -> VeilidAPIResult<Arc<PrivateRoute>> {
         let (key, secret_key, hop_node_refs, optimized) = {
-            let inner = self.inner.read();
-            let Some(rsid) = inner.content.get_id_by_key(allocated_route_key) else {
+            let cache = self.cache.read();
+            let Some(id) = cache.get_allocated_route_id_by_key(allocated_route_key) else {
                 // Route doesn't exist
-                apibail_invalid_target!("route id does not exist");
+                apibail_invalid_target!("route key does not exist");
             };
-            let Some(rssd) = inner.content.get_detail(&rsid) else {
+            let Some(arce) = cache.get_allocated_route_by_id(&id) else {
                 apibail_internal!("route id does not exist");
             };
 
             // See if we can optimize this compilation yet
             // We don't want to include full nodeinfo if we don't have to
             let optimized =
-                optimized.unwrap_or(rssd.with_stats(|stats| stats.last_known_valid_ts.is_some()));
+                optimized.unwrap_or(arce.with_stats(|stats| stats.last_known_valid_ts.is_some()));
 
-            let rsd = rssd
-                .get_route_by_key(allocated_route_key)
-                .expect_or_log("route key index is broken");
+            let secret_key = arce.route_set_secret_for_key(allocated_route_key)?;
 
             (
                 allocated_route_key.clone(),
-                rsd.secret_key.clone(),
-                rssd.hop_node_refs(),
+                secret_key,
+                arce.hop_node_refs(),
                 optimized,
             )
         };
 
-        self.assemble_single_private_route_inner(&key, &secret_key, &hop_node_refs, optimized)
-            .await
+        let routing_table = self.routing_table();
+        Self::assemble_single_private_route_inner(
+            &routing_table,
+            &key,
+            &secret_key,
+            &hop_node_refs,
+            optimized,
+        )
+        .await
     }
 
     /// Assemble private route set for publication
@@ -55,30 +60,34 @@ impl RouteSpecStore {
         optimized: Option<bool>,
     ) -> VeilidAPIResult<Vec<Arc<PrivateRoute>>> {
         let route_params = {
-            let inner = self.inner.read();
-            let Some(rssd) = inner.content.get_detail(id) else {
+            let cache = self.cache.read();
+            let Some(arce) = cache.get_allocated_route_by_id(id) else {
                 apibail_invalid_target!("route id does not exist");
             };
 
             // See if we can optimize this compilation yet
             // We don't want to include full nodeinfo if we don't have to
             let optimized =
-                optimized.unwrap_or(rssd.with_stats(|stats| stats.last_known_valid_ts.is_some()));
+                optimized.unwrap_or(arce.with_stats(|stats| stats.last_known_valid_ts.is_some()));
 
             let mut route_params = Vec::new();
-            for (key, rsd) in rssd.iter_route_set() {
-                let secret_key = rsd.secret_key.clone();
-                let hop_node_refs = rssd.hop_node_refs();
+
+            for key in arce.route_set_keys().iter() {
+                let secret_key = arce.route_set_secret_for_key(key)?;
+                let hop_node_refs = arce.hop_node_refs();
 
                 route_params.push((key.clone(), secret_key, hop_node_refs, optimized));
             }
+
             route_params
         };
 
         let mut out = Vec::new();
+        let routing_table = self.routing_table();
         for (key, secret_key, hop_node_refs, optimized) in route_params {
             out.push(
-                self.assemble_single_private_route_inner(
+                Self::assemble_single_private_route_inner(
+                    &routing_table,
                     &key,
                     &secret_key,
                     &hop_node_refs,
@@ -91,15 +100,14 @@ impl RouteSpecStore {
     }
 
     pub(super) async fn assemble_single_private_route_inner(
-        &self,
+        routing_table: &RoutingTable,
         key: &PublicKey,
         secret_key: &SecretKey,
         hop_node_refs: &[NodeRef],
         optimized: bool,
     ) -> VeilidAPIResult<Arc<PrivateRoute>> {
-        let routing_table = self.routing_table();
         // Ensure we get the crypto for it
-        let crypto = routing_table.network_manager().crypto();
+        let crypto = routing_table.crypto();
         let crypto_kind = key.kind();
         let Some(vcrypto) = crypto.get_async(crypto_kind) else {
             apibail_invalid_argument!("crypto not supported for route", "crypto_kind", crypto_kind);
@@ -116,7 +124,7 @@ impl RouteSpecStore {
             // Make innermost route hop to our own node
             let route_hop = RouteHop {
                 node: if optimized {
-                    let Some(node_id) = routing_table.node_ids().get(crypto_kind) else {
+                    let Some(node_id) = published_peer_info.node_ids().get(crypto_kind) else {
                         apibail_invalid_argument!(
                             "missing node id for crypto kind",
                             "crypto_kind",

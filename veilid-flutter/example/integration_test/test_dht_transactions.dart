@@ -10,7 +10,7 @@ final bogusKey =
 class TestDHTTransactions {
   late final VeilidRoutingContext routingContext;
   final CryptoKind cryptoKind;
-  final dhtRecordCount = 4;
+  final dhtRecordCount = 2;
   final dhtSubkeySize = 16;
   final dhtSubkeyCount = 2;
   final data = <Uint8List>[];

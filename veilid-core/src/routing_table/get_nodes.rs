@@ -74,30 +74,21 @@ impl RoutingTable {
 
         // Sort by least recently contacted
         let compare = Box::new(
-            |a_entry: &Option<BucketEntrySnapshot>,
-             b_entry: &Option<BucketEntrySnapshot>,
+            |opt_a_snap: &Option<BucketEntrySnapshot>,
+             opt_b_snap: &Option<BucketEntrySnapshot>,
              _cur_ts: Timestamp| {
-                // both None (self) are equal
-                let (Some(a), Some(b)) = (a_entry.as_ref(), b_entry.as_ref()) else {
-                    if a_entry.is_none() && b_entry.is_none() {
-                        return core::cmp::Ordering::Equal;
-                    }
-                    // our own node always comes last
-                    return if a_entry.is_none() {
-                        core::cmp::Ordering::Greater
-                    } else {
-                        core::cmp::Ordering::Less
-                    };
-                };
+                // Self node is always filtered out, so it is safe to unwrap here
+                let a_snap = opt_a_snap.as_ref().unwrap_or_log();
+                let b_snap = opt_b_snap.as_ref().unwrap_or_log();
 
                 // Sort by least recently contacted regardless of reliability
-                let ca = a
+                let ca = a_snap
                     .peer_stats
                     .rpc_stats
                     .last_question_ts
                     .unwrap_or(Timestamp::new(0))
                     .as_u64();
-                let cb = b
+                let cb = b_snap
                     .peer_stats
                     .rpc_stats
                     .last_question_ts
@@ -107,8 +98,9 @@ impl RoutingTable {
             },
         ) as RoutingTableEntrySort;
 
-        let transform = |v: Option<BucketEntrySnapshot>| {
-            let snap = v.unwrap_or_log();
+        let transform = |opt_snap: Option<BucketEntrySnapshot>| {
+            // Self node is always filtered out, so it is safe to unwrap here
+            let snap = opt_snap.unwrap_or_log();
 
             let ping_priority = self
                 .need_ping_priority(routing_domain, opt_own_node_info_ts, &snap)
@@ -121,7 +113,7 @@ impl RoutingTable {
         };
 
         let pre_sort_filter = Box::new(
-            |_all_entries: &mut Vec<Option<BucketEntrySnapshot>>, _cur_ts: Timestamp| {
+            |_all_snaps: &mut Vec<Option<BucketEntrySnapshot>>, _cur_ts: Timestamp| {
                 //
             },
         ) as RoutingTableEntryPreSortFilter;

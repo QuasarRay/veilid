@@ -8,6 +8,22 @@ import 'veilid_stub.dart'
     if (dart.library.io) 'veilid_ffi.dart'
     if (dart.library.js) 'veilid_js.dart';
 
+//////////////////////////////////////
+/// JSON Encode Helper
+
+List<T> Function(dynamic) jsonListConstructor<T>(
+  T Function(dynamic) jsonConstructor,
+) =>
+    (dynamic j) => (j as List<dynamic>).map(jsonConstructor).toList();
+List<T>? Function(dynamic) optJsonListConstructor<T>(
+  T Function(dynamic) jsonConstructor,
+) =>
+    (dynamic j) =>
+        j == null ? null : (j as List<dynamic>).map(jsonConstructor).toList();
+
+//////////////////////////////////////
+/// Base64 URL No-Pad Encode/Decode
+
 String base64UrlNoPadEncode(List<int> bytes) {
   var x = base64Url.encode(bytes);
   while (x.endsWith('=')) {
@@ -49,7 +65,7 @@ sealed class EncodedString extends Equatable {
   final String contents;
 
   EncodedString._fromBytes(Uint8List bytes)
-      : contents = base64UrlNoPadEncode(bytes);
+    : contents = base64UrlNoPadEncode(bytes);
 
   EncodedString._fromString(String s) : contents = s {
     // Ensure things can be decoded, will throw an exception if it fails

@@ -34,16 +34,7 @@ impl NodeRef {
         }
     }
 
-    pub fn default_filtered(&self) -> FilteredNodeRef {
-        FilteredNodeRef::new(
-            self.registry.clone(),
-            self.entry.clone(),
-            NodeRefFilter::new(),
-            Sequencing::default(),
-        )
-    }
-
-    pub fn default_filtered_with_sequencing(&self, sequencing: Sequencing) -> FilteredNodeRef {
+    pub fn sequencing_filtered(&self, sequencing: Sequencing) -> FilteredNodeRef {
         FilteredNodeRef::new(
             self.registry.clone(),
             self.entry.clone(),
@@ -60,7 +51,7 @@ impl NodeRef {
             self.registry.clone(),
             self.entry.clone(),
             NodeRefFilter::new().with_routing_domain_set(routing_domain_set.into()),
-            Sequencing::default(),
+            Sequencing::NoPreference,
         )
     }
 
@@ -69,17 +60,7 @@ impl NodeRef {
             self.registry.clone(),
             self.entry.clone(),
             filter,
-            Sequencing::default(),
-        )
-    }
-
-    #[expect(dead_code)]
-    pub fn dial_info_filtered(&self, filter: DialInfoFilter) -> FilteredNodeRef {
-        FilteredNodeRef::new(
-            self.registry.clone(),
-            self.entry.clone(),
-            NodeRefFilter::new().with_dial_info_filter(filter),
-            Sequencing::default(),
+            Sequencing::NoPreference,
         )
     }
 }

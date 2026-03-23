@@ -671,6 +671,36 @@ class ValueData:
 ####################################################################
 
 
+class PrivateSpec:
+    crypto_kinds: list[CryptoKind]
+    hop_count: int
+    stability: Stability
+    sequencing: Sequencing
+
+    def __init__(
+        self,
+        crypto_kinds: list[CryptoKind] = [],
+        hop_count: int = 0,
+        stability: Stability = Stability.RELIABLE,
+        sequencing: Sequencing = Sequencing.PREFER_ORDERED,
+    ):
+        self.crypto_kinds = crypto_kinds
+        self.hop_count = hop_count
+        self.stability = stability
+        self.sequencing = sequencing
+
+    @classmethod
+    def from_json(cls, j: dict) -> Self:
+        return cls(
+            [CryptoKind(ck) for ck in j["crypto_kinds"]] if "crypto_kinds" in j else [],
+            j["hop_count"] if "hop_count" in j else 0,
+            Stability(j["stability"]) if "stability" in j else Stability.RELIABLE,
+            Sequencing(j["sequencing"]) if "sequencing" in j else Sequencing.PREFER_ORDERED,
+        )
+
+    def to_json(self) -> dict:
+        return self.__dict__
+
 class SafetySpec:
     preferred_route: Optional[RouteId]
     hop_count: int
@@ -679,10 +709,10 @@ class SafetySpec:
 
     def __init__(
         self,
-        preferred_route: Optional[RouteId],
-        hop_count: int,
-        stability: Stability,
-        sequencing: Sequencing,
+        preferred_route: Optional[RouteId] = None,
+        hop_count: int = 0,
+        stability: Stability = Stability.RELIABLE,
+        sequencing: Sequencing = Sequencing.PREFER_ORDERED,
     ):
         self.preferred_route = preferred_route
         self.hop_count = hop_count
@@ -693,9 +723,9 @@ class SafetySpec:
     def from_json(cls, j: dict) -> Self:
         return cls(
             RouteId(j["preferred_route"]) if "preferred_route" in j else None,
-            j["hop_count"],
-            Stability(j["stability"]),
-            Sequencing(j["sequencing"]),
+            j["hop_count"] if "hop_count" in j else 0,
+            Stability(j["stability"]) if "stability" in j else Stability.RELIABLE,
+            Sequencing(j["sequencing"]) if "sequencing" in j else Sequencing.PREFER_ORDERED,
         )
 
     def to_json(self) -> dict:

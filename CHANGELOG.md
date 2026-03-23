@@ -1,6 +1,14 @@
-**UNRELEASED**
+**Changed in Veilid 0.5.3**
+
+- Global Breaking Changes:
+  - API Breaking Change: new syntax for `VeilidAPI::new_custom_private_route`, using `PrivateSpec`
+  - Feature Breaking Change: OpenTelemetry crates no longer support async-std, so we are removing support for the `opentelemetry` feature if you choose use the `rt-async-std` feature. The `opentelemetry` feature is still available for the Tokio executor as enabled by the `rt-tokio` feature.
 
 - veilid-core:
+  - Security: 
+    - Validate DH operations are contributory, ensuring DH checks for dangerous identity output
+  - API Breaking Changes:
+    - `Sequencing`, `Stability` and `SafetySelection` Rust API `Default`s have changed to match bindings API defaults
   - Improved DHT transactions speed and reliability
   - Switched to using the `bytes` crate internally for network code, closes [#414](https://gitlab.com/veilid/veilid/-/issues/414)
   - 'PublicInternet Ready' state now requires a complete bootstrap when cold-starting. Fixes connectivity problems for fresh nodes.
@@ -26,17 +34,21 @@
     - Transaction management tuning
   - NetworkManger improvements
     - ConnectionTable fix for connection inactivity timeout
+    - Ensure websocket connections don't ever resolve hostnames except for bootstrap
 
 - veilid-tools:
   - Added synchronous TagLock
   - Removed HashAtom
   - Removed MutableFuture
 
-- veilid-server:
-  - OpenTelemetry disabled for async-std build as we move toward deprecation
-
 - veilid-flutter:
-  - OpenTelemetry disabled for async-std build as we move toward deprecation
+  - API Breaking Changes: 
+      - logging configuration updated to support new directive format
+
+- veilid-wasm:
+  - API Breaking Changes: 
+      - logging configuration updated to support new directive format
+  - Update to veilid-tracing-wasm 0.2.0
 
 
 **Changed in Veilid 0.5.2**
