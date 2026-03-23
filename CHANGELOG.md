@@ -7,6 +7,7 @@
 - veilid-core:
   - Security: 
     - Validate DH operations are contributory, ensuring DH checks for dangerous identity output
+    - Ensure WebSocket connections don't ever resolve hostnames except for bootstrap
   - API Breaking Changes:
     - `Sequencing`, `Stability` and `SafetySelection` Rust API `Default`s have changed to match bindings API defaults
   - Improved DHT transactions speed and reliability
@@ -23,18 +24,17 @@
     - Add two-pass route allocation to the route allocation system
     - Implemented entry snapshots to eliminate race conditions and sort ordering problems
   - Routing table ping validator improvements
-    - Replace polling ticktask with a channel-driven background processor
+    - Replace polling TickTask with a channel-driven background processor
     - Add priority groups 
     - Add callback chains to enable multi-step route testing
   - RPC processor improvements
     - Add per-destination lost answer tracking
-    - Fix a bug where we were counting lost answers multiple time to the same route
+    - Fix a bug where we were counting lost answers multiple times for the same route
   - Storage manager improvements
     - Early consensus exit optimization for transactions
     - Transaction management tuning
   - NetworkManger improvements
     - ConnectionTable fix for connection inactivity timeout
-    - Ensure websocket connections don't ever resolve hostnames except for bootstrap
 
 - veilid-tools:
   - Added synchronous TagLock
@@ -67,7 +67,7 @@
   - `VeilidComponent` now registers log facilities and tags at initialization time in prep for an eventual crate split
   - Change route test failure during allocation to a `VeilidAPIError::TryAgain`
   - Fix connectivity problem resulting in `couldn't look up relay for inbound relay` in logs
-  - Update keyvaluedb to 0.1.5 to fix sqlite WAL file explosion
+  - Update KeyValueDB to 0.1.5 to fix sqlite WAL file explosion
   - Faster DialInfo detection, faster IPV4/IPV6 routability check
   - Fix for LimitedSize underflow in StorageManager
   - Add `instrument` feature to enable tracing instrumentation (on by default)
@@ -138,7 +138,7 @@
   - Safety routes are now twice the length when accessing a node directly [#361](https://gitlab.com/veilid/veilid/-/issues/361)
   - DHT Transactions support now exists. Multiple subkeys over multiple records can not be operated on in a single atomic commit. [#364](https://gitlab.com/veilid/veilid/-/issues/364)
   - RecordStore and StorageManager global locks have been split into per-subkey locks allowing greater parallelism.
-  - RecordStore index now has more metadata and will require a one-time 'repair' delay to the tabledb upon starting a node if it contained record data created before 0.5.0. If the node doesn't start immediately, don't panic. :)
+  - RecordStore index now has more metadata and will require a one-time 'repair' delay to the TableDB upon starting a node if it contained record data created before 0.5.0. If the node doesn't start immediately, don't panic. :)
 
 - veilid_flutter:
   - Android NDK version requirement is now 28.2.13676358
@@ -184,7 +184,7 @@
 **Changed in Veilid 0.4.7**
 
 - _BREAKING API CHANGES_:
-  - Improve type-safety by splitting out type aliases for `FourCC` and `CryptoKey` types into distinct "newtypes". Previously all instances of these types we just type aliases, and could be used interchangably when in reality they aren't interchangable. This prevents developers from accidentally passing the wrong type into the API, such as a `SecretKey` when you meant to pass a `PublicKey`. Function signatures have been updated to use the correct types, so code will need to be updated accordingly.
+  - Improve type-safety by splitting out type aliases for `FourCC` and `CryptoKey` types into distinct "newtypes". Previously all instances of these types we just type aliases, and could be used interchangeably when in reality they aren't interchangeable. This prevents developers from accidentally passing the wrong type into the API, such as a `SecretKey` when you meant to pass a `PublicKey`. Function signatures have been updated to use the correct types, so code will need to be updated accordingly.
     - `FourCC` has been separated into:
       - `CryptoKind`
       - `VeilidCapability`
@@ -210,10 +210,10 @@
       - `veilid_core::Envelope`
       - `veilid_core::Receipt`
       - `veilid_core::Crypto`
-  - The "JSON API" that was expored by `veilid-core` has now been moved into it's own crate called [`veilid-remote-api`](https://crates.io/crates/veilid-remote-api).
+  - The "JSON API" that was exported by `veilid-core` has now been moved into its own crate called [`veilid-remote-api`](https://crates.io/crates/veilid-remote-api).
 
 - veilid-core:
-  - Update keyvaluedb to 0.1.3
+  - Update KeyValueDB to 0.1.3
   - Inspect watched records for value changes made while offline when coming back online
   - Additional table store unit test
   - Eliminate `unwrap()` in `best_node_id()` (fixes crash)
@@ -266,7 +266,7 @@
 
 - veilid-python:
   - Fix type assertion bug in watch_dht_values
-  - Update watchvalue integration tests
+  - Update WatchValue integration tests
   - Expose the is_shutdown API [!392](https://gitlab.com/veilid/veilid/-/merge_requests/392)
 
 - veilid-server:
@@ -305,7 +305,7 @@
   - 'Finding more nodes' tasks now use PreferOrdered sequencing
   - Fix deadlock in veilid_api duration testing
   - Correct offline_subkey_writes inflight reporting
-  - Simplify upnp code, eliminate useless high-latency retry logic, and ensure it doesn't conflict with NAT detection
+  - Simplify UPNP code, eliminate useless high-latency retry logic, and ensure it doesn't conflict with NAT detection
 
 - veilid-python:
   - Fix async context implementation so it works correctly when re-entrant (nested `async with` blocks)
@@ -321,7 +321,7 @@
   - Added windows and macos clippy lints to CI via earthfile
   - Upgrade all pinned crate dependencies
 
-- CICD
+- CI/CD
   - Began migrating build/package/deploy scripts from shell to Python
   - Switched from using multiple build machines (one per arch/package) to a single machine running the +package-linux Earthly target
 
@@ -333,9 +333,9 @@
 
 **Changed in Veilid 0.4.3**
 
-This release exists without changes to the Veilid codebase in order to test fixes to the CICD release pipeline.
+This release exists without changes to the Veilid codebase in order to test fixes to the CI/CD release pipeline.
 
-- CICD
+- CI/CD
   - Fixed broken RPM packaging
 
 **Changed in Veilid 0.4.2**
@@ -420,19 +420,19 @@ general:
 
 - RFC-0001: Constrain DHT Subkey Size, issue #406
 
-- Dialinfo detection issues:
+- DialInfo detection issues:
   - Add a publish() as well as a commit() for routing domain editor
   - Should only publish our peer info after we're sure we done editing it (end of public address detection task)
   - Publish should happen after relay selection as well
-  - Publish should happen if the relay's peerinfo has changed
-  - Publish should not do anything if the peerinfo hasn't changed
+  - Publish should happen if the relay's PeerInfo has changed
+  - Publish should not do anything if the PeerInfo hasn't changed
   - `PeerInfo` -> `Arc<PeerInfo>` everywhere to minimize deep clones and ensure read-only PeerInfo
   - Routing domain editing is now more atomic
   - When a node selects a relay it now immediately protects its connections.
   - Made dial info port (for port restricted nat) more resilient to changes, in the case there are multiple mappings
   - Relays that drop protected connections should be deprioritized for relay selection (table saturation detection)
   - clear_network_callback in do_public_dial_info_check is a kludge, removed
-  - Raised the bar for dialinfo changes when its just the port
+  - Raised the bar for DialInfo changes when its just the port
   - Pinging node on the same network works again
   - resolve_node() never returns a dead node even when we want to try to communicate with it again
   - Removed 'bad public address' detection as it wasn't working anyway
@@ -441,10 +441,10 @@ general:
   - Nodes that are not relay capable should drop relayed packets
 
 - DHT issues:
-  - Make setvalue more likely to succeed by accepting a getvalue consensus if a full setvalue consensus is not reached.
+  - Make SetValue more likely to succeed by accepting a GetValue consensus if a full SetValue consensus is not reached.
   - Offline subkey writes are cleared too fast and should be thought as 'subkeys not yet synchronized'
   - If set_value is partial / in-flight, it should still be in offline_subkey_writes
-  - Make inflight_subkey_writes list and probably some bit for 'written_while_inflight' so we dont clear the offline_subkey_writes until they're really written
+  - Make inflight_subkey_writes list and probably some bit for 'written_while_inflight' so we don't clear the offline_subkey_writes until they're really written
 
 - Networking:
   - Fix TIME_WAIT states on Windows
@@ -458,7 +458,7 @@ general:
   - Fixes for python DHT test
 
 - API Additions:
-  - VeilidConfigInner::new parameteriztion for easier config from rust apps
+  - VeilidConfigInner::new parameterization for easier config from rust apps
   - Remove veilid-server specific paths from veilid-core defaults
   - Lots more stats about node performance in PeerStats
   - Uptime stats in VeilidStateAttachment/VeilidUpdateAttachment, issue #317
@@ -474,7 +474,7 @@ general:
   - SO_LINGER(0) re-enabled to eliminate TIME_WAIT on restart/detach/attach
   (this may cause noise for WASM in browsers when websockets are RST dropped rather than handshake closed, we will deal with this later)
 - _Community Contributions_
-  - prototype script to install / run a veilid-server node within a unifyos device (tested on a unify dream machine pro SE) @Vyrus-001
+  - prototype script to install / run a veilid-server node within a UnifyOS device (tested on a unify dream machine pro SE) @Vyrus-001
 
 **Changed in Veilid 0.3.3**
 - Fix set_dht_value and watch_value
@@ -487,7 +487,7 @@ general:
 - Fix DHT Rust integration test
 - ValueChanged Optional
   - Allow value changed data to be optional in rpc schema
-  - Make valuechanged update no longer happen when value hasn't changed or is older
+  - Make ValueChanged update no longer happen when value hasn't changed or is older
 - Implement closest peers refresh
   - Implement closest peers refresh. Closes issue #372.
   - Find_self/find_target can use capability check
@@ -510,11 +510,11 @@ general:
   - fix bug where messages sent to a private route without a safety route would not receive replies
   - fix verbose-tracing feature flag
   - improve route allocation to avoid co-located nodes
-  - fix contact method for nodes on the same ipblock
+  - fix contact method for nodes on the same IP block
   - add support for maintaining AddressType-translation relays
 - Removed NDK related hotfix, as this has been integrated into cargo-ndk already
-- Open sourced the CICD build scripts
-- Fixes for watchvalue
+- Open sourced the CI/CD build scripts
+- Fixes for WatchValue
 - Refactor low level network
 
 **Changed in Veilid 0.3.1**
@@ -575,7 +575,7 @@ general:
 - IGD/UPNP fixes for Windows
 - Reduce network downtime when local ip addresses change (ipv6 temporary addresses)
 - Fix support for Android emulator
-- Bootstrap is more robust in environments where some dialinfo won't work, like inbound UDP being firewalled off
+- Bootstrap is more robust in environments where some DialInfo won't work, like inbound UDP being firewalled off
 - CLI has timestamps in the log output
 - Base64 fixes for encoding
 - IPv6 capability detection for native platforms
@@ -589,7 +589,7 @@ general:
 - DHT set/get correctness fixes
 - Connection table fixes
 - Node resolution fixes
-- More debugging commands (appmessage, appcall, resolve, better nodeinfo, etc)
+- More debugging commands (AppMessage, AppCall, resolve, better NodeInfo, etc)
 - Reverse connect for WASM nodes
 - Better Typescript types for WASM
 - Various script and environment cleanups
@@ -600,7 +600,7 @@ general:
 - Crates are separated and publishable
 - First publication of veilid-core with docs to crates.io and docs.rs
 - Avoid large logs of 127.0.0.1:5959 attack payloads
-- Use getrandom in WASM for RNG
+- Use `getrandom` in WASM for RNG
 - Increase privacy for WASM builds by rewriting internal paths
 - Translations
 - Fix python update schema script
@@ -666,6 +666,6 @@ Note: Windows builds may be broken in this release. Please test and let us know 
 
 - Added Changelog 
 - Fix detachment issue with suspending network interfaces during operation
-- Fix incorrect punishment on relayed undecryptable messages
+- Fix incorrect punishment on relayed un-decryptable messages
 - Minor API feature adds
 - Relay bugfixes
