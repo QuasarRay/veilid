@@ -47,7 +47,6 @@ impl Network {
         let ipv4addr = "1.2.3.4".parse::<Ipv4Addr>().unwrap();
         let sockaddrv4 = SocketAddr::V4(SocketAddrV4::new(ipv4addr, 5155));
         let res = std::net::UdpSocket::bind("0.0.0.0:0");
-        println!("UDPv4 bind: {:?}", res);
         if let Ok(socket) = res {
             return (true, socket.connect(sockaddrv4).is_ok());
         }

@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! # veilid-remote-api
 //!
 //! This crate provides the ability to control a Veilid node remotely.
