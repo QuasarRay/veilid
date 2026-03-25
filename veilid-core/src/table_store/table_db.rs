@@ -201,43 +201,42 @@ impl TableDB {
         &self,
         data: &[u8],
         keyed_nonce: bool,
-    ) -> Vec<u8> {
-        let data = compress_prepend_size(data);
-        if let Some(ei) = &self.unlocked_inner.encrypt_info {
-            let crypto = self.crypto();
-            let vcrypto = crypto.get_async(ei.secret.kind()).unwrap_or_log();
-            let mut out = BytesMut::zeroed(vcrypto.nonce_length() + data.len());
+    ) -> Bytes {
+        let Some(ei) = &self.unlocked_inner.encrypt_info else {
+            return Bytes::copy_from_slice(data);
+        };
 
-            if keyed_nonce {
-                // Key content nonce
-                let mut noncedata =
-                    BytesMut::with_capacity(data.len() + ei.secret.ref_value().len());
-                noncedata.extend_from_slice(&data);
-                noncedata.extend_from_slice(ei.secret.ref_value());
-                let noncehash = vcrypto.generate_hash(noncedata.freeze()).await.value();
-                // Key content nonce is first 'nonce_length' bytes of generated hash
-                out.as_mut()[0..vcrypto.nonce_length()]
-                    .copy_from_slice(&noncehash.as_ref()[0..vcrypto.nonce_length()]);
-            } else {
-                // Random nonce
-                random_bytes(&mut out[0..vcrypto.nonce_length()]);
-            }
-            let nonce = Nonce::new(&out[0..vcrypto.nonce_length()]);
+        let crypto = self.crypto();
+        let vcrypto = crypto.get_async(ei.secret.kind()).unwrap_or_log();
+        let mut out = BytesMut::zeroed(vcrypto.nonce_length() + data.len());
 
-            let out = vcrypto
-                .crypt_b2b_no_auth(
-                    Bytes::from(data),
-                    out,
-                    vcrypto.nonce_length(),
-                    &nonce,
-                    &ei.secret,
-                )
-                .await
-                .unwrap_or_log();
-            out.to_vec()
+        if keyed_nonce {
+            // Key content nonce
+            let mut noncedata = BytesMut::with_capacity(data.len() + ei.secret.ref_value().len());
+            noncedata.extend_from_slice(data);
+            noncedata.extend_from_slice(ei.secret.ref_value());
+            let noncehash = vcrypto.generate_hash(noncedata.freeze()).await.value();
+            // Key content nonce is first 'nonce_length' bytes of generated hash
+            out.as_mut()[0..vcrypto.nonce_length()]
+                .copy_from_slice(&noncehash.as_ref()[0..vcrypto.nonce_length()]);
         } else {
-            data
+            // Random nonce
+            random_bytes(&mut out[0..vcrypto.nonce_length()]);
         }
+        let nonce = Nonce::new(&out[0..vcrypto.nonce_length()]);
+
+        let out = vcrypto
+            .crypt_b2b_no_auth(
+                Bytes::copy_from_slice(data),
+                out,
+                vcrypto.nonce_length(),
+                &nonce,
+                &ei.secret,
+            )
+            .await
+            .unwrap_or_log();
+
+        out.freeze()
     }
 
     /// Decrypt buffer using decrypt key with nonce prepended to input
@@ -248,28 +247,28 @@ impl TableDB {
     pub(in crate::table_store) async fn maybe_decrypt(
         &self,
         data: &[u8],
-    ) -> std::io::Result<Vec<u8>> {
-        if let Some(di) = &self.unlocked_inner.decrypt_info {
-            let crypto = self.crypto();
-            let vcrypto = crypto.get_async(di.secret.kind()).unwrap_or_log();
-            assert!(data.len() >= vcrypto.nonce_length());
-            if data.len() == vcrypto.nonce_length() {
-                return Ok(Vec::new());
-            }
+    ) -> std::io::Result<Bytes> {
+        let Some(di) = &self.unlocked_inner.decrypt_info else {
+            return Ok(Bytes::copy_from_slice(data));
+        };
 
-            let out = BytesMut::zeroed(data.len() - vcrypto.nonce_length());
-            let mut data = Bytes::copy_from_slice(data);
-            let data_start = data.split_to(vcrypto.nonce_length());
-
-            let out = vcrypto
-                .crypt_b2b_no_auth(data, out, 0, &Nonce::new(data_start.as_ref()), &di.secret)
-                .await
-                .unwrap_or_log();
-            decompress_size_prepended(out.as_ref(), None)
-                .map_err(|e| std::io::Error::other(e.to_string()))
-        } else {
-            decompress_size_prepended(data, None).map_err(|e| std::io::Error::other(e.to_string()))
+        let crypto = self.crypto();
+        let vcrypto = crypto.get_async(di.secret.kind()).unwrap_or_log();
+        assert!(data.len() >= vcrypto.nonce_length());
+        if data.len() == vcrypto.nonce_length() {
+            return Ok(Bytes::new());
         }
+
+        let out = BytesMut::zeroed(data.len() - vcrypto.nonce_length());
+        let mut data = Bytes::copy_from_slice(data);
+        let data_start = data.split_to(vcrypto.nonce_length());
+
+        let out = vcrypto
+            .crypt_b2b_no_auth(data, out, 0, &Nonce::new(data_start.as_ref()), &di.secret)
+            .await
+            .unwrap_or_log();
+
+        Ok(out.freeze())
     }
 
     /// Get the list of keys in a column of the TableDB
@@ -297,7 +296,11 @@ impl TableDB {
             .map_err(VeilidAPIError::from)?;
 
         for k in &mut out {
-            *k = self.maybe_decrypt(k).await.map_err(VeilidAPIError::from)?;
+            *k = decompress_size_prepended(
+                &self.maybe_decrypt(k).await.map_err(VeilidAPIError::from)?,
+                None,
+            )
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         }
         Ok(out)
     }
@@ -348,8 +351,9 @@ impl TableDB {
         let mut dbt = db.transaction();
         dbt.put(
             col,
-            self.maybe_encrypt(key, true).await,
-            self.maybe_encrypt(value, false).await,
+            self.maybe_encrypt(&compress_prepend_size(key), true).await,
+            self.maybe_encrypt(&compress_prepend_size(value), false)
+                .await,
         );
         db.write(dbt).await.map_err(VeilidAPIError::generic)
     }
@@ -381,10 +385,14 @@ impl TableDB {
             );
         }
         let db = self.unlocked_inner.database.clone();
-        let key = self.maybe_encrypt(key, true).await;
+        let key = self.maybe_encrypt(&compress_prepend_size(key), true).await;
         match db.get(col, &key).await.map_err(VeilidAPIError::from)? {
             Some(v) => Ok(Some(
-                self.maybe_decrypt(&v).await.map_err(VeilidAPIError::from)?,
+                decompress_size_prepended(
+                    &self.maybe_decrypt(&v).await.map_err(VeilidAPIError::from)?,
+                    None,
+                )
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
             )),
             None => Ok(None),
         }
@@ -419,13 +427,17 @@ impl TableDB {
                 self.opened_column_count
             );
         }
-        let key = self.maybe_encrypt(key, true).await;
+        let key = self.maybe_encrypt(&compress_prepend_size(key), true).await;
 
         let db = self.unlocked_inner.database.clone();
 
         match db.delete(col, &key).await.map_err(VeilidAPIError::from)? {
             Some(v) => Ok(Some(
-                self.maybe_decrypt(&v).await.map_err(VeilidAPIError::from)?,
+                decompress_size_prepended(
+                    &self.maybe_decrypt(&v).await.map_err(VeilidAPIError::from)?,
+                    None,
+                )
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
             )),
             None => Ok(None),
         }
@@ -567,14 +579,20 @@ impl TableDBTransaction {
             );
         }
 
-        let key = self.db.maybe_encrypt(key, true).await;
-        let value = self.db.maybe_encrypt(value, false).await;
+        let key = self
+            .db
+            .maybe_encrypt(&compress_prepend_size(key), true)
+            .await;
+        let value = self
+            .db
+            .maybe_encrypt(&compress_prepend_size(value), false)
+            .await;
         let mut inner = self.inner.lock();
         inner
             .dbt
             .as_mut()
             .ok_or_else(|| VeilidAPIError::generic("store failed, transaction already completed"))?
-            .put_owned(col, key, value);
+            .put_owned(col, key.to_vec(), value.to_vec());
         Ok(())
     }
 
@@ -605,13 +623,16 @@ impl TableDBTransaction {
             );
         }
 
-        let key = self.db.maybe_encrypt(key, true).await;
+        let key = self
+            .db
+            .maybe_encrypt(&compress_prepend_size(key), true)
+            .await;
         let mut inner = self.inner.lock();
         inner
             .dbt
             .as_mut()
             .ok_or_else(|| VeilidAPIError::generic("delete failed, transaction already completed"))?
-            .delete_owned(col, key);
+            .delete_owned(col, key.to_vec());
         Ok(())
     }
 }

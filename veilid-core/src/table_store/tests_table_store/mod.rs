@@ -378,11 +378,13 @@ async fn test_maybe_encrypt_decrypt(ts: &TableStore) {
     ];
 
     for data in datas.iter().copied() {
-        let encrypted = db.maybe_encrypt(data, true).await;
-        let decrypted = db.maybe_decrypt(&encrypted).await.unwrap();
+        let encrypted = db.maybe_encrypt(&compress_prepend_size(data), true).await;
+        let decrypted =
+            decompress_size_prepended(&db.maybe_decrypt(&encrypted).await.unwrap(), None).unwrap();
         assert_eq!(data, &decrypted);
-        let encrypted = db.maybe_encrypt(data, false).await;
-        let decrypted = db.maybe_decrypt(&encrypted).await.unwrap();
+        let encrypted = db.maybe_encrypt(&compress_prepend_size(data), false).await;
+        let decrypted =
+            decompress_size_prepended(&db.maybe_decrypt(&encrypted).await.unwrap(), None).unwrap();
         assert_eq!(data, &decrypted);
     }
 }
