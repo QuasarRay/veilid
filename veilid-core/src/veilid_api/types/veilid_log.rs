@@ -120,12 +120,22 @@ impl FromStr for VeilidLogLevel {
 }
 impl fmt::Display for VeilidLogLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let text = match self {
-            Self::Error => "Error",
-            Self::Warn => "Warn",
-            Self::Info => "Info",
-            Self::Debug => "Debug",
-            Self::Trace => "Trace",
+        let text = if f.alternate() {
+            match self {
+                Self::Error => "ERROR",
+                Self::Warn => "WARN",
+                Self::Info => "INFO",
+                Self::Debug => "DEBUG",
+                Self::Trace => "TRACE",
+            }
+        } else {
+            match self {
+                Self::Error => "Error",
+                Self::Warn => "Warn",
+                Self::Info => "Info",
+                Self::Debug => "Debug",
+                Self::Trace => "Trace",
+            }
         };
         write!(f, "{}", text)
     }
@@ -139,4 +149,20 @@ pub struct VeilidLog {
     pub message: String,
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
     pub backtrace: Option<String>,
+}
+
+impl fmt::Display for VeilidLog {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {}{}",
+            f.to_string(self.log_level),
+            self.message,
+            if let Some(backtrace) = &self.backtrace {
+                format!("\n{}", backtrace)
+            } else {
+                "".to_string()
+            }
+        )
+    }
 }

@@ -62,10 +62,9 @@ impl DHTTransaction {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let mut inner = self.inner.lock();
-                inner
-                    .opt_transaction_handle
-                    .take()
-                    .ok_or_else(|| VeilidAPIError::generic("transaction already completed"))?
+                inner.opt_transaction_handle.take().ok_or_else(|| {
+                    VeilidAPIError::transaction_not_found("transaction already completed")
+                })?
             };
 
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
@@ -88,10 +87,9 @@ impl DHTTransaction {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let mut inner = self.inner.lock();
-                inner
-                    .opt_transaction_handle
-                    .take()
-                    .ok_or_else(|| VeilidAPIError::generic("transaction already completed"))?
+                inner.opt_transaction_handle.take().ok_or_else(|| {
+                    VeilidAPIError::transaction_not_found("transaction already completed")
+                })?
             };
 
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
@@ -129,7 +127,7 @@ impl DHTTransaction {
                 inner
                     .opt_transaction_handle
                     .clone()
-                    .ok_or_else(|| VeilidAPIError::generic("transaction already completed"))?
+                    .ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))?
             };
 
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
@@ -171,7 +169,7 @@ impl DHTTransaction {
                 inner
                     .opt_transaction_handle
                     .clone()
-                    .ok_or_else(|| VeilidAPIError::generic("transaction already completed"))?
+                    .ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))?
             };
 
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
@@ -207,7 +205,7 @@ impl DHTTransaction {
                 inner
                     .opt_transaction_handle
                     .clone()
-                    .ok_or_else(|| VeilidAPIError::generic("transaction already completed"))?
+                    .ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))?
             };
 
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());

@@ -6,6 +6,17 @@ pub(crate) struct DialInfoFilter {
     pub address_type_set: AddressTypeSet,
 }
 
+impl fmt::Display for DialInfoFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}+{}",
+            f.to_string(self.protocol_type_set),
+            f.to_string(self.address_type_set)
+        )
+    }
+}
+
 impl Default for DialInfoFilter {
     fn default() -> Self {
         Self {

@@ -173,7 +173,7 @@ impl RoutingDomainEditorCommonTrait for RoutingDomainEditorPublicInternet<'_> {
                     if !removed_dial_info.is_empty() {
                         veilid_log!(self info
                             "[PublicInternet] removed dial info:\n{}",
-                            indent_all_string(&removed_dial_info.to_multiline_string())
+                            indent_all_string(removed_dial_info.to_multiline_string())
                                 .strip_trailing_newline()
                         );
                         peer_info_changed = true;
@@ -185,7 +185,7 @@ impl RoutingDomainEditorCommonTrait for RoutingDomainEditorPublicInternet<'_> {
                     if !added_dial_info.is_empty() {
                         veilid_log!(self info
                             "[PublicInternet] added dial info:\n{}",
-                            indent_all_string(&added_dial_info.to_multiline_string())
+                            indent_all_string(added_dial_info.to_multiline_string())
                                 .strip_trailing_newline()
                         );
                         peer_info_changed = true;

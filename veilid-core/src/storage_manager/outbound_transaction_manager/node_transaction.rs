@@ -241,11 +241,7 @@ impl fmt::Display for NodeTransaction {
             self.created_ts,
             self.stage,
             self.stage_ts,
-            if let Some(expiration) = self.opt_expiration {
-                expiration.to_string()
-            } else {
-                "done".to_string()
-            }
+            f.to_string_opt(self.opt_expiration),
         )
     }
 }

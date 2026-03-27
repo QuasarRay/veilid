@@ -85,6 +85,22 @@ pub fn serialize_json<T: Serialize + Debug>(val: T) -> String {
     feature = "instrument",
     instrument(level = "trace", target = "json", skip_all)
 )]
+pub fn serialize_json_pretty<T: Serialize + Debug>(val: T) -> String {
+    match serde_json::to_string_pretty(&val) {
+        Ok(v) => v,
+        Err(e) => {
+            panic!(
+                "failed to serialize pretty json value: {}\nval={:?}",
+                e, val
+            );
+        }
+    }
+}
+
+#[cfg_attr(
+    feature = "instrument",
+    instrument(level = "trace", target = "json", skip_all)
+)]
 pub fn serialize_json_bytes<T: Serialize + Debug>(val: T) -> Vec<u8> {
     match serde_json::to_vec(&val) {
         Ok(v) => v,

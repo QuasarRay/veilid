@@ -16,7 +16,6 @@ pub use api::*;
 #[cfg(feature = "unstable-blockstore")]
 pub use block_store::*;
 pub use crypto::*;
-pub use debug::*;
 pub use dht_transaction::*;
 pub use error::*;
 pub use protected_store::*;

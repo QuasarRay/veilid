@@ -58,33 +58,26 @@ impl fmt::Display for RouteStats {
         writeln!(
             f,
             "last_known_valid:   {}",
-            if let Some(ts) = &self.last_known_valid_ts {
-                ts.to_string()
-            } else {
-                "None".to_owned()
-            }
+            f.to_string_opt(self.last_known_valid_ts)
         )?;
         writeln!(
             f,
             "last_sent:          {}",
-            if let Some(ts) = &self.last_sent_ts {
-                ts.to_string()
-            } else {
-                "None".to_owned()
-            }
+            f.to_string_opt(self.last_sent_ts)
         )?;
         writeln!(
             f,
             "last_rcvd_question: {}",
-            if let Some(ts) = &self.last_rcvd_question_ts {
-                ts.to_string()
-            } else {
-                "None".to_owned()
-            }
+            f.to_string_opt(self.last_rcvd_question_ts)
         )?;
-        write!(f, "transfer:\n{}", indent_all_string(&self.transfer))?;
-        write!(f, "latency: {}", self.latency)?;
-        write!(f, "answer:\n{}", indent_all_string(&self.answer))?;
+        writeln!(
+            f,
+            "last_rcvd_answer:   {}",
+            f.to_string_opt(self.last_rcvd_answer_ts)
+        )?;
+        writeln!(f, "transfer:           {}", f.to_string(&self.transfer))?;
+        writeln!(f, "latency:            {}", f.to_string(&self.latency))?;
+        writeln!(f, "answer:             {}", f.to_string(&self.answer))?;
 
         Ok(())
     }

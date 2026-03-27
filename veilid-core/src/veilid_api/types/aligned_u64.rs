@@ -162,11 +162,6 @@ aligned_u64_type!(OperationId);
 aligned_u64_type_default_display_impl!(OperationId);
 aligned_u64_type_default_debug_impl!(OperationId);
 
-aligned_u64_type!(ByteCount);
-aligned_u64_type_default_display_impl!(ByteCount);
-aligned_u64_type_default_debug_impl!(ByteCount);
-aligned_u64_type_default_math_impl!(ByteCount);
-
 aligned_u64_type!(AlignedU64);
 aligned_u64_type_default_display_impl!(AlignedU64);
 aligned_u64_type_default_debug_impl!(AlignedU64);

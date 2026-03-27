@@ -50,30 +50,6 @@ cfg_if! {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-pub fn split_port(name: &str) -> Result<(String, Option<u16>), String> {
-    if let Some(split) = name.rfind(':') {
-        let hoststr = &name[0..split];
-        let portstr = &name[split + 1..];
-        let port: u16 = portstr
-            .parse::<u16>()
-            .map_err(|e| format!("invalid port: {}", e))?;
-
-        Ok((hoststr.to_string(), Some(port)))
-    } else {
-        Ok((name.to_string(), None))
-    }
-}
-
-#[must_use]
-pub fn prepend_slash(s: String) -> String {
-    if s.starts_with('/') {
-        return s;
-    }
-    let mut out = "/".to_owned();
-    out.push_str(s.as_str());
-    out
-}
-
 #[must_use]
 pub fn timestamp_duration_to_secs(dur: u64) -> f64 {
     // Downshift precision until it fits, lose least significant bits
@@ -418,10 +394,6 @@ pub unsafe fn unaligned_u8_vec_uninit(n_bytes: usize) -> Vec<u8> {
 
 pub fn type_name_of_val<T: ?Sized>(_val: &T) -> &'static str {
     std::any::type_name::<T>()
-}
-
-pub fn map_to_string<X: ToString>(arg: X) -> String {
-    arg.to_string()
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////

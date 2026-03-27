@@ -71,7 +71,7 @@ impl StorageManager {
                 apibail_invalid_argument!(
                     "value too big",
                     "data",
-                    print_data(&value_data.data(), Some(64))
+                    human_byte_data(value_data.data(), Some(64))
                 );
             }
 
@@ -115,7 +115,7 @@ impl StorageManager {
                 apibail_invalid_argument!(
                     "value too big",
                     "data",
-                    print_data(&value_data.data(), Some(64))
+                    human_byte_data(value_data.data(), Some(64))
                 );
             }
             // Wrong writer

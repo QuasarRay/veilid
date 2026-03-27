@@ -660,7 +660,7 @@ impl AttachmentManager {
             let cur_ts = Timestamp::now_non_decreasing();
             if let Some(last_changed_ts) = inner.last_public_internet_ready_changed_ts {
                 let dur = cur_ts.duration_since(last_changed_ts);
-                veilid_log!(self info "PublicInternet {} in {}", if veilid_state_attachment.public_internet_ready { "ready" } else { "unavailable" }, dur);
+                veilid_log!(self info "PublicInternet {} in {:#}", if veilid_state_attachment.public_internet_ready { "ready" } else { "unavailable" }, dur);
             }
             inner.last_public_internet_ready_changed_ts = Some(cur_ts);
             public_internet_ready_changed = true;
@@ -674,7 +674,7 @@ impl AttachmentManager {
             let cur_ts = Timestamp::now_non_decreasing();
             if let Some(last_changed_ts) = inner.last_local_network_ready_changed_ts {
                 let dur = cur_ts.duration_since(last_changed_ts);
-                veilid_log!(self info "LocalNetwork {} in {}", if veilid_state_attachment.local_network_ready { "ready" } else { "unavailable" }, dur);
+                veilid_log!(self info "LocalNetwork {} in {:#}", if veilid_state_attachment.local_network_ready { "ready" } else { "unavailable" }, dur);
             }
             inner.last_local_network_ready_changed_ts = Some(cur_ts);
             local_network_ready_changed = true;
@@ -746,7 +746,10 @@ impl AttachmentManager {
 
     pub fn debug_info_nodeinfo(&self) -> String {
         let mut out = String::new();
-        out += &format!("VeilidStateAttachment: {:#?}\n", self.get_veilid_state());
+        out += &format!(
+            "VeilidStateAttachment:\n{}\n",
+            indent_all_string(format!("{:#}", self.get_veilid_state()))
+        );
         out
     }
 }

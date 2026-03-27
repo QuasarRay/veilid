@@ -393,7 +393,7 @@ impl Crypto {
     pub(crate) fn debug_info_nodeinfo(&self) -> String {
         let inner = self.inner.lock();
         format!(
-            "Crypto Stats:\n  DH Cache Hits/Misses/LRU: {} / {} / {}\n",
+            "Crypto Stats:\n    DH Cache Hits/Misses/LRU: {} / {} / {}",
             inner.dh_cache_hits, inner.dh_cache_misses, inner.dh_cache_lru
         )
     }

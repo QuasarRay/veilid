@@ -13,16 +13,19 @@ pub struct RelayInfo {
 
 impl fmt::Display for RelayInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "timestamp: {}", self.timestamp)?;
-        writeln!(f, "node_ids: {}", self.node_ids)?;
-        writeln!(f, "outbound_protocols: {}", self.outbound_protocols)?;
-        writeln!(f, "address_types: {}", self.address_types)?;
+        writeln!(f, "timestamp: {}", f.to_string(self.timestamp))?;
+        writeln!(f, "node_ids: {}", f.to_string(&self.node_ids))?;
+        writeln!(
+            f,
+            "outbound_protocols: {}",
+            f.to_string(self.outbound_protocols)
+        )?;
+        writeln!(f, "address_types: {}", f.to_string(self.address_types))?;
         writeln!(f, "dial_info_detail_list:")?;
         for did in &self.dial_info_detail_list {
-            writeln!(f, "{}", indent_all_string(did))?;
+            writeln!(f, "{}", indent_all_string(f.to_string(did)))?;
         }
-        writeln!(f, "relay_kind: {}", self.relay_kind)?;
-        Ok(())
+        write!(f, "relay_kind: {}", f.to_string(self.relay_kind))
     }
 }
 

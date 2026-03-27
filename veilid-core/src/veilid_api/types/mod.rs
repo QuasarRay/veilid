@@ -3,6 +3,7 @@ mod aligned_u64;
 mod app_message_call;
 mod atomic_option_timestamp;
 mod atomic_timestamp;
+mod byte_count;
 #[cfg(feature = "geolocation")]
 mod country_code;
 mod dht;
@@ -27,6 +28,7 @@ pub use aligned_u64::*;
 pub use app_message_call::*;
 pub use atomic_option_timestamp::*;
 pub use atomic_timestamp::*;
+pub use byte_count::*;
 #[cfg(feature = "geolocation")]
 pub use country_code::*;
 pub use dht::*;

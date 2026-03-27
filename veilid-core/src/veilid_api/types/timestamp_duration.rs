@@ -6,7 +6,18 @@ aligned_u64_type_default_debug_impl!(TimestampDuration);
 
 impl fmt::Display for TimestampDuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", display_duration(self.as_u64()))
+        if f.alternate() {
+            write!(f, "{}", human_duration(self.as_u64()))
+        } else {
+            write!(f, "{}", self.as_u64())
+        }
+    }
+}
+
+impl FromStr for TimestampDuration {
+    type Err = <u64 as FromStr>::Err;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(TimestampDuration(u64::from_str(s)?))
     }
 }
 

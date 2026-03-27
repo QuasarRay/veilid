@@ -449,7 +449,7 @@ impl NetworkConnection {
                                     // Pass received messages up to the network manager for processing
                                     if let Err(e) = network_manager
                                         .on_recv_envelope(message, flow).measure_debug(TimestampDuration::new_ms(500), |x| {
-                                            veilid_log!(registry debug "on_recv_envelope: {} for {} ", x, protocol_connection.flow());
+                                            veilid_log!(registry debug "on_recv_envelope: {:#} for {} ", x, protocol_connection.flow());
                                         })
                                         .await
                                     {
@@ -528,18 +528,18 @@ impl NetworkConnection {
             "{} | {} | est {} sent {} rcvd {} refcount {}{}",
             self.flow,
             self.connection_id.as_u64(),
-            display_duration(
+            human_duration(
                 cur_ts
                     .as_u64()
                     .saturating_sub(self.established_time.as_u64())
             ),
             self.stats()
                 .last_message_sent_time
-                .map(|ts| display_duration(cur_ts.as_u64().saturating_sub(ts.as_u64())))
+                .map(|ts| human_duration(cur_ts.as_u64().saturating_sub(ts.as_u64())))
                 .unwrap_or("---".to_owned()),
             self.stats()
                 .last_message_recv_time
-                .map(|ts| display_duration(cur_ts.as_u64().saturating_sub(ts.as_u64())))
+                .map(|ts| human_duration(cur_ts.as_u64().saturating_sub(ts.as_u64())))
                 .unwrap_or("---".to_owned()),
             self.ref_count,
             if let Some(pnr) = &self.protected_nr {

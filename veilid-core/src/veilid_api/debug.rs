@@ -527,12 +527,7 @@ pub(crate) fn format_opt_ts(ts: Option<TimestampDuration>) -> String {
     let Some(ts) = ts else {
         return "---".to_owned();
     };
-    let secs = ts.seconds_f64();
-    if secs >= 1.0 {
-        format!("{:.2}s", secs)
-    } else {
-        format!("{:.2}ms", secs * 1000.0)
-    }
+    format!("{:#}", ts)
 }
 
 #[must_use]
@@ -540,16 +535,7 @@ pub(crate) fn format_opt_bps(bps: Option<ByteCount>) -> String {
     let Some(bps) = bps else {
         return "---".to_owned();
     };
-    let bps = bps.as_u64();
-    if bps >= 1024u64 * 1024u64 * 1024u64 {
-        format!("{:.2}GB/s", (bps / (1024u64 * 1024u64)) as f64 / 1024.0)
-    } else if bps >= 1024u64 * 1024u64 {
-        format!("{:.2}MB/s", (bps / 1024u64) as f64 / 1024.0)
-    } else if bps >= 1024u64 {
-        format!("{:.2}KB/s", bps as f64 / 1024.0)
-    } else {
-        format!("{:.2}B/s", bps as f64)
-    }
+    format!("{:#}/s", bps)
 }
 
 fn parse_bucket_entry_state(text: &str) -> Result<BucketEntryState, String> {
@@ -1107,48 +1093,6 @@ async fn async_get_debug_argument_at<T, G: FnOnce(&str) -> PinBoxFutureStatic<Op
     Ok(val)
 }
 
-#[must_use]
-pub fn print_data(data: &[u8], truncate_len: Option<usize>) -> String {
-    // check if message body is ascii printable
-    let mut printable = true;
-    for c in data {
-        if *c < 32 || *c > 126 {
-            printable = false;
-            break;
-        }
-    }
-
-    let (data, truncated) = if let Some(truncate_len) = truncate_len {
-        if data.len() > truncate_len {
-            (&data[0..truncate_len], true)
-        } else {
-            (data, false)
-        }
-    } else {
-        (data, false)
-    };
-
-    let strdata = if printable {
-        String::from_utf8_lossy(data).to_string()
-    } else {
-        let sw = shell_words::quote(String::from_utf8_lossy(data).as_ref()).to_string();
-        let always_hex = sw
-            .chars()
-            .any(|c| !c.is_ascii() || c.is_ascii_control() || c.is_ascii_graphic());
-        let h = hex::encode(data);
-        if always_hex || h.len() < sw.len() {
-            h
-        } else {
-            sw
-        }
-    };
-    if truncated {
-        format!("{}...", strdata)
-    } else {
-        strdata
-    }
-}
-
 impl VeilidAPI {
     fn debug_buckets(&self, opt_min_state: Option<String>) -> VeilidAPIResult<String> {
         let mut min_state = BucketEntryState::Unreliable;
@@ -1356,20 +1300,21 @@ impl VeilidAPI {
         // Dump core state
         let state = self.get_state().await?;
 
-        let mut peertable = format!(
-            "Recent Peers: {} (max {})\n",
+        let mut peertable = Vec::new();
+        peertable.push(format!(
+            "Recent Peers: {} (max {})",
             state.network.peers.len(),
             RECENT_PEERS_TABLE_SIZE
-        );
+        ));
         for peer in state.network.peers {
-            peertable += &format!(
-                "   {} | {} | {} | {} down | {} up\n",
+            peertable.push(format!(
+                "   {} | {} | {} | {} down | {} up",
                 peer.node_ids.first().unwrap_or_log(),
                 peer.peer_address,
                 format_opt_ts(peer.peer_stats.latency.map(|l| l.average)),
                 format_opt_bps(Some(peer.peer_stats.transfer.down.average)),
                 format_opt_bps(Some(peer.peer_stats.transfer.up.average)),
-            );
+            ));
         }
 
         // Dump connection table
@@ -1385,7 +1330,7 @@ impl VeilidAPI {
             nodeinfo_rtab,
             nodeinfo_net,
             nodeinfo_rpc,
-            peertable,
+            peertable.join("\n"),
             connman,
             nodeinfo_crypto,
             nodeinfo_attach
@@ -1687,7 +1632,7 @@ impl VeilidAPI {
             NetworkResult::Value(v) => format!(
                 "Sent {} bytes, received: {}",
                 data_len,
-                print_data(&v.answer, Some(512))
+                human_byte_data(&v.answer, Some(512))
             ),
             r => {
                 return Ok(r.to_string());
@@ -2931,10 +2876,10 @@ impl VeilidAPI {
         let state = self.get_state().await?;
 
         let uptime = state.attachment.uptime;
-        writeln!(result, "  since launch: {uptime}").ok();
+        writeln!(result, "  since launch: {uptime:#}").ok();
 
         if let Some(attached_uptime) = state.attachment.attached_uptime {
-            writeln!(result, "  since attachment: {attached_uptime}").ok();
+            writeln!(result, "  since attachment: {attached_uptime:#}").ok();
         }
 
         Ok(result)
@@ -3189,121 +3134,6 @@ impl VeilidAPI {
         };
 
         Ok((key, rc))
-    }
-}
-
-const DEFAULT_INDENT: usize = 4;
-pub(crate) fn indent_string<S: ToString>(s: &S) -> String {
-    indent_by(DEFAULT_INDENT, s.to_string())
-}
-pub(crate) fn indent_all_string<S: ToString>(s: &S) -> String {
-    indent_all_by(DEFAULT_INDENT, s.to_string())
-}
-
-pub(crate) trait ToMultilineString {
-    fn to_multiline_string(&self) -> String;
-    fn to_multiline_indexed_string(&self) -> String;
-}
-
-impl<T> ToMultilineString for Vec<T>
-where
-    T: fmt::Display,
-{
-    fn to_multiline_string(&self) -> String {
-        let mut out = String::new();
-        for x in self {
-            out += &x.to_string();
-            out += "\n";
-        }
-        out
-    }
-    fn to_multiline_indexed_string(&self) -> String {
-        let mut out = String::new();
-        for (n, x) in self.iter().enumerate() {
-            out += &format!("{}:\n", n);
-            out += &indent_all_string(x);
-            out += "\n";
-        }
-        out
-    }
-}
-
-pub(crate) trait ToTableString {
-    fn to_table_string(&self) -> String {
-        self.to_table_string_custom(32, 4, true, true)
-    }
-    fn to_table_string_custom(
-        &self,
-        columns: usize,
-        indent: usize,
-        brackets: bool,
-        newlines: bool,
-    ) -> String;
-}
-
-impl<T> ToTableString for Vec<T>
-where
-    T: fmt::Display,
-{
-    fn to_table_string_custom(
-        &self,
-        columns: usize,
-        indent: usize,
-        brackets: bool,
-        newlines: bool,
-    ) -> String {
-        let mut col = 0usize;
-        let mut out = String::new();
-        let mut left = self.len();
-
-        let use_columns = columns > 0 && columns < self.len();
-
-        if brackets {
-            out += "[";
-        }
-        if use_columns && newlines {
-            out += "\n";
-        }
-        let indent = " ".repeat(indent);
-
-        for s in self {
-            if use_columns && col == 0 {
-                out += &indent;
-            }
-            let sc = s.to_string();
-
-            out += &sc;
-            col += 1;
-            left -= 1;
-            if left != 0 {
-                out += ",";
-                if use_columns && col == columns {
-                    col = 0;
-                    out += "\n"
-                }
-            }
-        }
-        if use_columns && newlines {
-            out += "\n";
-        }
-        if brackets {
-            out += "]";
-        }
-
-        out
-    }
-}
-
-pub(crate) trait StripTrailingNewline {
-    fn strip_trailing_newline(&self) -> &str;
-}
-
-impl<T: AsRef<str>> StripTrailingNewline for T {
-    fn strip_trailing_newline(&self) -> &str {
-        self.as_ref()
-            .strip_suffix("\r\n")
-            .or(self.as_ref().strip_suffix("\n"))
-            .unwrap_or(self.as_ref())
     }
 }
 

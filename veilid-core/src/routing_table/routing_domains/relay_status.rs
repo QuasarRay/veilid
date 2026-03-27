@@ -15,6 +15,12 @@ impl PartialEq for RelayPing {
 
 impl Eq for RelayPing {}
 
+impl fmt::Display for RelayPing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", f.to_string(&self.node_ref))
+    }
+}
+
 /// The current node's relaying capabilities and requirements
 #[derive(Debug, Clone)]
 pub struct RelayStatus {
@@ -31,12 +37,27 @@ pub struct RelayStatus {
     /// Ordering modes we still need for relaying, per address type
     pub want_relay_orderings: HashSet<(SequenceOrdering, AddressType)>,
     /// All protocol/address types we can offer inbound relaying for from this node
-    #[expect(dead_code)]
     pub can_relay_protocols: HashSet<(ProtocolType, AddressType)>,
     /// All the low level protocols and ports that require nat keepalive pings
     pub wants_nat_keepalives: LowLevelProtocolPorts,
     /// All of the relays and their configuration currently included in our status
     pub relays: Vec<RoutingDomainRelay>,
+}
+
+impl fmt::Display for RelayStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Low Level Port Info:\n{}\nDial Info Filter: {}\nWant Relay Protocols: {}\nWant Relay Orderings: {}\nCan Relay Protocols: {}\nWants NAT Keepalives: {}\nRelays:\n{}",
+            indent_all_string(f.to_string(&self.low_level_port_info)),
+            f.to_string(self.dial_info_filter),
+            self.want_relay_protocols.iter().map(|(pt,at)| format!("{}:{}", f.to_string(pt), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
+            self.want_relay_orderings.iter().map(|(om,at)| format!("{}:{}", f.to_string(om), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
+            self.can_relay_protocols.iter().map(|(pt,at)| format!("{}:{}", f.to_string(pt), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
+            self.wants_nat_keepalives.iter().map(|(lpt,at,p)| format!("{}:{}:{}", f.to_string(lpt), f.to_string(at), p)).collect::<Vec<_>>().join(", ").string_if_empty("None"),
+            indent_all_string(f.to_multiline_indexed_string(self.relays.iter()).string_if_empty("None"))
+        )
+    }
 }
 
 impl RelayStatus {

@@ -11,7 +11,7 @@ impl fmt::Debug for RPCOperationAppMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RPCOperationAppMessage")
             .field("message(len)", &self.message.len())
-            .field("message", &print_data(&self.message, Some(64)))
+            .field("message", &human_byte_data(&self.message, Some(64)))
             .finish()
     }
 }

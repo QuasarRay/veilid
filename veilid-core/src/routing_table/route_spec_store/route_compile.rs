@@ -292,7 +292,7 @@ impl RouteSpecStore {
                 cache.lookup_compiled_route_cache(&compiled_route_cache_key)
             {
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self trace "compile_route profile (fast path cached): {}", Timestamp::now().duration_since(profile_start_ts));
+                veilid_log!(self trace "compile_route profile (fast path cached): {:#}", Timestamp::now().duration_since(profile_start_ts));
                 return Ok(compiled_route);
             }
             self.compile_lock_table
@@ -320,7 +320,7 @@ impl RouteSpecStore {
                 cache.lookup_compiled_route_cache(&compiled_route_cache_key)
             {
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self debug "compile_route profile (slow path cached): {}", Timestamp::now().duration_since(profile_start_ts));
+                veilid_log!(self debug "compile_route profile (slow path cached): {:#}", Timestamp::now().duration_since(profile_start_ts));
                 return Ok(compiled_route);
             }
 
@@ -386,7 +386,7 @@ impl RouteSpecStore {
                 )?;
 
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self debug "compile_route profile (stub): {}", Timestamp::now().duration_since(profile_start_ts));
+                veilid_log!(self debug "compile_route profile (stub): {:#}", Timestamp::now().duration_since(profile_start_ts));
                 return Ok(stub_compiled_route);
             }
         };
@@ -467,7 +467,7 @@ impl RouteSpecStore {
 
         // Return compiled route
         #[cfg(feature = "verbose-tracing")]
-        veilid_log!(self debug "compile_route profile (uncached{}): {}", if optimize { "" } else { " unoptimized" }, Timestamp::now().duration_since(profile_start_ts));
+        veilid_log!(self debug "compile_route profile (uncached{}): {:#}", if optimize { "" } else { " unoptimized" }, Timestamp::now().duration_since(profile_start_ts));
 
         Ok(compiled_route)
     }

@@ -190,7 +190,7 @@ impl RoutingDomainEditorCommonTrait for RoutingDomainEditorLocalNetwork<'_> {
                     if !removed_dial_info.is_empty() {
                         veilid_log!(self info
                             "[LocalNetwork] removed dial info:\n{}",
-                            indent_all_string(&removed_dial_info.to_multiline_string())
+                            indent_all_string(removed_dial_info.to_multiline_string())
                                 .strip_trailing_newline()
                         );
                         peer_info_changed = true;
@@ -202,7 +202,7 @@ impl RoutingDomainEditorCommonTrait for RoutingDomainEditorLocalNetwork<'_> {
                     if !added_dial_info.is_empty() {
                         veilid_log!(self info
                             "[LocalNetwork] added dial info:\n{}",
-                            indent_all_string(&added_dial_info.to_multiline_string())
+                            indent_all_string(added_dial_info.to_multiline_string())
                                 .strip_trailing_newline()
                         );
                         peer_info_changed = true;

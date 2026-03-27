@@ -29,8 +29,14 @@ impl fmt::Display for LatencyStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "slow={} / avg={} / fast={} / tm90={} / tm75={} / p90={} / p75={}",
-            self.slowest, self.average, self.fastest, self.tm90, self.tm75, self.p90, self.p75
+            "{} slow | {} avg | {} fast | {} tm90 | {} tm75 | {} p90 | {} p75",
+            f.to_string(self.slowest),
+            f.to_string(self.average),
+            f.to_string(self.fastest),
+            f.to_string(self.tm90),
+            f.to_string(self.tm75),
+            f.to_string(self.p90),
+            f.to_string(self.p75)
         )?;
         Ok(())
     }
@@ -55,8 +61,19 @@ impl fmt::Display for TransferStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} min / {} avg / {} max / {} total",
-            self.minimum, self.average, self.maximum, self.total
+            "{}/s min | {}/s avg | {}/s max | {} total",
+            f.to_string(self.minimum),
+            f.to_string(self.average),
+            f.to_string(self.maximum),
+            if f.alternate() {
+                format!(
+                    "{} ({} bytes)",
+                    human_byte_count(self.total.as_u64()),
+                    self.total.as_u64()
+                )
+            } else {
+                format!("{}", self.total.as_u64())
+            },
         )?;
         Ok(())
     }
@@ -73,7 +90,12 @@ pub struct TransferStatsDownUp {
 
 impl fmt::Display for TransferStatsDownUp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "down: {} up: {}", self.down, self.up)
+        write!(
+            f,
+            "Down: {}\nUp:   {}",
+            f.to_string(&self.down),
+            f.to_string(&self.up)
+        )
     }
 }
 
@@ -99,12 +121,16 @@ pub struct StateStats {
 
 impl fmt::Display for StateStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "span:       {}", self.span)?;
-        writeln!(f, "reliable:   {}", self.reliable)?;
-        writeln!(f, "unreliable: {}", self.unreliable)?;
-        writeln!(f, "dead:       {}", self.dead)?;
-        writeln!(f, "punished:   {}", self.punished)?;
-        write!(f, "reason:\n{}", indent_all_string(&self.reason))?;
+        writeln!(f, "span:       {}", f.to_string(self.span))?;
+        writeln!(f, "reliable:   {}", f.to_string(self.reliable))?;
+        writeln!(f, "unreliable: {}", f.to_string(self.unreliable))?;
+        writeln!(f, "dead:       {}", f.to_string(self.dead))?;
+        writeln!(f, "punished:   {}", f.to_string(self.punished))?;
+        write!(
+            f,
+            "reason:\n{}",
+            indent_all_string(f.to_string(&self.reason))
+        )?;
         Ok(())
     }
 }
@@ -132,22 +158,46 @@ pub struct StateReasonStats {
 
 impl fmt::Display for StateReasonStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "(dead) can_not_send:     {}", self.can_not_send)?;
-        writeln!(f, "(dead) lost_answers:     {}", self.too_many_lost_answers)?;
-        writeln!(f, "(dead) no_ping_response: {}", self.no_ping_response)?;
-        writeln!(f, "(urel) failed_to_send:   {}", self.failed_to_send)?;
-        writeln!(f, "(urel) lost_answers:     {}", self.lost_answers)?;
+        writeln!(
+            f,
+            "(dead) can_not_send:     {}",
+            f.to_string(self.can_not_send)
+        )?;
+        writeln!(
+            f,
+            "(dead) lost_answers:     {}",
+            f.to_string(self.too_many_lost_answers)
+        )?;
+        writeln!(
+            f,
+            "(dead) no_ping_response: {}",
+            f.to_string(self.no_ping_response)
+        )?;
+        writeln!(
+            f,
+            "(urel) failed_to_send:   {}",
+            f.to_string(self.failed_to_send)
+        )?;
+        writeln!(
+            f,
+            "(urel) lost_answers:     {}",
+            f.to_string(self.lost_answers)
+        )?;
         writeln!(
             f,
             "(urel) not_consecutive:  {}",
-            self.not_seen_consecutively
+            f.to_string(self.not_seen_consecutively)
         )?;
         writeln!(
             f,
             "(urel) unreliable_ping:  {}",
-            self.in_unreliable_ping_span
+            f.to_string(self.in_unreliable_ping_span)
         )?;
-        writeln!(f, "(urel) can_not_send:     {}", self.can_not_send)?;
+        writeln!(
+            f,
+            "(urel) can_not_send:     {}",
+            f.to_string(self.can_not_send)
+        )?;
         Ok(())
     }
 }
@@ -254,41 +304,28 @@ impl fmt::Display for RPCStats {
         writeln!(f, "# failed-to-send: {}", self.failed_to_send)?;
         writeln!(
             f,
-            "last_question:     {}",
-            if let Some(ts) = &self.last_question_ts {
-                ts.to_string()
-            } else {
-                "None".to_owned()
-            }
+            "last_question:      {}",
+            f.to_string_opt(self.last_question_ts.as_ref())
         )?;
         writeln!(
             f,
-            "last_seen:         {}",
-            if let Some(ts) = &self.last_seen_ts {
-                ts.to_string()
-            } else {
-                "None".to_owned()
-            }
+            "last_seen:          {}",
+            f.to_string_opt(self.last_seen_ts.as_ref())
         )?;
         writeln!(
             f,
-            "first_consecutive: {}",
-            if let Some(ts) = &self.first_consecutive_seen_ts {
-                ts.to_string()
-            } else {
-                "None".to_owned()
-            }
+            "first_consecutive:  {}",
+            f.to_string_opt(self.first_consecutive_seen_ts.as_ref())
         )?;
-
-        write!(
+        writeln!(
             f,
             "unreliable answers:\n{}",
-            indent_all_string(&self.answer_unordered)
+            indent_all_string(f.to_string(&self.answer_unordered))
         )?;
-        write!(
+        writeln!(
             f,
             "reliable answers:\n{}",
-            indent_all_string(&self.answer_ordered)
+            indent_all_string(f.to_string(&self.answer_ordered))
         )?;
 
         Ok(())
@@ -319,14 +356,18 @@ pub struct PeerStats {
 impl fmt::Display for PeerStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "time_added: {}", self.time_added)?;
-        write!(f, "rpc_stats:\n{}", indent_all_string(&self.rpc_stats))?;
-        if let Some(ls) = &self.latency {
-            writeln!(f, "latency: {}", ls)?;
-        } else {
-            writeln!(f, "latency: None")?;
-        }
-        write!(f, "transfer:\n{}", indent_all_string(&self.transfer))?;
-        write!(f, "state:\n{}", indent_all_string(&self.state))?;
+        write!(
+            f,
+            "rpc_stats:\n{}",
+            indent_all_string(f.to_string(&self.rpc_stats))
+        )?;
+        writeln!(f, "latency: {}", f.to_string_opt(self.latency.as_ref()))?;
+        write!(
+            f,
+            "transfer:\n{}",
+            indent_all_string(f.to_string(&self.transfer))
+        )?;
+        write!(f, "state:\n{}", indent_all_string(f.to_string(&self.state)))?;
 
         Ok(())
     }

@@ -320,7 +320,7 @@ impl RPCProcessor {
                     signing_member_id,
                 )
                 .measure_debug(TimestampDuration::new_ms(100), |dur| {
-                    veilid_log!(self debug "inbound_transact_begin: {}", dur);
+                    veilid_log!(self debug "inbound_transact_begin: {:#}", dur);
                 })
                 .await
                 .map_err(RPCError::internal)?);
@@ -399,7 +399,7 @@ impl RPCProcessor {
             None,
         ))
         .measure_debug(TimestampDuration::new_ms(200), |dur| {
-            veilid_log!(self debug "process_transact_begin_q answer ({}xid={:?}{}{}): {}",
+            veilid_log!(self debug "process_transact_begin_q answer ({}xid={:?}{}{}): {:#}",
                 if accepted {
                     "+accepted "
                 } else {

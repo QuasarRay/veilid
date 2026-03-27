@@ -32,6 +32,7 @@ pub mod eventual;
 pub mod eventual_base;
 pub mod eventual_value;
 pub mod eventual_value_clone;
+pub mod formatting;
 pub mod future_queue;
 pub mod interval;
 pub mod ip_addr_port;
@@ -167,6 +168,8 @@ pub use eventual_value::*;
 #[doc(inline)]
 pub use eventual_value_clone::*;
 #[doc(inline)]
+pub use formatting::*;
+#[doc(inline)]
 pub use future_queue::*;
 #[doc(inline)]
 pub use interval::*;
@@ -251,9 +254,12 @@ use parking_lot::*;
 use stop_token::*;
 use thiserror::Error as ThisError;
 
+// Re-exports for other crates
 pub use bytes;
 pub use fn_name;
+pub use hex;
 pub use parking_lot;
+pub use shell_words;
 
 // For iOS tests
 #[no_mangle]

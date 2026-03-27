@@ -39,16 +39,30 @@ impl AttachmentState {
 
 impl fmt::Display for AttachmentState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let out = match self {
-            AttachmentState::Attaching => "attaching",
-            AttachmentState::AttachedWeak => "attached_weak",
-            AttachmentState::AttachedGood => "attached_good",
-            AttachmentState::AttachedStrong => "attached_strong",
-            AttachmentState::FullyAttached => "fully_attached",
-            AttachmentState::OverAttached => "over_attached",
-            AttachmentState::Detaching => "detaching",
-            AttachmentState::Detached => "detached",
+        let out = if f.alternate() {
+            match self {
+                AttachmentState::Attaching => "Attaching",
+                AttachmentState::AttachedWeak => "AttachedWeak",
+                AttachmentState::AttachedGood => "AttachedGood",
+                AttachmentState::AttachedStrong => "AttachedStrong",
+                AttachmentState::FullyAttached => "FullyAttached",
+                AttachmentState::OverAttached => "OverAttached",
+                AttachmentState::Detaching => "Detaching",
+                AttachmentState::Detached => "Detached",
+            }
+        } else {
+            match self {
+                AttachmentState::Attaching => "attaching",
+                AttachmentState::AttachedWeak => "attached_weak",
+                AttachmentState::AttachedGood => "attached_good",
+                AttachmentState::AttachedStrong => "attached_strong",
+                AttachmentState::FullyAttached => "fully_attached",
+                AttachmentState::OverAttached => "over_attached",
+                AttachmentState::Detaching => "detaching",
+                AttachmentState::Detached => "detached",
+            }
         };
+
         write!(f, "{}", out)
     }
 }
@@ -98,6 +112,18 @@ pub struct VeilidStateAttachment {
     pub attached_uptime: Option<TimestampDuration>,
 }
 
+impl fmt::Display for VeilidStateAttachment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "state: {}\npublic_internet_ready: {}\nlocal_network_ready: {}\nuptime: {}\nattached_uptime: {}", 
+            f.to_string(self.state),
+            if self.public_internet_ready { "true" } else { "false" }, 
+            if self.local_network_ready { "true" } else { "false" }, 
+            f.to_string(self.uptime),
+            f.to_string_opt(self.attached_uptime.as_ref())
+        )
+    }
+}
+
 /// Describe a recently accessed peer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
@@ -115,6 +141,22 @@ pub struct PeerTableData {
     pub peer_address: String,
     /// Statistics we have collected on this peer.
     pub peer_stats: PeerStats,
+}
+
+impl fmt::Display for PeerTableData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "node_ids: [{}]\npeer_address: {}\npeer_stats: {}",
+            self.node_ids
+                .iter()
+                .map(|id| f.to_string(id))
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.peer_address,
+            indent_all_string(f.to_string(&self.peer_stats))
+        )
+    }
 }
 
 /// Describe the current network state of the Veilid node
@@ -141,6 +183,24 @@ pub struct VeilidStateNetwork {
     pub node_ids: Vec<NodeId>,
 }
 
+impl fmt::Display for VeilidStateNetwork {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "started: {}\nbps_down: {}\nbps_up: {}\npeers: [{}]\nnode_ids: [{}]",
+            if self.started { "true" } else { "false" },
+            f.to_string(self.bps_down),
+            f.to_string(self.bps_up),
+            f.to_table_string(&self.peers),
+            self.node_ids
+                .iter()
+                .map(|id| f.to_string(id))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    }
+}
+
 /// Describe a private or safety route change that has happened
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
@@ -155,6 +215,25 @@ pub struct VeilidRouteChange {
     pub dead_remote_routes: Vec<RouteId>,
 }
 
+impl fmt::Display for VeilidRouteChange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "dead_routes: [{}]\ndead_remote_routes: [{}]",
+            self.dead_routes
+                .iter()
+                .map(|id| f.to_string(id))
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.dead_remote_routes
+                .iter()
+                .map(|id| f.to_string(id))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    }
+}
+
 /// Describe changes to the Veilid node configuration
 /// Currently this is only ever emitted once, however we reserve the right to
 /// add the ability to change the configuration or have it changed by the Veilid node
@@ -166,6 +245,12 @@ pub struct VeilidRouteChange {
 pub struct VeilidStateConfig {
     /// If the Veilid node configuration has changed the full new config will be here.
     pub config: VeilidConfig,
+}
+
+impl fmt::Display for VeilidStateConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "config: {}", serialize_json_pretty(&self.config))
+    }
 }
 
 /// Describe when DHT records have subkey values changed
@@ -190,6 +275,19 @@ pub struct VeilidValueChange {
     pub value: Option<ValueData>,
 }
 
+impl fmt::Display for VeilidValueChange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "key: {}\nsubkeys: {}\ncount: {}\nvalue: {}",
+            f.to_string(&self.key),
+            f.to_string(&self.subkeys),
+            self.count,
+            f.to_string_opt(self.value.as_ref())
+        )
+    }
+}
+
 /// An update from the veilid-core to the host application describing a change
 /// to the internal state of the Veilid node.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -212,6 +310,43 @@ pub enum VeilidUpdate {
     Shutdown,
 }
 
+impl fmt::Display for VeilidUpdate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            VeilidUpdate::Log(log) => write!(f, "Log: {}", indent_all_string(f.to_string(log))),
+            VeilidUpdate::AppMessage(app_message) => write!(
+                f,
+                "AppMessage: {}",
+                indent_all_string(f.to_string(app_message))
+            ),
+            VeilidUpdate::AppCall(app_call) => {
+                write!(f, "AppCall: {}", indent_all_string(f.to_string(app_call)))
+            }
+            VeilidUpdate::Attachment(attachment) => write!(
+                f,
+                "Attachment: {}",
+                indent_all_string(f.to_string(attachment))
+            ),
+            VeilidUpdate::Network(network) => {
+                write!(f, "Network: {}", indent_all_string(f.to_string(network)))
+            }
+            VeilidUpdate::Config(config) => {
+                write!(f, "Config: {}", indent_all_string(f.to_string(config)))
+            }
+            VeilidUpdate::RouteChange(route_change) => write!(
+                f,
+                "RouteChange: {}",
+                indent_all_string(f.to_string(route_change))
+            ),
+            VeilidUpdate::ValueChange(value_change) => write!(
+                f,
+                "ValueChange: {}",
+                indent_all_string(f.to_string(value_change))
+            ),
+            VeilidUpdate::Shutdown => write!(f, "Shutdown"),
+        }
+    }
+}
 /// A queriable state of the internals of veilid-core.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(

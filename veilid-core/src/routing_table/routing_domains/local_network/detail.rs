@@ -25,6 +25,24 @@ impl fmt::Debug for LocalNetworkRoutingDomainDetail {
     }
 }
 
+impl fmt::Display for LocalNetworkRoutingDomainDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Interface Addresses:\n{}\nLast Relay Status:\n{}\n{}",
+            indent_all_string(
+                f.to_multiline_indexed_string(
+                    self.interface_addresses
+                        .iter()
+                        .map(|intf_addr| f.to_string(intf_addr))
+                )
+                .string_if_empty("None")
+            ),
+            indent_all_string(f.to_string_opt(self.opt_last_relay_status.load().as_ref())),
+            f.to_string(&self.common)
+        )
+    }
+}
 impl_veilid_component_accessors!(LocalNetworkRoutingDomainDetail);
 
 impl LocalNetworkRoutingDomainDetail {
@@ -204,9 +222,9 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
     }
     fn debug(&self, alt: bool) -> String {
         if alt {
-            format!("{:#?}", self)
+            format!("{:#}", self)
         } else {
-            format!("{:?}", self)
+            format!("{}", self)
         }
     }
 }

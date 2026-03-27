@@ -1821,7 +1821,7 @@ impl RPCProcessor {
                 let decode_res = self
                     .decode_rpc_operation(encoded_msg)
                     .measure_debug(TimestampDuration::new_ms(200), |dur| {
-                        veilid_log!(self debug "decode_rpc_operation Direct: {}", dur);
+                        veilid_log!(self debug "decode_rpc_operation Direct: {:#}", dur);
                     })
                     .await;
                 let (operation, opt_signer, encoded_msg) = match decode_res {

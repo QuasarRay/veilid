@@ -10,7 +10,18 @@ static LAST_INCREASING_RAW_TIMESTAMP: Mutex<u64> = Mutex::new(0u64);
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", display_ts(self.as_u64()))
+        if f.alternate() {
+            write!(f, "{}", human_timestamp(self.as_u64()))
+        } else {
+            write!(f, "{}", self.as_u64())
+        }
+    }
+}
+
+impl FromStr for Timestamp {
+    type Err = <u64 as FromStr>::Err;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Timestamp(u64::from_str(s)?))
     }
 }
 

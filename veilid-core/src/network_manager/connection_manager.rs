@@ -705,7 +705,7 @@ impl ConnectionManager {
 
     pub fn debug_print(&self) -> String {
         format!(
-            "Connection Table:\n\n{}",
+            "Connection Table:\n{}",
             self.arc.connection_table.debug_print_table()
         )
     }

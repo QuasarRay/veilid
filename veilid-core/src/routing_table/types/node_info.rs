@@ -14,25 +14,29 @@ pub struct NodeInfo {
 
 impl fmt::Display for NodeInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "timestamp:          {}", self.timestamp)?;
+        writeln!(f, "timestamp:          {}", f.to_string(self.timestamp))?;
         writeln!(f, "envelope_support:   {:?}", self.envelope_support)?;
-        writeln!(f, "crypto_info_list:   {:?}", self.crypto_info_list)?;
+        writeln!(
+            f,
+            "crypto_info_list:\n{}",
+            indent_all_string(f.to_multiline_indexed_string(self.crypto_info_list.iter()))
+        )?;
         writeln!(f, "capabilities:       {:?}", self.capabilities)?;
-        writeln!(f, "outbound_protocols: {:?}", self.outbound_protocols)?;
-        writeln!(f, "address_types:      {:?}", self.address_types)?;
+        writeln!(f, "outbound_protocols: {:#}", self.outbound_protocols)?;
+        writeln!(f, "address_types:      {:#}", self.address_types)?;
         writeln!(
             f,
             "dial_info_detail_list:\n{}",
-            indent_all_string(&self.dial_info_detail_list.to_multiline_indexed_string())
+            indent_all_string(f.to_multiline_indexed_string(self.dial_info_detail_list.iter()))
+                .string_if_empty("None")
         )?;
 
-        writeln!(
+        write!(
             f,
             "relay_info_list:\n{}",
-            indent_all_string(&self.relay_info_list.to_multiline_indexed_string())
-        )?;
-
-        Ok(())
+            indent_all_string(f.to_multiline_indexed_string(self.relay_info_list.iter()))
+                .string_if_empty("None")
+        )
     }
 }
 

@@ -34,10 +34,10 @@ impl fmt::Display for LowWaterMark {
         if f.alternate() {
             let mut out = Vec::new();
             for (ck, cc) in self.per_crypto_kind.iter() {
-                out.push(format!("{:#}:\n{:#}", ck, indent_all_string(cc)));
+                out.push(format!("{:#}: {}", ck, cc));
             }
             if out.is_empty() {
-                out.push("none".to_string());
+                out.push("None".to_string());
             }
             write!(f, "{}", out.join("\n"))
         } else {
@@ -46,7 +46,7 @@ impl fmt::Display for LowWaterMark {
                 out.push(format!("{}({})", ck, cc));
             }
             if out.is_empty() {
-                out.push("none".to_string());
+                out.push("None".to_string());
             }
             write!(f, "{}", out.join(", "))
         }

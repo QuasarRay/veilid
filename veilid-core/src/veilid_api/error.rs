@@ -111,6 +111,17 @@ macro_rules! apibail_route_not_found {
 
 #[allow(unused_macros)]
 #[macro_export]
+macro_rules! apibail_transaction_not_found {
+    ($x:expr) => {
+        return Err(VeilidAPIError::transaction_not_found($x))
+    };
+    ($fmt:literal, $($args:tt)*) => {
+        return Err(VeilidAPIError::transaction_not_found( format!($fmt, $($args)*) ))
+    };
+}
+
+#[allow(unused_macros)]
+#[macro_export]
 macro_rules! apibail_already_initialized {
     () => {
         return Err(VeilidAPIError::already_initialized())
@@ -163,6 +174,8 @@ pub enum VeilidAPIError {
     MissingArgument { context: String, argument: String },
     #[error("Generic: {message}")]
     Generic { message: String },
+    #[error("Transaction not found: {message}")]
+    TransactionNotFound { message: String },
 }
 
 impl VeilidAPIError {
@@ -234,6 +247,11 @@ impl VeilidAPIError {
             message: msg.to_string(),
         }
     }
+    pub fn transaction_not_found<T: ToString>(msg: T) -> Self {
+        Self::TransactionNotFound {
+            message: msg.to_string(),
+        }
+    }
 
     pub(crate) fn from_network_result<T>(nr: NetworkResult<T>) -> Result<T, Self> {
         match nr {
@@ -276,7 +294,9 @@ impl VeilidAPIError {
             | VeilidAPIError::KeyNotFound { key: _ }
             | VeilidAPIError::Unimplemented { message: _ } => Level::WARN,
 
-            VeilidAPIError::Timeout | VeilidAPIError::TryAgain { message: _ } => Level::DEBUG,
+            VeilidAPIError::Timeout
+            | VeilidAPIError::TryAgain { message: _ }
+            | VeilidAPIError::TransactionNotFound { message: _ } => Level::DEBUG,
         }
     }
 }

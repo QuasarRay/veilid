@@ -42,7 +42,7 @@ pub(crate) fn decompress_size_prepended(
                 "failed to decompress: {}:data_len={}\ndata={}\nbacktrace:\n{:#?}",
                 e,
                 input.len(),
-                print_data(input, Some(256)),
+                human_byte_data(input, Some(256)),
                 backtrace::Backtrace::new()
             );
         }

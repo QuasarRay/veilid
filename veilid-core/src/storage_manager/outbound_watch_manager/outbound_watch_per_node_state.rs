@@ -23,26 +23,14 @@ pub(in crate::storage_manager) struct OutboundWatchPerNodeState {
 
 impl fmt::Display for OutboundWatchPerNodeState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ watch_id={}, safety_selection={:?}, opt_watcher={}, expiration={}, count={}, watch_node_ref={}, opt_value_changed_route={} }}",
+        write!(f, "{{ watch_id={}, safety_selection={:#}, opt_watcher={}, expiration={:#}, count={}, watch_node_ref={}, opt_value_changed_route={} }}",
             self.watch_id,
             self.safety_selection,
-            if let Some(watcher) = &self.opt_watcher {
-                watcher.to_string()
-            } else {
-                "None".to_owned()
-            },
+            f.to_string_opt(self.opt_watcher.as_ref()),
             self.expiration,
             self.count,
-            if let Some(watch_node_ref) = &self.watch_node_ref {
-                watch_node_ref.to_string()
-            } else {
-                "None".to_string()
-            },
-            if let Some(value_changed_route)= &self.opt_value_changed_route {
-                value_changed_route.to_string()
-            } else {
-                "None".to_string()
-            }
+            f.to_string_opt(self.watch_node_ref.as_ref()),
+            f.to_string_opt(self.opt_value_changed_route.as_ref()),
         )
     }
 }

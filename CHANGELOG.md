@@ -1,3 +1,18 @@
+**UNRELEASED**
+
+- Global API Additions:
+  - `TransactionNotFound` added to `VeilidAPIError`
+
+- veilid-core:
+  - Added record flush on DHT record close to ensure closed records are fully flushed to the TableStore
+  - Formatting functions moved to veilid-tools, gets garbage nobody cares about out of the public API
+
+- veilid-tools:
+  - Formatting cleanup across the board, primarily for debugging purposes
+
+- veilid-flutter:
+  - Add `LogFixture` to `veilid_test` package
+
 **Changed in Veilid 0.5.3**
 
 - Global Breaking Changes:

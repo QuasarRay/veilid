@@ -76,12 +76,12 @@ impl fmt::Display for OutboundTransactionRecordState {
             f,
             "{} created@{} signer={} safety_selection={:?}\nnode_transactions:\n{}\nbegin_network_seqs:{}\n{}{}{}{}",
             self.record_key,
-            self.created_ts,
+            f.to_string(self.created_ts),
             self.signing_keypair.key(),
             self.safety_selection,
             self.node_transactions
                 .iter()
-                .map(|x| format!("  {}", x))
+                .map(|x| format!("  {}", f.to_string(x)))
                 .collect::<Vec<_>>()
                 .join("\n"),
             self.begin_network_seqs.to_table_string(),

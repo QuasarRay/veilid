@@ -114,6 +114,36 @@ impl SequenceOrdering {
     }
 }
 
+impl fmt::Display for SequenceOrdering {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                SequenceOrdering::Unordered => "unord",
+                SequenceOrdering::Ordered => "ord",
+            }
+        )
+    }
+}
+
+impl FromStr for SequenceOrdering {
+    type Err = VeilidAPIError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_ascii_lowercase();
+        if "unordered".starts_with(&s) {
+            Ok(Self::Unordered)
+        } else if "ordered".starts_with(&s) {
+            Ok(Self::Ordered)
+        } else {
+            Err(VeilidAPIError::parse_error(
+                "invalid sequence ordering str",
+                s,
+            ))
+        }
+    }
+}
+
 pub type SequenceOrderingSet = EnumSet<SequenceOrdering>;
 
 // Ordering here matters, >= is used to check strength of stability requirement
@@ -197,6 +227,15 @@ impl SafetySelection {
     }
 }
 
+impl fmt::Display for SafetySelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SafetySelection::Unsafe(seq) => write!(f, "Unsafe({})", f.to_string(seq)),
+            SafetySelection::Safe(ss) => write!(f, "Safe({})", f.to_string(ss)),
+        }
+    }
+}
+
 /// Options for safety routes (sender privacy).
 #[derive(
     Clone,
@@ -230,6 +269,22 @@ pub struct SafetySpec {
     pub sequencing: Sequencing,
 }
 
+impl fmt::Display for SafetySpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "hops={},{},{},{}",
+            self.hop_count,
+            f.to_string(self.stability),
+            f.to_string(self.sequencing),
+            self.preferred_route
+                .as_ref()
+                .map(|r| format!("pref={}", f.to_string(r)))
+                .unwrap_or_default()
+        )
+    }
+}
+
 /// Options for private routes (receiver privacy).
 #[derive(
     Clone,
@@ -260,4 +315,21 @@ pub struct PrivateSpec {
     /// Prefer connection-oriented sequenced protocols.
     #[serde(default)]
     pub sequencing: Sequencing,
+}
+
+impl fmt::Display for PrivateSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "kinds=[{}],hops={},{},{}",
+            self.crypto_kinds
+                .iter()
+                .map(|k| f.to_string(k))
+                .collect::<Vec<_>>()
+                .join(","),
+            self.hop_count,
+            f.to_string(self.stability),
+            f.to_string(self.sequencing)
+        )
+    }
 }

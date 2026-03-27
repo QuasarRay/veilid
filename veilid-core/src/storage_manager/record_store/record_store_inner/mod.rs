@@ -96,7 +96,10 @@ where
     ) -> VeilidAPIResult<Option<CommitAction<D>>> {
         self.record_index.delete_record(opaque_record_key.clone())?;
         self.cleanup_record(opaque_record_key);
-        Ok(self.record_index.maybe_prepare_commit_action())
+        // Use unconditional flush for deletes to ensure the deletion
+        // is persisted immediately rather than waiting for the
+        // background flush task or the uncommitted threshold
+        Ok(self.record_index.prepare_commit_action())
     }
 
     pub fn set_single_subkey(

@@ -97,7 +97,7 @@ impl InteractiveUI {
                     Ok(Ok(ConnectionState::ConnectedTCP(sa, st))) => {
                         let tstr = st
                             .duration_since(std::time::UNIX_EPOCH)
-                            .map(|n| display_ts(n.as_micros() as u64))
+                            .map(|n| human_timestamp(n.as_micros() as u64))
                             .unwrap_or_else(|_| "???".to_string());
 
                         stdout2
@@ -108,7 +108,7 @@ impl InteractiveUI {
                     Ok(Ok(ConnectionState::ConnectedIPC(pb, st))) => {
                         let tstr = st
                             .duration_since(std::time::UNIX_EPOCH)
-                            .map(|n| display_ts(n.as_micros() as u64))
+                            .map(|n| human_timestamp(n.as_micros() as u64))
                             .unwrap_or_else(|_| "???".to_string());
                         stdout2
                             .write(
@@ -121,7 +121,7 @@ impl InteractiveUI {
                     Ok(Ok(ConnectionState::RetryingTCP(sa, st))) => {
                         let tstr = st
                             .duration_since(std::time::UNIX_EPOCH)
-                            .map(|n| display_ts(n.as_micros() as u64))
+                            .map(|n| human_timestamp(n.as_micros() as u64))
                             .unwrap_or_else(|_| "???".to_string());
                         stdout2
                             .write(format!("\rRetrying TCP: {} @ {}\n", sa, tstr).as_bytes())
@@ -132,7 +132,7 @@ impl InteractiveUI {
                     Ok(Ok(ConnectionState::RetryingIPC(pb, st))) => {
                         let tstr = st
                             .duration_since(std::time::UNIX_EPOCH)
-                            .map(|n| display_ts(n.as_micros() as u64))
+                            .map(|n| human_timestamp(n.as_micros() as u64))
                             .unwrap_or_else(|_| "???".to_string());
                         stdout2
                             .write(

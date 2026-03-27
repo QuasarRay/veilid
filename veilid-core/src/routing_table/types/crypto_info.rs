@@ -28,3 +28,16 @@ impl CryptoInfo {
         }
     }
 }
+
+impl fmt::Display for CryptoInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            #[cfg(feature = "enable-crypto-none")]
+            CryptoInfo::NONE { public_key } => write!(f, "NONE: {}", f.to_string(public_key)),
+            #[cfg(feature = "enable-crypto-vld0")]
+            CryptoInfo::VLD0 { public_key } => write!(f, "VLD0: {}", f.to_string(public_key)),
+            // #[cfg(feature = "enable-crypto-vld1")]
+            // CryptoInfo::VLD1 { encapsulation_key, signing_key } => write!(f, "VLD1: encapsulation_key={}, signing_key={}", f.to_string(encapsulation_key), f.to_string(signing_key)),
+        }
+    }
+}

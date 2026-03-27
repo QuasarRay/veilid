@@ -394,9 +394,9 @@ impl StorageManager {
             if wva.answer.expiration.is_zero() {
                 veilid_log!(self debug "WatchValue not renewed: id={} ({})", watch_id, watch_node);
             } else if watch_id != wva.answer.watch_id {
-                veilid_log!(self debug "WatchValue changed: id={}->{} expiration={} ({})", watch_id, wva.answer.watch_id, wva.answer.expiration, watch_node);
+                veilid_log!(self debug "WatchValue changed: id={}->{} expiration={:#} ({})", watch_id, wva.answer.watch_id, wva.answer.expiration, watch_node);
             } else {
-                veilid_log!(self debug "WatchValue renewed: id={} expiration={} ({})", watch_id, wva.answer.expiration, watch_node);
+                veilid_log!(self debug "WatchValue renewed: id={} expiration={:#} ({})", watch_id, wva.answer.expiration, watch_node);
             }
 
             Ok(OutboundWatchValueResult {
@@ -527,7 +527,7 @@ impl StorageManager {
                         let disposition = if wva.answer.accepted {
                             if wva.answer.expiration.as_u64() > 0 {
                                 // If the expiration time is greater than zero this watch is active
-                                veilid_log!(registry debug target:"watch", "WatchValue accepted for {}: id={} expiration={} ({})", record_key, wva.answer.watch_id, display_ts(wva.answer.expiration.as_u64()), next_node);
+                                veilid_log!(registry debug target:"watch", "WatchValue accepted for {}: id={} expiration={:#} ({})", record_key, wva.answer.watch_id, wva.answer.expiration, next_node);
 
                                 // Add to accepted watches
                                 let mut ctx = context.lock();
@@ -543,7 +543,7 @@ impl StorageManager {
                                 // If the returned expiration time is zero, this watch was cancelled
 
                                 // If the expiration time is greater than zero this watch is active
-                                veilid_log!(registry debug target:"watch", "WatchValue rejected for {}: id={} expiration={} ({})", record_key, wva.answer.watch_id, display_ts(wva.answer.expiration.as_u64()), next_node);
+                                veilid_log!(registry debug target:"watch", "WatchValue rejected for {}: id={} expiration={:#} ({})", record_key, wva.answer.watch_id, wva.answer.expiration, next_node);
 
                                 // Add to rejected watches
                                 let mut ctx = context.lock();
@@ -600,7 +600,7 @@ impl StorageManager {
         let fanout_call = FanoutCall::new(
             &routing_table,
             FanoutCallParams {
-                name: format!("outbound_watch_value({})", Timestamp::now_increasing()),
+                name: format!("outbound_watch_value({:#})", Timestamp::now_increasing()),
                 hash_coordinate,
                 node_count,
                 fanout_tasks,

@@ -502,40 +502,40 @@ impl ConnectionTable {
     }
 
     pub fn debug_print_table(&self) -> String {
-        let mut out = String::new();
+        let mut out = Vec::new();
         let inner = self.inner.lock();
         let cur_ts = Timestamp::now();
         for pt in inner.conn_by_id.keys() {
-            out += &format!(
-                "  {} Connections: ({}/{})\n",
+            out.push(format!(
+                "  {} Connections: ({}/{})",
                 pt,
                 inner.conn_by_id[pt].len(),
                 inner.max_connections[pt]
-            );
+            ));
 
             for (_, conn) in &inner.conn_by_id[pt] {
                 let is_priority_flow = inner.priority_flows[pt].contains_key(&conn.flow());
 
-                out += &format!(
-                    "    {}{}\n",
+                out.push(format!(
+                    "    {}{}",
                     conn.debug_print(cur_ts),
                     if is_priority_flow { " PRIORITY" } else { "" }
-                );
+                ));
             }
         }
 
         for pt in inner.priority_flows.keys() {
-            out += &format!(
-                "  {} Priority Flows: ({}/{})\n",
+            out.push(format!(
+                "  {} Priority Flows: ({}/{})",
                 pt,
                 inner.priority_flows[pt].len(),
                 inner.priority_flows[pt].capacity(),
-            );
+            ));
 
             for (flow, _) in &inner.priority_flows[pt] {
-                out += &format!("    {}\n", flow);
+                out.push(format!("    {}", flow));
             }
         }
-        out
+        out.join("\n")
     }
 }

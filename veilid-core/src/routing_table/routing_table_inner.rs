@@ -185,7 +185,7 @@ impl RoutingTableInner {
         #[cfg(feature = "verbose-tracing")]
         {
             let elapsed = Timestamp::now().duration_since(start_ts);
-            veilid_log!(self debug "snapshot_entries: {} entries in {}", entries.len(), elapsed);
+            veilid_log!(self debug "snapshot_entries: {} entries in {:#}", entries.len(), elapsed);
         }
 
         EntrySnapshot::new(registry, cur_ts, entries)

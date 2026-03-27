@@ -17,8 +17,9 @@ import 'test_veilid_config.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  final fixture =
-      DefaultVeilidFixture(programName: 'veilid_flutter integration test');
+  final fixture = DefaultVeilidFixture(
+      programName: 'veilid_flutter integration test',
+      logFixture: LogFixture.instance);
 
   // setUp(() {
   //   final liveTest = Invoker.current?.liveTest;

@@ -49,6 +49,24 @@ pub(crate) enum BucketEntryDeadReason {
     NoPingResponse,
 }
 
+impl fmt::Display for BucketEntryDeadReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            match self {
+                BucketEntryDeadReason::CanNotSend => write!(f, "DFSEND"),
+                BucketEntryDeadReason::TooManyLostAnswers => write!(f, "DALOST"),
+                BucketEntryDeadReason::NoPingResponse => write!(f, "DNOPNG"),
+            }
+        } else {
+            match self {
+                BucketEntryDeadReason::CanNotSend => write!(f, "Can not send"),
+                BucketEntryDeadReason::TooManyLostAnswers => write!(f, "Too many lost answers"),
+                BucketEntryDeadReason::NoPingResponse => write!(f, "No ping response"),
+            }
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum BucketEntryUnreliableReason {
     FailedToSend,
@@ -57,12 +75,58 @@ pub(crate) enum BucketEntryUnreliableReason {
     InUnreliablePingSpan,
 }
 
+impl fmt::Display for BucketEntryUnreliableReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            match self {
+                BucketEntryUnreliableReason::FailedToSend => write!(f, "UFSEND"),
+                BucketEntryUnreliableReason::LostAnswers => write!(f, "UALOST"),
+                BucketEntryUnreliableReason::NotSeenConsecutively => write!(f, "UNSEEN"),
+                BucketEntryUnreliableReason::InUnreliablePingSpan => write!(f, "UUPING"),
+            }
+        } else {
+            match self {
+                BucketEntryUnreliableReason::FailedToSend => write!(f, "Failed to send"),
+                BucketEntryUnreliableReason::LostAnswers => write!(f, "Lost answers"),
+                BucketEntryUnreliableReason::NotSeenConsecutively => {
+                    write!(f, "Not seen consecutively")
+                }
+                BucketEntryUnreliableReason::InUnreliablePingSpan => {
+                    write!(f, "In unreliable ping span")
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum BucketEntryStateReason {
     Punished(PunishmentReason),
     Dead(BucketEntryDeadReason),
     Unreliable(BucketEntryUnreliableReason),
     Reliable,
+}
+
+impl fmt::Display for BucketEntryStateReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            match self {
+                BucketEntryStateReason::Punished(p) => write!(f, "{}", f.to_string(p)),
+                BucketEntryStateReason::Dead(d) => write!(f, "{}", f.to_string(d)),
+                BucketEntryStateReason::Unreliable(u) => write!(f, "{}", f.to_string(u)),
+                BucketEntryStateReason::Reliable => write!(f, "RELIBL"),
+            }
+        } else {
+            match self {
+                BucketEntryStateReason::Punished(p) => write!(f, "Punished({})", f.to_string(p)),
+                BucketEntryStateReason::Dead(d) => write!(f, "Dead({})", f.to_string(d)),
+                BucketEntryStateReason::Unreliable(u) => {
+                    write!(f, "Unreliable({})", f.to_string(u))
+                }
+                BucketEntryStateReason::Reliable => write!(f, "Reliable"),
+            }
+        }
+    }
 }
 
 // Do not change order here, it will mess up other sorts
@@ -125,14 +189,14 @@ impl fmt::Display for BucketEntryPublicInternet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(pi) = &self.peer_info {
             writeln!(f, "peer_info:")?;
-            write!(f, "    {}", indent_string(pi))?;
+            write!(f, "    {}", indent_string(f.to_string(&**pi)))?;
         } else {
             writeln!(f, "peer_info: None")?;
         }
         writeln!(
             f,
             "last_seen_our_node_info_ts: {}",
-            self.last_seen_our_node_info_ts
+            f.to_string(self.last_seen_our_node_info_ts)
         )?;
         writeln!(f, "node_status: {:?}", self.node_status)?;
         Ok(())
@@ -154,14 +218,14 @@ impl fmt::Display for BucketEntryLocalNetwork {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(pi) = &self.peer_info {
             writeln!(f, "peer_info:")?;
-            write!(f, "    {}", indent_string(pi))?;
+            write!(f, "    {}", indent_string(f.to_string(&**pi)))?;
         } else {
             writeln!(f, "peer_info: None")?;
         }
         writeln!(
             f,
             "last_seen_our_node_info_ts: {}",
-            self.last_seen_our_node_info_ts
+            f.to_string(self.last_seen_our_node_info_ts)
         )?;
         writeln!(f, "node_status: {:?}", self.node_status)?;
         Ok(())
@@ -251,20 +315,16 @@ impl fmt::Display for BucketEntryInner {
             )?;
         }
         writeln!(f, "public_internet:")?;
-        write!(f, "{}", indent_all_string(&self.public_internet))?;
-        writeln!(f, "local_network:")?;
-        write!(f, "{}", indent_all_string(&self.local_network))?;
-        writeln!(f, "peer_stats:")?;
-        write!(f, "{}", indent_all_string(&self.peer_stats))?;
-        writeln!(
+        write!(
             f,
-            "punishment: {}",
-            if let Some(punishment) = self.punishment {
-                format!("{:?}", punishment)
-            } else {
-                "None".to_owned()
-            }
+            "{}",
+            indent_all_string(f.to_string(&self.public_internet))
         )?;
+        writeln!(f, "local_network:")?;
+        write!(f, "{}", indent_all_string(f.to_string(&self.local_network)))?;
+        writeln!(f, "peer_stats:")?;
+        write!(f, "{}", indent_all_string(f.to_string(&self.peer_stats)))?;
+        writeln!(f, "punishment: {}", f.to_string_opt(self.punishment))?;
 
         Ok(())
     }

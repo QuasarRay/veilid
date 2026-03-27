@@ -11,9 +11,16 @@ pub(crate) enum RelayKind {
 
 impl fmt::Display for RelayKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RelayKind::Inbound => write!(f, "inbound"),
-            RelayKind::Outbound => write!(f, "outbound"),
+        if f.alternate() {
+            match self {
+                RelayKind::Inbound => write!(f, "Inbound"),
+                RelayKind::Outbound => write!(f, "Outbound"),
+            }
+        } else {
+            match self {
+                RelayKind::Inbound => write!(f, "inbound"),
+                RelayKind::Outbound => write!(f, "outbound"),
+            }
         }
     }
 }

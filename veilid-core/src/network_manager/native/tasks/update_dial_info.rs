@@ -208,7 +208,7 @@ impl Network {
 
         // If we got no external address types, try again
         if external_address_types.is_empty() {
-            veilid_log!(self debug "DialInfo discovery failed in {}, trying again, got no external address types", done_duration);
+            veilid_log!(self debug "DialInfo discovery failed in {:#}, trying again, got no external address types", done_duration);
             return Ok(false);
         }
 
@@ -223,12 +223,12 @@ impl Network {
         }
 
         if !success {
-            veilid_log!(self debug "DialInfo discovery failed in {}, trying again, needed {:?}", done_duration, context_configs);
+            veilid_log!(self debug "DialInfo discovery failed in {:#}, trying again, needed {:?}", done_duration, context_configs);
             return Ok(false);
         }
 
         // All done
-        veilid_log!(self debug "DialInfo discovery finished in {} with address_types {:?}", done_duration, external_address_types);
+        veilid_log!(self debug "DialInfo discovery finished in {:#} with address_types {:?}", done_duration, external_address_types);
 
         // Set the address types we've seen and confirm the routing domain configuration
         editor.setup_network(

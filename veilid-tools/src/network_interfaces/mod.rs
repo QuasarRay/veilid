@@ -78,6 +78,15 @@ impl IfAddr {
     }
 }
 
+impl fmt::Display for IfAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            IfAddr::V4(ref ifv4_addr) => write!(f, "{}", f.to_string(ifv4_addr)),
+            IfAddr::V6(ref ifv6_addr) => write!(f, "{}", f.to_string(ifv6_addr)),
+        }
+    }
+}
+
 /// Details about the ipv4 address of an interface on this host.
 #[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Hash, Clone, Serialize, Deserialize)]
 pub struct Ifv4Addr {
@@ -87,6 +96,33 @@ pub struct Ifv4Addr {
     pub netmask: Ipv4Addr,
     /// The broadcast address of the interface.
     pub broadcast: Option<Ipv4Addr>,
+}
+
+impl fmt::Display for Ifv4Addr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}",
+            self.ip,
+            if let Some(prefix_len) = self.prefix_len() {
+                format!("{}", prefix_len)
+            } else {
+                format!("(invalid netmask={})", self.netmask)
+            },
+        )
+    }
+}
+
+fn ipv4_netmask_to_prefix_len(netmask: Ipv4Addr) -> Option<u8> {
+    let netmask_u32 = netmask.to_bits();
+    let prefix_len = netmask_u32.leading_ones() as u8;
+    let suffix_len = netmask_u32.trailing_zeros() as u8;
+
+    if suffix_len != 32 - prefix_len {
+        None
+    } else {
+        Some(prefix_len)
+    }
 }
 
 impl Ifv4Addr {
@@ -130,6 +166,11 @@ impl Ifv4Addr {
 
         self_ip == addr_ip
     }
+
+    #[must_use]
+    pub fn prefix_len(&self) -> Option<u8> {
+        ipv4_netmask_to_prefix_len(self.netmask)
+    }
 }
 
 /// Details about the ipv6 address of an interface on this host.
@@ -141,6 +182,21 @@ pub struct Ifv6Addr {
     pub netmask: Ipv6Addr,
     /// The broadcast address of the interface.
     pub broadcast: Option<Ipv6Addr>,
+}
+
+impl fmt::Display for Ifv6Addr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}",
+            self.ip,
+            if let Some(prefix_len) = self.prefix_len() {
+                format!("{}", prefix_len)
+            } else {
+                format!("(invalid netmask={})", self.netmask)
+            },
+        )
+    }
 }
 
 impl Ifv6Addr {
@@ -195,6 +251,23 @@ impl Ifv6Addr {
         );
 
         self_ip == addr_ip
+    }
+
+    #[must_use]
+    pub fn prefix_len(&self) -> Option<u8> {
+        ipv6_netmask_to_prefix_len(self.netmask)
+    }
+}
+
+fn ipv6_netmask_to_prefix_len(netmask: Ipv6Addr) -> Option<u8> {
+    let netmask_u128 = netmask.to_bits();
+    let prefix_len = netmask_u128.leading_ones() as u8;
+    let suffix_len = netmask_u128.trailing_zeros() as u8;
+
+    if suffix_len != 128 - prefix_len {
+        None
+    } else {
+        Some(prefix_len)
     }
 }
 

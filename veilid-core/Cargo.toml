@@ -105,9 +105,7 @@ veilid-tools = { version = "0.5.3", path = "../veilid-tools", features = [
 pastey = "0.2.1"
 backtrace = "^0.3.71"
 num-traits = "0.2.19"
-shell-words = "1.1.0"
 cfg-if = "1.0.0"
-hex = "0.4.3"
 lazy_static = "1.5.0"
 directories = "6.0.0"
 get-size2 = { version = "0.7.4", features = ["derive"] }

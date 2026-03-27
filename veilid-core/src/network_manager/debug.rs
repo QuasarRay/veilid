@@ -6,12 +6,12 @@ impl NetworkManager {
         let inner = self.inner.lock();
         out += &format!(
             "Relay Worker Dequeue Latency:\n{}",
-            indent_all_string(&inner.stats.relay_worker_dequeue_latency)
+            indent_all_string(format!("{:#}", inner.stats.relay_worker_dequeue_latency))
         );
         out += "\n";
         out += &format!(
             "Relay Worker Process Latency:\n{}",
-            indent_all_string(&inner.stats.relay_worker_process_latency)
+            indent_all_string(format!("{:#}", inner.stats.relay_worker_process_latency))
         );
         out
     }
@@ -24,7 +24,7 @@ impl NetworkManager {
         out += "---------------\n";
         let mut out = format!(
             "Transfer stats:\n{}\n",
-            indent_all_string(&stats.self_stats.transfer_stats)
+            indent_all_string(format!("{:#}", stats.self_stats.transfer_stats))
         );
         out += &self.debug_info_nodeinfo();
         out += "\n";

@@ -15,6 +15,32 @@ pub enum RoutingDomainInboundStage {
     ReadyToPublish,
 }
 
+impl fmt::Display for RoutingDomainInboundStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            match self {
+                RoutingDomainInboundStage::Invalid => write!(f, "Invalid"),
+                RoutingDomainInboundStage::NeedsDialInfoConfirmation => {
+                    write!(f, "NeedsDialInfoConfirmation")
+                }
+                RoutingDomainInboundStage::Unusable => write!(f, "Unusable"),
+                RoutingDomainInboundStage::NeedsRelays => write!(f, "NeedsRelays"),
+                RoutingDomainInboundStage::ReadyToPublish => write!(f, "ReadyToPublish"),
+            }
+        } else {
+            match self {
+                RoutingDomainInboundStage::Invalid => write!(f, "Invalid"),
+                RoutingDomainInboundStage::NeedsDialInfoConfirmation => {
+                    write!(f, "Needs Dial Info Confirmation")
+                }
+                RoutingDomainInboundStage::Unusable => write!(f, "Unusable"),
+                RoutingDomainInboundStage::NeedsRelays => write!(f, "Needs Relays"),
+                RoutingDomainInboundStage::ReadyToPublish => write!(f, "Ready To Publish"),
+            }
+        }
+    }
+}
+
 /// The lifecycle stage of the routing domain's outbound connectivity
 #[derive(Debug, Copy, Clone)]
 pub enum RoutingDomainOutboundStage {
@@ -30,6 +56,38 @@ pub enum RoutingDomainOutboundStage {
     NeedsSafetyRoutes,
     /// Ready to perform all operations
     ReadyToOperate,
+}
+
+impl fmt::Display for RoutingDomainOutboundStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            match self {
+                RoutingDomainOutboundStage::Invalid => write!(f, "Invalid"),
+                RoutingDomainOutboundStage::NeedsBootstrap => write!(f, "NeedsBootstrap"),
+                RoutingDomainOutboundStage::NeedsPublishedPeerInfo => {
+                    write!(f, "NeedsPublishedPeerInfo")
+                }
+                RoutingDomainOutboundStage::NeedsMoreTestedNodes => {
+                    write!(f, "NeedsMoreTestedNodes")
+                }
+                RoutingDomainOutboundStage::NeedsSafetyRoutes => write!(f, "NeedsSafetyRoutes"),
+                RoutingDomainOutboundStage::ReadyToOperate => write!(f, "ReadyToOperate"),
+            }
+        } else {
+            match self {
+                RoutingDomainOutboundStage::Invalid => write!(f, "Invalid"),
+                RoutingDomainOutboundStage::NeedsBootstrap => write!(f, "Needs Bootstrap"),
+                RoutingDomainOutboundStage::NeedsPublishedPeerInfo => {
+                    write!(f, "Needs Published Peer Info")
+                }
+                RoutingDomainOutboundStage::NeedsMoreTestedNodes => {
+                    write!(f, "Needs More Tested Nodes")
+                }
+                RoutingDomainOutboundStage::NeedsSafetyRoutes => write!(f, "Needs Safety Routes"),
+                RoutingDomainOutboundStage::ReadyToOperate => write!(f, "Ready To Operate"),
+            }
+        }
+    }
 }
 
 /// Combined state information for the routing domain
@@ -51,4 +109,19 @@ pub struct RoutingDomainState {
     pub is_ready_inbound: bool,
     /// If this routing domain is ready for outbound use (dialinfo, bootstrapped, safety routes, etc)
     pub is_ready_outbound: bool,
+}
+
+impl fmt::Display for RoutingDomainState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Inbound Stage: {}\nOutbound Stage: {}\nRelay Status:\n{}\nCurrent Peer Info:\n{}\nEntry Summary:\n{}\nLow Water Mark:\n{}",
+            f.to_string(self.inbound_stage),
+            f.to_string(self.outbound_stage),
+            indent_all_string(f.to_string(&self.relay_status)),
+            indent_all_string(f.to_string(&self.current_peer_info)),
+            indent_all_string(f.to_string(&self.entry_summary)),
+            indent_all_string(f.to_string(&self.low_water_mark))
+        )
+    }
 }

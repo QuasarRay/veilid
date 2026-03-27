@@ -14,24 +14,25 @@ impl RoutingTable {
     pub fn debug_info_nodeinfo(&self) -> String {
         let self_transfer_stats = self.self_transfer_stats_accounting.lock().1.clone();
 
-        let mut out = String::new();
-        out += &format!("Node Ids: {}\n", self.node_ids());
-        out += &format!(
+        let mut out = Vec::new();
+
+        out.push(format!("Node Ids: {}\n", self.node_ids()));
+        out.push(format!(
             "Version: {}{}\n",
             veilid_version_string(),
             if cfg!(debug_assertions) { "-debug" } else { "" }
-        );
-        out += &format!("Features: {:?}\n", veilid_features());
-        out += &format!(
-            "Self Transfer Stats:\n{}",
-            indent_all_string(&self_transfer_stats)
-        );
-        out += &format!(
-            "Routing Table Health: {:#?}\n",
-            self.get_routing_table_health()
-        );
+        ));
+        out.push(format!("Features: {:?}\n", veilid_features()));
+        out.push(format!(
+            "Self Transfer Stats:\n{}\n",
+            indent_all_string(format!("{:#}", self_transfer_stats))
+        ));
+        out.push(format!(
+            "Routing Table Health:\n{}",
+            indent_all_string(format!("{:#}", self.get_routing_table_health()))
+        ));
 
-        out
+        out.join("\n")
     }
 
     pub fn debug_info_dialinfo(&self) -> String {
@@ -53,15 +54,18 @@ impl RoutingTable {
             let mut rdout = String::new();
             rdout += "Dial Info Details:\n";
             for (n, ldi) in dial_info_details.iter().enumerate() {
-                rdout += &indent_all_string(&format!("  {:>2}: {}\n", n, ldi));
+                rdout += &indent_all_string(format!("{:>2}: {:#}\n", n, ldi));
             }
-            rdout += &format!("Routing Domain State: {:#?}\n", state);
+            rdout += &format!(
+                "Routing Domain State:\n{}\n",
+                indent_all_string(format!("{:#}", state))
+            );
             rdout += "Routing Domain Relays:\n";
             for (n, rdr) in relays.iter().enumerate() {
-                rdout += &indent_all_string(&format!("{:>2}: {:?}\n", n, rdr));
+                rdout += &indent_all_string(format!("{:>2}: {:#}\n", n, rdr));
             }
             rdout += "Routing Domain Details:\n";
-            rdout += &debug;
+            rdout += &debug.string_if_empty("None");
 
             out += &(indent_all_string(&rdout) + "\n");
         }
@@ -73,47 +77,17 @@ impl RoutingTable {
         let mut out = String::new();
         if published {
             let pistr = if let Some(pi) = self.get_published_peer_info(routing_domain) {
-                format!("\n{}\n", indent_all_string(&pi))
+                format!("\n{}\n", indent_all_string(format!("{:#}", pi)))
             } else {
                 " None".to_owned()
             };
             out += &format!("{:?} Published PeerInfo:{}", routing_domain, pistr);
         } else {
             let pi = self.get_current_peer_info(routing_domain);
-            let pistr = format!("\n{}\n", indent_all_string(&pi));
+            let pistr = format!("\n{}\n", indent_all_string(format!("{:#}", pi)));
             out += &format!("{:?} Current PeerInfo:{}", routing_domain, pistr);
         }
         out
-    }
-
-    fn format_state_reason(state_reason: BucketEntryStateReason) -> &'static str {
-        match state_reason {
-            BucketEntryStateReason::Punished(p) => match p {
-                PunishmentReason::Manual => "PMANUL",
-                PunishmentReason::FailedToDecryptEnvelopeBody => "PCRYPT",
-                PunishmentReason::FailedToDecodeEnvelope => "PDECEN",
-                PunishmentReason::ShortPacket => "PSHORT",
-                PunishmentReason::InvalidFraming => "PFRAME",
-                PunishmentReason::FailedToDecodeOperation => "PDECOP",
-                PunishmentReason::WrongSenderPeerInfo => "PSPBAD",
-                // PunishmentReason::FailedToVerifySenderPeerInfo => "PSPVER",
-                PunishmentReason::FailedToRegisterSenderPeerInfo => "PSPREG",
-                //
-            },
-            BucketEntryStateReason::Dead(d) => match d {
-                BucketEntryDeadReason::CanNotSend => "DFSEND",
-                BucketEntryDeadReason::TooManyLostAnswers => "DALOST",
-                BucketEntryDeadReason::NoPingResponse => "DNOPNG",
-            },
-            BucketEntryStateReason::Unreliable(u) => match u {
-                BucketEntryUnreliableReason::FailedToSend => "UFSEND",
-                BucketEntryUnreliableReason::LostAnswers => "UALOST",
-                BucketEntryUnreliableReason::NotSeenConsecutively => "UNSEEN",
-                BucketEntryUnreliableReason::InUnreliablePingSpan => "UUPING",
-                //
-            },
-            BucketEntryStateReason::Reliable => "RELIBL",
-        }
     }
 
     fn format_entry(
@@ -122,13 +96,13 @@ impl RoutingTable {
         e: &BucketEntryInner,
         relay_tag: &str,
     ) -> String {
-        let state_reason = Self::format_state_reason(e.state_reason(cur_ts));
+        let state_reason = format!("{:#}", e.state_reason(cur_ts));
 
         let average_latency = e
             .peer_stats()
             .latency
             .as_ref()
-            .map(|l| l.to_string())
+            .map(|l| format!("{:#}", l))
             .unwrap_or_else(|| "???".to_string());
 
         let capabilities = if let Some(ni) = e.node_info(RoutingDomain::PublicInternet) {
@@ -146,7 +120,7 @@ impl RoutingTable {
             .rpc_stats
             .last_question_ts
             .as_ref()
-            .map(|l| cur_ts.duration_since(*l).to_string())
+            .map(|l| format!("{:#}", cur_ts.duration_since(*l)))
             .unwrap_or_else(|| "???".to_string());
 
         let since_last_seen = e
@@ -154,7 +128,7 @@ impl RoutingTable {
             .rpc_stats
             .last_seen_ts
             .as_ref()
-            .map(|l| cur_ts.duration_since(*l).to_string())
+            .map(|l| format!("{:#}", cur_ts.duration_since(*l)))
             .unwrap_or_else(|| "???".to_string());
 
         #[allow(unused_mut)]
@@ -487,11 +461,7 @@ impl RoutingTable {
         let mut out = String::new();
         out += &node_ref.operate(|e| {
             let state_reason = e.state_reason(cur_ts);
-            format!(
-                "{}\nstate: {}\n",
-                e,
-                Self::format_state_reason(state_reason),
-            )
+            format!("{:#}\nstate: {:#}\n", e, state_reason)
         });
         out
     }

@@ -68,6 +68,11 @@ abstract class VeilidAPIException implements Exception {
         {
           return VeilidAPIExceptionGeneric(json['message']! as String);
         }
+      case 'TransactionNotFound':
+        {
+          return VeilidAPIExceptionTransactionNotFound(
+              json['message']! as String);
+        }
       default:
         {
           throw VeilidAPIExceptionInternal(
@@ -265,4 +270,19 @@ class VeilidAPIExceptionGeneric implements VeilidAPIException {
 
   @override
   String toDisplayError() => message;
+}
+
+@immutable
+class VeilidAPIExceptionTransactionNotFound implements VeilidAPIException {
+  final String message;
+
+  //
+  const VeilidAPIExceptionTransactionNotFound(this.message);
+
+  @override
+  String toString() =>
+      'VeilidAPIException: TransactionNotFound (message: $message)';
+
+  @override
+  String toDisplayError() => 'Transaction not found: $message';
 }

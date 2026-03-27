@@ -83,13 +83,12 @@ pub use async_trait;
 pub use tracing;
 /// Re-exported from `tracing-subscriber` crate
 pub use tracing_subscriber;
+#[cfg(target_os = "android")]
+pub use veilid_api::android::veilid_core_setup_android;
 /// Re-exported from `veilid-tools` crate
 pub use veilid_tools as tools;
 /// Re-exported from `bytes` crate
 pub use veilid_tools::bytes;
-
-#[cfg(target_os = "android")]
-pub use veilid_api::android::veilid_core_setup_android;
 
 #[cfg(any(test, feature = "test-util"))]
 #[doc(hidden)]

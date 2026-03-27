@@ -48,7 +48,7 @@ impl RPCProcessor {
                 Some(route_op_id),
             )
             .measure_debug(TimestampDuration::new_ms(200), |dur| {
-                veilid_log!(self debug "process_route_safety_route_hop rpc_route stmt: {}", dur);
+                veilid_log!(self debug "process_route_safety_route_hop rpc_route stmt: {:#}", dur);
             }),
         )
         .await
@@ -100,7 +100,7 @@ impl RPCProcessor {
                 Some(route_op_id),
             )
             .measure_debug(TimestampDuration::new_ms(200), |dur| {
-                veilid_log!(self debug "process_route_private_route_hop rpc_route stmt: {}", dur);
+                veilid_log!(self debug "process_route_private_route_hop rpc_route stmt: {:#}", dur);
             }),
         )
         .await

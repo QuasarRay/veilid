@@ -44,6 +44,25 @@ impl fmt::Debug for RoutingDomainDetailCommon {
     }
 }
 
+impl fmt::Display for RoutingDomainDetailCommon {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Outbound Protocols: {}\nInbound Protocols: {}\nAddress Types: {}\nRelays And States:\n{}\nCapabilities: {}\nDial Info Details:\n{}\nConfirmed: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nEntry Summary:\n{}",
+            self.outbound_protocols,
+            self.inbound_protocols,
+            self.address_types,
+            indent_all_string(f.to_multiline_indexed_string(self.relays_and_states.iter().map(|(r,s)| format!("{}\n{}", f.to_string(r), f.to_string(s)))).string_if_empty("None")),
+            self.capabilities.iter().map(|c| f.to_string(c)).collect::<Vec<_>>().join(","),
+            indent_all_string(f.to_multiline_indexed_string(self.dial_info_details.iter().map(|d| f.to_string(d))).string_if_empty("None")),
+            self.confirmed,
+            f.to_string(self.low_water_mark.lock().1.clone()),
+            self.bootstrap_peers.lock().clone().iter().map(|n| f.to_string(n)).collect::<Vec<_>>().join(",").string_if_empty("None"),
+            indent_all_string(f.to_string(self.entry_summary.lock().clone()))
+        )
+    }
+}
+
 impl_veilid_component_accessors!(RoutingDomainDetailCommon);
 
 impl RoutingDomainDetailCommon {

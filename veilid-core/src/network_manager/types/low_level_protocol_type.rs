@@ -9,3 +9,16 @@ pub(crate) enum LowLevelProtocolType {
     UDP = 0,
     TCP = 1,
 }
+
+impl fmt::Display for LowLevelProtocolType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                LowLevelProtocolType::UDP => "UDP",
+                LowLevelProtocolType::TCP => "TCP",
+            }
+        )
+    }
+}

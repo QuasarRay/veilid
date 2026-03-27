@@ -153,7 +153,7 @@ impl PublicInternetRoutingDomainController {
         // Reset the low water mark for this routing domain
         routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
 
-        veilid_log!(self info "Bootstrap finished in {} via {:?}", duration, valid_bootstraps);
+        veilid_log!(self info "Bootstrap finished in {:#} via {:?}", duration, valid_bootstraps);
 
         Ok(())
     }

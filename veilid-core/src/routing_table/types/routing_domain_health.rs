@@ -38,10 +38,10 @@ impl fmt::Display for RoutingDomainHealth {
         if f.alternate() {
             write!(
                 f,
-                "ready: {}\n{:#}\n{:#}",
+                "Ready: {}\nSummary:\n{}\nLow Water Mark:\n{}",
                 ready.join("+"),
-                self.entry_summary,
-                self.low_water_mark
+                indent_all_string(f.to_string(&self.entry_summary)),
+                indent_all_string(f.to_string(&self.low_water_mark))
             )
         } else {
             // Merge entry summary and low water mark into a single string
@@ -63,15 +63,15 @@ impl fmt::Display for RoutingDomainHealth {
                     .get(&ck)
                     .map(|x| x.to_string())
                 {
-                    ckout.push(format!("lwm:{}", lwmstr));
+                    ckout.push(format!("LWM:{}", lwmstr));
                 }
                 out.push(ckout.join(" / "));
             }
             if out.is_empty() {
-                out.push("none".to_string());
+                out.push("None".to_string());
             }
 
-            write!(f, "ready: {}, {}", ready.join("+"), out.join(", "))
+            write!(f, "Ready: {}, {}", ready.join("+"), out.join(", "))
         }
     }
 }

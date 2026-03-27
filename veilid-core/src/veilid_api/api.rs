@@ -6,7 +6,7 @@ impl_veilid_log_facility!("veilid_api");
 
 pub(super) struct VeilidAPIInner {
     context: Option<VeilidCoreContext>,
-    pub(super) debug_cache: DebugCache,
+    pub(super) debug_cache: debug::DebugCache,
 }
 
 impl fmt::Debug for VeilidAPIInner {
@@ -132,31 +132,6 @@ impl VeilidAPI {
             .registry()
             .lookup::<BlockStore>()
             .ok_or(VeilidAPIError::NotInitialized)
-    }
-
-    ////////////////////////////////////////////////////////////////
-    // Internal Accessors
-
-    pub(crate) fn core_context(&self) -> VeilidAPIResult<VeilidCoreContext> {
-        let inner = self.inner.lock();
-        let Some(context) = &inner.context else {
-            return Err(VeilidAPIError::NotInitialized);
-        };
-        Ok(context.clone())
-    }
-
-    pub(crate) fn with_debug_cache<R, F: FnOnce(&mut DebugCache) -> R>(&self, callback: F) -> R {
-        let mut inner = self.inner.lock();
-        callback(&mut inner.debug_cache)
-    }
-
-    #[must_use]
-    pub(crate) fn log_key(&self) -> &str {
-        let inner = self.inner.lock();
-        let Some(context) = &inner.context else {
-            return "";
-        };
-        context.log_key()
     }
 
     ////////////////////////////////////////////////////////////////
@@ -481,5 +456,33 @@ impl VeilidAPI {
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip(self), ret))]
     pub async fn cancel_tunnel(&self, _tunnel_id: TunnelId) -> VeilidAPIResult<bool> {
         panic!("unimplemented");
+    }
+
+    ////////////////////////////////////////////////////////////////
+    // Internal Accessors
+
+    pub(crate) fn core_context(&self) -> VeilidAPIResult<VeilidCoreContext> {
+        let inner = self.inner.lock();
+        let Some(context) = &inner.context else {
+            return Err(VeilidAPIError::NotInitialized);
+        };
+        Ok(context.clone())
+    }
+
+    pub(crate) fn with_debug_cache<R, F: FnOnce(&mut debug::DebugCache) -> R>(
+        &self,
+        callback: F,
+    ) -> R {
+        let mut inner = self.inner.lock();
+        callback(&mut inner.debug_cache)
+    }
+
+    #[must_use]
+    pub(crate) fn log_key(&self) -> &str {
+        let inner = self.inner.lock();
+        let Some(context) = &inner.context else {
+            return "";
+        };
+        context.log_key()
     }
 }

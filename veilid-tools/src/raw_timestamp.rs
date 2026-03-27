@@ -14,7 +14,7 @@ cfg_if! {
         }
 
         #[must_use]
-        pub fn display_ts(ts: u64) -> String {
+        pub fn human_timestamp(ts: u64) -> String {
             if is_browser() {
                 let now = Date::new_0();
                 now.set_time(Date::now());
@@ -70,7 +70,7 @@ cfg_if! {
         }
 
         #[must_use]
-        pub fn display_ts(ts: u64) -> String {
+        pub fn human_timestamp(ts: u64) -> String {
             let now = chrono::DateTime::<chrono::Utc>::from(SystemTime::now());
             let date = chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + Duration::from_micros(ts));
 
@@ -115,7 +115,7 @@ const SEC: u64 = 1_000_000u64;
 const MSEC: u64 = 1_000u64;
 
 #[must_use]
-pub fn display_duration(dur: u64) -> String {
+pub fn human_duration(dur: u64) -> String {
     let days = dur / DAY;
     let dur = dur % DAY;
     let hours = dur / HOUR;

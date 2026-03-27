@@ -63,6 +63,18 @@ impl VeilidAppMessage {
     }
 }
 
+impl fmt::Display for VeilidAppMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "sender: {}\nroute_id: {}\nmessage: {}",
+            f.to_string_opt(self.sender.as_ref()),
+            f.to_string_opt(self.route_id.as_ref()),
+            human_byte_data(&self.message, Some(64)),
+        )
+    }
+}
+
 /// Direct question blob passed to hosting application for processing to send an eventual AppReply.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
@@ -135,5 +147,18 @@ impl VeilidAppCall {
     /// The id to specify as `call_id` in the [VeilidAPI::app_call_reply] function.
     pub fn id(&self) -> OperationId {
         self.call_id
+    }
+}
+
+impl fmt::Display for VeilidAppCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "sender: {}\nroute_id: {}\nmessage: {}\ncall_id: {}",
+            f.to_string_opt(self.sender.as_ref()),
+            f.to_string_opt(self.route_id.as_ref()),
+            human_byte_data(&self.message, Some(64)),
+            f.to_string(self.call_id)
+        )
     }
 }

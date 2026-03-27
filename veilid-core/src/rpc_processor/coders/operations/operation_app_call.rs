@@ -12,7 +12,7 @@ impl fmt::Debug for RPCOperationAppCallQ {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RPCOperationAppCallQ")
             .field("message(len)", &self.message.len())
-            .field("message", &print_data(&self.message, Some(64)))
+            .field("message", &human_byte_data(&self.message, Some(64)))
             .finish()
     }
 }
@@ -65,7 +65,7 @@ impl fmt::Debug for RPCOperationAppCallA {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RPCOperationAppCallA")
             .field("message(len)", &self.message.len())
-            .field("message", &print_data(&self.message, Some(64)))
+            .field("message", &human_byte_data(&self.message, Some(64)))
             .finish()
     }
 }

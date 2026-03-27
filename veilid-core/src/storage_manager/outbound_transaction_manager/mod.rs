@@ -61,7 +61,7 @@ impl fmt::Display for OutboundTransactionManager {
 
             for k in keys {
                 let v = self.transactions.get(&k).unwrap_or_log();
-                out += &format!("  {}:\n{}\n", k, indent_all_by(4, v.to_string()));
+                out += &format!("  {}:\n{}\n", k, indent_all_by(4, f.to_string(v)));
             }
         }
         out += "]\n";
@@ -187,7 +187,7 @@ impl OutboundTransactionManager {
     ) -> VeilidAPIResult<&OutboundTransactionState> {
         self.transactions
             .get(transaction_handle)
-            .ok_or_else(|| VeilidAPIError::internal("missing transaction"))
+            .ok_or_else(|| VeilidAPIError::transaction_not_found("missing transaction"))
     }
 
     /// Modify a transaction state
@@ -197,7 +197,7 @@ impl OutboundTransactionManager {
     ) -> VeilidAPIResult<&mut OutboundTransactionState> {
         self.transactions
             .get_mut(transaction_handle)
-            .ok_or_else(|| VeilidAPIError::internal("missing transaction"))
+            .ok_or_else(|| VeilidAPIError::transaction_not_found("missing transaction"))
     }
 
     /// Iterate transaction handles and states
@@ -217,7 +217,7 @@ impl OutboundTransactionManager {
 
         // Assert stage
         if let Some(stage_consensus) = outbound_transaction_state.stage_consensus() {
-            apibail_generic!("stage was {:?}, wanted Init", stage_consensus.stage,);
+            apibail_transaction_not_found!("stage was {:?}, wanted Init", stage_consensus.stage,);
         }
 
         let mut out = vec![];
@@ -412,7 +412,7 @@ impl OutboundTransactionManager {
 
         // Assert stage
         if outbound_transaction_state.stage_consensus().is_none() {
-            apibail_generic!("stage was Init, wanted valid stage");
+            apibail_transaction_not_found!("stage was Init, wanted valid stage");
         }
 
         // If rollback ids are specified, just go with it
@@ -464,7 +464,7 @@ impl OutboundTransactionManager {
 
         // Assert stage
         if outbound_transaction_state.stage_consensus().is_none() {
-            apibail_generic!("stage was Init, wanted valid stage");
+            apibail_transaction_not_found!("stage was Init, wanted valid stage");
         }
 
         // Record results
@@ -503,7 +503,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
             }
         }
 
@@ -550,7 +550,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
             }
         }
 
@@ -590,7 +590,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted End", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted End", stage);
             }
         }
 
@@ -648,7 +648,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted End", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted End", stage);
             }
         }
 
@@ -702,7 +702,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
             }
         }
 
@@ -767,7 +767,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
             }
         }
 
@@ -902,7 +902,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
             }
         }
 
@@ -963,7 +963,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
             }
         }
 
@@ -1044,12 +1044,12 @@ impl OutboundTransactionManager {
             OutboundTransactionStage::Begin | OutboundTransactionStage::End
         ) {
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(registry debug target: "dht", "Keepalive updated expiration: transaction_handle={} record={} node_xid={} expiration={}", transaction_handle, opaque_record_key, node_xid, expiration);
+            veilid_log!(registry debug target: "dht", "Keepalive updated expiration: transaction_handle={} record={} node_xid={} expiration={:#}", transaction_handle, opaque_record_key, node_xid, expiration);
 
             nt.update_expiration(Some(expiration));
         } else {
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(registry debug target: "dht", "Keepalive update ignored: stage={} transaction_handle={} record={} node_xid={} expiration={}", nt.stage(), transaction_handle, opaque_record_key, node_xid, expiration);
+            veilid_log!(registry debug target: "dht", "Keepalive update ignored: stage={} transaction_handle={} record={} node_xid={} expiration={:#}", nt.stage(), transaction_handle, opaque_record_key, node_xid, expiration);
         }
 
         Ok(matches!(nt.stage(), OutboundTransactionStage::Begin))
@@ -1077,7 +1077,7 @@ impl OutboundTransactionManager {
             | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
-                apibail_generic!("stage was {:?}, wanted Begin", stage);
+                apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
             }
         }
 

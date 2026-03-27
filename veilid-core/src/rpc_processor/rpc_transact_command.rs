@@ -260,7 +260,7 @@ impl RPCProcessor {
                     opt_value,
                 )
                 .measure_debug(TimestampDuration::new_ms(200), |dur| {
-                    veilid_log!(self debug "inbound_transact_command: {} command={} xid={} opt_subkey={:?}", dur, command, transaction_id, opt_subkey);
+                    veilid_log!(self debug "inbound_transact_command: {:#} command={} xid={} opt_subkey={:?}", dur, command, transaction_id, opt_subkey);
                 })
                 .await
                 .map_err(RPCError::internal)?);
@@ -341,7 +341,7 @@ impl RPCProcessor {
                 None,
             )
             .measure_debug(TimestampDuration::new_ms(200), |dur| {
-                veilid_log!(self debug "process_transact_command_q answer ({} xid={}): {}", command, transaction_id, dur);
+                veilid_log!(self debug "process_transact_command_q answer ({} xid={}): {:#}", command, transaction_id, dur);
             }),
         )
         .await

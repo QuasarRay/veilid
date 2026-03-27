@@ -223,7 +223,7 @@ impl RoutingTable {
             != current_routing_table_health.live_entry_count()
             || readiness_changed
         {
-            veilid_log!(self debug "Routing Table Health:\n{}", indent_all_string(&current_routing_table_health));
+            veilid_log!(self debug "Routing Table Health:\n{}", indent_all_string(format!("{:#}", &*current_routing_table_health)));
         }
     }
 }

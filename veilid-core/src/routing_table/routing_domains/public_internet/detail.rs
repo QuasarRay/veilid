@@ -20,10 +20,31 @@ impl fmt::Debug for PublicInternetRoutingDomainDetail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PublicInternetRoutingDomainDetail")
             // .field("registry", &self.registry)
+            .field("interface_addresses", &self.interface_addresses)
             .field("common", &self.common)
             .field("published_peer_info", &self.published_peer_info)
             .field("opt_last_relay_status", &self.opt_last_relay_status)
             .finish()
+    }
+}
+
+impl fmt::Display for PublicInternetRoutingDomainDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Interface Addresses:\n{}\nPublished Peer Info:\n{}\nLast Relay Status:\n{}\n{}",
+            indent_all_string(
+                f.to_multiline_indexed_string(
+                    self.interface_addresses
+                        .iter()
+                        .map(|intf_addr| f.to_string(intf_addr))
+                )
+                .string_if_empty("None")
+            ),
+            indent_all_string(f.to_string_opt(self.published_peer_info.lock().as_ref())),
+            indent_all_string(f.to_string_opt(self.opt_last_relay_status.load().as_ref())),
+            f.to_string(&self.common)
+        )
     }
 }
 
@@ -200,9 +221,9 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
 
     fn debug(&self, alt: bool) -> String {
         if alt {
-            format!("{:#?}", self)
+            format!("{:#}", self)
         } else {
-            format!("{:?}", self)
+            format!("{}", self)
         }
     }
 }

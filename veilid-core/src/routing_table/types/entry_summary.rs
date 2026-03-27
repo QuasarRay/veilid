@@ -56,7 +56,7 @@ impl fmt::Display for CapabilityCounts {
         } else {
             write!(
                 f,
-                "{{any={},conn={},dist={}}}",
+                "{{any={}, connectivity={}, distance_metric={}}}",
                 self.any_capabilities,
                 self.connectivity_capabilities,
                 self.distance_metric_capabilities
@@ -143,11 +143,19 @@ impl EntrySummary {
 impl fmt::Display for EntrySummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if f.alternate() {
-            write!(f, "combined:\n{:#}\n", indent_all_string(&self.combined))?;
+            let mut out = Vec::new();
+            out.push(format!(
+                "Combined:\n{}",
+                indent_all_string(f.to_string(&self.combined))
+            ));
             for (ck, detail) in self.per_crypto_kind.iter() {
-                write!(f, "{:#}:\n{:#}\n", ck, indent_all_string(detail))?;
+                out.push(format!(
+                    "{:#}:\n{}",
+                    ck,
+                    indent_all_string(f.to_string(detail))
+                ));
             }
-            Ok(())
+            write!(f, "{}", out.join("\n"))
         } else {
             let mut out = Vec::new();
             for (ck, detail) in self.per_crypto_kind.iter() {
@@ -159,7 +167,7 @@ impl fmt::Display for EntrySummary {
             //     out.push(format!("combined({})", indent_all_string(&self.combined)));
             // }
             if out.is_empty() {
-                out.push("none".to_string());
+                out.push("None".to_string());
             }
             write!(f, "{}", out.join(", "))
         }

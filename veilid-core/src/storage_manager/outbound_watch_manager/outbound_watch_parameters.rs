@@ -22,7 +22,7 @@ impl fmt::Display for OutboundWatchParameters {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{{ expiration={}, count={}, subkeys={}, opt_watcher={}, safety_selection={:?} }}",
+            "{{ expiration={:#}, count={}, subkeys={}, opt_watcher={}, safety_selection={:#} }}",
             self.expiration,
             self.count,
             self.subkeys,

@@ -4188,6 +4188,22 @@
             "kind",
             "message"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "TransactionNotFound"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "message"
+          ]
         }
       ]
     },
@@ -4938,18 +4954,18 @@
       ]
     },
     "VeilidRouteChange": {
-      "description": "Describe a private route change that has happened",
+      "description": "Describe a private or safety route change that has happened",
       "type": "object",
       "properties": {
         "dead_remote_routes": {
-          "description": "If a private route that was imported has died, it is listed here.",
+          "description": "If an imported remote private route has died, it is listed here.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "dead_routes": {
-          "description": "If a private route that was allocated has died, it is listed here.",
+          "description": "If an allocated route dies or was released, it is listed here.",
           "type": "array",
           "items": {
             "type": "string"

@@ -14,6 +14,17 @@ pub struct RoutingDomainRelayState {
     pub last_optimized: Timestamp,
 }
 
+impl fmt::Display for RoutingDomainRelayState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Keepalive:{}\nOptimized:{}",
+            f.to_string(self.last_keepalive),
+            f.to_string(self.last_optimized)
+        )
+    }
+}
+
 impl PartialEq for RoutingDomainRelay {
     fn eq(&self, other: &Self) -> bool {
         self.relay_node.equivalent(&other.relay_node)
@@ -34,5 +45,22 @@ impl RoutingDomainRelay {
             dial_info_details: vec![],
             pings: vec![],
         }
+    }
+}
+
+impl fmt::Display for RoutingDomainRelay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:#}: {}\nPings:\n{}\nDial Info Details:\n{}",
+            self.relay_kind,
+            self.relay_node,
+            indent_all_string(
+                f.to_multiline_indexed_string(self.pings.iter().map(|p| f.to_string(p)))
+            ),
+            indent_all_string(f.to_multiline_indexed_string(
+                self.dial_info_details.iter().map(|d| f.to_string(d))
+            ))
+        )
     }
 }

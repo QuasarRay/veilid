@@ -1124,7 +1124,7 @@ where
         }
 
         let end_ts = Timestamp::now();
-        veilid_log!(self info "Finished loading {} in {}", self.unlocked_inner.name, end_ts.duration_since(start_ts));
+        veilid_log!(self info "Finished loading {} in {:#}", self.unlocked_inner.name, end_ts.duration_since(start_ts));
 
         Ok(())
     }
@@ -2047,7 +2047,7 @@ where
         out += "Records:\n";
         for (rik, rec) in &self.record_cache {
             out += &format!(
-                "  {} age={} len={} subkeys={}\n",
+                "  {} age={:#} len={} subkeys={}\n",
                 rik.record_key,
                 Timestamp::now_non_decreasing().duration_since(rec.last_touched()),
                 rec.record_data_size(),
@@ -2055,8 +2055,16 @@ where
             );
         }
         out += &format!("Subkey Cache Count: {}\n", self.subkey_cache.len());
-        out += &format!("Subkey Cache Total Size: {}\n", self.subkey_cache_space);
-        out += &format!("Total Storage Space: {}\n", self.record_cache_space);
+        let subkey_cache_total_size = ByteCount::new(self.subkey_cache_space.debug_value() as u64);
+        out += &format!(
+            "Subkey Cache Total Size: {:#} ({} bytes)\n",
+            subkey_cache_total_size, subkey_cache_total_size
+        );
+        let total_storage_space = ByteCount::new(self.record_cache_space.debug_value());
+        out += &format!(
+            "Total Storage Space: {:#} ({} bytes)\n",
+            total_storage_space, total_storage_space
+        );
         out += &format!(
             "Uncommitted Record Changes: {}\n",
             self.uncommitted_record_changes.len()

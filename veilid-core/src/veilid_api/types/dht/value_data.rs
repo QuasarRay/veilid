@@ -99,7 +99,7 @@ impl fmt::Debug for ValueData {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("ValueData")
             .field("seq", &u32::from(self.seq))
-            .field("data", &print_data(&self.data, Some(64)))
+            .field("data", &human_byte_data(&self.data, Some(64)))
             .field("writer", &self.writer)
             .finish()
     }

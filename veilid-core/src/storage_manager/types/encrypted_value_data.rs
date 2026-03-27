@@ -169,7 +169,7 @@ impl fmt::Debug for EncryptedValueData {
 
         fmt.debug_struct("EncryptedValueData")
             .field("seq", &seq)
-            .field("data", &print_data(&data, Some(64)))
+            .field("data", &human_byte_data(&data, Some(64)))
             .field("writer", &writer)
             .field("nonce", &nonce)
             .finish()

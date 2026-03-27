@@ -114,6 +114,9 @@ flume = { version = "0.12.0", features = ["async"] }
 imbl = { version = "7.0.0", features = ["serde"] }
 indent = "0.1.1"
 bytes = { version = "1.11.1", features = ["serde", "std"] }
+shell-words = "1.1.0"
+hex = "0.4.3"
+
 
 # Dependencies for native builds only
 # Linux, Windows, Mac, iOS, Android

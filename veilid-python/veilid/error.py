@@ -141,6 +141,14 @@ class VeilidAPIErrorGeneric(VeilidAPIError):
     message: str
 
 
+@dataclass
+class VeilidAPIErrorTransactionNotFound(VeilidAPIError):
+    """Transaction was not found or is no longer valid"""
+
+    label = "Transaction not found"
+    message: str
+
+
 # Build a mapping of canonicalized labels to their exception classes. Do this in-place to update
 # the object inside the closure so VeilidAPIError.from_json can access the values.
 _ERROR_REGISTRY.clear()

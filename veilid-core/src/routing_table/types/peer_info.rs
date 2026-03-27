@@ -23,7 +23,7 @@ impl fmt::Display for PeerInfo {
         writeln!(f, "routing_domain: {:?}", self.routing_domain)?;
         writeln!(f, "node_ids: {}", self.node_ids)?;
         writeln!(f, "node_info:")?;
-        write!(f, "{}", indent_all_string(&self.node_info))?;
+        write!(f, "{}", indent_all_string(f.to_string(&self.node_info)))?;
         Ok(())
     }
 }

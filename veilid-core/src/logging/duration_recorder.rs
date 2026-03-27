@@ -36,7 +36,7 @@ where
     let out = closure();
     let duration = TimestampDuration::since(start);
     if duration > limit {
-        let msg = format!("Excessive duration: {}", duration);
+        let msg = format!("Excessive duration: {:#}", duration);
         callback(msg);
     }
 
@@ -104,14 +104,14 @@ where
                 out
             }
             Either::Right((_, fut)) => {
-                let msg = format!("Duration limit exceeded: {}", limit);
+                let msg = format!("Duration limit exceeded: {:#}", limit);
                 callback(msg);
                 fut.await
             }
         };
         let duration = TimestampDuration::since(start);
         if duration > limit {
-            let msg = format!("Excessive duration: {}", duration);
+            let msg = format!("Excessive duration: {:#}", duration);
             callback(msg);
         }
         out

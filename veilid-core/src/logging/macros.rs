@@ -46,13 +46,13 @@ macro_rules! veilid_log_err {
 #[macro_export]
 macro_rules! veilid_log_dbg {
     ($self_expr:expr) => {
-        |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, "{}", e)
+        |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, "{:#}", e)
     };
     ($self_expr:expr, $message:expr) => {
-        |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, "{}: {}", $message, e)
+        |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, "{}: {:#}", $message, e)
     };
     ($self_expr:expr, $fmt:expr, $($args:tt)*) => {
-        |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, concat!($fmt,": {}"), $($args)*, e)
+        |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, concat!($fmt,": {:#}"), $($args)*, e)
     };
 }
 

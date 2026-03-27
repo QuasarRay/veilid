@@ -7,6 +7,8 @@ import 'dart:io' show Platform;
 import 'package:async_tools/async_tools.dart';
 import 'package:veilid/veilid.dart';
 
+import 'log_fixture.dart';
+
 const kIsWeb = bool.fromEnvironment('dart.library.js_util');
 
 abstract class VeilidFixture {
@@ -27,8 +29,9 @@ class DefaultVeilidFixture implements VeilidFixture {
   static final _fixtureMutex = Mutex();
 
   final String programName;
+  final LogFixture? logFixture;
 
-  DefaultVeilidFixture({required this.programName});
+  DefaultVeilidFixture({required this.programName, this.logFixture});
 
   @override
   Future<void> setUp() async {
@@ -160,15 +163,7 @@ class DefaultVeilidFixture implements VeilidFixture {
 
     _veilidUpdateSubscription = us.listen((update) {
       if (update is VeilidLog) {
-        final datetime = DateTime.now();
-        final timestamp =
-            '${datetime.hour.toString().padLeft(2, '0')}:${datetime.minute.toString().padLeft(2, '0')}:${datetime.second.toString().padLeft(2, '0')}.${datetime.millisecond.toString().padLeft(3, '0')}';
-
-        // Tests should print logs
-        // ignore: avoid_print
-        print(
-          '$timestamp ${update.logLevel.name.toUpperCase()} ${update.message}',
-        );
+        logFixture?.processVeilidLog(update);
       } else if (update is VeilidUpdateAttachment) {
       } else if (update is VeilidUpdateConfig) {
       } else if (update is VeilidUpdateNetwork) {

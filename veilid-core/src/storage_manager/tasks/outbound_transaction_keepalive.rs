@@ -410,7 +410,7 @@ impl OutboundTransactionKeepaliveProcessor {
                 ) {
                 Ok(v) => v,
                 Err(e) => {
-                    veilid_log!(registry debug "Keepalive result recording failed: keepalive={:?} expiration={}: {}",
+                    veilid_log!(registry debug "Keepalive result recording failed: keepalive={:?} expiration={:#}: {}",
                         keepalive, expiration, e);
                     // Do not reschedule on recording failure
                     false
@@ -424,7 +424,7 @@ impl OutboundTransactionKeepaliveProcessor {
                 let cur_ts = Timestamp::now();
                 let next_ts = cur_ts.later(OUTBOUND_TRANSACTION_KEEPALIVE_INTERVAL);
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(registry debug target: "dht", "Keepalive rescheduled: next_ts={} keepalive={:?}", next_ts, keepalive);
+                veilid_log!(registry debug target: "dht", "Keepalive rescheduled: next_ts={:#} keepalive={:?}", next_ts, keepalive);
 
                 dl.add_deadline(next_ts, keepalive);
             }

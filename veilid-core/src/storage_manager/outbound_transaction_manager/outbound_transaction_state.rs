@@ -51,7 +51,7 @@ impl fmt::Display for OutboundTransactionState {
 record_infos:
 {}
 "#,
-            self.created_ts,
+            f.to_string(self.created_ts),
             self.stage_consensus()
                 .map(|x| x.stage.to_string())
                 .unwrap_or_else(|| "INIT".to_string()),
@@ -59,7 +59,7 @@ record_infos:
             self.record_states
                 .iter()
                 .enumerate()
-                .map(|x| indent_all_string(&format!("{}: {}", x.0, x.1)))
+                .map(|x| indent_all_string(format!("{}: {}", x.0, f.to_string(x.1))))
                 .collect::<Vec<_>>()
                 .join("\n"),
         )
