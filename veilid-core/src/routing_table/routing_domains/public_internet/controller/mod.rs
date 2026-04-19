@@ -25,7 +25,7 @@ pub const PRIVATE_ROUTE_MANAGEMENT_INTERVAL_SECS: u32 = 1;
 
 pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     registry: VeilidComponentRegistry,
-    detail: Box<RwLock<dyn RoutingDomainDetail>>,
+    detail: Box<RwLock<PublicInternetRoutingDomainDetail>>,
     /// Published peer info for this routing domain
     published_peer_info: Mutex<Option<Arc<PeerInfo>>>,
     /// Last time we pinged checked the active watches
@@ -73,6 +73,22 @@ impl core::ops::Deref for PublicInternetRoutingDomainController {
 
 impl_veilid_component_accessors!(PublicInternetRoutingDomainController);
 
+impl SpecificRoutingDomainController for PublicInternetRoutingDomainController {
+    const ROUTING_DOMAIN: RoutingDomain = RoutingDomain::PublicInternet;
+    type Detail = PublicInternetRoutingDomainDetail;
+    type Editor<'a> = RoutingDomainEditorPublicInternet<'a>;
+
+    fn read(&self) -> RwLockReadGuard<'_, Self::Detail> {
+        self.unlocked_inner.detail.read()
+    }
+    fn write(&self) -> RwLockWriteGuard<'_, Self::Detail> {
+        self.unlocked_inner.detail.write()
+    }
+    fn edit(&self) -> Self::Editor<'_> {
+        RoutingDomainEditorPublicInternet::new(self)
+    }
+}
+
 impl PublicInternetRoutingDomainController {
     pub fn new(registry: VeilidComponentRegistry) -> Self {
         let config = registry.config();
@@ -117,13 +133,22 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
     }
 
     /// Read access to the routing domain detail
-    fn read(&self) -> RwLockReadGuard<'_, dyn RoutingDomainDetail> {
-        self.unlocked_inner.detail.read()
+    fn read_dyn(&self) -> MappedRwLockReadGuard<'_, dyn RoutingDomainDetail> {
+        RwLockReadGuard::map(self.unlocked_inner.detail.read(), |x| {
+            x as &dyn RoutingDomainDetail
+        })
     }
 
     /// Write access to the routing domain detail
-    fn write(&self) -> RwLockWriteGuard<'_, dyn RoutingDomainDetail> {
-        self.unlocked_inner.detail.write()
+    fn write_dyn(&self) -> MappedRwLockWriteGuard<'_, dyn RoutingDomainDetail> {
+        RwLockWriteGuard::map(self.unlocked_inner.detail.write(), |x| {
+            x as &mut dyn RoutingDomainDetail
+        })
+    }
+
+    /// Editor access to common fields in the routing domain detail
+    fn edit_dyn(&self) -> Box<dyn RoutingDomainEditor + '_> {
+        Box::new(RoutingDomainEditorPublicInternet::new(self))
     }
 
     fn routing_domain(&self) -> RoutingDomain {
@@ -133,7 +158,8 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
     /// Start up the routing domain controller
     fn startup(&self) -> PinBoxFuture<'_, EyreResult<()>> {
         Box::pin(async move {
-            // Nothing to do
+            // Publish peer info
+            self.publish_peer_info();
             Ok(())
         })
     }
@@ -142,7 +168,6 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
     fn shutdown(&self) -> PinBoxFuture<'_, ()> {
         Box::pin(async move {
             // Unpublish peer info
-            veilid_log!(self debug "PublicInternet: unpublishing peer info");
             self.unpublish_peer_info();
         })
     }
@@ -179,13 +204,15 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         let (opt_old_peer_info, opt_new_peer_info) = {
             let state = self.state();
 
-            let opt_new_peer_info = if matches!(
+            let new_peer_info = if matches!(
                 state.inbound_stage,
                 RoutingDomainInboundStage::ReadyToPublish
             ) {
-                Some(state.current_peer_info)
+                state.current_peer_info
             } else {
-                None
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self debug "[PublicInternet] Not publishing peer info because it is not ready to publish");
+                return false;
             };
 
             // Don't publish if the peer info hasnt changed from our previous publication
@@ -193,26 +220,23 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             let opt_old_peer_info = (*ppi_lock).clone();
 
             if let Some(old_peer_info) = &opt_old_peer_info {
-                if let Some(new_peer_info) = &opt_new_peer_info {
-                    if new_peer_info.equivalent(old_peer_info) {
-                        veilid_log!(self debug "[PublicInternet] Not publishing peer info because it is equivalent");
-                        return false;
-                    }
+                if new_peer_info.equivalent(old_peer_info) {
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug "[PublicInternet] Not publishing peer info because it is equivalent");
+                    return false;
                 }
-            } else if opt_new_peer_info.is_none() {
-                veilid_log!(self debug "[PublicInternet] Not publishing peer info because it is still None");
-                return false;
             }
 
-            if let Some(new_peer_info) = &opt_new_peer_info {
-                veilid_log!(self debug "[PublicInternet] Published new peer info: {}", new_peer_info);
-            } else {
-                veilid_log!(self debug "[PublicInternet] Unpublishing because current peer info is invalid");
-            }
+            veilid_log!(self debug "[PublicInternet] Published new peer info: {}", new_peer_info);
 
-            *ppi_lock = opt_new_peer_info.clone();
+            *ppi_lock = Some(new_peer_info.clone());
 
-            (opt_old_peer_info, opt_new_peer_info)
+            // Report peer info change to route spec store cache
+            self.routing_table()
+                .route_spec_store()
+                .report_peer_info_changed();
+
+            (opt_old_peer_info, Some(new_peer_info))
         };
 
         if let Err(e) = self.event_bus().post(PeerInfoChangeEvent {
@@ -234,6 +258,12 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         }
         veilid_log!(self debug "[PublicInternet] Unpublished peer info");
         *ppi_lock = None;
+
+        // Report peer info change to route spec store cache
+        self.routing_table()
+            .route_spec_store()
+            .report_peer_info_changed();
+
         if let Err(e) = self.event_bus().post(PeerInfoChangeEvent {
             routing_domain: RoutingDomain::PublicInternet,
             opt_old_peer_info,
@@ -250,6 +280,7 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
     fn get_contact_method(
         &self,
         peer_a: Arc<PeerInfo>,
+        peer_a_published: bool,
         peer_b: Arc<PeerInfo>,
         dial_info_filter: DialInfoFilter,
         sequencing: Sequencing,
@@ -258,6 +289,7 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         PublicInternetRoutingDomainController::get_contact_method(
             self,
             peer_a,
+            peer_a_published,
             peer_b,
             dial_info_filter,
             sequencing,

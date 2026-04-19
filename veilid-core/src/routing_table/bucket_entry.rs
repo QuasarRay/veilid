@@ -459,6 +459,8 @@ impl BucketEntryInner {
 
             // Always allow overwriting unsigned node (bootstrap)
             if !current_pi.signatures().is_empty() {
+                // Current peer info is signed so accept only newer peer info (may be unsigned if bootstrapping)
+
                 // If the timestamp hasn't changed or is less, ignore this update
                 if peer_info.node_info().timestamp() <= current_pi.node_info().timestamp() {
                     // If we received a node update with the same timestamp

@@ -6,7 +6,7 @@ impl_veilid_log_facility!("rtab");
 
 pub struct LocalNetworkRoutingDomainControllerUnlockedInner {
     registry: VeilidComponentRegistry,
-    detail: Box<RwLock<dyn RoutingDomainDetail>>,
+    detail: Box<RwLock<LocalNetworkRoutingDomainDetail>>,
     /// Published peer info for this routing domain
     published_peer_info: Mutex<Option<Arc<PeerInfo>>>,
     /// Background process to check LocalNetwork nodes to see if they are still alive and for reliability
@@ -37,6 +37,22 @@ impl core::ops::Deref for LocalNetworkRoutingDomainController {
 
 impl_veilid_component_accessors!(LocalNetworkRoutingDomainController);
 
+impl SpecificRoutingDomainController for LocalNetworkRoutingDomainController {
+    const ROUTING_DOMAIN: RoutingDomain = RoutingDomain::LocalNetwork;
+    type Detail = LocalNetworkRoutingDomainDetail;
+    type Editor<'a> = RoutingDomainEditorLocalNetwork<'a>;
+
+    fn read(&self) -> RwLockReadGuard<'_, Self::Detail> {
+        self.unlocked_inner.detail.read()
+    }
+    fn write(&self) -> RwLockWriteGuard<'_, Self::Detail> {
+        self.unlocked_inner.detail.write()
+    }
+    fn edit(&self) -> Self::Editor<'_> {
+        RoutingDomainEditorLocalNetwork::new(self)
+    }
+}
+
 impl LocalNetworkRoutingDomainController {
     pub fn new(registry: VeilidComponentRegistry) -> Self {
         let detail = Box::new(RwLock::new(LocalNetworkRoutingDomainDetail::new(
@@ -65,13 +81,22 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
     }
 
     /// Read access to the routing domain detail
-    fn read(&self) -> RwLockReadGuard<'_, dyn RoutingDomainDetail> {
-        self.unlocked_inner.detail.read()
+    fn read_dyn(&self) -> MappedRwLockReadGuard<'_, dyn RoutingDomainDetail> {
+        RwLockReadGuard::map(self.unlocked_inner.detail.read(), |x| {
+            x as &dyn RoutingDomainDetail
+        })
     }
 
     /// Write access to the routing domain detail
-    fn write(&self) -> RwLockWriteGuard<'_, dyn RoutingDomainDetail> {
-        self.unlocked_inner.detail.write()
+    fn write_dyn(&self) -> MappedRwLockWriteGuard<'_, dyn RoutingDomainDetail> {
+        RwLockWriteGuard::map(self.unlocked_inner.detail.write(), |x| {
+            x as &mut dyn RoutingDomainDetail
+        })
+    }
+
+    /// Editor access to common fields in the routing domain detail
+    fn edit_dyn(&self) -> Box<dyn RoutingDomainEditor + '_> {
+        Box::new(RoutingDomainEditorLocalNetwork::new(self))
     }
 
     fn routing_domain(&self) -> RoutingDomain {
@@ -81,7 +106,8 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
     /// Start up the routing domain controller
     fn startup(&self) -> PinBoxFuture<'_, EyreResult<()>> {
         Box::pin(async move {
-            // Nothing to do
+            // Publish peer info
+            self.publish_peer_info();
             Ok(())
         })
     }
@@ -90,7 +116,6 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
     fn shutdown(&self) -> PinBoxFuture<'_, ()> {
         Box::pin(async move {
             // Unpublish peer info
-            veilid_log!(self debug "LocalNetwork: unpublishing peer info");
             self.unpublish_peer_info();
         })
     }
@@ -106,7 +131,7 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
     ///////////////////////////////////////////////////////////////////////////////////////
 
     fn state(&self) -> RoutingDomainState {
-        let detail = self.read();
+        let detail = self.read_dyn();
         let entry_summary = detail.get_entry_summary();
         let low_water_mark = detail.get_low_water_mark();
 
@@ -192,13 +217,15 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
         let (opt_old_peer_info, opt_new_peer_info) = {
             let state = self.state();
 
-            let opt_new_peer_info = if matches!(
+            let new_peer_info = if matches!(
                 state.inbound_stage,
                 RoutingDomainInboundStage::ReadyToPublish
             ) {
-                Some(state.current_peer_info)
+                state.current_peer_info
             } else {
-                None
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self debug "[LocalNetwork] Not publishing peer info because it is not ready to publish");
+                return false;
             };
 
             // Don't publish if the peer info hasnt changed from our previous publication
@@ -206,25 +233,17 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
             let opt_old_peer_info = (*ppi_lock).clone();
 
             if let Some(old_peer_info) = &opt_old_peer_info {
-                if let Some(new_peer_info) = &opt_new_peer_info {
-                    if new_peer_info.equivalent(old_peer_info) {
-                        veilid_log!(self debug "[LocalNetwork] Not publishing peer info because it is equivalent");
-                        return false;
-                    }
+                if new_peer_info.equivalent(old_peer_info) {
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug "[LocalNetwork] Not publishing peer info because it is equivalent");
+                    return false;
                 }
-            } else if opt_new_peer_info.is_none() {
-                veilid_log!(self debug "[LocalNetwork] Not publishing peer info because it is still None");
-                return false;
             }
 
-            if let Some(new_peer_info) = &opt_new_peer_info {
-                veilid_log!(self debug "[LocalNetwork] Published new peer info: {}", new_peer_info);
-            } else {
-                veilid_log!(self debug "[LocalNetwork] Unpublishing because current peer info is invalid");
-            }
-            *ppi_lock = opt_new_peer_info.clone();
+            veilid_log!(self debug "[LocalNetwork] Published new peer info: {}", new_peer_info);
+            *ppi_lock = Some(new_peer_info.clone());
 
-            (opt_old_peer_info, opt_new_peer_info)
+            (opt_old_peer_info, Some(new_peer_info))
         };
 
         if let Err(e) = self.event_bus().post(PeerInfoChangeEvent {
@@ -263,6 +282,7 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
     fn get_contact_method(
         &self,
         peer_a: Arc<PeerInfo>,
+        _peer_a_published: bool,
         peer_b: Arc<PeerInfo>,
         dial_info_filter: DialInfoFilter,
         sequencing: Sequencing,

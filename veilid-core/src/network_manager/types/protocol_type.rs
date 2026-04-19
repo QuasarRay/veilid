@@ -87,6 +87,7 @@ pub type ProtocolTypeSort<'a> =
 
 // Keep member order appropriate for sorting < preference
 // Must match DialInfo order
+// Eventually this needs to become a FOURCC when protocols become pluggable
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Debug, PartialOrd, Ord, Hash, EnumSetType, Serialize, Deserialize)]
 #[enumset(repr = "u8")]

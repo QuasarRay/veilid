@@ -20,10 +20,17 @@ enum ConnectionManagerEvent {
     Dead(Box<NetworkConnection>),
 }
 
-#[derive(Debug)]
 pub struct ConnectionRefScope {
     connection_manager: ConnectionManager,
     id: NetworkConnectionId,
+}
+
+impl fmt::Debug for ConnectionRefScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectionRefScope")
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 impl ConnectionRefScope {
@@ -78,13 +85,17 @@ impl core::fmt::Debug for ConnectionManagerArc {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ConnectionManager {
-    registry: VeilidComponentRegistry,
+    network: Network,
     arc: Arc<ConnectionManagerArc>,
 }
 
-impl_veilid_component_accessors!(ConnectionManager);
+impl VeilidComponentRegistryAccessor for ConnectionManager {
+    fn registry(&self) -> VeilidComponentRegistry {
+        self.network.registry()
+    }
+}
 
 impl ConnectionManager {
     fn new_inner(
@@ -115,10 +126,10 @@ impl ConnectionManager {
             inner: Mutex::new(None),
         }
     }
-    pub fn new(registry: VeilidComponentRegistry) -> Self {
+    pub fn new(network: Network) -> Self {
         Self {
-            arc: Arc::new(Self::new_arc(registry.clone())),
-            registry,
+            arc: Arc::new(Self::new_arc(network.registry())),
+            network,
         }
     }
 
@@ -453,18 +464,17 @@ impl ConnectionManager {
 
         // Attempt new connection
         let mut retry_count = NEW_CONNECTION_RETRY_COUNT;
-        let network_manager = self.network_manager();
 
         let nres = loop {
             veilid_log!(self trace "== get_or_create_connection connect({}) {:?} -> {}", retry_count, preferred_local_address, dial_info);
-            let result_net_res = ProtocolNetworkConnection::connect(
-                self.registry(),
-                preferred_local_address,
-                &dial_info,
-                self.arc.connection_initial_timeout_ms,
-                network_manager.address_filter(),
-            )
-            .await;
+            let result_net_res = self
+                .network
+                .connect(
+                    preferred_local_address,
+                    dial_info.clone(),
+                    self.arc.connection_initial_timeout_ms,
+                )
+                .await;
             match result_net_res {
                 Ok(net_res) => {
                     if net_res.is_value() || retry_count == 0 {

@@ -124,7 +124,7 @@ impl RPCProcessor {
 
         if debug_target_enabled!("dht") {
             let debug_string_answer = format!(
-                "OUT <== TransactBeginA({} {}{}{} @{} peers={}) <= {} (latency={}) seqs:{}",
+                "OUT <== TransactBeginA({} {}{}{} @{:#} peers={}) <= {} (latency={:#}) seqs:{}",
                 opaque_record_key,
                 if let Some(xid) = transaction_id {
                     format!("xid={} ", xid)

@@ -401,7 +401,12 @@ impl OutboundTransactionManager {
         Ok(callback)
     }
 
-    /// Prepare to rollback a transaction
+    /// Prepare to rollback a transaction.
+    ///
+    /// Best-effort: if Begin never reached consensus (or got zero accepts), this returns
+    /// rollback params only for nodes that actually did accept Begin. If no nodes ever
+    /// accepted, returns an empty list (nothing to roll back). The caller still gets the
+    /// original begin error (TryAgain / etc.) propagated through rollback_guard_locked.
     pub fn prepare_rollback_transact_value_params(
         &self,
         transaction_handle: OutboundTransactionHandle,
@@ -410,13 +415,8 @@ impl OutboundTransactionManager {
         // Get transaction
         let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
 
-        // Assert stage
-        if outbound_transaction_state.stage_consensus().is_none() {
-            apibail_transaction_not_found!("stage was Init, wanted valid stage");
-        }
-
         // If rollback ids are specified, just go with it
-        // Otherwise get the full set of fail rollback ids
+        // Otherwise get the full set of fail rollback ids (empty if no nodes accepted)
         let rollback_ids = match opt_rollback_ids {
             Some(rbids) => rbids,
             None => outbound_transaction_state.get_all_rollbacks(),
@@ -425,6 +425,11 @@ impl OutboundTransactionManager {
         let mut out = vec![];
 
         for (opaque_record_key, node_xids) in rollback_ids {
+            // Skip records with no nodes to roll back (Begin never got any accepts for this record)
+            if node_xids.is_empty() {
+                continue;
+            }
+
             let record_state = outbound_transaction_state
                 .get_record_state(&opaque_record_key)
                 .ok_or_else(|| {
@@ -462,9 +467,10 @@ impl OutboundTransactionManager {
         // Get transaction
         let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
 
-        // Assert stage
-        if outbound_transaction_state.stage_consensus().is_none() {
-            apibail_transaction_not_found!("stage was Init, wanted valid stage");
+        // If there are no results, nothing to record. This happens when a rollback was
+        // issued for a transaction that never reached Begin consensus (zero nodes accepted).
+        if results.is_empty() {
+            return Ok(());
         }
 
         // Record results

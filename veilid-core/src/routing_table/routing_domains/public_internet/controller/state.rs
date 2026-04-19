@@ -28,7 +28,7 @@ impl PublicInternetRoutingDomainController {
             low_water_mark,
             relays,
         ) = {
-            let detail = self.read();
+            let detail = self.read_dyn();
             let relay_status = detail.relay_status();
             let current_peer_info = detail.get_peer_info();
             let confirmed = detail.confirmed();
@@ -113,7 +113,7 @@ impl PublicInternetRoutingDomainController {
     pub(in crate::routing_table) fn nodes_needed(&self) -> NodesNeeded {
         // Nodes needed summary is based off the entry summary and the low water mark
         let (entry_summary, low_water_mark) = {
-            let rdd = self.read();
+            let rdd = self.read_dyn();
             (rdd.get_entry_summary(), rdd.get_low_water_mark())
         };
 

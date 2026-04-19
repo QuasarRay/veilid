@@ -27,9 +27,8 @@ pub const ADDRESS_CHECK_CACHE_SIZE: usize = 10;
 /// Address checker config
 #[derive(Debug)]
 pub struct AddressCheckConfig {
-    pub detect_address_changes: bool,
+    pub routing_domain_detect_address_changes: BTreeSet<RoutingDomain>,
     pub ip6_prefix_size: usize,
-    pub require_inbound_relay: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -54,6 +53,10 @@ impl fmt::Debug for AddressCheck {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AddressCheck")
             .field("config", &self.config)
+            .field(
+                "routing_domain_detect_address_changes",
+                &self.config.routing_domain_detect_address_changes,
+            )
             //.field("net", &self.net)
             .field("current_peer_info", &self.published_peer_info)
             .field("current_addresses", &self.current_addresses)
@@ -73,14 +76,12 @@ impl AddressCheck {
         let registry = net.registry();
 
         let config = registry.config();
-        let detect_address_changes = net.resolved_detect_address_changes();
+        let routing_domain_detect_address_changes = net.routing_domains_detecting_address_changes();
         let ip6_prefix_size = config.network.max_connections_per_ip6_prefix_size as usize;
-        let require_inbound_relay = config.network.privacy.require_inbound_relay;
 
         let config = AddressCheckConfig {
-            detect_address_changes,
+            routing_domain_detect_address_changes,
             ip6_prefix_size,
-            require_inbound_relay,
         };
 
         Self {
@@ -153,7 +154,24 @@ impl AddressCheck {
         reporting_peer: NodeRef,       // the peer's noderef reporting the socket address
     ) {
         // Only process the PublicInternet RoutingDomain for now
+        // TODO: this is a separate mechanism from 'routing_domain_detect_address_changes' because that covers both
+        // this case -and- checking the low level network interfaces for address changes.
+        // Not all domains have NAT or the need to consider other nodes' remote attestations of our address, but they
+        // may still change addresses and be detected a different way. So we check for both settings here, a check
+        // on the routing domains that can leverage 'socket address change' detection -and- the overall
+        // 'detect_address_changes' setting.
+
+        // Check if this routing domain supports 'socket address change' detection
         if !matches!(routing_domain, RoutingDomain::PublicInternet) {
+            return;
+        }
+
+        // Only process address changes for routing domains configured for it
+        if !self
+            .config
+            .routing_domain_detect_address_changes
+            .contains(&routing_domain)
+        {
             return;
         }
 
@@ -200,11 +218,6 @@ impl AddressCheck {
             return;
         }
 
-        // Configured to only use relays for inbound connections. Thus, skip address detection.
-        if self.config.require_inbound_relay {
-            return;
-        }
-
         // Process the state of the address checker and see if we need to
         // perform a full address check for this routing domain
         let needs_address_detection = if peer_info.node_info().has_dial_info() {
@@ -220,21 +233,15 @@ impl AddressCheck {
         };
 
         if needs_address_detection {
-            if self.config.detect_address_changes && !self.config.require_inbound_relay {
-                // Reset the address check cache now so we can start detecting fresh
-                veilid_log!(self info
-                    "{:?} address has changed, detecting dial info",
-                    routing_domain
-                );
+            // Reset the address check cache now so we can start detecting fresh
+            veilid_log!(self info
+                "{:?} address has changed, detecting dial info",
+                routing_domain
+            );
 
-                // Re-detect the public dialinfo
-                self.net.trigger_update_dial_info(routing_domain);
-            } else {
-                veilid_log!(self warn
-                    "{:?} address may have changed. Restarting the server may be required.",
-                    routing_domain
-                );
-            }
+            // Re-detect the public dialinfo
+            self.net
+                .routing_domain_request_confirm_dial_info(routing_domain);
         }
     }
 
@@ -263,6 +270,9 @@ impl AddressCheck {
         flow: Flow,                    // the flow used
         reporting_peer: NodeRef,       // the peer's noderef reporting the socket address
     ) -> bool {
+        // Get registry for logging because we have &mut self
+        let registry = self.registry();
+
         let acckey =
             AddressCheckCacheKey(routing_domain, flow.protocol_type(), flow.address_type());
 
@@ -271,7 +281,6 @@ impl AddressCheck {
 
         // If we have something that matches our current dial info at all, consider it a validation
         if new_matches_current {
-            let registry = self.registry();
             self.address_inconsistency_table
                 .entry(acckey)
                 .and_modify(|ait| {
@@ -297,7 +306,7 @@ impl AddressCheck {
                     *ait += 1;
                 })
                 .or_insert(1);
-            veilid_log!(self debug "Adding address inconsistency ({}) for {:?} due to address {} on flow {:?} from {}", val, acckey, socket_address, flow, reporting_peer);
+            veilid_log!(registry debug "Adding address inconsistency ({}) for {:?} due to address {} on flow {:?} from {}", val, acckey, socket_address, flow, reporting_peer);
             return val >= ADDRESS_INCONSISTENCY_DETECTION_COUNT;
         }
 
@@ -315,13 +324,10 @@ impl AddressCheck {
         flow: Flow,                    // the flow used
         reporting_ipblock: IpAddr,     // the IP block this report came from
     ) -> bool {
-        // Don't do this if we aren't ever going to use it
-        if !self.config.detect_address_changes {
-            return false;
-        }
+        // Get registry for logging because we have &mut self
+        let registry = self.registry();
 
         // Add the currently seen socket address into the consistency table
-        let registry = self.registry();
         let acckey =
             AddressCheckCacheKey(routing_domain, flow.protocol_type(), flow.address_type());
         let cache = self

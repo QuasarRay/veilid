@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 use super::*;
 
+// XXX: Eventually this needs to become a FOURCC when address types become pluggable
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Debug, PartialOrd, Ord, Hash, Serialize, Deserialize, EnumSetType)]
 #[enumset(repr = "u8")]

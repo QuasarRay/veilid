@@ -613,8 +613,17 @@ impl StorageManager {
             check_done,
         );
 
+        let shutdown_stop_source = self
+            .startup_lock
+            .stop_token()
+            .ok_or_else(VeilidAPIError::not_initialized)?;
+
         let fanout_result = fanout_call
-            .run(init_fanout_queue, FanoutQueueMode::ThrottleAtConsensus)
+            .run(
+                init_fanout_queue,
+                FanoutQueueMode::ThrottleAtConsensus,
+                shutdown_stop_source,
+            )
             .await
             .inspect_err(|e| {
                 // If we finished with an error, return that
@@ -1110,6 +1119,7 @@ impl StorageManager {
             editor.set_params(desired.clone());
             editor.retain_nodes(|x| !remove_nodes.contains(x));
             editor.add_nodes(added_nodes);
+            editor.clear_forced_reconcile();
         });
 
         // Watch was reconciled, now kick off an inspect to
@@ -1269,10 +1279,15 @@ impl StorageManager {
 
                                 // the remaining updates count
                                 let remaining_count = state.remaining_count().saturating_sub(1);
+                                let cur_ts = Timestamp::now_non_decreasing();
+                                let missing_value_changes = state.needs_fallback_inspect(cur_ts);
                                 state.edit(
                                     &inner.outbound_watch_manager.per_node_states,
                                     |editor| {
                                         editor.set_remaining_count(remaining_count);
+                                        if missing_value_changes {
+                                            editor.set_forced_reconcile();
+                                        }
                                     },
                                 );
 
@@ -1379,18 +1394,15 @@ impl StorageManager {
         watch_id: u64,
     ) -> VeilidAPIResult<bool> {
         let opaque_record_key = record_key.opaque();
+        let owm = &mut inner.outbound_watch_manager;
 
         // Get the outbound watch
-        let Some(outbound_watch) = inner
-            .outbound_watch_manager
-            .outbound_watches
-            .get(&opaque_record_key)
-        else {
+        let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
             // No outbound watch means no callback
             return Ok(false);
         };
 
-        let Some(state) = outbound_watch.state() else {
+        let Some(state) = outbound_watch.state_mut() else {
             // No outbound watch current state means no callback (we haven't reconciled yet)
             return Ok(false);
         };
@@ -1405,8 +1417,7 @@ impl StorageManager {
         }
 
         // Get per node state
-        let Some(per_node_state) = inner.outbound_watch_manager.per_node_states.get_mut(&pnk)
-        else {
+        let Some(per_node_state) = owm.per_node_states.get_mut(&pnk) else {
             // No per node state means no callback
             veilid_log!(self warn "Missing per node state in outbound watch: {:?}", pnk);
             return Ok(false);
@@ -1414,7 +1425,6 @@ impl StorageManager {
 
         // If watch id doesn't match it's for an older watch and should be ignored
         if per_node_state.watch_id != watch_id {
-            // No per node state means no callback
             veilid_log!(self debug "Incorrect watch id for per node state in outbound watch: {:?} {} != {}", pnk, per_node_state.watch_id, watch_id);
             return Ok(false);
         }
@@ -1459,6 +1469,13 @@ impl StorageManager {
             );
             per_node_state.count = count;
         }
+
+        // Record that we received a valid ValueChanged — resets fallback inspection timer
+        // NOTE: It is possible this should be a per-node state, but for now let's try it on the whole watch
+        // Done after per_node_state usage to avoid borrow conflicts with owm.per_node_states
+        state.edit(&owm.per_node_states, |editor| {
+            editor.touch_value_changed(Timestamp::now_non_decreasing());
+        });
 
         Ok(true)
     }

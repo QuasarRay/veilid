@@ -2,58 +2,48 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
-pub trait RoutingDomainEditorCommonTrait {
+pub trait RoutingDomainEditor {
     fn clear_dial_info_details(
         &mut self,
-        address_type: Option<AddressType>,
-        protocol_type: Option<ProtocolType>,
-    ) -> &mut Self;
-    fn set_relays(&mut self, relays: Vec<RoutingDomainRelay>) -> &mut Self;
-    fn set_relay_state(
-        &mut self,
-        relay: RoutingDomainRelay,
-        state: RoutingDomainRelayState,
-    ) -> &mut Self;
+        address_types: Option<AddressTypeSet>,
+        protocol_types: Option<ProtocolTypeSet>,
+    );
+    fn set_relays(&mut self, relays: Vec<RoutingDomainRelay>);
+    fn set_relay_state(&mut self, relay: RoutingDomainRelay, state: RoutingDomainRelayState);
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
-    fn add_dial_info(&mut self, dial_info: DialInfo, class: DialInfoClass) -> &mut Self;
-    fn setup_network(
-        &mut self,
-        outbound_protocols: ProtocolTypeSet,
-        inbound_protocols: ProtocolTypeSet,
-        address_types: AddressTypeSet,
-        capabilities: Vec<VeilidCapability>,
-        confirmed: bool,
-    ) -> &mut Self;
-    fn commit(&mut self, pause_tasks: bool) -> PinBoxFuture<'_, bool>;
-    fn reset(&mut self) -> PinBoxFuture<'_, ()>;
-    fn publish(&mut self);
-    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
-    fn unpublish(&mut self);
+    fn add_dial_info_detail(&mut self, dial_info_detail: DialInfoDetail);
+    // #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
+    // fn remove_dial_info_detail(&mut self, dial_info_detail: DialInfoDetail);
+    fn set_network_config(&mut self, network_config: RoutingDomainNetworkConfig);
+    fn set_confirmed(&mut self, confirmed: bool);
+    fn commit(&mut self);
+    #[expect(dead_code)]
+    fn reset(&mut self);
 }
 
-pub(super) trait RoutingDomainDetailApplyCommonChange {
+pub(super) trait RoutingDomainDetailApplyChange {
     /// Make a change from the routing domain editor
-    fn apply_common_change(&mut self, change: RoutingDomainChangeCommon);
+    fn apply_change(&mut self, change: RoutingDomainChange);
 }
 
-impl<T: RoutingDomainDetailCommonAccessors + ?Sized> RoutingDomainDetailApplyCommonChange for T {
+impl<T: RoutingDomainDetailAccessors + ?Sized> RoutingDomainDetailApplyChange for T {
     /// Make a change from the routing domain editor
-    fn apply_common_change(&mut self, change: RoutingDomainChangeCommon) {
+    fn apply_change(&mut self, change: RoutingDomainChange) {
         match change {
-            RoutingDomainChangeCommon::ClearDialInfoDetails {
-                address_type,
-                protocol_type,
+            RoutingDomainChange::ClearDialInfoDetails {
+                address_types,
+                protocol_types,
             } => {
                 self.common_mut()
-                    .clear_dial_info_details(address_type, protocol_type);
+                    .clear_dial_info_details(address_types, protocol_types);
             }
 
-            RoutingDomainChangeCommon::SetRelays { relays } => self.common_mut().set_relays(relays),
-            RoutingDomainChangeCommon::SetRelayState { relay, state } => {
+            RoutingDomainChange::SetRelays { relays } => self.common_mut().set_relays(relays),
+            RoutingDomainChange::SetRelayState { relay, state } => {
                 self.common_mut().set_relay_state(&relay, state)
             }
 
-            RoutingDomainChangeCommon::AddDialInfo { dial_info_detail } => {
+            RoutingDomainChange::AddDialInfoDetail { dial_info_detail } => {
                 if !self.ensure_dial_info_is_valid(&dial_info_detail.dial_info) {
                     return;
                 }
@@ -62,33 +52,24 @@ impl<T: RoutingDomainDetailCommonAccessors + ?Sized> RoutingDomainDetailApplyCom
                     .add_dial_info_detail(dial_info_detail.clone());
             }
             // RoutingDomainChange::RemoveDialInfoDetail { dial_info_detail } => {
-            //     self.common
+            //     self.common_mut()
             //         .remove_dial_info_detail(dial_info_detail.clone());
             // }
-            RoutingDomainChangeCommon::SetupNetwork {
-                outbound_protocols,
-                inbound_protocols,
-                address_types,
-                capabilities,
-                confirmed,
-            } => {
-                self.common_mut().setup_network(
-                    outbound_protocols,
-                    inbound_protocols,
-                    address_types,
-                    capabilities.clone(),
-                    confirmed,
-                );
+            RoutingDomainChange::SetNetworkConfig { network_config } => {
+                self.common_mut().set_network_config(network_config);
+            }
+            RoutingDomainChange::SetConfirmed { confirmed } => {
+                self.common_mut().set_confirmed(confirmed);
             }
         }
     }
 }
 
 #[derive(Debug)]
-pub(super) enum RoutingDomainChangeCommon {
+pub(super) enum RoutingDomainChange {
     ClearDialInfoDetails {
-        address_type: Option<AddressType>,
-        protocol_type: Option<ProtocolType>,
+        address_types: Option<AddressTypeSet>,
+        protocol_types: Option<ProtocolTypeSet>,
     },
     SetRelays {
         relays: Vec<RoutingDomainRelay>,
@@ -97,18 +78,17 @@ pub(super) enum RoutingDomainChangeCommon {
         relay: RoutingDomainRelay,
         state: RoutingDomainRelayState,
     },
-    AddDialInfo {
+    AddDialInfoDetail {
         dial_info_detail: DialInfoDetail,
     },
     // #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     // RemoveDialInfoDetail {
     //     dial_info_detail: DialInfoDetail,
     // },
-    SetupNetwork {
-        outbound_protocols: ProtocolTypeSet,
-        inbound_protocols: ProtocolTypeSet,
-        address_types: AddressTypeSet,
-        capabilities: Vec<VeilidCapability>,
+    SetNetworkConfig {
+        network_config: RoutingDomainNetworkConfig,
+    },
+    SetConfirmed {
         confirmed: bool,
     },
 }

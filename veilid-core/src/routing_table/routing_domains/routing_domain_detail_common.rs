@@ -2,26 +2,33 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
-pub trait RoutingDomainDetailCommonAccessors: RoutingDomainDetail {
+pub trait RoutingDomainDetailAccessors: RoutingDomainDetail {
     #[expect(dead_code)]
     fn common(&self) -> &RoutingDomainDetailCommon;
     fn common_mut(&mut self) -> &mut RoutingDomainDetailCommon;
 }
 
 pub struct RoutingDomainDetailCommon {
+    /// The registry accessor for this routing domain detail
     registry: VeilidComponentRegistry,
+    /// The routing domain identifier for this routing domain detail
     routing_domain: RoutingDomain,
-    outbound_protocols: ProtocolTypeSet,
-    inbound_protocols: ProtocolTypeSet,
-    address_types: AddressTypeSet,
+    /// The network configuration for this routing domain
+    network_config: RoutingDomainNetworkConfig,
+    /// Relay nodes and their current state used to determine what actions a relay many need (keepalive, optimize, etc.)
     relays_and_states: Vec<(RoutingDomainRelay, RoutingDomainRelayState)>,
-    capabilities: Vec<VeilidCapability>,
+    /// The dial info details that are inbound reachable for this node in this domain
     dial_info_details: Vec<DialInfoDetail>,
+    /// Dial info detail has been confirmed by the network manager as publishable/reachable
     confirmed: bool,
+    /// The minimum number of nodes in the is routing domain since the last low water mark recording point
+    /// Pair of (reset, low water mark)
     low_water_mark: Mutex<(bool, Arc<LowWaterMark>)>,
-    // caches
+    /// The current peer info so we don't have recalculate it every time it is requested
     current_peer_info_cache: Mutex<Option<Arc<PeerInfo>>>,
+    /// The last known bootstrap peers that seeded our routing table
     bootstrap_peers: Mutex<Vec<NodeRef>>,
+    /// The last calculated summary of the routing table entries in this domain
     entry_summary: Mutex<Arc<EntrySummary>>,
 }
 
@@ -29,11 +36,8 @@ impl fmt::Debug for RoutingDomainDetailCommon {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RoutingDomainDetailCommon")
             .field("routing_domain", &self.routing_domain)
-            .field("outbound_protocols", &self.outbound_protocols)
-            .field("inbound_protocols", &self.inbound_protocols)
-            .field("address_types", &self.address_types)
+            .field("network_config", &self.network_config)
             .field("relays_and_states", &self.relays_and_states)
-            .field("capabilities", &self.capabilities)
             .field("dial_info_details", &self.dial_info_details)
             .field("confirmed", &self.confirmed)
             .field("low_water_mark", &self.low_water_mark)
@@ -48,14 +52,15 @@ impl fmt::Display for RoutingDomainDetailCommon {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Outbound Protocols: {}\nInbound Protocols: {}\nAddress Types: {}\nRelays And States:\n{}\nCapabilities: {}\nDial Info Details:\n{}\nConfirmed: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nEntry Summary:\n{}",
-            self.outbound_protocols,
-            self.inbound_protocols,
-            self.address_types,
+            "Network Config:{}\nRelays And States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nEntry Summary:\n{}",
+            if f.alternate() {
+                format!("\n{}",indent_all_string(f.to_string(&self.network_config)))
+            } else {
+                format!(" {}",f.to_string(&self.network_config))
+            },
             indent_all_string(f.to_multiline_indexed_string(self.relays_and_states.iter().map(|(r,s)| format!("{}\n{}", f.to_string(r), f.to_string(s)))).string_if_empty("None")),
-            self.capabilities.iter().map(|c| f.to_string(c)).collect::<Vec<_>>().join(","),
             indent_all_string(f.to_multiline_indexed_string(self.dial_info_details.iter().map(|d| f.to_string(d))).string_if_empty("None")),
-            self.confirmed,
+            f.to_string(self.confirmed),
             f.to_string(self.low_water_mark.lock().1.clone()),
             self.bootstrap_peers.lock().clone().iter().map(|n| f.to_string(n)).collect::<Vec<_>>().join(",").string_if_empty("None"),
             indent_all_string(f.to_string(self.entry_summary.lock().clone()))
@@ -70,11 +75,8 @@ impl RoutingDomainDetailCommon {
         Self {
             registry,
             routing_domain,
-            outbound_protocols: Default::default(),
-            inbound_protocols: Default::default(),
-            address_types: Default::default(),
+            network_config: Default::default(),
             relays_and_states: Default::default(),
-            capabilities: Default::default(),
             dial_info_details: Default::default(),
             confirmed: false,
             low_water_mark: Mutex::new((true, Default::default())),
@@ -91,20 +93,24 @@ impl RoutingDomainDetailCommon {
         self.confirmed
     }
 
+    pub fn network_config(&self) -> &RoutingDomainNetworkConfig {
+        &self.network_config
+    }
+
     pub fn outbound_protocols(&self) -> ProtocolTypeSet {
-        self.outbound_protocols
+        self.network_config.outbound_protocols
     }
 
     pub fn inbound_protocols(&self) -> ProtocolTypeSet {
-        self.inbound_protocols
+        self.network_config.inbound_protocols
     }
 
     pub fn address_types(&self) -> AddressTypeSet {
-        self.address_types
+        self.network_config.address_types
     }
 
-    pub fn capabilities(&self) -> Vec<VeilidCapability> {
-        self.capabilities.clone()
+    pub fn capabilities(&self) -> BTreeSet<VeilidCapability> {
+        self.network_config.capabilities.clone()
     }
 
     pub fn get_bootstrap_peers(&self) -> Vec<NodeRef> {
@@ -158,14 +164,14 @@ impl RoutingDomainDetailCommon {
 
     pub fn inbound_dial_info_filter(&self) -> DialInfoFilter {
         DialInfoFilter::all()
-            .with_protocol_type_set(self.inbound_protocols)
-            .with_address_type_set(self.address_types)
+            .with_protocol_type_set(self.network_config.inbound_protocols)
+            .with_address_type_set(self.network_config.address_types)
     }
 
     pub fn outbound_dial_info_filter(&self) -> DialInfoFilter {
         DialInfoFilter::all()
-            .with_protocol_type_set(self.outbound_protocols)
-            .with_address_type_set(self.address_types)
+            .with_protocol_type_set(self.network_config.outbound_protocols)
+            .with_address_type_set(self.network_config.address_types)
     }
 
     pub fn get_current_peer_info(&self) -> Arc<PeerInfo> {
@@ -191,49 +197,70 @@ impl RoutingDomainDetailCommon {
     ///////////////////////////////////////////////////////////////////////
     // Mutators
 
-    pub fn setup_network(
-        &mut self,
-        outbound_protocols: ProtocolTypeSet,
-        inbound_protocols: ProtocolTypeSet,
-        address_types: AddressTypeSet,
-        capabilities: Vec<VeilidCapability>,
-        confirmed: bool,
-    ) {
-        self.outbound_protocols = outbound_protocols;
-        self.inbound_protocols = inbound_protocols;
-        self.address_types = address_types;
-        self.capabilities = capabilities;
+    pub fn set_network_config(&mut self, network_config: RoutingDomainNetworkConfig) {
+        let changed = self.network_config != network_config;
+        if changed {
+            self.network_config = network_config;
+
+            self.clear_current_peer_info_cache();
+        }
+    }
+
+    pub fn set_confirmed(&mut self, confirmed: bool) {
         self.confirmed = confirmed;
-        self.clear_current_peer_info_cache();
     }
 
     pub fn clear_dial_info_details(
         &mut self,
-        address_type: Option<AddressType>,
-        protocol_type: Option<ProtocolType>,
+        address_types: Option<AddressTypeSet>,
+        protocol_types: Option<ProtocolTypeSet>,
     ) {
+        let mut changed = false;
         self.dial_info_details.retain_mut(|e| {
             let mut remove = true;
-            if let Some(pt) = protocol_type {
-                if pt != e.dial_info.protocol_type() {
+            if let Some(pt) = protocol_types {
+                if !pt.contains(e.dial_info.protocol_type()) {
                     remove = false;
                 }
             }
-            if let Some(at) = address_type {
-                if at != e.dial_info.address_type() {
+            if let Some(at) = address_types {
+                if !at.contains(e.dial_info.address_type()) {
                     remove = false;
                 }
             }
+
+            changed = changed || remove;
             !remove
         });
-        self.clear_current_peer_info_cache();
+
+        if changed {
+            self.dial_info_details.sort();
+            self.dial_info_details.dedup();
+
+            self.clear_current_peer_info_cache();
+        }
     }
     pub fn add_dial_info_detail(&mut self, did: DialInfoDetail) {
-        self.dial_info_details.push(did);
-        self.dial_info_details.sort();
-        self.dial_info_details.dedup();
-        self.clear_current_peer_info_cache();
+        let changed = !self.dial_info_details.contains(&did);
+        if changed {
+            self.dial_info_details.push(did);
+            self.dial_info_details.sort();
+            self.dial_info_details.dedup();
+
+            self.clear_current_peer_info_cache();
+        }
     }
+    // pub fn remove_dial_info_detail(&mut self, did: DialInfoDetail) {
+    //     let mut changed = false;
+    //     self.dial_info_details.retain(|e| {
+    //         let remove = e == &did;
+    //         changed = changed || remove;
+    //         !remove
+    //     });
+    //     if changed {
+    //         self.clear_current_peer_info_cache();
+    //     }
+    // }
 
     pub fn set_relays(&mut self, relays: Vec<RoutingDomainRelay>) {
         let changed = self.relays() != relays;
@@ -334,9 +361,9 @@ impl RoutingDomainDetailCommon {
             cur_ts,
             VALID_ENVELOPE_VERSIONS.to_vec(),
             crypto_info_list,
-            self.capabilities.clone(),
-            self.outbound_protocols,
-            self.address_types,
+            self.network_config.capabilities.iter().copied().collect(),
+            self.network_config.outbound_protocols,
+            self.network_config.address_types,
             self.dial_info_details.clone(),
             relay_info_list,
         );

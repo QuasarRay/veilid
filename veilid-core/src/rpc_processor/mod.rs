@@ -468,8 +468,14 @@ impl RPCProcessor {
             call_routine,
             check_done,
         );
+        let Some(shutdown_stop_source) = self.startup_context.startup_lock.stop_token() else {
+            return TimeoutOr::value(Err(RPCError::ignore("shutting down")));
+        };
 
-        match fanout_call.run(vec![], FanoutQueueMode::Unthrottled).await {
+        match fanout_call
+            .run(vec![], FanoutQueueMode::Unthrottled, shutdown_stop_source)
+            .await
+        {
             Ok(fanout_result) => {
                 if matches!(fanout_result.kind, FanoutResultKind::Timeout) {
                     TimeoutOr::timeout()
@@ -1357,11 +1363,13 @@ impl RPCProcessor {
         // or because we manually double it when contacting non-private destinations
         let effective_hops = safety_selection.get_hop_count() * 2;
 
-        // Timeout should be the default timeout plus a half timeout for each hop
-        // Anything more than that is going to drag performance down and routes should be reselected
-        // that can survive the timeout rather than accepting slow performance
+        // Timeout is the default timeout plus 500ms (max single hop latency) times the excess hop count
+        // Excess hops count is what could possibly fix in the 3sec -> 5sec padding range. Better calculations
+        // using actual routing table statistics should be able to optimize this with a more accurate estimate.
+        let excess_hops = effective_hops.saturating_sub(4); // 500ms * 4 = 2000ms,
         self.timeout
-            .saturating_add(self.timeout.div(2).saturating_mul(effective_hops as u64))
+            .saturating_add(TimestampDuration::new_ms(500).saturating_mul(excess_hops as u64))
+        // Effectively for all routed communications under 4 hops total, the timeout will be the default timeout for now
     }
 
     /// Get the default timeout for RPCs sent to a specific destination

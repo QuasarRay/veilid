@@ -60,7 +60,7 @@ enable-crypto-none = [
 ]
 
 # Protocol support features
-enable-protocol-wss = []
+enable-protocol-wss = ["webpki-roots"]
 
 # JSON format to use for serializing
 json-camel-case = []
@@ -216,12 +216,13 @@ keyring-manager = "=0.7.1"
 keyvaluedb-sqlite = "=0.1.7"
 
 # Network
-async-tungstenite = { version = "0.33.0", features = ["async-tls"] }
+async-tungstenite = { version = "0.34.0", features = ["async-tls"] }
 igd = { package = "veilid-igd", version = "0.1.1" }
 futures-rustls = { version = "0.26.0", default-features = false, features = [
     "ring",
     "logging",
 ] }
+webpki-roots = { version = "1.0.6", optional = true }
 
 ### Dependencies for WASM builds only
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]

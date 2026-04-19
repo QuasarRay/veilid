@@ -14,7 +14,7 @@ const ACTIVE_WATCH_KEEPALIVE_PING_INTERVAL: TimestampDuration = TimestampDuratio
 impl PublicInternetRoutingDomainController {
     // Task routine for PublicInternet status pings
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err))]
-    pub async fn ping_validator_public_internet_task_routine(
+    pub fn ping_validator_public_internet_task_routine(
         &self,
         _stop_token: StopToken,
         _last_ts: Timestamp,
@@ -23,7 +23,7 @@ impl PublicInternetRoutingDomainController {
         self.routing_table()
             .add_reliability_ping_validations(cur_ts, RoutingDomain::PublicInternet)?;
 
-        self.add_relay_keepalive_ping_validations(cur_ts).await?;
+        self.add_relay_keepalive_ping_validations(cur_ts)?;
 
         self.add_active_watches_keepalive_ping_validations(cur_ts)?;
 
@@ -34,11 +34,11 @@ impl PublicInternetRoutingDomainController {
 
     // Ping the relay to keep it alive, over every protocol it is relaying for us
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err))]
-    async fn add_relay_keepalive_ping_validations(&self, cur_ts: Timestamp) -> EyreResult<()> {
+    fn add_relay_keepalive_ping_validations(&self, cur_ts: Timestamp) -> EyreResult<()> {
         let routing_table = self.routing_table();
 
         // Iterate the PublicInternet relays
-        let relays_and_states = self.read().relays_and_states();
+        let relays_and_states = self.read_dyn().relays_and_states();
         let mut state_updates = Vec::new();
         let mut validations = Vec::new();
         let name = format!("RelayKeepalive({})", RoutingDomain::PublicInternet);
@@ -70,11 +70,11 @@ impl PublicInternetRoutingDomainController {
 
         // Update the relay keepalive timestamp on the routing domain
         if !state_updates.is_empty() {
-            let mut editor = routing_table.edit_public_internet_routing_domain();
+            let mut editor = self.edit();
             for (relay, state) in state_updates {
                 editor.set_relay_state(relay, state);
             }
-            editor.commit(false).await;
+            editor.commit();
         }
 
         Ok(())

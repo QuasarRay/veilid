@@ -1,7 +1,21 @@
 use super::*;
 
 #[cfg(feature = "enable-protocol-wss")]
-use async_tls::TlsConnector;
+use futures_rustls::{
+    rustls::{crypto::ring::default_provider, pki_types::ServerName, ClientConfig, RootCertStore},
+    TlsConnector,
+};
+
+#[cfg(feature = "enable-protocol-wss")]
+static CLIENT_CONFIG: LazyLock<Arc<ClientConfig>> = LazyLock::new(|| {
+    let root_store = RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    Arc::new(config)
+});
 
 use async_tungstenite::tungstenite::error::ProtocolError;
 use async_tungstenite::tungstenite::handshake::server::{
@@ -26,12 +40,12 @@ cfg_if! {
     if #[cfg(feature="rt-async-std")] {
         #[cfg(feature="enable-protocol-wss")]
         pub type WebsocketNetworkConnectionWSS =
-            WebsocketNetworkConnection<async_tls::client::TlsStream<TcpStream>>;
+            WebsocketNetworkConnection<futures_rustls::client::TlsStream<TcpStream>>;
         pub type WebsocketNetworkConnectionWS = WebsocketNetworkConnection<TcpStream>;
     } else if #[cfg(feature="rt-tokio")] {
         #[cfg(feature="enable-protocol-wss")]
         pub type WebsocketNetworkConnectionWSS =
-            WebsocketNetworkConnection<async_tls::client::TlsStream<Compat<TcpStream>>>;
+            WebsocketNetworkConnection<futures_rustls::client::TlsStream<Compat<TcpStream>>>;
         pub type WebsocketNetworkConnectionWS = WebsocketNetworkConnection<Compat<TcpStream>>;
     } else {
         compile_error!("needs executor implementation");
@@ -193,6 +207,9 @@ impl_veilid_component_accessors!(WebsocketProtocolHandler);
 
 impl WebsocketProtocolHandler {
     pub fn new(registry: VeilidComponentRegistry, tls: bool) -> Self {
+        #[cfg(feature = "enable-protocol-wss")]
+        let _ = default_provider().install_default();
+
         let config = registry.config();
         let path = if tls {
             cfg_if::cfg_if! {
@@ -305,7 +322,7 @@ impl WebsocketProtocolHandler {
         let peer_addr =
             PeerAddress::new(SocketAddress::from_socket_addr(socket_addr), protocol_type);
 
-        let conn = ProtocolNetworkConnection::WsAccepted(WebsocketNetworkConnection::new(
+        let conn = NativeProtocolNetworkConnection::WsAccepted(WebsocketNetworkConnection::new(
             self.registry(),
             Flow::new(peer_addr, SocketAddress::from_socket_addr(local_addr)),
             ws_stream,
@@ -317,7 +334,7 @@ impl WebsocketProtocolHandler {
             if self.arc.tls { "WSS" } else { "WS" }
         );
 
-        Ok(Some(conn))
+        Ok(Some(Box::new(conn)))
     }
 
     #[cfg_attr(
@@ -327,7 +344,7 @@ impl WebsocketProtocolHandler {
     pub async fn connect(
         registry: VeilidComponentRegistry,
         local_address: Option<SocketAddr>,
-        dial_info: &DialInfo,
+        dial_info: DialInfo,
         timeout_ms: u32,
     ) -> io::Result<NetworkResult<ProtocolNetworkConnection>> {
         // Split dial info up
@@ -374,18 +391,19 @@ impl WebsocketProtocolHandler {
                 if #[cfg(feature="enable-protocol-wss")] {
                     let domain = split_url.host.clone();
 
-                    let connector = TlsConnector::default();
+                    let connector = TlsConnector::from(CLIENT_CONFIG.clone());
+                    let server_name = ServerName::try_from(domain.to_string()).map_err(to_io_error_other)?;
                     let tls_stream = network_result_try!(connector
-                        .connect(domain.to_string(), tcp_stream)
+                        .connect(server_name, tcp_stream)
                         .await
                         .into_network_result()?);
-                    let (ws_stream, _response) = client_async(request, tls_stream)
+                    let (ws_stream, _response) = Box::pin(client_async(request, tls_stream))
                         .await
                         .map_err(to_io_error_other)?;
 
-                    Ok(NetworkResult::Value(ProtocolNetworkConnection::Wss(
+                    Ok(NetworkResult::Value(Box::new(NativeProtocolNetworkConnection::Wss(
                         WebsocketNetworkConnection::new(registry, flow, ws_stream),
-                    )))
+                    ))))
                 } else {
                     unreachable!("no tls support for websockets enabled");
                 }
@@ -394,8 +412,10 @@ impl WebsocketProtocolHandler {
             let (ws_stream, _response) = client_async(request, tcp_stream)
                 .await
                 .map_err(to_io_error_other)?;
-            Ok(NetworkResult::Value(ProtocolNetworkConnection::Ws(
-                WebsocketNetworkConnection::new(registry, flow, ws_stream),
+            Ok(NetworkResult::Value(Box::new(
+                NativeProtocolNetworkConnection::Ws(WebsocketNetworkConnection::new(
+                    registry, flow, ws_stream,
+                )),
             )))
         }
     }

@@ -206,6 +206,7 @@ class DefaultVeilidFixture implements VeilidFixture {
         }
       }
       if (done) {
+        logFixture?.debug("Veilid attached: ${state.attachment}");
         break;
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
@@ -234,6 +235,7 @@ class DefaultVeilidFixture implements VeilidFixture {
           break;
       }
       if (done) {
+        logFixture?.debug("Veilid detached: ${state.attachment}");
         break;
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));

@@ -107,7 +107,7 @@ impl PublicInternetRoutingDomainController {
             }
         }
 
-        self.read().clear_bootstrap_peers();
+        self.read_dyn().clear_bootstrap_peers();
 
         let valid_bootstraps = self
             .bootstrap_with_peer_list(bootstrapped_peers.clone(), crypto_kinds.clone(), stop_token)
@@ -139,7 +139,7 @@ impl PublicInternetRoutingDomainController {
                     }
                 }
                 if add {
-                    self.read().add_bootstrap_peer(bootstrap_peer);
+                    self.read_dyn().add_bootstrap_peer(bootstrap_peer);
                 }
             }
         }
@@ -153,7 +153,7 @@ impl PublicInternetRoutingDomainController {
         // Reset the low water mark for this routing domain
         routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
 
-        veilid_log!(self info "Bootstrap finished in {:#} via {:?}", duration, valid_bootstraps);
+        veilid_log!(self info "Bootstrap finished in {:#} via {}", duration, valid_bootstraps.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
 
         Ok(())
     }

@@ -9,7 +9,7 @@ impl_veilid_log_facility!("net");
 
 const EXTERNAL_INFO_NODE_COUNT: usize = 20;
 const EXTERNAL_INFO_CONCURRENCY: usize = 20;
-pub(in crate::network_manager::native) const EXTERNAL_INFO_VALIDATIONS: usize = 5;
+pub(super) const EXTERNAL_INFO_VALIDATIONS: usize = 5;
 
 // Detection result of dial info detection futures
 #[derive(Clone, Debug)]
@@ -124,20 +124,22 @@ struct DiscoveryContextInner {
 
 pub(super) struct DiscoveryContextUnlockedInner {
     config: DiscoveryContextConfig,
-
-    // per-protocol
-    intf_addrs: Vec<SocketAddress>,
+    intf_addrs: BTreeSet<Address>,
 }
 
 #[derive(Clone)]
 pub(super) struct DiscoveryContext {
-    registry: VeilidComponentRegistry,
+    network: NativeNetwork,
     unlocked_inner: Arc<DiscoveryContextUnlockedInner>,
     inner: Arc<Mutex<DiscoveryContextInner>>,
     stop_token: StopToken,
 }
 
-impl_veilid_component_accessors!(DiscoveryContext);
+impl VeilidComponentRegistryAccessor for DiscoveryContext {
+    fn registry(&self) -> VeilidComponentRegistry {
+        self.network.registry()
+    }
+}
 
 impl core::ops::Deref for DiscoveryContext {
     type Target = DiscoveryContextUnlockedInner;
@@ -149,16 +151,21 @@ impl core::ops::Deref for DiscoveryContext {
 
 impl DiscoveryContext {
     pub fn new(
-        registry: VeilidComponentRegistry,
+        network: NativeNetwork,
         config: DiscoveryContextConfig,
         stop_token: StopToken,
     ) -> Self {
-        let routing_table = registry.routing_table();
-        let intf_addrs =
-            Self::get_local_addresses(&routing_table, config.protocol_type, config.address_type);
+        let intf_addrs = network
+            .last_network_state()
+            .unwrap_or_log()
+            .interface_address_state
+            .interface_addresses
+            .iter()
+            .map(|x| Address::from_ip_addr(x.ip()))
+            .collect();
 
         Self {
-            registry,
+            network,
             unlocked_inner: Arc::new(DiscoveryContextUnlockedInner { config, intf_addrs }),
             inner: Arc::new(Mutex::new(DiscoveryContextInner {
                 external_infos: Vec::new(),
@@ -170,28 +177,6 @@ impl DiscoveryContext {
 
     ///////
     // Utilities
-
-    // This pulls the already-detected local interface dial info from the routing table
-    fn get_local_addresses(
-        routing_table: &RoutingTable,
-        protocol_type: ProtocolType,
-        address_type: AddressType,
-    ) -> Vec<SocketAddress> {
-        let filter = DialInfoFilter::all()
-            .with_protocol_type(protocol_type)
-            .with_address_type(address_type);
-        routing_table
-            .dial_info_details(RoutingDomain::LocalNetwork)
-            .iter()
-            .filter_map(|did| {
-                if did.dial_info.matches_filter(&filter) {
-                    Some(did.dial_info.socket_address())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
 
     // Ask for a public address check from a particular noderef
     // This is done over the normal port using RPC
@@ -299,10 +284,7 @@ impl DiscoveryContext {
             );
             async move {
                 if let Some(address) = Box::pin(this.request_public_address(node.clone())).await {
-                    let dial_info = this
-                        .network_manager()
-                        .net()
-                        .make_dial_info(address, protocol_type);
+                    let dial_info = this.network.make_dial_info(address, protocol_type);
                     return Some(ExternalInfo {
                         dial_info,
                         address,
@@ -450,7 +432,7 @@ impl DiscoveryContext {
             AddressType::IPV4 => IGDAddressType::IPV4,
         };
 
-        let igd_manager = self.network_manager().net().igd_manager.clone();
+        let igd_manager = self.network.igd_manager.clone();
 
         // Attempt a port mapping. If this doesn't succeed, it's not going to
         let mapped_external_address = igd_manager
@@ -458,7 +440,7 @@ impl DiscoveryContext {
             .await?;
 
         // Make dial info from the port mapping
-        let external_mapped_dial_info = self.network_manager().net().make_dial_info(
+        let external_mapped_dial_info = self.network.make_dial_info(
             SocketAddress::from_socket_addr(mapped_external_address),
             protocol_type,
         );
@@ -906,7 +888,11 @@ impl DiscoveryContext {
             .lock()
             .external_infos
             .iter()
-            .find_map(|ei| self.intf_addrs.contains(&ei.address).then_some(true))
+            .find_map(|ei| {
+                self.intf_addrs
+                    .contains(&ei.address.address())
+                    .then_some(true)
+            })
             .unwrap_or_default();
 
         if local_address_in_external_info {

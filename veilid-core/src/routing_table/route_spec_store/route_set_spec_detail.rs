@@ -67,8 +67,8 @@ impl fmt::Display for RouteSetSpecDetail {
             self.get_stability(),
             self.get_directions(),
             self.is_automatic(),
-            latency_stats,
-            transfer_stats,
+            f.to_string(&latency_stats),
+            f.to_string(&transfer_stats),
             self.route_set.keys().map(|x| x.to_string()).collect::<Vec<_>>().join(","),
             self.route_set.first_key_value()
                 .unwrap_or_log()

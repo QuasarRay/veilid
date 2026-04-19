@@ -1270,17 +1270,23 @@ impl VeilidAPI {
 
         // Change routing domain relays
         let routing_table = registry.routing_table();
-        match routing_domain {
-            RoutingDomain::LocalNetwork => {
-                let mut editor = routing_table.edit_local_network_routing_domain();
-                if editor.set_relays(relays).commit(true).await {
-                    editor.publish();
+        {
+            match routing_domain {
+                RoutingDomain::LocalNetwork => {
+                    let rdc = routing_table
+                        .get_specific_routing_domain_controller::<LocalNetworkRoutingDomainController>();
+                    let mut editor = rdc.edit();
+                    editor.set_relays(relays);
+                    editor.commit();
+                    rdc.publish_peer_info();
                 }
-            }
-            RoutingDomain::PublicInternet => {
-                let mut editor = routing_table.edit_public_internet_routing_domain();
-                if editor.set_relays(relays).commit(true).await {
-                    editor.publish();
+                RoutingDomain::PublicInternet => {
+                    let rdc = routing_table
+                        .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>();
+                    let mut editor = rdc.edit();
+                    editor.set_relays(relays);
+                    editor.commit();
+                    rdc.publish_peer_info();
                 }
             }
         }
@@ -1876,19 +1882,19 @@ impl VeilidAPI {
         let routing_table = registry.routing_table();
         let rss = routing_table.route_spec_store();
 
-        let routes = rss.list_allocated_routes(|k, v| Some((k.clone(), v.to_string())));
+        let routes = rss.list_allocated_routes(|k, v| Some((k.clone(), format!("{:#}", v))));
         let mut out = format!("Allocated Routes: (count = {}):\n", routes.len());
         for (r, s) in routes {
             out.push_str(&format!("{}: {}\n", r, s));
         }
 
-        let remote_routes = rss.list_remote_routes(|k, v| Some((k.clone(), v.to_string())));
+        let remote_routes = rss.list_remote_routes(|k, v| Some((k.clone(), format!("{:#}", v))));
         out.push_str(&format!(
             "Remote Routes: (count = {}):\n",
             remote_routes.len()
         ));
         for (r, s) in remote_routes {
-            out.push_str(&format!("{}: {}\n", r, s));
+            out.push_str(&format!("{}: {:#}\n", r, s));
         }
 
         Ok(out)

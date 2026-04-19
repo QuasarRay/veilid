@@ -110,7 +110,7 @@ impl fmt::Display for FanoutNodeStatus {
 #[derive(Debug)]
 pub struct FanoutNode {
     pub work_item: FanoutWorkItem,
-    pub cancel_stop_source: Option<StopSource>,
+    pub lane_stop_source: Option<StopSource>,
     pub status: FanoutNodeStatus,
 }
 
@@ -172,7 +172,7 @@ impl FanoutWorkRequest {
 #[derive(Debug, Clone)]
 pub struct FanoutWorkItem {
     pub node_ref: NodeRef,
-    pub cancel_stop_token: StopToken,
+    pub work_item_stop_token: StopToken,
 }
 
 pub type FanoutWorkReceiver = flume::Receiver<FanoutWorkItem>;
@@ -294,8 +294,8 @@ impl<'a> FanoutQueue<'a> {
 
             // Create a cancellation token for the node,
             // so we can stop processing the fanout lane immediately if needed
-            let cancel_stop_source = StopSource::new();
-            let cancel_stop_token = cancel_stop_source.token();
+            let lane_stop_source = StopSource::new();
+            let work_item_stop_token = lane_stop_source.token();
 
             // Add the new node
             self.nodes.insert(
@@ -303,9 +303,9 @@ impl<'a> FanoutQueue<'a> {
                 FanoutNode {
                     work_item: FanoutWorkItem {
                         node_ref: node_ref.clone(),
-                        cancel_stop_token,
+                        work_item_stop_token,
                     },
-                    cancel_stop_source: Some(cancel_stop_source),
+                    lane_stop_source: Some(lane_stop_source),
                     status: FanoutNodeStatus::queued(cur_ts),
                 },
             );
@@ -541,7 +541,7 @@ impl<'a> FanoutQueue<'a> {
             if (self.consensus_width > 0 && index >= self.consensus_width) || rejected_consensus {
                 node.status
                     .transition(FanoutNodeStage::Disqualified, cur_ts);
-                if let Some(css) = node.cancel_stop_source.take() {
+                if let Some(css) = node.lane_stop_source.take() {
                     // Drop the stop source to force the lane to stop processing this node
                     drop(css);
                 }

@@ -121,7 +121,7 @@ impl WebsocketProtocolHandler {
     )]
     pub async fn connect(
         registry: VeilidComponentRegistry,
-        dial_info: &DialInfo,
+        dial_info: DialInfo,
         timeout_ms: u32,
     ) -> io::Result<NetworkResult<ProtocolNetworkConnection>> {
         // Split dial info up
@@ -169,6 +169,8 @@ impl WebsocketProtocolHandler {
             wsmeta,
             wsio,
         );
-        Ok(NetworkResult::Value(ProtocolNetworkConnection::Ws(wnc)))
+        Ok(NetworkResult::Value(Box::new(
+            WasmProtocolNetworkConnection::Ws(wnc),
+        )))
     }
 }

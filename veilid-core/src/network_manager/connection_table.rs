@@ -480,6 +480,10 @@ impl ConnectionTable {
                 break;
             }
         }
+        // priority_flows
+        if let Some(pf) = inner.priority_flows.get_mut(&protocol_type) {
+            pf.remove(&flow);
+        }
         // address_filter
         let ip_addr = remote.socket_addr().ip();
         self.network_manager()

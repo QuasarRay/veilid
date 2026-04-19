@@ -245,6 +245,13 @@ impl OutboundWatch {
             return true;
         }
 
+        // If fallback inspection found missed changes, force a reconcile
+        // to re-establish watch with fresh notification routes
+        if state.needs_forced_reconcile() {
+            veilid_log!(registry debug target: "watch", "OutboundWatch({}): needs_reconcile because fallback inspection found missed changes", self.record_key);
+            return true;
+        }
+
         false
     }
 

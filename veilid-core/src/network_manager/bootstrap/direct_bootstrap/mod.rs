@@ -147,10 +147,10 @@ impl NetworkManager {
                     }).collect();
 
                     // Make unsigned node info
-                    let timestamp = bsrec
-                        .timestamp_secs()
-                        .map(|tss| Timestamp::new(tss * 1_000_000u64))
-                        .unwrap_or_else(Timestamp::now);
+                    // Use the current time for the timestamp since any older bootstrap peer info
+                    // needs to be overwritten for this to be guaranteed to work
+                    let timestamp = Timestamp::now();
+
                     let ni = NodeInfo::new(
                         timestamp,
                         bsrec.envelope_support().to_vec(), // Envelope support is as specified in the bootstrap list

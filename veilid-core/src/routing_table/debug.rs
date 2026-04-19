@@ -42,7 +42,7 @@ impl RoutingTable {
             let rdc = self.get_routing_domain_controller(rd);
             let state = rdc.state();
             let (dial_info_details, relays, debug) = {
-                let rdd = rdc.read();
+                let rdd = rdc.read_dyn();
                 let dial_info_details = rdd.dial_info_details().clone();
                 let relays = rdd.relays().clone();
                 let debug = rdd.debug(true);
@@ -133,7 +133,7 @@ impl RoutingTable {
 
         #[allow(unused_mut)]
         let mut result = format!(
-            "    {} [{}][{}] {} [{}] lastq@{} seen@{}",
+            "{} [{}][{}] {} [{}] lastq@{} seen@{}",
             // node id
             node_id_str,
             // state reason
@@ -186,7 +186,7 @@ impl RoutingTable {
         capabilities: Vec<VeilidCapability>,
     ) -> String {
         let rdc = self.get_routing_domain_controller(RoutingDomain::PublicInternet);
-        let relays = rdc.read().relays();
+        let relays = rdc.read_dyn().relays();
         let relay_node_filter = rdc
             .as_any()
             .downcast_ref::<PublicInternetRoutingDomainController>()
@@ -203,7 +203,7 @@ impl RoutingTable {
         out += "   Live:\n";
         let rdds = self.get_routing_domain_controllers(RoutingDomainSet::all());
         for rdd in rdds {
-            let rdd = rdd.read();
+            let rdd = rdd.read_dyn();
             let entry_summary = rdd.get_entry_summary();
             out += &format!("{:#}: {}\n", rdd.routing_domain(), entry_summary);
         }
@@ -328,7 +328,7 @@ impl RoutingTable {
         let cur_ts = Timestamp::now();
 
         let rdc = self.get_routing_domain_controller(RoutingDomain::PublicInternet);
-        let relays = rdc.read().relays();
+        let relays = rdc.read_dyn().relays();
         let relay_node_filter = rdc
             .as_any()
             .downcast_ref::<PublicInternetRoutingDomainController>()
@@ -359,7 +359,7 @@ impl RoutingTable {
             filters,
             |opt_snap: Option<BucketEntrySnapshot>| opt_snap.unwrap_or_log().node_ref.clone(),
         );
-        let mut out = String::new();
+        let mut out = format!("Entries: {}\n", nodes.len());
         let entry_count = nodes.len();
         for node in nodes {
             let relay_snap = node.entry().snapshot(self.registry(), cur_ts);
@@ -415,8 +415,7 @@ impl RoutingTable {
         }
 
         out += &format!(
-            "Entries: {}\nRelay Capable: {}  Relay Capable %: {:.2}\nRelaying Through This Node: {}\n",
-            entry_count,
+            "Relay Capable: {}  Relay Capable %: {:.2}\nRelaying Through This Node: {}\n",
             relay_count,
             (relay_count as f64) * 100.0 / (entry_count as f64),
             relaying_count,

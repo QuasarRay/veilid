@@ -185,12 +185,6 @@ impl RouteSpecStore {
 
     /// Purge the route spec store
     pub async fn purge(&self) -> VeilidAPIResult<()> {
-        // Briefly pause routing table ticker while changes are made
-        let routing_table = self.routing_table();
-
-        let _tick_guard = routing_table.pause_tasks().await;
-        routing_table.cancel_tasks().await;
-
         // Careful with locking order here, we need to lock the content before the cache
         {
             let mut content = self.content.write();
@@ -363,9 +357,9 @@ impl RouteSpecStore {
         let cur_ts = Timestamp::now();
 
         let rstr = if let Some(arce) = cache.get_allocated_route_by_id(id) {
-            format!("allocated: {}", arce)
+            format!("allocated: {:#}", arce)
         } else if let Some(rrce) = cache.peek_remote_route(cur_ts, id) {
-            format!("remote: {}", rrce)
+            format!("remote: {:#}", rrce)
         } else {
             "(route missing)".to_string()
         };

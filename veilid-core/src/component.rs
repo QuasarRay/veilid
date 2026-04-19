@@ -401,6 +401,18 @@ macro_rules! impl_setup_task {
 
 pub(crate) use impl_setup_task;
 
+macro_rules! impl_setup_task_clone {
+    ($this:expr, $task_name:ident, $task_routine:ident ) => {{
+        let this = $this.clone();
+        $this.$task_name.set_routine(move |s, l, t| {
+            let this = this.clone();
+            Box::pin(async move { this.$task_routine(s, Timestamp::new(l), Timestamp::new(t)) })
+        });
+    }};
+}
+
+pub(crate) use impl_setup_task_clone;
+
 macro_rules! impl_setup_task_async {
     ($this:expr, $this_type:ty, $task_name:ident, $task_routine:ident ) => {{
         let registry = $this.registry();

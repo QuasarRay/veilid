@@ -24,7 +24,10 @@ impl fmt::Display for RemoteRouteCacheEntry {
         write!(
             f,
             "last_seen_our_ni={} last_touched={} latency={} transfer={}",
-            self.last_seen_our_node_info_ts, self.last_touched_ts, latency_stats, transfer_stats
+            f.to_string(&self.last_seen_our_node_info_ts),
+            f.to_string(&self.last_touched_ts),
+            f.to_string(&latency_stats),
+            f.to_string(&transfer_stats)
         )
     }
 }

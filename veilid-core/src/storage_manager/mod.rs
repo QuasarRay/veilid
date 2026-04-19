@@ -216,6 +216,10 @@ pub(crate) struct StorageManager {
     // Outbound transaction keepalive processor
     outbound_transaction_keepalive_processor: OutboundTransactionKeepaliveProcessor,
 
+    // Detached spawn counter to wait for before shutting down
+    // Adding a read lock adds a detached spawn, use write lock to wait for them to all to finish
+    detached_spawns: Arc<AsyncRwLock<()>>,
+
     // Online check
     is_online: AtomicBool,
 }
@@ -233,6 +237,7 @@ impl fmt::Debug for StorageManager {
             .field("anonymous_signing_keys", &self.anonymous_signing_keys)
             .field("is_online", &self.is_online)
             .field("descriptor_cache", &self.descriptor_cache)
+            .field("detached_spawns", &self.detached_spawns)
             .finish()
     }
 }
@@ -298,6 +303,7 @@ impl StorageManager {
             outbound_transaction_keepalive_processor,
             is_online: AtomicBool::new(false),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
+            detached_spawns: Arc::new(AsyncRwLock::new(())),
         };
 
         this.setup_tasks();
@@ -470,6 +476,9 @@ impl StorageManager {
 
         // Stop deferred result processor
         self.background_operation_processor.terminate().await;
+
+        // Wait for all detached spawns to finish
+        let _ = self.detached_spawns.write().await;
 
         // Terminate and release the storage manager
         let (opt_local_record_store, opt_remote_record_store) = {

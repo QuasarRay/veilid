@@ -479,6 +479,15 @@ impl StorageManager {
         // Call the fanout in a spawned task
         let registry = self.registry();
         let hash_coordinate = opaque_record_key.to_hash_coordinate();
+        let detached_spawn_guard = self
+            .detached_spawns
+            .try_read_arc()
+            .ok_or_else(VeilidAPIError::not_initialized)?;
+        let shutdown_stop_source = self
+            .startup_lock
+            .stop_token()
+            .ok_or_else(VeilidAPIError::not_initialized)?;
+
         spawn(
             "outbound_get_value fanout",
             Box::pin(
@@ -500,7 +509,7 @@ impl StorageManager {
                         check_done,
                     );
 
-                    let fanout_result = match fanout_call.run(init_fanout_queue, FanoutQueueMode::ThrottleAtConsensus).await {
+                    let fanout_result = match fanout_call.run(init_fanout_queue, FanoutQueueMode::ThrottleAtConsensus, shutdown_stop_source).await {
                         Ok(v) => v,
                         Err(e) => {
                             // If we finished with an error, return that
@@ -528,6 +537,9 @@ impl StorageManager {
                     if let Err(e) = out_tx.send(Ok(out)) {
                         veilid_log!(registry debug "Sending GetValue result failed: {}", e);
                     }
+
+                    // Ensure we move in the guard and drop it here explicitly
+                    drop(detached_spawn_guard);
                 }
                 .instrument(tracing::trace_span!("outbound_get_value result", __VEILID_LOG_KEY = self.log_key())),
             ),

@@ -22,7 +22,7 @@ impl ListenerState {
 
 /////////////////////////////////////////////////////////////////
 
-impl Network {
+impl NativeNetwork {
     fn get_or_create_tls_acceptor(&self) -> EyreResult<TlsAcceptor> {
         if let Some(ts) = self.inner.lock().tls_acceptor.as_ref() {
             return Ok(ts.clone());

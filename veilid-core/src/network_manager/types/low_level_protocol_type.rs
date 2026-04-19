@@ -2,6 +2,7 @@
 
 use super::*;
 
+// XXX: Eventually this needs to become a FOURCC when low level protocols become pluggable
 // Keep member order appropriate for sorting < preference
 // Must match DialInfo order
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

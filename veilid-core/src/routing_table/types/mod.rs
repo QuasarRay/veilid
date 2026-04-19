@@ -14,6 +14,7 @@ mod peer_info;
 mod relay_info;
 mod routing_domain;
 mod routing_domain_health;
+mod routing_domain_network_config;
 mod routing_table_health;
 
 use super::*;
@@ -34,4 +35,5 @@ pub use peer_info::*;
 pub use relay_info::*;
 pub use routing_domain::*;
 pub use routing_domain_health::*;
+pub use routing_domain_network_config::*;
 pub use routing_table_health::*;

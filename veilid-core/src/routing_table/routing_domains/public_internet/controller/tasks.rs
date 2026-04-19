@@ -22,14 +22,14 @@ impl PublicInternetRoutingDomainController {
         );
 
         // Set ping validator tick task
-        impl_setup_task_async_clone!(
+        impl_setup_task_clone!(
             self,
             ping_validator_public_internet_task,
             ping_validator_public_internet_task_routine
         );
 
         // Set relay management tick task
-        impl_setup_task_async_clone!(self, relay_management_task, relay_management_task_routine);
+        impl_setup_task_clone!(self, relay_management_task, relay_management_task_routine);
 
         // Set private route management tick task
         impl_setup_task_async_clone!(
@@ -96,7 +96,7 @@ impl PublicInternetRoutingDomainController {
             | RoutingDomainInboundStage::NeedsDialInfoConfirmation
             | RoutingDomainInboundStage::Unusable => false,
             RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish => {
-                state.relay_status.needs_more_relays()
+                state.relay_status.wants_more_relays()
             }
         }
     }

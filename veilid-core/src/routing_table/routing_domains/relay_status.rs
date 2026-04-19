@@ -36,8 +36,6 @@ pub struct RelayStatus {
     pub want_relay_protocols: HashSet<(ProtocolType, AddressType)>,
     /// Ordering modes we still need for relaying, per address type
     pub want_relay_orderings: HashSet<(SequenceOrdering, AddressType)>,
-    /// All protocol/address types we can offer inbound relaying for from this node
-    pub can_relay_protocols: HashSet<(ProtocolType, AddressType)>,
     /// All the low level protocols and ports that require nat keepalive pings
     pub wants_nat_keepalives: LowLevelProtocolPorts,
     /// All of the relays and their configuration currently included in our status
@@ -48,12 +46,11 @@ impl fmt::Display for RelayStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Low Level Port Info:\n{}\nDial Info Filter: {}\nWant Relay Protocols: {}\nWant Relay Orderings: {}\nCan Relay Protocols: {}\nWants NAT Keepalives: {}\nRelays:\n{}",
+            "Low Level Port Info:\n{}\nDial Info Filter: {}\nWant Relay Protocols: {}\nWant Relay Orderings: {}\nWants NAT Keepalives: {}\nRelays:\n{}",
             indent_all_string(f.to_string(&self.low_level_port_info)),
             f.to_string(self.dial_info_filter),
             self.want_relay_protocols.iter().map(|(pt,at)| format!("{}:{}", f.to_string(pt), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
             self.want_relay_orderings.iter().map(|(om,at)| format!("{}:{}", f.to_string(om), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
-            self.can_relay_protocols.iter().map(|(pt,at)| format!("{}:{}", f.to_string(pt), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
             self.wants_nat_keepalives.iter().map(|(lpt,at,p)| format!("{}:{}:{}", f.to_string(lpt), f.to_string(at), p)).collect::<Vec<_>>().join(", ").string_if_empty("None"),
             indent_all_string(f.to_multiline_indexed_string(self.relays.iter()).string_if_empty("None"))
         )
@@ -67,7 +64,7 @@ impl RelayStatus {
             Timestamp::now_non_decreasing(),
             VALID_ENVELOPE_VERSIONS.to_vec(),
             vec![],
-            rdd.capabilities(),
+            rdd.capabilities().iter().copied().collect(),
             rdd.outbound_protocols(),
             rdd.address_types(),
             rdd.dial_info_details().clone(),
@@ -77,78 +74,53 @@ impl RelayStatus {
         Self::new_from_node_info(
             rdd.routing_domain(),
             &node_info,
-            rdd.is_network_translated(),
+            rdd.translated_address_types(),
         )
     }
 
     fn new_from_node_info(
         routing_domain: RoutingDomain,
         node_info: &NodeInfo,
-        needs_hairpin_nat_support: bool,
+        translated_address_types: AddressTypeSet,
     ) -> Self {
         let low_level_port_info = node_info.get_low_level_port_info();
         let dial_info_filter = DialInfoFilter::all()
             .with_protocol_type_set(node_info.outbound_protocols())
             .with_address_type_set(node_info.address_types());
 
-        // Determine ordering modes we need relaying for
-        let ordering_modes = node_info
-            .outbound_protocols()
-            .iter()
-            .map(|x| x.sequence_ordering())
-            .collect::<HashSet<_>>();
-
         // Get the dial info list in preferred deterministic order
         let mut dial_info_list = node_info.dial_info_detail_list().to_vec();
         dial_info_list.sort_by(DialInfoDetail::ordered_sequencing_sort);
 
-        // Figure out which dial info combinations we have that are direct-capable
-        let mut direct_did_protoaddrs = HashSet::<(ProtocolType, AddressType)>::new();
-        let mut wants_nat_keepalives = LowLevelProtocolPorts::new();
-        for did in dial_info_list {
-            if !did.class.requires_signal() {
-                direct_did_protoaddrs
-                    .insert((did.dial_info.protocol_type(), did.dial_info.address_type()));
-            }
-            if did.class.wants_nat_keepalive() {
-                wants_nat_keepalives.insert((
-                    did.dial_info.protocol_type().low_level_protocol_type(),
-                    did.dial_info.address_type(),
-                    did.dial_info.port(),
-                ));
+        // Start with all possible combinations we might need to have relays for
+        let mut want_relay_protocols = HashSet::<(ProtocolType, AddressType)>::new();
+        let mut want_relay_orderings = HashSet::<(SequenceOrdering, AddressType)>::new();
+        for at in AddressTypeSet::all() {
+            for pt in ProtocolTypeSet::all() {
+                want_relay_protocols.insert((pt, at));
+                want_relay_orderings.insert((pt.sequence_ordering(), at));
             }
         }
 
-        // Calculate which address/protocol type combinations we require
-        // relays for, and which we can offer relay support for
-        // Get the ordering modes per address type we need, at a minimum, to be able to publish peer info
-        let mut want_relay_protocols = HashSet::<(ProtocolType, AddressType)>::new();
-        let mut want_relay_orderings = AddressTypeSet::all()
-            .iter()
-            .flat_map(|at| ordering_modes.iter().map(move |om| (*om, at)))
-            .collect::<HashSet<_>>();
-        let mut can_relay_protocols = HashSet::<(ProtocolType, AddressType)>::new();
+        // Figure out which dial info combinations we have that are direct-capable
+        let mut wants_nat_keepalives = LowLevelProtocolPorts::new();
+        for did in dial_info_list {
+            let pt = did.dial_info.protocol_type();
+            let at = did.dial_info.address_type();
 
-        for at in AddressTypeSet::all() {
-            for pt in ProtocolTypeSet::all() {
-                // if we can't use this protocol because we don't have its ordering mode enabled at all, then we should exclude it
-                if !ordering_modes.contains(&pt.sequence_ordering()) {
-                    continue;
-                }
+            if !did.class.requires_signal() && !translated_address_types.contains(at) {
+                // If this address type is NAT'd, then we need a relay for its
+                // protocols even if it is directly reachable
+                want_relay_protocols.remove(&(pt, at));
+                want_relay_orderings.remove(&(pt.sequence_ordering(), at));
+            }
 
-                if direct_did_protoaddrs.contains(&(pt, at)) {
-                    // We can relay this combination
-                    can_relay_protocols.insert((pt, at));
-
-                    // Note the relay ordering
-                    want_relay_orderings.remove(&(pt.sequence_ordering(), at));
-                }
-
-                if needs_hairpin_nat_support || !direct_did_protoaddrs.contains(&(pt, at)) {
-                    // We can't relay this, so we must need a relay for it ourselves
-                    // Or we want to allocate a hairpin NAT relay
-                    want_relay_protocols.insert((pt, at));
-                }
+            if did.class.wants_nat_keepalive() {
+                wants_nat_keepalives.insert((
+                    pt.low_level_protocol_type(),
+                    at,
+                    did.dial_info.port(),
+                ));
             }
         }
 
@@ -158,13 +130,14 @@ impl RelayStatus {
             dial_info_filter,
             want_relay_protocols,
             want_relay_orderings,
-            can_relay_protocols,
             wants_nat_keepalives,
             relays: vec![],
         }
     }
 
     /// Check if we would like more relays
+    /// Beyond the bare minimum ordering mode relays, having relays to handle
+    /// each protocol+address type combination we can't accept directly are also wanted
     pub fn wants_more_relays(&self) -> bool {
         // If we want more keepalives for NAT, we want more relays
         if !self.wants_nat_keepalives.is_empty() {
@@ -176,19 +149,18 @@ impl RelayStatus {
     }
 
     /// Check if we need more relays before publication
+    /// This is a stricter check than wants_more_relays() because the bare minimum
+    /// relays we need are a subset of the relays we want, one relay per ordering mode
+    /// per address type is enough to publish.
     pub fn needs_more_relays(&self) -> bool {
         // If we want more keepalives for NAT, we need more relays
         if !self.wants_nat_keepalives.is_empty() {
             return true;
         }
 
-        // If we have any address type that doesn't need relays for its ordering modes
-        // then we don't need more relays (we still want more relays though)
-        let mut ready_address_types = AddressTypeSet::all();
-        for nro in &self.want_relay_orderings {
-            ready_address_types.remove(nro.1);
-        }
-        ready_address_types.is_empty()
+        // If we have any address types that still have ordering modes they need
+        // relays for, then we need more relays
+        !self.want_relay_orderings.is_empty()
     }
 
     /// Get the routing domain relays list when we're done

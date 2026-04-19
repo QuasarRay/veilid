@@ -768,6 +768,10 @@ impl StorageManager {
                 .get_transaction_state(&transaction_handle)?
                 .get_operation_concurrency_semaphore();
 
+            // Note: in theory, we could return a null value here if no sequence number existed at begin time.
+            // But we are reserving the right to include transactional 'gets' in the -remote transaction state-.
+            // Which means we have to send the get request to the network even if nothing should be returned.
+
             // Prepare for get value
             let command_params = otm
                 .prepare_transact_get_params(transaction_handle.clone(), &opaque_record_key, subkey)
@@ -807,7 +811,7 @@ impl StorageManager {
         // Done with network access, release the semaphore
         drop(sem);
 
-        let subkey_get_result = {
+        let get_signed_value_data = {
             let mut inner = self.inner.lock();
             let otm = &mut inner.outbound_transaction_manager;
             otm.record_transact_get_result(transaction_handle.clone(), result)
@@ -826,12 +830,21 @@ impl StorageManager {
             else {
                 apibail_internal!("missing record in get: {}", record_key.opaque());
             };
-            record_state.current_subkey_get_result(subkey)?
+            let subkey_get_result = record_state.current_subkey_get_result(subkey)?;
+            let Some(get_signed_value_data) = subkey_get_result.opt_value else {
+                // Check if the transaction should have had a value because the begin had a sequence number
+                let begin_network_seq = record_state.begin_network_seq(subkey)?;
+                if begin_network_seq.is_some() {
+                    // Sequence number existed at begin time, so we should have gotten a value
+                    apibail_try_again!(
+                        "sequence number existed at transaction begin, but no value was returned"
+                    );
+                }
+                return Ok(None);
+            };
+            get_signed_value_data
         };
-        let Some(get_signed_value_data) = subkey_get_result.opt_value else {
-            // No value
-            return Ok(None);
-        };
+
         let get_value_data = self
             .maybe_decrypt_value_data(&record_key, get_signed_value_data.value_data())
             .await?;

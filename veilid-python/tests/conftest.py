@@ -24,7 +24,7 @@ async def api_connection() -> AsyncGenerator[_JsonVeilidAPI, None]:
 
     async with api:
         # purge routes to ensure we start fresh
-        await api.debug("purge routes")
+        # await api.debug("purge routes")
 
         while not (await api.get_state()).attachment.public_internet_ready:
             await asyncio.sleep(0.25)

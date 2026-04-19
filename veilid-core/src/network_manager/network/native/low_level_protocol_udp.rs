@@ -1,7 +1,7 @@
 use super::*;
 use stop_token::future::FutureExt;
 
-impl Network {
+impl NativeNetwork {
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(super) fn create_udp_listener_tasks(&self) -> EyreResult<()> {
         // Spawn socket tasks
@@ -132,10 +132,7 @@ impl Network {
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(super) fn create_outbound_udp_protocol_handlers(&self) -> EyreResult<bool> {
-        let last_network_state = self.last_network_state().unwrap_or_log();
-
-        let enable_ipv4 =
-            last_network_state.enable_ipv4_local || last_network_state.enable_ipv4_global;
+        let enable_ipv4 = is_ipv4_supported();
         if enable_ipv4 {
             let has_ipv4_handler = self
                 .inner
@@ -154,8 +151,7 @@ impl Network {
                 }
             }
         }
-        let enable_ipv6 =
-            last_network_state.enable_ipv6_local || last_network_state.enable_ipv6_global;
+        let enable_ipv6 = is_ipv6_supported();
         if enable_ipv6 {
             let has_ipv6_handler = self
                 .inner

@@ -12,6 +12,7 @@ pub(crate) use ws::*;
 #[cfg(feature = "enable-protocol-wss")]
 pub(crate) use wss::*;
 
+// XXX: Eventually this needs to use the protocol FOURCC and become a more generic parser when protocols/address types become pluggable
 // Keep member order appropriate for sorting < preference
 // Must match ProtocolType order
 #[derive(Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize)]

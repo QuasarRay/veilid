@@ -364,8 +364,17 @@ impl StorageManager {
             check_done,
         );
 
+        let shutdown_stop_source = self
+            .startup_lock
+            .stop_token()
+            .ok_or_else(VeilidAPIError::not_initialized)?;
+
         let fanout_result = fanout_call
-            .run(init_fanout_queue, FanoutQueueMode::ThrottleAtConsensus)
+            .run(
+                init_fanout_queue,
+                FanoutQueueMode::ThrottleAtConsensus,
+                shutdown_stop_source,
+            )
             .await?;
 
         let mut ctx = context.lock();

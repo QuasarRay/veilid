@@ -1,10 +1,5 @@
 use super::*;
 
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-mod native;
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-mod wasm;
-
 mod address_check;
 mod address_filter;
 mod bootstrap;
@@ -12,6 +7,7 @@ mod connection_handle;
 mod connection_manager;
 mod connection_table;
 mod debug;
+mod network;
 mod network_connection;
 mod node_contact_method_cache;
 mod receipt_manager;
@@ -28,6 +24,7 @@ pub mod tests_network_manager;
 ////////////////////////////////////////////////////////////////////////////////////////
 
 pub use connection_manager::*;
+pub use network::*;
 pub use network_connection::*;
 pub use receipt_manager::*;
 pub use stats::*;
@@ -41,13 +38,9 @@ use address_check::*;
 use address_filter::*;
 use connection_handle::*;
 use crypto::*;
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-use native::*;
 use relay_worker::*;
 use routing_table::*;
 use rpc_processor::*;
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-use wasm::*;
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -185,11 +178,6 @@ impl fmt::Display for NodeContactMethod {
             }
         }
     }
-}
-
-enum SendDataToExistingFlowResult {
-    Sent(UniqueFlow),
-    NotSent(Bytes),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -382,9 +370,11 @@ impl NetworkManager {
     fn net(&self) -> Network {
         self.components.read().as_ref().unwrap_or_log().net.clone()
     }
+
     fn opt_net(&self) -> Option<Network> {
         self.components.read().as_ref().map(|x| x.net.clone())
     }
+
     fn receipt_manager(&self) -> ReceiptManager {
         self.components
             .read()
@@ -453,8 +443,8 @@ impl NetworkManager {
         self.address_filter.restart();
 
         // Create network components
-        let connection_manager = ConnectionManager::new(self.registry());
-        let net = Network::new(self.registry());
+        let net = new_platform_network(self.registry());
+        let connection_manager = ConnectionManager::new(net.clone());
         let receipt_manager = ReceiptManager::new(self.registry());
 
         *self.components.write() = Some(NetworkComponents {

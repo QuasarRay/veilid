@@ -163,7 +163,7 @@ impl RoutingTable {
                 let rdc = self.get_routing_domain_controller(routing_domain);
 
                 {
-                    let rdd = rdc.read();
+                    let rdd = rdc.read_dyn();
 
                     // Store cached entry summary (must come before get_health, because that uses the summary)
                     rdd.set_entry_summary(Arc::new(entry_summary));

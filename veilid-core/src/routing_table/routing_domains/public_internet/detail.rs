@@ -50,7 +50,7 @@ impl fmt::Display for PublicInternetRoutingDomainDetail {
 
 impl_veilid_component_accessors!(PublicInternetRoutingDomainDetail);
 
-impl RoutingDomainDetailCommonAccessors for PublicInternetRoutingDomainDetail {
+impl RoutingDomainDetailAccessors for PublicInternetRoutingDomainDetail {
     fn common(&self) -> &RoutingDomainDetailCommon {
         &self.common
     }
@@ -112,6 +112,10 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
         relay_status
     }
 
+    fn network_config(&self) -> &RoutingDomainNetworkConfig {
+        self.common.network_config()
+    }
+
     fn outbound_protocols(&self) -> ProtocolTypeSet {
         self.common.outbound_protocols()
     }
@@ -127,7 +131,7 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
     fn confirmed(&self) -> bool {
         self.common.confirmed()
     }
-    fn capabilities(&self) -> Vec<VeilidCapability> {
+    fn capabilities(&self) -> BTreeSet<VeilidCapability> {
         self.common.capabilities()
     }
     fn relays(&self) -> Vec<RoutingDomainRelay> {
@@ -141,15 +145,17 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
         self.common.dial_info_details()
     }
 
-    fn is_network_translated(&self) -> bool {
-        let mut inbound_addresses = HashSet::<_>::new();
+    fn translated_address_types(&self) -> AddressTypeSet {
+        let mut inbound_address_types = HashMap::new();
         for did in self.dial_info_details() {
-            inbound_addresses.insert(did.dial_info.ip_addr());
+            inbound_address_types.insert(did.dial_info.ip_addr(), did.dial_info.address_type());
         }
         for intf_addr in &self.interface_addresses {
-            inbound_addresses.remove(&intf_addr.ip());
+            inbound_address_types.remove(&intf_addr.ip());
         }
-        !inbound_addresses.is_empty()
+        inbound_address_types
+            .into_values()
+            .fold(AddressTypeSet::new(), |acc, at| acc | at)
     }
 
     fn inbound_dial_info_filter(&self) -> DialInfoFilter {
@@ -215,7 +221,8 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
 
     ////////////////////////////////////////////////
 
-    fn refresh(&self) {
+    fn invalidate(&self) {
+        self.opt_last_relay_status.store(None);
         self.common.clear_current_peer_info_cache();
     }
 

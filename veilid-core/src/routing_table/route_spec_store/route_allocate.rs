@@ -707,6 +707,7 @@ impl RouteSpecStore {
                     let cm = routing_table.get_contact_method(
                         RoutingDomain::PublicInternet,
                         previous_node.clone(),
+                        true,
                         current_node.clone(),
                         DialInfoFilter::all(),
                         params.sequencing,
@@ -722,6 +723,7 @@ impl RouteSpecStore {
                         let cm = routing_table.get_contact_method(
                             RoutingDomain::PublicInternet,
                             previous_node.clone(),
+                            true,
                             current_node.clone(),
                             DialInfoFilter::all(),
                             ordering.strict_sequencing(),
@@ -746,6 +748,7 @@ impl RouteSpecStore {
                     let cm = routing_table.get_contact_method(
                         RoutingDomain::PublicInternet,
                         next_node.clone(),
+                        true,
                         current_node.clone(),
                         DialInfoFilter::all(),
                         params.sequencing,
@@ -761,6 +764,7 @@ impl RouteSpecStore {
                         let cm = routing_table.get_contact_method(
                             RoutingDomain::PublicInternet,
                             next_node.clone(),
+                            true,
                             current_node.clone(),
                             DialInfoFilter::all(),
                             ordering.strict_sequencing(),

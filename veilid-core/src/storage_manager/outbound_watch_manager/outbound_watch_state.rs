@@ -1,5 +1,9 @@
 use super::*;
 
+/// How long to wait without receiving a ValueChanged before
+/// triggering a fallback change inspection to detect missed updates.
+const WATCH_FALLBACK_INSPECT_INTERVAL: TimestampDuration = TimestampDuration::new_secs(30);
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundWatchState {
     /// Requested parameters
@@ -16,6 +20,17 @@ pub(in crate::storage_manager) struct OutboundWatchState {
     min_expiration: Timestamp,
     /// Calculated field: the set of value changed routes for this watch from all per node watches
     value_changed_routes: BTreeSet<PublicKey>,
+    /// Timestamp when the watch was established or last renewed/reconciled.
+    watch_established_ts: Timestamp,
+    /// Timestamp of the last ValueChanged RPC received.
+    /// Set ONLY when an actual ValueChanged arrives from a remote node.
+    last_value_changed_ts: Option<Timestamp>,
+    /// Timestamp of the last fallback change inspection.
+    last_fallback_inspect_ts: Option<Timestamp>,
+    /// Set by fallback change inspection when changes are found that should
+    /// have been delivered via ValueChanged but weren't. Forces a reconcile
+    /// to re-establish the watch with fresh notification routes.
+    needs_forced_reconcile: bool,
 }
 
 impl fmt::Display for OutboundWatchState {
@@ -86,6 +101,18 @@ impl OutboundWatchStateEditor<'_> {
     pub fn update_last_consensus_node_count(&mut self) {
         self.state.opt_last_consensus_node_count = Some(self.state.nodes().len());
     }
+    pub fn touch_value_changed(&mut self, ts: Timestamp) {
+        self.state.last_value_changed_ts = Some(ts);
+    }
+    pub fn touch_fallback_inspect(&mut self, ts: Timestamp) {
+        self.state.last_fallback_inspect_ts = Some(ts);
+    }
+    pub fn set_forced_reconcile(&mut self) {
+        self.state.needs_forced_reconcile = true;
+    }
+    pub fn clear_forced_reconcile(&mut self) {
+        self.state.needs_forced_reconcile = false;
+    }
 }
 
 impl OutboundWatchState {
@@ -101,6 +128,10 @@ impl OutboundWatchState {
             opt_last_consensus_node_count: None,
             min_expiration,
             value_changed_routes: BTreeSet::new(),
+            watch_established_ts: Timestamp::now_non_decreasing(),
+            last_value_changed_ts: None,
+            last_fallback_inspect_ts: None,
+            needs_forced_reconcile: false,
         }
     }
 
@@ -190,5 +221,27 @@ impl OutboundWatchState {
                     .unwrap_or_log()
             })
             .collect()
+    }
+
+    /// Check if a fallback change inspection is needed because no
+    /// ValueChanged has been received within WATCH_FALLBACK_INSPECT_INTERVAL.
+    pub fn needs_fallback_inspect(&self, cur_ts: Timestamp) -> bool {
+        let reference_ts = self
+            .last_fallback_inspect_ts
+            .map(|t| t.max(self.watch_established_ts))
+            .unwrap_or(self.watch_established_ts);
+
+        if let Some(vc_ts) = self.last_value_changed_ts {
+            if vc_ts >= reference_ts {
+                return false;
+            }
+        }
+
+        cur_ts >= reference_ts.later(WATCH_FALLBACK_INSPECT_INTERVAL)
+    }
+
+    /// Whether a forced reconcile is needed (fallback inspection found missed changes).
+    pub fn needs_forced_reconcile(&self) -> bool {
+        self.needs_forced_reconcile
     }
 }

@@ -113,7 +113,7 @@ impl PublicInternetRoutingDomainController {
 
     // Keep relays assigned and accessible
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub async fn relay_management_task_routine(
+    pub fn relay_management_task_routine(
         &self,
         _stop_token: StopToken,
         _last_ts: Timestamp,
@@ -133,7 +133,7 @@ impl PublicInternetRoutingDomainController {
         };
 
         // Get existing relays
-        let original_relays_and_states = self.read().relays_and_states();
+        let original_relays_and_states = self.read_dyn().relays_and_states();
 
         // All sync work using the snapshot is scoped in this block
         let (original_relays, state_updates, new_relays) = {
@@ -258,22 +258,18 @@ impl PublicInternetRoutingDomainController {
         };
 
         // Apply all changes in a single editor commit
-        let mut editor = routing_table.edit_public_internet_routing_domain();
-        let mut changed = false;
+        let mut editor = self.edit();
 
         for (relay, state) in state_updates {
             editor.set_relay_state(relay, state);
-            changed = true;
         }
 
         if new_relays != original_relays {
             editor.set_relays(new_relays);
-            changed = true;
         }
 
-        if changed && editor.commit(false).await {
-            editor.publish();
-        }
+        editor.commit();
+        self.publish_peer_info();
 
         Ok(())
     }
@@ -283,10 +279,10 @@ impl PublicInternetRoutingDomainController {
         let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
 
         // Get all our outbound protocol/address types
-        let outbound_dif = self.read().outbound_dial_info_filter();
+        let outbound_dif = self.read_dyn().outbound_dial_info_filter();
 
         // Get our own peer info
-        let own_peer_info = self.read().get_peer_info();
+        let own_peer_info = self.read_dyn().get_peer_info();
 
         move |snap: &BucketEntrySnapshot| {
             // Ensure this node is not on the local network

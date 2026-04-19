@@ -6,9 +6,6 @@ impl_veilid_log_facility!("rtab");
 
 pub const RECENT_PEERS_TABLE_SIZE: usize = 64;
 
-// Critical sections
-pub const LOCK_TAG_TICK: &str = "TICK";
-
 #[derive(Debug)]
 pub struct NodeRelativePerformance {
     pub percentile: f32,

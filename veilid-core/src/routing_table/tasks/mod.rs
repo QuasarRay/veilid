@@ -60,11 +60,6 @@ impl RoutingTable {
             return Ok(());
         };
 
-        // Don't tick if paused
-        let Some(_tick_guard) = self.critical_sections.try_lock_tag(LOCK_TAG_TICK) else {
-            return Ok(());
-        };
-
         // Do flush every ROUTING_TABLE_FLUSH_INTERVAL_SECS secs
         self.flush_task.tick().await?;
 
@@ -93,9 +88,6 @@ impl RoutingTable {
         }
 
         Ok(())
-    }
-    pub async fn pause_tasks(&self) -> AsyncTagLockGuard<&'static str> {
-        self.critical_sections.lock_tag(LOCK_TAG_TICK).await
     }
 
     pub async fn cancel_tasks(&self) {

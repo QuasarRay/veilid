@@ -49,6 +49,21 @@ pub fn is_ipv6_supported() -> bool {
     supp
 }
 
+static IPV4_IS_SUPPORTED: Mutex<Option<bool>> = Mutex::new(None);
+
+pub fn is_ipv4_supported() -> bool {
+    let mut opt_supp = IPV4_IS_SUPPORTED.lock();
+    if let Some(supp) = *opt_supp {
+        return supp;
+    }
+
+    // XXX: See issue #92
+    let supp = true;
+
+    *opt_supp = Some(supp);
+    supp
+}
+
 pub fn get_concurrency() -> u32 {
     static CACHE: AtomicU32 = AtomicU32::new(0);
     let cache = CACHE.load(Ordering::Acquire);

@@ -5,6 +5,7 @@ impl_veilid_log_facility!("rtab");
 /// Context for calculating contact method
 pub struct ContactMethodContext<'a> {
     pub peer_a: Arc<PeerInfo>,
+    pub peer_a_published: bool,
     pub peer_b: Arc<PeerInfo>,
     pub node_a: &'a NodeInfo,
     pub node_b: &'a NodeInfo,
@@ -20,6 +21,7 @@ impl fmt::Debug for ContactMethodContext<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ContactMethodContext")
             .field("peer_a", &self.peer_a)
+            .field("peer_a_published", &self.peer_a_published)
             .field("peer_b", &self.peer_b)
             .field("node_a", &self.node_a)
             .field("node_b", &self.node_b)
@@ -38,6 +40,7 @@ impl PublicInternetRoutingDomainController {
     pub fn get_contact_method(
         &self,
         peer_a: Arc<PeerInfo>,
+        peer_a_published: bool,
         peer_b: Arc<PeerInfo>,
         dial_info_filter: DialInfoFilter,
         sequencing: Sequencing,
@@ -64,6 +67,7 @@ impl PublicInternetRoutingDomainController {
 
         let ctx = ContactMethodContext {
             peer_a: peer_a.clone(),
+            peer_a_published,
             peer_b: peer_b.clone(),
             node_a,
             node_b,
@@ -166,7 +170,8 @@ impl PublicInternetRoutingDomainController {
                 ctx.context_sort,
             ) {
                 // Can node A receive anything inbound ever?
-                if ctx.node_a.has_dial_info() {
+                // Requires both inbound dial info and the peer info to be published
+                if ctx.node_a.has_dial_info() && ctx.peer_a_published {
                     ///////// Reverse connection
 
                     // Get the best match dial info for an reverse inbound connection from node B to node A
@@ -300,25 +305,26 @@ impl PublicInternetRoutingDomainController {
             ctx.sequencing,
             ctx.context_sort,
         ) {
-            ///////// Reverse connection
-
-            // Get the best match dial info for an reverse inbound connection from node B to node A
-            // unless both nodes are on the same ipblock
-            if let Some(reverse_did) = (!ctx.same_ipblock)
-                .then(|| {
-                    self.best_dial_info_detail_between_nodes(
-                        ctx.node_b,
-                        ctx.node_a,
-                        ctx.dial_info_filter,
-                        ctx.sequencing,
-                        ctx.context_sort,
-                    )
-                })
-                .flatten()
-            {
-                // Can we receive a direct reverse connection?
-                if !reverse_did.class.requires_signal() {
-                    return Some(ContactMethod::SignalReverse(node_b_relay_did.dial_info));
+            // Reverse connection (requires published peer info because signal rpc uses it)
+            if ctx.peer_a_published {
+                // Get the best match dial info for an reverse inbound connection from node B to node A
+                // unless both nodes are on the same ipblock
+                if let Some(reverse_did) = (!ctx.same_ipblock)
+                    .then(|| {
+                        self.best_dial_info_detail_between_nodes(
+                            ctx.node_b,
+                            ctx.node_a,
+                            ctx.dial_info_filter,
+                            ctx.sequencing,
+                            ctx.context_sort,
+                        )
+                    })
+                    .flatten()
+                {
+                    // Can we receive a direct reverse connection?
+                    if !reverse_did.class.requires_signal() {
+                        return Some(ContactMethod::SignalReverse(node_b_relay_did.dial_info));
+                    }
                 }
             }
 

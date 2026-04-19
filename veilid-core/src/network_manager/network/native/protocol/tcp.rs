@@ -168,7 +168,7 @@ impl RawTcpProtocolHandler {
             SocketAddress::from_socket_addr(socket_addr),
             ProtocolType::TCP,
         );
-        let conn = ProtocolNetworkConnection::RawTcp(RawTcpNetworkConnection::new(
+        let conn = NativeProtocolNetworkConnection::RawTcp(RawTcpNetworkConnection::new(
             self.registry(),
             Flow::new(peer_addr, SocketAddress::from_socket_addr(local_addr)),
             ps,
@@ -176,7 +176,7 @@ impl RawTcpProtocolHandler {
 
         veilid_log!(self trace "Connection accepted from: {} (TCP)", socket_addr);
 
-        Ok(Some(conn))
+        Ok(Some(Box::new(conn)))
     }
 
     #[cfg_attr(
@@ -214,10 +214,11 @@ impl RawTcpProtocolHandler {
         );
         veilid_log!(registry trace "rawtcp::connect: {:?}", flow);
 
-        let conn =
-            ProtocolNetworkConnection::RawTcp(RawTcpNetworkConnection::new(registry, flow, ps));
+        let conn = NativeProtocolNetworkConnection::RawTcp(RawTcpNetworkConnection::new(
+            registry, flow, ps,
+        ));
 
-        Ok(NetworkResult::Value(conn))
+        Ok(NetworkResult::Value(Box::new(conn)))
     }
 }
 

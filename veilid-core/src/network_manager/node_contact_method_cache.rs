@@ -8,6 +8,8 @@ pub struct NodeContactMethodCacheKey {
     pub node_ids: NodeIdGroup,
     /// The timestamp of our own -current- peer info
     pub own_node_info_ts: Timestamp,
+    /// The timestamp our -published- peer info if it has been published
+    pub own_published_node_info_ts: Option<Timestamp>,
     /// The timestamp of the target's published peer info
     pub target_node_info_ts: Timestamp,
     /// The node ref filter used to connect to the target

@@ -187,6 +187,20 @@ cfg_if! {
             *opt_supp = Some(supp);
             supp
         }
+
+        static IPV4_IS_SUPPORTED: Mutex<Option<bool>> = Mutex::new(None);
+
+        pub fn is_ipv4_supported() -> bool {
+            let mut opt_supp = IPV4_IS_SUPPORTED.lock();
+            if let Some(supp) = *opt_supp {
+                return supp;
+            }
+            // Not exhaustive but for our use case it should be sufficient. If no local ports are available for binding, Veilid isn't going to work anyway :P
+            let supp = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST,  0)).is_ok();
+            *opt_supp = Some(supp);
+            supp
+        }
+
     }
 }
 

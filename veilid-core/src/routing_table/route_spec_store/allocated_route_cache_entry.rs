@@ -53,8 +53,8 @@ impl fmt::Display for AllocatedRouteCacheEntry {
             self.stability,
             self.orderings,
             self.published.load(Ordering::Relaxed),
-            latency_stats,
-            transfer_stats
+            f.to_string(&latency_stats),
+            f.to_string(&transfer_stats)
         )
     }
 }

@@ -602,7 +602,10 @@ impl NetworkManager {
         // Peer A is our own node
         // Use whatever node info we've calculated so far
         let peer_a = routing_table.get_current_peer_info(routing_domain);
+        let peer_a_published = routing_table.get_published_peer_info(routing_domain);
+
         let own_node_info_ts = peer_a.node_info().timestamp();
+        let own_published_node_info_ts = peer_a_published.map(|p| p.node_info().timestamp());
 
         // Peer B is the target node, get the whole peer info now
         let Some(peer_b) = target_node_ref.get_peer_info(routing_domain) else {
@@ -636,6 +639,7 @@ impl NetworkManager {
         let ncm_key = NodeContactMethodCacheKey {
             node_ids: target_node_ref.node_ids(),
             own_node_info_ts,
+            own_published_node_info_ts,
             target_node_info_ts: peer_b.node_info().timestamp(),
             target_node_ref_filter: target_node_ref.filter(),
             target_node_ref_sequencing: target_node_ref.sequencing(),
@@ -652,6 +656,7 @@ impl NetworkManager {
             routing_domain,
             target_node_ref.clone(),
             peer_a.clone(),
+            own_published_node_info_ts.is_some(),
             peer_b.clone(),
             &ncm_key,
         )?
@@ -684,6 +689,7 @@ impl NetworkManager {
         routing_domain: RoutingDomain,
         target_node_ref: FilteredNodeRef,
         peer_a: Arc<PeerInfo>,
+        peer_a_published: bool,
         peer_b: Arc<PeerInfo>,
         ncm_key: &NodeContactMethodCacheKey,
     ) -> EyreResult<Option<NodeContactMethod>> {
@@ -729,6 +735,7 @@ impl NetworkManager {
         let cm = routing_table.get_contact_method(
             routing_domain,
             peer_a.clone(),
+            peer_a_published,
             peer_b.clone(),
             dial_info_filter,
             sequencing,

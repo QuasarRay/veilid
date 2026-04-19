@@ -129,7 +129,7 @@ impl RPCProcessor {
 
         if debug_target_enabled!("dht") {
             let debug_string_answer = format!(
-                "OUT <== TransactCommandA({} xid={} @{}{}{}) <= {} (latency={}) {}",
+                "OUT <== TransactCommandA({} xid={} @{:#}{}{}) <= {} (latency={:#}) {}",
                 command,
                 transaction_id,
                 duration,

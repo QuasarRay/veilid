@@ -137,9 +137,6 @@ pub(crate) struct RoutingTable {
     self_transfer_stats_accounting: Mutex<(TransferStatsAccounting, TransferStatsDownUp)>,
     /// Peers we have recently communicated with
     recent_peers: Mutex<LruCache<NodeId, RecentPeersEntry>>,
-    /// Async tagged critical sections table
-    /// Tag: "tick" -> in ticker
-    critical_sections: AsyncTagLockTable<&'static str>,
     /// Last routing table health summary
     routing_table_health: Mutex<Arc<RoutingTableHealth>>,
 
@@ -198,7 +195,6 @@ impl RoutingTable {
             self_latency_stats_accounting: Default::default(),
             self_transfer_stats_accounting: Default::default(),
             recent_peers: Mutex::new(LruCache::new(RECENT_PEERS_TABLE_SIZE)),
-            critical_sections: AsyncTagLockTable::new(),
             routing_table_health: Mutex::new(Arc::new(RoutingTableHealth::default())),
 
             flush_task: TickTask::new("flush_task", ROUTING_TABLE_FLUSH_INTERVAL_SECS),
@@ -311,7 +307,7 @@ impl RoutingTable {
 
         // Start all routing domain controllers
         veilid_log!(self debug "starting routing domain controllers");
-        let mut started_rdcs: Vec<Arc<dyn RoutingDomainController>> = Vec::new();
+        let mut started_rdcs: Vec<RoutingDomainControllerGuard<'_>> = Vec::new();
         for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
             veilid_log!(self debug "  starting routing domain controller: {}", rdc.routing_domain());
             if let Err(e) = rdc.startup().await {
@@ -1283,14 +1279,14 @@ impl RoutingTable {
         // if we have relayed peerinfo, then changing the relay's peerinfo
         // changes our own peer info
         let rdc = self.get_routing_domain_controller(routing_domain);
-        let rdd = rdc.read();
+        let rdd = rdc.read_dyn();
         let our_relay_node_ids = rdd
             .relays()
             .iter()
             .flat_map(|rdr| rdr.relay_node.node_ids().to_vec())
             .collect::<Vec<_>>();
         if node_ids.contains_any_from_iter(our_relay_node_ids.iter()) {
-            rdd.refresh();
+            rdd.invalidate();
             rdc.publish_peer_info();
         }
 
@@ -1331,7 +1327,7 @@ impl RoutingTable {
             return None;
         }
         for rdd in self.get_routing_domain_controllers(routing_domain_set) {
-            let rdd = rdd.read();
+            let rdd = rdd.read_dyn();
             if let Some(did) = rdd
                 .dial_info_details()
                 .iter()
@@ -1386,7 +1382,7 @@ impl RoutingTable {
     ) -> RoutingTableEntryFilter<'a> {
         let outbound_dial_info_filter = self
             .get_routing_domain_controller(routing_domain)
-            .read()
+            .read_dyn()
             .outbound_dial_info_filter();
         let self_has_matching_dial_info = dial_info.matches_filter(&outbound_dial_info_filter);
 

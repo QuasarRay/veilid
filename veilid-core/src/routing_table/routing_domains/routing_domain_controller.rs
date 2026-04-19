@@ -14,12 +14,12 @@ pub trait RoutingDomainController:
     ///////////////////////////////////////////////////////////////////////////////////////
 
     /// Read access to the routing domain detail
-    fn read(&self) -> RwLockReadGuard<'_, dyn RoutingDomainDetail>;
+    fn read_dyn(&self) -> MappedRwLockReadGuard<'_, dyn RoutingDomainDetail>;
     /// Write access to the routing domain detail
-    fn write(&self) -> RwLockWriteGuard<'_, dyn RoutingDomainDetail>;
-
-    // Routing Domain Controller Lifecycle
-    ///////////////////////////////////////////////////////////////////////////////////////
+    fn write_dyn(&self) -> MappedRwLockWriteGuard<'_, dyn RoutingDomainDetail>;
+    /// Editor access to common fields in the routing domain detail
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
+    fn edit_dyn(&self) -> Box<dyn RoutingDomainEditor + '_>;
 
     /// Start up the routing domain controller
     fn startup(&self) -> PinBoxFuture<'_, EyreResult<()>>;
@@ -49,6 +49,7 @@ pub trait RoutingDomainController:
     fn get_contact_method(
         &self,
         peer_a: Arc<PeerInfo>,
+        peer_a_published: bool,
         peer_b: Arc<PeerInfo>,
         dial_info_filter: DialInfoFilter,
         sequencing: Sequencing,
@@ -133,5 +134,64 @@ pub trait RoutingDomainController:
             context_sort,
         );
         dids.into_iter().next()
+    }
+}
+
+pub struct RoutingDomainControllerGuard<'a> {
+    controller: Arc<dyn RoutingDomainController>,
+    _phantom: core::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> RoutingDomainControllerGuard<'a> {
+    pub fn new(controller: Arc<dyn RoutingDomainController>) -> Self {
+        Self {
+            controller,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<'a> core::ops::Deref for RoutingDomainControllerGuard<'a> {
+    type Target = dyn RoutingDomainController;
+
+    fn deref(&self) -> &Self::Target {
+        self.controller.as_ref()
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+pub trait SpecificRoutingDomainController: RoutingDomainController {
+    const ROUTING_DOMAIN: RoutingDomain;
+    type Detail: RoutingDomainDetail;
+    type Editor<'a>: RoutingDomainEditor;
+
+    #[expect(dead_code)]
+    fn read(&self) -> RwLockReadGuard<'_, Self::Detail>;
+    fn write(&self) -> RwLockWriteGuard<'_, Self::Detail>;
+    fn edit(&self) -> Self::Editor<'_>;
+}
+
+pub struct SpecificRoutingDomainControllerGuard<'a, C: SpecificRoutingDomainController> {
+    controller: Arc<C>,
+    _phantom: core::marker::PhantomData<&'a ()>,
+}
+
+impl<'a, C: SpecificRoutingDomainController> SpecificRoutingDomainControllerGuard<'a, C> {
+    pub fn new(controller: Arc<C>) -> Self {
+        Self {
+            controller,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<'a, C: SpecificRoutingDomainController> core::ops::Deref
+    for SpecificRoutingDomainControllerGuard<'a, C>
+{
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        &self.controller
     }
 }

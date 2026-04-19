@@ -7,7 +7,7 @@ struct FanoutContext<'a> {
     fanout_queue: FanoutQueue<'a>,
     result: FanoutResult,
     done: FanoutDoneDisposition,
-    stop_source: Option<StopSource>,
+    ticker_stop_source: Option<StopSource>,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -305,7 +305,7 @@ impl<'a> FanoutCall<'a> {
         ctx.result = fanout_result;
         ctx.done = done;
         if !matches!(done, FanoutDoneDisposition::NotDone) {
-            drop(ctx.stop_source.take())
+            drop(ctx.ticker_stop_source.take())
         }
         done
     }
@@ -322,7 +322,7 @@ impl<'a> FanoutCall<'a> {
         // Make a stop token to break out when we're done
         let stop_token = context
             .lock()
-            .stop_source
+            .ticker_stop_source
             .as_ref()
             .ok_or_else(|| RPCError::internal("should have stop source"))?
             .token();
@@ -350,7 +350,7 @@ impl<'a> FanoutCall<'a> {
             };
 
             let work_node = work_item.node_ref.clone();
-            let cancel_stop_token = work_item.cancel_stop_token.clone();
+            let cancel_stop_token = work_item.work_item_stop_token.clone();
 
             // Do the call for this node
             match (self.call_routine)(work_node.clone())
@@ -501,6 +501,7 @@ impl<'a> FanoutCall<'a> {
         &self,
         init_fanout_queue: Vec<NodeRef>,
         fanout_queue_mode: FanoutQueueMode,
+        fanout_stop_token: StopToken,
     ) -> Result<FanoutResult, RPCError> {
         // Create context for this run
         let node_sort = Box::new(RoutingTable::make_closest_node_id_sort(
@@ -529,7 +530,7 @@ impl<'a> FanoutCall<'a> {
                 value_nodes: vec![],
             },
             done: FanoutDoneDisposition::NotDone,
-            stop_source: Some(StopSource::new()),
+            ticker_stop_source: Some(StopSource::new()),
         }));
 
         // Get timeout in milliseconds
@@ -557,16 +558,16 @@ impl<'a> FanoutCall<'a> {
         }
 
         // Ticker to pump the queue
-        let stop_token = context
+        let ticker_stop_token = context
             .lock()
-            .stop_source
+            .ticker_stop_source
             .as_ref()
             .ok_or_else(|| RPCError::internal("should have stop source"))?
             .token();
         let make_tick_future = || {
-            let stop_token = stop_token.clone();
+            let ticker_stop_token = ticker_stop_token.clone();
             pin_dyn_future!(async move {
-                if sleep(100).timeout_at(stop_token).await.is_err() {
+                if sleep(100).timeout_at(ticker_stop_token).await.is_err() {
                     return Ok(FanoutProcessorReturn::Done);
                 }
                 Ok(FanoutProcessorReturn::Tick)
@@ -591,32 +592,44 @@ impl<'a> FanoutCall<'a> {
             timeout_ms,
             async {
                 loop {
-                    if let Some(res) = unord.next().in_current_span().await {
-                        match res {
-                            Ok(FanoutProcessorReturn::DoneEarly) => {
-                                // Stop all lanes immediately
-                                break Ok(());
-                            }
-                            Ok(FanoutProcessorReturn::Done) => {
-                                // Lane finished but trying to finish other lanes
-                            }
-                            Ok(FanoutProcessorReturn::Tick) => {
-                                // Timer tick to push more work to the processor lanes
-                                let context_locked = &mut *context.lock();
-                                let cur_ts = Timestamp::now_non_decreasing();
-                                context_locked.fanout_queue.send_more_work(cur_ts);
+                    let fanout_stop_token = fanout_stop_token.clone();
+                    let res = unord
+                        .next()
+                        .in_current_span()
+                        .timeout_at(fanout_stop_token)
+                        .await;
 
-                                // Set up next tick if there's still stuff processing
-                                if !unord.is_empty() {
-                                    unord.push(make_tick_future());
-                                }
-                            }
-                            Err(e) => {
-                                break Err(e);
+                    match res {
+                        Ok(Some(Ok(FanoutProcessorReturn::DoneEarly))) => {
+                            // Stop all lanes immediately
+                            break Ok(());
+                        }
+                        Ok(Some(Ok(FanoutProcessorReturn::Done))) => {
+                            // Lane finished but trying to finish other lanes
+                        }
+                        Ok(Some(Ok(FanoutProcessorReturn::Tick))) => {
+                            // Timer tick to push more work to the processor lanes
+                            let context_locked = &mut *context.lock();
+                            let cur_ts = Timestamp::now_non_decreasing();
+                            context_locked.fanout_queue.send_more_work(cur_ts);
+
+                            // Set up next tick if there's still stuff processing
+                            if !unord.is_empty() {
+                                unord.push(make_tick_future());
                             }
                         }
-                    } else {
-                        break Ok(());
+                        Ok(Some(Err(e))) => {
+                            // Fanout died with an error
+                            break Err(e);
+                        }
+                        Ok(None) => {
+                            // No more lanes to process
+                            break Ok(());
+                        }
+                        Err(_) => {
+                            // Cancelled
+                            break Err(RPCError::ignore("fanout cancelled"));
+                        }
                     }
                 }
             }

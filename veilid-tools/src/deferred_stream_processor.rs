@@ -155,14 +155,22 @@ impl DeferredStreamProcessor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let dsc_tx = {
+        let (st, dsc_tx) = {
             let inner = self.inner.lock();
+            let Some(st) = inner.opt_stopper.as_ref().map(|s| s.token()) else {
+                return false;
+            };
             let Some(dsc_tx) = inner.opt_deferred_stream_channel.clone() else {
                 return false;
             };
-            dsc_tx
+            (st, dsc_tx)
         };
-        if dsc_tx.send(Box::pin(fut)).is_err() {
+        if dsc_tx
+            .send(Box::pin(async move {
+                let _ = fut.timeout_at(st.clone()).await;
+            }))
+            .is_err()
+        {
             return false;
         }
         true

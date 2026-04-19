@@ -17,6 +17,10 @@ pub trait RoutingDomainDetail:
 
     /// The current relay status of this routing domain
     fn relay_status(&self) -> Arc<RelayStatus>;
+
+    /// The current network configuration for this routing domain
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
+    fn network_config(&self) -> &RoutingDomainNetworkConfig;
     /// What protocols are supported for outbound connections from this domain
     fn outbound_protocols(&self) -> ProtocolTypeSet;
     /// What protocols are supported for inbound connections to this domain
@@ -28,7 +32,7 @@ pub trait RoutingDomainDetail:
     /// Whether or not the network dialinfo has been confirmed by the network manager
     fn confirmed(&self) -> bool;
     /// What Veilid capabilities are supported by RPCs in this routing domain
-    fn capabilities(&self) -> Vec<VeilidCapability>;
+    fn capabilities(&self) -> BTreeSet<VeilidCapability>;
     /// What relays are configured for this domain
     fn relays(&self) -> Vec<RoutingDomainRelay>;
     /// What relays are configured for this domain and their current state
@@ -36,7 +40,7 @@ pub trait RoutingDomainDetail:
     /// What dial info details are configured for this domain
     fn dial_info_details(&self) -> &Vec<DialInfoDetail>;
     /// Whether or not the network associated with this domain has addresses that are translated (NAT)
-    fn is_network_translated(&self) -> bool;
+    fn translated_address_types(&self) -> AddressTypeSet;
     /// The dial info filter for inbound connections to this domain
     fn inbound_dial_info_filter(&self) -> DialInfoFilter;
     /// The dial info filter for outbound connections from this domain
@@ -50,7 +54,7 @@ pub trait RoutingDomainDetail:
     fn ensure_dial_info_is_valid(&self, dial_info: &DialInfo) -> bool;
 
     /// Refresh caches if external data changes
-    fn refresh(&self);
+    fn invalidate(&self);
 
     /// Get the bootstrap peers that we last used in this routing domain
     /// May be empty is the node started up and did not need to bootstrap
