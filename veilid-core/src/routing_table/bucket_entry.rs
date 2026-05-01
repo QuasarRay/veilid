@@ -369,8 +369,11 @@ impl BucketEntryInner {
     }
 
     /// Get best node id
-    pub fn best_node_id(&self) -> Option<NodeId> {
-        self.node_ids.first().cloned()
+    pub fn best_node_id(&self) -> NodeId {
+        self.node_ids
+            .first()
+            .expect_or_log("all entries must have one valid node id")
+            .clone()
     }
 
     /// Get best public key

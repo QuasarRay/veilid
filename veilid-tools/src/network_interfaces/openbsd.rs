@@ -388,6 +388,8 @@ impl PlatformSupportOpenBSD {
             is_loopback: (flags & IFF_LOOPBACK) != 0,
             is_running: (flags & IFF_RUNNING) != 0,
             is_point_to_point: (flags & IFF_POINTOPOINT) != 0,
+            // OpenBSD doesn't run CLAT
+            is_clat: false,
         }
     }
 
@@ -417,20 +419,25 @@ impl PlatformSupportOpenBSD {
         }
         let expire = req.get_ia6t_expire();
 
-        let is_auto_generated_random_address =
-            flags & (IN6_IFF_SECURED | IN6_IFF_AUTOCONF) == (IN6_IFF_SECURED | IN6_IFF_AUTOCONF);
-
-        let is_temporary =
-            (flags & IN6_IFF_TEMPORARY) != 0 || (expire != 0 && is_auto_generated_random_address);
+        // RFC 4941 privacy address only; must not be conflated with stable secured SLAAC
+        let is_temporary = (flags & IN6_IFF_TEMPORARY) != 0;
         let is_dynamic = (flags & (IN6_IFF_DYNAMIC | IN6_IFF_AUTOCONF)) != 0;
         let is_preferred = (flags
             & (IN6_IFF_TENTATIVE | IN6_IFF_DUPLICATED | IN6_IFF_DETACHED | IN6_IFF_DEPRECATED))
             == 0;
+        let expiration_secs = if expire == 0 {
+            None
+        } else {
+            Some(expire as u64)
+        };
 
         Ok(AddressFlags {
             is_temporary,
             is_dynamic,
             is_preferred,
+            // OpenBSD doesn't have a CLAT-equivalent address flag
+            is_clat: false,
+            expiration_secs,
         })
     }
 

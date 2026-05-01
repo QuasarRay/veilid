@@ -37,6 +37,13 @@ impl RouteHopCacheKey {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum RouteCompileCacheDisposition {
+    Compile,
+    Optimize,
+    Cached(Arc<CompiledRoute>),
+}
+
 /// Ephemeral data used to help the RouteSpecStore operate efficiently
 #[derive(Debug)]
 pub(super) struct RouteSpecStoreCache {
@@ -224,9 +231,7 @@ impl RouteSpecStoreCache {
         }
 
         // Invalidate compiled route cache for all route keys
-        for route_key in arce.route_set_keys().iter() {
-            self.invalidate_compiled_route_cache(route_key);
-        }
+        self.invalidate_compiled_route_cache_iter(arce.route_set_keys().iter());
 
         // Mark it as dead for the update if it wasn't automatically created
         if !is_automatic {
@@ -300,13 +305,15 @@ impl RouteSpecStoreCache {
         if let Some((dead_id, dead_rrce)) = dead {
             // If anything LRUs out, remove from the by-key table
             // Follow the same logic as 'remove_remote_private_route' here
+            let mut dead_keys = Vec::new();
             for dead_private_route in dead_rrce.get_private_routes() {
                 let _ = self
                     .remote_routes_by_key
                     .remove(&dead_private_route.public_key)
                     .unwrap_or_log();
-                self.invalidate_compiled_route_cache(&dead_private_route.public_key);
+                dead_keys.push(&dead_private_route.public_key);
             }
+            self.invalidate_compiled_route_cache_iter(dead_keys);
             self.dead_remote_routes.push(dead_id);
         }
     }
@@ -401,14 +408,16 @@ impl RouteSpecStoreCache {
         };
         veilid_log!(self debug "removing remote route from cache {}: keys=[{}]", id, rrce.get_private_routes().iter().map(|x| x.public_key.to_string()).collect::<Vec<_>>().join(","));
 
+        let mut dead_keys = Vec::new();
         for private_route in rrce.get_private_routes() {
             let _ = self
                 .remote_routes_by_key
                 .remove(&private_route.public_key)
                 .unwrap_or_log();
 
-            self.invalidate_compiled_route_cache(&private_route.public_key);
+            dead_keys.push(&private_route.public_key);
         }
+        self.invalidate_compiled_route_cache_iter(dead_keys);
         self.dead_remote_routes.push(id);
         true
     }
@@ -427,20 +436,34 @@ impl RouteSpecStoreCache {
     /// Clean up imported remote routes when our peer info changes
     /// Resets statistics assocaited with remote private routes
     pub fn report_peer_info_changed(&self) {
+        // Invalidate all of the compiled routes for all routes we have allocated so we can ensure
+        // they get re-optimized.
+        // Unpublished routes are still valid but the compilation cache will need to be invalidated
+        let mut dead_keys = Vec::new();
+        for arce in self.allocated_route_set_cache.values() {
+            for key in arce.route_set_keys().iter() {
+                dead_keys.push(key);
+            }
+        }
+        self.invalidate_compiled_route_cache_iter(dead_keys);
+
         // Restart start for allocated routes so we test the route again
         for (id, arce) in self.allocated_route_set_cache.iter() {
-            // Must republish route now
-            arce.set_published(false);
+            // If the route is published it will need to be republished if our peer info changes
+            if arce.is_published() {
+                // Must republish route now
+                arce.set_published(false);
 
-            match arce.with_stats_mut(|s| {
-                s.reset();
-                Ok(())
-            }) {
-                Ok(disp) => {
-                    self.handle_allocated_route_stats_disposition(id.clone(), arce, None, disp);
-                }
-                Err(e) => {
-                    veilid_log!(self error "Error resetting allocated route stats during peer info change: {}", e);
+                match arce.with_stats_mut(|s| {
+                    s.reset();
+                    Ok(())
+                }) {
+                    Ok(disp) => {
+                        self.handle_allocated_route_stats_disposition(id.clone(), arce, None, disp);
+                    }
+                    Err(e) => {
+                        veilid_log!(self error "Error resetting allocated route stats during peer info change: {}", e);
+                    }
                 }
             }
         }
@@ -542,11 +565,13 @@ impl RouteSpecStoreCache {
     pub fn lookup_compiled_route_cache(
         &self,
         key: &CompiledRouteCacheKey,
-    ) -> Option<Arc<CompiledRoute>> {
+    ) -> RouteCompileCacheDisposition {
         // Check the compiled route cache
         // If there's nothing there, then return None so we can compile the route
         let mut crc = self.compiled_route_cache.lock();
-        let compiled_route = crc.get(key).cloned()?;
+        let Some(compiled_route) = crc.get(key).cloned() else {
+            return RouteCompileCacheDisposition::Compile;
+        };
 
         // Ensure the safety route is still in the cache
         let safety_route_key = &compiled_route.safety_route.public_key;
@@ -556,13 +581,13 @@ impl RouteSpecStoreCache {
             #[cfg(feature = "verbose-tracing")]
             veilid_log!(self debug "Safety route no longer exists for key {}, removing compiled routes from cache", safety_route_key);
             self.invalidate_compiled_route_cache_inner(&mut crc, safety_route_key);
-            return None;
+            return RouteCompileCacheDisposition::Compile;
         };
 
         let Some(arce) = self.get_allocated_route_by_id(&safety_route_id) else {
             veilid_log!(self error "Safety route no longer exists for id {} (key={}), removing compiled routes from cache", safety_route_id, safety_route_key);
             self.invalidate_compiled_route_cache_inner(&mut crc, safety_route_key);
-            return None;
+            return RouteCompileCacheDisposition::Compile;
         };
 
         // Check a cached compiled route and determine if it can be used as-is or needs recompilation.
@@ -570,19 +595,37 @@ impl RouteSpecStoreCache {
         // removes the stale cache entry and signals recompilation.
         if compiled_route.optimized == arce.is_route_optimizable() {
             // If the route has the same optimizability as the cache, then return the cached route
-            return Some(compiled_route);
+            return RouteCompileCacheDisposition::Cached(compiled_route);
         }
 
-        // Can be reoptimized. Invalidate the cache and return None to recompile
+        // Can be reoptimized, or needs to be recompiled unoptimized
         self.invalidate_compiled_route_cache_inner(&mut crc, safety_route_key);
-        None
+
+        // If what was in the cache was optimized, then we need to recompile unoptimized
+        // If what was in the cache was unoptimized, then we can optimize it now
+        if compiled_route.optimized {
+            RouteCompileCacheDisposition::Compile
+        } else {
+            RouteCompileCacheDisposition::Optimize
+        }
     }
 
     /// When routes are dropped or have accumulated failures,
     /// they should be removed from the compiled route cache
-    pub fn invalidate_compiled_route_cache(&self, dead_key: &PublicKey) {
+    fn invalidate_compiled_route_cache(&self, dead_key: &PublicKey) {
         let mut crc = self.compiled_route_cache.lock();
         self.invalidate_compiled_route_cache_inner(&mut crc, dead_key);
+    }
+
+    /// Iterator form of invalidate_compiled_route_cache that avoids repeated locking
+    fn invalidate_compiled_route_cache_iter<'a>(
+        &self,
+        keys: impl IntoIterator<Item = &'a PublicKey> + 'a,
+    ) {
+        let mut crc = self.compiled_route_cache.lock();
+        for key in keys.into_iter() {
+            self.invalidate_compiled_route_cache_inner(&mut crc, key);
+        }
     }
 
     fn invalidate_compiled_route_cache_inner(
@@ -659,15 +702,11 @@ impl RouteSpecStoreCache {
         match disposition {
             RouteStatsDisposition::InvalidSendFailure => {
                 veilid_log!(self debug "Allocated route {}{} exceeded send failure threshold, invalidating compiled route cache", id, key.map(|k| format!("(key={})",k)).unwrap_or_default());
-                for key in all_keys.iter() {
-                    self.invalidate_compiled_route_cache(key);
-                }
+                self.invalidate_compiled_route_cache_iter(all_keys.iter());
             }
             RouteStatsDisposition::InvalidLostAnswers => {
                 veilid_log!(self debug "Allocated route {}{} exceeded lost destination threshold, invalidating compiled route cache",id, key.map(|k| format!("(key={})",k)).unwrap_or_default());
-                for key in all_keys.iter() {
-                    self.invalidate_compiled_route_cache(key);
-                }
+                self.invalidate_compiled_route_cache_iter(all_keys.iter());
             }
             RouteStatsDisposition::Locked | RouteStatsDisposition::Valid => {}
         }

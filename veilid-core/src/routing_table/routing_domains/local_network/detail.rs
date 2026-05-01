@@ -10,8 +10,8 @@ pub struct LocalNetworkRoutingDomainDetail {
     interface_addresses: Vec<IfAddr>,
     /// Common implementation for all routing domains
     common: RoutingDomainDetailCommon,
-    /// Last relay status for this routing domain
-    opt_last_relay_status: ArcSwapOption<RelayStatus>,
+    /// Last relay requirements for this routing domain
+    opt_last_relay_requirements: ArcSwapOption<RelayRequirements>,
 }
 
 impl fmt::Debug for LocalNetworkRoutingDomainDetail {
@@ -20,7 +20,10 @@ impl fmt::Debug for LocalNetworkRoutingDomainDetail {
             // .field("registry", &self.registry)
             .field("interface_addresses", &self.interface_addresses)
             .field("common", &self.common)
-            .field("opt_last_relay_status", &self.opt_last_relay_status)
+            .field(
+                "opt_last_relay_requirements",
+                &self.opt_last_relay_requirements,
+            )
             .finish()
     }
 }
@@ -29,7 +32,7 @@ impl fmt::Display for LocalNetworkRoutingDomainDetail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Interface Addresses:\n{}\nLast Relay Status:\n{}\n{}",
+            "Interface Addresses:\n{}\nLast Relay Requirements:\n{}\n{}",
             indent_all_string(
                 f.to_multiline_indexed_string(
                     self.interface_addresses
@@ -38,7 +41,7 @@ impl fmt::Display for LocalNetworkRoutingDomainDetail {
                 )
                 .string_if_empty("None")
             ),
-            indent_all_string(f.to_string_opt(self.opt_last_relay_status.load().as_ref())),
+            indent_all_string(f.to_string_opt(self.opt_last_relay_requirements.load().as_ref())),
             f.to_string(&self.common)
         )
     }
@@ -50,7 +53,7 @@ impl LocalNetworkRoutingDomainDetail {
         Self {
             interface_addresses: Default::default(),
             common: RoutingDomainDetailCommon::new(registry.clone(), RoutingDomain::LocalNetwork),
-            opt_last_relay_status: ArcSwapOption::empty(),
+            opt_last_relay_requirements: ArcSwapOption::empty(),
             registry,
         }
     }
@@ -94,16 +97,17 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
         RoutingDomain::LocalNetwork
     }
 
-    fn relay_status(&self) -> Arc<RelayStatus> {
+    fn relay_requirements(&self) -> Arc<RelayRequirements> {
         {
-            let opt_relay_status_guard = self.opt_last_relay_status.load();
+            let opt_relay_status_guard = self.opt_last_relay_requirements.load();
             if let Some(relay_status) = opt_relay_status_guard.as_ref().map(|x| x.clone()) {
                 return relay_status;
             }
         }
 
-        let relay_status = Arc::new(RelayStatus::new_from_routing_domain_detail(self));
-        self.opt_last_relay_status.store(Some(relay_status.clone()));
+        let relay_status = RelayRequirements::new(self);
+        self.opt_last_relay_requirements
+            .store(Some(relay_status.clone()));
         relay_status
     }
 
@@ -129,12 +133,17 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
     fn capabilities(&self) -> BTreeSet<VeilidCapability> {
         self.common.capabilities()
     }
+
     fn relays(&self) -> Vec<RoutingDomainRelay> {
         self.common.relays()
     }
-    fn relays_and_states(&self) -> Vec<(RoutingDomainRelay, RoutingDomainRelayState)> {
-        self.common.relays_and_states()
+    fn relay_compilation(&self) -> Option<RelayCompilation> {
+        self.common.relay_compilation()
     }
+    fn relay_state(&self, relay_id: NodeId) -> Option<RoutingDomainRelayState> {
+        self.common.relay_state(relay_id)
+    }
+
     fn dial_info_details(&self) -> &Vec<DialInfoDetail> {
         self.common.dial_info_details()
     }
@@ -224,7 +233,7 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
     }
 
     fn invalidate(&self) {
-        self.opt_last_relay_status.store(None);
+        self.opt_last_relay_requirements.store(None);
         self.common.clear_current_peer_info_cache();
     }
     fn debug(&self, alt: bool) -> String {

@@ -96,7 +96,13 @@ impl PublicInternetRoutingDomainController {
             | RoutingDomainInboundStage::NeedsDialInfoConfirmation
             | RoutingDomainInboundStage::Unusable => false,
             RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish => {
-                state.relay_status.wants_more_relays()
+                // Tick the relay management task if we need relays at all, or if we have some already but they need to be validated/optimized
+                state.relay_requirements.needs_relays()
+                    || state
+                        .opt_relay_compilation
+                        .as_ref()
+                        .map(|c| !c.relays.is_empty())
+                        .unwrap_or(false)
             }
         }
     }
@@ -136,6 +142,49 @@ impl PublicInternetRoutingDomainController {
         }
 
         Ok(())
+    }
+
+    pub async fn commit_event_handler(&self, evt: Arc<RoutingDomainCommitEvent>) {
+        if evt.routing_domain != RoutingDomain::PublicInternet {
+            return;
+        }
+        if !(evt.confirmation_changed || evt.dial_info_changed || evt.relays_changed) {
+            return;
+        }
+        let state = self.state();
+        if Self::check_relay_management(&state) {
+            if let Err(e) = self.relay_management_task.tick().await {
+                veilid_log!(self warn "[PublicInternet] relay_management tick failed: {}", e);
+            }
+        }
+    }
+
+    pub async fn peer_info_change_event_handler(&self, evt: Arc<PeerInfoChangeEvent>) {
+        if evt.routing_domain != RoutingDomain::PublicInternet || evt.opt_new_peer_info.is_none() {
+            return;
+        }
+        let state = self.state();
+        let nodes_needed = self.nodes_needed();
+        if Self::check_peer_minimum_refresh(&state, &nodes_needed) {
+            if let Err(e) = self.peer_minimum_refresh_task.tick().await {
+                veilid_log!(self warn "[PublicInternet] peer_minimum_refresh tick failed: {}", e);
+            }
+        }
+        if Self::check_closest_peers_refresh(&state) {
+            if let Err(e) = self.closest_peers_refresh_task.tick().await {
+                veilid_log!(self warn "[PublicInternet] closest_peers_refresh tick failed: {}", e);
+            }
+        }
+        if Self::check_ping_validator_public_internet(&state) {
+            if let Err(e) = self.ping_validator_public_internet_task.tick().await {
+                veilid_log!(self warn "[PublicInternet] ping_validator tick failed: {}", e);
+            }
+        }
+        if Self::check_private_route_management(&state) {
+            if let Err(e) = self.private_route_management_task.tick().await {
+                veilid_log!(self warn "[PublicInternet] private_route_management tick failed: {}", e);
+            }
+        }
     }
 
     pub async fn cancel_tasks(&self) {

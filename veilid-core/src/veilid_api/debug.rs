@@ -1271,24 +1271,30 @@ impl VeilidAPI {
         // Change routing domain relays
         let routing_table = registry.routing_table();
         {
-            match routing_domain {
-                RoutingDomain::LocalNetwork => {
-                    let rdc = routing_table
-                        .get_specific_routing_domain_controller::<LocalNetworkRoutingDomainController>();
-                    let mut editor = rdc.edit();
-                    editor.set_relays(relays);
-                    editor.commit();
-                    rdc.publish_peer_info();
+            let rdc = routing_table.get_routing_domain_controller(routing_domain);
+
+            // Create a relay compilation with these relays
+            let opt_relay_compilation = if relays.is_empty() {
+                None
+            } else {
+                let rdd = rdc.read_dyn();
+                let relay_requirements = rdd.relay_requirements();
+                let mut rc = relay_requirements.make_relay_compiler();
+                for relay in relays {
+                    rc.apply_relay(relay);
                 }
-                RoutingDomain::PublicInternet => {
-                    let rdc = routing_table
-                        .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>();
-                    let mut editor = rdc.edit();
-                    editor.set_relays(relays);
-                    editor.commit();
-                    rdc.publish_peer_info();
+
+                let c = rc.compile();
+                if c.is_none() {
+                    return Ok("Relays selected do not meet publication requirements".to_owned());
                 }
-            }
+                c
+            };
+
+            let mut editor = rdc.edit_dyn();
+            editor.set_relay_compilation(opt_relay_compilation);
+            editor.commit();
+            rdc.publish_peer_info();
         }
 
         Ok("Relay changed".to_owned())

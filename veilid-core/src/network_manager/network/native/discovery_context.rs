@@ -484,32 +484,44 @@ impl DiscoveryContext {
 
             let this = self.clone();
             let mapped_dial_info = mapped_dial_info.clone();
-            let do_no_nat_fut: PinBoxFutureStatic<DetectionResultKind> = Box::pin(async move {
-                // Do a validate_dial_info on the external address from a redirected node
-                if this
-                    .validate_dial_info(external_info.node.clone(), mapped_dial_info.clone(), true)
-                    .await
-                {
-                    // Add public dial info with Direct dialinfo class
-                    DetectionResultKind::Result {
-                        possibilities,
-                        result: DetectionResult {
-                            config: this.config,
-                            ddi: DetectedDialInfo::Detected(DialInfoDetail {
-                                dial_info: mapped_dial_info.clone(),
-                                class: DialInfoClass::Mapped,
-                            }),
-                            external_address_types: AddressTypeSet::only(
-                                external_info.address.address_type(),
-                            ),
-                        },
-                    }
-                } else {
-                    DetectionResultKind::Failure { possibilities }
-                }
-            });
+            let do_map_validate_fut: PinBoxFutureStatic<DetectionResultKind> = Box::pin(
+                async move {
+                    veilid_log!(this debug "validating mapped dial info {:?} on node {:?}", mapped_dial_info, external_info.node);
 
-            unord.push(do_no_nat_fut);
+                    // Do a validate_dial_info on the external address from a redirected node
+                    if this
+                        .validate_dial_info(
+                            external_info.node.clone(),
+                            mapped_dial_info.clone(),
+                            true,
+                        )
+                        .await
+                    {
+                        veilid_log!(this debug "successfully validated mapped dial info {:?} on node {:?}", mapped_dial_info, external_info.node);
+
+                        // Add public dial info with Direct dialinfo class
+                        DetectionResultKind::Result {
+                            possibilities,
+                            result: DetectionResult {
+                                config: this.config,
+                                ddi: DetectedDialInfo::Detected(DialInfoDetail {
+                                    dial_info: mapped_dial_info.clone(),
+                                    class: DialInfoClass::Mapped,
+                                }),
+                                external_address_types: AddressTypeSet::only(
+                                    external_info.address.address_type(),
+                                ),
+                            },
+                        }
+                    } else {
+                        veilid_log!(this debug "failed to validate mapped dial info {:?} on node {:?}", mapped_dial_info, external_info.node);
+
+                        DetectionResultKind::Failure { possibilities }
+                    }
+                },
+            );
+
+            unord.push(do_map_validate_fut);
         }
     }
 
@@ -593,6 +605,40 @@ impl DiscoveryContext {
             inner.external_infos.clone()
         };
         let local_port = self.config.port;
+
+        // If any local interface address of this context's family is a carrier-grade NAT or
+        // DS-Lite indicator, classify as Symmetric for this family only. Other families may
+        // still be globally reachable.
+        let family_intf_addrs_indicate_cgnat = self
+            .intf_addrs
+            .iter()
+            .filter(|a| a.address_type() == self.config.address_type)
+            .any(|a| a.is_cgnat_indicator());
+        if family_intf_addrs_indicate_cgnat {
+            let external_address_types =
+                external_info.iter().fold(AddressTypeSet::new(), |acc, ei| {
+                    acc | ei.address.address_type()
+                });
+            let this = self.clone();
+            let do_cgnat_symmetric_fut: PinBoxFutureStatic<DetectionResultKind> = Box::pin(
+                async move {
+                    veilid_log!(this debug
+                        "Local interface address indicates carrier-grade NAT or DS-Lite; classifying as SymmetricNAT for {:?}:{:?}",
+                        this.config.protocol_type, this.config.address_type
+                    );
+                    DetectionResultKind::Result {
+                        possibilities: vec![],
+                        result: DetectionResult {
+                            config: this.config,
+                            ddi: DetectedDialInfo::SymmetricNAT,
+                            external_address_types,
+                        },
+                    }
+                },
+            );
+            unord.push(do_cgnat_symmetric_fut);
+            return;
+        }
 
         let mut external_info_addr_port_hist = HashMap::<SocketAddress, usize>::new();
         let mut external_info_addr_hist = HashMap::<Address, usize>::new();

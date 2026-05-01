@@ -44,7 +44,6 @@ impl DialInfoDetail {
 
 pub trait HasDialInfoDetailList: fmt::Debug {
     fn dial_info_detail_list(&self) -> &[DialInfoDetail];
-    fn has_sequencing_matched_dial_info(&self, sequencing: Sequencing) -> bool;
 
     // Default implementations
     fn first_filtered_dial_info_detail(
@@ -143,6 +142,37 @@ pub trait HasDialInfoDetailList: fmt::Debug {
             .iter()
             .map(|did| ip_to_ipblock(ip6_prefix_size, did.dial_info.to_socket_addr().ip()))
             .collect::<HashSet<_>>()
+    }
+
+    /// Build a map of protocols to low level ports
+    /// This way we can get the set of protocols required to keep our NAT mapping alive for keepalive pings
+    /// Only one protocol per low level protocol/port combination is required
+    /// For example, if WS/WSS and TCP protocols are on the same low-level TCP port, only TCP keepalives will be required
+    /// and we do not need to do WS/WSS keepalive as well. If they are on different ports, then we will need WS/WSS keepalives too.
+    fn get_low_level_port_info(&self) -> LowLevelPortInfo {
+        let mut low_level_protocol_ports =
+            BTreeSet::<(LowLevelProtocolType, AddressType, u16)>::new();
+        let mut protocol_to_port =
+            BTreeMap::<(ProtocolType, AddressType), (LowLevelProtocolType, u16)>::new();
+
+        for did in self.dial_info_detail_list() {
+            low_level_protocol_ports.insert((
+                did.dial_info.protocol_type().low_level_protocol_type(),
+                did.dial_info.address_type(),
+                did.dial_info.socket_address().port(),
+            ));
+            protocol_to_port.insert(
+                (did.dial_info.protocol_type(), did.dial_info.address_type()),
+                (
+                    did.dial_info.protocol_type().low_level_protocol_type(),
+                    did.dial_info.socket_address().port(),
+                ),
+            );
+        }
+        LowLevelPortInfo {
+            low_level_protocol_ports,
+            protocol_to_port,
+        }
     }
 
     /// Get geolocation info of just this object

@@ -18,7 +18,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 //////////////////////////////////////////////////////////////////////////////////////////
 
 pub fn bind_async_udp_socket(local_address: SocketAddr) -> io::Result<Option<UdpSocket>> {
-    let Some(socket) = new_bound_default_socket2_udp(local_address)? else {
+    let Some(socket) = new_bound_shared_socket2_udp(local_address)? else {
         return Ok(None);
     };
 
@@ -160,19 +160,26 @@ pub fn split_async_tcp_stream(tcp_stream: TcpStream) -> (ReadHalf, WriteHalf) {
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
-fn new_default_udp_socket(domain: core::ffi::c_int) -> io::Result<Socket> {
+fn new_shared_socket2_udp(domain: core::ffi::c_int) -> io::Result<Socket> {
     let domain = Domain::from(domain);
     let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
     if domain == Domain::IPV6 {
         socket.set_only_v6(true)?;
     }
-
+    // SO_REUSEADDR + SO_REUSEPORT so a wildcard listener and a specific-source
+    // handler can coexist on the same port (used for outbound source binding)
+    socket.set_reuse_address(true)?;
+    cfg_if! {
+        if #[cfg(unix)] {
+            socket.set_reuse_port(true)?;
+        }
+    }
     Ok(socket)
 }
 
-fn new_bound_default_socket2_udp(local_address: SocketAddr) -> io::Result<Option<Socket>> {
+fn new_bound_shared_socket2_udp(local_address: SocketAddr) -> io::Result<Option<Socket>> {
     let domain = domain_for_address(local_address);
-    let socket = new_default_udp_socket(domain)?;
+    let socket = new_shared_socket2_udp(domain)?;
     let socket2_addr = SockAddr::from(local_address);
 
     if socket.bind(&socket2_addr).is_err() {

@@ -12,6 +12,7 @@ pub(super) use protocol::*;
 use super::*;
 use discovery_context::*;
 use low_level_protocol_tcp::*;
+use low_level_protocol_udp::UdpListenerCommand;
 use network_state::*;
 use protocol::tcp::RawTcpProtocolHandler;
 use protocol::udp::RawUdpProtocolHandler;
@@ -35,7 +36,7 @@ use std::path::{Path, PathBuf};
 
 impl_veilid_log_facility!("net");
 
-pub const MAX_DIAL_INFO_FAILURE_COUNT: usize = 100;
+pub const MAX_DIAL_INFO_CONFIRM_FAILURE_COUNT: usize = 3;
 pub const UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS: u32 = 10;
 pub const UPDATE_DIAL_INFO_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const NETWORK_INTERFACES_TASK_TICK_PERIOD_SECS: u32 = 1;
@@ -49,9 +50,9 @@ struct NetworkInner {
     /// set if the network needs to be restarted due to a low level configuration change
     /// such as dhcp release or change of address or interfaces being added or removed
     network_needs_restart: bool,
-    /// the number of consecutive dial info failures per routing domain,
-    /// which may indicate the network is down for that domain
-    dial_info_failure_count: BTreeMap<RoutingDomain, usize>,
+    /// the number of consecutive dial info confirmation failures per routing domain,
+    /// used to avoid unpublishing peer info after a single transient discovery failure
+    dial_info_confirm_failure_count: BTreeMap<RoutingDomain, usize>,
     /// result of resolving 'auto'/None detect_address_changes mode
     routing_domain_detect_address_changes: BTreeSet<RoutingDomain>,
     /// the next time we are allowed to check for better dialinfo when we are OutboundOnly
@@ -64,6 +65,8 @@ struct NetworkInner {
     bound_address_per_protocol: BTreeMap<ProtocolType, Vec<SocketAddr>>,
     /// mapping of protocol handlers to accept or send messages from a set of bound socket addresses
     udp_protocol_handlers: BTreeMap<SocketAddr, RawUdpProtocolHandler>,
+    /// One sender per UDP listener task, used to add dynamically-bound handlers at runtime
+    udp_listener_command_txs: Vec<flume::Sender<UdpListenerCommand>>,
     /// TLS handling socket controller
     tls_acceptor: Option<TlsAcceptor>,
     /// Multiplexer record for protocols on low level TCP sockets
@@ -163,6 +166,7 @@ impl PlatformNetwork for NativeNetwork {
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     fn restart_network(&self) {
+        veilid_log!(self debug "restart_network() called externally, triggering network restart");
         self.inner.lock().network_needs_restart = true;
     }
 
@@ -171,7 +175,8 @@ impl PlatformNetwork for NativeNetwork {
         Box::pin(async move {
             veilid_log!(self debug "starting low level network shutdown");
             let Ok(guard) = self.startup_lock.shutdown().await else {
-                veilid_log!(self error "low level network is already shut down");
+                // Startup never reached the success state (e.g. bind retry tore it down already)
+                veilid_log!(self debug "low level network was not started, nothing to shut down");
                 return;
             };
 
@@ -238,6 +243,9 @@ impl PlatformNetwork for NativeNetwork {
                         return Ok(NetworkResult::no_connection_other("punished"));
                     }
 
+                    // Preferred source for outbound (None for LocalNetwork or NATed IPv4)
+                    let preferred_local = self.preferred_outbound_source_addr(&dial_info);
+
                     match dial_info.protocol_type() {
                         ProtocolType::UDP => {
                             let peer_socket_addr = dial_info.to_socket_addr();
@@ -256,7 +264,7 @@ impl PlatformNetwork for NativeNetwork {
                             let peer_socket_addr = dial_info.to_socket_addr();
                             let pnc = network_result_try!(RawTcpProtocolHandler::connect(
                                 self.registry(),
-                                None,
+                                preferred_local,
                                 peer_socket_addr,
                                 connect_timeout_ms
                             )
@@ -267,7 +275,7 @@ impl PlatformNetwork for NativeNetwork {
                         ProtocolType::WS => {
                             let pnc = network_result_try!(WebsocketProtocolHandler::connect(
                                 self.registry(),
-                                None,
+                                preferred_local,
                                 dial_info,
                                 connect_timeout_ms
                             )
@@ -279,7 +287,7 @@ impl PlatformNetwork for NativeNetwork {
                         ProtocolType::WSS => {
                             let pnc = network_result_try!(WebsocketProtocolHandler::connect(
                                 self.registry(),
-                                None,
+                                preferred_local,
                                 dial_info,
                                 connect_timeout_ms
                             )
@@ -324,6 +332,9 @@ impl PlatformNetwork for NativeNetwork {
                     {
                         return Ok(NetworkResult::no_connection_other("punished"));
                     }
+
+                    // Preferred source for outbound (None for LocalNetwork or NATed IPv4)
+                    let preferred_local = self.preferred_outbound_source_addr(&dial_info);
 
                     match dial_info.protocol_type() {
                         // Connectionless protocols
@@ -372,7 +383,7 @@ impl PlatformNetwork for NativeNetwork {
                                     let peer_socket_addr = dial_info.to_socket_addr();
                                     RawTcpProtocolHandler::connect(
                                         self.registry(),
-                                        None,
+                                        preferred_local,
                                         peer_socket_addr,
                                         connect_timeout_ms,
                                     )
@@ -382,7 +393,7 @@ impl PlatformNetwork for NativeNetwork {
                                 ProtocolType::WS => {
                                     WebsocketProtocolHandler::connect(
                                         self.registry(),
-                                        None,
+                                        preferred_local,
                                         dial_info,
                                         connect_timeout_ms,
                                     )
@@ -393,7 +404,7 @@ impl PlatformNetwork for NativeNetwork {
                                 ProtocolType::WSS => {
                                     WebsocketProtocolHandler::connect(
                                         self.registry(),
-                                        None,
+                                        preferred_local,
                                         dial_info,
                                         connect_timeout_ms,
                                     )
@@ -516,7 +527,9 @@ impl PlatformNetwork for NativeNetwork {
                     if dial_info.protocol_type() == ProtocolType::UDP {
                         // Handle connectionless protocol
                         let peer_socket_addr = dial_info.to_socket_addr();
-                        let ph = match self.find_best_udp_protocol_handler(&peer_socket_addr, &None)
+                        let preferred_local = self.preferred_outbound_source_addr(&dial_info);
+                        let ph = match self
+                            .find_best_udp_protocol_handler(&peer_socket_addr, &preferred_local)
                         {
                             Some(ph) => ph,
                             None => {
@@ -583,7 +596,10 @@ impl PlatformNetwork for NativeNetwork {
                     {
                         // Handle connectionless protocol
                         let peer_socket_addr = dial_info.to_socket_addr();
-                        let ph = match self.find_best_udp_protocol_handler(&peer_socket_addr, &None)
+                        // Prefer a source-bound handler for PublicInternet sends
+                        let preferred_local = self.preferred_outbound_source_addr(&dial_info);
+                        let ph = match self
+                            .find_best_udp_protocol_handler(&peer_socket_addr, &preferred_local)
                         {
                             Some(ph) => ph,
                             None => {
@@ -633,6 +649,45 @@ impl PlatformNetwork for NativeNetwork {
         inner.preferred_local_addresses.get(&key).copied()
     }
 
+    fn preferred_outbound_source_addr(&self, dial_info: &DialInfo) -> Option<SocketAddr> {
+        // Only PublicInternet uses source-address binding
+        let routing_domain = self
+            .routing_table()
+            .routing_domain_for_address(dial_info.address())?;
+        if routing_domain != RoutingDomain::PublicInternet {
+            return None;
+        }
+
+        let pt = dial_info.protocol_type();
+        let at = dial_info.address_type();
+        let configured = self.get_preferred_local_address_by_key(pt, at)?;
+
+        // User pinned a specific listen address via config; use it as the outbound source
+        if !configured.ip().is_unspecified() {
+            return Some(configured);
+        }
+
+        // Default unspecified listener: pair the first publicly-routable interface
+        // address of the matching family with the bound listen port
+        let listen_port = configured.port();
+        let interface_address_state = self.interfaces.interface_address_state();
+        for ifaddr in interface_address_state.interface_addresses.iter() {
+            let ip = ifaddr.ip();
+            let matches_family = matches!(
+                (ip, at),
+                (IpAddr::V4(_), AddressType::IPV4) | (IpAddr::V6(_), AddressType::IPV6)
+            );
+            if !matches_family {
+                continue;
+            }
+            if !Address::from_ip_addr(ip).is_global() {
+                continue;
+            }
+            return Some(SocketAddr::new(ip, listen_port));
+        }
+        None
+    }
+
     fn routing_domains_detecting_address_changes(&self) -> BTreeSet<RoutingDomain> {
         let inner = self.inner.lock();
         if inner.network_state.is_none() {
@@ -643,17 +698,22 @@ impl PlatformNetwork for NativeNetwork {
         inner.routing_domain_detect_address_changes.clone()
     }
 
-    fn routing_domain_request_confirm_dial_info(&self, routing_domain: RoutingDomain) {
+    fn routing_domain_request_confirm_dial_info(&self, routing_domain: RoutingDomain) -> bool {
         let Ok(_guard) = self.startup_lock.enter() else {
             veilid_log!(self debug "ignoring 'routing_domain_request_confirm_dial_info' due to not started up");
-            return;
+            return false;
         };
 
         let routing_table = self.routing_table();
         let rdc = routing_table.get_routing_domain_controller(routing_domain);
+        // Already unconfirmed; a detection cycle is already pending or in progress
+        if !rdc.read_dyn().confirmed() {
+            return false;
+        }
         let mut editor = rdc.edit_dyn();
         editor.set_confirmed(false);
         editor.commit();
+        true
     }
 }
 
@@ -661,13 +721,14 @@ impl NativeNetwork {
     fn new_inner() -> NetworkInner {
         NetworkInner {
             network_needs_restart: false,
-            dial_info_failure_count: BTreeMap::new(),
+            dial_info_confirm_failure_count: BTreeMap::new(),
             routing_domain_detect_address_changes: BTreeSet::new(),
             next_outbound_only_dial_info_check: Timestamp::default(),
             join_handles: Vec::new(),
             stop_source: None,
             bound_address_per_protocol: BTreeMap::new(),
             udp_protocol_handlers: BTreeMap::new(),
+            udp_listener_command_txs: Vec::new(),
             tls_acceptor: None,
             listener_states: BTreeMap::new(),
             preferred_local_addresses: BTreeMap::new(),
@@ -805,45 +866,14 @@ impl NativeNetwork {
         dial_info: DialInfo,
         fut: F,
     ) -> EyreResult<NetworkResult<T>> {
-        let opt_routing_domain = self
-            .routing_table()
-            .routing_domain_for_address(dial_info.address());
-
         let network_result = pin_future_closure!(fut).await?;
         if matches!(
             network_result,
             NetworkResult::NoConnection(_) | NetworkResult::Timeout
         ) {
-            // Dial info failure
             self.network_manager()
                 .address_filter()
                 .set_dial_info_failed(dial_info);
-
-            // Increment consecutive failure count for this routing domain
-            if let Some(rd) = opt_routing_domain {
-                let dial_info_failure_count = {
-                    let mut inner = self.inner.lock();
-                    *inner
-                        .dial_info_failure_count
-                        .entry(rd)
-                        .and_modify(|x| *x += 1)
-                        .or_insert(1)
-                };
-
-                if dial_info_failure_count == MAX_DIAL_INFO_FAILURE_COUNT {
-                    veilid_log!(self debug "Node may be offline. Exceeded maximum dial info failure count for {:?}", rd);
-                    // todo: what operations should we perform here?
-                    // self.set_needs_dial_info_check(rd);
-                }
-            }
-        } else {
-            // Dial info success
-
-            // Clear failure count for this routing domain
-            if let Some(rd) = opt_routing_domain {
-                let mut inner = self.inner.lock();
-                inner.dial_info_failure_count.remove(&rd);
-            }
         }
         Ok(network_result)
     }
@@ -1119,6 +1149,9 @@ impl NativeNetwork {
             inner.stop_source = Some(StopSource::new());
         }
 
+        // Start the IGD worker so its first probes can run while bind/discovery proceeds
+        self.igd_manager.startup();
+
         // Bind all listening network protocols
         let res = self.bind_all_listeners();
         if !matches!(res, Ok(StartupDisposition::Success)) {
@@ -1163,14 +1196,20 @@ impl NativeNetwork {
                 veilid_log!(self trace "joining: {:?}", h);
                 unord.push(h);
             }
-            // Drop the stop
+            // Wake source-bound recv-loops that follow per-handler stops (the global stop
+            // doesn't reach them)
+            for ph in inner.udp_protocol_handlers.values() {
+                ph.stop();
+            }
+            // Drop senders so listener channel-wait futures observe ChannelClosed
+            inner.udp_listener_command_txs.clear();
             drop(inner.stop_source.take());
         }
         veilid_log!(self debug "stopping {} low level network tasks", unord.len());
-        // Wait for everything to stop
         while unord.next().await.is_some() {}
 
-        // Reset all inner state to undo what was done during startup
+        self.igd_manager.shutdown().await;
+
         *self.inner.lock() = Self::new_inner();
     }
 }

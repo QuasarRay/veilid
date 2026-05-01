@@ -8,8 +8,8 @@ pub trait RoutingDomainEditor {
         address_types: Option<AddressTypeSet>,
         protocol_types: Option<ProtocolTypeSet>,
     );
-    fn set_relays(&mut self, relays: Vec<RoutingDomainRelay>);
-    fn set_relay_state(&mut self, relay: RoutingDomainRelay, state: RoutingDomainRelayState);
+    fn set_relay_compilation(&mut self, relay_compilation: Option<RelayCompilation>);
+    fn set_relay_state(&mut self, relay_id: NodeId, state: RoutingDomainRelayState);
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     fn add_dial_info_detail(&mut self, dial_info_detail: DialInfoDetail);
     // #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
@@ -38,9 +38,11 @@ impl<T: RoutingDomainDetailAccessors + ?Sized> RoutingDomainDetailApplyChange fo
                     .clear_dial_info_details(address_types, protocol_types);
             }
 
-            RoutingDomainChange::SetRelays { relays } => self.common_mut().set_relays(relays),
-            RoutingDomainChange::SetRelayState { relay, state } => {
-                self.common_mut().set_relay_state(&relay, state)
+            RoutingDomainChange::SetRelayCompilation { relay_compilation } => {
+                self.common_mut().set_relay_compilation(relay_compilation)
+            }
+            RoutingDomainChange::SetRelayState { relay_id, state } => {
+                self.common_mut().set_relay_state(relay_id, state)
             }
 
             RoutingDomainChange::AddDialInfoDetail { dial_info_detail } => {
@@ -71,11 +73,11 @@ pub(super) enum RoutingDomainChange {
         address_types: Option<AddressTypeSet>,
         protocol_types: Option<ProtocolTypeSet>,
     },
-    SetRelays {
-        relays: Vec<RoutingDomainRelay>,
+    SetRelayCompilation {
+        relay_compilation: Option<RelayCompilation>,
     },
     SetRelayState {
-        relay: RoutingDomainRelay,
+        relay_id: NodeId,
         state: RoutingDomainRelayState,
     },
     AddDialInfoDetail {

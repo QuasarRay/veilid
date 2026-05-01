@@ -241,6 +241,36 @@ impl RouteSpecStore {
         out
     }
 
+    /// Return the hop node ids of an allocated route by one of its public keys, as a deduplicated set.
+    /// Empty if the key isn't a known allocated route.
+    pub fn allocated_route_hop_node_ids(&self, key: &PublicKey) -> HashSet<NodeId> {
+        let cache = self.cache.read();
+        let Some(rid) = cache.get_allocated_route_id_by_key(key) else {
+            return HashSet::new();
+        };
+        let Some(arce) = cache.get_allocated_route_by_id(&rid) else {
+            return HashSet::new();
+        };
+        arce.hop_node_refs()
+            .iter()
+            .map(|nr| nr.best_node_id())
+            .collect()
+    }
+
+    /// Return the first hop node id of a remote private route by one of its public keys.
+    /// The remaining hops of a remote private route are encrypted, so only the first hop is visible to us.
+    pub fn remote_route_first_hop_node_id(&self, key: &PublicKey) -> Option<NodeId> {
+        let cache = self.cache.read();
+        let cur_ts = Timestamp::now();
+        let rrid = cache.get_remote_route_id_by_key(key)?;
+        let rrce = cache.peek_remote_route(cur_ts, &rrid)?;
+        let pr = rrce.best_private_route()?;
+        match &pr.hops {
+            PrivateRouteHops::FirstHop(rh) => rh.node.node_id(),
+            _ => None,
+        }
+    }
+
     /// List all allocated routes with a filter. Filter must not access the route spec store due to locking.
     pub fn list_remote_routes<F, R>(&self, mut filter: F) -> Vec<R>
     where

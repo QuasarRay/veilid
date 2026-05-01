@@ -8,9 +8,19 @@
   - Formatting functions moved to veilid-tools, gets garbage nobody cares about out of the public API
   - Routing domain publication improvements, better logic for dial info confirmation
   - `NetworkManager`'s `Network` abstraction is now a `PlatformNetwork` trait, implemented as `NativeNetwork` and `WasmNetwork`
+  - Added relay compiler to unify how relay requirements are calculated
+  - Improved address change detection
+  - Improved route optimizer, routes no longer are completely reset when switching relays or publishing peer info
+  - Fixed UPNP support
+  - Fixes for handling SLAAC, APIPA, CLAT46/XLAT464, and earlier detection of CGNAT. Big day for acroynms.
+  - Dynamic source Binding for low level protocols to ensure non-temporary addresses are used for outbound flows.
+  - Added `OnlineDetector` to `NetworkManager` to enhance detecting switching networks. Things are now reactive to low level address switches rather than tick-based. Next up, OS-level subscriptions to routing table and interface table changes.
+  - (@neequ57) Extract compression from crypto
+  - (@kirks) Fix recursion limit for Rust 1.94.0
 
 - veilid-tools:
   - Formatting cleanup across the board, primarily for debugging purposes
+  - (@hamanasu_ruka) Break up monolithic unit tests 
 
 - veilid-flutter:
   - Add `LogFixture` to `veilid_test` package

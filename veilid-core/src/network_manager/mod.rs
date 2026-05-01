@@ -10,6 +10,7 @@ mod debug;
 mod network;
 mod network_connection;
 mod node_contact_method_cache;
+mod online_detector;
 mod receipt_manager;
 mod relay_worker;
 mod send_data;
@@ -31,6 +32,7 @@ pub use stats::*;
 
 pub(crate) use bootstrap::*;
 pub(crate) use node_contact_method_cache::*;
+pub(crate) use online_detector::*;
 pub(crate) use types::*;
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -230,6 +232,9 @@ pub(crate) struct NetworkManager {
     // Address filter
     address_filter: AddressFilter,
 
+    // Per-routing-domain online detector
+    online_detector: OnlineDetector,
+
     // Accessors
     components: RwLock<Option<NetworkComponents>>,
 
@@ -256,6 +261,7 @@ impl fmt::Debug for NetworkManager {
             //.field("registry", &self.registry)
             .field("inner", &self.inner)
             .field("address_filter", &self.address_filter)
+            .field("online_detector", &self.online_detector)
             .field("network_key", &self.network_key)
             .field("startup_context", &self.startup_context)
             .field("concurrency", &self.concurrency)
@@ -338,11 +344,13 @@ impl NetworkManager {
 
         let inner = Self::new_inner();
         let address_filter = AddressFilter::new(registry.clone());
+        let online_detector = OnlineDetector::new(registry.clone());
 
         let this = Self {
             registry,
             inner: Mutex::new(inner),
             address_filter,
+            online_detector,
             components: RwLock::new(None),
             rolling_transfers_task: TickTask::new(
                 "rolling_transfers_task",
@@ -365,6 +373,10 @@ impl NetworkManager {
 
     pub fn address_filter(&self) -> &AddressFilter {
         &self.address_filter
+    }
+
+    pub fn online_detector(&self) -> &OnlineDetector {
+        &self.online_detector
     }
 
     fn net(&self) -> Network {
@@ -1030,13 +1042,17 @@ impl NetworkManager {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             return Ok(NetworkResult::no_connection_other("network is not started"));
         };
+        // Capture a stop token so the long network awaits below can be cancelled
+        // when shutdown is requested. Without this, the enter guard above is held
+        // for the full duration of the send, blocking shutdown until each peer
+        // round-trip completes (or its RPC timeout fires).
+        let stop_token = self
+            .startup_context
+            .startup_lock
+            .stop_token()
+            .ok_or_else(|| eyre!("network is stopping"))?;
 
-        let Some(best_node_id) = node_ref.best_node_id() else {
-            bail!(
-                "can't talk to this node {} because we dont support its cryptosystem",
-                node_ref
-            );
-        };
+        let best_node_id = node_ref.best_node_id();
 
         // Get node's envelope versions and see if we can send to it
         // and if so, get the max version we can use
@@ -1055,7 +1071,9 @@ impl NetworkManager {
                 TimestampDuration::new_ms(200),
                 veilid_log_dbg!(self, "NetworkManager::build_envelope"),
             )
-            .await?;
+            .timeout_at(stop_token.clone())
+            .await
+            .map_err(|_| eyre!("network is stopping"))??;
 
         if let Some(relay_di) = &opt_relay_di {
             veilid_log!(self trace
@@ -1069,14 +1087,18 @@ impl NetworkManager {
             veilid_log!(self trace "sending envelope to {:?}, len={}, timestamp={:?}", node_ref, out.len(), timestamp);
         }
 
-        // Send the envelope via whatever means necessary
-        if let Some(relay_di) = opt_relay_di {
-            // Have direct dialinfo already
-            self.send_data_direct(node_ref.unfiltered(), relay_di, out)
-                .await
-        } else {
-            // Must calculate node contact method
-            self.send_data(node_ref, out).await
+        // Send the envelope via whatever means necessary, gated on the shutdown stop token.
+        let send_fut = async {
+            if let Some(relay_di) = opt_relay_di {
+                self.send_data_direct(node_ref.unfiltered(), relay_di, out)
+                    .await
+            } else {
+                self.send_data(node_ref, out).await
+            }
+        };
+        match send_fut.timeout_at(stop_token).await {
+            Ok(res) => res,
+            Err(_) => Ok(NetworkResult::no_connection_other("network is stopping")),
         }
     }
 
@@ -1154,6 +1176,11 @@ impl NetworkManager {
                 return Ok(false);
             }
         };
+
+        // Earliest "we received from outside" signal for the online detector.
+        // Sender node id isn't decoded yet; rpc_processor will mark the sender seen later.
+        self.online_detector()
+            .record_success(routing_domain, std::iter::empty());
 
         // Is this a direct bootstrap request instead of an envelope?
         if magic == *BOOT_MAGIC {

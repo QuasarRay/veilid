@@ -54,16 +54,15 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorPublicInternet<'a> {
         ));
     }
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
-    fn set_relays(&mut self, relays: Vec<RoutingDomainRelay>) {
+    fn set_relay_compilation(&mut self, relay_compilation: Option<RelayCompilation>) {
         self.changes.push(RoutingDomainChangePublicInternet::Common(
-            RoutingDomainChange::SetRelays { relays },
+            RoutingDomainChange::SetRelayCompilation { relay_compilation },
         ));
     }
-
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
-    fn set_relay_state(&mut self, relay: RoutingDomainRelay, state: RoutingDomainRelayState) {
+    fn set_relay_state(&mut self, relay_id: NodeId, state: RoutingDomainRelayState) {
         self.changes.push(RoutingDomainChangePublicInternet::Common(
-            RoutingDomainChange::SetRelayState { relay, state },
+            RoutingDomainChange::SetRelayState { relay_id, state },
         ));
     }
 
@@ -104,7 +103,11 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorPublicInternet<'a> {
         let routing_table = self.routing_table();
 
         // Apply changes
-        let mut peer_info_changed = false;
+        let mut dial_info_changed = false;
+        let mut relays_changed = false;
+        let mut confirmation_changed = false;
+        let mut other_peer_info_changed = false;
+        let peer_info_changed: bool;
         {
             let mut rdd = self.controller.write_dyn();
             let Some(detail) = rdd
@@ -155,7 +158,7 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorPublicInternet<'a> {
                         indent_all_string(removed_dial_info.to_multiline_string())
                             .strip_trailing_newline()
                     );
-                    peer_info_changed = true;
+                    dial_info_changed = true;
                 }
                 let added_dial_info = new_dial_info_details
                     .iter()
@@ -167,7 +170,7 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorPublicInternet<'a> {
                         indent_all_string(added_dial_info.to_multiline_string())
                             .strip_trailing_newline()
                     );
-                    peer_info_changed = true;
+                    dial_info_changed = true;
                 }
                 if old_relays.len() != new_relays.len()
                     || old_relays
@@ -178,44 +181,49 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorPublicInternet<'a> {
                     veilid_log!(self info "[PublicInternet] relays changed: [{}] -> [{}]",
                             old_relays.iter().map(|x| x.relay_node.to_string()).collect::<Vec<_>>().join(","),
                             new_relays.iter().map(|x| x.relay_node.to_string()).collect::<Vec<_>>().join(","));
-                    peer_info_changed = true;
+                    relays_changed = true;
                 }
                 if old_outbound_protocols != new_outbound_protocols {
                     veilid_log!(self info
                         "[PublicInternet] changed network: outbound {:?}->{:?}",
                         old_outbound_protocols, new_outbound_protocols
                     );
-                    peer_info_changed = true;
+                    other_peer_info_changed = true;
                 }
                 if old_inbound_protocols != new_inbound_protocols {
                     veilid_log!(self info
                         "[PublicInternet] changed network: inbound {:?}->{:?}",
                         old_inbound_protocols, new_inbound_protocols
                     );
-                    peer_info_changed = true;
+                    other_peer_info_changed = true;
                 }
                 if old_address_types != new_address_types {
                     veilid_log!(self info
                         "[PublicInternet] changed network: address types {:?}->{:?}",
                         old_address_types, new_address_types
                     );
-                    peer_info_changed = true;
+                    other_peer_info_changed = true;
                 }
                 if old_capabilities != new_capabilities {
                     veilid_log!(self info
                         "[PublicInternet] changed network: capabilities {:?}->{:?}",
                         old_capabilities, new_capabilities
                     );
-                    peer_info_changed = true;
+                    other_peer_info_changed = true;
                 }
                 if old_confirmed != new_confirmed {
                     veilid_log!(self info
                         "[PublicInternet] changed confirmation: {:?}->{:?}",
                         old_confirmed, new_confirmed
                     );
-                    peer_info_changed = true;
+                    confirmation_changed = true;
                 }
             }
+
+            peer_info_changed = dial_info_changed
+                || relays_changed
+                || confirmation_changed
+                || other_peer_info_changed;
 
             // Invalidate the caches so we re-generate cached peerinfo and relay status
             if peer_info_changed {
@@ -234,13 +242,23 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorPublicInternet<'a> {
             self.network_manager()
                 .connection_manager()
                 .update_protections();
+
+            if let Err(e) = self.event_bus().post(RoutingDomainCommitEvent {
+                routing_domain: RoutingDomain::PublicInternet,
+                peer_info_changed,
+                confirmation_changed,
+                dial_info_changed,
+                relays_changed,
+            }) {
+                veilid_log!(self warn "failed to post RoutingDomainCommitEvent: {}", e);
+            }
         }
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
     fn reset(&mut self) {
         self.clear_dial_info_details(None, None);
-        self.set_relays(vec![]);
+        self.set_relay_compilation(None);
         self.set_confirmed(false);
         self.commit();
     }

@@ -13,16 +13,30 @@ use std::ffi::CStr;
 use std::io;
 use std::os::raw::{c_int, c_uchar, c_ulong, c_ushort, c_void};
 
+// xnu bsd/netinet6/in6_var.h IN6_IFF_* flags and address-info ioctls
+/// Get IPv6 address flags
 const SIOCGIFAFLAG_IN6: c_ulong = 0xC1206949;
+/// Get IPv6 address lifetime (preferred/valid/expire)
 const SIOCGIFALIFETIME_IN6: c_ulong = 0xC1206951;
+/// Address is undergoing duplicate-address detection
 const IN6_IFF_TENTATIVE: c_ushort = 0x0002;
+/// Address has been detected as a duplicate
 const IN6_IFF_DUPLICATED: c_ushort = 0x0004;
+/// Network interface link is detached
 const IN6_IFF_DETACHED: c_ushort = 0x0008;
-const IN6_IFF_AUTOCONF: c_ushort = 0x0040;
-const IN6_IFF_TEMPORARY: c_ushort = 0x0080;
+/// Address has reached the end of its preferred lifetime (still valid but discouraged)
 const IN6_IFF_DEPRECATED: c_ushort = 0x0010;
+/// Address was assigned via IPv6 stateless auto-configuration (SLAAC)
+const IN6_IFF_AUTOCONF: c_ushort = 0x0040;
+/// RFC 4941 privacy / temporary address (rotates)
+const IN6_IFF_TEMPORARY: c_ushort = 0x0080;
+/// Address was assigned dynamically (e.g. via DHCPv6)
 const IN6_IFF_DYNAMIC: c_ushort = 0x0100;
+/// RFC 7217 stable secured SLAAC; currently unused — kept for documentation
+#[allow(dead_code)]
 const IN6_IFF_SECURED: c_ushort = 0x0400;
+/// CLAT46 synthesized address for RFC 6877 IPv4-as-a-Service over IPv6 (cellular)
+const IN6_IFF_CLAT46: c_ushort = 0x1000;
 
 macro_rules! set_name {
     ($name_field:expr, $name_str:expr) => {{
@@ -391,6 +405,8 @@ impl PlatformSupportApple {
             is_loopback: (flags & IFF_LOOPBACK) != 0,
             is_running: (flags & IFF_RUNNING) != 0,
             is_point_to_point: (flags & IFF_POINTOPOINT) != 0,
+            // macOS/iOS surface CLAT at the address level via IN6_IFF_CLAT46, not as an interface flag
+            is_clat: false,
         }
     }
 
@@ -420,20 +436,26 @@ impl PlatformSupportApple {
         }
         let expire = req.get_ia6t_expire();
 
-        let is_auto_generated_random_address =
-            flags & (IN6_IFF_SECURED | IN6_IFF_AUTOCONF) == (IN6_IFF_SECURED | IN6_IFF_AUTOCONF);
-
-        let is_temporary =
-            (flags & IN6_IFF_TEMPORARY) != 0 || (expire != 0 && is_auto_generated_random_address);
+        // RFC 4941 privacy address only; RFC 7217 secured SLAAC also has a non-zero
+        // RA lifetime but is stable, so it must not be conflated
+        let is_temporary = (flags & IN6_IFF_TEMPORARY) != 0;
         let is_dynamic = (flags & (IN6_IFF_DYNAMIC | IN6_IFF_AUTOCONF)) != 0;
         let is_preferred = (flags
             & (IN6_IFF_TENTATIVE | IN6_IFF_DUPLICATED | IN6_IFF_DETACHED | IN6_IFF_DEPRECATED))
             == 0;
+        let is_clat = (flags & IN6_IFF_CLAT46) != 0;
+        let expiration_secs = if expire == 0 {
+            None
+        } else {
+            Some(expire as u64)
+        };
 
         Ok(AddressFlags {
             is_temporary,
             is_dynamic,
             is_preferred,
+            is_clat,
+            expiration_secs,
         })
     }
 

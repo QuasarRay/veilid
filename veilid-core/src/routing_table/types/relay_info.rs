@@ -82,14 +82,8 @@ impl RelayInfo {
 
         ani == bni && aop == bop && aat == bat && adids == bdids && aor == bor
     }
-}
 
-impl HasDialInfoDetailList for RelayInfo {
-    fn dial_info_detail_list(&self) -> &[DialInfoDetail] {
-        &self.dial_info_detail_list
-    }
-
-    fn has_sequencing_matched_dial_info(&self, sequencing: Sequencing) -> bool {
+    pub fn has_sequencing_matched_dial_info(&self, sequencing: Sequencing) -> bool {
         // Check our dial info
         for did in self.dial_info_detail_list() {
             if sequencing.matches_ordering(did.dial_info.protocol_type().sequence_ordering()) {
@@ -98,5 +92,11 @@ impl HasDialInfoDetailList for RelayInfo {
         }
 
         false
+    }
+}
+
+impl HasDialInfoDetailList for RelayInfo {
+    fn dial_info_detail_list(&self) -> &[DialInfoDetail] {
+        &self.dial_info_detail_list
     }
 }

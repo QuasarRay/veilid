@@ -185,13 +185,31 @@ impl RoutingTable {
         min_state: BucketEntryState,
         capabilities: Vec<VeilidCapability>,
     ) -> String {
-        let rdc = self.get_routing_domain_controller(RoutingDomain::PublicInternet);
-        let relays = rdc.read_dyn().relays();
-        let relay_node_filter = rdc
-            .as_any()
-            .downcast_ref::<PublicInternetRoutingDomainController>()
-            .unwrap()
-            .make_relay_node_filter();
+        // Get PublicInternet relay information
+        let (public_internet_relays, public_internet_relay_node_filter) = {
+            let rdc = self.get_routing_domain_controller(RoutingDomain::PublicInternet);
+            let rdc_specific = rdc
+                .as_any()
+                .downcast_ref::<PublicInternetRoutingDomainController>()
+                .unwrap();
+            let rdd_specific = rdc_specific.read();
+            let relays = rdd_specific.relays();
+            let relay_node_filter = rdd_specific.make_relay_node_filter();
+
+            (relays, relay_node_filter)
+        };
+
+        // Get summary of all routing domains
+        let rd_summary = {
+            let mut rd_summary = String::new();
+            let rdcs = self.get_routing_domain_controllers(RoutingDomainSet::all());
+            for rdd in rdcs {
+                let rdd = rdd.read_dyn();
+                let entry_summary = rdd.get_entry_summary();
+                rd_summary += &format!("  {:#}: {}\n", rdd.routing_domain(), entry_summary);
+            }
+            rd_summary
+        };
 
         let inner = self.inner.read();
         let inner = &*inner;
@@ -200,13 +218,8 @@ impl RoutingTable {
         let mut out = String::new();
 
         out += &format!("Entries: {}\n", inner.bucket_entry_count());
+        out += &rd_summary;
         out += "   Live:\n";
-        let rdds = self.get_routing_domain_controllers(RoutingDomainSet::all());
-        for rdd in rdds {
-            let rdd = rdd.read_dyn();
-            let entry_summary = rdd.get_entry_summary();
-            out += &format!("{:#}: {}\n", rdd.routing_domain(), entry_summary);
-        }
         for ck in &VALID_CRYPTO_KINDS {
             let our_node_id = self.node_id(*ck);
 
@@ -243,8 +256,8 @@ impl RoutingTable {
                         }
 
                         let entry_snap = e.1.snapshot(self.registry(), cur_ts);
-                        let can_be_relay = relay_node_filter(&entry_snap);
-                        let is_relay = relays
+                        let can_be_relay = public_internet_relay_node_filter(&entry_snap);
+                        let is_relay = public_internet_relays
                             .iter()
                             .find_map(|r| {
                                 if r.relay_node.same_bucket_entry(e.1) {
@@ -327,13 +340,19 @@ impl RoutingTable {
     ) -> String {
         let cur_ts = Timestamp::now();
 
-        let rdc = self.get_routing_domain_controller(RoutingDomain::PublicInternet);
-        let relays = rdc.read_dyn().relays();
-        let relay_node_filter = rdc
-            .as_any()
-            .downcast_ref::<PublicInternetRoutingDomainController>()
-            .unwrap()
-            .make_relay_node_filter();
+        // Get PublicInternet relay information
+        let (public_internet_relays, public_internet_relay_node_filter) = {
+            let rdc = self.get_routing_domain_controller(RoutingDomain::PublicInternet);
+            let rdc_specific = rdc
+                .as_any()
+                .downcast_ref::<PublicInternetRoutingDomainController>()
+                .unwrap();
+            let rdd_specific = rdc_specific.read();
+            let relays = rdd_specific.relays();
+            let relay_node_filter = rdd_specific.make_relay_node_filter();
+
+            (relays, relay_node_filter)
+        };
 
         let our_node_ids = self.node_ids();
         let mut relay_count = 0usize;
@@ -363,8 +382,8 @@ impl RoutingTable {
         let entry_count = nodes.len();
         for node in nodes {
             let relay_snap = node.entry().snapshot(self.registry(), cur_ts);
-            let can_be_relay = relay_node_filter(&relay_snap);
-            let is_relay = relays
+            let can_be_relay = public_internet_relay_node_filter(&relay_snap);
+            let is_relay = public_internet_relays
                 .iter()
                 .find_map(|r| {
                     if r.relay_node.same_entry(&node) {

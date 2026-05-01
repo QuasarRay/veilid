@@ -1,7 +1,7 @@
 mod editor;
 mod local_network;
 mod public_internet;
-mod relay_status;
+mod relay_requirements;
 mod routing_domain_controller;
 mod routing_domain_detail;
 mod routing_domain_detail_common;
@@ -14,7 +14,7 @@ use super::*;
 pub use editor::*;
 pub use local_network::*;
 pub use public_internet::*;
-pub use relay_status::*;
+pub use relay_requirements::*;
 pub use routing_domain_controller::*;
 pub use routing_domain_detail::*;
 pub use routing_domain_detail_common::*;

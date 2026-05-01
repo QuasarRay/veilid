@@ -271,26 +271,36 @@ fn ipv6_netmask_to_prefix_len(netmask: Ipv6Addr) -> Option<u8> {
     }
 }
 
-/// Some of the flags associated with an interface.
+/// Some of the flags associated with an interface
 #[derive(
     Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Clone, Copy, Serialize, Deserialize,
 )]
 pub struct InterfaceFlags {
+    /// Loopback interface (lo/lo0)
     pub is_loopback: bool,
+    /// Interface is up and operational
     pub is_running: bool,
+    /// Point-to-point link (PPP, tun, etc.)
     pub is_point_to_point: bool,
+    /// CLAT (RFC 6877) virtual interface (e.g. Android `clat4*` / `v4-*`); local-only
+    pub is_clat: bool,
 }
 
-/// Some of the flags associated with an address.
+/// Some of the flags associated with an address
 #[derive(
     Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Clone, Copy, Serialize, Deserialize,
 )]
 pub struct AddressFlags {
-    // common flags
+    /// Auto-configured (DHCP/SLAAC) rather than statically configured
     pub is_dynamic: bool,
-    // ipv6 flags
+    /// RFC 4941 privacy/temporary IPv6 address (rotates periodically)
     pub is_temporary: bool,
+    /// Address has finished DAD and is not deprecated/tentative/duplicated
     pub is_preferred: bool,
+    /// CLAT46 synthesized IPv6 (RFC 6877); local-only on macOS/iOS
+    pub is_clat: bool,
+    /// Absolute expiration in seconds since UNIX epoch; `None` if non-expiring (static)
+    pub expiration_secs: Option<u64>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -406,24 +416,57 @@ impl InterfaceAddress {
         Self { if_addr, flags }
     }
 
+    /// Underlying IPv4 or IPv6 address with netmask/broadcast.
     #[must_use]
     pub fn if_addr(&self) -> &IfAddr {
         &self.if_addr
     }
 
+    /// RFC 4941 privacy/temporary IPv6 (rotates)
     #[must_use]
     pub fn is_temporary(&self) -> bool {
         self.flags.is_temporary
     }
 
+    /// Auto-configured (DHCP/SLAAC) rather than statically configured
     #[must_use]
     pub fn is_dynamic(&self) -> bool {
         self.flags.is_dynamic
     }
 
+    /// Address has finished DAD and is not deprecated/tentative/duplicated
     #[must_use]
     pub fn is_preferred(&self) -> bool {
         self.flags.is_preferred
+    }
+
+    /// CLAT46 synthesized IPv6 (RFC 6877) — local-only on macOS/iOS
+    #[must_use]
+    pub fn is_clat(&self) -> bool {
+        self.flags.is_clat
+    }
+
+    /// IPv4 address in CGNAT (RFC 6598 100.64.0.0/10) or DS-Lite (RFC 6333 192.0.0.0/24);
+    /// always false for IPv6
+    #[must_use]
+    pub fn is_cgnat_or_ds_lite(&self) -> bool {
+        match &self.if_addr {
+            IfAddr::V4(v4) => {
+                ipv4addr_is_shared(&v4.ip) || ipv4addr_is_ietf_protocol_assignment(&v4.ip)
+            }
+            IfAddr::V6(_) => false,
+        }
+    }
+
+    /// IPv4 link-local / APIPA (169.254.0.0/16) — DHCP-failed fallback, transient
+    /// and not reachable by peers; always false for IPv6 (link-local IPv6 is
+    /// handled by `ipv6addr_is_global`)
+    #[must_use]
+    pub fn is_ipv4_link_local(&self) -> bool {
+        match &self.if_addr {
+            IfAddr::V4(v4) => ipv4addr_is_link_local(&v4.ip),
+            IfAddr::V6(_) => false,
+        }
     }
 }
 
@@ -468,47 +511,64 @@ impl NetworkInterface {
             addrs: Vec::new(),
         }
     }
+
+    /// OS interface name (e.g. `en0`, `eth0`, `clat4-rmnet_data0`)
     #[must_use]
     pub fn name(&self) -> String {
         self.name.clone()
     }
+
+    /// Loopback interface (lo/lo0)
     #[must_use]
     pub fn is_loopback(&self) -> bool {
         self.flags.is_loopback
     }
 
+    /// Point-to-point link (PPP, tun, etc.)
     #[must_use]
     pub fn is_point_to_point(&self) -> bool {
         self.flags.is_point_to_point
     }
 
+    /// Interface is up and operational
     #[must_use]
     pub fn is_running(&self) -> bool {
         self.flags.is_running
     }
 
+    /// CLAT (RFC 6877) virtual interface (e.g. Android `clat4*` / `v4-*`); local-only
+    #[must_use]
+    pub fn is_clat(&self) -> bool {
+        self.flags.is_clat
+    }
+
+    /// Append an address to this interface; addresses are kept sorted and deduplicated
     pub fn add_address(&mut self, addr: InterfaceAddress) {
         self.addrs.push(addr);
         self.addrs.sort();
         self.addrs.dedup();
     }
 
+    /// All addresses bound to this interface.
     #[must_use]
     pub fn addresses(&self) -> &[InterfaceAddress] {
         &self.addrs
     }
 
+    /// Append a gateway to this interface; gateways are kept sorted and deduplicated.
     pub fn add_gateway(&mut self, gateway: IpAddr) {
         self.gateways.push(gateway);
         self.gateways.sort();
         self.gateways.dedup();
     }
 
+    /// Default-route gateways reachable through this interface.
     #[must_use]
     pub fn gateways(&self) -> &[IpAddr] {
         &self.gateways
     }
 
+    /// Most-preferred IPv4 address on this interface (per `InterfaceAddress::cmp`).
     #[must_use]
     pub fn primary_ipv4(&self) -> Option<InterfaceAddress> {
         let mut ipv4addrs: Vec<&InterfaceAddress> = self
@@ -520,6 +580,7 @@ impl NetworkInterface {
         ipv4addrs.last().cloned().cloned()
     }
 
+    /// Most-preferred IPv6 address on this interface (per `InterfaceAddress::cmp`).
     #[must_use]
     pub fn primary_ipv6(&self) -> Option<InterfaceAddress> {
         let mut ipv6addrs: Vec<&InterfaceAddress> = self
@@ -536,6 +597,13 @@ impl NetworkInterface {
 pub struct NetworkInterfaceAddressState {
     pub gateway_addresses: Vec<IpAddr>,
     pub interface_addresses: Vec<IfAddr>,
+}
+
+#[derive(Clone, Copy, Default, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+pub struct RawAddressSummary {
+    pub has_non_loopback_ipv4: bool,
+    pub has_non_loopback_ipv6: bool,
+    pub has_unicast_global_ipv6: bool,
 }
 
 pub struct NetworkInterfacesInner {
@@ -641,6 +709,37 @@ impl NetworkInterfaces {
         inner.interface_address_state_cache.clone()
     }
 
+    /// Address presence across running, non-loopback interfaces, NOT filtered by
+    /// `is_temporary()`, since RFC 7217 secured SLAAC globals get marked temporary on macOS.
+    #[must_use]
+    pub fn raw_address_summary(&self) -> RawAddressSummary {
+        let inner = self.inner.lock();
+        let mut summary = RawAddressSummary::default();
+        for intf in inner.interfaces.values() {
+            if !intf.is_running() || intf.is_loopback() {
+                continue;
+            }
+            for addr in intf.addresses() {
+                match addr.if_addr() {
+                    IfAddr::V4(v4) => {
+                        if !v4.ip.is_loopback() && !v4.ip.is_unspecified() {
+                            summary.has_non_loopback_ipv4 = true;
+                        }
+                    }
+                    IfAddr::V6(v6) => {
+                        if !v6.ip.is_loopback() && !v6.ip.is_unspecified() {
+                            summary.has_non_loopback_ipv6 = true;
+                            if ipv6addr_is_unicast_global(&v6.ip) {
+                                summary.has_unicast_global_ipv6 = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        summary
+    }
+
     /////////////////////////////////////////////
 
     fn cache_interface_address_state(inner: &mut NetworkInterfacesInner) {
@@ -648,12 +747,27 @@ impl NetworkInterfaces {
         let mut intf_addrs = Vec::new();
         let mut gateway_addresses = Vec::new();
         for intf in inner.interfaces.values() {
-            if !intf.is_running() || intf.is_loopback() {
+            // Skip down, loopback, and CLAT virtual interfaces (Android: clat4*/v4-*)
+            if !intf.is_running() || intf.is_loopback() || intf.is_clat() {
                 continue;
             }
 
             for addr in intf.addresses() {
+                // Skip RFC 4941 privacy addresses; they rotate and churn published peer info
                 if addr.is_temporary() {
+                    continue;
+                }
+                // Skip macOS/iOS CLAT46 synthesized IPv6 (local-only translator address)
+                if addr.is_clat() {
+                    continue;
+                }
+                // Skip RFC 6598 CGNAT and RFC 6333 DS-Lite IPv4; peers can't reach them
+                if addr.is_cgnat_or_ds_lite() {
+                    continue;
+                }
+                // Skip RFC 3927 IPv4 link-local (169.254.0.0/16); transient DHCP-fallback
+                // address, never reachable by peers
+                if addr.is_ipv4_link_local() {
                     continue;
                 }
                 intf_addrs.push(addr.clone());

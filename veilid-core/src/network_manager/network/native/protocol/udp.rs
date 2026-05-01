@@ -1,15 +1,26 @@
 use super::*;
+use stop_token::{StopSource, StopToken};
 
 impl_veilid_log_facility!("net");
 
 #[derive(Clone)]
 pub struct RawUdpProtocolHandler {
+    /// Component registry for logging and access to other subsystems
     registry: VeilidComponentRegistry,
+    /// Async UDP socket this handler reads from and writes to
     socket: Arc<UdpSocket>,
+    /// Reassembly buffer for fragmented UDP messages
     assembly_buffer: AssemblyBuffer,
+    /// True if `socket` is IPv6, false for IPv4
     is_ipv6: bool,
+    /// TTL the socket was created with; restored after holepunch sends
     default_ttl: u32,
+    /// Current TTL on the socket; mutated transiently by `send_hole_punch`
     current_ttl: Arc<AsyncMutex<u32>>,
+    /// Drop to signal cancellation; taken out by `stop()`
+    stop_source: Arc<Mutex<Option<StopSource>>>,
+    /// Cloned by recv-loops that follow this handler's stop
+    stop_token: StopToken,
 }
 
 impl_veilid_component_accessors!(RawUdpProtocolHandler);
@@ -25,6 +36,9 @@ impl RawUdpProtocolHandler {
                 .expect_or_log("getting IP_TTL should not fail")
         };
 
+        let stop_source = StopSource::new();
+        let stop_token = stop_source.token();
+
         Self {
             registry,
             socket,
@@ -32,7 +46,19 @@ impl RawUdpProtocolHandler {
             is_ipv6,
             default_ttl,
             current_ttl: Arc::new(AsyncMutex::new(default_ttl)),
+            stop_source: Arc::new(Mutex::new(Some(stop_source))),
+            stop_token,
         }
+    }
+
+    /// Stop token for this handler's recv-loop
+    pub fn stop_token(&self) -> StopToken {
+        self.stop_token.clone()
+    }
+
+    /// Signal cancellation for this handler. Idempotent.
+    pub fn stop(&self) {
+        *self.stop_source.lock() = None;
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "protocol", err, skip(self, data), fields(self.socket = ?self.socket, data.len = data.len(), ret.len, ret.flow)))]
@@ -257,6 +283,24 @@ impl RawUdpProtocolHandler {
     ) -> io::Result<RawUdpProtocolHandler> {
         // get local wildcard address for bind
         let local_socket_addr = compatible_unspecified_socket_addr(socket_addr);
+        let socket = bind_async_udp_socket(local_socket_addr)?
+            .ok_or(io::Error::from(io::ErrorKind::AddrInUse))?;
+        Ok(RawUdpProtocolHandler::new(
+            registry,
+            Arc::new(socket),
+            local_socket_addr.is_ipv6(),
+        ))
+    }
+
+    /// Bind a UDP socket to a specific local source address
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "protocol", skip(registry), err, fields(__VEILID_LOG_KEY = registry.log_key()))
+    )]
+    pub fn new_specific_bound_handler(
+        registry: VeilidComponentRegistry,
+        local_socket_addr: SocketAddr,
+    ) -> io::Result<RawUdpProtocolHandler> {
         let socket = bind_async_udp_socket(local_socket_addr)?
             .ok_or(io::Error::from(io::ErrorKind::AddrInUse))?;
         Ok(RawUdpProtocolHandler::new(

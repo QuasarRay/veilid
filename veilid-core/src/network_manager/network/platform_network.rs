@@ -126,27 +126,31 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
         dial_info: DialInfo,
     ) -> PinBoxFuture<'_, EyreResult<NetworkResult<UniqueFlow>>>;
 
-    /// Determine which -local- address to use for establishing a flow to a given dialinfo
-    ///
-    /// Returns None if no preferred local address is available or required by the dialinfo
-    /// Because a node typically has only one connection/flow per protocol/address-type combination
-    /// to any other node, properly using the local address ensures that things like hole-punches and
-    /// established NAT flows are used optimally.
+    /// Local address (bound listen SocketAddr) to use when establishing a flow to `dial_info`.
+    /// Used to keep one connection/flow per protocol+address-type combo so hole-punches and
+    /// established NAT flows are reused.
     fn get_preferred_local_address(&self, dial_info: &DialInfo) -> Option<SocketAddr>;
 
-    /// Determine which -local- address to use for establishing a flow using a specific protocol and address type combination
+    /// Local address to use for a flow given a specific protocol+address-type pair.
     fn get_preferred_local_address_by_key(
         &self,
         pt: ProtocolType,
         at: AddressType,
     ) -> Option<SocketAddr>;
 
+    /// Preferred local source for an outbound send to `dial_info`; None for LocalNetwork
+    /// or NATed cases (let OS pick the source)
+    fn preferred_outbound_source_addr(&self, dial_info: &DialInfo) -> Option<SocketAddr>;
+
     /// Returns which routing domains are configured to detect when their bound or public addresses change
     fn routing_domains_detecting_address_changes(&self) -> BTreeSet<RoutingDomain>;
 
-    /// Mark a routing domain as needing to confirm its dial info
+    /// Mark a routing domain as needing to confirm its dial info.
     ///
-    /// On some platforms/protocols this causes a dial info discovery process to be run to ensure the
-    /// dialinfo in use is up to date
-    fn routing_domain_request_confirm_dial_info(&self, routing_domain: RoutingDomain);
+    /// On some platforms/protocols this causes a dial info discovery process to be run to ensure
+    /// the dialinfo in use is up to date.
+    ///
+    /// Returns `true` if the routing domain transitioned from confirmed to unconfirmed,
+    /// `false` if it was already unconfirmed (so the caller can suppress redundant work).
+    fn routing_domain_request_confirm_dial_info(&self, routing_domain: RoutingDomain) -> bool;
 }

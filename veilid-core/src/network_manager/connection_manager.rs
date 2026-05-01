@@ -415,10 +415,11 @@ impl ConnectionManager {
         };
         let peer_address = dial_info.peer_address();
         let remote_addr = peer_address.socket_addr();
-        let mut preferred_local_address = self
-            .network_manager()
-            .net()
-            .get_preferred_local_address(&dial_info);
+        // Prefer a publicly-routable source (PublicInternet only); else use configured listener
+        let net = self.network_manager().net();
+        let mut preferred_local_address = net
+            .preferred_outbound_source_addr(&dial_info)
+            .or_else(|| net.get_preferred_local_address(&dial_info));
         let best_port = preferred_local_address.map(|pla| pla.port());
 
         // Async lock on the remote address for atomicity per remote
@@ -524,6 +525,25 @@ impl ConnectionManager {
         };
 
         self.arc.connection_table.add_priority_flow(flow);
+    }
+
+    /// Closes connections whose specific local address is no longer in
+    /// `valid_local_addresses`.
+    pub fn close_dead_connections(&self, valid_local_addresses: &HashSet<Address>) {
+        let Ok(_guard) = self.arc.startup_lock.enter() else {
+            return;
+        };
+        let dead_ids = self
+            .arc
+            .connection_table
+            .get_dead_connection_ids(valid_local_addresses);
+        if dead_ids.is_empty() {
+            return;
+        }
+        veilid_log!(self debug "closing {} dead connections after interface change", dead_ids.len());
+        for id in dead_ids {
+            self.report_connection_finished(id);
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////

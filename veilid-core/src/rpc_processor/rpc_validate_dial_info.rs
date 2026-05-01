@@ -36,6 +36,11 @@ impl RPCProcessor {
             .await
             .map_err(RPCError::internal)?;
 
+        // Use the same address family to send the validate_dial_info request because when we call this, we
+        // are still figuring out what address families are supported by this node
+        let node_ref_filter = NodeRefFilter::new().with_address_type(dial_info.address_type());
+
+        // Build the statement to send
         let validate_dial_info = RPCOperationValidateDialInfo::new(dial_info, receipt, redirect)?;
         let statement = RPCStatement::new(RPCStatementDetail::ValidateDialInfo(Box::new(
             validate_dial_info,
@@ -43,7 +48,9 @@ impl RPCProcessor {
 
         // Send the validate_dial_info request
         // This can only be sent directly, as relays can not validate dial info
-        network_result_value_or_log!(self self.statement(Destination::direct(peer.sequencing_filtered(Sequencing::NoPreference), None), statement, None, None)
+        network_result_value_or_log!(self self.statement(Destination::direct(
+            peer.custom_filtered(node_ref_filter).with_sequencing(Sequencing::PreferOrdered),
+            None), statement, None, None)
             .await? => [ format!(": peer={} statement={:?}", peer, statement) ] {
                 return Ok(false);
             }

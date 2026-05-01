@@ -12,8 +12,8 @@ pub struct PublicInternetRoutingDomainDetail {
     common: RoutingDomainDetailCommon,
     /// Published peer info for this routing domain
     published_peer_info: Mutex<Option<Arc<PeerInfo>>>,
-    /// Last relay status for this routing domain
-    opt_last_relay_status: ArcSwapOption<RelayStatus>,
+    /// Last relay requirements for this routing domain
+    opt_last_relay_requirements: ArcSwapOption<RelayRequirements>,
 }
 
 impl fmt::Debug for PublicInternetRoutingDomainDetail {
@@ -23,7 +23,10 @@ impl fmt::Debug for PublicInternetRoutingDomainDetail {
             .field("interface_addresses", &self.interface_addresses)
             .field("common", &self.common)
             .field("published_peer_info", &self.published_peer_info)
-            .field("opt_last_relay_status", &self.opt_last_relay_status)
+            .field(
+                "opt_last_relay_requirements",
+                &self.opt_last_relay_requirements,
+            )
             .finish()
     }
 }
@@ -32,7 +35,7 @@ impl fmt::Display for PublicInternetRoutingDomainDetail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Interface Addresses:\n{}\nPublished Peer Info:\n{}\nLast Relay Status:\n{}\n{}",
+            "Interface Addresses:\n{}\nPublished Peer Info:\n{}\nLast Relay Requirements:\n{}\n{}",
             indent_all_string(
                 f.to_multiline_indexed_string(
                     self.interface_addresses
@@ -42,7 +45,7 @@ impl fmt::Display for PublicInternetRoutingDomainDetail {
                 .string_if_empty("None")
             ),
             indent_all_string(f.to_string_opt(self.published_peer_info.lock().as_ref())),
-            indent_all_string(f.to_string_opt(self.opt_last_relay_status.load().as_ref())),
+            indent_all_string(f.to_string_opt(self.opt_last_relay_requirements.load().as_ref())),
             f.to_string(&self.common)
         )
     }
@@ -65,7 +68,7 @@ impl PublicInternetRoutingDomainDetail {
             interface_addresses: Default::default(),
             common: RoutingDomainDetailCommon::new(registry.clone(), RoutingDomain::PublicInternet),
             published_peer_info: Default::default(),
-            opt_last_relay_status: ArcSwapOption::new(None),
+            opt_last_relay_requirements: ArcSwapOption::new(None),
             registry,
         }
     }
@@ -85,6 +88,97 @@ impl PublicInternetRoutingDomainDetail {
         self.interface_addresses = interface_addresses;
         true
     }
+
+    pub fn make_relay_node_filter(&self) -> impl Fn(&BucketEntrySnapshot) -> bool {
+        let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
+
+        // Get all our outbound protocol/address types
+        let outbound_dif = self.outbound_dial_info_filter();
+
+        // Get our own peer info
+        let own_peer_info = self.get_peer_info();
+
+        move |snap: &BucketEntrySnapshot| {
+            // Ensure this node is not on the local network
+            if snap
+                .routing_domain_set()
+                .contains(RoutingDomain::LocalNetwork)
+            {
+                return false;
+            }
+
+            // Exclude any nodes that don't have a 'best node id' for our enabled cryptosystems
+            if snap.best_node_id().is_none() {
+                return false;
+            }
+
+            // Exclude any nodes that have 'failed to send' state indicating a
+            // connection drop or inability to reach the node
+            if snap.peer_stats.rpc_stats.failed_to_send > 0 {
+                return false;
+            }
+
+            // Get the public internet peer info so we can validate it
+            let Some(peer_info) = snap.get_peer_info(RoutingDomain::PublicInternet) else {
+                return false;
+            };
+
+            // Exclude any nodes that are relaying directly through us
+            if own_peer_info
+                .node_ids()
+                .contains_any_from_iter(peer_info.node_info().relay_ids().iter())
+            {
+                return false;
+            }
+
+            // Disqualify nodes that don't have relay capability
+            if !peer_info
+                .node_info()
+                .has_capability(VEILID_CAPABILITY_RELAY)
+            {
+                return false;
+            }
+
+            // Disqualify any nodes that don't speak all of the envelope versions we do
+            let peer_envelope_support = peer_info.node_info().envelope_support();
+            if own_peer_info
+                .node_info()
+                .envelope_support()
+                .iter()
+                .copied()
+                .any(|x| !peer_envelope_support.contains(&x))
+            {
+                return false;
+            }
+
+            // Ensure there is a way to reach this relay
+            let mut directly_reachable = false;
+            for did in peer_info.node_info().dial_info_detail_list() {
+                if did.class.requires_signal() {
+                    continue;
+                }
+                // If this dial info can be contacted directly, then it is a relay candidate
+                if did.dial_info.matches_filter(&outbound_dif) {
+                    directly_reachable = true;
+                    break;
+                }
+            }
+
+            if !directly_reachable {
+                return false;
+            }
+
+            // Exclude any nodes that have our same network block
+            if own_peer_info
+                .node_info()
+                .is_on_same_ipblock(peer_info.node_info(), ip6_prefix_size)
+            {
+                return false;
+            }
+
+            true
+        }
+    }
 }
 
 impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
@@ -99,17 +193,20 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
         RoutingDomain::PublicInternet
     }
 
-    fn relay_status(&self) -> Arc<RelayStatus> {
+    fn relay_requirements(&self) -> Arc<RelayRequirements> {
         {
-            let opt_relay_status_guard = self.opt_last_relay_status.load();
-            if let Some(relay_status) = opt_relay_status_guard.as_ref().map(|x| x.clone()) {
-                return relay_status;
+            let opt_relay_requirements_guard = self.opt_last_relay_requirements.load();
+            if let Some(relay_requirements) =
+                opt_relay_requirements_guard.as_ref().map(|x| x.clone())
+            {
+                return relay_requirements;
             }
         }
 
-        let relay_status = Arc::new(RelayStatus::new_from_routing_domain_detail(self));
-        self.opt_last_relay_status.store(Some(relay_status.clone()));
-        relay_status
+        let relay_requirements = RelayRequirements::new(self);
+        self.opt_last_relay_requirements
+            .store(Some(relay_requirements.clone()));
+        relay_requirements
     }
 
     fn network_config(&self) -> &RoutingDomainNetworkConfig {
@@ -134,11 +231,15 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
     fn capabilities(&self) -> BTreeSet<VeilidCapability> {
         self.common.capabilities()
     }
+
     fn relays(&self) -> Vec<RoutingDomainRelay> {
         self.common.relays()
     }
-    fn relays_and_states(&self) -> Vec<(RoutingDomainRelay, RoutingDomainRelayState)> {
-        self.common.relays_and_states()
+    fn relay_compilation(&self) -> Option<RelayCompilation> {
+        self.common.relay_compilation()
+    }
+    fn relay_state(&self, relay_id: NodeId) -> Option<RoutingDomainRelayState> {
+        self.common.relay_state(relay_id)
     }
 
     fn dial_info_details(&self) -> &Vec<DialInfoDetail> {
@@ -222,7 +323,7 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
     ////////////////////////////////////////////////
 
     fn invalidate(&self) {
-        self.opt_last_relay_status.store(None);
+        self.opt_last_relay_requirements.store(None);
         self.common.clear_current_peer_info_cache();
     }
 

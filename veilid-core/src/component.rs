@@ -476,3 +476,17 @@ macro_rules! impl_subscribe_event_bus_async {
 }
 
 pub(crate) use impl_subscribe_event_bus_async;
+
+macro_rules! impl_subscribe_event_bus_async_clone {
+    ($this:expr, $event_handler:ident ) => {{
+        let this = $this.clone();
+        $this.event_bus().subscribe(move |evt| {
+            let this = this.clone();
+            Box::pin(async move {
+                this.$event_handler(evt).await;
+            })
+        })
+    }};
+}
+
+pub(crate) use impl_subscribe_event_bus_async_clone;

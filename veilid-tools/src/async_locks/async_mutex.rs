@@ -1,64 +1,32 @@
 //! AsyncMutex
 use super::*;
 
+// Inner type and macro API must agree per executor; keep them in one cfg_if so they can't
+// drift apart under cargo feature unification (e.g. both rt-async-std and rt-tokio enabled).
 cfg_if! {
     if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
         use async_lock::Mutex as InnerAsyncMutex;
         use async_lock::MutexGuard as InnerAsyncMutexGuard;
         use async_lock::MutexGuardArc as InnerAsyncMutexGuardArc;
+        macro_rules! asyncmutex_try_lock { ($x:expr) => { $x.try_lock() }; }
+        macro_rules! asyncmutex_lock_arc { ($x:expr) => { $x.lock_arc() }; }
+        macro_rules! asyncmutex_try_lock_arc { ($x:expr) => { $x.try_lock_arc() }; }
+    } else if #[cfg(feature="rt-async-std")] {
+        use async_std::sync::Mutex as InnerAsyncMutex;
+        use async_std::sync::MutexGuard as InnerAsyncMutexGuard;
+        use async_std::sync::MutexGuardArc as InnerAsyncMutexGuardArc;
+        macro_rules! asyncmutex_try_lock { ($x:expr) => { $x.try_lock() }; }
+        macro_rules! asyncmutex_lock_arc { ($x:expr) => { $x.lock_arc() }; }
+        macro_rules! asyncmutex_try_lock_arc { ($x:expr) => { $x.try_lock_arc() }; }
+    } else if #[cfg(feature="rt-tokio")] {
+        use tokio::sync::Mutex as InnerAsyncMutex;
+        use tokio::sync::MutexGuard as InnerAsyncMutexGuard;
+        use tokio::sync::OwnedMutexGuard as InnerAsyncMutexGuardArc;
+        macro_rules! asyncmutex_try_lock { ($x:expr) => { $x.try_lock().ok() }; }
+        macro_rules! asyncmutex_lock_arc { ($x:expr) => { $x.clone().lock_owned() }; }
+        macro_rules! asyncmutex_try_lock_arc { ($x:expr) => { $x.clone().try_lock_owned().ok() }; }
     } else {
-        cfg_if! {
-            if #[cfg(feature="rt-async-std")] {
-                use async_std::sync::Mutex as InnerAsyncMutex;
-                use async_std::sync::MutexGuard as InnerAsyncMutexGuard;
-                use async_std::sync::MutexGuardArc as InnerAsyncMutexGuardArc;
-            } else if #[cfg(feature="rt-tokio")] {
-                use tokio::sync::Mutex as InnerAsyncMutex;
-                use tokio::sync::MutexGuard as InnerAsyncMutexGuard;
-                use tokio::sync::OwnedMutexGuard as InnerAsyncMutexGuardArc;
-            } else {
-                compile_error!("needs executor implementation");
-            }
-        }
-    }
-}
-
-cfg_if::cfg_if! {
-    if #[cfg(feature="rt-tokio")] {
-        macro_rules! asyncmutex_try_lock {
-            ($x:expr) => {
-                $x.try_lock().ok()
-            };
-        }
-
-        macro_rules! asyncmutex_lock_arc {
-            ($x:expr) => {
-                $x.clone().lock_owned()
-            };
-        }
-
-        macro_rules! asyncmutex_try_lock_arc {
-            ($x:expr) => {
-                $x.clone().try_lock_owned().ok()
-            };
-        }
-
-    } else {
-        macro_rules! asyncmutex_try_lock {
-            ($x:expr) => {
-                $x.try_lock()
-            };
-        }
-        macro_rules! asyncmutex_lock_arc {
-            ($x:expr) => {
-                $x.lock_arc()
-            };
-        }
-        macro_rules! asyncmutex_try_lock_arc {
-            ($x:expr) => {
-                $x.try_lock_arc()
-            };
-        }
+        compile_error!("needs executor implementation");
     }
 }
 

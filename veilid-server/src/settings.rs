@@ -181,7 +181,7 @@ core:
             consensus_width: 10
             min_peer_count: 20
             min_peer_refresh_time_ms: 60000
-            validate_dial_info_receipt_time_ms: 2000
+            validate_dial_info_receipt_time_ms: 1000
             local_subkey_cache_size: 128
             local_max_subkey_cache_memory_mb: 256
             remote_subkey_cache_size: 1024
@@ -1834,7 +1834,7 @@ mod tests {
         assert_eq!(s.core.network.dht.min_peer_refresh_time_ms, 60_000u32);
         assert_eq!(
             s.core.network.dht.validate_dial_info_receipt_time_ms,
-            2_000u32
+            1_000u32
         );
         assert_eq!(s.core.network.dht.public_watch_limit, 32u32);
         assert_eq!(s.core.network.dht.member_watch_limit, 8u32);

@@ -97,8 +97,10 @@ pub struct RoutingDomainState {
     pub inbound_stage: RoutingDomainInboundStage,
     /// The lifecycle stage of the routing domain's outbound connectivity
     pub outbound_stage: RoutingDomainOutboundStage,
-    /// The relay status of the routing domain
-    pub relay_status: Arc<RelayStatus>,
+    /// The relay requirements of the routing domain
+    pub relay_requirements: Arc<RelayRequirements>,
+    /// The current relay compilation of the routing domain
+    pub opt_relay_compilation: Option<RelayCompilation>,
     /// The current peer info of the routing domain
     pub current_peer_info: Arc<PeerInfo>,
     /// The entry snapshot used to calculate this routing domain's state
@@ -115,10 +117,11 @@ impl fmt::Display for RoutingDomainState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Inbound Stage: {}\nOutbound Stage: {}\nRelay Status:\n{}\nCurrent Peer Info:\n{}\nEntry Summary:\n{}\nLow Water Mark:\n{}",
+            "Inbound Stage: {}\nOutbound Stage: {}\nRelay Requirements:\n{}\nRelay Compilation:\n{}\nCurrent Peer Info:\n{}\nEntry Summary:\n{}\nLow Water Mark:\n{}",
             f.to_string(self.inbound_stage),
             f.to_string(self.outbound_stage),
-            indent_all_string(f.to_string(&self.relay_status)),
+            indent_all_string(f.to_string(&self.relay_requirements)),
+            indent_all_string(f.to_string_opt(self.opt_relay_compilation.as_ref())),
             indent_all_string(f.to_string(&self.current_peer_info)),
             indent_all_string(f.to_string(&self.entry_summary)),
             indent_all_string(f.to_string(&self.low_water_mark))

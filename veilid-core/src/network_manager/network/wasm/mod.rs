@@ -86,7 +86,8 @@ impl PlatformNetwork for WasmNetwork {
         Box::pin(async move {
             veilid_log!(self debug "starting network shutdown");
             let Ok(guard) = self.startup_lock.shutdown().await else {
-                veilid_log!(self error "network is already shut down");
+                // Startup never reached the success state; nothing to tear down
+                veilid_log!(self debug "network was not started, nothing to shut down");
                 return;
             };
 
@@ -406,6 +407,10 @@ impl PlatformNetwork for WasmNetwork {
         None
     }
 
+    fn preferred_outbound_source_addr(&self, _dial_info: &DialInfo) -> Option<SocketAddr> {
+        None
+    }
+
     fn routing_domains_detecting_address_changes(&self) -> BTreeSet<RoutingDomain> {
         let Ok(_guard) = self.startup_lock.enter() else {
             veilid_log!(self debug "ignoring 'routing_domains_detecting_address_changes' due to not started up");
@@ -416,14 +421,15 @@ impl PlatformNetwork for WasmNetwork {
         BTreeSet::new()
     }
 
-    fn routing_domain_request_confirm_dial_info(&self, _routing_domain: RoutingDomain) {
+    fn routing_domain_request_confirm_dial_info(&self, _routing_domain: RoutingDomain) -> bool {
         let Ok(_guard) = self.startup_lock.enter() else {
             veilid_log!(self debug "ignoring 'force_confirm_dial_info' due to not started up");
-            return;
+            return false;
         };
 
         // Stub for WASM
         veilid_log!(self debug "ignoring 'force_confirm_dial_info' on WASM target");
+        false
     }
 }
 

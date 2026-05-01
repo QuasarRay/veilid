@@ -451,6 +451,36 @@ impl ConnectionTable {
             .fold(0, |acc, (_pt, c)| acc + c.len())
     }
 
+    /// Returns ids of connections whose specific (non-wildcard, non-loopback) local address
+    /// is no longer in `valid_local_addresses`.
+    pub fn get_dead_connection_ids(
+        &self,
+        valid_local_addresses: &HashSet<Address>,
+    ) -> Vec<NetworkConnectionId> {
+        let inner = self.inner.lock();
+        let mut out = Vec::new();
+        for (id, pt) in inner.protocol_type_by_id.iter() {
+            let conn_by_id_table = match inner.conn_by_id.get(pt) {
+                Some(t) => t,
+                None => continue,
+            };
+            let Some(conn) = conn_by_id_table.peek(id) else {
+                continue;
+            };
+            let Some(local) = conn.flow().local() else {
+                continue;
+            };
+            let addr = local.address();
+            if addr.is_unspecified() || addr.ip_addr().is_loopback() {
+                continue;
+            }
+            if !valid_local_addresses.contains(&addr) {
+                out.push(*id);
+            }
+        }
+        out
+    }
+
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(inner), ret, fields(__VEILID_LOG_KEY = self.log_key())))]
     fn remove_connection_records_inner(
         &self,

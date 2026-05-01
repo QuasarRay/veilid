@@ -164,16 +164,8 @@ impl Destination {
             Destination::Direct {
                 node,
                 safety_selection: _,
-            } => {
-                Ok(Target::NodeId(node.best_node_id().ok_or_else(|| {
-                    RPCError::protocol("no supported node id")
-                })?))
-            }
-            Destination::Relay { relay_di: _, node } => {
-                Ok(Target::NodeId(node.best_node_id().ok_or_else(|| {
-                    RPCError::protocol("no supported node id")
-                })?))
-            }
+            } => Ok(Target::NodeId(node.best_node_id())),
+            Destination::Relay { relay_di: _, node } => Ok(Target::NodeId(node.best_node_id())),
             Destination::PrivateRoute {
                 private_route,
                 safety_selection: _,
@@ -361,10 +353,7 @@ impl RPCProcessor {
                 }
                 SafetySelection::Safe(safety_spec) => {
                     // Sent directly but with a safety route, respond to private route
-                    let crypto_kind = target
-                        .best_node_id()
-                        .ok_or_else(|| RPCError::protocol("no supported node id"))?
-                        .kind();
+                    let crypto_kind = target.best_node_id().kind();
                     let RouteIdAndKeys {
                         route_id: _,
                         route_set_keys: public_keys,

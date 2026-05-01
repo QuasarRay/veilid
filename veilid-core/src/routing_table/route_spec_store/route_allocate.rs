@@ -634,10 +634,12 @@ impl RouteSpecStore {
 
         let relay_node_filter = {
             let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
-            rdc.as_any()
+            let rdd = rdc
+                .as_any()
                 .downcast_ref::<PublicInternetRoutingDomainController>()
                 .unwrap()
-                .make_relay_node_filter()
+                .read();
+            rdd.make_relay_node_filter()
         };
 
         let best_crypto_kind = params.crypto_kinds.first().copied().unwrap_or_log();

@@ -15,8 +15,8 @@ pub trait RoutingDomainDetail:
     /// The routing domain identifier for this routing domain detail
     fn routing_domain(&self) -> RoutingDomain;
 
-    /// The current relay status of this routing domain
-    fn relay_status(&self) -> Arc<RelayStatus>;
+    /// The current relay requirements of this routing domain
+    fn relay_requirements(&self) -> Arc<RelayRequirements>;
 
     /// The current network configuration for this routing domain
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
@@ -35,8 +35,10 @@ pub trait RoutingDomainDetail:
     fn capabilities(&self) -> BTreeSet<VeilidCapability>;
     /// What relays are configured for this domain
     fn relays(&self) -> Vec<RoutingDomainRelay>;
-    /// What relays are configured for this domain and their current state
-    fn relays_and_states(&self) -> Vec<(RoutingDomainRelay, RoutingDomainRelayState)>;
+    /// The output of the last relay compilation for this domain
+    fn relay_compilation(&self) -> Option<RelayCompilation>;
+    /// The state of a particular relay in this domain
+    fn relay_state(&self, relay_id: NodeId) -> Option<RoutingDomainRelayState>;
     /// What dial info details are configured for this domain
     fn dial_info_details(&self) -> &Vec<DialInfoDetail>;
     /// Whether or not the network associated with this domain has addresses that are translated (NAT)
@@ -78,4 +80,10 @@ pub trait RoutingDomainDetail:
 
     /// Debugging
     fn debug(&self, alt: bool) -> String;
+}
+
+impl<T: RoutingDomainDetail + ?Sized> HasDialInfoDetailList for T {
+    fn dial_info_detail_list(&self) -> &[DialInfoDetail] {
+        self.dial_info_details()
+    }
 }

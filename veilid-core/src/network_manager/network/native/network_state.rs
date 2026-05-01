@@ -1,4 +1,5 @@
 use super::*;
+use igd_manager::IGDAddressType;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProtocolConfig {
@@ -245,6 +246,24 @@ impl NativeNetwork {
                 indent_all_string(format!("{:?}", interface_address_state))
             );
 
+            // Close connections whose local address departed so we don't reuse zombies
+            let valid_local_addresses: HashSet<Address> = interface_address_state
+                .interface_addresses
+                .iter()
+                .map(|a| Address::from_ip_addr(a.ip()))
+                .collect();
+            self.network_manager()
+                .connection_manager()
+                .close_dead_connections(&valid_local_addresses);
+
+            // Mark PublicInternet offline; first successful RPC on the new network flips us back
+            self.network_manager()
+                .online_detector()
+                .network_address_change(RoutingDomain::PublicInternet);
+
+            // Cached gateway, external IP, and port mappings all reference the prior interfaces
+            self.igd_manager.clear_caches();
+
             // Return the 'detect address changes' settings from when they were set up for all the other
             // post-startup calls to this routine
             self.routing_domains_detecting_address_changes()
@@ -277,6 +296,17 @@ impl NativeNetwork {
 
         let new_network_state = Arc::new(new_network_state);
         self.inner.lock().network_state = Some(new_network_state.clone());
+
+        self.bind_outbound_source_udp_handlers();
+
+        // Probe IGD off the critical path so map_any_port has a populated cache
+        let ac = &new_network_state.address_config;
+        if ac.ipv4_local || ac.ipv4_global {
+            self.igd_manager.trigger_probe(IGDAddressType::IPV4);
+        }
+        if ac.ipv6_local || ac.ipv6_global {
+            self.igd_manager.trigger_probe(IGDAddressType::IPV6);
+        }
 
         Ok(Some(new_network_state))
     }
@@ -355,41 +385,47 @@ impl NativeNetwork {
         Ok(())
     }
 
-    fn check_ipv4_routable() -> (bool, bool) {
-        let ipv4addr = "1.2.3.4".parse::<Ipv4Addr>().unwrap();
-        let sockaddrv4 = SocketAddr::V4(SocketAddrV4::new(ipv4addr, 5155));
-        let res = std::net::UdpSocket::bind("0.0.0.0:0");
-        if let Ok(socket) = res {
-            return (true, socket.connect(sockaddrv4).is_ok());
-        }
-        (false, false)
+    fn can_bind_v4() -> bool {
+        std::net::UdpSocket::bind("0.0.0.0:0").is_ok()
     }
-
-    fn check_ipv6_routable() -> (bool, bool) {
-        let ipv6addr = "2222::1".parse::<Ipv6Addr>().unwrap();
-        let sockaddrv6 = SocketAddr::V6(SocketAddrV6::new(ipv6addr, 5155, 0, 0));
-        let res = std::net::UdpSocket::bind("[::]:0");
-        if let Ok(socket) = res {
-            return (true, socket.connect(sockaddrv6).is_ok());
-        }
-        (false, false)
+    fn can_bind_v6() -> bool {
+        std::net::UdpSocket::bind("[::]:0").is_ok()
     }
 
     pub(super) fn make_address_config(&self) -> AddressConfig {
-        // Determine if we have ipv4/ipv6 addresses
-        let (ipv4_local, ipv4_global) = Self::check_ipv4_routable();
-        let (ipv6_local, ipv6_global) = Self::check_ipv6_routable();
+        let raw = self.interfaces.raw_address_summary();
+        let ias = self.interfaces.interface_address_state();
+
+        let has_v4_default_route = ias
+            .gateway_addresses
+            .iter()
+            .any(|g| matches!(g, IpAddr::V4(_)));
+        let has_v6_default_route = ias
+            .gateway_addresses
+            .iter()
+            .any(|g| matches!(g, IpAddr::V6(_)));
+
+        let ipv4_local = Self::can_bind_v4() && raw.has_non_loopback_ipv4;
+        let ipv4_global = ipv4_local && has_v4_default_route;
+
+        let ipv6_local = Self::can_bind_v6() && raw.has_non_loopback_ipv6;
+        let ipv6_global = ipv6_local && has_v6_default_route && raw.has_unicast_global_ipv6;
+
         if ipv4_local {
-            veilid_log!(self debug "Local IPV4 detected by bind test");
+            veilid_log!(self debug "Local IPV4 detected (interface address present)");
         }
         if ipv4_global {
-            veilid_log!(self debug "Global IPV4 detected by connect test");
+            veilid_log!(self debug "Global IPV4 detected (default route present)");
         }
         if ipv6_local {
-            veilid_log!(self debug "Local IPV6 detected by bind test");
+            veilid_log!(self debug "Local IPV6 detected (interface address present)");
         }
         if ipv6_global {
-            veilid_log!(self debug "Global IPV6 detected by connect test");
+            veilid_log!(self debug "Global IPV6 detected (unicast-global address + default route)");
+        } else if ipv6_local && !raw.has_unicast_global_ipv6 {
+            veilid_log!(self debug "Skipping global IPV6: no unicast-global address (only link-local/ULA present)");
+        } else if ipv6_local && !has_v6_default_route {
+            veilid_log!(self debug "Skipping global IPV6: no IPv6 default route");
         }
 
         AddressConfig {

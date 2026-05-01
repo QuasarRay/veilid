@@ -1,5 +1,5 @@
 use crate::{network_manager::StartupDisposition, *};
-use routing_table::{RoutingDomain, RoutingTableHealth};
+use routing_table::{RoutingDomain, RoutingDomainReadyEvent, RoutingTableHealth};
 
 impl_veilid_log_facility!("attach");
 
@@ -56,6 +56,8 @@ struct AttachmentManagerInner {
     last_tick_ts: Option<Timestamp>,
     /// The future for the attachment maintainer task
     tick_future: Option<PinBoxFutureStatic<()>>,
+    /// Subscription to RoutingDomainReadyEvent
+    routing_domain_ready_subscription: Option<EventBusSubscription>,
 }
 
 impl fmt::Debug for AttachmentManagerInner {
@@ -116,6 +118,7 @@ impl AttachmentManager {
             last_tick_ts: None,
             bind_retry_ts: None,
             tick_future: None,
+            routing_domain_ready_subscription: None,
         }
     }
     pub fn new(
@@ -173,7 +176,11 @@ impl AttachmentManager {
             attachment_maintainer_task_routine
         );
 
+        let routing_domain_ready_subscription =
+            impl_subscribe_event_bus!(self, Self, routing_domain_ready_event_handler);
+
         let mut inner = self.inner.lock();
+        inner.routing_domain_ready_subscription = Some(routing_domain_ready_subscription);
 
         // Let the attachment maintainer run
         let guard = self.startup_context.attachment_lock.startup()?;
@@ -201,6 +208,22 @@ impl AttachmentManager {
         Ok(())
     }
 
+    fn routing_domain_ready_event_handler(&self, _evt: Arc<RoutingDomainReadyEvent>) {
+        let inner = self.inner.lock();
+        if !matches!(
+            inner.attachment_state,
+            AttachmentState::AttachedWeak
+                | AttachmentState::AttachedGood
+                | AttachmentState::AttachedStrong
+                | AttachmentState::FullyAttached
+                | AttachmentState::OverAttached
+                | AttachmentState::Attaching
+        ) {
+            return;
+        }
+        self.update_attached_state(inner, None);
+    }
+
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn pre_terminate_async(&self) {
         // Start attachment shutdown
@@ -217,6 +240,11 @@ impl AttachmentManager {
             AttachmentState::Detached
         ) {
             sleep(100).await;
+        }
+
+        let sub = self.inner.lock().routing_domain_ready_subscription.take();
+        if let Some(sub) = sub {
+            self.event_bus().unsubscribe(sub);
         }
 
         // Stop ticker

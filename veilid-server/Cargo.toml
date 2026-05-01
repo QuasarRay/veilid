@@ -94,7 +94,6 @@ futures-util = { version = "0.3.32", default-features = false, features = [
     "alloc",
 ] }
 url = "2.5.2"
-ctrlc = "3.5.1"
 lazy_static = "^1"
 bugsalot = { package = "veilid-bugsalot", version = "0.2.0" }
 flume = { version = "0.12.0", features = ["async"] }
@@ -110,6 +109,7 @@ chrono = "0.4.40"
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8.0"
 ansi_term = "0.12.1"
+ctrlc = "3.5.1"
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5.0"

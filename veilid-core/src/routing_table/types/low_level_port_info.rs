@@ -4,7 +4,7 @@ pub type LowLevelProtocolPort = (LowLevelProtocolType, AddressType, u16);
 pub type LowLevelProtocolPorts = BTreeSet<LowLevelProtocolPort>;
 pub type ProtocolToPortMapping = BTreeMap<(ProtocolType, AddressType), (LowLevelProtocolType, u16)>;
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 #[must_use]
 pub struct LowLevelPortInfo {
     pub low_level_protocol_ports: LowLevelProtocolPorts,

@@ -194,37 +194,6 @@ impl NodeInfo {
         false
     }
 
-    /// Build a map of protocols to low level ports
-    /// This way we can get the set of protocols required to keep our NAT mapping alive for keepalive pings
-    /// Only one protocol per low level protocol/port combination is required
-    /// For example, if WS/WSS and TCP protocols are on the same low-level TCP port, only TCP keepalives will be required
-    /// and we do not need to do WS/WSS keepalive as well. If they are on different ports, then we will need WS/WSS keepalives too.
-    pub fn get_low_level_port_info(&self) -> LowLevelPortInfo {
-        let mut low_level_protocol_ports =
-            BTreeSet::<(LowLevelProtocolType, AddressType, u16)>::new();
-        let mut protocol_to_port =
-            BTreeMap::<(ProtocolType, AddressType), (LowLevelProtocolType, u16)>::new();
-
-        for did in self.dial_info_detail_list() {
-            low_level_protocol_ports.insert((
-                did.dial_info.protocol_type().low_level_protocol_type(),
-                did.dial_info.address_type(),
-                did.dial_info.socket_address().port(),
-            ));
-            protocol_to_port.insert(
-                (did.dial_info.protocol_type(), did.dial_info.address_type()),
-                (
-                    did.dial_info.protocol_type().low_level_protocol_type(),
-                    did.dial_info.socket_address().port(),
-                ),
-            );
-        }
-        LowLevelPortInfo {
-            low_level_protocol_ports,
-            protocol_to_port,
-        }
-    }
-
     /// Compare this NodeInfo to another one
     /// Exclude the signature and timestamp and any other fields that are not
     /// semantically valuable
@@ -251,6 +220,25 @@ impl NodeInfo {
         true
     }
 
+    pub fn has_sequencing_matched_dial_info(&self, sequencing: Sequencing) -> bool {
+        // Check our dial info
+        for did in self.dial_info_detail_list() {
+            if sequencing.matches_ordering(did.dial_info.protocol_type().sequence_ordering()) {
+                return true;
+            }
+        }
+        // Check our relays
+        self.relay_info_list
+            .iter()
+            .find_map(|relay_info| {
+                if relay_info.has_sequencing_matched_dial_info(sequencing) {
+                    return Some(true);
+                }
+                None
+            })
+            .unwrap_or_default()
+    }
+
     #[cfg(feature = "geolocation")]
     pub fn get_geolocation_info(&self, routing_domain: RoutingDomain) -> GeolocationInfo {
         if routing_domain != RoutingDomain::PublicInternet {
@@ -271,24 +259,5 @@ impl NodeInfo {
 impl HasDialInfoDetailList for NodeInfo {
     fn dial_info_detail_list(&self) -> &[DialInfoDetail] {
         &self.dial_info_detail_list
-    }
-
-    fn has_sequencing_matched_dial_info(&self, sequencing: Sequencing) -> bool {
-        // Check our dial info
-        for did in self.dial_info_detail_list() {
-            if sequencing.matches_ordering(did.dial_info.protocol_type().sequence_ordering()) {
-                return true;
-            }
-        }
-        // Check our relays
-        self.relay_info_list
-            .iter()
-            .find_map(|relay_info| {
-                if relay_info.has_sequencing_matched_dial_info(sequencing) {
-                    return Some(true);
-                }
-                None
-            })
-            .unwrap_or_default()
     }
 }

@@ -18,7 +18,6 @@ pub trait RoutingDomainController:
     /// Write access to the routing domain detail
     fn write_dyn(&self) -> MappedRwLockWriteGuard<'_, dyn RoutingDomainDetail>;
     /// Editor access to common fields in the routing domain detail
-    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     fn edit_dyn(&self) -> Box<dyn RoutingDomainEditor + '_>;
 
     /// Start up the routing domain controller
@@ -166,7 +165,6 @@ pub trait SpecificRoutingDomainController: RoutingDomainController {
     type Detail: RoutingDomainDetail;
     type Editor<'a>: RoutingDomainEditor;
 
-    #[expect(dead_code)]
     fn read(&self) -> RwLockReadGuard<'_, Self::Detail>;
     fn write(&self) -> RwLockWriteGuard<'_, Self::Detail>;
     fn edit(&self) -> Self::Editor<'_>;

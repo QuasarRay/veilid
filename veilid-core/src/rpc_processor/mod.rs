@@ -1048,6 +1048,19 @@ impl RPCProcessor {
         SenderPeerInfo::new_no_peer_info(target_node_info_ts)
     }
 
+    /// Record a send failure on a node where we couldn't determine a routing domain
+    /// for the target. This is a configuration mismatch with the target rather than a
+    /// network failure, so it does not feed the online-detector.
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
+    )]
+    fn record_no_routing_domain(&self, rpc_kind: RPCKind, send_ts: Timestamp, node_ref: NodeRef) {
+        let wants_answer = matches!(rpc_kind, RPCKind::Question);
+        node_ref.stats_failed_to_send(send_ts, wants_answer);
+        node_ref.clear_last_flows();
+    }
+
     /// Record failure to send to node or route
     #[cfg_attr(
         feature = "instrument",
@@ -1057,7 +1070,7 @@ impl RPCProcessor {
         &self,
         rpc_kind: RPCKind,
         send_ts: Timestamp,
-        node_ref: NodeRef,
+        node_ref: FilteredNodeRef,
         safety_route: Option<PublicKey>,
         remote_private_route: Option<PublicKey>,
     ) {
@@ -1066,14 +1079,36 @@ impl RPCProcessor {
         );
 
         let wants_answer = matches!(rpc_kind, RPCKind::Question);
+        let is_routed = safety_route.is_some() || remote_private_route.is_some();
+
+        // Determine routing domain for online detection. Routed sends are PublicInternet by construction.
+        let opt_rd = if is_routed {
+            Some(RoutingDomain::PublicInternet)
+        } else {
+            node_ref.best_routing_domain()
+        };
+
+        // Tell the online detector about this failure so it can track distinct-target failures.
+        let network_manager = self.network_manager();
+        let online_detector = network_manager.online_detector();
+        if let Some(rd) = opt_rd {
+            online_detector.record_failure(rd, node_ref.best_node_id(), send_ts);
+        }
+        let suppress_degradation = opt_rd
+            .map(|rd| online_detector.online_state(rd) == OnlineState::Offline)
+            .unwrap_or(false);
 
         // Record for node if this was not sent via a route
-        if safety_route.is_none() && remote_private_route.is_none() {
-            node_ref.stats_failed_to_send(send_ts, wants_answer);
-
-            // Also clear the last_connections for the entry so we make a new connection next time
+        if !is_routed {
+            if !suppress_degradation {
+                node_ref.stats_failed_to_send(send_ts, wants_answer);
+            }
+            // Always clear last_flows: the underlying flow is gone or broken regardless.
             node_ref.clear_last_flows();
+            return;
+        }
 
+        if suppress_degradation {
             return;
         }
 
@@ -1101,17 +1136,39 @@ impl RPCProcessor {
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     fn record_lost_answer(&self, context: &WaitableReplyContext) {
+        // Determine routing domain for online detection. Routed sends are PublicInternet by construction.
+        let opt_rd = if context.is_routed() {
+            Some(RoutingDomain::PublicInternet)
+        } else {
+            context.node_ref.best_routing_domain()
+        };
+
+        // Tell the online detector about this failure.
+        let network_manager = self.network_manager();
+        let online_detector = network_manager.online_detector();
+        if let Some(rd) = opt_rd {
+            online_detector.record_failure(rd, context.node_ref.best_node_id(), context.send_ts);
+        }
+        let suppress_degradation = opt_rd
+            .map(|rd| online_detector.online_state(rd) == OnlineState::Offline)
+            .unwrap_or(false);
+
         // Record for node if this was not sent via a route
-        if context.opt_safety_route.is_none() && context.opt_remote_private_route.is_none() {
-            context
-                .node_ref
-                .stats_lost_answer(context.send_data_result.sequence_ordering());
-
-            // Also clear the last_connections for the entry so we make a new connection next time
+        if !context.is_routed() {
+            if !suppress_degradation {
+                context
+                    .node_ref
+                    .stats_lost_answer(context.send_data_result.sequence_ordering());
+            }
+            // Always clear last_flows: the underlying flow is gone or broken regardless.
             context.node_ref.clear_last_flows();
-
             return;
         }
+
+        if suppress_degradation {
+            return;
+        }
+
         // Get route spec store
         let routing_table = self.routing_table();
         let rss = routing_table.route_spec_store();
@@ -1161,13 +1218,33 @@ impl RPCProcessor {
         rpc_kind: RPCKind,
         send_ts: Timestamp,
         bytes: ByteCount,
-        node_ref: NodeRef,
+        node_ref: FilteredNodeRef,
         safety_route: Option<PublicKey>,
         remote_private_route: Option<PublicKey>,
         ordering: SequenceOrdering,
     ) {
+        let is_routed = safety_route.is_some() || remote_private_route.is_some();
+
+        // Notify the online detector of this successful outbound send. For routed sends the
+        // kernel only acknowledged the send to the first hop; full round-trip success comes
+        // when the answer arrives. So only direct destinations get marked seen here.
+        let opt_rd = if is_routed {
+            Some(RoutingDomain::PublicInternet)
+        } else {
+            node_ref.best_routing_domain()
+        };
+        if let Some(rd) = opt_rd {
+            let nm = self.network_manager();
+            if is_routed {
+                nm.online_detector().record_success(rd, std::iter::empty());
+            } else {
+                nm.online_detector()
+                    .record_success(rd, std::iter::once(node_ref.best_node_id()));
+            }
+        }
+
         // Record for node if this was not sent via a route
-        if safety_route.is_none() && remote_private_route.is_none() {
+        if !is_routed {
             let wants_answer = matches!(rpc_kind, RPCKind::Question);
             let is_answer = matches!(rpc_kind, RPCKind::Answer);
 
@@ -1211,6 +1288,41 @@ impl RPCProcessor {
         bytes: ByteCount,
         context: &WaitableReplyContext,
     ) {
+        // Strongest signal that we're online: an RPC round-trip just completed. Every node that
+        // appeared in any of our local routes (safety, reply private) for this round-trip was
+        // successfully reached, plus the destination if direct, plus the first hop of any
+        // remote private route we sent through (the only hop visible to us).
+        let opt_rd = if context.is_routed() {
+            Some(RoutingDomain::PublicInternet)
+        } else {
+            context.node_ref.best_routing_domain()
+        };
+        if let Some(rd) = opt_rd {
+            let mut seen: HashSet<NodeId> = HashSet::new();
+            if !context.is_routed() {
+                seen.insert(context.node_ref.best_node_id());
+            } else {
+                let routing_table = self.routing_table();
+                let rss = routing_table.route_spec_store();
+                if let Some(sr_pubkey) = &context.opt_safety_route {
+                    seen.extend(rss.allocated_route_hop_node_ids(sr_pubkey));
+                }
+                if let Some(rpr_pubkey) = &context.opt_reply_private_route {
+                    if context.opt_safety_route.as_ref() != Some(rpr_pubkey) {
+                        seen.extend(rss.allocated_route_hop_node_ids(rpr_pubkey));
+                    }
+                }
+                if let Some(prr_pubkey) = &context.opt_remote_private_route {
+                    if let Some(first_hop) = rss.remote_route_first_hop_node_id(prr_pubkey) {
+                        seen.insert(first_hop);
+                    }
+                }
+            }
+            self.network_manager()
+                .online_detector()
+                .record_success(rd, seen);
+        }
+
         // Record stats for remote node if this was direct
         if context.opt_safety_route.is_none()
             && context.opt_remote_private_route.is_none()
@@ -1453,7 +1565,7 @@ impl RPCProcessor {
                 self.record_send_failure(
                     RPCKind::Question,
                     send_ts,
-                    node_ref.unfiltered(),
+                    node_ref.clone(),
                     opt_safety_route.clone(),
                     opt_remote_private_route.clone(),
                 );
@@ -1464,7 +1576,7 @@ impl RPCProcessor {
         let send_ts = Timestamp::now();
         let send_data_result = network_result_value_or_log!(self res => [ format!(": outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}", outer_op_id, node_ref, opt_relay_di.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len) ] {
                 // If we couldn't send we're still cleaning up
-                self.record_send_failure(RPCKind::Question, send_ts, node_ref.unfiltered(), opt_safety_route, opt_remote_private_route);
+                self.record_send_failure(RPCKind::Question, send_ts, node_ref.clone(), opt_safety_route, opt_remote_private_route);
                 network_result_raise!(res);
             }
         );
@@ -1474,7 +1586,7 @@ impl RPCProcessor {
             RPCKind::Question,
             send_ts,
             bytes,
-            node_ref.unfiltered(),
+            node_ref.clone(),
             opt_safety_route.clone(),
             opt_remote_private_route.clone(),
             send_data_result.sequence_ordering(),
@@ -1494,7 +1606,7 @@ impl RPCProcessor {
             opt_connection_ref_scope,
             WaitableReplyContext {
                 timeout,
-                node_ref: node_ref.unfiltered(),
+                node_ref: node_ref.clone(),
                 send_ts,
                 send_data_result,
                 opt_safety_route,
@@ -1572,7 +1684,7 @@ impl RPCProcessor {
                 self.record_send_failure(
                     RPCKind::Statement,
                     send_ts,
-                    node_ref.unfiltered(),
+                    node_ref.clone(),
                     safety_route.clone(),
                     remote_private_route.clone(),
                 );
@@ -1583,7 +1695,7 @@ impl RPCProcessor {
         let send_ts = Timestamp::now();
         let send_data_result = network_result_value_or_log!(self res => [ format!(": outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}", outer_op_id, node_ref, opt_relay_di.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len) ] {
                 // If we couldn't send we're still cleaning up
-                self.record_send_failure(RPCKind::Statement, send_ts, node_ref.unfiltered(), safety_route.clone(), remote_private_route.clone());
+                self.record_send_failure(RPCKind::Statement, send_ts, node_ref.clone(), safety_route.clone(), remote_private_route.clone());
                 network_result_raise!(res);
             }
         );
@@ -1593,7 +1705,7 @@ impl RPCProcessor {
             RPCKind::Statement,
             send_ts,
             bytes,
-            node_ref.unfiltered(),
+            node_ref.clone(),
             safety_route,
             remote_private_route,
             send_data_result.sequence_ordering(),
@@ -1673,7 +1785,7 @@ impl RPCProcessor {
                 self.record_send_failure(
                     RPCKind::Answer,
                     send_ts,
-                    node_ref.unfiltered(),
+                    node_ref.clone(),
                     safety_route.clone(),
                     remote_private_route.clone(),
                 );
@@ -1684,7 +1796,7 @@ impl RPCProcessor {
         let send_ts = Timestamp::now();
         let send_data_result = network_result_value_or_log!(self res => [ format!(": outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}", outer_op_id, node_ref, opt_relay_di.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len) ] {
                 // If we couldn't send we're still cleaning up
-                self.record_send_failure(RPCKind::Answer, send_ts, node_ref.unfiltered(), safety_route.clone(), remote_private_route.clone());
+                self.record_send_failure(RPCKind::Answer, send_ts, node_ref.clone(), safety_route.clone(), remote_private_route.clone());
                 network_result_raise!(res);
             }
         );
@@ -1694,7 +1806,7 @@ impl RPCProcessor {
             RPCKind::Answer,
             send_ts,
             bytes,
-            node_ref.unfiltered(),
+            node_ref.clone(),
             safety_route,
             remote_private_route,
             send_data_result.sequence_ordering(),

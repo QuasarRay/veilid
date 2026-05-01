@@ -15,8 +15,10 @@ pub struct RoutingDomainDetailCommon {
     routing_domain: RoutingDomain,
     /// The network configuration for this routing domain
     network_config: RoutingDomainNetworkConfig,
-    /// Relay nodes and their current state used to determine what actions a relay many need (keepalive, optimize, etc.)
-    relays_and_states: Vec<(RoutingDomainRelay, RoutingDomainRelayState)>,
+    /// The output of the last relay compilation for this domain
+    opt_relay_compilation: Option<RelayCompilation>,
+    /// Relay states we are tracking for the compiled relay list
+    relay_states: HashMap<NodeId, RoutingDomainRelayState>,
     /// The dial info details that are inbound reachable for this node in this domain
     dial_info_details: Vec<DialInfoDetail>,
     /// Dial info detail has been confirmed by the network manager as publishable/reachable
@@ -37,7 +39,8 @@ impl fmt::Debug for RoutingDomainDetailCommon {
         f.debug_struct("RoutingDomainDetailCommon")
             .field("routing_domain", &self.routing_domain)
             .field("network_config", &self.network_config)
-            .field("relays_and_states", &self.relays_and_states)
+            .field("opt_relay_compilation", &self.opt_relay_compilation)
+            .field("relay_states", &self.relay_states)
             .field("dial_info_details", &self.dial_info_details)
             .field("confirmed", &self.confirmed)
             .field("low_water_mark", &self.low_water_mark)
@@ -52,13 +55,14 @@ impl fmt::Display for RoutingDomainDetailCommon {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Network Config:{}\nRelays And States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nEntry Summary:\n{}",
+            "Network Config:{}\nRelay Compilation:\n{}\nRelay States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nEntry Summary:\n{}",
             if f.alternate() {
                 format!("\n{}",indent_all_string(f.to_string(&self.network_config)))
             } else {
                 format!(" {}",f.to_string(&self.network_config))
             },
-            indent_all_string(f.to_multiline_indexed_string(self.relays_and_states.iter().map(|(r,s)| format!("{}\n{}", f.to_string(r), f.to_string(s)))).string_if_empty("None")),
+            indent_all_string(f.to_string_opt(self.opt_relay_compilation.as_ref())),
+            indent_all_string(f.to_multiline_indexed_string(self.relay_states.iter().map(|(k, v)| format!("{}: {}", f.to_string(k), f.to_string(v)))).string_if_empty("None")),
             indent_all_string(f.to_multiline_indexed_string(self.dial_info_details.iter().map(|d| f.to_string(d))).string_if_empty("None")),
             f.to_string(self.confirmed),
             f.to_string(self.low_water_mark.lock().1.clone()),
@@ -76,7 +80,8 @@ impl RoutingDomainDetailCommon {
             registry,
             routing_domain,
             network_config: Default::default(),
-            relays_and_states: Default::default(),
+            opt_relay_compilation: None,
+            relay_states: Default::default(),
             dial_info_details: Default::default(),
             confirmed: false,
             low_water_mark: Mutex::new((true, Default::default())),
@@ -151,11 +156,18 @@ impl RoutingDomainDetailCommon {
     }
 
     pub fn relays(&self) -> Vec<RoutingDomainRelay> {
-        self.relays_and_states.iter().map(|x| x.0.clone()).collect()
+        self.opt_relay_compilation
+            .as_ref()
+            .map(|c| c.relays.to_vec())
+            .unwrap_or_default()
     }
 
-    pub fn relays_and_states(&self) -> Vec<(RoutingDomainRelay, RoutingDomainRelayState)> {
-        self.relays_and_states.clone()
+    pub fn relay_compilation(&self) -> Option<RelayCompilation> {
+        self.opt_relay_compilation.clone()
+    }
+
+    pub fn relay_state(&self, relay_id: NodeId) -> Option<RoutingDomainRelayState> {
+        self.relay_states.get(&relay_id).cloned()
     }
 
     pub fn dial_info_details(&self) -> &Vec<DialInfoDetail> {
@@ -262,55 +274,66 @@ impl RoutingDomainDetailCommon {
     //     }
     // }
 
-    pub fn set_relays(&mut self, relays: Vec<RoutingDomainRelay>) {
-        let changed = self.relays() != relays;
-        if !changed {
-            return;
-        }
+    pub fn set_relay_compilation(&mut self, opt_relay_compilation: Option<RelayCompilation>) {
+        // See if the relays being set are equivalent and in the same order
+        match (
+            self.opt_relay_compilation.as_ref(),
+            opt_relay_compilation.as_ref(),
+        ) {
+            (opt_existing_compilation, Some(new_compilation)) => {
+                // Check if existing is equivalent to new
+                if opt_existing_compilation
+                    .as_ref()
+                    .map(|existing_compilation| existing_compilation.equivalent(new_compilation))
+                    .unwrap_or(false)
+                {
+                    return;
+                }
 
-        let cur_ts = Timestamp::now();
+                // Get the new relay ids
+                let new_relay_ids = new_compilation
+                    .relays
+                    .iter()
+                    .map(|r| r.relay_id())
+                    .collect::<HashSet<_>>();
 
-        let mut new_relays_and_states = vec![];
-        for relay in relays {
-            // See if this relay exists already, if so, keep its state
-            if let Some(existing_relay_state) =
-                self.relays_and_states.iter().find_map(
-                    |(r, s)| {
-                        if r == &relay {
-                            Some(*s)
-                        } else {
-                            None
-                        }
-                    },
-                )
-            {
-                new_relays_and_states.push((relay, existing_relay_state));
-            } else {
-                // New relay, make a new state for it
-                new_relays_and_states.push((
-                    relay,
-                    RoutingDomainRelayState {
-                        last_keepalive: cur_ts,
-                        last_optimized: cur_ts,
-                    },
-                ));
+                // Drop any relay states that are no longer in the new compilation, and add default ones for the new relays
+                // (not really necessary for opt_existing_compilation.is_none(), but as it is harmless, we can do this for simplicity)
+                self.relay_states.retain(|k, _| new_relay_ids.contains(k));
+
+                // Add new relay states for the new relays
+                let cur_ts = Timestamp::now_non_decreasing();
+                for relay_id in new_relay_ids {
+                    self.relay_states
+                        .entry(relay_id)
+                        .or_insert_with(|| RoutingDomainRelayState {
+                            last_keepalive: cur_ts,
+                            last_optimized: cur_ts,
+                        });
+                }
+            }
+            (None, None) => {
+                // None is equivalent to None, no state changed needed
+                return;
+            }
+            (Some(_), None) => {
+                // Relays are no longer required, so clear the relay states
+                self.relay_states.clear();
             }
         }
-        self.relays_and_states = new_relays_and_states;
+
+        // Save the new relays and clear the current peer info cache since we'll need to rebuild that
+        self.opt_relay_compilation = opt_relay_compilation;
         self.clear_current_peer_info_cache();
     }
 
-    pub fn set_relay_state(&mut self, relay: &RoutingDomainRelay, state: RoutingDomainRelayState) {
-        let Some(existing_relay_state) = self.relays_and_states.iter_mut().find_map(|x| {
-            if &x.0 == relay {
-                Some(&mut x.1)
-            } else {
-                None
+    // Update a single relay's state
+    pub fn set_relay_state(&mut self, relay_id: NodeId, state: RoutingDomainRelayState) {
+        if let Some(rc) = self.opt_relay_compilation.as_ref() {
+            if rc.relays.iter().any(|r| r.relay_id() == relay_id) {
+                self.relay_states.insert(relay_id, state);
             }
-        }) else {
-            return;
-        };
-        *existing_relay_state = state;
+        }
     }
 
     pub fn clear_current_peer_info_cache(&self) {

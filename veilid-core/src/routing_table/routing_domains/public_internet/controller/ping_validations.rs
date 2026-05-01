@@ -32,19 +32,23 @@ impl PublicInternetRoutingDomainController {
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // Ping the relay to keep it alive, over every protocol it is relaying for us
+    /// Enqueue relay keepalive pings for all relays that need them and record the keepalive timestamp
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err))]
     fn add_relay_keepalive_ping_validations(&self, cur_ts: Timestamp) -> EyreResult<()> {
         let routing_table = self.routing_table();
 
         // Iterate the PublicInternet relays
-        let relays_and_states = self.read_dyn().relays_and_states();
+        let relays = self.read_dyn().relays();
         let mut state_updates = Vec::new();
         let mut validations = Vec::new();
         let name = format!("RelayKeepalive({})", RoutingDomain::PublicInternet);
-        for (relay, mut relay_state) in relays_and_states {
+        for relay in relays {
+            let Some(mut state) = self.read_dyn().relay_state(relay.relay_id()) else {
+                bail!("Relay state not found for relay {}", relay.relay_id());
+            };
+
             let relay_needs_keepalive =
-                cur_ts.duration_since(relay_state.last_keepalive) >= RELAY_KEEPALIVE_PING_INTERVAL;
+                cur_ts.duration_since(state.last_keepalive) >= RELAY_KEEPALIVE_PING_INTERVAL;
 
             if !relay_needs_keepalive {
                 continue;
@@ -57,8 +61,8 @@ impl PublicInternetRoutingDomainController {
             }
 
             // Say we're doing this keepalive now
-            relay_state.last_keepalive = cur_ts;
-            state_updates.push((relay, relay_state));
+            state.last_keepalive = cur_ts;
+            state_updates.push((relay.relay_id(), state));
         }
 
         routing_table.enqueue_ping_validations(
@@ -71,8 +75,8 @@ impl PublicInternetRoutingDomainController {
         // Update the relay keepalive timestamp on the routing domain
         if !state_updates.is_empty() {
             let mut editor = self.edit();
-            for (relay, state) in state_updates {
-                editor.set_relay_state(relay, state);
+            for (relay_id, state) in state_updates {
+                editor.set_relay_state(relay_id, state);
             }
             editor.commit();
         }

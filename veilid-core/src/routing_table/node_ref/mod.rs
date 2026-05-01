@@ -124,12 +124,8 @@ impl Clone for NodeRef {
 
 impl fmt::Display for NodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(best_node_id) = self.entry.with(|e| e.best_node_id()) {
-            return write!(f, "{}", best_node_id);
-        } else if let Some(node_id) = self.entry.with(|e| e.node_ids().first().cloned()) {
-            return write!(f, "{}", node_id);
-        }
-        write!(f, "*NONE*")
+        let best_node_id = self.entry.with(|e| e.best_node_id());
+        write!(f, "{}", f.to_string(best_node_id))
     }
 }
 

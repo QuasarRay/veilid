@@ -480,7 +480,7 @@ impl Default for VeilidConfigDHT {
             consensus_width: 10,
             min_peer_count: 20,
             min_peer_refresh_time_ms: 60000,
-            validate_dial_info_receipt_time_ms: 2000,
+            validate_dial_info_receipt_time_ms: 1000,
             local_subkey_cache_size,
             local_max_subkey_cache_memory_mb,
             remote_subkey_cache_size,

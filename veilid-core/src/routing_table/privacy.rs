@@ -32,6 +32,14 @@ pub(crate) enum RouteNode {
 }
 
 impl RouteNode {
+    /// Extract the node id without consulting the routing table.
+    pub fn node_id(&self) -> Option<NodeId> {
+        match self {
+            RouteNode::NodeId(id) => Some(id.clone()),
+            RouteNode::PeerInfo(pi) => pi.node_ids().first().cloned(),
+        }
+    }
+
     pub fn node_ref(&self, routing_table: &RoutingTable) -> Option<NodeRef> {
         match self {
             RouteNode::NodeId(id) => {

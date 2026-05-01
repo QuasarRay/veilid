@@ -43,6 +43,11 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     relay_management_task: TickTask<EyreReport>,
     /// Background process to keep private routes up
     private_route_management_task: TickTask<EyreReport>,
+
+    /// Subscription to RoutingDomainCommitEvent for fast-path tick on edit-commits
+    commit_subscription: Mutex<Option<EventBusSubscription>>,
+    /// Subscription to PeerInfoChangeEvent for fast-path tick of downstream stages
+    peer_info_subscription: Mutex<Option<EventBusSubscription>>,
 }
 
 impl fmt::Debug for PublicInternetRoutingDomainControllerUnlockedInner {
@@ -118,6 +123,8 @@ impl PublicInternetRoutingDomainController {
                 "private_route_management_task",
                 PRIVATE_ROUTE_MANAGEMENT_INTERVAL_SECS,
             ),
+            commit_subscription: Default::default(),
+            peer_info_subscription: Default::default(),
         };
         let this = Self {
             unlocked_inner: Arc::new(unlocked_inner),
@@ -158,6 +165,13 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
     /// Start up the routing domain controller
     fn startup(&self) -> PinBoxFuture<'_, EyreResult<()>> {
         Box::pin(async move {
+            let commit_sub = impl_subscribe_event_bus_async_clone!(self, commit_event_handler);
+            *self.commit_subscription.lock() = Some(commit_sub);
+
+            let peer_info_sub =
+                impl_subscribe_event_bus_async_clone!(self, peer_info_change_event_handler);
+            *self.peer_info_subscription.lock() = Some(peer_info_sub);
+
             // Publish peer info
             self.publish_peer_info();
             Ok(())
@@ -167,6 +181,13 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
     /// Shut down the routing domain controller
     fn shutdown(&self) -> PinBoxFuture<'_, ()> {
         Box::pin(async move {
+            if let Some(sub) = self.commit_subscription.lock().take() {
+                self.event_bus().unsubscribe(sub);
+            }
+            if let Some(sub) = self.peer_info_subscription.lock().take() {
+                self.event_bus().unsubscribe(sub);
+            }
+
             // Unpublish peer info
             self.unpublish_peer_info();
         })

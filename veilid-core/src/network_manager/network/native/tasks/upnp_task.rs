@@ -1,5 +1,7 @@
 use super::*;
 
+impl_veilid_log_facility!("net");
+
 impl NativeNetwork {
     #[cfg_attr(feature = "instrument", instrument(parent = None, level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(super) async fn upnp_task_routine(
@@ -9,7 +11,7 @@ impl NativeNetwork {
         _t: Timestamp,
     ) -> EyreResult<()> {
         if !self.igd_manager.tick().await? {
-            veilid_log!(self info "upnp failed, restarting local network");
+            veilid_log!(self info "upnp port mapping renew failed, triggering network restart");
             let mut inner = self.inner.lock();
             inner.network_needs_restart = true;
         }

@@ -131,57 +131,101 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
     ///////////////////////////////////////////////////////////////////////////////////////
 
     fn state(&self) -> RoutingDomainState {
-        let detail = self.read_dyn();
-        let entry_summary = detail.get_entry_summary();
-        let low_water_mark = detail.get_low_water_mark();
+        let (
+            relay_requirements,
+            opt_relay_compilation,
+            current_peer_info,
+            confirmed,
+            address_types,
+            outbound_protocols,
+            entry_summary,
+            low_water_mark,
+            relays,
+        ) = {
+            let detail = self.read_dyn();
+            let relay_requirements = detail.relay_requirements();
+            let opt_relay_compilation = detail.relay_compilation();
+            let current_peer_info = detail.get_peer_info();
+            let confirmed = detail.confirmed();
+            let address_types = detail.address_types();
+            let outbound_protocols = detail.outbound_protocols();
+            let entry_summary = detail.get_entry_summary();
+            let low_water_mark = detail.get_low_water_mark();
+            let relays = detail.relays();
+
+            (
+                relay_requirements,
+                opt_relay_compilation,
+                current_peer_info,
+                confirmed,
+                address_types,
+                outbound_protocols,
+                entry_summary,
+                low_water_mark,
+                relays,
+            )
+        };
 
         // Determine inbound stage
-        let (inbound_stage, relay_status, current_peer_info) = {
-            let relay_status = detail.relay_status();
-            let current_peer_info = detail.get_peer_info();
-
-            let inbound_stage = if !detail.confirmed() {
-                if detail.address_types().is_empty() || detail.outbound_protocols().is_empty() {
+        let inbound_stage = {
+            if !confirmed {
+                if address_types.is_empty() || outbound_protocols.is_empty() {
                     RoutingDomainInboundStage::Invalid
                 } else {
                     RoutingDomainInboundStage::NeedsDialInfoConfirmation
                 }
-            } else if detail.address_types().is_empty() || detail.outbound_protocols().is_empty() {
+            } else if address_types.is_empty() || outbound_protocols.is_empty() {
                 RoutingDomainInboundStage::Unusable
-            } else if relay_status.needs_more_relays() && detail.relays().is_empty() {
-                // If relays are wanted, they are all allocated at the same time, so we either have all the relays
+            } else if relay_requirements.needs_relays() == relays.is_empty() {
+                // If relays are needed, they are all allocated at the same time, so we either have all the relays
                 // we need, or we don't have any at all
+                // If relays are not needed, but we have some, we are also in the 'needsrelays' state so we can get
+                // rid of the unnecessary relays before we publish
                 RoutingDomainInboundStage::NeedsRelays
             } else {
                 RoutingDomainInboundStage::ReadyToPublish
-            };
-
-            (inbound_stage, relay_status, current_peer_info)
+            }
         };
 
         // Determine outbound stage
         let outbound_stage = {
-            let outbound_state = if detail.address_types().is_empty()
-                || detail.outbound_protocols().is_empty()
+            if address_types.is_empty()
+                || outbound_protocols.is_empty()
                 || !self.network_manager().network_is_started()
             {
                 RoutingDomainOutboundStage::Invalid
             } else {
-                RoutingDomainOutboundStage::ReadyToOperate
-            };
+                // More to do here for local network outbound stage
 
-            // More to do here...
-            outbound_state
+                // Figure out if we need more nodes
+                // let nodes_needed = self.nodes_needed();
+                // if !nodes_needed.needs_bootstrap.is_empty() {
+                //     RoutingDomainOutboundStage::NeedsBootstrap
+                // } else if self.get_published_peer_info().is_none() {
+                //     RoutingDomainOutboundStage::NeedsPublishedPeerInfo
+                // } else if !nodes_needed.needs_more_tested_nodes.is_empty() {
+                //     RoutingDomainOutboundStage::NeedsMoreTestedNodes
+                // } else if !self.safety_routes_ready() {
+                //     RoutingDomainOutboundStage::NeedsSafetyRoutes
+                // } else {
+                RoutingDomainOutboundStage::ReadyToOperate
+                // }
+            }
         };
 
-        let is_ready_inbound = matches!(inbound_stage, RoutingDomainInboundStage::ReadyToPublish);
+        // Inbound is ready if our current stage is ReadyToPublish and we have actually published peer info
+        let is_ready_inbound = matches!(inbound_stage, RoutingDomainInboundStage::ReadyToPublish)
+            && self.get_published_peer_info().is_some();
+
+        // Outbound is ready if are in the 'ready to operate' stage
         let is_ready_outbound =
             matches!(outbound_stage, RoutingDomainOutboundStage::ReadyToOperate);
 
         RoutingDomainState {
             inbound_stage,
             outbound_stage,
-            relay_status,
+            relay_requirements,
+            opt_relay_compilation,
             current_peer_info,
             entry_summary,
             low_water_mark,

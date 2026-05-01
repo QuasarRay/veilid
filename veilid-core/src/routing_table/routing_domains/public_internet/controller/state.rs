@@ -19,7 +19,8 @@ pub struct NodesNeeded {
 impl PublicInternetRoutingDomainController {
     pub fn state(&self) -> RoutingDomainState {
         let (
-            relay_status,
+            relay_requirements,
+            opt_relay_compilation,
             current_peer_info,
             confirmed,
             address_types,
@@ -29,7 +30,8 @@ impl PublicInternetRoutingDomainController {
             relays,
         ) = {
             let detail = self.read_dyn();
-            let relay_status = detail.relay_status();
+            let relay_requirements = detail.relay_requirements();
+            let opt_relay_compilation = detail.relay_compilation();
             let current_peer_info = detail.get_peer_info();
             let confirmed = detail.confirmed();
             let address_types = detail.address_types();
@@ -39,7 +41,8 @@ impl PublicInternetRoutingDomainController {
             let relays = detail.relays();
 
             (
-                relay_status,
+                relay_requirements,
+                opt_relay_compilation,
                 current_peer_info,
                 confirmed,
                 address_types,
@@ -60,9 +63,11 @@ impl PublicInternetRoutingDomainController {
                 }
             } else if address_types.is_empty() || outbound_protocols.is_empty() {
                 RoutingDomainInboundStage::Unusable
-            } else if relay_status.needs_more_relays() && relays.is_empty() {
-                // If relays are wanted, they are all allocated at the same time, so we either have all the relays
+            } else if relay_requirements.needs_relays() == relays.is_empty() {
+                // If relays are needed, they are all allocated at the same time, so we either have all the relays
                 // we need, or we don't have any at all
+                // If relays are not needed, but we have some, we are also in the 'needsrelays' state so we can get
+                // rid of the unnecessary relays before we publish
                 RoutingDomainInboundStage::NeedsRelays
             } else {
                 RoutingDomainInboundStage::ReadyToPublish
@@ -93,14 +98,19 @@ impl PublicInternetRoutingDomainController {
             }
         };
 
-        let is_ready_inbound = matches!(inbound_stage, RoutingDomainInboundStage::ReadyToPublish);
+        // Inbound is ready if our current stage is ReadyToPublish and we have actually published peer info
+        let is_ready_inbound = matches!(inbound_stage, RoutingDomainInboundStage::ReadyToPublish)
+            && self.get_published_peer_info().is_some();
+
+        // Outbound is ready if are in the 'ready to operate' stage
         let is_ready_outbound =
             matches!(outbound_stage, RoutingDomainOutboundStage::ReadyToOperate);
 
         RoutingDomainState {
             inbound_stage,
             outbound_stage,
-            relay_status,
+            relay_requirements,
+            opt_relay_compilation,
             current_peer_info,
             entry_summary,
             low_water_mark,

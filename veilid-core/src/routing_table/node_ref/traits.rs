@@ -44,7 +44,7 @@ pub(crate) trait NodeRefCommonTrait:
     fn public_keys(&self, routing_domain: RoutingDomain) -> PublicKeyGroup {
         self.operate(|e| e.public_keys(routing_domain))
     }
-    fn best_node_id(&self) -> Option<NodeId> {
+    fn best_node_id(&self) -> NodeId {
         self.operate(|e| e.best_node_id())
     }
     fn best_public_key(&self, routing_domain: RoutingDomain) -> Option<PublicKey> {
@@ -215,14 +215,13 @@ pub(crate) trait NodeRefCommonTrait:
     }
 
     fn set_last_flow(&self, flow: Flow, ts: Timestamp) {
-        let opt_best_node_id_and_flow = self.operate_mut(|e| {
+        let (best_node_id, flow) = self.operate_mut(|e| {
             e.set_last_flow(flow, ts);
-            e.best_node_id().map(|best_node_id| (best_node_id, flow))
+            let best_node_id = e.best_node_id();
+            (best_node_id, flow)
         });
 
-        if let Some((best_node_id, flow)) = opt_best_node_id_and_flow {
-            self.routing_table().touch_recent_peer(best_node_id, flow);
-        }
+        self.routing_table().touch_recent_peer(best_node_id, flow);
     }
 
     fn clear_last_flow(&self, flow: Flow) {

@@ -59,6 +59,17 @@ impl Address {
             }
         }
     }
+    /// Indicates the address is on a network where the local host is behind a carrier-grade NAT
+    /// or DS-Lite tunnel — RFC 6598 shared address space (100.64.0.0/10) or RFC 6333 IETF
+    /// protocol assignments (192.0.0.0/24). When seen on a local interface, inbound from the
+    /// public internet to this host is not reachable, even if peers report a globally routable
+    /// external address (because the carrier owns the public range and uses it for CGNAT).
+    pub fn is_cgnat_indicator(&self) -> bool {
+        match self {
+            Address::IPV4(v4) => ipv4addr_is_shared(v4) || ipv4addr_is_ietf_protocol_assignment(v4),
+            Address::IPV6(_) => false,
+        }
+    }
     pub fn ip_addr(&self) -> IpAddr {
         match self {
             Self::IPV4(a) => IpAddr::V4(*a),

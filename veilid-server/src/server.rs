@@ -7,6 +7,7 @@ use futures_util::select;
 use futures_util::FutureExt;
 use lazy_static::*;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::*;
@@ -24,10 +25,19 @@ lazy_static! {
         Mutex::new(Some(SingleShotEventual::new(Some(()))));
 }
 
+/// `--panic` causes shutdown() to panic instead of resolving the switch
+static PANIC_ON_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+pub fn set_panic_on_shutdown(panic: bool) {
+    PANIC_ON_SHUTDOWN.store(panic, Ordering::SeqCst);
+}
+
 #[instrument]
 pub fn shutdown() {
-    let shutdown_switch = SHUTDOWN_SWITCH.lock().take();
-    if let Some(shutdown_switch) = shutdown_switch {
+    if PANIC_ON_SHUTDOWN.load(Ordering::SeqCst) {
+        panic!("panic requested");
+    }
+    if let Some(shutdown_switch) = SHUTDOWN_SWITCH.lock().take() {
         shutdown_switch.resolve(());
     }
 }

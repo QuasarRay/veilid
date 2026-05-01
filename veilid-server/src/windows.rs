@@ -1,3 +1,5 @@
+use crate::logs::*;
+use crate::server::*;
 use crate::settings::*;
 use crate::*;
 use std::ffi::OsString;
@@ -8,6 +10,16 @@ use windows_service::service::{
 };
 use windows_service::service_control_handler::ServiceControlHandlerResult;
 use windows_service::*;
+
+/// Install a Ctrl-C handler via `ctrlc` (Unix uses signal-hook in `unix.rs`).
+pub async fn run_veilid_server_with_ctrl_c(
+    settings: Settings,
+    server_mode: ServerMode,
+    veilid_logs: Logs,
+) -> EyreResult<()> {
+    ctrlc::set_handler(shutdown).expect("Error setting Ctrl-C handler");
+    run_veilid_server(settings, server_mode, veilid_logs).await
+}
 
 // Register generated `ffi_service_main` with the system and start the service, blocking
 // this thread until the service is stopped.

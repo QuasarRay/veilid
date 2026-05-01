@@ -5,24 +5,28 @@ use crate::tools::*;
 use crate::*;
 use futures_util::StreamExt as _;
 use signal_hook::consts::signal::*;
+use stop_token::{future::FutureExt as StopFutureExt, StopSource, StopToken};
+use veilid_core::tools::*;
+
 #[cfg(feature = "rt-async-std")]
 use signal_hook_async_std::Signals;
 #[cfg(feature = "rt-tokio")]
 use signal_hook_tokio::Signals;
-use veilid_core::tools::*;
 
-#[instrument(level = "trace", skip_all)]
-async fn handle_signals(mut signals: Signals) {
-    while let Some(signal) = signals.next().await {
+async fn handle_signals(stop_token: StopToken) {
+    let Ok(mut signals) = Signals::new([SIGHUP, SIGTERM, SIGINT, SIGQUIT]) else {
+        return;
+    };
+    while let Ok(Some(signal)) = signals.next().timeout_at(stop_token.clone()).await {
         match signal {
             SIGHUP => {
                 // XXX: reload configuration?
             }
             SIGTERM | SIGINT | SIGQUIT => {
-                // Shutdown the system;
                 shutdown();
+                break;
             }
-            _ => unreachable!(),
+            _ => {}
         }
     }
 }
@@ -32,18 +36,19 @@ pub async fn run_veilid_server_with_signals(
     server_mode: ServerMode,
     veilid_logs: Logs,
 ) -> EyreResult<()> {
-    // Catch signals
-    let signals =
-        Signals::new([SIGHUP, SIGTERM, SIGINT, SIGQUIT]).wrap_err("failed to init signals")?;
-    let handle = signals.handle();
+    // Disarm SIGPIPE so writes to a broken pipe (e.g. `tee` exited on Ctrl-C)
+    // return EPIPE instead of OS-terminating us
+    let _ = signal_hook::flag::register(
+        signal_hook::consts::signal::SIGPIPE,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
 
-    let signals_task = spawn("signals", handle_signals(signals));
+    let stop_source = StopSource::new();
+    let signals_task = spawn("signals", handle_signals(stop_source.token()));
 
-    // Run veilid server
     let res = run_veilid_server(settings, server_mode, veilid_logs).await;
 
-    // Terminate the signal stream.
-    handle.close();
+    drop(stop_source);
     let _ = signals_task.await;
 
     res

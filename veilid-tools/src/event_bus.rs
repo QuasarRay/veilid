@@ -244,7 +244,8 @@ impl EventBus {
                             .collect(),
                     ),
                     std::collections::hash_map::Entry::Vacant(_) => {
-                        error!("no handlers for event: {}", type_name);
+                        // Common during startup before subscribers register
+                        debug!("no handlers for event: {}", type_name);
                         None
                     }
                 }

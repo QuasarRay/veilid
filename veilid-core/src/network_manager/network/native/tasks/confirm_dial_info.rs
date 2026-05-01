@@ -3,6 +3,8 @@ use super::*;
 use futures_util::stream::FuturesUnordered;
 use stop_token::future::FutureExt as StopTokenFutureExt;
 
+impl_veilid_log_facility!("net");
+
 type InboundProtocolMap = HashMap<(AddressType, LowLevelProtocolType, u16), Vec<ProtocolType>>;
 
 struct DialInfoConfirmationResult {
@@ -151,6 +153,18 @@ impl NativeNetwork {
             return Ok(());
         }
 
+        // Skip while presumed offline. Validators won't be able to send us receipts,
+        // so the discovery would just fail and pollute the dial-info confirm failure counter.
+        if self
+            .network_manager()
+            .online_detector()
+            .online_state(RoutingDomain::PublicInternet)
+            == OnlineState::Offline
+        {
+            veilid_log!(self debug "Skipping dial-info confirmation (offline detected)");
+            return Ok(());
+        }
+
         let confirmed = self
             .do_dial_info_confirm_public_internet(stop_token, l, t)
             .await?;
@@ -296,21 +310,6 @@ impl NativeNetwork {
             return Ok(None);
         }
 
-        // See if we have any discovery contexts that did not complete for a
-        // particular protocol type if its external address type was supported.
-        let mut success = true;
-        for cc in &context_configs {
-            if external_address_types.contains(cc.address_type) {
-                success = false;
-                break;
-            }
-        }
-
-        if !success {
-            veilid_log!(self debug "DialInfo discovery failed in {:#}, trying again, needed {:?}", done_duration, context_configs);
-            return Ok(None);
-        }
-
         // All done
         veilid_log!(self debug "DialInfo discovery finished in {:#} with address_types {:?}", done_duration, external_address_types);
 
@@ -405,14 +404,33 @@ impl NativeNetwork {
             // Revert to last network config
             editor.set_network_config(last_network_config);
 
-            // Mark as unconfirmed since we failed the detection
-            editor.set_confirmed(false);
-            editor.commit();
+            // Track consecutive confirmation failures so a single transient failure
+            // does not cause us to unpublish working peer info
+            let confirm_failure_count = {
+                let mut inner = self.inner.lock();
+                *inner
+                    .dial_info_confirm_failure_count
+                    .entry(RoutingDomain::PublicInternet)
+                    .and_modify(|x| *x += 1)
+                    .or_insert(1)
+            };
 
-            // Unpublish peer info if we couldn't detect dial info
-            rdc.unpublish_peer_info();
+            if confirm_failure_count >= MAX_DIAL_INFO_CONFIRM_FAILURE_COUNT {
+                veilid_log!(self debug "DialInfo confirmation failed {} times consecutively for PublicInternet, unpublishing peer info", confirm_failure_count);
+                editor.set_confirmed(false);
+                editor.commit();
+                rdc.unpublish_peer_info();
+            } else {
+                veilid_log!(self debug "DialInfo confirmation failed {} time(s) consecutively for PublicInternet, will retry before unpublishing", confirm_failure_count);
+            }
             return Ok(false);
         };
+
+        // Successful confirmation, reset the failure counter
+        self.inner
+            .lock()
+            .dial_info_confirm_failure_count
+            .remove(&RoutingDomain::PublicInternet);
 
         // Set the address types we've seen and confirm the dialinfo we just discovered
         editor.set_network_config(RoutingDomainNetworkConfig::new(

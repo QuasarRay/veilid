@@ -539,25 +539,16 @@ fn main() -> EyreResult<()> {
     // --- Normal Startup ---
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        // invoke the default handler and exit the process
         orig_hook(panic_info);
-
         let backtrace = backtrace::Backtrace::new();
-        eprintln!("Backtrace:\n{:?}", backtrace);
-
-        eprintln!("exiting!");
+        // Non-panicking stderr write so a broken pipe inside the hook doesn't double-panic
+        use std::io::Write;
+        let _ = std::io::stderr()
+            .write_all(format!("Backtrace:\n{:?}\nexiting!\n", backtrace).as_bytes());
         std::process::exit(1);
     }));
 
-    let panic_on_shutdown = args.panic;
-    ctrlc::set_handler(move || {
-        if panic_on_shutdown {
-            panic!("panic requested");
-        } else {
-            shutdown();
-        }
-    })
-    .expect("Error setting Ctrl-C handler");
+    set_panic_on_shutdown(args.panic);
 
     // Run the server loop
     block_on(async {
@@ -566,7 +557,7 @@ fn main() -> EyreResult<()> {
 
         cfg_if! {
             if #[cfg(windows)] {
-                run_veilid_server(settings, server_mode, veilid_logs).await
+                windows::run_veilid_server_with_ctrl_c(settings, server_mode, veilid_logs).await
             } else if #[cfg(unix)] {
                 unix::run_veilid_server_with_signals(settings, server_mode, veilid_logs).await
             }

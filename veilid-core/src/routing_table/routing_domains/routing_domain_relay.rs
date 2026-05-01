@@ -1,5 +1,7 @@
 use super::*;
 
+/// The routing domain's record of the output of the relay management task
+/// containing everything the rest of the system needs to know about a single relay
 #[derive(Debug, Clone)]
 pub struct RoutingDomainRelay {
     pub relay_node: FilteredNodeRef,
@@ -8,33 +10,24 @@ pub struct RoutingDomainRelay {
     pub dial_info_details: Vec<DialInfoDetail>,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct RoutingDomainRelayState {
-    pub last_keepalive: Timestamp,
-    pub last_optimized: Timestamp,
-}
-
-impl fmt::Display for RoutingDomainRelayState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Keepalive:{}\nOptimized:{}",
-            f.to_string(self.last_keepalive),
-            f.to_string(self.last_optimized)
-        )
+impl RoutingDomainRelay {
+    pub fn relay_id(&self) -> NodeId {
+        self.relay_node.best_node_id()
     }
-}
 
-impl PartialEq for RoutingDomainRelay {
-    fn eq(&self, other: &Self) -> bool {
+    /// Checks if this relay is configured the same way as another relay
+    pub fn equivalent(&self, other: &Self) -> bool {
         self.relay_node.equivalent(&other.relay_node)
             && self.relay_kind == other.relay_kind
-            && self.pings == other.pings
+            && self.pings.len() == other.pings.len()
+            && self
+                .pings
+                .iter()
+                .zip(other.pings.iter())
+                .all(|(a, b)| a.equivalent(b))
             && self.dial_info_details == other.dial_info_details
     }
 }
-
-impl Eq for RoutingDomainRelay {}
 
 impl RoutingDomainRelay {
     pub fn new(routing_domain: RoutingDomain, relay_node: NodeRef, relay_kind: RelayKind) -> Self {
@@ -60,7 +53,45 @@ impl fmt::Display for RoutingDomainRelay {
             ),
             indent_all_string(f.to_multiline_indexed_string(
                 self.dial_info_details.iter().map(|d| f.to_string(d))
-            ))
+            )),
+        )
+    }
+}
+
+/// The record of a node that needs to be pinged to keep a relay alive
+#[derive(Debug, Clone)]
+pub struct RelayPing {
+    pub node_ref: FilteredNodeRef,
+}
+
+impl RelayPing {
+    pub fn equivalent(&self, other: &Self) -> bool {
+        self.node_ref.equivalent(&other.node_ref)
+    }
+}
+
+impl fmt::Display for RelayPing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", f.to_string(&self.node_ref))
+    }
+}
+
+/// The routing domain's state tracking for a single relay
+/// Keeps track of when the last keepalive was sent to the relay
+/// and when the last attempt to optimize the relay was made
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct RoutingDomainRelayState {
+    pub last_keepalive: Timestamp,
+    pub last_optimized: Timestamp,
+}
+
+impl fmt::Display for RoutingDomainRelayState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Keepalive:{}\nOptimized:{}",
+            f.to_string(self.last_keepalive),
+            f.to_string(self.last_optimized)
         )
     }
 }

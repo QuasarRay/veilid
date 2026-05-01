@@ -59,6 +59,7 @@ impl RouteSpecStore {
         safety_route_id: &RouteId,
         sr_pubkey: PublicKey,
         safety_spec: &SafetySpec,
+        optimize: bool,
     ) -> VeilidAPIResult<RouteCompileContext> {
         let cache = self.cache.read();
 
@@ -77,8 +78,6 @@ impl RouteSpecStore {
             .merge_filter(NodeRefFilter::new().with_routing_domain(RoutingDomain::PublicInternet));
 
         let secret = safety_arce.route_set_secret_for_key(&sr_pubkey)?;
-
-        let optimize = safety_arce.with_stats(|stats| stats.last_known_valid_ts.is_some());
 
         let hop_node_refs = safety_arce.hop_node_refs();
 
@@ -286,14 +285,18 @@ impl RouteSpecStore {
         let profile_start_ts = Timestamp::now();
         let compiled_route_cache_key: CompiledRouteCacheKey = params.into();
 
+        let mut optimize: bool;
         let opt_compile_lock = {
             let cache = self.cache.read();
-            if let Some(compiled_route) =
-                cache.lookup_compiled_route_cache(&compiled_route_cache_key)
-            {
-                #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self trace "compile_route profile (fast path cached): {:#}", Timestamp::now().duration_since(profile_start_ts));
-                return Ok(compiled_route);
+            let disposition = cache.lookup_compiled_route_cache(&compiled_route_cache_key);
+            match disposition {
+                RouteCompileCacheDisposition::Compile => optimize = false,
+                RouteCompileCacheDisposition::Optimize => optimize = true,
+                RouteCompileCacheDisposition::Cached(compiled_route) => {
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self trace "compile_route profile (fast path cached): {:#}", Timestamp::now().duration_since(profile_start_ts));
+                    return Ok(compiled_route);
+                }
             }
             self.compile_lock_table
                 .try_lock_tag(compiled_route_cache_key.clone())
@@ -316,12 +319,15 @@ impl RouteSpecStore {
 
             // Check again due to race condition on route cache
             let cache = self.cache.read();
-            if let Some(compiled_route) =
-                cache.lookup_compiled_route_cache(&compiled_route_cache_key)
-            {
-                #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self debug "compile_route profile (slow path cached): {:#}", Timestamp::now().duration_since(profile_start_ts));
-                return Ok(compiled_route);
+            let disposition = cache.lookup_compiled_route_cache(&compiled_route_cache_key);
+            match disposition {
+                RouteCompileCacheDisposition::Compile => optimize = false,
+                RouteCompileCacheDisposition::Optimize => optimize = true,
+                RouteCompileCacheDisposition::Cached(compiled_route) => {
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug "compile_route profile (slow path cached): {:#}", Timestamp::now().duration_since(profile_start_ts));
+                    return Ok(compiled_route);
+                }
             }
 
             compile_lock
@@ -447,7 +453,8 @@ impl RouteSpecStore {
             };
 
         // Get the compile context (shared state for both optimized and unoptimized paths)
-        let ctx = self.get_route_compile_context(&safety_route_id, sr_pubkey, safety_spec)?;
+        let ctx =
+            self.get_route_compile_context(&safety_route_id, sr_pubkey, safety_spec, optimize)?;
 
         #[cfg(feature = "verbose-tracing")]
         let optimize = ctx.optimize;

@@ -39,6 +39,8 @@ impl PlatformSupportWindows {
             is_loopback: intf.get_flag_loopback(),
             is_running: intf.get_flag_running(),
             is_point_to_point: intf.get_flag_point_to_point(),
+            // Windows doesn't typically run CLAT
+            is_clat: false,
         }
     }
 
@@ -46,10 +48,24 @@ impl PlatformSupportWindows {
         let ds = unsafe { (*addr).DadState };
         let po = unsafe { (*addr).PrefixOrigin };
         let so = unsafe { (*addr).SuffixOrigin };
+        // ValidLifetime is the remaining valid lifetime in seconds; 0xFFFFFFFF means infinite
+        let valid_lifetime = unsafe { (*addr).ValidLifetime };
+        let expiration_secs = if valid_lifetime == u32::MAX {
+            None
+        } else {
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            Some(now_secs.saturating_add(valid_lifetime as u64))
+        };
         AddressFlags {
             is_temporary: so == IpSuffixOriginRandom,
             is_dynamic: po == IpPrefixOriginDhcp || so == IpSuffixOriginDhcp,
             is_preferred: ds == IpDadStatePreferred,
+            // Windows doesn't surface a CLAT-equivalent address flag
+            is_clat: false,
+            expiration_secs,
         }
     }
 

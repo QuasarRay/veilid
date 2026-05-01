@@ -1,18 +1,23 @@
 use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use stop_token::future::FutureExt;
+
+const LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS: usize = 16;
 
 /////////////////////////////////////////////////////////////////
 
 #[derive(Clone)]
 pub struct ListenerState {
+    pub addr: SocketAddr,
     pub protocol_accept_handlers: Vec<Box<dyn ProtocolAcceptHandler + 'static>>,
     pub tls_protocol_handlers: Vec<Box<dyn ProtocolAcceptHandler + 'static>>,
     pub tls_acceptor: Option<TlsAcceptor>,
 }
 
 impl ListenerState {
-    pub fn new() -> Self {
+    pub fn new(addr: SocketAddr) -> Self {
         Self {
+            addr,
             protocol_accept_handlers: Vec::new(),
             tls_protocol_handlers: Vec::new(),
             tls_acceptor: None,
@@ -94,17 +99,30 @@ impl NativeNetwork {
     async fn tcp_acceptor(
         self,
         tcp_stream: io::Result<TcpStream>,
+        consecutive_accept_errors: Arc<AtomicUsize>,
         listener_state: Arc<RwLock<ListenerState>>,
         connection_manager: ConnectionManager,
         connection_initial_timeout_ms: u32,
         tls_connection_initial_timeout_ms: u32,
     ) {
         let tcp_stream = match tcp_stream {
-            Ok(v) => v,
-            Err(_) => {
-                // If this happened our low-level listener socket probably died
-                // so it's time to restart the network
-                self.inner.lock().network_needs_restart = true;
+            Ok(v) => {
+                consecutive_accept_errors.store(0, Ordering::Relaxed);
+                v
+            }
+            Err(e) => {
+                let listener_addr = listener_state.read().addr;
+                let n = consecutive_accept_errors.fetch_add(1, Ordering::Relaxed) + 1;
+                if n >= LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS {
+                    veilid_log!(self debug
+                        "TCP acceptor on {} errored {} times consecutively ({}), triggering network restart",
+                        listener_addr, n, e);
+                    self.inner.lock().network_needs_restart = true;
+                } else {
+                    veilid_log!(self debug
+                        "TCP acceptor on {} transient error {}/{} ({})",
+                        listener_addr, n, LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS, e);
+                }
                 return;
             }
         };
@@ -235,7 +253,7 @@ impl NativeNetwork {
         veilid_log!(self debug "spawn_socket_listener: binding successful to {}", addr);
 
         // Create protocol handler records
-        let listener_state = Arc::new(RwLock::new(ListenerState::new()));
+        let listener_state = Arc::new(RwLock::new(ListenerState::new(addr)));
         self.inner
             .lock()
             .listener_states
@@ -251,6 +269,7 @@ impl NativeNetwork {
             .unwrap_or_log()
             .token();
         let connection_manager = self.network_manager().connection_manager();
+        let consecutive_accept_errors = Arc::new(AtomicUsize::new(0));
 
         ////////////////////////////////////////////////////////////
         let jh = spawn(&format!("TCP listener {}", addr), async move {
@@ -264,9 +283,11 @@ impl NativeNetwork {
                     let this = this.clone();
                     let listener_state = listener_state.clone();
                     let connection_manager = connection_manager.clone();
+                    let consecutive_accept_errors = consecutive_accept_errors.clone();
                     Self::tcp_acceptor(
                         this,
                         tcp_stream,
+                        consecutive_accept_errors,
                         listener_state,
                         connection_manager,
                         connection_initial_timeout_ms,

@@ -40,13 +40,18 @@ pub struct AddressCheck {
     registry: VeilidComponentRegistry,
     config: AddressCheckConfig,
     net: Network,
-    published_peer_info: BTreeMap<RoutingDomain, Arc<PeerInfo>>,
+    last_published_peer_info: BTreeMap<RoutingDomain, Arc<PeerInfo>>,
+    port_checked_protocols: BTreeSet<AddressCheckCacheKey>,
     current_addresses: BTreeMap<AddressCheckCacheKey, HashSet<SocketAddress>>,
     // Used by InboundCapable to determine if we have changed our address or re-do our network class
     address_inconsistency_table: BTreeMap<AddressCheckCacheKey, usize>,
+    // Last InboundCapable re-confirm trigger; suppresses duplicate re-fires from the same address
+    last_inbound_triggered_address: BTreeMap<AddressCheckCacheKey, SocketAddress>,
     // Used by OutboundOnly to determine if we should re-do our network class
     address_consistency_table:
         BTreeMap<AddressCheckCacheKey, hashlink::LruCache<IpAddr, SocketAddress>>,
+    // Last address that triggered an OutboundOnly re-confirm; used to suppress duplicate re-fires
+    last_outbound_triggered_address: BTreeMap<AddressCheckCacheKey, Address>,
 }
 
 impl fmt::Debug for AddressCheck {
@@ -58,13 +63,22 @@ impl fmt::Debug for AddressCheck {
                 &self.config.routing_domain_detect_address_changes,
             )
             //.field("net", &self.net)
-            .field("current_peer_info", &self.published_peer_info)
+            .field("last_published_peer_info", &self.last_published_peer_info)
+            .field("port_checked_protocols", &self.port_checked_protocols)
             .field("current_addresses", &self.current_addresses)
             .field(
                 "address_inconsistency_table",
                 &self.address_inconsistency_table,
             )
             .field("address_consistency_table", &self.address_consistency_table)
+            .field(
+                "last_outbound_triggered_address",
+                &self.last_outbound_triggered_address,
+            )
+            .field(
+                "last_inbound_triggered_address",
+                &self.last_inbound_triggered_address,
+            )
             .finish()
     }
 }
@@ -88,10 +102,13 @@ impl AddressCheck {
             registry,
             config,
             net,
-            published_peer_info: BTreeMap::new(),
+            last_published_peer_info: BTreeMap::new(),
+            port_checked_protocols: BTreeSet::new(),
             current_addresses: BTreeMap::new(),
             address_inconsistency_table: BTreeMap::new(),
+            last_inbound_triggered_address: BTreeMap::new(),
             address_consistency_table: BTreeMap::new(),
+            last_outbound_triggered_address: BTreeMap::new(),
         }
     }
 
@@ -107,39 +124,52 @@ impl AddressCheck {
 
                 // Clear our current addresses so we can rebuild them for this routing domain
                 self.current_addresses.remove(&acck);
+                self.port_checked_protocols.remove(&acck);
 
                 // Clear our history as well now so we start fresh when we get a new peer info
                 self.address_inconsistency_table.remove(&acck);
+                self.last_inbound_triggered_address.remove(&acck);
                 self.address_consistency_table.remove(&acck);
+                self.last_outbound_triggered_address.remove(&acck);
             }
         }
 
         if let Some(peer_info) = opt_peer_info {
-            self.published_peer_info
+            self.last_published_peer_info
                 .insert(routing_domain, peer_info.clone());
 
+            // Figure out which protocols we need to check the port for
             for did in peer_info.node_info().dial_info_detail_list() {
-                // Strip port from direct and mapped addresses
-                // as the incoming dialinfo may not match the outbound
-                // connections' NAT mapping. In this case we only check for IP address changes.
-                let socket_address =
-                    if did.class == DialInfoClass::Direct || did.class == DialInfoClass::Mapped {
-                        did.dial_info.socket_address().with_port(0)
-                    } else {
-                        did.dial_info.socket_address()
-                    };
+                // If the this is a dynamically translated dial info, and the protocol is not something a
+                // router is going to change the source port for, then we should check the port.
+                // Effectively, this ends up checking the port just for UDP protocols when the port would matter for hole punching.
+                let acck = AddressCheckCacheKey(
+                    routing_domain,
+                    did.dial_info.protocol_type(),
+                    did.dial_info.address_type(),
+                );
+                let mut socket_address = did.dial_info.socket_address();
+                if did.class.is_dynamically_translated()
+                    && !did
+                        .dial_info
+                        .protocol_type()
+                        .low_level_protocol_type()
+                        .is_connection_oriented()
+                {
+                    self.port_checked_protocols.insert(acck);
+                } else {
+                    // If we're not checking the port, strip it before inserting
+                    socket_address = socket_address.with_port(0);
+                }
 
-                let address_type = did.dial_info.address_type();
-                let protocol_type = did.dial_info.protocol_type();
-                let acck = AddressCheckCacheKey(routing_domain, protocol_type, address_type);
-
+                // Keep any of the current dialinfo as expected current addresss with or without the port
                 self.current_addresses
                     .entry(acck)
                     .or_default()
                     .insert(socket_address);
             }
         } else {
-            self.published_peer_info.remove(&routing_domain);
+            self.last_published_peer_info.remove(&routing_domain);
         }
     }
 
@@ -153,15 +183,10 @@ impl AddressCheck {
         flow: Flow,                    // the flow used
         reporting_peer: NodeRef,       // the peer's noderef reporting the socket address
     ) {
-        // Only process the PublicInternet RoutingDomain for now
-        // TODO: this is a separate mechanism from 'routing_domain_detect_address_changes' because that covers both
-        // this case -and- checking the low level network interfaces for address changes.
-        // Not all domains have NAT or the need to consider other nodes' remote attestations of our address, but they
-        // may still change addresses and be detected a different way. So we check for both settings here, a check
-        // on the routing domains that can leverage 'socket address change' detection -and- the overall
-        // 'detect_address_changes' setting.
-
         // Check if this routing domain supports 'socket address change' detection
+        // XXX: Only process the PublicInternet RoutingDomain for now, if we expand routing domain support we
+        // should revisit this and make it more generic. (It may sufficient to remove this check and just
+        // check 'routing_domain_detect_address_changes')
         if !matches!(routing_domain, RoutingDomain::PublicInternet) {
             return;
         }
@@ -175,9 +200,28 @@ impl AddressCheck {
             return;
         }
 
+        // While offline, peer reports may reflect stale or in-flight data; ignore them.
+        if self
+            .network_manager()
+            .online_detector()
+            .online_state(routing_domain)
+            == OnlineState::Offline
+        {
+            return;
+        }
+
+        // Ignore reports from nodes that have no dial info (probably symmetric NAT)
+        let Some(reporting_ni) = reporting_peer.node_info(routing_domain) else {
+            return;
+        };
+        if !reporting_ni.has_any_dial_info() {
+            // No dial info, ignore report
+            return;
+        }
+
         // Get the routing table and published peer info
         // If the peer info has invalid network class or is unconfirmed or unpublished this will return
-        let Some(peer_info) = self.published_peer_info.get(&routing_domain).cloned() else {
+        let Some(peer_info) = self.last_published_peer_info.get(&routing_domain).cloned() else {
             return;
         };
 
@@ -201,15 +245,6 @@ impl AddressCheck {
         let reporting_ipblock =
             ip_to_ipblock(self.config.ip6_prefix_size, flow.remote_address().ip_addr());
 
-        // Reject public address reports from nodes that we know are behind symmetric nat or
-        // nodes that must be using a relay for everything
-        let Some(reporting_node_info) = reporting_peer.node_info(routing_domain) else {
-            return;
-        };
-        if !reporting_node_info.has_dial_info() {
-            return;
-        }
-
         // If the socket address reported is the same as the reporter, then this is coming through a relay
         // or it should be ignored due to local proximity (nodes on the same network block should not be trusted as
         // public ip address reporters, only disinterested parties)
@@ -232,30 +267,33 @@ impl AddressCheck {
             self.detect_for_outbound_only(routing_domain, socket_address, flow, reporting_ipblock)
         };
 
-        if needs_address_detection {
-            // Reset the address check cache now so we can start detecting fresh
+        // Only log when the routing domain actually transitioned from confirmed; with multiple
+        // acckeys hitting the threshold at once the redundant calls are no-ops
+        if needs_address_detection
+            && self
+                .net
+                .routing_domain_request_confirm_dial_info(routing_domain)
+        {
             veilid_log!(self info
                 "{:?} address has changed, detecting dial info",
                 routing_domain
             );
-
-            // Re-detect the public dialinfo
-            self.net
-                .routing_domain_request_confirm_dial_info(routing_domain);
         }
     }
 
     fn matches_current_address(
         &self,
         acckey: AddressCheckCacheKey,
-        socket_address: SocketAddress,
+        mut socket_address: SocketAddress,
     ) -> bool {
+        let port_checked = self.port_checked_protocols.contains(&acckey);
+        if !port_checked {
+            socket_address = socket_address.with_port(0);
+        }
+
         self.current_addresses
             .get(&acckey)
-            .map(|current_addresses| {
-                current_addresses.contains(&socket_address)
-                    || current_addresses.contains(&socket_address.with_port(0))
-            })
+            .map(|current_addresses| current_addresses.contains(&socket_address))
             .unwrap_or(false)
     }
 
@@ -285,11 +323,23 @@ impl AddressCheck {
                 .entry(acckey)
                 .and_modify(|ait| {
                     if *ait != 0 {
-                        veilid_log!(registry debug "Resetting address inconsistency for {:?} due to match on flow {:?} from {}", acckey, flow, reporting_peer);
+                        veilid_log!(registry debug "Resetting address inconsistency for {:?} due to match on flow {:?} from {}: current=[{}], old={}, new={}",
+                            acckey,
+                            flow,
+                            reporting_peer,
+                            self.current_addresses
+                                .get(&acckey)
+                                .map(|cas| cas.iter().map(|ca| ca.to_string()).collect::<Vec<String>>().join(", "))
+                                .unwrap_or("None".to_string()),
+                            old_socket_address.map(|osa| osa.to_string()).unwrap_or("None".to_string()),
+                            socket_address.to_string(),
+                        );
                     }
                     *ait = 0;
                 })
                 .or_insert(0);
+            // Reset dedup so a future genuine inconsistency can re-fire detection
+            self.last_inbound_triggered_address.remove(&acckey);
             return false;
         }
 
@@ -306,8 +356,27 @@ impl AddressCheck {
                     *ait += 1;
                 })
                 .or_insert(1);
-            veilid_log!(registry debug "Adding address inconsistency ({}) for {:?} due to address {} on flow {:?} from {}", val, acckey, socket_address, flow, reporting_peer);
-            return val >= ADDRESS_INCONSISTENCY_DETECTION_COUNT;
+            veilid_log!(registry debug "Adding address inconsistency ({}) for {:?} due to address {} on flow {:?} from {}: current=[{}], old={}, new={}",
+                val,
+                acckey,
+                socket_address,
+                flow,
+                reporting_peer,
+                self.current_addresses
+                    .get(&acckey)
+                    .map(|cas| cas.iter().map(|ca| ca.to_string()).collect::<Vec<String>>().join(", "))
+                    .unwrap_or("None".to_string()),
+                old_socket_address.map(|osa| osa.to_string()).unwrap_or("None".to_string()),
+                socket_address.to_string(),
+            );
+            if val < ADDRESS_INCONSISTENCY_DETECTION_COUNT {
+                return false;
+            }
+            // Only fire when the off-current address actually changes from the last fire
+            return self
+                .last_inbound_triggered_address
+                .insert(acckey, socket_address)
+                != Some(socket_address);
         }
 
         false
@@ -343,11 +412,26 @@ impl AddressCheck {
             });
 
         // If we have at least N consistencies then trigger a detect
-        let mut consistencies = HashMap::<SocketAddress, usize>::new();
+        let mut consistencies = HashMap::<Address, usize>::new();
         for (_k, v) in cache.iter() {
-            let count = *consistencies.entry(*v).and_modify(|e| *e += 1).or_insert(1);
+            // Strip port because if we are outbound only we won't go inbound-capable
+            // unless the addresses are stable, and checking the port would unnecessarily
+            // prevert the detection of stable addresses
+            let address = v.address();
+
+            let count = *consistencies
+                .entry(address)
+                .and_modify(|e| *e += 1)
+                .or_insert(1);
             if count >= ADDRESS_CONSISTENCY_DETECTION_COUNT {
-                veilid_log!(registry debug "Address consistency detected for {:?}: {}", acckey, v);
+                // Suppress repeated re-fires for the same stable address. Only fire when
+                // the consistent address actually changes, or after a peer info change
+                // resets state via report_peer_info_change.
+                if self.last_outbound_triggered_address.get(&acckey) == Some(&address) {
+                    return false;
+                }
+                self.last_outbound_triggered_address.insert(acckey, address);
+                veilid_log!(registry debug "Address consistency detected for {:?}: {}", acckey, address);
                 return true;
             }
         }

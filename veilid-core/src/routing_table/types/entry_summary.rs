@@ -132,6 +132,7 @@ impl EntrySummary {
         routing_domain: RoutingDomain,
         e: &BucketEntrySnapshot,
     ) {
+        self.combined.add_entry(routing_domain, e);
         for crypto_kind in e.crypto_kinds() {
             let detail = self.per_crypto_kind.entry(crypto_kind).or_default();
 

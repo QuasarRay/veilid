@@ -6,7 +6,7 @@ pub struct WaitableReplyContext {
     pub timeout: TimestampDuration,
     pub send_ts: Timestamp,
     pub send_data_result: SendDataResult,
-    pub node_ref: NodeRef,
+    pub node_ref: FilteredNodeRef,
     pub opt_safety_route: Option<PublicKey>,
     pub opt_remote_private_route: Option<PublicKey>,
     pub opt_reply_private_route: Option<PublicKey>,
@@ -15,6 +15,10 @@ pub struct WaitableReplyContext {
 }
 
 impl WaitableReplyContext {
+    pub fn is_routed(&self) -> bool {
+        self.opt_safety_route.is_some() || self.opt_remote_private_route.is_some()
+    }
+
     #[cfg_attr(not(feature = "verbose-tracing"), expect(dead_code))]
     pub fn debug(&self, routing_table: &RoutingTable) -> String {
         let rss = routing_table.route_spec_store();

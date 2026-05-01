@@ -200,13 +200,7 @@ impl Clone for FilteredNodeRef {
 
 impl fmt::Display for FilteredNodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let node_id_str = if let Some(best_node_id) = self.entry.with(|e| e.best_node_id()) {
-            best_node_id.to_string()
-        } else if let Some(node_id) = self.entry.with(|e| e.node_ids().first().cloned()) {
-            node_id.to_string()
-        } else {
-            "*ERROR*".to_string()
-        };
+        let node_id_str = self.entry.with(|e| e.best_node_id()).to_string();
 
         let mut out = node_id_str;
 

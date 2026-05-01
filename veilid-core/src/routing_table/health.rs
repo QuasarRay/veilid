@@ -215,7 +215,18 @@ impl RoutingTable {
                 || last_outbound_ready != current_outbound_ready
             {
                 readiness_changed = true;
-                break;
+
+                if let (Some(is_ready_inbound), Some(is_ready_outbound)) =
+                    (current_inbound_ready, current_outbound_ready)
+                {
+                    if let Err(e) = self.event_bus().post(RoutingDomainReadyEvent {
+                        routing_domain,
+                        is_ready_inbound,
+                        is_ready_outbound,
+                    }) {
+                        veilid_log!(self warn "failed to post RoutingDomainReadyEvent: {}", e);
+                    }
+                }
             }
         }
 

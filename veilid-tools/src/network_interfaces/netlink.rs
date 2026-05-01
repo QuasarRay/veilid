@@ -9,7 +9,7 @@ use libc::{
     IFA_F_OPTIMISTIC, IFA_F_PERMANENT, IFA_F_TEMPORARY, IFA_F_TENTATIVE, IFF_LOOPBACK,
     IFF_POINTOPOINT, IFF_RUNNING, IF_NAMESIZE, SIOCGIFFLAGS, SOCK_DGRAM,
 };
-use netlink_packet_route::address::{AddressAttribute, AddressMessage};
+use netlink_packet_route::address::{AddressAttribute, AddressMessage, CacheInfo};
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use netlink_packet_route::AddressFamily;
 use rtnetlink::{new_connection_with_socket, Handle};
@@ -54,13 +54,29 @@ fn get_interface_name(index: u32) -> io::Result<String> {
     Ok(ifname_str.to_owned())
 }
 
-fn flags_to_address_flags(flags: u32) -> AddressFlags {
+fn flags_to_address_flags(flags: u32, opt_cache_info: Option<&CacheInfo>) -> AddressFlags {
+    // CacheInfo.ifa_valid is the remaining valid lifetime in seconds; u32::MAX means infinite
+    let expiration_secs = opt_cache_info.and_then(|ci| {
+        if ci.ifa_valid == u32::MAX {
+            None
+        } else {
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            Some(now_secs.saturating_add(ci.ifa_valid as u64))
+        }
+    });
+
     AddressFlags {
         is_temporary: (flags & IFA_F_TEMPORARY) != 0,
         is_dynamic: (flags & IFA_F_PERMANENT) == 0,
         is_preferred: (flags
             & (IFA_F_TENTATIVE | IFA_F_DADFAILED | IFA_F_DEPRECATED | IFA_F_OPTIMISTIC))
             == 0,
+        // Linux/Android surfaces CLAT via the owning interface, not the address (see InterfaceFlags::is_clat)
+        is_clat: false,
+        expiration_secs,
     }
 }
 
@@ -167,10 +183,14 @@ impl PlatformSupportNetlink {
 
         let flags = req.get_flags() as c_int;
 
+        // Android CLAT (RFC 6877) lives on a virtual interface named `clat4*` or `v4-*`
+        let is_clat = ifname.starts_with("clat4") || ifname.starts_with("v4-");
+
         Ok(InterfaceFlags {
             is_loopback: (flags & IFF_LOOPBACK) != 0,
             is_running: (flags & IFF_RUNNING) != 0,
             is_point_to_point: (flags & IFF_POINTOPOINT) != 0,
+            is_clat,
         })
     }
 
@@ -212,6 +232,14 @@ impl PlatformSupportNetlink {
             })
             .unwrap_or(msg.header.flags.bits() as u32);
 
+        let opt_cache_info = msg.attributes.iter().find_map(|attr| {
+            if let AddressAttribute::CacheInfo(ci) = attr {
+                Some(ci)
+            } else {
+                None
+            }
+        });
+
         Some(InterfaceAddress::new(
             IfAddr::V4(Ifv4Addr {
                 ip,
@@ -220,7 +248,7 @@ impl PlatformSupportNetlink {
                 // The broadcast address of the interface.
                 broadcast,
             }),
-            flags_to_address_flags(flags),
+            flags_to_address_flags(flags, opt_cache_info),
         ))
     }
 
@@ -258,6 +286,14 @@ impl PlatformSupportNetlink {
             return None;
         }
 
+        let opt_cache_info = msg.attributes.iter().find_map(|attr| {
+            if let AddressAttribute::CacheInfo(ci) = attr {
+                Some(ci)
+            } else {
+                None
+            }
+        });
+
         Some(InterfaceAddress::new(
             IfAddr::V6(Ifv6Addr {
                 ip,
@@ -266,7 +302,7 @@ impl PlatformSupportNetlink {
                 // The broadcast address of the interface.
                 broadcast: None,
             }),
-            flags_to_address_flags(flags),
+            flags_to_address_flags(flags, opt_cache_info),
         ))
     }
 

@@ -23,3 +23,9 @@ impl fmt::Display for LowLevelProtocolType {
         )
     }
 }
+
+impl LowLevelProtocolType {
+    pub fn is_connection_oriented(&self) -> bool {
+        matches!(self, Self::TCP)
+    }
+}

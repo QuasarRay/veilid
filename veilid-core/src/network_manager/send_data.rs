@@ -649,6 +649,14 @@ impl NetworkManager {
             return Ok(opt_ncm_kind);
         }
 
+        // Determine if the published peer info is the same as our current peer info
+        // This is important because published peer info can lag behind current peer info
+        // and we don't want old published peer info to be considered 'published' for the purposes
+        // of contact method calculation and caching.
+        // This disables hole punching and reverse connections when the published peer info is stale, which
+        // will revert back to inbound relay only for the duration of the stale period.
+        let peer_a_published = own_published_node_info_ts == Some(own_node_info_ts);
+
         // Calculate the node contact method
         let routing_table = self.routing_table();
         let Some(ncm_kind) = Self::get_node_contact_method_inner(
@@ -656,7 +664,7 @@ impl NetworkManager {
             routing_domain,
             target_node_ref.clone(),
             peer_a.clone(),
-            own_published_node_info_ts.is_some(),
+            peer_a_published,
             peer_b.clone(),
             &ncm_key,
         )?

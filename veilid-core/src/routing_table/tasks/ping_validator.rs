@@ -498,10 +498,20 @@ impl RoutingTable {
                         }
                         Ok(_) => {
                             // Network result but not a value - route failed
-                            veilid_log!(registry debug "Remote route test failed (no response): {}", route_id_clone);
                             let routing_table = registry.routing_table();
-                            let rss = routing_table.route_spec_store();
-                            rss.release_route(route_id_clone);
+                            let nm = routing_table.network_manager();
+                            if nm
+                                .online_detector()
+                                .online_state(RoutingDomain::PublicInternet)
+                                == OnlineState::Offline
+                            {
+                                veilid_log!(registry debug "Deferring remote route release (offline detected): {}", route_id_clone);
+                            } else {
+                                veilid_log!(registry debug "Remote route test failed (no response): {}", route_id_clone);
+                                routing_table
+                                    .route_spec_store()
+                                    .release_route(route_id_clone);
+                            }
                         }
                         Err(e) => {
                             veilid_log!(registry debug "Remote route test error: {} - {}", route_id_clone, e);
@@ -560,19 +570,27 @@ impl RoutingTable {
                         }
                     }
                     Ok(_) => {
-                        // Network result but not a value - route failed
-                        veilid_log!(registry debug "Route test failed at ping {}/{}: {} (no response)",
-                            ping_index + 1, total_pings, route_id);
-
-                        // Report failed route test on hop nodes
-                        for hop in &hops {
-                            hop.report_failed_route_test();
-                        }
-
-                        // Release the dead route
                         let routing_table = registry.routing_table();
-                        let rss = routing_table.route_spec_store();
-                        rss.release_route(route_id);
+                        let nm = routing_table.network_manager();
+                        if nm
+                            .online_detector()
+                            .online_state(RoutingDomain::PublicInternet)
+                            == OnlineState::Offline
+                        {
+                            veilid_log!(registry debug "Deferring route release (offline detected) at ping {}/{}: {}",
+                                ping_index + 1, total_pings, route_id);
+                        } else {
+                            veilid_log!(registry debug "Route test failed at ping {}/{}: {} (no response)",
+                                ping_index + 1, total_pings, route_id);
+
+                            // Report failed route test on hop nodes
+                            for hop in &hops {
+                                hop.report_failed_route_test();
+                            }
+
+                            // Release the dead route
+                            routing_table.route_spec_store().release_route(route_id);
+                        }
 
                         Vec::new()
                     }
