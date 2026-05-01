@@ -1,5 +1,11 @@
 pub mod test_async_tag_lock;
 pub mod test_event_bus;
-pub mod test_host_interface;
+pub mod test_eventual;
+pub mod test_interval_and_timeout;
+pub mod test_must_join;
+pub mod test_random;
+pub mod test_split_url;
 pub mod test_startup_lock;
 pub mod test_tag_lock;
+pub mod test_timestamp;
+pub mod test_tools_basic;

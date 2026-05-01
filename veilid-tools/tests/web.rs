@@ -28,10 +28,45 @@ pub fn setup() -> () {
 }
 
 #[wasm_bindgen_test]
-async fn run_test_host_interface() {
+async fn run_test_timestamp() {
     setup();
+    test_timestamp::test_get_raw_timestamp();
+    test_timestamp::test_sleep().await;
+}
 
-    test_host_interface::test_all().await;
+#[wasm_bindgen_test]
+async fn run_test_tools_basic() {
+    setup();
+    test_tools_basic::test_log();
+    test_tools_basic::test_tools();
+}
+
+#[wasm_bindgen_test]
+async fn run_test_random() {
+    setup();
+    test_random::test_get_random_u64();
+    test_random::test_get_random_u32();
+}
+
+#[wasm_bindgen_test]
+async fn run_test_split_url() {
+    setup();
+    test_split_url::test_split_url();
+}
+
+#[wasm_bindgen_test]
+async fn run_test_eventual() {
+    setup();
+    test_eventual::test_eventual().await;
+    test_eventual::test_eventual_value().await;
+    test_eventual::test_eventual_value_clone().await;
+}
+
+#[wasm_bindgen_test]
+async fn run_test_interval_and_timeout() {
+    setup();
+    test_interval_and_timeout::test_interval().await;
+    test_interval_and_timeout::test_timeout().await;
 }
 
 #[wasm_bindgen_test]
