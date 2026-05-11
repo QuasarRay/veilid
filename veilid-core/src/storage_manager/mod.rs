@@ -2,6 +2,7 @@ mod close_record;
 mod create_record;
 mod debug;
 mod delete_record;
+mod flush_record;
 mod get_value;
 mod inspect_record;
 mod local_record_detail;
@@ -146,6 +147,8 @@ struct StorageManagerInner {
     pub offline_subkey_writes: LinkedHashMap<OpaqueRecordKey, OfflineSubkeyWrite>,
     /// Records that have pending rehydration requests
     pub rehydration_requests: HashMap<OpaqueRecordKey, RehydrationRequest>,
+    /// StopSources for callers waiting on flush_record; dropped when offline writes for a key drain
+    pub flush_record_waiters: HashMap<OpaqueRecordKey, Vec<StopSource>>,
     /// State management for outbound watches
     pub outbound_watch_manager: OutboundWatchManager,
     /// State management for outbound transactions

@@ -109,7 +109,7 @@ impl RoutingContext {
             if let SafetySelection::Unsafe(_) = &safety_selection {
                 #[cfg(not(feature = "footgun"))]
                 {
-                    apibail_generic!("Unsafe routing mode is not allowed without the 'footgun' feature enabled"); 
+                    apibail_generic!("Unsafe routing mode is not allowed without the 'footgun' feature enabled");
                 }
             }
 
@@ -444,6 +444,34 @@ impl RoutingContext {
 
             let storage_manager = self.api.core_context()?.storage_manager();
             Box::pin(storage_manager.close_record(record_key)).await
+        })
+        .await
+        .inspect_err(log_veilid_api_error!(self))
+    }
+
+    /// Waits for any pending offline subkey writes for a DHT record to be flushed to the network.
+    ///
+    /// Returns immediately with `Ok(true)` if there are no pending writes.
+    /// With a timeout is specified, returns `Ok(true)` if all pending writes were flushed, or `Ok(false)` if `timeout` elapsed first.
+    /// Without a `timeout` is specified, waits indefinitely for writes to be flushed and then returns `Ok(true)`.
+    /// If the system shuts down while waiting, returns `Err(VeilidAPIError::NotInitialized)`.
+    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
+    pub async fn flush_dht_record(
+        &self,
+        record_key: RecordKey,
+        timeout: Option<Duration>,
+    ) -> VeilidAPIResult<bool> {
+        record_duration_fut(async {
+            veilid_log!(self debug
+                "RoutingContext::flush_dht_record(self: {:?}, key: {:?})", self, record_key);
+
+            self.api
+                .core_context()?
+                .storage_manager()
+                .check_record_key(&record_key)?;
+
+            let storage_manager = self.api.core_context()?.storage_manager();
+            Box::pin(storage_manager.flush_record(record_key, timeout)).await
         })
         .await
         .inspect_err(log_veilid_api_error!(self))

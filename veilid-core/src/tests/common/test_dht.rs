@@ -431,11 +431,97 @@ pub async fn test_set_dht_value_allow_offline(api: VeilidAPI) {
     rc.delete_dht_record(dht_key).await.unwrap();
 }
 
+async fn test_flush_dht_record_offline(api: VeilidAPI) {
+    let rc = api.routing_context().unwrap();
+
+    let rec = rc
+        .create_dht_record(CRYPTO_KIND_VLD0, DHTSchema::dflt(1).unwrap(), None)
+        .await
+        .unwrap();
+    let dht_key = rec.key();
+
+    rc.set_dht_value(
+        dht_key.clone(),
+        0,
+        b"offline value".to_vec(),
+        Some(SetDHTValueOptions {
+            writer: None,
+            allow_offline: Some(AllowOffline(true)),
+        }),
+    )
+    .await
+    .unwrap();
+
+    // flush with a short timeout should return false since we're not attached
+    assert!(!rc
+        .flush_dht_record(dht_key.clone(), Some(Duration::from_millis(100)))
+        .await
+        .unwrap());
+
+    // writes should still be pending
+    let report = rc
+        .inspect_dht_record(dht_key.clone(), None, DHTReportScope::Local)
+        .await
+        .unwrap();
+    assert!(!report.offline_subkeys().is_empty());
+
+    // pending writes should survive close
+    rc.close_dht_record(dht_key.clone()).await.unwrap();
+
+    assert!(!rc
+        .flush_dht_record(dht_key.clone(), Some(Duration::from_millis(100)))
+        .await
+        .unwrap());
+
+    let report = rc
+        .inspect_dht_record(dht_key.clone(), None, DHTReportScope::Local)
+        .await
+        .unwrap();
+    assert!(!report.offline_subkeys().is_empty());
+
+    rc.delete_dht_record(dht_key).await.unwrap();
+}
+
+async fn test_flush_dht_record(api: VeilidAPI) {
+    let rc = api.routing_context().unwrap();
+
+    let rec = rc
+        .create_dht_record(CRYPTO_KIND_VLD0, DHTSchema::dflt(1).unwrap(), None)
+        .await
+        .unwrap();
+    let dht_key = rec.key();
+
+    rc.set_dht_value(dht_key.clone(), 0, b"online value".to_vec(), None)
+        .await
+        .unwrap();
+
+    // flush should wait and then return true
+    assert!(rc.flush_dht_record(dht_key.clone(), None).await.unwrap());
+
+    // and verify it's actually flushed to the network
+    let report = rc
+        .inspect_dht_record(dht_key.clone(), None, DHTReportScope::Local)
+        .await
+        .unwrap();
+    assert!(report.offline_subkeys().is_empty());
+
+    // no pending writes, should return true immediately even with a tight timeout
+    assert!(rc
+        .flush_dht_record(dht_key.clone(), Some(Duration::from_millis(1)))
+        .await
+        .unwrap());
+
+    rc.close_dht_record(dht_key.clone()).await.unwrap();
+    rc.delete_dht_record(dht_key).await.unwrap();
+}
+
 pub async fn test_all() {
     let (update_callback, config) = fixture_veilid_core();
     let api = api_startup(update_callback, config)
         .await
         .expect("startup failed");
+
+    test_flush_dht_record_offline(api.clone()).await;
 
     let _ = api.attach().await;
     fixture_wait_for_public_internet_ready(&api).await;
@@ -451,6 +537,7 @@ pub async fn test_all() {
     test_set_get_dht_value(api.clone()).await;
     test_open_writer_dht_value(api.clone()).await;
     test_set_dht_value_allow_offline(api.clone()).await;
+    test_flush_dht_record(api.clone()).await;
 
     api.shutdown().await;
 }

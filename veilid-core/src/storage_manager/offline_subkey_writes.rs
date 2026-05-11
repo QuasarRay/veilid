@@ -66,6 +66,7 @@ impl StorageManager {
                 if finished {
                     veilid_log!(self debug "Dropped offline write {}", opaque_record_key);
                     o.remove();
+                    inner.flush_record_waiters.remove(opaque_record_key);
                 }
             }
             hashlink::linked_hash_map::Entry::Vacant(_) => {}
@@ -92,12 +93,8 @@ impl StorageManager {
         );
 
         // Get the offline subkey write record
-        match self
-            .inner
-            .lock()
-            .offline_subkey_writes
-            .entry(opaque_record_key.clone())
-        {
+        let mut inner = self.inner.lock();
+        match inner.offline_subkey_writes.entry(opaque_record_key.clone()) {
             hashlink::linked_hash_map::Entry::Occupied(mut o) => {
                 let finished = {
                     let osw = o.get_mut();
@@ -114,6 +111,7 @@ impl StorageManager {
                 if finished {
                     veilid_log!(self debug "offline subkey write finished key {}", opaque_record_key);
                     o.remove();
+                    inner.flush_record_waiters.remove(opaque_record_key);
                 }
             }
             hashlink::linked_hash_map::Entry::Vacant(_) => {
