@@ -16,7 +16,6 @@ fn bytes_size_helper(bytes: &Bytes) -> usize {
 macro_rules! byte_array_type {
     ($visibility:vis $name:ident) => {
 
-        #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(wasm_bindgen_derive::TryFromJsValue))]
         #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
         #[derive(Clone, Hash, Default, PartialOrd, Ord, PartialEq, Eq, GetSize)]
         #[must_use]
@@ -28,6 +27,7 @@ macro_rules! byte_array_type {
 
         #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
         make_wasm_bindgen_stubs!($name);
+        impl_try_from_js_value!($name);
 
         impl $name {
             #[allow(dead_code)] // Not all implementors of this macro use this

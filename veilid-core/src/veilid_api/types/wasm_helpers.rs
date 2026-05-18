@@ -35,6 +35,101 @@ macro_rules! make_wasm_bindgen_stubs {
     };
 }
 
+#[macro_export]
+macro_rules! impl_try_from_js_value {
+    ($name:ident) => {
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        impl ::core::convert::TryFrom<&::wasm_bindgen::JsValue> for $name {
+            type Error = String;
+
+            fn try_from(js: &::wasm_bindgen::JsValue) -> Result<Self, Self::Error> {
+                use ::wasm_bindgen::convert::RefFromWasmAbi;
+
+                let ptr =
+                    ::js_sys::Reflect::get(js, &::wasm_bindgen::JsValue::from_str("__wbg_ptr"))
+                        .map_err(|_| {
+                            ::alloc::format!(
+                                "expected {}, value is not an object",
+                                ::core::stringify!($name)
+                            )
+                        })?;
+                let ptr_u32: u32 = ptr.as_f64().ok_or_else(|| {
+                    ::alloc::format!("expected {}, missing __wbg_ptr", ::core::stringify!($name))
+                })? as u32;
+                let wasm_ptr = ::wasm_bindgen::__rt::WasmPtr::<
+                    ::wasm_bindgen::__rt::WasmRefCell<$name>,
+                >::from_usize(ptr_u32 as usize);
+                let instance_ref = unsafe { Self::ref_from_abi(wasm_ptr) };
+                Ok(instance_ref.clone())
+            }
+        }
+    };
+}
+
+/// Converts the given optional typed value into a JS value.
+/// If the typed value is `None`, the result is JS `undefined`.
+pub fn into_js_option<T, U>(val: Option<U>) -> T
+where
+    JsValue: From<U>,
+    T: JsCast,
+{
+    let js_val = match val {
+        None => JsValue::UNDEFINED,
+        Some(val) => val.into(),
+    };
+    js_val.unchecked_into::<T>()
+}
+
+/// Attempts to unpack a JS value into a typed value,
+/// returning `None` if the JS value is `undefined`.
+pub fn try_from_js_option<T>(val: impl Into<JsValue>) -> Result<Option<T>, String>
+where
+    for<'a> T: TryFrom<&'a JsValue>,
+    for<'a> <T as TryFrom<&'a JsValue>>::Error: core::fmt::Display,
+{
+    let js_val = val.into();
+    if js_val.is_undefined() {
+        return Ok(None);
+    }
+    T::try_from(&js_val)
+        .map(Some)
+        .map_err(|err| alloc::format!("{}", err))
+}
+
+/// Converts the given iterator into a JS array of the custom type `T`.
+pub fn into_js_array<T, U>(value: impl IntoIterator<Item = U>) -> T
+where
+    JsValue: From<U>,
+    T: JsCast,
+{
+    value
+        .into_iter()
+        .map(JsValue::from)
+        .collect::<js_sys::Array>()
+        .unchecked_into::<T>()
+}
+
+/// Attempts to unpack a JS array into a vector of typed values.
+pub fn try_from_js_array<T>(val: impl Into<JsValue>) -> Result<Vec<T>, String>
+where
+    for<'a> T: TryFrom<&'a JsValue>,
+    for<'a> <T as TryFrom<&'a JsValue>>::Error: core::fmt::Display,
+{
+    let js_val = val.into();
+    let array: &js_sys::Array = js_val.dyn_ref().ok_or("The argument must be an array")?;
+    let length: usize = array
+        .length()
+        .try_into()
+        .map_err(|err| alloc::format!("{}", err))?;
+    let mut typed_array = Vec::<T>::with_capacity(length);
+    for (idx, js) in array.iter().enumerate() {
+        let typed_elem = T::try_from(&js)
+            .map_err(|err| alloc::format!("Failed to cast item {}: {}", idx, err))?;
+        typed_array.push(typed_elem);
+    }
+    Ok(typed_array)
+}
+
 pub mod ts {
     use super::*;
 
@@ -229,8 +324,8 @@ impl TryFrom<ts::SetDHTValueOptions> for SetDHTValueOptions {
     type Error = VeilidAPIError;
 
     fn try_from(value: ts::SetDHTValueOptions) -> Result<Self, Self::Error> {
-        let writer = wasm_bindgen_derive::try_from_js_option::<KeyPair>(value.writer)
-            .map_err(VeilidAPIError::generic)?;
+        let writer =
+            try_from_js_option::<KeyPair>(value.writer).map_err(VeilidAPIError::generic)?;
         let allow_offline = value.allow_offline.clone();
         Ok(SetDHTValueOptions {
             writer,
@@ -243,9 +338,8 @@ impl TryFrom<ts::TransactDHTRecordsOptions> for TransactDHTRecordsOptions {
     type Error = VeilidAPIError;
 
     fn try_from(value: ts::TransactDHTRecordsOptions) -> Result<Self, Self::Error> {
-        let default_signing_keypair =
-            wasm_bindgen_derive::try_from_js_option::<KeyPair>(value.default_signing_keypair)
-                .map_err(VeilidAPIError::generic)?;
+        let default_signing_keypair = try_from_js_option::<KeyPair>(value.default_signing_keypair)
+            .map_err(VeilidAPIError::generic)?;
         Ok(TransactDHTRecordsOptions {
             default_signing_keypair,
         })
@@ -256,8 +350,8 @@ impl TryFrom<ts::DHTTransactionSetValueOptions> for DHTTransactionSetValueOption
     type Error = VeilidAPIError;
 
     fn try_from(value: ts::DHTTransactionSetValueOptions) -> Result<Self, Self::Error> {
-        let writer = wasm_bindgen_derive::try_from_js_option::<KeyPair>(value.writer)
-            .map_err(VeilidAPIError::generic)?;
+        let writer =
+            try_from_js_option::<KeyPair>(value.writer).map_err(VeilidAPIError::generic)?;
         Ok(DHTTransactionSetValueOptions { writer })
     }
 }
@@ -266,9 +360,8 @@ impl TryFrom<ts::DHTSchemaSMPLMember> for DHTSchemaSMPLMember {
     type Error = VeilidAPIError;
 
     fn try_from(value: ts::DHTSchemaSMPLMember) -> Result<Self, Self::Error> {
-        let Some(m_key) =
-            wasm_bindgen_derive::try_from_js_option::<BareMemberId>(value.m_key.clone())
-                .map_err(VeilidAPIError::generic)?
+        let Some(m_key) = try_from_js_option::<BareMemberId>(value.m_key.clone())
+            .map_err(VeilidAPIError::generic)?
         else {
             apibail_missing_argument!("m_key must not be undefined", "m_key");
         };
@@ -337,28 +430,24 @@ impl TryFrom<ts::DHTRecordDescriptor> for DHTRecordDescriptor {
     type Error = VeilidAPIError;
 
     fn try_from(value: ts::DHTRecordDescriptor) -> Result<Self, Self::Error> {
-        let Some(key) = wasm_bindgen_derive::try_from_js_option::<RecordKey>(value.key.clone())
-            .map_err(VeilidAPIError::generic)?
+        let Some(key) =
+            try_from_js_option::<RecordKey>(value.key.clone()).map_err(VeilidAPIError::generic)?
         else {
             apibail_missing_argument!("key must not be undefined", "key");
         };
-        let (owner, owner_secret) =
-            match wasm_bindgen_derive::try_from_js_option::<KeyPair>(value.owner.clone()) {
-                Ok(Some(v)) => (v.key(), Some(v.secret())),
+        let (owner, owner_secret) = match try_from_js_option::<KeyPair>(value.owner.clone()) {
+            Ok(Some(v)) => (v.key(), Some(v.secret())),
+            Ok(None) => {
+                apibail_missing_argument!("owner must not be undefined", "owner");
+            }
+            Err(_) => match try_from_js_option::<PublicKey>(value.owner.clone()) {
+                Ok(Some(v)) => (v, None),
+                Err(e) => apibail_generic!(e),
                 Ok(None) => {
                     apibail_missing_argument!("owner must not be undefined", "owner");
                 }
-                Err(_) => {
-                    match wasm_bindgen_derive::try_from_js_option::<PublicKey>(value.owner.clone())
-                    {
-                        Ok(Some(v)) => (v, None),
-                        Err(e) => apibail_generic!(e),
-                        Ok(None) => {
-                            apibail_missing_argument!("owner must not be undefined", "owner");
-                        }
-                    }
-                }
-            };
+            },
+        };
 
         let schema = value.schema.try_into()?;
 
@@ -396,9 +485,8 @@ impl TryFrom<ts::SafetySpec> for SafetySpec {
         let hop_count = value.hop_count;
         let stability = value.stability;
         let sequencing = value.sequencing;
-        let preferred_route =
-            wasm_bindgen_derive::try_from_js_option::<RouteId>(value.preferred_route)
-                .map_err(VeilidAPIError::generic)?;
+        let preferred_route = try_from_js_option::<RouteId>(value.preferred_route)
+            .map_err(VeilidAPIError::generic)?;
         Ok(SafetySpec {
             hop_count,
             stability,
@@ -451,8 +539,8 @@ impl TryFrom<ts::RouteBlob> for RouteBlob {
     type Error = VeilidAPIError;
 
     fn try_from(value: ts::RouteBlob) -> Result<Self, Self::Error> {
-        let Some(route_id) = wasm_bindgen_derive::try_from_js_option::<RouteId>(value.route_id)
-            .map_err(VeilidAPIError::generic)?
+        let Some(route_id) =
+            try_from_js_option::<RouteId>(value.route_id).map_err(VeilidAPIError::generic)?
         else {
             apibail_missing_argument!("route_id must not be undefined", "route_id");
         };

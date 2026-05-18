@@ -1,9 +1,5 @@
 use super::*;
 
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(wasm_bindgen_derive::TryFromJsValue)
-)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
 #[derive(Clone, Default, Hash, PartialOrd, Ord, PartialEq, Eq, GetSize)]
 #[must_use]
@@ -11,6 +7,8 @@ pub struct BareKeyPair {
     key: BarePublicKey,
     secret: BareSecretKey,
 }
+
+impl_try_from_js_value!(BareKeyPair);
 
 impl BareKeyPair {
     pub fn new(key: BarePublicKey, secret: BareSecretKey) -> Self {

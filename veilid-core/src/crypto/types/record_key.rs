@@ -1,9 +1,5 @@
 use super::*;
 
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(wasm_bindgen_derive::TryFromJsValue)
-)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
 #[derive(Clone, Default, PartialOrd, Ord, PartialEq, Eq, Hash, GetSize)]
 #[must_use]
@@ -14,6 +10,7 @@ pub struct BareRecordKey {
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 make_wasm_bindgen_stubs!(BareRecordKey);
+impl_try_from_js_value!(BareRecordKey);
 
 impl BareRecordKey {
     pub fn new(key: BareOpaqueRecordKey, encryption_key: Option<BareSharedSecret>) -> Self {

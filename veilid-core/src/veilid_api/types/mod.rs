@@ -22,6 +22,13 @@ mod veilid_state;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm_helpers;
 
+/// No-op on non-wasm targets; the real macro lives in `wasm_helpers`.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[macro_export]
+macro_rules! impl_try_from_js_value {
+    ($name:ident) => {};
+}
+
 use super::*;
 
 pub use aligned_u64::*;

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 use super::*;
+use veilid_core::{try_from_js_array, try_from_js_option};
 use veilid_crypto_js::VeilidCrypto;
-use wasm_bindgen_derive::{try_from_js_array, try_from_js_option};
 
 #[wasm_bindgen(typescript_custom_section)]
 const IUPDATE_VEILID_FUNCTION: &'static str = r#"

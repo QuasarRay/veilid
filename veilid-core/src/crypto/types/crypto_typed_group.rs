@@ -3,7 +3,6 @@ macro_rules! impl_crypto_typed_group {
     ($visibility:vis $name:ident) => {
         pastey::paste! {
 
-            #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(wasm_bindgen_derive::TryFromJsValue))]
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
             #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, Ord, PartialEq, Eq, Hash, Default, GetSize)]
             #[serde(from = "Vec<_>", into = "Vec<_>")]
@@ -14,6 +13,7 @@ macro_rules! impl_crypto_typed_group {
 
             #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
             make_wasm_bindgen_stubs!([<$name Group>]);
+            impl_try_from_js_value!([<$name Group>]);
 
             impl [<$name Group>]
             {

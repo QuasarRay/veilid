@@ -3,7 +3,6 @@ macro_rules! impl_crypto_typed {
     ($visibility:vis $name:ident) => {
         pastey::paste! {
 
-            #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(wasm_bindgen_derive::TryFromJsValue))]
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
             #[derive(Clone, PartialEq, Eq, Hash, GetSize)]
             #[must_use]
@@ -15,6 +14,7 @@ macro_rules! impl_crypto_typed {
 
             #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
             make_wasm_bindgen_stubs!($name);
+            impl_try_from_js_value!($name);
 
             impl $name {
                 pub fn new(kind: CryptoKind, value: [<Bare $name>]) -> Self {

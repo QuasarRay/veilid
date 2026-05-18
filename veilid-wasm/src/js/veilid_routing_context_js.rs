@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use super::*;
-use wasm_bindgen_derive::try_from_js_option;
+use veilid_core::try_from_js_option;
 
 #[wasm_bindgen()]
 pub struct VeilidRoutingContext {
