@@ -1792,6 +1792,30 @@
             "rc_op",
             "key"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "rc_op": {
+              "type": "string",
+              "const": "FlushDhtRecord"
+            },
+            "timeout_ms": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "rc_op",
+            "key"
+          ]
         }
       ],
       "required": [

@@ -55,6 +55,7 @@ class RoutingContextOperation(StrEnum):
     WATCH_DHT_VALUES = "WatchDhtValues"
     CANCEL_DHT_WATCH = "CancelDhtWatch"
     INSPECT_DHT_RECORD = "InspectDhtRecord"
+    FLUSH_DHT_RECORD = "FlushDhtRecord"
 
 
 class TableDbOperation(StrEnum):

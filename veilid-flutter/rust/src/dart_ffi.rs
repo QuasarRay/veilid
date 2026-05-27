@@ -906,6 +906,32 @@ pub extern "C" fn routing_context_inspect_dht_record(
 
 #[no_mangle]
 #[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn routing_context_flush_dht_record(
+    port: i64,
+    id: u32,
+    key: FfiStr,
+    timeout_ms: u64,
+) {
+    let key: RecordKey = deserialize_opt_json(key.into_opt_string()).unwrap_or_log();
+    let timeout = if timeout_ms == 0 {
+        None
+    } else {
+        Some(Duration::from_millis(timeout_ms))
+    };
+
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let routing_context = get_routing_context(id, "routing_context_flush_dht_record")?;
+
+            let res = routing_context.flush_dht_record(key, timeout).await?;
+            VeilidAPIResult::Ok(res)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
 pub extern "C" fn generate_member_id(port: i64, writer_key: FfiStr) {
     let writer_key: PublicKey = deserialize_opt_json(writer_key.into_opt_string()).unwrap_or_log();
 

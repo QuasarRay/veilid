@@ -296,4 +296,26 @@ class TestDHT {
     await routingContext.closeDHTRecord(rec.key);
     await routingContext.deleteDHTRecord(rec.key);
   }
+
+  Future<void> testFlushDHTRecord() async {
+    final rec = await routingContext.createDHTRecord(
+        cryptoKind, const DHTSchema.dflt(oCnt: 1));
+
+    expect(
+        await routingContext.setDHTValue(
+            rec.key, 0, utf8.encode('flush test value')),
+        isNull);
+
+    // flush with no timeout should wait until writes drain and return true
+    expect(await routingContext.flushDHTRecord(rec.key), isTrue);
+
+    // no pending writes — tight timeout should still return true immediately
+    expect(
+        await routingContext.flushDHTRecord(rec.key,
+            timeout: const Duration(milliseconds: 10)),
+        isTrue);
+
+    await routingContext.closeDHTRecord(rec.key);
+    await routingContext.deleteDHTRecord(rec.key);
+  }
 }

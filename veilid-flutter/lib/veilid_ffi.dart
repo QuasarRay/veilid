@@ -101,6 +101,10 @@ typedef _RoutingContextCancelDHTWatchDart =
 //     id: u32, key: FfiStr, subkeys: FfiStr, scope: FfiStr)
 typedef _RoutingContextInspectDHTRecordDart =
     void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+// fn routing_context_flush_dht_record(port: i64,
+//     id: u32, key: FfiStr, timeout_ms: u64)
+typedef _RoutingContextFlushDHTRecordDart =
+    void Function(int, int, Pointer<Utf8>, int);
 
 // fn generate_member_id(port: i64, writer_key: FfiStr)
 typedef _GenerateMemberIdDart = void Function(int, Pointer<Utf8>);
@@ -957,6 +961,22 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     );
     return report;
   }
+
+  @override
+  Future<bool> flushDHTRecord(RecordKey key, {Duration? timeout}) async {
+    _ctx.ensureValid();
+    final nativeKey = jsonEncode(key).toNativeUtf8();
+
+    final recvPort = ReceivePort('routing_context_flush_dht_record');
+    final sendPort = recvPort.sendPort;
+    _ctx.ffi._routingContextFlushDHTRecord(
+      sendPort.nativePort,
+      _ctx.id!,
+      nativeKey,
+      timeout?.inMilliseconds ?? 0,
+    );
+    return processFuturePlain<bool>(recvPort.first);
+  }
 }
 
 class _TDBT {
@@ -1739,6 +1759,7 @@ class VeilidFFI extends Veilid {
   final _RoutingContextWatchDHTValuesDart _routingContextWatchDHTValues;
   final _RoutingContextCancelDHTWatchDart _routingContextCancelDHTWatch;
   final _RoutingContextInspectDHTRecordDart _routingContextInspectDHTRecord;
+  final _RoutingContextFlushDHTRecordDart _routingContextFlushDHTRecord;
 
   final _GenerateMemberIdDart _generateMemberId;
   final _GetDHTRecordKeyDart _getDHTRecordKey;
@@ -1968,6 +1989,11 @@ class VeilidFFI extends Veilid {
             ),
             _RoutingContextInspectDHTRecordDart
           >('routing_context_inspect_dht_record'),
+      _routingContextFlushDHTRecord = dylib
+          .lookupFunction<
+            Void Function(Int64, Uint32, Pointer<Utf8>, Uint64),
+            _RoutingContextFlushDHTRecordDart
+          >('routing_context_flush_dht_record'),
       _generateMemberId = dylib
           .lookupFunction<
             Void Function(Int64, Pointer<Utf8>),

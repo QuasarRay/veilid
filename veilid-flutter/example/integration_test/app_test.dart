@@ -118,6 +118,7 @@ void main() {
               tags: ['dht']);
           test('inspect dht record', testDHT.testInspectDHTRecord,
               tags: ['dht']);
+          test('flush dht record', testDHT.testFlushDHTRecord, tags: ['dht']);
         });
 
         group('DHT Transactions $cryptoKind', () {

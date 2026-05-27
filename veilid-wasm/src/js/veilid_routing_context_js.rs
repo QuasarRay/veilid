@@ -360,4 +360,21 @@ impl VeilidRoutingContext {
             .inspect_dht_record(recordKey.clone(), subkeys, scope)
             .await
     }
+
+    /// Waits for any pending offline subkey writes for a DHT record to be flushed to the network.
+    /// `timeoutMs` is the maximum time to wait in milliseconds, or `undefined` to wait indefinitely.
+    /// Returns `true` if all pending writes were flushed, `false` if the timeout elapsed first.
+    pub async fn flushDHTRecord(
+        &self,
+        recordKey: &RecordKey,
+        timeoutMs: Option<u32>,
+    ) -> VeilidAPIResult<bool> {
+        let routing_context = self.getRoutingContext()?;
+        routing_context
+            .flush_dht_record(
+                recordKey.clone(),
+                timeoutMs.map(|ms| Duration::from_millis(ms as u64)),
+            )
+            .await
+    }
 }

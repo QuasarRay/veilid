@@ -439,6 +439,23 @@ describe('VeilidRoutingContext', () => {
           await expect(inspectRes.localSeqs).toEqual([0]);
           await expect(inspectRes.networkSeqs).toEqual([undefined]);
         });
+
+        it('should flush a record and confirm no offline subkeys remain', async () => {
+          const setValueRes = await routingContext.setDHTValue(
+            dhtRecord.key,
+            0,
+            textEncoder.encode(data)
+          );
+          await expect(setValueRes).toBeUndefined();
+
+          // flush with no timeout should wait until writes drain and return true
+          const flushRes = await routingContext.flushDHTRecord(dhtRecord.key);
+          await expect(flushRes).toBe(true);
+
+          // no pending writes — tight timeout should still return true immediately
+          const flushResWithTimeout = await routingContext.flushDHTRecord(dhtRecord.key, 10);
+          await expect(flushResWithTimeout).toBe(true);
+        });
       });
 
       describe(`DHT transactions simple tests for ${cryptoKind as string}`, () => {

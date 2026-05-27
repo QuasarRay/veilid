@@ -877,6 +877,25 @@ async def test_schema_limit_smpl(api_connection: veilid.VeilidAPI):
 
 
 
+@pytest.mark.asyncio
+async def test_flush_dht_record(api_connection: veilid.VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            rec = await rc.create_dht_record(kind, veilid.DHTSchema.dflt(1))
+
+            await rc.set_dht_value(rec.key, ValueSubkey(0), b"flush test value")
+
+            # flush with no timeout should wait until writes drain and return true
+            assert await rc.flush_dht_record(rec.key) is True
+
+            # no pending writes — tight timeout should still return true immediately
+            assert await rc.flush_dht_record(rec.key, 10) is True
+
+            await rc.close_dht_record(rec.key)
+            await rc.delete_dht_record(rec.key)
+
+
 @pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
 @pytest.mark.asyncio
 async def test_dht_integration_writer_reader():

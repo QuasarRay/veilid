@@ -93,6 +93,11 @@ pub enum RoutingContextRequestOp {
         #[schemars(default)]
         scope: DHTReportScope,
     },
+    FlushDhtRecord {
+        #[schemars(with = "String")]
+        key: RecordKey,
+        timeout_ms: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -158,5 +163,9 @@ pub enum RoutingContextResponseOp {
     InspectDhtRecord {
         #[serde(flatten)]
         result: ApiResult<Box<DHTRecordReport>>,
+    },
+    FlushDhtRecord {
+        #[serde(flatten)]
+        result: ApiResult<bool>,
     },
 }

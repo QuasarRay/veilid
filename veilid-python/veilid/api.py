@@ -115,6 +115,14 @@ class RoutingContext(ABC):
     ) -> types.DHTRecordReport:
         pass
 
+    @abstractmethod
+    async def flush_dht_record(
+        self, 
+        key: types.RecordKey, 
+        timeout_ms: Optional[int] = None
+    ) -> bool:
+        pass
+
 
 
 class TableDbTransaction(ABC):

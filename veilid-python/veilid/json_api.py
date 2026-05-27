@@ -866,6 +866,25 @@ class _JsonRoutingContext(RoutingContext):
             )
         )
 
+    async def flush_dht_record(
+        self, 
+        key: RecordKey, 
+        timeout_ms: Optional[int] = None
+    ) -> bool:
+        assert isinstance(key, RecordKey)
+        assert timeout_ms is None or isinstance(timeout_ms, int)
+
+        return raise_api_result(
+            await self.api.send_ndjson_request(
+                Operation.ROUTING_CONTEXT,
+                validate=validate_rc_op,
+                rc_id=self.rc_id,
+                rc_op=RoutingContextOperation.FLUSH_DHT_RECORD,
+                key=key,
+                timeout_ms=timeout_ms,
+            )
+        )
+
 
 
 

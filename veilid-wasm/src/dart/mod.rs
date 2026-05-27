@@ -583,6 +583,21 @@ pub fn routing_context_inspect_dht_record(
 }
 
 #[wasm_bindgen()]
+pub fn routing_context_flush_dht_record(id: u32, key: String, timeout_ms: Option<u32>) -> Promise {
+    wrap_api_future_plain(async move {
+        let key: veilid_core::RecordKey =
+            veilid_core::deserialize_json(&key).map_err(VeilidAPIError::generic)?;
+
+        let routing_context = get_routing_context(id, "routing_context_flush_dht_record")?;
+
+        let res = routing_context
+            .flush_dht_record(key, timeout_ms.map(|ms| Duration::from_millis(ms as u64)))
+            .await?;
+        VeilidAPIResult::Ok(res)
+    })
+}
+
+#[wasm_bindgen()]
 pub fn generate_member_id(writer_key: String) -> Promise {
     wrap_api_future_json(async move {
         let writer_key: veilid_core::PublicKey =

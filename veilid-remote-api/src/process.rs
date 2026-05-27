@@ -386,6 +386,15 @@ impl JsonRequestProcessor {
                         .map(Box::new),
                 ),
             },
+            RoutingContextRequestOp::FlushDhtRecord { key, timeout_ms } => {
+                RoutingContextResponseOp::FlushDhtRecord {
+                    result: to_json_api_result(
+                        routing_context
+                            .flush_dht_record(key, timeout_ms.map(Duration::from_millis))
+                            .await,
+                    ),
+                }
+            }
         };
         RoutingContextResponse {
             rc_id: rcr.rc_id,

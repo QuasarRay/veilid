@@ -57,4 +57,5 @@ abstract class VeilidRoutingContext {
     List<ValueSubkeyRange>? subkeys,
     DHTReportScope scope = DHTReportScope.local,
   });
+  Future<bool> flushDHTRecord(RecordKey key, {Duration? timeout});
 }

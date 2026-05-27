@@ -390,6 +390,16 @@ class VeilidRoutingContextJS extends VeilidRoutingContext {
       ],
     );
   }
+
+  @override
+  Future<bool> flushDHTRecord(RecordKey key, {Duration? timeout}) {
+    final id = _ctx.requireId();
+    return _wasmPromiseBool('routing_context_flush_dht_record', [
+      id.toJS,
+      jsonEncode(key).toJS,
+      if (timeout != null) timeout.inMilliseconds.toJS else null,
+    ]);
+  }
 }
 
 // JS implementation of VeilidCryptoSystem

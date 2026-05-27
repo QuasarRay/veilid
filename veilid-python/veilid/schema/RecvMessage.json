@@ -3300,6 +3300,42 @@
           "required": [
             "rc_op"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "rc_op": {
+              "type": "string",
+              "const": "FlushDhtRecord"
+            }
+          },
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "rc_op"
+          ]
         }
       ],
       "required": [
