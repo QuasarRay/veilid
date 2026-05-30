@@ -1,6 +1,28 @@
 use super::*;
 
 impl StorageManager {
+    /// A non-transactional set, or a network-enabled get, clears a record's transaction membership
+    pub(super) fn clear_record_transaction_set(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+    ) -> VeilidAPIResult<()> {
+        let local_record_store = self.get_local_record_store()?;
+        let is_transactional = local_record_store
+            .with_record(opaque_record_key, |r| {
+                r.detail().transaction_record_set.is_some()
+            })?
+            .unwrap_or(false);
+        if is_transactional {
+            local_record_store.with_record_detail_mut(
+                opaque_record_key,
+                |_descriptor, detail| {
+                    detail.transaction_record_set = None;
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -199,6 +221,18 @@ impl StorageManager {
                 CommitActionFlushMode::Immediate,
             )
             .await?;
+
+        // Stamp transaction membership (the full committed set) onto each participating record
+        let transaction_record_set: Vec<OpaqueRecordKey> =
+            keys_and_subkeys.iter().map(|(k, _)| k.clone()).collect();
+        for opaque_record_key in &transaction_record_set {
+            local_record_store.with_record_detail_mut(
+                opaque_record_key,
+                |_descriptor, detail| {
+                    detail.transaction_record_set = Some(transaction_record_set.clone());
+                },
+            )?;
+        }
 
         Ok(())
     }

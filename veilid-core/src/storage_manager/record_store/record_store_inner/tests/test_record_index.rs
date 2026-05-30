@@ -534,6 +534,7 @@ pub async fn test_create_read_write_delete_loop(
         let detail = LocalRecordDetail {
             safety_selection: SafetySelection::Unsafe(Sequencing::NoPreference),
             nodes: HashMap::new(),
+            transaction_record_set: None,
         };
         record_index
             .create_record(

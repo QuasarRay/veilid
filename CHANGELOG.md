@@ -11,6 +11,7 @@
 
 - veilid-core:
   - SECURITY: Reject invalid DHT schema and value signatures on inbound set value and value change notifications, not just at get_dht_value time.
+    - Credit to Mr. JDH for the security report (https://github.com/Evelynkaz)
   - Added record flush on DHT record close to ensure closed records are fully flushed to the TableStore
   - Formatting functions moved to veilid-tools, gets garbage nobody cares about out of the public API
   - Routing domain publication improvements, better logic for dial info confirmation

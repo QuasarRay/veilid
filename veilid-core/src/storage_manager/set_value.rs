@@ -93,6 +93,9 @@ impl StorageManager {
             apibail_generic!("value is not writable");
         };
 
+        // A non-transactional set clears this record's transaction membership
+        self.clear_record_transaction_set(&opaque_record_key)?;
+
         // Make signed value data (encrypted) and value data (unencrypted) and get descriptor for this value
         let last_get_result = self
             .handle_get_single_local_value(&opaque_record_key, subkey, true)
@@ -654,7 +657,10 @@ impl StorageManager {
                 "invalid descriptor signature or record-key binding",
             );
         }
-        match value.validate(descriptor.ref_owner(), subkey, &vcrypto).await {
+        match value
+            .validate(descriptor.ref_owner(), subkey, &vcrypto)
+            .await
+        {
             Ok(true) => NetworkResult::value(()),
             Ok(false) | Err(_) => {
                 NetworkResult::invalid_message("invalid signed value data signature")

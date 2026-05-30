@@ -88,6 +88,9 @@ impl StorageManager {
             apibail_try_again!("offline, try again later");
         };
 
+        // A network-enabled get clears this record's transaction membership
+        self.clear_record_transaction_set(&opaque_record_key)?;
+
         // May have last descriptor / value
         // Use the safety selection we opened the record with
         let last_seq = last_get_result

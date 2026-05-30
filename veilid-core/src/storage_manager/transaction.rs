@@ -90,6 +90,12 @@ impl StorageManager {
             let mut record_params_list = vec![];
             for record_key in record_keys {
                 let opaque_record_key = record_key.opaque();
+
+                // Can't begin a transaction on a record with pending offline subkey writes
+                if inner.offline_subkey_writes.contains_key(&opaque_record_key) {
+                    apibail_try_again!("record has pending offline writes, try again later");
+                }
+
                 let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
                     apibail_generic!("record key not open: {}", opaque_record_key);
                 };

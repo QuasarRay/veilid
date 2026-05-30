@@ -17,6 +17,9 @@ pub(in crate::storage_manager) struct LocalRecordDetail {
     /// The nodes that we have seen this record cached on recently
     #[serde(default)]
     pub nodes: HashMap<NodeId, PerNodeRecordDetail>,
+    /// Most recent set of records committed in a transaction with this one; while set, background ops treat the record transactionally
+    #[serde(default)]
+    pub transaction_record_set: Option<Vec<OpaqueRecordKey>>,
 }
 
 impl LocalRecordDetail {
@@ -24,6 +27,7 @@ impl LocalRecordDetail {
         Self {
             safety_selection,
             nodes: Default::default(),
+            transaction_record_set: None,
         }
     }
 }
