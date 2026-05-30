@@ -74,8 +74,12 @@ struct ConnectionManagerArc {
     connection_table: ConnectionTable,
     address_lock_table: AsyncTagLockTable<SocketAddr>,
     startup_lock: StartupLock,
+    /// Flap detector over protected (relay) connection drops, which should be rare
+    connection_flap_detector: Mutex<FlapDetector<()>>,
     inner: Mutex<Option<ConnectionManagerInner>>,
     reconnection_processor: DeferredStreamProcessor,
+    commit_subscription: Mutex<Option<EventBusSubscription>>,
+    route_allocation_subscription: Mutex<Option<EventBusSubscription>>,
 }
 impl core::fmt::Debug for ConnectionManagerArc {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -123,7 +127,11 @@ impl ConnectionManager {
             connection_table: ConnectionTable::new(registry),
             address_lock_table: AsyncTagLockTable::new(),
             startup_lock: StartupLock::new(),
+            // 4 protected-connection drops within ~60s = flapping
+            connection_flap_detector: Mutex::new(FlapDetector::new_secs(4.0, 60)),
             inner: Mutex::new(None),
+            commit_subscription: Mutex::new(None),
+            route_allocation_subscription: Mutex::new(None),
         }
     }
     pub fn new(network: Network) -> Self {
@@ -166,9 +174,23 @@ impl ConnectionManager {
         // Spawn the reconnection processor
         self.arc.reconnection_processor.init();
 
+        // Subscribe to events that may invalidate our protected-address set
+        let commit_sub = impl_subscribe_event_bus_clone!(self, commit_event_handler);
+        *self.arc.commit_subscription.lock() = Some(commit_sub);
+        let route_alloc_sub = impl_subscribe_event_bus_clone!(self, route_allocation_event_handler);
+        *self.arc.route_allocation_subscription.lock() = Some(route_alloc_sub);
+
         guard.success();
 
         Ok(())
+    }
+
+    pub fn commit_event_handler(&self, _evt: Arc<RoutingDomainCommitEvent>) {
+        self.update_protections();
+    }
+
+    pub fn route_allocation_event_handler(&self, _evt: Arc<RouteAllocationEvent>) {
+        self.update_protections();
     }
 
     pub async fn shutdown(&self) {
@@ -177,6 +199,14 @@ impl ConnectionManager {
             veilid_log!(self error "connection manager is already shut down");
             return;
         };
+
+        // Unsubscribe from event bus
+        if let Some(sub) = self.arc.commit_subscription.lock().take() {
+            self.event_bus().unsubscribe(sub);
+        }
+        if let Some(sub) = self.arc.route_allocation_subscription.lock().take() {
+            self.event_bus().unsubscribe(sub);
+        }
 
         // Stop the reconnection processor
         veilid_log!(self debug "stopping reconnection processor task");
@@ -262,6 +292,10 @@ impl ConnectionManager {
                 }
             }
         }
+
+        // Safety-route first hops are intentionally NOT protected: with no far-side priority
+        // flow they idle out, and reconnecting them only churns. The bidirectional route lets
+        // the first hop reopen a connection to us for return-path answers when ours is down.
 
         // Remove protected addresses that were not still associated with a protected noderef
         for dead_address in dead_addresses {
@@ -413,6 +447,18 @@ impl ConnectionManager {
                 "connection manager is not started",
             ));
         };
+
+        // Never connect to one of our own addresses; it loops back to our own listener
+        if self
+            .network_manager()
+            .routing_table()
+            .is_own_direct_dial_info_address(&dial_info.socket_address())
+        {
+            return Ok(NetworkResult::no_connection_other(
+                "refusing to connect to our own address",
+            ));
+        }
+
         let peer_address = dial_info.peer_address();
         let remote_addr = peer_address.socket_addr();
         // Prefer a publicly-routable source (PublicInternet only); else use configured listener
@@ -422,9 +468,17 @@ impl ConnectionManager {
             .or_else(|| net.get_preferred_local_address(&dial_info));
         let best_port = preferred_local_address.map(|pla| pla.port());
 
-        // Async lock on the remote address for atomicity per remote
-        // Use the initial connection timeout here because multiple calls to get_or_create_connection
-        // can be performed simultaneously and we want to wait for the first one to succeed or not
+        // Fast path: an existing connection makes the lock unnecessary. Parallel sends to the same
+        // remote would otherwise all queue on the address lock and time out before the first TCP completes
+        if let Some(best_existing_conn) = self
+            .arc
+            .connection_table
+            .get_best_connection_by_remote(best_port, peer_address)
+        {
+            return Ok(NetworkResult::Value(best_existing_conn));
+        }
+
+        // Slow path: serialize the actual TCP connect via per-remote address lock
         let Ok(_lock_guard) = timeout(
             self.arc.connection_initial_timeout_ms,
             self.arc.address_lock_table.lock_tag(remote_addr),
@@ -437,9 +491,7 @@ impl ConnectionManager {
 
         veilid_log!(self trace "== get_or_create_connection dial_info={:?}", dial_info);
 
-        // If any connection to this remote exists that has the same protocol, return it
-        // Any connection will do, we don't have to match the local address but if we can
-        // match the preferred port do it
+        // Re-check inside the lock in case another thread connected while we waited
         if let Some(best_existing_conn) = self
             .arc
             .connection_table
@@ -486,7 +538,7 @@ impl ConnectionManager {
                 Err(e) => {
                     if retry_count == 0 {
                         bail!(
-                            "failed to connect: {:?} -> {:?}: {:#?}",
+                            "error creating connection: {:?} -> {:?}: {:#?}",
                             preferred_local_address,
                             dial_info,
                             e
@@ -529,6 +581,7 @@ impl ConnectionManager {
 
     /// Closes connections whose specific local address is no longer in
     /// `valid_local_addresses`.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     pub fn close_dead_connections(&self, valid_local_addresses: &HashSet<Address>) {
         let Ok(_guard) = self.arc.startup_lock.enter() else {
             return;
@@ -666,35 +719,53 @@ impl ConnectionManager {
             // If the connection closed while it was protected, report it on the node the connection was established on
             // In-use connections will already get reported because they will cause a 'lost_answer' stat on the remote node
             if let Some(protect_nr) = conn.protected_node_ref() {
-                // Find the protected address and increase our drop count
+                // Lifetime: only counts remote-closed protected connections.
+                // Skip recording when we're offline ourselves so peer-side
+                // stats don't get poisoned by our own connectivity loss.
+                let cur_ts = Timestamp::now_non_decreasing();
+                let lifetime = cur_ts.duration_since(conn.established_time());
+                let we_are_online = self
+                    .network_manager()
+                    .online_detector()
+                    .online_state(RoutingDomain::PublicInternet)
+                    == OnlineState::Online;
+                if we_are_online {
+                    protect_nr.record_protected_connection_drop(lifetime);
+                    if let Some(penalty) = self
+                        .arc
+                        .connection_flap_detector
+                        .lock()
+                        .record_event(cur_ts.as_u64())
+                    {
+                        veilid_log!(self debugwarn "protected connection FLAPPING (penalty={:.1}): node {}", penalty, protect_nr);
+                    }
+                }
+
                 if let Some(inner) = self.arc.inner.lock().as_mut() {
                     for pa in inner.protected_addresses.values_mut() {
                         if pa.node_ref.same_entry(&protect_nr) {
-                            // See if we've had more than the threshold number of drops in the last span
-                            let cur_ts = Timestamp::now_non_decreasing();
                             let duration = cur_ts.duration_since(pa.span_start_ts);
 
                             let mut reconnect = true;
 
                             if duration < PROTECTED_CONNECTION_DROP_SPAN {
                                 pa.drops_in_span += 1;
-                                veilid_log!(self debug "== Protected connection dropped (count={}): {} -> {} for node {}", pa.drops_in_span, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
+                                veilid_log!(self debug "== Protected connection dropped (count={}, lifetime={}): {} -> {} for node {}", pa.drops_in_span, lifetime, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
 
                                 if pa.drops_in_span >= PROTECTED_CONNECTION_DROP_COUNT {
-                                    // Consider this as a failure to send if we've dropped the connection too many times in a single timespan
-                                    protect_nr.report_protected_connection_dropped();
+                                    protect_nr.record_protected_connection_dead(
+                                        conn.flow().transport_type(),
+                                    );
                                     reconnect = false;
 
-                                    // Reset the drop counter
                                     pa.drops_in_span = 0;
                                     pa.span_start_ts = cur_ts;
                                 }
                             } else {
-                                // Otherwise, just reset the drop detection span
                                 pa.drops_in_span = 1;
                                 pa.span_start_ts = cur_ts;
 
-                                veilid_log!(self debug "== Protected connection dropped (count={}): {} -> {} for node {}", pa.drops_in_span, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
+                                veilid_log!(self debug "== Protected connection dropped (count={}, lifetime={}): {} -> {} for node {}", pa.drops_in_span, lifetime, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
                             }
 
                             // Reconnect the protected connection immediately

@@ -9,6 +9,8 @@ import veilid
 from veilid import *
 from veilid.types import *
 
+from .conftest import dht_retry
+
 ##################################################################
 BOGUS_KEY = veilid.RecordKey.from_value(
     veilid.CryptoKind.CRYPTO_KIND_VLD0, veilid.BareRecordKey.from_parts(veilid.BareOpaqueRecordKey.from_bytes(b'                                '), None))
@@ -1181,15 +1183,11 @@ async def test_dht_fill_dht_local():
                             subkey_data = subkey_data_list[n]
 
                             async def setter(key: RecordKey, subkey: ValueSubkey, data: bytes):
-                                start = time.time()
-                                cnt = 0
-                                while True:
-                                    try:
-                                        await rc0.set_dht_value(key, subkey, data, SetDHTValueOptions(allow_offline=False))
-                                        break
-                                    except veilid.VeilidAPIErrorTryAgain:
-                                        cnt += 1
-                                        continue
+                                await dht_retry(
+                                    api0,
+                                    lambda: rc0.set_dht_value(key, subkey, data, SetDHTValueOptions(allow_offline=False)),
+                                    label=f"set {key} #{subkey}",
+                                )
 
                             init_set_futures.add(setter(key, ValueSubkey(i), subkey_data))
 
@@ -1203,6 +1201,81 @@ async def test_dht_fill_dht_local():
                         await rc0.close_dht_record(desc.key)
 
 
+@pytest.mark.skipif(os.getenv("STRESS") != "1", reason="stress test takes a long time")
+@pytest.mark.asyncio
+async def test_close_reopen_subkey_update_race(api_connection: veilid.VeilidAPI):
+    """Mimics dht_log's interleaved write pattern: writes to subkey 1 are
+    spaced out by many writes to subkey 0 (the "head" updates). Then
+    close + delete + reopen + force_refresh read of subkey 1. Asserts
+    the final seq=2 value of subkey 1 survives.
+    """
+    ITERATIONS = 8
+    SUBKEY0_WRITES_BETWEEN = 5  # head updates between segment-key updates
+    failures = []
+
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            for i in range(ITERATIONS):
+                rec = await rc.create_dht_record(kind, veilid.DHTSchema.dflt(2))
+                record_key = rec.key
+                owner_kp = rec.owner_key_pair()
+                assert owner_kp is not None
+
+                value_init = f"iter{i}-init-{record_key}".encode()
+                value_a = f"iter{i}-A-{record_key}".encode()
+                value_b = f"iter{i}-B-{record_key}".encode()
+
+                head_counter = [0]
+
+                async def write_subkey(subkey: int, value: bytes):
+                    tx = await api_connection.transact_dht_records(
+                        [record_key], None
+                    )
+                    async with tx:
+                        assert await tx.set(record_key, ValueSubkey(subkey), value) is None
+                        await tx.commit()
+
+                async def churn_subkey0(n: int):
+                    for _ in range(n):
+                        head_counter[0] += 1
+                        await write_subkey(
+                            0, f"head-rev{head_counter[0]}".encode()
+                        )
+
+                await write_subkey(1, value_init)         # seq=0 on subkey 1
+                await churn_subkey0(SUBKEY0_WRITES_BETWEEN)
+                await write_subkey(1, value_a)            # seq=1 on subkey 1
+                await churn_subkey0(SUBKEY0_WRITES_BETWEEN)
+                await write_subkey(1, value_b)            # seq=2 on subkey 1
+                await churn_subkey0(SUBKEY0_WRITES_BETWEEN)
+
+                await rc.close_dht_record(record_key)
+                await rc.delete_dht_record(record_key)
+                rec2 = await rc.open_dht_record(record_key, owner_kp)
+                assert rec2.key == record_key
+
+                try:
+                    vd = await rc.get_dht_value(
+                        record_key, ValueSubkey(1), force_refresh=True
+                    )
+                    if vd is None:
+                        failures.append((i, "got None"))
+                        print(f"  iter {i}: got None")
+                    elif vd.data != value_b:
+                        failures.append((i, f"got data={vd.data!r} seq={vd.seq}"))
+                        print(f"  iter {i}: STALE: got data={vd.data!r} seq={vd.seq}, "
+                              f"expected {value_b!r} (seq=2)")
+                    else:
+                        print(f"  iter {i}: OK seq={vd.seq}")
+                finally:
+                    await rc.close_dht_record(record_key)
+                    await rc.delete_dht_record(record_key)
+
+    if failures:
+        raise AssertionError(
+            f"{len(failures)}/{ITERATIONS} iterations got stale or null read: {failures}"
+        )
 
 
 async def sync(rc: veilid.RoutingContext, records: list[veilid.DHTRecordDescriptor]):

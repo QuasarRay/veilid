@@ -83,105 +83,6 @@ struct ClientAllowlistEntry {
     last_seen_ts: Timestamp,
 }
 
-#[derive(Clone, Debug)]
-pub struct SendDataResult {
-    /// How the data was sent, possibly to a relay
-    opt_node_contact_method: Option<NodeContactMethod>,
-    /// The specific flow used to send the data
-    unique_flow: UniqueFlow,
-}
-
-impl SendDataResult {
-    pub fn is_direct(&self) -> bool {
-        matches!(
-            &self.opt_node_contact_method,
-            Some(ncm) if ncm.is_direct()
-        )
-    }
-    pub fn sequence_ordering(&self) -> SequenceOrdering {
-        self.unique_flow.flow.protocol_type().sequence_ordering()
-    }
-
-    pub fn unique_flow(&self) -> UniqueFlow {
-        self.unique_flow
-    }
-}
-
-impl fmt::Display for SendDataResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "flow={}{}",
-            self.unique_flow.flow,
-            if let Some(ncm) = &self.opt_node_contact_method {
-                format!(" node_contact_method={}", ncm)
-            } else {
-                "".to_string()
-            },
-        )
-    }
-}
-
-/// Mechanism required to contact another node
-#[derive(Clone, Debug)]
-pub enum NodeContactMethod {
-    /// Connection should have already existed
-    Existing,
-    /// Contact the node directly
-    Direct { target_di: DialInfo },
-    /// Request via signal the node connect back directly
-    SignalReverse { relay_di: DialInfo },
-    /// Request via signal the node negotiate a hole punch
-    SignalHolePunch {
-        relay_di: DialInfo,
-        hole_punch_di: DialInfo,
-        reverse_hole_punch_di: DialInfo,
-    },
-    /// Must use an inbound relay to reach the node
-    InboundRelay { relay_di: DialInfo },
-    /// Must use outbound relay to reach the node
-    OutboundRelay { relay_nr: FilteredNodeRef },
-}
-
-impl NodeContactMethod {
-    pub fn is_direct(&self) -> bool {
-        matches!(self, NodeContactMethod::Direct { target_di: _ })
-    }
-    pub fn direct_dial_info(&self) -> Option<DialInfo> {
-        match &self {
-            NodeContactMethod::Direct { target_di } => Some(target_di.clone()),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for NodeContactMethod {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            NodeContactMethod::Existing => write!(f, "Existing"),
-            NodeContactMethod::Direct { target_di } => write!(f, "Direct({})", target_di),
-            NodeContactMethod::SignalReverse { relay_di } => {
-                write!(f, "SignalReverse(relay={})", relay_di)
-            }
-            NodeContactMethod::SignalHolePunch {
-                relay_di,
-                hole_punch_di,
-                reverse_hole_punch_di,
-            } => write!(
-                f,
-                "SignalHolePunch(relay={}, hole_punch={}, reverse_hole_punch={})",
-                relay_di, hole_punch_di, reverse_hole_punch_di
-            ),
-            NodeContactMethod::InboundRelay { relay_di } => {
-                write!(f, "InboundRelay(relay={})", relay_di)
-            }
-            NodeContactMethod::OutboundRelay { relay_nr } => {
-                write!(f, "OutboundRelay(relay={})", relay_nr)
-            }
-        }
-    }
-}
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StartupDisposition {
     Success,
@@ -1017,9 +918,12 @@ impl NetworkManager {
 
         envelope
             .to_encrypted_data(&crypto, body, &secret_key, &network_key)
-            .measure_debug(
-                TimestampDuration::new_ms(100),
-                veilid_log_dbg!(registry, "NetworkManager::build_envelope to_encrypted_data"),
+            .measure_limit(
+                TimestampDuration::new_ms(500),
+                veilid_log_dbg!(
+                    registry,
+                    "NetworkManager::build_envelope to_encrypted_data slow"
+                ),
             )
             .await
             .wrap_err("envelope failed to encode")
@@ -1038,9 +942,12 @@ impl NetworkManager {
         node_ref: FilteredNodeRef,
         opt_relay_di: Option<DialInfo>,
         body: Bytes,
-    ) -> EyreResult<NetworkResult<SendDataResult>> {
+    ) -> EyreResult<SendDataResult> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
-            return Ok(NetworkResult::no_connection_other("network is not started"));
+            return Ok(SendDataResult::new(
+                NodeContactMethodResult::NoContactMethod,
+                NetworkResult::no_connection_other("network is not started"),
+            ));
         };
         // Capture a stop token so the long network awaits below can be cancelled
         // when shutdown is requested. Without this, the enter guard above is held
@@ -1067,9 +974,9 @@ impl NetworkManager {
         let timestamp = Timestamp::now_increasing();
         let out = self
             .build_envelope(timestamp, best_node_id, envelope_version, body)
-            .measure_debug(
-                TimestampDuration::new_ms(200),
-                veilid_log_dbg!(self, "NetworkManager::build_envelope"),
+            .measure_limit(
+                TimestampDuration::new_ms(1000),
+                veilid_log_dbg!(self, "NetworkManager::build_envelope slow"),
             )
             .timeout_at(stop_token.clone())
             .await
@@ -1098,7 +1005,10 @@ impl NetworkManager {
         };
         match send_fut.timeout_at(stop_token).await {
             Ok(res) => res,
-            Err(_) => Ok(NetworkResult::no_connection_other("network is stopping")),
+            Err(_) => Ok(SendDataResult::new(
+                NodeContactMethodResult::NoContactMethod,
+                NetworkResult::no_connection_other("network is stopping"),
+            )),
         }
     }
 
@@ -1176,11 +1086,6 @@ impl NetworkManager {
                 return Ok(false);
             }
         };
-
-        // Earliest "we received from outside" signal for the online detector.
-        // Sender node id isn't decoded yet; rpc_processor will mark the sender seen later.
-        self.online_detector()
-            .record_success(routing_domain, std::iter::empty());
 
         // Is this a direct bootstrap request instead of an envelope?
         if magic == *BOOT_MAGIC {
@@ -1391,6 +1296,7 @@ impl NetworkManager {
         let sender_noderef = match routing_table.register_node_with_id(
             routing_domain,
             sender_id,
+            flow.transport_type(),
             local_timestamp,
         ) {
             Ok(v) => v,

@@ -59,11 +59,8 @@ pub fn fake_rpc_stats() -> RPCStats {
         last_question_ts: Some(Timestamp::from(1685569084280)),
         last_seen_ts: Some(Timestamp::from(1685569101256)),
         first_consecutive_seen_ts: Some(Timestamp::from(1685569111851)),
-        recent_lost_answers_unordered: 5,
-        recent_lost_answers_ordered: 6,
         failed_to_send: 3,
-        answer_unordered: fake_answer_stats(),
-        answer_ordered: fake_answer_stats(),
+        unreachable: 1,
     }
 }
 
@@ -95,6 +92,7 @@ pub fn fake_peer_stats() -> PeerStats {
         latency: Some(fake_latency_stats()),
         transfer: fake_transfer_stats_down_up(),
         state: fake_state_stats(),
+        protected_connection_drop: None,
     }
 }
 

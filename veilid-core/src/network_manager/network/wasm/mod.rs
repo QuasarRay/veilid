@@ -399,11 +399,7 @@ impl PlatformNetwork for WasmNetwork {
         None
     }
 
-    fn get_preferred_local_address_by_key(
-        &self,
-        _pt: ProtocolType,
-        _at: AddressType,
-    ) -> Option<SocketAddr> {
+    fn get_preferred_local_address_by_key(&self, _tt: TransportType) -> Option<SocketAddr> {
         None
     }
 
@@ -469,7 +465,7 @@ impl WasmNetwork {
         if matches!(network_result, NetworkResult::NoConnection(_)) {
             self.network_manager()
                 .address_filter()
-                .set_dial_info_failed(dial_info);
+                .set_transport_failed(dial_info);
         }
         Ok(network_result)
     }
@@ -516,6 +512,11 @@ impl WasmNetwork {
             }
         };
         self.inner.lock().protocol_config = protocol_config.clone();
+
+        // Tell offline detection which socket classes this network uses
+        self.network_manager()
+            .online_detector()
+            .set_protocol_config(protocol_config.outbound, protocol_config.inbound);
 
         // Start editing routing table
         let routing_table = self.routing_table();

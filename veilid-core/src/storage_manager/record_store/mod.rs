@@ -129,10 +129,13 @@ where
 
         let inner = RecordStoreInner::<D>::try_new(unlocked_inner.clone()).await?;
 
+        let record_store_lock_table =
+            RecordStoreRecordLockTable::new(unlocked_inner.registry.clone());
+
         Ok(Self {
             unlocked_inner,
             inner: Arc::new(Mutex::new(inner)),
-            record_store_lock_table: RecordStoreRecordLockTable::new(),
+            record_store_lock_table,
         })
     }
 

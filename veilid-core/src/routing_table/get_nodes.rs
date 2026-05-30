@@ -6,13 +6,37 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
+/// Why a node needs a ping. Lower priority numbers run first.
+pub(crate) enum NeedPing {
+    /// We don't have node status yet for this node.
+    NodeStatus,
+    /// The node hasn't seen our latest node info timestamp.
+    OurNodeInfoTs,
+    /// Timing-based per-transport pings: which low-level transports need probing.
+    PerTransportTiming(BTreeSet<LowLevelTransportType>),
+}
+
+impl NeedPing {
+    pub fn priority(&self) -> usize {
+        match self {
+            Self::NodeStatus => 50,
+            Self::OurNodeInfoTs => 75,
+            Self::PerTransportTiming(_) => 100,
+        }
+    }
+}
+
 impl RoutingTable {
-    pub fn need_ping_priority(
+    /// Decide if a node needs a ping. None means no ping needed right now.
+    /// `outbound_dif` is our outbound dial-info filter for the routing domain;
+    /// it determines which of the node's transports we can actually reach.
+    pub fn need_ping(
         &self,
         routing_domain: RoutingDomain,
         opt_own_node_info_ts: Option<Timestamp>,
+        outbound_dif: &DialInfoFilter,
         snap: &BucketEntrySnapshot,
-    ) -> Option<usize> {
+    ) -> Option<NeedPing> {
         // If this entry doesn't have node info in the routing domain we are checking, don't include it
         if !snap.has_node_info(routing_domain.into()) {
             return None;
@@ -22,7 +46,7 @@ impl RoutingTable {
         if snap.node_status(routing_domain).is_none() {
             #[cfg(feature = "verbose-tracing")]
             veilid_log!(self debug "Ping reason: node_status is none (rd={:?} ids={:?})", routing_domain, snap.node_ids);
-            return Some(50);
+            return Some(NeedPing::NodeStatus);
         }
 
         // If this entry needs a ping because this node hasn't seen our latest node info, then do it
@@ -31,21 +55,29 @@ impl RoutingTable {
                 #[cfg(feature = "verbose-tracing")]
                 veilid_log!(self debug "Ping reason: has not seen our node info timestamp (rd={:?} ids={:?} own_ni_ts={}",
                     routing_domain, snap.node_ids, own_node_info_ts);
-                return Some(75);
+                return Some(NeedPing::OurNodeInfoTs);
             }
         }
 
-        // If this entry needs need a ping by non-routing-domain-specific metrics then do it
-        if snap.needs_ping() {
+        // If any low-level transport this node supports needs a timing-based ping
+        // (or has never been pinged yet), schedule per-transport pings.
+        let needing: BTreeSet<LowLevelTransportType> = snap
+            .supported_low_level_transports(routing_domain, outbound_dif)
+            .into_iter()
+            .filter(|t| snap.transport_state(*t).is_none() || snap.needs_ping_for(*t))
+            .collect();
+        if !needing.is_empty() {
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(self debug "Ping reason: timing (rd={:?} ids={:?})", routing_domain, snap.node_ids);
-            return Some(100);
+            veilid_log!(self debug "Ping reason: timing (rd={:?} ids={:?} transports={:?})",
+                routing_domain, snap.node_ids, needing);
+            return Some(NeedPing::PerTransportTiming(needing));
         }
 
         None
     }
 
-    /// See which nodes need to be pinged
+    /// See which nodes need to be pinged. Priority-100 entries are transport-pinned;
+    /// priority 50/75 entries use Sequencing::PreferOrdered (multi-transport).
     pub fn get_relability_ping_nodes(
         &self,
         routing_domain: RoutingDomain,
@@ -54,6 +86,7 @@ impl RoutingTable {
         let opt_own_node_info_ts = self
             .get_published_peer_info(routing_domain)
             .map(|pi| pi.node_info().timestamp());
+        let outbound_dif = self.get_outbound_dial_info_filter(routing_domain);
 
         let mut filters = VecDeque::new();
 
@@ -63,16 +96,22 @@ impl RoutingTable {
                 as RoutingTableEntryFilter;
         filters.push_back(filter_self);
 
+        let filter_outbound_dif = outbound_dif;
         let filter_ping = Box::new(move |v: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
             let snap = v.as_ref().unwrap_or_log();
 
             // See if this node needs a ping
-            self.need_ping_priority(routing_domain, opt_own_node_info_ts, snap)
-                .is_some()
+            self.need_ping(
+                routing_domain,
+                opt_own_node_info_ts,
+                &filter_outbound_dif,
+                snap,
+            )
+            .is_some()
         }) as RoutingTableEntryFilter;
         filters.push_back(filter_ping);
 
-        // Sort by least recently contacted
+        // Prioritize nodes most likely to respond: recently-seen first, never-seen last
         let compare = Box::new(
             |opt_a_snap: &Option<BucketEntrySnapshot>,
              opt_b_snap: &Option<BucketEntrySnapshot>,
@@ -81,35 +120,37 @@ impl RoutingTable {
                 let a_snap = opt_a_snap.as_ref().unwrap_or_log();
                 let b_snap = opt_b_snap.as_ref().unwrap_or_log();
 
-                // Sort by least recently contacted regardless of reliability
                 let ca = a_snap
                     .peer_stats
                     .rpc_stats
-                    .last_question_ts
+                    .last_seen_ts
                     .unwrap_or(Timestamp::new(0))
                     .as_u64();
                 let cb = b_snap
                     .peer_stats
                     .rpc_stats
-                    .last_question_ts
+                    .last_seen_ts
                     .unwrap_or(Timestamp::new(0))
                     .as_u64();
-                ca.cmp(&cb)
+                cb.cmp(&ca)
             },
         ) as RoutingTableEntrySort;
 
-        let transform = |opt_snap: Option<BucketEntrySnapshot>| {
+        let transform_outbound_dif = outbound_dif;
+        let transform = move |opt_snap: Option<BucketEntrySnapshot>| {
             // Self node is always filtered out, so it is safe to unwrap here
             let snap = opt_snap.unwrap_or_log();
 
-            let ping_priority = self
-                .need_ping_priority(routing_domain, opt_own_node_info_ts, &snap)
+            let need_ping = self
+                .need_ping(
+                    routing_domain,
+                    opt_own_node_info_ts,
+                    &transform_outbound_dif,
+                    &snap,
+                )
                 .unwrap_or_log();
 
-            (
-                ping_priority,
-                snap.node_ref.routing_domain_filtered(routing_domain),
-            )
+            (need_ping, snap)
         };
 
         let pre_sort_filter = Box::new(
@@ -120,7 +161,7 @@ impl RoutingTable {
 
         let snapshot = self.snapshot_entries(cur_ts, BucketEntryState::Unreliable);
 
-        let priority_nodes: Vec<(usize, FilteredNodeRef)> = snapshot
+        let priority_nodes: Vec<(NeedPing, BucketEntrySnapshot)> = snapshot
             .get_peers_with_sort_and_filter(
                 usize::MAX,
                 cur_ts,
@@ -131,8 +172,32 @@ impl RoutingTable {
             );
 
         let mut out: BTreeMap<usize, Vec<FilteredNodeRef>> = BTreeMap::new();
-        for (priority, node) in priority_nodes {
-            out.entry(priority).or_default().push(node);
+        for (need_ping, snap) in priority_nodes {
+            let priority = need_ping.priority();
+            let bucket = out.entry(priority).or_default();
+            let node = snap.node_ref.clone();
+            match need_ping {
+                NeedPing::NodeStatus | NeedPing::OurNodeInfoTs => {
+                    // Node-level ping: multi-transport, PreferOrdered.
+                    bucket.push(
+                        node.routing_domain_filtered(routing_domain)
+                            .with_sequencing(Sequencing::PreferOrdered),
+                    );
+                }
+                NeedPing::PerTransportTiming(low_levels) => {
+                    // For each low-level transport needing a ping, pick the preferred
+                    // high-level protocol the node supports and construct a single
+                    // transport-pinned ping. TCP wins over WS within Stream class.
+                    for llt in low_levels {
+                        let Some(t) =
+                            snap.preferred_transport_for(routing_domain, llt, &outbound_dif)
+                        else {
+                            continue;
+                        };
+                        bucket.push(node.with_transport(routing_domain, t).into_filtered());
+                    }
+                }
+            }
         }
 
         out

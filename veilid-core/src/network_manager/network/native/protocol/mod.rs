@@ -29,6 +29,17 @@ impl PlatformProtocolNetworkConnection for NativeProtocolNetworkConnection {
         }
     }
 
+    fn direction(&self) -> Direction {
+        match self {
+            // RawTcp accepts and connects; the rest are inbound-accept or outbound-connect only
+            Self::RawTcp(t) => t.direction(),
+            Self::WsAccepted(_) => Direction::In,
+            Self::Ws(_) => Direction::Out,
+            #[cfg(feature = "enable-protocol-wss")]
+            Self::Wss(_) => Direction::Out,
+        }
+    }
+
     fn close(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
         Box::pin(async move {
             match self {

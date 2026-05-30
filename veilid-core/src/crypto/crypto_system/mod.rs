@@ -13,11 +13,7 @@ pub(crate) mod vld0;
 pub(crate) const VEILID_DOMAIN_API: &[u8] = b"VEILID_API";
 
 #[cfg(feature = "enable-crypto-none")]
-pub use none::sizes::*;
-#[cfg(feature = "enable-crypto-none")]
 pub use none::*;
-#[cfg(feature = "enable-crypto-vld0")]
-pub use vld0::sizes::*;
 #[cfg(feature = "enable-crypto-vld0")]
 pub use vld0::*;
 // #[cfg(feature = "enable-crypto-vld1")]

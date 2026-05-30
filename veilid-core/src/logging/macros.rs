@@ -108,10 +108,12 @@ macro_rules! veilid_log_event {
     };
 }
 
+// Warn in debug builds so it's obvious without enabling debug logging; demote to
+// debug in release so it stays silent unless debug logging is turned on.
 #[cfg(debug_assertions)]
-pub(crate) const DEBUGWARN: tracing::Level = tracing::Level::DEBUG;
-#[cfg(not(debug_assertions))]
 pub(crate) const DEBUGWARN: tracing::Level = tracing::Level::WARN;
+#[cfg(not(debug_assertions))]
+pub(crate) const DEBUGWARN: tracing::Level = tracing::Level::DEBUG;
 
 #[macro_export]
 macro_rules! veilid_log {

@@ -97,6 +97,8 @@ cfg_if! {
                     #[allow(clippy::unused_async)]
                     async {
                         VeilidTracing::stdout().try_apply_default_env().expect("RUST_LOG string is invalid");
+                        #[cfg(feature = "debug-locks")]
+                        veilid_tools::deadlock_detector::start_deadlock_detector();
                     }
                 );
             });
@@ -115,6 +117,7 @@ cfg_if! {
         run_test!(component protected_store);
         run_test!(component storage_manager);
         run_test!(component rpc_processor);
+        run_test!(component attachment_manager);
 
     }
 

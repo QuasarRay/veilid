@@ -1,7 +1,7 @@
 use super::*;
 
 /// Keeping track of how many entries we have of each capability set we care about
-#[derive(Debug, Copy, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityCounts {
     /// A count of the entries in the routing domain per crypto kind with any capabilities
     pub any_capabilities: usize,
@@ -72,6 +72,8 @@ pub struct EntrySummaryDetail {
     pub total: CapabilityCounts,
     /// A count of the entries in the routing domain per crypto kind that are live
     pub live: CapabilityCounts,
+    /// Live entries that can serve as safety route hops (not on our own network)
+    pub live_external: CapabilityCounts,
     /// A count of the entries in the routing domain per crypto kind that have been tested
     pub tested: CapabilityCounts,
 }
@@ -81,6 +83,7 @@ impl EntrySummaryDetail {
         &mut self,
         routing_domain: RoutingDomain,
         e: &BucketEntrySnapshot,
+        is_own_network: bool,
     ) {
         self.total.add_entry(routing_domain, e);
         if matches!(
@@ -88,6 +91,9 @@ impl EntrySummaryDetail {
             BucketEntryState::Reliable | BucketEntryState::Unreliable
         ) {
             self.live.add_entry(routing_domain, e);
+            if !is_own_network {
+                self.live_external.add_entry(routing_domain, e);
+            }
             if e.is_tested() {
                 self.tested.add_entry(routing_domain, e);
             }
@@ -100,14 +106,14 @@ impl fmt::Display for EntrySummaryDetail {
         if f.alternate() {
             write!(
                 f,
-                "total: {}\nlive: {}\ntested: {}",
-                self.total, self.live, self.tested
+                "total: {}\nlive: {}\nlive_external: {}\ntested: {}",
+                self.total, self.live, self.live_external, self.tested
             )
         } else {
             write!(
                 f,
-                "total:{} / live:{} / tested:{}",
-                self.total, self.live, self.tested
+                "total:{} / live:{} / live_external:{} / tested:{}",
+                self.total, self.live, self.live_external, self.tested
             )
         }
     }
@@ -131,12 +137,13 @@ impl EntrySummary {
         &mut self,
         routing_domain: RoutingDomain,
         e: &BucketEntrySnapshot,
+        is_own_network: bool,
     ) {
-        self.combined.add_entry(routing_domain, e);
+        self.combined.add_entry(routing_domain, e, is_own_network);
         for crypto_kind in e.crypto_kinds() {
             let detail = self.per_crypto_kind.entry(crypto_kind).or_default();
 
-            detail.add_entry(routing_domain, e);
+            detail.add_entry(routing_domain, e, is_own_network);
         }
     }
 }

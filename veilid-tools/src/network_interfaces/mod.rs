@@ -677,6 +677,14 @@ impl NetworkInterfaces {
             last_interfaces
         };
 
+        // Drop globally-routable addresses from interfaces that aren't the kernel's
+        // primary outbound source for that family (e.g. iOS cellular IPv6 while wifi
+        // is primary). Private/local addresses are kept so the LocalNetwork routing
+        // domain still works. Don't do this on wasm32-unknown-unknown because we don't have
+        // access to the network stack.
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        Self::filter_non_primary_global_addresses(&mut last_interfaces);
+
         let mut inner = self.inner.lock();
         core::mem::swap(&mut inner.interfaces, &mut last_interfaces);
         inner.valid = true;
@@ -741,6 +749,30 @@ impl NetworkInterfaces {
     }
 
     /////////////////////////////////////////////
+
+    // For each interface, keep only addresses that are either non-global (private/
+    // link-local/ULA, needed by LocalNetwork) or match the kernel's primary outbound
+    // source for that family. A global address on a non-primary interface is
+    // unreachable from peers — publishing it as our dial info just causes timeouts.
+    // Interfaces that end up with no addresses are dropped entirely.
+
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    fn filter_non_primary_global_addresses(interfaces: &mut BTreeMap<String, NetworkInterface>) {
+        let primary_v4 = primary_source_ipv4();
+        let primary_v6 = primary_source_ipv6();
+
+        interfaces.retain(|_, intf| {
+            intf.addrs.retain(|addr| match addr.if_addr() {
+                IfAddr::V4(v4) => {
+                    !ipv4addr_is_global(&v4.ip) || primary_v4.is_some_and(|p| p == v4.ip)
+                }
+                IfAddr::V6(v6) => {
+                    !ipv6addr_is_unicast_global(&v6.ip) || primary_v6.is_some_and(|p| p == v6.ip)
+                }
+            });
+            !intf.addrs.is_empty()
+        });
+    }
 
     fn cache_interface_address_state(inner: &mut NetworkInterfacesInner) {
         // Reduce interfaces to their best routable ip addresses

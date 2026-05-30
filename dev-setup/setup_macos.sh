@@ -152,7 +152,7 @@ $BREW_COMMAND install capnp cmake llvm jq binaryen bumpversion
 rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-darwin x86_64-apple-ios wasm32-unknown-unknown aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
 
 # install cargo packages
-cargo install wasm-bindgen-cli wasm-pack cargo-edit@0.13.0 cargo-nextest
+cargo install wasm-bindgen-cli cargo-edit@0.13.0 cargo-nextest
 
 if command -v pod &>/dev/null; then
     echo '[X] CocoaPods is available in the path'

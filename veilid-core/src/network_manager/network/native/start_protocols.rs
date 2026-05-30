@@ -125,7 +125,7 @@ impl NativeNetwork {
 
     // Add local dial info to preferred local address table
     pub(super) fn set_preferred_local_address(inner: &mut NetworkInner, pa: PeerAddress) {
-        let key = (pa.protocol_type(), pa.address_type());
+        let key = pa.transport_type();
         let sa = pa.socket_addr();
         // let unspec_sa = match sa {
         //     SocketAddr::V4(a) => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, a.port())),

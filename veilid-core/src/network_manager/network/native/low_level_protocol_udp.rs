@@ -304,7 +304,8 @@ impl NativeNetwork {
         let mut bound_listen_addrs: BTreeSet<SocketAddr> = BTreeSet::new();
         let interface_address_state = self.interfaces.interface_address_state();
         for at in [AddressType::IPV4, AddressType::IPV6] {
-            let Some(listen_addr) = self.get_preferred_local_address_by_key(ProtocolType::UDP, at)
+            let Some(listen_addr) =
+                self.get_preferred_local_address_by_key(TransportType::new(ProtocolType::UDP, at))
             else {
                 continue;
             };

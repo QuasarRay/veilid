@@ -271,17 +271,36 @@ pub struct SafetySpec {
 
 impl fmt::Display for SafetySpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "hops={},{},{},{}",
-            self.hop_count,
-            f.to_string(self.stability),
-            f.to_string(self.sequencing),
-            self.preferred_route
-                .as_ref()
-                .map(|r| format!("pref={}", f.to_string(r)))
-                .unwrap_or_default()
-        )
+        if f.alternate() {
+            // Compact: only fields differing from default. hop_count != 1 marks non-default
+            // because a 1-hop safety route is the lightest meaningful default.
+            let mut parts: Vec<String> = Vec::new();
+            if self.hop_count != 1 {
+                parts.push(format!("#{}", self.hop_count));
+            }
+            if self.stability != Stability::default() {
+                parts.push(f.to_string(self.stability));
+            }
+            if self.sequencing != Sequencing::default() {
+                parts.push(f.to_string(self.sequencing));
+            }
+            if let Some(r) = &self.preferred_route {
+                parts.push(format!("@{}", f.to_string(r)));
+            }
+            write!(f, "{}", parts.join(","))
+        } else {
+            write!(
+                f,
+                "hops={},{},{},{}",
+                self.hop_count,
+                f.to_string(self.stability),
+                f.to_string(self.sequencing),
+                self.preferred_route
+                    .as_ref()
+                    .map(|r| format!("pref={}", f.to_string(r)))
+                    .unwrap_or_default()
+            )
+        }
     }
 }
 

@@ -50,6 +50,16 @@ pub(in crate::rpc_processor) enum RPCMessageHeaderDetail {
     PrivateRouted(RPCMessageHeaderDetailPrivateRouted),
 }
 
+impl RPCMessageHeaderDetail {
+    pub fn flow(&self) -> Flow {
+        match self {
+            RPCMessageHeaderDetail::Direct(d) => d.flow,
+            RPCMessageHeaderDetail::SafetyRouted(s) => s.direct.flow,
+            RPCMessageHeaderDetail::PrivateRouted(p) => p.direct.flow,
+        }
+    }
+}
+
 /// The decoded header of an RPC message
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct MessageHeader {

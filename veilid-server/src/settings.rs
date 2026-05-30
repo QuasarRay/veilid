@@ -134,6 +134,8 @@ core:
     table_store:
         directory: '%TABLE_STORE_DIRECTORY%'
         delete: false
+        wipe_on_invalid_device_encryption_key: false
+        max_value_size_mb: 64
     block_store:
         directory: '%BLOCK_STORE_DIRECTORY%'
         delete: false
@@ -154,11 +156,6 @@ core:
             secret_keys: null
             bootstrap: ['bootstrap-v1.veilid.net']
             bootstrap_keys: ['VLD0:Vj0lKDdUQXmQ5Ol1SZdlvXkBHUccBcQvGLN9vbLSI7k','VLD0:QeQJorqbXtC7v3OlynCZ_W3m76wGNeB5NTF81ypqHAo','VLD0:QNdcl-0OiFfYVj9331XVR6IqZ49NG-E18d5P7lwi4TA']
-            limit_over_attached: 64
-            limit_fully_attached: 32
-            limit_attached_strong: 16
-            limit_attached_good: 8
-            limit_attached_weak: 4
         rpc:
             concurrency: 0
             queue_size: 1024
@@ -691,11 +688,6 @@ pub struct RoutingTable {
     pub secret_keys: Option<veilid_core::SecretKeyGroup>,
     pub bootstrap: Vec<String>,
     pub bootstrap_keys: Vec<veilid_core::PublicKey>,
-    pub limit_over_attached: u32,
-    pub limit_fully_attached: u32,
-    pub limit_attached_strong: u32,
-    pub limit_attached_good: u32,
-    pub limit_attached_weak: u32,
 }
 
 mod auto_bool {
@@ -870,6 +862,8 @@ pub struct Testing {
 pub struct TableStore {
     pub directory: String,
     pub delete: bool,
+    pub wipe_on_invalid_device_encryption_key: bool,
+    pub max_value_size_mb: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1269,6 +1263,11 @@ impl Settings {
         );
         set_config_value!(inner.core.table_store.directory, value);
         set_config_value!(inner.core.table_store.delete, value);
+        set_config_value!(
+            inner.core.table_store.wipe_on_invalid_device_encryption_key,
+            value
+        );
+        set_config_value!(inner.core.table_store.max_value_size_mb, value);
         set_config_value!(inner.core.block_store.directory, value);
         set_config_value!(inner.core.block_store.delete, value);
         set_config_value!(inner.core.network.connection_initial_timeout_ms, value);
@@ -1288,14 +1287,6 @@ impl Settings {
         set_config_value!(inner.core.network.routing_table.secret_keys, value);
         set_config_value!(inner.core.network.routing_table.bootstrap, value);
         set_config_value!(inner.core.network.routing_table.bootstrap_keys, value);
-        set_config_value!(inner.core.network.routing_table.limit_over_attached, value);
-        set_config_value!(inner.core.network.routing_table.limit_fully_attached, value);
-        set_config_value!(
-            inner.core.network.routing_table.limit_attached_strong,
-            value
-        );
-        set_config_value!(inner.core.network.routing_table.limit_attached_good, value);
-        set_config_value!(inner.core.network.routing_table.limit_attached_weak, value);
         set_config_value!(inner.core.network.rpc.concurrency, value);
         set_config_value!(inner.core.network.rpc.queue_size, value);
         set_config_value!(inner.core.network.rpc.max_timestamp_behind_ms, value);
@@ -1401,8 +1392,7 @@ impl Settings {
                 disable: {
                     let mut caps = Vec::<veilid_core::VeilidCapability>::new();
                     for c in &inner.core.capabilities.disable {
-                        let cap = veilid_core::VeilidCapability::from_str(c.as_str())
-                            .map_err(VeilidAPIError::generic)?;
+                        let cap = veilid_core::VeilidCapability::from_str(c.as_str())?;
                         caps.push(cap);
                     }
                     caps
@@ -1427,6 +1417,11 @@ impl Settings {
             table_store: VeilidConfigTableStore {
                 directory: inner.core.table_store.directory.clone(),
                 delete: inner.core.table_store.delete,
+                wipe_on_invalid_device_encryption_key: inner
+                    .core
+                    .table_store
+                    .wipe_on_invalid_device_encryption_key,
+                max_value_size_mb: inner.core.table_store.max_value_size_mb,
             },
             block_store: VeilidConfigBlockStore {
                 directory: inner.core.block_store.directory.clone(),
@@ -1472,11 +1467,6 @@ impl Settings {
                         .unwrap_or_default(),
                     bootstrap: inner.core.network.routing_table.bootstrap.clone(),
                     bootstrap_keys: inner.core.network.routing_table.bootstrap_keys.clone(),
-                    limit_over_attached: inner.core.network.routing_table.limit_over_attached,
-                    limit_fully_attached: inner.core.network.routing_table.limit_fully_attached,
-                    limit_attached_strong: inner.core.network.routing_table.limit_attached_strong,
-                    limit_attached_good: inner.core.network.routing_table.limit_attached_good,
-                    limit_attached_weak: inner.core.network.routing_table.limit_attached_weak,
                 },
                 rpc: VeilidConfigRPC {
                     concurrency: inner.core.network.rpc.concurrency,
@@ -1758,6 +1748,8 @@ mod tests {
                 .to_string()
         );
         assert!(!s.core.table_store.delete);
+        assert!(!s.core.table_store.wipe_on_invalid_device_encryption_key);
+        assert_eq!(s.core.table_store.max_value_size_mb, 64);
 
         assert_eq!(
             s.core.block_store.directory,

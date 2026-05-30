@@ -1,56 +1,89 @@
+mod local_node_transaction_id;
 mod node_transaction;
-mod node_transaction_id;
+mod outbound_transaction_handle;
+mod outbound_transaction_keepalive_deadlines;
+mod outbound_transaction_keepalive_processor;
 mod outbound_transaction_record_state;
 mod outbound_transaction_stage;
 mod outbound_transaction_state;
+mod remote_node_transaction_id;
 mod subkey_consensus;
 mod transaction_cleanup;
 
-use super::transaction::OutboundTransactionHandle;
-use super::transaction_begin::{OutboundTransactBeginParams, OutboundTransactBeginResult};
-use super::transaction_command::{
-    OutboundTransactCommandNodes, OutboundTransactCommandParams,
+use super::*;
+
+use transaction_begin::{OutboundTransactBeginParams, OutboundTransactBeginResult};
+use transaction_command::{
+    OutboundTransactCommandNode, OutboundTransactCommandNodes, OutboundTransactCommandParams,
     OutboundTransactCommandPerNodeResult, OutboundTransactCommandResult,
     TransactCommandDisposition,
 };
-use super::*;
 
-use serde_with::serde_as;
-
+pub(in crate::storage_manager) use local_node_transaction_id::*;
 pub(in crate::storage_manager) use node_transaction::*;
-pub(in crate::storage_manager) use node_transaction_id::*;
+pub(in crate::storage_manager) use outbound_transaction_keepalive_processor::*;
 pub(in crate::storage_manager) use outbound_transaction_record_state::*;
 pub(in crate::storage_manager) use outbound_transaction_stage::*;
 pub(in crate::storage_manager) use outbound_transaction_state::*;
+pub(in crate::storage_manager) use remote_node_transaction_id::*;
 pub(in crate::storage_manager) use subkey_consensus::*;
 pub(in crate::storage_manager) use transaction_cleanup::*;
 
-impl_veilid_log_facility!("stor");
+pub use outbound_transaction_handle::*;
 
-/// The percentage of nodes to allow past the consensus count on a transaction begin to account for network errors, rounded up
-const CONSENSUS_TRIM_PERCENT: usize = 50;
+impl_veilid_log_facility!("stor");
 
 /// Number of concurrent network operations per transaction
 /// excluding keepalives. Applies only to get/set operations inside a begin state.
 const PER_TRANSACTION_OPERATION_CONCURRENCY: usize = 32;
 
-/// Outbound Transaction Manager is not currently serialized, so
-/// transactions do not survive across app restarts
-/// If it is to be serialized it has to be done more intelligently than
-/// the `save_metadata` task default json dump that writes the whole thing
-/// every 30 seconds.
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize)]
+/// Parameters for adding a node transaction to an existing transaction
+pub(in crate::storage_manager) struct AddNodeTransactionParams {
+    /// Handle of the transaction this node belongs to
+    pub transaction_handle: OutboundTransactionHandle,
+    /// Record key this node transaction is for
+    pub opaque_record_key: OpaqueRecordKey,
+    /// Server-side transaction id
+    pub xid: u64,
+    /// Ref to the node running this transaction
+    pub node_ref: NodeRef,
+    /// When the server says this node transaction is dead
+    pub expiration: Timestamp,
+    /// Destination used to reach this node
+    pub dest: Destination,
+    /// Record descriptor
+    pub descriptor: Arc<SignedValueDescriptor>,
+    /// RTT measured during Begin, used to seed the per-node RTT estimate
+    pub opt_begin_rtt: Option<TimestampDuration>,
+}
+
+#[derive(Debug, Clone)]
+struct LocalNodeTransactionMapping {
+    transaction_handle: OutboundTransactionHandle,
+    opaque_record_key: OpaqueRecordKey,
+}
+
+#[derive(Debug)]
 pub(in crate::storage_manager) struct OutboundTransactionManager {
     /// Registry used for logging
-    #[serde(skip)]
-    opt_registry: Option<VeilidComponentRegistry>,
+    registry: VeilidComponentRegistry,
     /// Record key to handle map
     handles_by_key: HashMap<OpaqueRecordKey, OutboundTransactionHandle>,
     /// Each transaction per record key
-    #[serde_as(as = "Vec<(_, _)>")]
     transactions: HashMap<OutboundTransactionHandle, OutboundTransactionState>,
+    /// Next transaction id to assign
+    next_txid: u64,
+    /// Local node transaction ids to transaction mapping.
+    /// Invariant: an entry exists iff the corresponding node_transaction exists.
+    local_node_transaction_mappings: HashMap<LocalNodeTransactionId, LocalNodeTransactionMapping>,
+    /// Next local node transaction id to assign
+    next_lnxid: u64,
+
+    /// Keepalive processor
+    opt_keepalive_processor: Option<Arc<OutboundTransactionKeepaliveProcessor>>,
 }
+
+impl_veilid_component_accessors!(OutboundTransactionManager);
 
 impl fmt::Display for OutboundTransactionManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -69,41 +102,95 @@ impl fmt::Display for OutboundTransactionManager {
         write!(f, "{}", out)
     }
 }
-impl Default for OutboundTransactionManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl VeilidComponentRegistryAccessor for OutboundTransactionManager {
-    fn registry(&self) -> VeilidComponentRegistry {
-        self.opt_registry.clone().unwrap_or_log()
-    }
-}
 
 type OutboundTransactionPerNodeResultHandler<'a> = Box<
     dyn FnMut(&mut NodeTransaction, OutboundTransactCommandPerNodeResult) -> VeilidAPIResult<()>
         + 'a,
 >;
 
+pub type OutboundTransactionManagerTerminate = PinBoxFutureStatic<()>;
+
 impl OutboundTransactionManager {
-    pub fn new() -> Self {
+    pub fn new(registry: VeilidComponentRegistry) -> Self {
         Self {
-            opt_registry: None,
+            registry,
             handles_by_key: HashMap::new(),
             transactions: HashMap::new(),
+            local_node_transaction_mappings: HashMap::new(),
+            next_txid: 0u64,
+            next_lnxid: 1_000_000_000u64,
+            opt_keepalive_processor: None,
         }
     }
 
-    pub fn prepare(&mut self, routing_table: &RoutingTable) {
-        self.opt_registry = Some(routing_table.registry());
-
+    pub fn init(&mut self) {
         let cur_ts = Timestamp::now();
+        let routing_table = self.routing_table();
         for transaction in self.transactions.values_mut() {
-            transaction.prepare(routing_table, cur_ts);
+            transaction.prepare(&routing_table, cur_ts);
+        }
+
+        let keepalive_processor = Arc::new(OutboundTransactionKeepaliveProcessor::new(
+            routing_table.registry(),
+        ));
+
+        keepalive_processor.init();
+
+        self.opt_keepalive_processor = Some(keepalive_processor);
+    }
+
+    pub fn terminate(&mut self) -> OutboundTransactionManagerTerminate {
+        let opt_keepalive_processor = self.opt_keepalive_processor.take();
+        Box::pin(async move {
+            if let Some(keepalive_processor) = opt_keepalive_processor {
+                keepalive_processor.terminate().await;
+            }
+        })
+    }
+
+    fn allocate_transaction_handle(&mut self) -> VeilidAPIResult<OutboundTransactionHandle> {
+        let start_txid = self.next_txid;
+        loop {
+            // Get txid and increment id allocator
+            let handle = OutboundTransactionHandle::new(self.next_txid);
+            self.next_txid = self.next_txid.wrapping_add(1);
+
+            if self.transactions.contains_key(&handle) {
+                if self.next_txid == start_txid {
+                    // This should basically never happen, but logic is here for completeness
+                    veilid_log!(self debugwarn "no free transaction handles available, wrapped around to start_txid={}", start_txid);
+                    apibail_try_again!("no free transaction handles available");
+                }
+                // Iterate and try again with the next txid
+            } else {
+                // Got a unique transaction handle, return it
+                break Ok(handle);
+            }
         }
     }
 
+    fn allocate_local_node_transaction_id(&mut self) -> VeilidAPIResult<LocalNodeTransactionId> {
+        let start_lnxid = self.next_lnxid;
+        loop {
+            // Get lnxid and increment id allocator
+            let lnxid = LocalNodeTransactionId::new(self.next_lnxid);
+            self.next_lnxid = self.next_lnxid.wrapping_add(1);
+
+            if self.local_node_transaction_mappings.contains_key(&lnxid) {
+                if self.next_lnxid == start_lnxid {
+                    // This should basically never happen, but logic is here for completeness
+                    veilid_log!(self debugwarn "no free local node transaction ids available, wrapped around to start_lnxid={}", start_lnxid);
+                    apibail_try_again!("no free local node transaction ids available");
+                }
+                // Iterate and try again with the next lnxid
+            } else {
+                // Got a unique local node transaction id, return it
+                break Ok(lnxid);
+            }
+        }
+    }
+
+    /// Create a new transaction over a set of records
     pub fn new_transaction(
         &mut self,
         record_params: Vec<OutboundTransactionRecordParams>,
@@ -120,7 +207,7 @@ impl OutboundTransactionManager {
             }
             opaque_record_keys.push(opaque_record_key);
         }
-        let transaction_handle = OutboundTransactionHandle::new(opaque_record_keys.clone());
+        let transaction_handle = self.allocate_transaction_handle()?;
 
         // Create a new outbound transaction state
         let mut outbound_transaction_state = OutboundTransactionState::new(self.registry());
@@ -133,13 +220,293 @@ impl OutboundTransactionManager {
         // Add to transaction list
         for opaque_record_key in opaque_record_keys {
             self.handles_by_key
-                .insert(opaque_record_key, transaction_handle.clone());
+                .insert(opaque_record_key, transaction_handle);
         }
         self.transactions
-            .insert(transaction_handle.clone(), outbound_transaction_state);
+            .insert(transaction_handle, outbound_transaction_state);
 
         // Success, return the transaction handle
         Ok(transaction_handle)
+    }
+
+    /// Add a new node transaction to an existing transaction
+    pub fn add_node_transaction(
+        &mut self,
+        params: AddNodeTransactionParams,
+    ) -> VeilidAPIResult<()> {
+        let lnxid = self.allocate_local_node_transaction_id()?;
+
+        let outbound_transaction_state =
+            self.get_transaction_state_mut(params.transaction_handle)?;
+        let record_state = outbound_transaction_state
+            .get_record_state_mut(&params.opaque_record_key)
+            .ok_or_else(|| VeilidAPIError::internal("missing record state"))?;
+        let nt = record_state.new_node_transaction(
+            lnxid,
+            NodeTransactionParams {
+                kind: params.opaque_record_key.kind(),
+                xid: params.xid,
+                node_ref: params.node_ref,
+                expiration: params.expiration,
+                opt_initial_rtt: params.opt_begin_rtt,
+            },
+        )?;
+        let rnxid = nt.rnxid().clone();
+
+        // Add local node transaction mapping
+        self.local_node_transaction_mappings.insert(
+            lnxid,
+            LocalNodeTransactionMapping {
+                transaction_handle: params.transaction_handle,
+                opaque_record_key: params.opaque_record_key.clone(),
+            },
+        );
+
+        // Register with the keepalive processor for this node transaction
+        // Done here so that it happens in the OTM inside the StorageManager inner lock,
+        // along with the rest of the node transaction addition, to reduce the risk of race conditions with the keepalive processor.
+        if let Some(keepalive_processor) = &self.opt_keepalive_processor {
+            keepalive_processor.register(
+                OutboundTransactionKeepaliveParams {
+                    lnxid,
+                    opaque_record_key: params.opaque_record_key,
+                    rnxid,
+                    dest: params.dest,
+                    descriptor: params.descriptor,
+                },
+                params.expiration,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn get_transaction_record_state_mut_by_lnxid(
+        &mut self,
+        transaction_handle: OutboundTransactionHandle,
+        lnxid: LocalNodeTransactionId,
+    ) -> Option<&mut OutboundTransactionRecordState> {
+        let registry = self.registry();
+
+        let Some(mapping) = self.local_node_transaction_mappings.get(&lnxid) else {
+            veilid_log!(registry debug "Missing local node transaction mapping {} for transaction {} in background drop", lnxid, transaction_handle);
+            return None;
+        };
+
+        let Some(state) = self.transactions.get_mut(&mapping.transaction_handle) else {
+            veilid_log!(registry debug "Missing transaction state for node transaction {} for transaction {} in background drop", lnxid, transaction_handle);
+            return None;
+        };
+
+        if mapping.transaction_handle != transaction_handle {
+            veilid_log!(registry debug "Mismatched transaction handle {} for node transaction {} for transaction {} in background drop", mapping.transaction_handle, lnxid, transaction_handle);
+            return None;
+        }
+
+        let Some(record_state) = state.get_record_state_mut(&mapping.opaque_record_key) else {
+            veilid_log!(registry debug "Missing record state for node transaction {} for transaction {} in background drop", lnxid, transaction_handle);
+            return None;
+        };
+
+        Some(record_state)
+    }
+
+    fn get_transaction_record_state_by_lnxid(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+        lnxid: LocalNodeTransactionId,
+    ) -> Option<&OutboundTransactionRecordState> {
+        let registry = self.registry();
+
+        let Some(mapping) = self.local_node_transaction_mappings.get(&lnxid) else {
+            veilid_log!(registry debug "Missing local node transaction mapping {} for transaction {} in background drop", lnxid, transaction_handle);
+            return None;
+        };
+
+        let Some(state) = self.transactions.get(&mapping.transaction_handle) else {
+            veilid_log!(registry debug "Missing transaction state for node transaction {} for transaction {} in background drop", lnxid, transaction_handle);
+            return None;
+        };
+
+        if mapping.transaction_handle != transaction_handle {
+            veilid_log!(registry debug "Mismatched transaction handle {} for node transaction {} for transaction {} in background drop", mapping.transaction_handle, lnxid, transaction_handle);
+            return None;
+        }
+
+        let Some(record_state) = state.get_record_state(&mapping.opaque_record_key) else {
+            veilid_log!(registry debug "Missing record state for node transaction {} for transaction {} in background drop", lnxid, transaction_handle);
+            return None;
+        };
+
+        Some(record_state)
+    }
+
+    /// Remove node transactions from a transaction
+    /// Adds a stop token to record the background rollback task upon transaction cleanup.
+    pub fn drop_node_transactions(
+        &mut self,
+        transaction_handle: OutboundTransactionHandle,
+        node_transactions_to_drop: LocalNodeTransactionIdSet,
+    ) -> VeilidAPIResult<()> {
+        let registry = self.registry();
+
+        for lnxid in node_transactions_to_drop {
+            let Some(record_state) =
+                self.get_transaction_record_state_mut_by_lnxid(transaction_handle, lnxid)
+            else {
+                // Missing record state, skip, already logged
+                continue;
+            };
+
+            // Drop node transaction
+            if record_state.remove_node_transaction(lnxid).is_none() {
+                veilid_log!(registry debug "Missing node transaction {} for transaction {} in background drop", lnxid, transaction_handle);
+            }
+
+            // Drop keepalive
+            if let Some(keepalive_processor) = &self.opt_keepalive_processor {
+                keepalive_processor.unregister(lnxid);
+            }
+
+            // Drop mapping
+            if self
+                .local_node_transaction_mappings
+                .remove(&lnxid)
+                .is_none()
+            {
+                veilid_log!(registry debug "Missing mapping for node transaction {} for transaction {} in background drop", lnxid, transaction_handle);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Add background task to a transaction
+    /// Registers the background task with a cleanup token that can be waited on to ensure the task has completed.
+    pub fn add_transaction_background_task(
+        &mut self,
+        transaction_handle: OutboundTransactionHandle,
+        task: impl Future<Output = ()> + Send + 'static,
+    ) -> VeilidAPIResult<()> {
+        let stop_source = StopSource::new();
+        let stop_token = stop_source.token();
+
+        let state = self.get_transaction_state_mut(transaction_handle)?;
+        state.add_background_token(stop_token);
+
+        let registry = self.registry();
+        let fut = async move {
+            task.await;
+
+            let storage_manager = registry.storage_manager();
+
+            // If the transaction still exists, remove the completed background tokens
+            // It may not exist other errors happened after the the partial_drop_and_background_rollback_locked
+            {
+                let mut inner = storage_manager.inner.lock();
+                if let Ok(transaction_state) = inner
+                    .outbound_transaction_manager
+                    .get_transaction_state_mut(transaction_handle)
+                {
+                    transaction_state.remove_completed_background_tokens();
+                }
+            }
+
+            // Move the stop source in here and drop it when we're done
+            drop(stop_source);
+        };
+
+        let storage_manager = self.storage_manager();
+        storage_manager
+            .background_operation_processor
+            .add_future(fut);
+
+        Ok(())
+    }
+
+    /// Merge two transactions into a single transaction
+    /// Additional transaction is merged into the existing transaction and the additional transaction handle is released
+    pub fn merge_transactions(
+        &mut self,
+        existing_transaction_handle: OutboundTransactionHandle,
+        additional_transaction_handle: OutboundTransactionHandle,
+    ) -> VeilidAPIResult<()> {
+        // Existing transaction must exist and be in Begin stage.
+        let Some(existing_state) = self.transactions.get(&existing_transaction_handle) else {
+            apibail_transaction_not_found!(
+                "existing transaction does not exist: {}",
+                existing_transaction_handle
+            );
+        };
+        match existing_state.stage_consensus().map(|c| c.stage) {
+            Some(OutboundTransactionStage::Begin) => {}
+            Some(other) => {
+                apibail_transaction_not_found!(
+                    "existing transaction stage is {:?}, must be Begin to extend: {}",
+                    other,
+                    existing_transaction_handle
+                );
+            }
+            None => {
+                apibail_transaction_not_found!(
+                    "existing transaction not yet started: {}",
+                    existing_transaction_handle
+                );
+            }
+        }
+        if !self
+            .transactions
+            .contains_key(&additional_transaction_handle)
+        {
+            veilid_log!(self debugwarn "Dropping non-existent merge transaction: {:?}", additional_transaction_handle);
+            apibail_invalid_argument!(
+                "additional transaction does not exist",
+                "additional_transaction_handle",
+                additional_transaction_handle.to_string()
+            );
+        }
+
+        veilid_log!(self debug target: "network_result", "Merging transaction {} -> {}", additional_transaction_handle, existing_transaction_handle);
+
+        // Get and remove additional transaction state
+        // Unwrap is safe because we just checked contains_key
+        let additional_outbound_transaction_state = self
+            .transactions
+            .remove(&additional_transaction_handle)
+            .unwrap_or_log();
+
+        // Move handle record key mappings from additional transaction to existing transaction
+        for additional_record_state in additional_outbound_transaction_state.get_record_states() {
+            let additional_opaque_record_key = additional_record_state.record_key().opaque();
+            if let Some(old) = self.handles_by_key.insert(
+                additional_opaque_record_key.clone(),
+                existing_transaction_handle,
+            ) {
+                if old != additional_transaction_handle {
+                    veilid_log!(self error "Incorrect transaction handle mapping for record {}: {} != {}", additional_opaque_record_key, old, additional_transaction_handle);
+                }
+            } else {
+                veilid_log!(self error "Missing prior transaction handle mapping for record {}: {}", additional_opaque_record_key, additional_transaction_handle);
+            }
+        }
+
+        // Get existing transaction state
+        // Unwrap is safe because we just checked contains_key
+        let existing_outbound_transaction_state = self
+            .get_transaction_state_mut(existing_transaction_handle)
+            .unwrap_or_log();
+
+        // Merge additional transaction state into existing transaction state
+        existing_outbound_transaction_state.merge(additional_outbound_transaction_state);
+
+        // Move local node transaction mappings
+        for mapping in self.local_node_transaction_mappings.values_mut() {
+            if mapping.transaction_handle == additional_transaction_handle {
+                mapping.transaction_handle = existing_transaction_handle;
+            }
+        }
+
+        Ok(())
     }
 
     /// Drop a transaction completely. Does not error.
@@ -160,9 +527,30 @@ impl OutboundTransactionManager {
 
         veilid_log!(self debug target: "network_result", "Dropping transaction: {:?}", transaction_handle);
 
+        let mut unregister_keepalive_lnxids = LocalNodeTransactionIdSet::new();
         for record_state in outbound_transaction_state.get_record_states() {
-            let opaque_record_key = record_state.record_key().opaque();
-            self.handles_by_key.remove(&opaque_record_key);
+            let lnxids = record_state.get_node_transaction_ids();
+
+            // Drop mappings
+            for lnxid in &lnxids {
+                if self.local_node_transaction_mappings.remove(lnxid).is_none() {
+                    veilid_log!(self debug "Missing mapping for node transaction {} for transaction {} in drop", lnxid, transaction_handle);
+                }
+            }
+
+            unregister_keepalive_lnxids.extend(lnxids);
+
+            self.handles_by_key
+                .remove(&record_state.record_key().opaque());
+        }
+
+        // Cancel and clean up keepalives for dropped transaction
+        // if the keepalive processor is still active. Done in the OTM inside the StorageManager inner lock,
+        // along with the rest of the transaction cleanup, to reduce the risk of race conditions with the keepalive processor.
+        if let Some(keepalive_processor) = &self.opt_keepalive_processor {
+            for unregister_keepalive_lnxid in unregister_keepalive_lnxids {
+                keepalive_processor.unregister(unregister_keepalive_lnxid);
+            }
         }
         Some(outbound_transaction_state)
     }
@@ -175,28 +563,33 @@ impl OutboundTransactionManager {
         self.handles_by_key.get(opaque_record_key).cloned()
     }
 
-    /// Check if a transaction exists
-    pub fn transaction_exists(&self, transaction_handle: &OutboundTransactionHandle) -> bool {
-        self.transactions.contains_key(transaction_handle)
+    /// Check if a transaction exists and return the opaque record keys associated with it if it does
+    pub fn get_transaction_keys(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+    ) -> Option<Vec<OpaqueRecordKey>> {
+        self.transactions
+            .get(&transaction_handle)
+            .map(|tx| tx.keys())
     }
 
     /// Get a transaction state
     pub fn get_transaction_state(
         &self,
-        transaction_handle: &OutboundTransactionHandle,
+        transaction_handle: OutboundTransactionHandle,
     ) -> VeilidAPIResult<&OutboundTransactionState> {
         self.transactions
-            .get(transaction_handle)
+            .get(&transaction_handle)
             .ok_or_else(|| VeilidAPIError::transaction_not_found("missing transaction"))
     }
 
     /// Modify a transaction state
-    pub fn get_transaction_state_mut(
+    fn get_transaction_state_mut(
         &mut self,
-        transaction_handle: &OutboundTransactionHandle,
+        transaction_handle: OutboundTransactionHandle,
     ) -> VeilidAPIResult<&mut OutboundTransactionState> {
         self.transactions
-            .get_mut(transaction_handle)
+            .get_mut(&transaction_handle)
             .ok_or_else(|| VeilidAPIError::transaction_not_found("missing transaction"))
     }
 
@@ -211,9 +604,9 @@ impl OutboundTransactionManager {
     pub fn prepare_transact_begin_params(
         &self,
         transaction_handle: OutboundTransactionHandle,
-    ) -> VeilidAPIResult<Vec<OutboundTransactBeginParams>> {
+    ) -> VeilidAPIResult<Vec<Arc<OutboundTransactBeginParams>>> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
 
         // Assert stage
         if let Some(stage_consensus) = outbound_transaction_state.stage_consensus() {
@@ -222,12 +615,10 @@ impl OutboundTransactionManager {
 
         let mut out = vec![];
         for record_state in outbound_transaction_state.get_record_states() {
-            out.push(OutboundTransactBeginParams {
-                transaction_handle: transaction_handle.clone(),
-                opaque_record_key: record_state.record_key().opaque(),
-                safety_selection: record_state.safety_selection().clone(),
-                signing_keypair: record_state.signing_keypair().clone(),
-            });
+            out.push(Arc::new(OutboundTransactBeginParams {
+                transaction_handle,
+                record_params: record_state.record_params().clone(),
+            }));
         }
 
         Ok(out)
@@ -247,37 +638,38 @@ impl OutboundTransactionManager {
         // Add all node transaction ids
         // Each record must still be in Init state (no node_transactions yet) when being recorded
         for result in results {
-            let transaction_handle = result.params.transaction_handle.clone();
+            let opaque_record_key = result.params.record_params.record_key.opaque();
+            let transaction_handle = result.params.transaction_handle;
 
             // Get transaction
-            let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+            let outbound_transaction_state = self.get_transaction_state_mut(transaction_handle)?;
 
-            // Add locked routes to transaction state
-            outbound_transaction_state.add_locked_routes(result.locked_routes);
+            // Hold the route refs used by this transaction
+            outbound_transaction_state.add_route_refs(result.route_refs);
 
             // Get record state
             let Some(record_state) =
-                outbound_transaction_state.get_record_state_mut(&result.params.opaque_record_key)
+                outbound_transaction_state.get_record_state_mut(&opaque_record_key)
             else {
                 apibail_internal!(
                     "missing record during begin results recording: {}",
-                    result.params.opaque_record_key
+                    opaque_record_key
                 );
             };
 
             // Ensure results came in with enough consensus
-            let node_transaction_count = record_state.get_node_transactions().len();
+            let node_transaction_count = record_state.get_node_transactions_count();
             if node_transaction_count < required_strict_consensus_count {
                 #[cfg(feature = "verbose-tracing")]
                 veilid_log!(registry debug target: "dht", "Did not get a consensus of transaction ids for begin for handle={} record={}: merged_seqs={} with state: {}",
                     transaction_handle,
-                    result.params.opaque_record_key,
+                    opaque_record_key,
                     result.seqs.to_table_string(),
                     record_state
                 );
 
                 apibail_try_again!("did not get consensus of transaction ids in begin (rec={}, count={}, required_consensus={})",
-                    result.params.opaque_record_key,
+                    opaque_record_key,
                     node_transaction_count,
                     required_strict_consensus_count
                 );
@@ -291,29 +683,23 @@ impl OutboundTransactionManager {
             let Some(stage_consensus) = record_state.stage_consensus() else {
                 apibail_generic!(
                     "record {} has no stage consensus during begin results recording",
-                    result.params.opaque_record_key
+                    opaque_record_key
                 );
             };
 
             if stage_consensus.stage != OutboundTransactionStage::Begin {
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(registry debug target: "dht", "record {} did not get Begin consensus with state: {}", result.params.opaque_record_key, record_state);
+                veilid_log!(registry debug target: "dht", "record {} did not get Begin consensus with state: {}", opaque_record_key, record_state);
 
                 apibail_generic!(
                     "record {} has stage consensus {:?} during begin results recording, wanted Begin",
-                    result.params.opaque_record_key,
+                    opaque_record_key,
                     stage_consensus.stage
                 );
             }
 
-            // Trim the number of node transactions down to a multiplier of the strict consensus count
-            let max_node_transaction_params_count = required_strict_consensus_count
-                + (required_strict_consensus_count * CONSENSUS_TRIM_PERCENT).div_ceil(100);
-
-            record_state.trim_node_transactions(max_node_transaction_params_count);
-
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(registry debug target: "dht", "Begin results for record {}: {}", result.params.opaque_record_key, record_state);
+            veilid_log!(registry debug target: "dht", "Begin results for record {}: {}", opaque_record_key, record_state);
         }
 
         Ok(())
@@ -347,9 +733,9 @@ impl OutboundTransactionManager {
         result: OutboundTransactCommandResult,
         mut callback: OutboundTransactionPerNodeResultHandler<'a>,
     ) -> VeilidAPIResult<OutboundTransactionPerNodeResultHandler<'a>> {
-        let mut command_node_xids = result.get_command_node_xids();
+        let mut command_lnxids = result.get_command_lnxids();
         for pnr in result.per_node_results {
-            if !command_node_xids.remove(&pnr.node_transaction_id) {
+            if !command_lnxids.remove(&pnr.lnxid) {
                 apibail_internal!(
                     "node transaction has multiple results: {} pnr={:?}",
                     result.params.opaque_record_key,
@@ -358,26 +744,30 @@ impl OutboundTransactionManager {
             }
 
             let node_transaction = record_state
-                .get_node_transaction_mut(&pnr.node_transaction_id)
+                .get_node_transaction_mut(pnr.lnxid)
                 .ok_or_else(|| VeilidAPIError::internal("missing node transaction"))?;
 
             match pnr.disposition {
                 TransactCommandDisposition::Invalid => {
                     // If not valid, the server already rolled it back
                     #[cfg(feature = "verbose-tracing")]
-                    veilid_log!(node_transaction debug target: "dht", "transact_command_result: node={} INVALID (server rolled back) record={}",
-                        pnr.node_transaction_id, result.params.opaque_record_key);
+                    veilid_log!(node_transaction debug target: "dht", "transact_command_result: lnxid={} rnxid={} INVALID (server rolled back) record={}",
+                        pnr.lnxid, pnr.rnxid, result.params.opaque_record_key);
                     node_transaction.set_stage(OutboundTransactionStage::Rollback, None);
                     continue;
                 }
                 TransactCommandDisposition::Skipped => {
                     // Node was not waited for due to early consensus exit, leave its stage unchanged
                     #[cfg(feature = "verbose-tracing")]
-                    veilid_log!(node_transaction debug target: "dht", "transact_command_result: node={} SKIPPED (no response/early exit) record={} stage={:?}",
-                        pnr.node_transaction_id, result.params.opaque_record_key, node_transaction.stage());
+                    veilid_log!(node_transaction debug target: "dht", "transact_command_result: lnxid={} rndid={} SKIPPED (no response/early exit) record={} stage={:?}",
+                        pnr.lnxid, pnr.rnxid, result.params.opaque_record_key, node_transaction.stage());
                     continue;
                 }
                 TransactCommandDisposition::Valid => {
+                    // Refresh the per-node RTT from this successful response
+                    if let Some(rtt) = pnr.opt_rtt {
+                        node_transaction.record_rtt(rtt);
+                    }
                     // If transaction is still valid, then call the processing callback
                     callback(node_transaction, pnr)?;
                 }
@@ -385,17 +775,17 @@ impl OutboundTransactionManager {
         }
 
         // Any commands that did not return a result have their node transactions marked as failed
-        for missing_node_xid in &command_node_xids {
-            let Some(node_transaction) = record_state.get_node_transaction_mut(missing_node_xid)
+        for missing_lnxid in command_lnxids {
+            let Some(node_transaction) = record_state.get_node_transaction_mut(missing_lnxid)
             else {
                 apibail_internal!(
                     "missing node transaction in record state: {}",
-                    missing_node_xid,
+                    missing_lnxid,
                 );
             };
             #[cfg(feature = "verbose-tracing")]
             veilid_log!(node_transaction debug target: "dht", "transact_command_result: node={} MISSING result → Failed",
-                missing_node_xid);
+                missing_lnxid);
             node_transaction.set_stage(OutboundTransactionStage::Failed, None);
         }
         Ok(callback)
@@ -410,10 +800,10 @@ impl OutboundTransactionManager {
     pub fn prepare_rollback_transact_value_params(
         &self,
         transaction_handle: OutboundTransactionHandle,
-        opt_rollback_ids: Option<PerRecordNodeTransactionIds>,
-    ) -> VeilidAPIResult<Vec<OutboundTransactCommandParams>> {
+        opt_rollback_ids: Option<LocalNodeTransactionIdSet>,
+    ) -> VeilidAPIResult<Vec<Arc<OutboundTransactCommandParams>>> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
 
         // If rollback ids are specified, just go with it
         // Otherwise get the full set of fail rollback ids (empty if no nodes accepted)
@@ -424,26 +814,38 @@ impl OutboundTransactionManager {
 
         let mut out = vec![];
 
-        for (opaque_record_key, node_xids) in rollback_ids {
-            // Skip records with no nodes to roll back (Begin never got any accepts for this record)
-            if node_xids.is_empty() {
+        // Split up rollback ids by record key
+        let mut rollback_ids_by_record_key: BTreeMap<OpaqueRecordKey, LocalNodeTransactionIdSet> =
+            BTreeMap::new();
+        for rollback_id in rollback_ids {
+            let Some(record_state) =
+                self.get_transaction_record_state_by_lnxid(transaction_handle, rollback_id)
+            else {
+                // Missing record state, skip, already logged
                 continue;
-            }
+            };
+            rollback_ids_by_record_key
+                .entry(record_state.record_key().opaque())
+                .or_default()
+                .insert(rollback_id);
+        }
 
-            let record_state = outbound_transaction_state
-                .get_record_state(&opaque_record_key)
-                .ok_or_else(|| {
-                    VeilidAPIError::internal(format!(
-                        "tried to rollback record not in transaction: {}",
-                        opaque_record_key
-                    ))
-                })?;
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
+        for (opaque_record_key, record_rollback_ids) in rollback_ids_by_record_key {
+            let Some(record_state) =
+                outbound_transaction_state.get_record_state(&opaque_record_key)
+            else {
+                apibail_internal!(
+                    "Missing record state for {} in rollback for transaction {}: ",
+                    opaque_record_key,
+                    transaction_handle
+                );
+            };
 
             let safety_selection = record_state.safety_selection().clone();
-            let nodes = record_state.get_transact_command_nodes(Some(&node_xids), None)?;
-            let required_strict_consensus_count = record_state.required_strict_consensus_count();
+            let nodes = record_state.get_transact_command_nodes(Some(record_rollback_ids), None)?;
 
-            out.push(OutboundTransactCommandParams {
+            out.push(Arc::new(OutboundTransactCommandParams {
                 opaque_record_key,
                 safety_selection,
                 nodes,
@@ -451,8 +853,9 @@ impl OutboundTransactionManager {
                 opt_seqs: None,
                 opt_subkey: None,
                 opt_value: None,
-                required_strict_consensus_count,
-            });
+                required_strict_consensus_count: 0,
+                pre_authorized_valid_count: 0,
+            }));
         }
 
         Ok(out)
@@ -465,7 +868,7 @@ impl OutboundTransactionManager {
         results: Vec<OutboundTransactCommandResult>,
     ) -> VeilidAPIResult<()> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state_mut(transaction_handle)?;
 
         // If there are no results, nothing to record. This happens when a rollback was
         // issued for a transaction that never reached Begin consensus (zero nodes accepted).
@@ -494,9 +897,9 @@ impl OutboundTransactionManager {
     pub fn prepare_transact_end_params(
         &self,
         transaction_handle: OutboundTransactionHandle,
-    ) -> VeilidAPIResult<Vec<OutboundTransactCommandParams>> {
+    ) -> VeilidAPIResult<Vec<Arc<OutboundTransactCommandParams>>> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -515,13 +918,19 @@ impl OutboundTransactionManager {
 
         let mut out = vec![];
 
+        let mut unregister_keepalive_lnxids = LocalNodeTransactionIdSet::new();
+
         for record_state in outbound_transaction_state.get_record_states() {
             let opaque_record_key = record_state.record_key().opaque();
             let safety_selection = record_state.safety_selection().clone();
             let nodes = record_state.get_transact_command_nodes(None, None)?;
             let required_strict_consensus_count = record_state.required_strict_consensus_count();
 
-            out.push(OutboundTransactCommandParams {
+            for node in &nodes {
+                unregister_keepalive_lnxids.insert(node.lnxid);
+            }
+
+            out.push(Arc::new(OutboundTransactCommandParams {
                 opaque_record_key,
                 safety_selection,
                 nodes,
@@ -530,7 +939,15 @@ impl OutboundTransactionManager {
                 opt_subkey: None,
                 opt_value: None,
                 required_strict_consensus_count,
-            });
+                pre_authorized_valid_count: 0,
+            }));
+        }
+
+        // Cancel all scheduled keepalives
+        if let Some(keepalive_processor) = &self.opt_keepalive_processor {
+            for lnxid in unregister_keepalive_lnxids {
+                keepalive_processor.unregister(lnxid);
+            }
         }
 
         Ok(out)
@@ -543,7 +960,7 @@ impl OutboundTransactionManager {
         results: Vec<OutboundTransactCommandResult>,
     ) -> VeilidAPIResult<()> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state_mut(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -581,9 +998,9 @@ impl OutboundTransactionManager {
     pub fn prepare_transact_commit_params(
         &self,
         transaction_handle: OutboundTransactionHandle,
-    ) -> VeilidAPIResult<Vec<OutboundTransactCommandParams>> {
+    ) -> VeilidAPIResult<Vec<Arc<OutboundTransactCommandParams>>> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -612,14 +1029,21 @@ impl OutboundTransactionManager {
                     nt.commit_will_change_remote()
                 })),
             )?;
+            // Nodes pre-promoted to Commit stage (no-op commits) count toward
+            // consensus without an RPC, so seed the fanout's valid count.
+            let pre_authorized_valid_count = record_state
+                .get_node_transactions()
+                .filter(|(_, nt)| !nt.commit_will_change_remote())
+                .count();
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(self debug target: "dht", "prepare_commit: record={} nodes_requiring_commit_rpc={} total_nodes={}",
+            veilid_log!(self debug target: "dht", "prepare_commit: record={} nodes_requiring_commit_rpc={} pre_authorized={} total_nodes={}",
                 opaque_record_key,
                 nodes.len(),
-                record_state.get_node_transactions().len());
+                pre_authorized_valid_count,
+                record_state.get_node_transactions_count());
             let required_strict_consensus_count = record_state.required_strict_consensus_count();
 
-            out.push(OutboundTransactCommandParams {
+            out.push(Arc::new(OutboundTransactCommandParams {
                 opaque_record_key,
                 safety_selection,
                 nodes,
@@ -628,7 +1052,8 @@ impl OutboundTransactionManager {
                 opt_subkey: None,
                 opt_value: None,
                 required_strict_consensus_count,
-            });
+                pre_authorized_valid_count,
+            }));
         }
 
         Ok(out)
@@ -641,7 +1066,7 @@ impl OutboundTransactionManager {
         results: Vec<OutboundTransactCommandResult>,
     ) -> VeilidAPIResult<()> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state_mut(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -661,7 +1086,7 @@ impl OutboundTransactionManager {
         // For all node transactions where commit commands were not required,
         // transition them directly to the commit state.
         for record_state in outbound_transaction_state.get_record_states_mut() {
-            for node_transaction in record_state.get_node_transactions_mut() {
+            for (_, node_transaction) in record_state.get_node_transactions_mut() {
                 // commit_will_change_remote() logs internally when returning false
                 if !node_transaction.commit_will_change_remote() {
                     node_transaction.set_stage(OutboundTransactionStage::Commit, None);
@@ -693,9 +1118,9 @@ impl OutboundTransactionManager {
         opaque_record_key: &OpaqueRecordKey,
         subkey: ValueSubkey,
         signed_value_data: Arc<SignedValueData>,
-    ) -> VeilidAPIResult<OutboundTransactCommandParams> {
+    ) -> VeilidAPIResult<Arc<OutboundTransactCommandParams>> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -741,7 +1166,7 @@ impl OutboundTransactionManager {
         )?;
         let required_strict_consensus_count = record_state.required_strict_consensus_count();
 
-        Ok(OutboundTransactCommandParams {
+        Ok(Arc::new(OutboundTransactCommandParams {
             opaque_record_key: opaque_record_key.clone(),
             safety_selection,
             nodes,
@@ -750,7 +1175,8 @@ impl OutboundTransactionManager {
             opt_subkey: Some(subkey),
             opt_value: Some(signed_value_data),
             required_strict_consensus_count,
-        })
+            pre_authorized_valid_count: 0,
+        }))
     }
 
     /// Record set value in transaction
@@ -760,7 +1186,7 @@ impl OutboundTransactionManager {
         result: OutboundTransactCommandResult,
     ) -> VeilidAPIResult<()> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state_mut(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -820,7 +1246,7 @@ impl OutboundTransactionManager {
                     // Newer value found online
                     #[cfg(feature = "verbose-tracing")]
                     veilid_log!(node_transaction debug target: "dht", "transact_set: node={} subkey={} NEWER value found online seq={} (our seq={}), write cancelled",
-                        node_transaction.node_xid(), subkey,
+                        node_transaction.rnxid(), subkey,
                         newer_value.value_data().seq(), value.value_data().seq());
                     node_transaction.record_current_subkey_value(subkey, Some(newer_value.clone()));
                     node_transaction.record_updated_subkey_value(subkey, None);
@@ -832,7 +1258,7 @@ impl OutboundTransactionManager {
                     // Successful write
                     #[cfg(feature = "verbose-tracing")]
                     veilid_log!(node_transaction debug target: "dht", "transact_set: node={} subkey={} write accepted seq={}",
-                        node_transaction.node_xid(), subkey, value.value_data().seq());
+                        node_transaction.rnxid(), subkey, value.value_data().seq());
                     node_transaction.record_updated_subkey_value(subkey, Some(value.clone()));
 
                     Some(value.clone())
@@ -893,9 +1319,9 @@ impl OutboundTransactionManager {
         transaction_handle: OutboundTransactionHandle,
         opaque_record_key: &OpaqueRecordKey,
         subkey: ValueSubkey,
-    ) -> VeilidAPIResult<OutboundTransactCommandParams> {
+    ) -> VeilidAPIResult<Arc<OutboundTransactCommandParams>> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -937,7 +1363,7 @@ impl OutboundTransactionManager {
         // won't force a costly retry that exceeds the outer timeout. (get_value_count <= set_value_count by config.)
         let required_strict_consensus_count = self.config().network.dht.get_value_count as usize;
 
-        Ok(OutboundTransactCommandParams {
+        Ok(Arc::new(OutboundTransactCommandParams {
             opaque_record_key: opaque_record_key.clone(),
             safety_selection,
             nodes,
@@ -946,7 +1372,8 @@ impl OutboundTransactionManager {
             opt_subkey: Some(subkey),
             opt_value: None,
             required_strict_consensus_count,
-        })
+            pre_authorized_valid_count: 0,
+        }))
     }
 
     /// Record get value in transaction
@@ -956,7 +1383,7 @@ impl OutboundTransactionManager {
         result: OutboundTransactCommandResult,
     ) -> VeilidAPIResult<()> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state_mut(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -993,7 +1420,7 @@ impl OutboundTransactionManager {
                 let opt_value = pnr.opt_value;
                 #[cfg(feature = "verbose-tracing")]
                 veilid_log!(node_transaction debug target: "dht", "transact_get: node={} subkey={} returned seq={}",
-                    node_transaction.node_xid(), subkey,
+                    node_transaction.rnxid(), subkey,
                     opt_value.as_ref().map(|v| v.value_data().seq().to_string()).unwrap_or_else(|| "None".to_string()));
                 node_transaction.record_current_subkey_value(subkey, opt_value.clone());
                 node_transaction.update_expiration(pnr.opt_expiration);
@@ -1021,28 +1448,49 @@ impl OutboundTransactionManager {
         Ok(())
     }
 
-    /// Record keepalive results
+    /// Record a keepalive result
     pub fn record_transact_keepalive_result(
         &mut self,
-        transaction_handle: OutboundTransactionHandle,
-        opaque_record_key: OpaqueRecordKey,
-        node_xid: NodeTransactionId,
+        lnxid: LocalNodeTransactionId,
         expiration: Timestamp,
+        opt_rtt: Option<TimestampDuration>,
     ) -> VeilidAPIResult<bool> {
         #[cfg(feature = "verbose-tracing")]
         let registry = self.registry();
 
-        let outbound_transaction_state = self.get_transaction_state_mut(&transaction_handle)?;
-        let Some(record_state) =
-            outbound_transaction_state.get_record_state_mut(&opaque_record_key)
-        else {
-            // Record was removed from transaction
-            return Ok(false);
-        };
-        let Some(nt) = record_state.get_node_transaction_mut(&node_xid) else {
+        // Resolve the transaction handle from the local node transaction id mapping
+        let Some(mapping) = self.local_node_transaction_mappings.get(&lnxid).cloned() else {
             // Node transaction was dropped from transaction
             return Ok(false);
         };
+        let transaction_handle = mapping.transaction_handle;
+
+        // Get the record state for this node transaction
+        let Some(record_state) =
+            self.get_transaction_record_state_mut_by_lnxid(transaction_handle, lnxid)
+        else {
+            // Record was removed from transaction
+            apibail_internal!(
+                "record state not found for node transaction {} in transaction {}",
+                lnxid,
+                transaction_handle
+            );
+        };
+
+        // Get the node transaction for this node transaction id
+        let Some(nt) = record_state.get_node_transaction_mut(lnxid) else {
+            apibail_internal!(
+                "node transaction {} not found for record state {} in transaction {}",
+                lnxid,
+                record_state.record_key().opaque(),
+                transaction_handle
+            );
+        };
+
+        // Refresh the per-node RTT from this successful keepalive
+        if let Some(rtt) = opt_rtt {
+            nt.record_rtt(rtt);
+        }
 
         // Update expiration only if we're still in Begin or End stage
         if matches!(
@@ -1050,12 +1498,12 @@ impl OutboundTransactionManager {
             OutboundTransactionStage::Begin | OutboundTransactionStage::End
         ) {
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(registry debug target: "dht", "Keepalive updated expiration: transaction_handle={} record={} node_xid={} expiration={:#}", transaction_handle, opaque_record_key, node_xid, expiration);
+            veilid_log!(registry debug target: "dht", "Keepalive updated expiration: transaction_handle={} record={} lnxid={} rnxid={} expiration={:#}", mapping.transaction_handle, mapping.opaque_record_key, lnxid, nt.rnxid(), expiration);
 
             nt.update_expiration(Some(expiration));
         } else {
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(registry debug target: "dht", "Keepalive update ignored: stage={} transaction_handle={} record={} node_xid={} expiration={:#}", nt.stage(), transaction_handle, opaque_record_key, node_xid, expiration);
+            veilid_log!(registry debug target: "dht", "Keepalive update ignored: stage={} transaction_handle={} record={} lnxid={} rnxid={} expiration={:#}", nt.stage(), mapping.transaction_handle, mapping.opaque_record_key, lnxid, nt.rnxid(), expiration);
         }
 
         Ok(matches!(nt.stage(), OutboundTransactionStage::Begin))
@@ -1063,14 +1511,14 @@ impl OutboundTransactionManager {
 
     /// Get an inspection report for a transaction
     pub fn get_record_report(
-        &mut self,
+        &self,
         transaction_handle: OutboundTransactionHandle,
         opaque_record_key: &OpaqueRecordKey,
         subkeys: Option<ValueSubkeyRangeSet>,
         scope: DHTReportScope,
     ) -> VeilidAPIResult<DHTRecordReport> {
         // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(&transaction_handle)?;
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
 
         // Assert stage
         let stage = outbound_transaction_state
@@ -1103,15 +1551,10 @@ impl OutboundTransactionManager {
         let subkeys = ValueSubkeyRangeSet::single_range(0, schema.max_subkey())
             .intersect(&subkeys.unwrap_or_else(ValueSubkeyRangeSet::full));
 
-        let opt_local_snapshot = record_state.local_snapshot();
+        let local_snapshot = record_state.local_snapshot();
         let mut local_seqs = Vec::with_capacity(subkeys.len() as usize);
         let mut network_seqs = Vec::with_capacity(subkeys.len() as usize);
         for subkey in subkeys.iter() {
-            let Some(local_snapshot) = &opt_local_snapshot else {
-                local_seqs.push(ValueSeqNum::NONE);
-                continue;
-            };
-
             let mut local_seq = local_snapshot.seq(subkey)?;
 
             match scope {

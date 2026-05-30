@@ -43,8 +43,8 @@ impl PublicInternetRoutingDomainController {
         let mut validations = Vec::new();
         let name = format!("RelayKeepalive({})", RoutingDomain::PublicInternet);
         for relay in relays {
-            let Some(mut state) = self.read_dyn().relay_state(relay.relay_id()) else {
-                bail!("Relay state not found for relay {}", relay.relay_id());
+            let Some(mut state) = self.read_dyn().relay_state(relay.relay_id.clone()) else {
+                bail!("Relay state not found for relay {}", relay.relay_id);
             };
 
             let relay_needs_keepalive =
@@ -62,7 +62,7 @@ impl PublicInternetRoutingDomainController {
 
             // Say we're doing this keepalive now
             state.last_keepalive = cur_ts;
-            state_updates.push((relay.relay_id(), state));
+            state_updates.push((relay.relay_id.clone(), state));
         }
 
         routing_table.enqueue_ping_validations(

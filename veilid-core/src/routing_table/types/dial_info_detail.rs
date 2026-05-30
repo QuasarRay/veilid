@@ -152,8 +152,7 @@ pub trait HasDialInfoDetailList: fmt::Debug {
     fn get_low_level_port_info(&self) -> LowLevelPortInfo {
         let mut low_level_protocol_ports =
             BTreeSet::<(LowLevelProtocolType, AddressType, u16)>::new();
-        let mut protocol_to_port =
-            BTreeMap::<(ProtocolType, AddressType), (LowLevelProtocolType, u16)>::new();
+        let mut protocol_to_port = BTreeMap::<TransportType, (LowLevelProtocolType, u16)>::new();
 
         for did in self.dial_info_detail_list() {
             low_level_protocol_ports.insert((
@@ -162,7 +161,7 @@ pub trait HasDialInfoDetailList: fmt::Debug {
                 did.dial_info.socket_address().port(),
             ));
             protocol_to_port.insert(
-                (did.dial_info.protocol_type(), did.dial_info.address_type()),
+                TransportType::new(did.dial_info.protocol_type(), did.dial_info.address_type()),
                 (
                     did.dial_info.protocol_type().low_level_protocol_type(),
                     did.dial_info.socket_address().port(),

@@ -33,7 +33,7 @@ impl TableStoreDriver {
         let namespaced_table_name = self.get_namespaced_table_name(table_name);
         let db = Database::open(&namespaced_table_name, column_count, false)
             .await
-            .map_err(VeilidAPIError::generic)?;
+            .map_err(|e| VeilidAPIError::generic(format!("failed to open table store: {}", e)))?;
 
         veilid_log!(self trace
             "opened table store '{}' with {} columns",
@@ -57,5 +57,33 @@ impl TableStoreDriver {
         } else {
             unimplemented!();
         }
+    }
+
+    /// Delete every table in the currently configured namespace.
+    pub async fn delete_all_in_namespace(&self) -> VeilidAPIResult<usize> {
+        let namespace = self.config().namespace.clone();
+        let opt_prefix = if namespace.is_empty() {
+            None
+        } else {
+            Some(format!("{}_", namespace))
+        };
+
+        let entries = Database::list(opt_prefix.as_deref())
+            .await
+            .map_err(VeilidAPIError::from)?;
+
+        let mut deleted = 0usize;
+        for (name, _ver) in entries {
+            match Database::delete(&name).await {
+                Ok(()) => {
+                    deleted += 1;
+                    veilid_log!(self debug "delete_all_in_namespace: removed '{}'", name);
+                }
+                Err(e) => {
+                    veilid_log!(self warn "delete_all_in_namespace: failed to remove '{}': {}", name, e);
+                }
+            }
+        }
+        Ok(deleted)
     }
 }

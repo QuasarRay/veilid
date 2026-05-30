@@ -2,20 +2,26 @@ use super::*;
 
 #[derive(Clone, Debug)]
 pub struct NodeTransactionParams {
+    /// Crypto kind of the record key
     pub kind: CryptoKind,
+    /// Server-side transaction id
     pub xid: u64,
+    /// Ref to the node running this transaction
     pub node_ref: NodeRef,
+    /// When the server says this node transaction is dead
     pub expiration: Timestamp,
+    /// RTT measured during Begin, used to seed the per-node RTT estimate
+    pub opt_initial_rtt: Option<TimestampDuration>,
 }
 
 /// Transaction per node
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NodeTransaction {
+pub(super) struct NodeTransaction {
     /// Registry for logging
     #[serde(skip)]
     opt_registry: Option<VeilidComponentRegistry>,
-    /// The unique key for this node transaction
-    node_xid: NodeTransactionId,
+    /// The server-side unique key for this node transaction
+    rnxid: RemoteNodeTransactionId,
     /// Ref to keep node in routing table
     #[serde(skip)]
     node_ref: Option<NodeRef>,
@@ -32,6 +38,9 @@ pub struct NodeTransaction {
     current_values: BTreeMap<ValueSubkey, Option<Arc<SignedValueData>>>,
     /// The values of remote subkeys changed by this node transaction (sets)
     updated_values: BTreeMap<ValueSubkey, Arc<SignedValueData>>,
+    /// Most recent RTT measured for this node, refreshed on each successful RPC
+    #[serde(default)]
+    opt_last_rtt: Option<TimestampDuration>,
 }
 
 impl VeilidComponentRegistryAccessor for NodeTransaction {
@@ -43,9 +52,10 @@ impl VeilidComponentRegistryAccessor for NodeTransaction {
 impl NodeTransaction {
     pub(super) fn new(
         registry: VeilidComponentRegistry,
-        node_xid: NodeTransactionId,
+        rnxid: RemoteNodeTransactionId,
         node_ref: NodeRef,
         expiration: Timestamp,
+        opt_initial_rtt: Option<TimestampDuration>,
     ) -> Self {
         let cur_ts = Timestamp::now();
         Self {
@@ -53,15 +63,16 @@ impl NodeTransaction {
             created_ts: cur_ts,
             stage_ts: cur_ts,
             stage: OutboundTransactionStage::Begin,
-            node_xid,
+            rnxid,
             node_ref: Some(node_ref),
             opt_expiration: Some(expiration),
             current_values: Default::default(),
             updated_values: Default::default(),
+            opt_last_rtt: opt_initial_rtt,
         }
     }
 
-    pub fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) -> bool {
+    pub(super) fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) -> bool {
         if let Some(expiration) = self.opt_expiration {
             if expiration < cur_ts {
                 return false;
@@ -90,11 +101,16 @@ impl NodeTransaction {
         self.stage_ts
     }
 
+    /// Most recent RTT measured for this node, used to bound per-RPC command timeouts.
+    pub fn opt_last_rtt(&self) -> Option<TimestampDuration> {
+        self.opt_last_rtt
+    }
+
     pub fn stage(&self) -> OutboundTransactionStage {
         self.stage
     }
 
-    pub fn set_stage(
+    pub(super) fn set_stage(
         &mut self,
         stage: OutboundTransactionStage,
         opt_expiration: Option<Timestamp>,
@@ -109,19 +125,19 @@ impl NodeTransaction {
         self.node_ref.clone().unwrap_or_log()
     }
 
-    pub fn node_xid(&self) -> &NodeTransactionId {
-        &self.node_xid
+    pub fn rnxid(&self) -> &RemoteNodeTransactionId {
+        &self.rnxid
     }
 
     pub fn node_id(&self) -> NodeId {
-        self.node_xid.node_id()
+        self.rnxid.node_id()
     }
 
-    pub fn update_expiration(&mut self, opt_expiration: Option<Timestamp>) {
+    pub(super) fn update_expiration(&mut self, opt_expiration: Option<Timestamp>) {
         self.opt_expiration = opt_expiration;
     }
 
-    pub fn record_current_subkey_value(
+    pub(super) fn record_current_subkey_value(
         &mut self,
         subkey: ValueSubkey,
         value: Option<Arc<SignedValueData>>,
@@ -130,7 +146,7 @@ impl NodeTransaction {
         self.current_values.insert(subkey, value);
     }
 
-    pub fn record_updated_subkey_value(
+    pub(super) fn record_updated_subkey_value(
         &mut self,
         subkey: ValueSubkey,
         value: Option<Arc<SignedValueData>>,
@@ -141,6 +157,11 @@ impl NodeTransaction {
         } else {
             self.updated_values.remove(&subkey);
         }
+    }
+
+    /// Record the most recent RTT measured for this node after a successful RPC.
+    pub(super) fn record_rtt(&mut self, rtt: TimestampDuration) {
+        self.opt_last_rtt = Some(rtt);
     }
 
     pub fn commit_will_change_remote(&self) -> bool {
@@ -183,7 +204,7 @@ impl NodeTransaction {
                 .collect::<Vec<_>>()
                 .join(" ");
             veilid_log!(self debug target: "dht", "commit_will_change_remote: node={} → false subkeys=[{}]",
-                self.node_xid, subkey_summary);
+                self.rnxid, subkey_summary);
         }
         false
     }
@@ -236,12 +257,13 @@ impl fmt::Display for NodeTransaction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}: @{} stage: {:?}@{} exp: {}",
-            self.node_xid,
+            "{}: @{} stage: {:?}@{} exp: {} rtt: {}",
+            self.rnxid,
             self.created_ts,
             self.stage,
             self.stage_ts,
             f.to_string_opt(self.opt_expiration),
+            f.to_string_opt(self.opt_last_rtt),
         )
     }
 }

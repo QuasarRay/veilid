@@ -62,7 +62,9 @@ wFAbkZY9eS/x6P7qrpd7dUA=
 cfg_if! {
 
     if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
-        pub fn purge_old_test_group_dirs() {}
+        pub fn purge_old_test_group_dirs() {
+            // Does nothing on WASM
+        }
 
         #[must_use]
         pub fn get_table_store_path(_test_instance: String) -> String {
@@ -84,11 +86,6 @@ cfg_if! {
         pub fn get_keyfile_path(_test_instance: String) -> String {
             String::new()
         }
-
-        pub fn purge_old_test_group_dirs() {
-            // Does nothing on WASM
-        }
-
     }
     else {
 
@@ -275,6 +272,7 @@ pub fn fixture_veilid_config() -> VeilidConfig {
         table_store: VeilidConfigTableStore {
             directory: get_table_store_path(test_instance.clone()),
             delete: true,
+            ..Default::default()
         },
         block_store: VeilidConfigBlockStore {
             directory: get_block_store_path(test_instance.clone()),

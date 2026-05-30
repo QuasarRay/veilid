@@ -1,4 +1,7 @@
 use super::*;
+// std mutex keeps the active-guard map out of parking_lot's deadlock detector
+#[cfg(feature = "debug-locks")]
+use std::sync::Mutex as StdMutex;
 
 #[derive(ThisError, Debug, Copy, Clone, PartialEq, Eq)]
 #[error("Already started")]
@@ -37,13 +40,13 @@ pub struct StartupLockEnterGuard<'a> {
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
-    active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
+    active_guards: Arc<StdMutex<HashMap<usize, backtrace::Backtrace>>>,
 }
 
 #[cfg(feature = "debug-locks")]
 impl<'a> Drop for StartupLockEnterGuard<'a> {
     fn drop(&mut self) {
-        self.active_guards.lock().remove(&self.id);
+        self.active_guards.lock().unwrap().remove(&self.id);
     }
 }
 
@@ -54,13 +57,13 @@ pub struct StartupLockEnterGuardArc {
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
-    active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
+    active_guards: Arc<StdMutex<HashMap<usize, backtrace::Backtrace>>>,
 }
 
 #[cfg(feature = "debug-locks")]
 impl Drop for StartupLockEnterGuardArc {
     fn drop(&mut self) {
-        self.active_guards.lock().remove(&self.id);
+        self.active_guards.lock().unwrap().remove(&self.id);
     }
 }
 
@@ -79,7 +82,7 @@ pub struct StartupLock {
     startup_state: Arc<AsyncRwLock<bool>>,
     stop_source: Mutex<Option<StopSource>>,
     #[cfg(feature = "debug-locks")]
-    active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
+    active_guards: Arc<StdMutex<HashMap<usize, backtrace::Backtrace>>>,
 }
 
 impl StartupLock {
@@ -89,7 +92,7 @@ impl StartupLock {
             startup_state: Arc::new(AsyncRwLock::new(false)),
             stop_source: Mutex::new(None),
             #[cfg(feature = "debug-locks")]
-            active_guards: Arc::new(Mutex::new(HashMap::new())),
+            active_guards: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
 
@@ -148,7 +151,19 @@ impl StartupLock {
                 let guard = match timeout(30000, self.startup_state.write()).await {
                     Ok(v) => v,
                     Err(_) => {
-                        eprintln!("active guards: {:#?}", self.active_guards.lock().values().collect::<Vec<_>>());
+                        // resolve here: captured backtraces are unresolved for speed
+                        let active: Vec<_> = self
+                            .active_guards
+                            .lock()
+                            .unwrap()
+                            .values()
+                            .map(|bt| {
+                                let mut b = bt.clone();
+                                b.resolve();
+                                b
+                            })
+                            .collect();
+                        eprintln!("active guards: {active:#?}");
                         panic!("shutdown deadlock");
                     }
                 };
@@ -185,9 +200,11 @@ impl StartupLock {
         };
 
         #[cfg(feature = "debug-locks")]
-        self.active_guards
-            .lock()
-            .insert(out.id, backtrace::Backtrace::new());
+        {
+            // capture outside the lock so the unwind is never in the critical section
+            let bt = crate::async_locks::debug_lock_backtrace();
+            self.active_guards.lock().unwrap().insert(out.id, bt);
+        }
 
         Ok(out)
     }
@@ -212,9 +229,11 @@ impl StartupLock {
         };
 
         #[cfg(feature = "debug-locks")]
-        self.active_guards
-            .lock()
-            .insert(out.id, backtrace::Backtrace::new());
+        {
+            // capture outside the lock so the unwind is never in the critical section
+            let bt = crate::async_locks::debug_lock_backtrace();
+            self.active_guards.lock().unwrap().insert(out.id, bt);
+        }
 
         Ok(out)
     }

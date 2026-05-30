@@ -18,10 +18,12 @@ path = "src/lib.rs"
 
 [features]
 default = ["rt-tokio", "veilid-core/default"]
+default-wasm = ["veilid-core/default-wasm"]
 crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
 rt-async-std = ["veilid-core/rt-async-std", "async-std"]
 rt-tokio = ["veilid-core/rt-tokio", "tokio"]
 debug-load = ["dep:ctor", "dep:libc-print", "dep:android_log-sys"]
+debug-locks = ["veilid-core/debug-locks"]
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
 footgun = ["veilid-core/footgun"]
 opentelemetry = [
@@ -64,20 +66,33 @@ allo-isolate = "0.1.27"
 ffi-support = "0.4.4"
 lazy_static = "1.5.0"
 hostname = "0.4.2"
-ctor = { version = "0.6.3", optional = true }
-libc-print = { version = "0.1.23", optional = true }
+ctor = { version = "1.0.6", optional = true }
+libc-print = { version = "0.3.0", optional = true }
 time = { version = "0.3.47", features = ["local-offset"] }
 chrono = "0.4.40"
 
 # Dependencies for Android builds only
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.22.3"
+jni = "0.22.4"
 paranoid-android = "0.2.2"
 android_log-sys = { version = "0.3.2", optional = true }
 
 # Dependencies for iOS builds only
 [target.'cfg(target_os = "ios")'.dependencies]
 # None currently
+
+# Dependencies for WASM builds only (dart-flavored wasm-bindgen bindings)
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+veilid-tracing-wasm = "0.2.0"
+js-sys = "0.3.83"
+wasm-bindgen = { version = "0.2.121", features = ["serde-serialize"] }
+wasm-bindgen-futures = "=0.4.71"
+wasm-bindgen-derive = "0.3.0"
+console_error_panic_hook = "0.1.7"
+send_wrapper = "0.6.0"
+futures-util = { version = "0.3.32" }
+gloo-utils = { version = "0.3.0", features = ["serde"] }
+lazy_static = "1.5.0"
 
 [lints]
 workspace = true

@@ -57,7 +57,7 @@ impl RPCProcessor {
         };
 
         let debug_string = format!(
-            "OUT ==> TransactBeginQ({} {}) => {} (signer={}) ",
+            "OUT ==> TransactBeginQ({} {}) => {:#} (signer={}) ",
             opaque_record_key,
             descriptor_mode,
             dest,
@@ -93,15 +93,15 @@ impl RPCProcessor {
 
         veilid_log!(self debug target: "dht", "{}", debug_string);
 
-        let waitable_reply = network_result_try!(
-            self.question(
+        let waitable_reply = network_result_try!(self
+            .question(
                 dest.clone(),
                 question,
                 Some(signing_keypair),
-                Some(question_context)
+                Some(question_context),
             )
             .await?
-        );
+            .into_network_result());
 
         // Wait for reply
         let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {

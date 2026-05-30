@@ -40,9 +40,10 @@ pushd veilid-flutter 2>/dev/null
 flutter pub get
 popd 2>/dev/null
 
-# Update npm lockfiles
+# Build wasm bundle (debug) — refreshes pkg/package.json with new version
+# so the local tests/ dependency resolves to the bumped version.
 pushd veilid-wasm 2>/dev/null
-wasm-pack build --dev --target bundler --weak-refs
+./wasm_build_js.sh
 popd 2>/dev/null
 
 pushd veilid-wasm/tests 2>/dev/null

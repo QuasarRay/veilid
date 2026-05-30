@@ -354,7 +354,9 @@ async fn test_maybe_encrypt_decrypt(ts: &TableStore) {
     let _ = ts.delete("test").await;
     let db = ts.open("test", 3).await.expect("should have opened");
 
-    let datas: &[&[u8]] = &[b"", b" ", b"  ", b"12345678", b"|/\\!@#$%^&*()_+", 
+    let max_value_size = VeilidConfigTableStore::default().max_value_size_mb as usize * 1024 * 1024;
+
+    let datas: &[&[u8]] = &[b"", b" ", b"  ", b"12345678", b"|/\\!@#$%^&*()_+",
         b"\xE2\x93\x82\xEF\xB8\x8F\xEF\xB8\x8F", b"\xF0\xEF\xB8\x8F\x9F\x94\xA5\xF0\x9F\x94\xA5\xE2\x99\xBE\xEF\xB8\x8F",
         b"1234567890", b"ABCDEFGHIJKLMNOPQRSTUVWXYZ", b"ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ", 
         b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
@@ -380,13 +382,109 @@ async fn test_maybe_encrypt_decrypt(ts: &TableStore) {
     for data in datas.iter().copied() {
         let encrypted = db.maybe_encrypt(&compress_prepend_size(data), true).await;
         let decrypted =
-            decompress_size_prepended(&db.maybe_decrypt(&encrypted).await.unwrap(), None).unwrap();
+            decompress_size_prepended(&db.maybe_decrypt(&encrypted).await.unwrap(), max_value_size)
+                .unwrap();
         assert_eq!(data, &decrypted);
         let encrypted = db.maybe_encrypt(&compress_prepend_size(data), false).await;
         let decrypted =
-            decompress_size_prepended(&db.maybe_decrypt(&encrypted).await.unwrap(), None).unwrap();
+            decompress_size_prepended(&db.maybe_decrypt(&encrypted).await.unwrap(), max_value_size)
+                .unwrap();
         assert_eq!(data, &decrypted);
     }
+}
+
+/// protected_store.delete=true with table_store.delete=false should still
+/// wipe the tables, via the encryption-key-mismatch path that calls
+/// delete_all_in_namespace.
+async fn test_protected_store_delete_wipes_tables() {
+    info!("test_protected_store_delete_wipes_tables");
+
+    let (update_callback, config_a) = fixture_veilid_core();
+    let api1 = api_startup(update_callback.clone(), config_a.clone())
+        .await
+        .expect("startup 1 failed");
+    {
+        let ts = api1.table_store().unwrap();
+        let db = ts.open("wipe_test", 1).await.expect("open 1 failed");
+        db.store(0, b"persist_me", b"hello")
+            .await
+            .expect("store failed");
+        assert_eq!(
+            db.load(0, b"persist_me").await.unwrap(),
+            Some(b"hello".to_vec())
+        );
+        drop(db);
+    }
+    api1.shutdown().await;
+
+    // Same paths; wipe protected store, keep table store files.
+    let config_b = VeilidConfig {
+        protected_store: VeilidConfigProtectedStore {
+            delete: true,
+            ..config_a.protected_store.clone()
+        },
+        table_store: VeilidConfigTableStore {
+            delete: false,
+            ..config_a.table_store.clone()
+        },
+        ..config_a
+    };
+    let api2 = api_startup(update_callback, config_b)
+        .await
+        .expect("startup 2 failed");
+    {
+        let ts = api2.table_store().unwrap();
+        let db = ts.open("wipe_test", 1).await.expect("open 2 failed");
+        assert_eq!(
+            db.load(0, b"persist_me").await.unwrap(),
+            None,
+            "table should be wiped after protected_store.delete cascade"
+        );
+        drop(db);
+    }
+    api2.shutdown().await;
+}
+
+/// With wipe_on_invalid_device_encryption_key=false, api_startup must
+/// surface NotInitialized when an internal table fails to decrypt, instead
+/// of silently wiping the user's data.
+async fn test_protected_store_delete_no_wipe_returns_not_initialized() {
+    info!("test_protected_store_delete_no_wipe_returns_not_initialized");
+
+    let (update_callback, config_a) = fixture_veilid_core();
+    let api1 = api_startup(update_callback.clone(), config_a.clone())
+        .await
+        .expect("startup 1 failed");
+    {
+        let ts = api1.table_store().unwrap();
+        let db = ts.open("nowipe_test", 1).await.expect("open 1 failed");
+        db.store(0, b"persist_me", b"hello")
+            .await
+            .expect("store failed");
+        drop(db);
+    }
+    api1.shutdown().await;
+
+    let config_b = VeilidConfig {
+        protected_store: VeilidConfigProtectedStore {
+            delete: true,
+            ..config_a.protected_store.clone()
+        },
+        table_store: VeilidConfigTableStore {
+            delete: false,
+            wipe_on_invalid_device_encryption_key: false,
+            ..config_a.table_store.clone()
+        },
+        ..config_a
+    };
+    let err = api_startup(update_callback, config_b)
+        .await
+        .expect_err("startup 2 should fail with NotInitialized");
+    assert!(
+        matches!(err, VeilidAPIError::NotInitialized),
+        "expected NotInitialized, got {:?}",
+        err
+    );
 }
 
 pub async fn test_all() {
@@ -409,4 +507,7 @@ pub async fn test_all() {
     }
 
     shutdown(api).await;
+
+    test_protected_store_delete_wipes_tables().await;
+    test_protected_store_delete_no_wipe_returns_not_initialized().await;
 }

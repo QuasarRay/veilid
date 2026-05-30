@@ -1,4 +1,4 @@
-pub mod sizes;
+mod sizes;
 
 use super::*;
 use argon2::password_hash::Salt;
@@ -165,7 +165,7 @@ impl CryptoSystem for CryptoSystemNONE {
     }
     fn generate_hash_reader(&self, reader: &mut dyn std::io::Read) -> VeilidAPIResult<PublicKey> {
         let mut hasher = blake3::Hasher::new();
-        std::io::copy(reader, &mut hasher).map_err(VeilidAPIError::generic)?;
+        std::io::copy(reader, &mut hasher).map_err(|e| VeilidAPIError::generic(e.to_string()))?;
         Ok(PublicKey::new(
             CRYPTO_KIND_NONE,
             BarePublicKey::new(hasher.finalize().as_bytes()),
@@ -228,7 +228,7 @@ impl CryptoSystem for CryptoSystemNONE {
     ) -> VeilidAPIResult<bool> {
         self.check_hash_digest(hash_digest)?;
         let mut hasher = blake3::Hasher::new();
-        std::io::copy(reader, &mut hasher).map_err(VeilidAPIError::generic)?;
+        std::io::copy(reader, &mut hasher).map_err(|e| VeilidAPIError::generic(e.to_string()))?;
         let out_hash = hasher.finalize();
         let bytes = out_hash.as_bytes();
         Ok(*bytes == **hash_digest.ref_value())

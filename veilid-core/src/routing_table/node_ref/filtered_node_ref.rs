@@ -63,6 +63,36 @@ impl FilteredNodeRef {
         )
     }
 
+    pub fn single_transport(&self) -> Option<TransportType> {
+        let mut dif = self.filter.dial_info_filter();
+        if matches!(self.sequencing, Sequencing::EnsureOrdered) {
+            (_, dif) = dif.apply_sequencing(self.sequencing);
+        }
+        let pts = dif.protocol_type_set();
+        let ats = dif.address_type_set();
+        if pts.len() != 1 || ats.len() != 1 {
+            return None;
+        }
+        Some(TransportType::new(pts.iter().next()?, ats.iter().next()?))
+    }
+
+    pub fn single_routing_domain(&self) -> Option<RoutingDomain> {
+        let rds = self.filter.routing_domain_set();
+        if rds.len() != 1 {
+            return None;
+        }
+        rds.iter().next()
+    }
+
+    /// Recover a TransportNodeRef from this filtered ref if the filter+sequencing
+    /// narrows to exactly one (routing_domain, transport).
+    #[expect(dead_code)]
+    pub fn try_into_transport(self) -> Option<TransportNodeRef> {
+        let transport = self.single_transport()?;
+        let routing_domain = self.single_routing_domain()?;
+        Some(self.unfiltered().with_transport(routing_domain, transport))
+    }
+
     pub fn set_filter(&mut self, filter: NodeRefFilter) {
         self.filter = filter
     }
@@ -147,7 +177,7 @@ impl NodeRefAccessorsTrait for FilteredNodeRef {
     }
 
     fn routing_domain_set(&self) -> RoutingDomainSet {
-        self.filter.routing_domain_set
+        self.filter.routing_domain_set()
     }
 
     fn filter(&self) -> NodeRefFilter {
@@ -161,7 +191,7 @@ impl NodeRefAccessorsTrait for FilteredNodeRef {
     }
 
     fn dial_info_filter(&self) -> DialInfoFilter {
-        self.filter.dial_info_filter
+        self.filter.dial_info_filter()
     }
 }
 

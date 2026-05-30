@@ -442,11 +442,6 @@ _VeilidConfigRoutingTable _$VeilidConfigRoutingTableFromJson(
   bootstrapKeys: (json['bootstrapKeys'] as List<dynamic>)
       .map(Typed<BarePublicKey>.fromJson)
       .toList(),
-  limitOverAttached: (json['limitOverAttached'] as num).toInt(),
-  limitFullyAttached: (json['limitFullyAttached'] as num).toInt(),
-  limitAttachedStrong: (json['limitAttachedStrong'] as num).toInt(),
-  limitAttachedGood: (json['limitAttachedGood'] as num).toInt(),
-  limitAttachedWeak: (json['limitAttachedWeak'] as num).toInt(),
 );
 
 Map<String, dynamic> _$VeilidConfigRoutingTableToJson(
@@ -456,11 +451,6 @@ Map<String, dynamic> _$VeilidConfigRoutingTableToJson(
   'secretKeys': instance.secretKeys.map((e) => e.toJson()).toList(),
   'bootstrap': instance.bootstrap,
   'bootstrapKeys': instance.bootstrapKeys.map((e) => e.toJson()).toList(),
-  'limitOverAttached': instance.limitOverAttached,
-  'limitFullyAttached': instance.limitFullyAttached,
-  'limitAttachedStrong': instance.limitAttachedStrong,
-  'limitAttachedGood': instance.limitAttachedGood,
-  'limitAttachedWeak': instance.limitAttachedWeak,
 };
 
 _VeilidConfigNetwork _$VeilidConfigNetworkFromJson(Map<String, dynamic> json) =>
@@ -522,6 +512,9 @@ _VeilidConfigTableStore _$VeilidConfigTableStoreFromJson(
 ) => _VeilidConfigTableStore(
   directory: json['directory'] as String,
   delete: json['delete'] as bool,
+  wipeOnInvalidDeviceEncryptionKey:
+      json['wipeOnInvalidDeviceEncryptionKey'] as bool,
+  maxValueSizeMb: (json['maxValueSizeMb'] as num).toInt(),
 );
 
 Map<String, dynamic> _$VeilidConfigTableStoreToJson(
@@ -529,6 +522,8 @@ Map<String, dynamic> _$VeilidConfigTableStoreToJson(
 ) => <String, dynamic>{
   'directory': instance.directory,
   'delete': instance.delete,
+  'wipeOnInvalidDeviceEncryptionKey': instance.wipeOnInvalidDeviceEncryptionKey,
+  'maxValueSizeMb': instance.maxValueSizeMb,
 };
 
 _VeilidConfigBlockStore _$VeilidConfigBlockStoreFromJson(

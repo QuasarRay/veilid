@@ -182,18 +182,31 @@ impl RoutingContext {
 
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     async fn get_destination(&self, target: Target) -> VeilidAPIResult<rpc_processor::Destination> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::get_destination(self: {:?}, target: {:?})", self, target);
-
+        async {
             let rpc_processor = self.api.core_context()?.rpc_processor();
-            Box::pin(rpc_processor.resolve_target_to_destination(
-                target,
-                self.unlocked_inner.safety_selection.clone(),
-            ))
-            .await
-            .map_err(VeilidAPIError::invalid_target)
-        })
+            let recorder =
+                DurationRecorder::new("RoutingContext::get_destination", |name, start| {
+                    veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, target: {:?})", name, start, self, target);
+                });
+            recorder
+                .record_fut(
+                    async {
+                        let dest = Box::pin(rpc_processor.resolve_target_to_destination(
+                            target,
+                            self.unlocked_inner.safety_selection.clone(),
+                        ))
+                        .await?;
+                        VeilidAPIResult::Ok(dest)
+                    },
+                    |name, start, dur, ret| {
+                        veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                        ret
+                    },
+                )
+                .await
+        }
         .await
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -221,37 +234,30 @@ impl RoutingContext {
 
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(message), fields(duration, __VEILID_LOG_KEY = self.log_key(), message_len = message.len(), ret.len)))]
     async fn internal_app_call(&self, target: Target, message: Bytes) -> VeilidAPIResult<Bytes> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::app_call(self: {:?}, target: {:?}, message_len: {:?})", self, target, message.len());
-            veilid_log!(self trace "message: {:?}", message);
-
+        async {
             self.check_target(&target)?;
-
             let rpc_processor = self.api.core_context()?.rpc_processor();
 
-            // Get destination
-            let dest = self.get_destination(target).await?;
-
-            // Send app message
-            let answer = match Box::pin(rpc_processor.rpc_call_app_call(dest, message)).await {
-                Ok(NetworkResult::Value(v)) => v,
-                Ok(NetworkResult::Timeout) => apibail_timeout!(),
-                Ok(NetworkResult::ServiceUnavailable(e)) => apibail_invalid_target!(e),
-                Ok(NetworkResult::NoConnection(e)) | Ok(NetworkResult::AlreadyExists(e)) => {
-                    apibail_no_connection!(e);
-                }
-
-                Ok(NetworkResult::InvalidMessage(message)) => {
-                    apibail_generic!(message);
-                }
-                Err(e) => return Err(e.into()),
-            };
-
-            tracing::Span::current().record("ret.len", answer.answer.len());
-
-            Ok(answer.answer)
-        }).await.inspect_err(log_veilid_api_error!(self))
+            let message_len = message.len();
+            let recorder = DurationRecorder::new("RoutingContext::app_call", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, target: {:?}, message_len: {})", name, start, self, target, message_len);
+                veilid_log!(self trace "message: {:?}", message);
+            });
+            recorder.record_fut(
+                async {
+                    let dest = self.get_destination(target).await?;
+                    let answer = VeilidAPIError::from_network_result(Box::pin(rpc_processor.rpc_call_app_call(dest, message)).await?)?;
+                    tracing::Span::current().record("ret.len", answer.answer.len());
+                    VeilidAPIResult::Ok(answer.answer)
+                },
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     #[cfg(feature = "footgun")]
@@ -292,34 +298,28 @@ impl RoutingContext {
 
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(message), fields(duration, __VEILID_LOG_KEY = self.log_key(), message_len = message.len()), ret))]
     async fn internal_app_message(&self, target: Target, message: Bytes) -> VeilidAPIResult<()> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::app_message(self: {:?}, target: {:?}, message_len: {})", self, target, message.len());
-            veilid_log!(self trace "message: {:?}", message);
-
+        async {
             self.check_target(&target)?;
-
             let rpc_processor = self.api.core_context()?.rpc_processor();
 
-            // Get destination
-            let dest = self.get_destination(target).await?;
-
-            // Send app message
-            match Box::pin(rpc_processor.rpc_call_app_message(dest, message)).await {
-                Ok(NetworkResult::Value(())) => {}
-                Ok(NetworkResult::Timeout) => apibail_timeout!(),
-                Ok(NetworkResult::ServiceUnavailable(e)) => apibail_invalid_target!(e),
-                Ok(NetworkResult::NoConnection(e)) | Ok(NetworkResult::AlreadyExists(e)) => {
-                    apibail_no_connection!(e);
-                }
-                Ok(NetworkResult::InvalidMessage(message)) => {
-                    apibail_generic!(message);
-                }
-                Err(e) => return Err(e.into()),
-            };
-
-            Ok(())
-        }).await.inspect_err(log_veilid_api_error!(self))
+            let message_len = message.len();
+            let recorder = DurationRecorder::new("RoutingContext::app_message", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, target: {:?}, message_len: {})", name, start, self, target, message_len);
+                veilid_log!(self trace "message: {:?}", message);
+            });
+            recorder.record_fut(
+                async {
+                    let dest = self.get_destination(target).await?;
+                    VeilidAPIError::from_network_result(Box::pin(rpc_processor.rpc_call_app_message(dest, message)).await?)
+                },
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     #[cfg(feature = "footgun")]
@@ -368,24 +368,32 @@ impl RoutingContext {
         schema: DHTSchema,
         owner: Option<KeyPair>,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::create_dht_record(self: {:?}, schema: {:?}, owner: {:?}, kind: {:?})", self, schema, owner, kind);
+        async {
             Crypto::validate_crypto_kind(kind)?;
             schema.validate()?;
             if let Some(owner) = &owner {
                 self.api.crypto()?.check_keypair(owner)?;
             }
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.create_record(
-                kind,
-                schema,
-                owner,
-                self.unlocked_inner.safety_selection.clone(),
-            ))
-            .await
-        }).await.inspect_err(log_veilid_api_error!(self))
+
+            let recorder = DurationRecorder::new("RoutingContext::create_dht_record", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, schema: {:?}, owner: {:?}, kind: {:?})", name, start, self, schema, owner, kind);
+            });
+            recorder.record_fut(
+                Box::pin(storage_manager.create_record(
+                    kind,
+                    schema,
+                    owner,
+                    self.unlocked_inner.safety_selection.clone(),
+                )),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Opens a DHT record at a specific key.
@@ -405,10 +413,7 @@ impl RoutingContext {
         record_key: RecordKey,
         default_writer: Option<KeyPair>,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::open_dht_record(self: {:?}, key: {:?}, default_writer: {:?})", self, record_key, default_writer);
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
@@ -416,16 +421,25 @@ impl RoutingContext {
             if let Some(default_writer) = &default_writer {
                 self.api.crypto()?.check_keypair(default_writer)?;
             }
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            storage_manager
-                .open_record(
+
+            let recorder = DurationRecorder::new("RoutingContext::open_dht_record", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, key: {:?}, default_writer: {:?})", name, start, self, record_key, default_writer);
+            });
+            recorder.record_fut(
+                storage_manager.open_record(
                     record_key,
                     default_writer,
                     self.unlocked_inner.safety_selection.clone(),
-                )
-                .await
-        }).await.inspect_err(log_veilid_api_error!(self))
+                ),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Closes a DHT record at a specific key that was opened with create_dht_record or open_dht_record.
@@ -433,18 +447,29 @@ impl RoutingContext {
     /// Closing a record allows you to re-open it with a different routing context.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn close_dht_record(&self, record_key: RecordKey) -> VeilidAPIResult<()> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::close_dht_record(self: {:?}, key: {:?})", self, record_key);
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
                 .check_record_key(&record_key)?;
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.close_record(record_key)).await
-        })
+
+            let recorder =
+                DurationRecorder::new("RoutingContext::close_dht_record", |name, start| {
+                    veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, key: {:?})", name, start, self, record_key);
+                });
+            recorder
+                .record_fut(
+                    Box::pin(storage_manager.close_record(record_key)),
+                    |name, start, dur, ret| {
+                        veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                        ret
+                    },
+                )
+                .await
+        }
         .await
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -452,8 +477,8 @@ impl RoutingContext {
     /// Waits for any pending offline subkey writes for a DHT record to be flushed to the network.
     ///
     /// Returns immediately with `Ok(true)` if there are no pending writes.
-    /// With a timeout is specified, returns `Ok(true)` if all pending writes were flushed, or `Ok(false)` if `timeout` elapsed first.
-    /// Without a `timeout` is specified, waits indefinitely for writes to be flushed and then returns `Ok(true)`.
+    /// When a `timeout` is specified, returns `Ok(true)` if all pending writes were flushed, or `Ok(false)` if `timeout` elapsed first.
+    /// When no `timeout` is specified, waits indefinitely for writes to be flushed and then returns `Ok(true)`.
     /// If the system shuts down while waiting, returns `Err(VeilidAPIError::NotInitialized)`.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn flush_dht_record(
@@ -461,18 +486,26 @@ impl RoutingContext {
         record_key: RecordKey,
         timeout: Option<Duration>,
     ) -> VeilidAPIResult<bool> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::flush_dht_record(self: {:?}, key: {:?})", self, record_key);
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
                 .check_record_key(&record_key)?;
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.flush_record(record_key, timeout)).await
-        })
+
+            let recorder = DurationRecorder::new("RoutingContext::flush_dht_record", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, key: {:?}, timeout: {:?})", name, start, self, record_key, timeout);
+            });
+            recorder.record_fut(
+                Box::pin(storage_manager.flush_record(record_key, timeout)),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }
         .await
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -484,18 +517,29 @@ impl RoutingContext {
     /// locally, and will prevent its value from being refreshed on the network by this node.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn delete_dht_record(&self, record_key: RecordKey) -> VeilidAPIResult<()> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::delete_dht_record(self: {:?}, key: {:?})", self, record_key);
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
                 .check_record_key(&record_key)?;
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.delete_record(record_key)).await
-        })
+
+            let recorder =
+                DurationRecorder::new("RoutingContext::delete_dht_record", |name, start| {
+                    veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, key: {:?})", name, start, self, record_key);
+                });
+            recorder
+                .record_fut(
+                    Box::pin(storage_manager.delete_record(record_key)),
+                    |name, start, dur, ret| {
+                        veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                        ret
+                    },
+                )
+                .await
+        }
         .await
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -513,18 +557,26 @@ impl RoutingContext {
         subkey: ValueSubkey,
         force_refresh: bool,
     ) -> VeilidAPIResult<Option<ValueData>> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::get_dht_value(self: {:?}, key: {:?}, subkey: {:?}, force_refresh: {:?})", self, record_key, subkey, force_refresh);
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
                 .check_record_key(&record_key)?;
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.get_value(record_key, subkey, force_refresh)).await
-        }).await.inspect_err(log_veilid_api_error!(self))
+
+            let recorder = DurationRecorder::new("RoutingContext::get_dht_value", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, key: {:?}, subkey: {:?}, force_refresh: {:?})", name, start, self, record_key, subkey, force_refresh);
+            });
+            recorder.record_fut(
+                Box::pin(storage_manager.get_value(record_key, subkey, force_refresh)),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Pushes a changed subkey value to the network.
@@ -534,7 +586,7 @@ impl RoutingContext {
     ///
     /// Returns `None` if the value was successfully set.
     /// Returns `Some(data)` if the value set was older than the one available on the network.
-    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(data), fields(duration, __VEILID_LOG_KEY = self.log_key(), data = print_data(&data, Some(64))), ret))]
+    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(data), fields(duration, __VEILID_LOG_KEY = self.log_key(), data.len = data.len()), ret))]
     pub async fn set_dht_value(
         &self,
         record_key: RecordKey,
@@ -542,18 +594,27 @@ impl RoutingContext {
         data: Vec<u8>,
         options: Option<SetDHTValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::set_dht_value(self: {:?}, key: {:?}, subkey: {:?}, data: len={}, options: {:?})", self, record_key, subkey, data.len(), options);
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
                 .check_record_key(&record_key)?;
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.set_value(record_key, subkey, data, options)).await
-        }).await.inspect_err(log_veilid_api_error!(self))
+
+            let data_len = data.len();
+            let recorder = DurationRecorder::new("RoutingContext::set_dht_value", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, key: {:?}, subkey: {:?}, data: len={}, options: {:?})", name, start, self, record_key, subkey, data_len, options);
+            });
+            recorder.record_fut(
+                Box::pin(storage_manager.set_value(record_key, subkey, data, options)),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Add or update a watch to a DHT value that informs the user via an VeilidUpdate::ValueChange callback when the record has subkeys change.
@@ -572,6 +633,9 @@ impl RoutingContext {
     /// * `count:
     ///   - None: specifies a watch count of u32::MAX
     ///   - Some(count): is the number of times the watch will be sent, maximum. A zero value here is equivalent to a cancellation.
+    /// * `transactional`: when true, ValueChanged notifications report only the changed subkey range; the local record store
+    ///   is not auto-updated and no change-inspection forced get is run. The watcher must fetch new values under its own
+    ///   transaction. Required by DHTLog/DHTShortArray. Defaults to false.
     ///
     /// Returns Ok(true) if a watch is active for this record.
     /// Returns Ok(false) if the entire watch has been cancelled.
@@ -588,22 +652,32 @@ impl RoutingContext {
         subkeys: Option<ValueSubkeyRangeSet>,
         expiration: Option<Timestamp>,
         count: Option<u32>,
+        transactional: Option<bool>,
     ) -> VeilidAPIResult<bool> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::watch_dht_values(self: {:?}, key: {:?}, subkeys: {:?}, expiration: {:?}, count: {:?})", self, record_key, subkeys, expiration, count);
-            let subkeys = subkeys.unwrap_or_default();
-            let expiration = expiration.unwrap_or_default();
-            let count = count.unwrap_or(u32::MAX);
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
                 .check_record_key(&record_key)?;
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.watch_values(record_key, subkeys, expiration, count)).await
-        }).await.inspect_err(log_veilid_api_error!(self))
+
+            let recorder = DurationRecorder::new("RoutingContext::watch_dht_values", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, key: {:?}, subkeys: {:?}, expiration: {:?}, count: {:?}, transactional: {:?})", name, start, self, record_key, subkeys, expiration, count, transactional);
+            });
+            let subkeys = subkeys.unwrap_or_default();
+            let expiration = expiration.unwrap_or_default();
+            let count = count.unwrap_or(u32::MAX);
+            let transactional = transactional.unwrap_or(false);
+            recorder.record_fut(
+                Box::pin(storage_manager.watch_values(record_key, subkeys, expiration, count, transactional)),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Cancels a watch early.
@@ -625,19 +699,27 @@ impl RoutingContext {
         record_key: RecordKey,
         subkeys: Option<ValueSubkeyRangeSet>,
     ) -> VeilidAPIResult<bool> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::cancel_dht_watch(self: {:?}, key: {:?}, subkeys: {:?}", self, record_key, subkeys);
-            let subkeys = subkeys.unwrap_or_default();
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
                 .check_record_key(&record_key)?;
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.cancel_watch_values(record_key, subkeys)).await
-        }).await.inspect_err(log_veilid_api_error!(self))
+
+            let recorder = DurationRecorder::new("RoutingContext::cancel_dht_watch", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, key: {:?}, subkeys: {:?})", name, start, self, record_key, subkeys);
+            });
+            let subkeys = subkeys.unwrap_or_default();
+            recorder.record_fut(
+                Box::pin(storage_manager.cancel_watch_values(record_key, subkeys)),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Inspects a DHT record for subkey state.
@@ -688,19 +770,27 @@ impl RoutingContext {
         subkeys: Option<ValueSubkeyRangeSet>,
         scope: DHTReportScope,
     ) -> VeilidAPIResult<DHTRecordReport> {
-        record_duration_fut(async {
-            veilid_log!(self debug
-                "RoutingContext::inspect_dht_record(self: {:?}, record_key: {:?}, subkeys: {:?}, scope: {:?})", self, record_key, subkeys, scope);
-            let subkeys = subkeys.unwrap_or_default();
-
+        async {
             self.api
                 .core_context()?
                 .storage_manager()
                 .check_record_key(&record_key)?;
-
             let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.inspect_record(record_key, subkeys, scope)).await
-        }).await.inspect_err(log_veilid_api_error!(self))
+
+            let recorder = DurationRecorder::new("RoutingContext::inspect_dht_record", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](self: {:?}, record_key: {:?}, subkeys: {:?}, scope: {:?})", name, start, self, record_key, subkeys, scope);
+            });
+            let subkeys = subkeys.unwrap_or_default();
+            recorder.record_fut(
+                Box::pin(storage_manager.inspect_record(record_key, subkeys, scope)),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     ///////////////////////////////////

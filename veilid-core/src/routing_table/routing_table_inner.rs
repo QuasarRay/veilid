@@ -51,8 +51,8 @@ impl RoutingTableInner {
         });
     }
 
-    fn bucket_depth(bucket_index: BucketIndex) -> usize {
-        match bucket_index.1 {
+    pub(in crate::routing_table) fn bucket_depth(pos: usize) -> usize {
+        match pos {
             0 => 256,
             1 => 128,
             2 => 64,
@@ -63,6 +63,30 @@ impl RoutingTableInner {
             7 => 2,
             _ => 1,
         }
+    }
+
+    /// Per-bucket entry counts for a given crypto kind, indexed by bucket position.
+    pub(in crate::routing_table) fn bucket_counts(&self, ck: CryptoKind) -> Vec<usize> {
+        let Some(buckets) = self.buckets.get(&ck) else {
+            return Vec::new();
+        };
+        buckets.iter().map(|b| b.len()).collect()
+    }
+
+    /// Total count of entries across all buckets (any crypto kind) that exceed
+    /// their bucket's max depth and haven't been kicked yet. This is "over-attached"
+    /// in the bucket-fill sense — capacity is overrun, lazy kicking will trim later.
+    pub(in crate::routing_table) fn excess_kickable_count(&self) -> usize {
+        let mut total = 0usize;
+        for buckets in self.buckets.values() {
+            for (pos, bucket) in buckets.iter().enumerate() {
+                let depth = Self::bucket_depth(pos);
+                if bucket.len() > depth {
+                    total += bucket.len() - depth;
+                }
+            }
+        }
+        total
     }
 
     pub fn init_buckets(&mut self) {
@@ -118,7 +142,7 @@ impl RoutingTableInner {
     /// which may not be possible due extant NodeRefs
     pub fn kick_bucket(&mut self, bucket_index: BucketIndex, exempt_peers: &BTreeSet<BareNodeId>) {
         let bucket = self.get_bucket_mut(bucket_index);
-        let bucket_depth = Self::bucket_depth(bucket_index);
+        let bucket_depth = Self::bucket_depth(bucket_index.1);
 
         if let Some(dead_node_ids) = bucket.kick(bucket_depth, exempt_peers) {
             // Remove expired entries

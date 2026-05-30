@@ -23,7 +23,7 @@ use async_tungstenite::tungstenite::handshake::server::{
 };
 use async_tungstenite::tungstenite::http::StatusCode;
 use async_tungstenite::tungstenite::protocol::Message;
-use async_tungstenite::tungstenite::Error;
+use async_tungstenite::tungstenite::Error as WsError;
 use async_tungstenite::{accept_hdr_async, client_async, WebSocketStream};
 use futures_util::{AsyncRead, AsyncWrite, SinkExt};
 
@@ -52,13 +52,16 @@ cfg_if! {
     }
 }
 
-fn err_to_network_result<T>(err: Error) -> NetworkResult<T> {
+fn ws_error_to_network_result<T>(err: WsError) -> NetworkResult<T> {
     match err {
-        Error::ConnectionClosed
-        | Error::AlreadyClosed
-        | Error::Io(_)
-        | Error::Protocol(ProtocolError::ResetWithoutClosingHandshake)
-        | Error::Protocol(ProtocolError::SendAfterClosing) => {
+        WsError::Io(io_err) => match Err(io_err).into_network_result() {
+            Ok(v) => v,
+            Err(e) => NetworkResult::NoConnection(e),
+        },
+        WsError::ConnectionClosed
+        | WsError::AlreadyClosed
+        | WsError::Protocol(ProtocolError::ResetWithoutClosingHandshake)
+        | WsError::Protocol(ProtocolError::SendAfterClosing) => {
             NetworkResult::NoConnection(to_io_error_other(err))
         }
         _ => NetworkResult::InvalidMessage(err.to_string()),
@@ -128,7 +131,7 @@ where
         match timeout(timeout_ms, stream.close()).await {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
-                return Ok(err_to_network_result(e));
+                return Ok(ws_error_to_network_result(e));
             }
             Err(_) => {
                 // Timed out
@@ -146,7 +149,7 @@ where
         }
         let out = match self.stream.clone().send(Message::binary(message)).await {
             Ok(v) => NetworkResult::value(v),
-            Err(e) => err_to_network_result(e),
+            Err(e) => ws_error_to_network_result(e),
         };
 
         #[cfg(feature = "verbose-tracing")]
@@ -174,7 +177,7 @@ where
                 io::ErrorKind::ConnectionReset,
                 format!("Unexpected WS message type: {:?}", x),
             )),
-            Some(Err(e)) => err_to_network_result(e),
+            Some(Err(e)) => ws_error_to_network_result(e),
             None => NetworkResult::NoConnection(io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "connection ended normally",
@@ -397,9 +400,11 @@ impl WebsocketProtocolHandler {
                         .connect(server_name, tcp_stream)
                         .await
                         .into_network_result()?);
-                    let (ws_stream, _response) = Box::pin(client_async(request, tls_stream))
-                        .await
-                        .map_err(to_io_error_other)?;
+                    let (ws_stream, _response) = network_result_try!(
+                        match Box::pin(client_async(request, tls_stream)).await {
+                            Ok(v) => NetworkResult::Value(v),
+                            Err(e) => ws_error_to_network_result(e),
+                        });
 
                     Ok(NetworkResult::Value(Box::new(NativeProtocolNetworkConnection::Wss(
                         WebsocketNetworkConnection::new(registry, flow, ws_stream),
@@ -409,9 +414,11 @@ impl WebsocketProtocolHandler {
                 }
             }
         } else {
-            let (ws_stream, _response) = client_async(request, tcp_stream)
-                .await
-                .map_err(to_io_error_other)?;
+            let (ws_stream, _response) =
+                network_result_try!(match client_async(request, tcp_stream).await {
+                    Ok(v) => NetworkResult::Value(v),
+                    Err(e) => ws_error_to_network_result(e),
+                });
             Ok(NetworkResult::Value(Box::new(
                 NativeProtocolNetworkConnection::Ws(WebsocketNetworkConnection::new(
                     registry, flow, ws_stream,

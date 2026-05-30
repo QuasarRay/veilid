@@ -110,6 +110,16 @@ impl ProtocolType {
         }
     }
 
+    pub fn framing_type(&self) -> FramingType {
+        match self {
+            ProtocolType::UDP => FramingType::Message,
+            ProtocolType::TCP => FramingType::Connection,
+            ProtocolType::WS => FramingType::Connection,
+            #[cfg(feature = "enable-protocol-wss")]
+            ProtocolType::WSS => FramingType::Connection,
+        }
+    }
+
     pub fn low_level_protocol_type(&self) -> LowLevelProtocolType {
         match self {
             ProtocolType::UDP => LowLevelProtocolType::UDP,

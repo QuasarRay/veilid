@@ -8,7 +8,7 @@ use lazy_static::*;
 cfg_if::cfg_if! {
     if #[cfg(feature = "opentelemetry")] {
         use opentelemetry_otlp::WithExportConfig;
-        use opentelemetry_sdk::trace::SdkTracerProvider;
+        use opentelemetry_sdk::trace::{BatchConfigBuilder, BatchSpanProcessor, SdkTracerProvider};
         use opentelemetry::trace::TracerProvider;
     }
 }
@@ -321,25 +321,38 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
 
                 cfg_if! {
                     if #[cfg(feature="rt-tokio")] {
+                        // OTLP build() spawns runtime workers; enter global runtime first.
+                        let _guard = crate::tools::enter_global_runtime();
                         let exporter = opentelemetry_otlp::SpanExporter::builder()
                             .with_tonic()
                             .with_endpoint(format!("http://{}", grpc_endpoint))
                             .build()
                             .expect("failed to build OpenTelemetry exporter");
+                        // Default BatchSpanProcessor queue is 2048 spans; with verbose
+                        // tracing directives this overflows in <1s and drops earlier
+                        // spans. Bump queue + batch size + reduce delay so diagnostic
+                        // runs can capture multi-minute traces without loss.
+                        let batch_config = BatchConfigBuilder::default()
+                            .with_max_queue_size(1_048_576)
+                            .with_max_export_batch_size(8192)
+                            .with_scheduled_delay(std::time::Duration::from_millis(500))
+                            .build();
+                        let batch = BatchSpanProcessor::builder(exporter)
+                            .with_batch_config(batch_config)
+                            .build();
+                        let provider = SdkTracerProvider::builder()
+                            .with_span_processor(batch)
+                            .build();
+                        let tracer = provider.tracer(format!(
+                            "{}:{}",
+                            platform_config.logging.otlp.service_name,
+                            hostname::get()
+                                .map(|s| s.to_string_lossy().into_owned())
+                                .unwrap_or_else(|_| "unknown".to_owned())));
                     } else {
                         compile_error!("needs executor implementation");
                     }
                 }
-
-                let provider = SdkTracerProvider::builder()
-                    .with_batch_exporter(exporter)
-                    .build();
-                let tracer = provider.tracer(format!(
-                    "{}:{}",
-                    platform_config.logging.otlp.service_name,
-                    hostname::get()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|_| "unknown".to_owned())));
 
                 let filter =
                     VeilidLayerFilter::new_with_config(VeilidLayerFilterConfig::new().with_directives([
@@ -349,7 +362,7 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
                 #[allow(deprecated)]
                 filter.apply_ignore_change_list(&platform_config.logging.otlp.ignore_log_targets);
                 filter
-                    .try_apply_directives(platform_config.logging.api.directives)
+                    .try_apply_directives(platform_config.logging.otlp.directives)
                     .expect_or_log("failed to apply otlp logging directives");
 
                 let layer = tracing_opentelemetry::layer()
@@ -830,6 +843,7 @@ pub extern "C" fn routing_context_watch_dht_values(
     subkeys: FfiStr,
     expiration: u64,
     count: u32,
+    transactional: bool,
 ) {
     let key: RecordKey = deserialize_opt_json(key.into_opt_string()).unwrap_or_log();
     let subkeys: Option<ValueSubkeyRangeSet> = subkeys
@@ -842,7 +856,13 @@ pub extern "C" fn routing_context_watch_dht_values(
             let routing_context = get_routing_context(id, "routing_context_watch_dht_values")?;
 
             let res = routing_context
-                .watch_dht_values(key, subkeys, Some(expiration), Some(count))
+                .watch_dht_values(
+                    key,
+                    subkeys,
+                    Some(expiration),
+                    Some(count),
+                    Some(transactional),
+                )
                 .await?;
             VeilidAPIResult::Ok(res)
         }
@@ -1052,9 +1072,10 @@ pub extern "C" fn app_call_reply(port: i64, call_id: FfiStr, message: FfiStr) {
             let call_id = match call_id.parse() {
                 Ok(v) => v,
                 Err(e) => {
-                    return VeilidAPIResult::Err(VeilidAPIError::invalid_argument(
-                        e, "call_id", call_id,
-                    ))
+                    return VeilidAPIResult::Err(VeilidAPIError::parse_error(
+                        format!("failed to parse call_id: {}", e),
+                        call_id,
+                    ));
                 }
             };
 
@@ -1138,6 +1159,26 @@ pub extern "C" fn dht_transaction_rollback(port: i64, id: u32) {
             let dht_tx = get_dht_transaction(id, "dht_transaction_rollback")?;
 
             dht_tx.rollback().await?;
+            VeilidAPIResult::Ok(())
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn dht_transaction_extend(port: i64, id: u32, record_keys: FfiStr, options: FfiStr) {
+    let record_keys: Vec<RecordKey> =
+        deserialize_opt_json(record_keys.into_opt_string()).unwrap_or_log();
+    let options: Option<TransactDHTRecordsOptions> = options
+        .into_opt_string()
+        .map(|s| deserialize_json(&s).unwrap_or_log());
+
+    DartIsolateWrapper::new(port).spawn_result_json(
+        async move {
+            let dht_tx = get_dht_transaction(id, "dht_transaction_extend")?;
+
+            dht_tx.extend(record_keys, options).await?;
             VeilidAPIResult::Ok(())
         }
         .in_current_span(),
@@ -2371,6 +2412,18 @@ pub extern "C" fn crypto_crypt_no_auth(
 #[instrument(level = "trace", target = "ffi", skip_all)]
 pub extern "C" fn now() -> u64 {
     Timestamp::now().as_u64()
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn now_non_decreasing() -> u64 {
+    Timestamp::now_non_decreasing().as_u64()
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn now_increasing() -> u64 {
+    Timestamp::now_increasing().as_u64()
 }
 
 #[no_mangle]

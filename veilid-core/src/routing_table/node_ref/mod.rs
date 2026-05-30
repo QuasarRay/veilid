@@ -1,6 +1,7 @@
 mod filtered_node_ref;
 mod node_ref_filter;
 mod traits;
+mod transport_node_ref;
 
 impl_veilid_log_facility!("rtab");
 
@@ -9,6 +10,7 @@ use super::*;
 pub(crate) use filtered_node_ref::*;
 pub(crate) use node_ref_filter::*;
 pub(crate) use traits::*;
+pub(crate) use transport_node_ref::*;
 
 ///////////////////////////////////////////////////////////////////////////
 // Default NodeRef
@@ -52,6 +54,21 @@ impl NodeRef {
             self.entry.clone(),
             NodeRefFilter::new().with_routing_domain_set(routing_domain_set.into()),
             Sequencing::NoPreference,
+        )
+    }
+
+    /// Construct a TransportNodeRef pinned to a single (routing_domain, transport).
+    /// Use this anywhere an RPC must be sent over exactly one specific transport.
+    pub fn with_transport(
+        &self,
+        routing_domain: RoutingDomain,
+        transport: TransportType,
+    ) -> TransportNodeRef {
+        TransportNodeRef::new(
+            self.registry.clone(),
+            self.entry.clone(),
+            transport,
+            routing_domain,
         )
     }
 

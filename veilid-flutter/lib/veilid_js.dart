@@ -10,7 +10,7 @@ import 'veilid.dart';
 
 Veilid getVeilid() => VeilidJS();
 
-JSObject wasm = web.window.getProperty<JSObject>('veilid_wasm'.toJS);
+JSObject wasm = web.window.getProperty<JSObject>('veilid_flutter'.toJS);
 
 Uint8List convertUint8ListFromJson(dynamic json) => Uint8List.fromList(
   ((json as JSArray).dartify()! as List<Object?>)
@@ -134,7 +134,6 @@ Future<void> _wasmPromiseVoid(String method, [List<JSAny?>? arguments]) =>
 
 class _Ctx {
   int? _id;
-
   final VeilidJS js;
 
   _Ctx(int id, this.js) : _id = id;
@@ -342,10 +341,12 @@ class VeilidRoutingContextJS extends VeilidRoutingContext {
     List<ValueSubkeyRange>? subkeys,
     Timestamp? expiration,
     int? count,
+    bool? transactional,
   }) {
     subkeys ??= [];
     expiration ??= Timestamp.zero();
     count ??= 0xFFFFFFFF;
+    transactional ??= false;
 
     final id = _ctx.requireId();
     return _wasmPromiseBool('routing_context_watch_dht_values', [
@@ -354,6 +355,7 @@ class VeilidRoutingContextJS extends VeilidRoutingContext {
       jsonEncode(subkeys).toJS,
       expiration.toString().toJS,
       count.toJS,
+      transactional.toJS,
     ]);
   }
 
@@ -648,9 +650,7 @@ class VeilidCryptoSystemJS extends VeilidCryptoSystem {
 
 class _TDBT {
   int? id;
-
   final VeilidTableDBJS tdbjs;
-
   final VeilidJS js;
 
   _TDBT(this.id, this.tdbjs, this.js);
@@ -729,7 +729,6 @@ class VeilidTableDBTransactionJS extends VeilidTableDBTransaction {
 
 class _TDB {
   int? _id;
-
   final VeilidJS js;
 
   _TDB(int id, this.js) : _id = id;
@@ -774,6 +773,19 @@ class VeilidDHTTransactionJS extends VeilidDHTTransaction {
     final id = _dtx.requireId();
     await _wasmPromiseVoid('dht_transaction_rollback', [id.toJS]);
     _dtx.close();
+  }
+
+  @override
+  Future<void> extend(
+    List<RecordKey> recordKeys, {
+    TransactDHTRecordsOptions? options,
+  }) async {
+    final id = _dtx.requireId();
+    await _wasmPromiseVoid('dht_transaction_extend', [
+      id.toJS,
+      jsonEncode(recordKeys).toJS,
+      if (options != null) jsonEncode(options).toJS else null,
+    ]);
   }
 
   @override
@@ -825,7 +837,6 @@ class VeilidDHTTransactionJS extends VeilidDHTTransaction {
 
 class _DTX {
   int? id;
-
   final VeilidJS js;
 
   _DTX(int this.id, this.js);
@@ -869,7 +880,7 @@ class VeilidTableDBJS extends VeilidTableDB {
   @override
   Future<List<Uint8List>> getKeys(int col) async {
     final id = _tdb.requireId();
-    return await _wasmCallJson(
+    return await _wasmPromiseJson(
       'table_db_get_keys',
       jsonListConstructor(base64UrlNoPadDecodeDynamic),
       [id.toJS, col.toJS],
@@ -1121,6 +1132,14 @@ class VeilidJS extends Veilid {
 
   @override
   Timestamp now() => Timestamp.fromString(_wasmCallString('now', []));
+
+  @override
+  Timestamp nowNonDecreasing() =>
+      Timestamp.fromString(_wasmCallString('now_non_decreasing', []));
+
+  @override
+  Timestamp nowIncreasing() =>
+      Timestamp.fromString(_wasmCallString('now_increasing', []));
 
   @override
   Future<String> debug(String command) =>

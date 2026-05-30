@@ -4,6 +4,7 @@ use futures_util::{AsyncReadExt, AsyncWriteExt};
 pub struct RawTcpNetworkConnection {
     registry: VeilidComponentRegistry,
     flow: Flow,
+    direction: Direction,
     stream: Mutex<Option<AsyncPeekStream>>,
 }
 
@@ -12,6 +13,7 @@ impl fmt::Debug for RawTcpNetworkConnection {
         f.debug_struct("RawTcpNetworkConnection")
             //.field("registry", &self.registry)
             .field("flow", &self.flow)
+            .field("direction", &self.direction)
             //.field("stream", &self.stream)
             .finish()
     }
@@ -20,16 +22,26 @@ impl fmt::Debug for RawTcpNetworkConnection {
 impl_veilid_component_accessors!(RawTcpNetworkConnection);
 
 impl RawTcpNetworkConnection {
-    pub fn new(registry: VeilidComponentRegistry, flow: Flow, stream: AsyncPeekStream) -> Self {
+    pub fn new(
+        registry: VeilidComponentRegistry,
+        flow: Flow,
+        direction: Direction,
+        stream: AsyncPeekStream,
+    ) -> Self {
         Self {
             registry,
             flow,
+            direction,
             stream: Mutex::new(Some(stream)),
         }
     }
 
     pub fn flow(&self) -> Flow {
         self.flow
+    }
+
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 
     #[cfg_attr(
@@ -79,15 +91,17 @@ impl RawTcpNetworkConnection {
 
         network_result_try!(stream.read_exact(&mut header).await.into_network_result()?);
         if header[0] != b'V' || header[1] != b'L' {
-            return Ok(NetworkResult::invalid_message(
-                "received invalid TCP frame header",
-            ));
+            return Ok(NetworkResult::invalid_message(format!(
+                "received invalid TCP frame header: {:02x?}",
+                header
+            )));
         }
         let len = ((header[3] as usize) << 8) | (header[2] as usize);
         if len > MAX_MESSAGE_SIZE {
-            return Ok(NetworkResult::invalid_message(
-                "received too large TCP frame",
-            ));
+            return Ok(NetworkResult::invalid_message(format!(
+                "received too large TCP frame: len={} header={:02x?}",
+                len, header
+            )));
         }
 
         let mut out = BytesMut::zeroed(len);
@@ -168,13 +182,14 @@ impl RawTcpProtocolHandler {
             SocketAddress::from_socket_addr(socket_addr),
             ProtocolType::TCP,
         );
+        let flow = Flow::new(peer_addr, SocketAddress::from_socket_addr(local_addr));
+        veilid_log!(self trace target: "net", "RawTcp accept (inbound) flow: {:?}", flow);
         let conn = NativeProtocolNetworkConnection::RawTcp(RawTcpNetworkConnection::new(
             self.registry(),
-            Flow::new(peer_addr, SocketAddress::from_socket_addr(local_addr)),
+            flow,
+            Direction::In,
             ps,
         ));
-
-        veilid_log!(self trace "Connection accepted from: {} (TCP)", socket_addr);
 
         Ok(Some(Box::new(conn)))
     }
@@ -212,10 +227,13 @@ impl RawTcpProtocolHandler {
             ),
             SocketAddress::from_socket_addr(actual_local_address),
         );
-        veilid_log!(registry trace "rawtcp::connect: {:?}", flow);
+        veilid_log!(registry trace target: "net", "RawTcp connect (outbound) flow: {:?}", flow);
 
         let conn = NativeProtocolNetworkConnection::RawTcp(RawTcpNetworkConnection::new(
-            registry, flow, ps,
+            registry,
+            flow,
+            Direction::Out,
+            ps,
         ));
 
         Ok(NetworkResult::Value(Box::new(conn)))

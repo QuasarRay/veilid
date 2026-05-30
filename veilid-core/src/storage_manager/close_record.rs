@@ -12,6 +12,9 @@ impl StorageManager {
         };
 
         let opaque_record_key = record_key.opaque();
+
+        // Hold the record lock for the whole close so pending writes flush
+        // before any subsequent open can race.
         let record_lock = self
             .record_lock_table
             .lock_record(
@@ -19,14 +22,15 @@ impl StorageManager {
                 StorageManagerRecordLockPurpose::Close,
             )
             .await;
-
-        // Attempt to close the record
-        let opt_cleanup = self.close_record_locked(&record_lock)?;
-
-        if let Some(cleanup) = opt_cleanup {
+        if let Some(cleanup) = self.close_record_locked(&record_lock)? {
             cleanup.await;
         }
 
+        // Flush the local record store so pending writes for this record land
+        // in the TableStore before the close returns.
+        self.get_local_record_store()?.flush().await?;
+
+        drop(record_lock);
         Ok(())
     }
 
@@ -40,36 +44,44 @@ impl StorageManager {
             apibail_not_initialized!();
         };
 
-        let record_locks = {
-            let keys = {
-                let inner = self.inner.lock();
-                inner.opened_records.keys().cloned().collect::<Vec<_>>()
+        // Release the record locks before awaiting cleanup
+        let (all_cleanup, opt_error) = {
+            let record_locks = {
+                let keys = {
+                    let inner = self.inner.lock();
+                    inner.opened_records.keys().cloned().collect::<Vec<_>>()
+                };
+
+                self.record_lock_table
+                    .lock_records(keys, StorageManagerRecordLockPurpose::Close)
+                    .await
             };
 
-            self.record_lock_table
-                .lock_records(keys, StorageManagerRecordLockPurpose::Close)
-                .await
-        };
-
-        let mut all_cleanup: Option<TransactionCleanup> = None;
-        let mut opt_error = None;
-        for record_lock_guard in record_locks.record_lock_guards() {
-            let res = self.close_record_locked(record_lock_guard);
-            match res {
-                Ok(Some(cleanup)) => match &mut all_cleanup {
-                    Some(existing) => existing.merge(cleanup),
-                    None => all_cleanup = Some(cleanup),
-                },
-                Ok(None) => {}
-                Err(e) => {
-                    opt_error = Some(e);
+            let mut all_cleanup: Option<TransactionCleanup> = None;
+            let mut opt_error = None;
+            for record_lock_guard in record_locks.record_lock_guards() {
+                let res = self.close_record_locked(record_lock_guard);
+                match res {
+                    Ok(Some(cleanup)) => match &mut all_cleanup {
+                        Some(existing) => existing.merge(cleanup),
+                        None => all_cleanup = Some(cleanup),
+                    },
+                    Ok(None) => {}
+                    Err(e) => {
+                        opt_error = Some(e);
+                    }
                 }
             }
-        }
+            (all_cleanup, opt_error)
+        };
 
         if let Some(cleanup) = all_cleanup {
             cleanup.await;
         }
+
+        // Flush the local record store so pending writes for the closed
+        // records land in the TableStore before the close returns.
+        self.get_local_record_store()?.flush().await?;
 
         if let Some(e) = opt_error {
             return Err(e);
@@ -113,9 +125,9 @@ impl StorageManager {
                 {
                     if let Some(state) = inner
                         .outbound_transaction_manager
-                        .drop_transaction(transaction_handle.clone())
+                        .drop_transaction(transaction_handle)
                     {
-                        opt_cleanup = Some(state.into_transaction_cleanup(transaction_handle));
+                        opt_cleanup = Some(state.into_transaction_cleanup());
                     }
                 }
             }

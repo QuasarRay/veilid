@@ -97,3 +97,5 @@ perf.data.old
 
 ## Ignore rustc crash files
 rustc-ice-*
+.claude/
+

@@ -53,7 +53,7 @@ impl_veilid_log_facility!("rpc");
 
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
-pub enum QuestionContext {
+pub(in crate::rpc_processor) enum QuestionContext {
     GetValue(ValidateGetValueContext),
     SetValue(ValidateSetValueContext),
     InspectValue(ValidateInspectValueContext),
@@ -61,7 +61,7 @@ pub enum QuestionContext {
     TransactCommand(ValidateTransactCommandContext),
 }
 
-pub struct RPCValidateContext<'a> {
+pub(in crate::rpc_processor) struct RPCValidateContext<'a> {
     pub registry: VeilidComponentRegistry,
     pub question_context: Option<&'a QuestionContext>,
 }

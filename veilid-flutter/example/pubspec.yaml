@@ -47,6 +47,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   veilid_test:
     path: ../packages/veilid_test
+  veilid_integration_test:
+    path: ../packages/veilid_integration_test
 
 # The following section is specific to Flutter.
 flutter:

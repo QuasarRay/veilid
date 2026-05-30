@@ -5,7 +5,7 @@ pub(super) static GUARD_ID: AtomicUsize = AtomicUsize::new(0);
 
 /// Subkey lock management structure
 #[derive(Debug)]
-struct RecordLockInner<R: LockPurpose, S: LockPurpose> {
+struct RecordLockInner<R: RecordLockPurpose, S: RecordLockPurpose> {
     subkey_lock_table: WeakValueHashMap<ValueSubkey, Weak<AsyncMutex<()>>>,
     purpose_state: RecordLockPurposeState<R, S>,
     peek_count: usize,
@@ -13,19 +13,26 @@ struct RecordLockInner<R: LockPurpose, S: LockPurpose> {
 
 /// Record lock management structure
 #[derive(Debug)]
-pub(super) struct RecordLock<R: LockPurpose, S: LockPurpose> {
+pub(super) struct RecordLock<R: RecordLockPurpose, S: RecordLockPurpose> {
     record: OpaqueRecordKey,
-    whole_record_lock: Arc<AsyncRwLock<()>>,
+    /// Write = Lifetime mode. Read = any non-Lifetime mode.
+    lifetime_lock: Arc<AsyncRwLock<()>>,
+    /// Write = Transaction mode. Read = Subkey mode.
+    transaction_lock: Arc<AsyncRwLock<()>>,
+    /// Mutual exclusion among Watch ops on this record.
+    watch_lock: Arc<AsyncMutex<()>>,
     inner: Mutex<RecordLockInner<R, S>>,
     #[cfg(feature = "debug-locks")]
     active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
 }
 
-impl<R: LockPurpose, S: LockPurpose> RecordLock<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLock<R, S> {
     pub fn new(record: OpaqueRecordKey) -> Self {
         Self {
             record,
-            whole_record_lock: Arc::new(AsyncRwLock::new(())),
+            lifetime_lock: Arc::new(AsyncRwLock::new(())),
+            transaction_lock: Arc::new(AsyncRwLock::new(())),
+            watch_lock: Arc::new(AsyncMutex::new(())),
             inner: Mutex::new(RecordLockInner {
                 subkey_lock_table: WeakValueHashMap::new(),
                 purpose_state: RecordLockPurposeState {
@@ -42,8 +49,14 @@ impl<R: LockPurpose, S: LockPurpose> RecordLock<R, S> {
     pub fn record(&self) -> OpaqueRecordKey {
         self.record.clone()
     }
-    pub fn get_whole_record_lock(&self) -> Arc<AsyncRwLock<()>> {
-        self.whole_record_lock.clone()
+    pub fn get_lifetime_lock(&self) -> Arc<AsyncRwLock<()>> {
+        self.lifetime_lock.clone()
+    }
+    pub fn get_transaction_lock(&self) -> Arc<AsyncRwLock<()>> {
+        self.transaction_lock.clone()
+    }
+    pub fn get_watch_lock(&self) -> Arc<AsyncMutex<()>> {
+        self.watch_lock.clone()
     }
     pub fn purpose_state(&self) -> RecordLockPurposeState<R, S> {
         self.inner.lock().purpose_state.clone()

@@ -15,16 +15,36 @@ enum AttachmentState {
   detached,
   attaching,
   attachedWeak,
+  attachedFair,
   attachedGood,
   attachedStrong,
-  fullyAttached,
-  overAttached,
+  attachedFull,
   detaching;
 
   factory AttachmentState.fromJson(dynamic j) =>
       AttachmentState.values.byName((j as String).toCamelCase());
 
   String toJson() => name.toPascalCase();
+
+  /// Signal-strength bars (0..=5).
+  int get barCount {
+    switch (this) {
+      case AttachmentState.detached:
+      case AttachmentState.detaching:
+      case AttachmentState.attaching:
+        return 0;
+      case AttachmentState.attachedWeak:
+        return 1;
+      case AttachmentState.attachedFair:
+        return 2;
+      case AttachmentState.attachedGood:
+        return 3;
+      case AttachmentState.attachedStrong:
+        return 4;
+      case AttachmentState.attachedFull:
+        return 5;
+    }
+  }
 }
 
 //////////////////////////////////////
@@ -156,11 +176,8 @@ sealed class RPCStats with _$RPCStats {
     required Timestamp? lastQuestionTs,
     required Timestamp? lastSeenTs,
     required Timestamp? firstConsecutiveSeenTs,
-    required int recentLostAnswersUnordered,
-    required int recentLostAnswersOrdered,
     required int failedToSend,
-    required AnswerStats answerUnordered,
-    required AnswerStats answerOrdered,
+    required int unreachable,
   }) = _RPCStats;
 
   factory RPCStats.fromJson(dynamic json) =>
@@ -224,6 +241,11 @@ sealed class VeilidUpdate with _$VeilidUpdate {
     required bool localNetworkReady,
     required TimestampDuration uptime,
     required TimestampDuration? attachedUptime,
+    required BigInt reliablePeerCount,
+    required BigInt livePeerCount,
+    required BigInt estimatedNetworkSize,
+    required TimestampDuration? medianLatency,
+    required BigInt overAttachedNodes,
   }) = VeilidUpdateAttachment;
   const factory VeilidUpdate.network({
     required bool started,
@@ -260,6 +282,11 @@ sealed class VeilidStateAttachment with _$VeilidStateAttachment {
     required bool localNetworkReady,
     required TimestampDuration uptime,
     required TimestampDuration? attachedUptime,
+    required BigInt reliablePeerCount,
+    required BigInt livePeerCount,
+    required BigInt estimatedNetworkSize,
+    required TimestampDuration? medianLatency,
+    required BigInt overAttachedNodes,
   }) = _VeilidStateAttachment;
 
   factory VeilidStateAttachment.fromJson(dynamic json) =>

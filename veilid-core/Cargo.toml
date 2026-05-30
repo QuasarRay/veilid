@@ -28,16 +28,8 @@ default-async-std = ["enable-crypto-vld0", "rt-async-std"]
 default-wasm = ["enable-crypto-vld0"]
 
 # Runtimes
-rt-async-std = [
-    "async-std",
-    "veilid-tools/rt-async-std",
-    "keyring-manager/rt-async-io-crypto-rust",
-]
-rt-tokio = [
-    "tokio",
-    "veilid-tools/rt-tokio",
-    "keyring-manager/rt-tokio-crypto-rust",
-]
+rt-async-std = ["async-std", "veilid-tools/rt-async-std"]
+rt-tokio = ["tokio", "veilid-tools/rt-tokio"]
 
 # Crypto support features
 enable-crypto-vld0 = [
@@ -88,10 +80,6 @@ crypto-test-none = ["enable-crypto-none"]
 veilid_core_android_tests = ["dep:paranoid-android", "test-util"]
 veilid_core_ios_tests = ["dep:tracing-oslog", "test-util"]
 debug-locks = ["veilid-tools/debug-locks"]
-debug-locks-detect = [
-    "veilid-tools/debug-locks",
-    "veilid-tools/debug-locks-detect",
-] # This does not work yet, do not enable
 
 
 ### DEPENDENCIES
@@ -108,7 +96,7 @@ num-traits = "0.2.19"
 cfg-if = "1.0.0"
 lazy_static = "1.5.0"
 directories = "6.0.0"
-get-size2 = { version = "0.7.4", features = ["derive"] }
+get-size2 = { version = "0.9.0", features = ["derive"] }
 async-trait = "0.1.89"
 macro_rules_attribute = "0.2.2"
 clap = { version = "4.5.39", features = ["derive"] }
@@ -121,7 +109,7 @@ thiserror = "2.0.18"
 
 # Data structures
 enumset = { version = "1.1.10", features = ["serde"] }
-keyvaluedb = "=0.1.7"
+keyvaluedb = "=0.1.8"
 range-set-blaze = "0.5.0"
 weak-table = "0.3.2"
 hashlink = { package = "veilid-hashlink", version = "=0.1.3", features = [
@@ -164,7 +152,10 @@ chacha20poly1305 = { version = "0.11.0-rc.3", optional = true, features = [
     "rand_core",
 ] }
 chacha20 = { version = "0.10", optional = true, features = ["xchacha"] }
-argon2 = { version = "0.5.3", optional = true }
+argon2 = { version = "0.5.3", optional = true, default-features = false, features = [
+    "std",
+    "rand",
+] }
 digest = { version = "0.10.7", optional = true, features = ["rand_core"] }
 
 # Serialization
@@ -176,7 +167,7 @@ serde = { version = "1.0.218", features = ["derive", "rc"] }
 serde_json = { version = "1.0.149" }
 data-encoding = { version = "2.8.0" }
 schemars = "1.0.3"
-lz4_flex = { version = "0.12.0", default-features = false, features = [
+lz4_flex = { version = "0.13.1", default-features = false, features = [
     "safe-encode",
     "safe-decode",
 ] }
@@ -190,7 +181,7 @@ serde_with = "3.12.0"
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 
 # Tools
-maxminddb = { version = "0.27.1", optional = true }
+maxminddb = { version = "0.28.1", optional = true }
 
 # System
 async-std = { version = "1.13.0", features = ["unstable"], optional = true }
@@ -212,8 +203,8 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 ] }
 
 # Data structures
-keyring-manager = "=0.7.1"
-keyvaluedb-sqlite = "=0.1.7"
+keyring-manager = "=0.8.2"
+keyvaluedb-sqlite = "=0.1.8"
 
 # Network
 async-tungstenite = { version = "0.34.0", features = ["async-tls"] }
@@ -232,7 +223,7 @@ veilid-tools = { version = "0.5.3", path = "../veilid-tools", default-features =
 ] }
 
 # Crypto
-getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom = { version = "0.4.2", features = ["wasm_js"] }
 
 # System
 js-sys = ">=0.3.83"
@@ -249,7 +240,7 @@ serde-wasm-bindgen = "0.6.5"
 ws_stream_wasm = "0.7.4"
 
 # Data Structures
-keyvaluedb-web = "=0.1.7"
+keyvaluedb-web = "=0.1.8"
 
 ### Configuration for WASM32 'web-sys' crate
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies.web-sys]
@@ -269,7 +260,7 @@ features = [
 
 # Dependencies for Android
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.22.3"
+jni = "0.22.4"
 paranoid-android = { version = "0.2.2", optional = true }
 
 # Dependencies for Windows
@@ -296,7 +287,7 @@ veilid-tracing-wasm = "0.2.0"
 [build-dependencies]
 capnpc = "0.25.0"
 glob = "0.3.2"
-sha2 = "0.10.8"
+sha2 = "0.11.0"
 hex = "0.4.3"
 reqwest = { version = "0.13.1", features = ["blocking"], optional = true }
 bosion = { version = "2.0.0", default-features = false }

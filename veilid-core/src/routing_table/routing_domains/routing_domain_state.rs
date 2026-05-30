@@ -1,9 +1,10 @@
 use super::*;
 
 /// The lifecycle stage of the routing domain's inbound connectivity
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum RoutingDomainInboundStage {
     /// No network setup (no inbound/outbound protocols, address types, or capabilities). No dialinfo confirmation.
+    #[default]
     Invalid,
     /// Network setup, but no dialinfo confirmation.
     NeedsDialInfoConfirmation,
@@ -42,9 +43,10 @@ impl fmt::Display for RoutingDomainInboundStage {
 }
 
 /// The lifecycle stage of the routing domain's outbound connectivity
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum RoutingDomainOutboundStage {
     /// No network setup (no inboundoutbound protocols, address types, or capabilities). No dialinfo confirmation.
+    #[default]
     Invalid,
     /// Network setup but routing table is is too small, bootstrap is needed.
     NeedsBootstrap,

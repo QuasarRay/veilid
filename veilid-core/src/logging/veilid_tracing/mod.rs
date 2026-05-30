@@ -88,7 +88,7 @@ impl VeilidTracing {
                         .append(log_output.append)
                         .create(true)
                         .open(log_output.path)
-                        .map_err(VeilidAPIError::generic)?;
+                        .map_err(|e| VeilidAPIError::generic(e.to_string()))?;
 
                     let layer = tracing_subscriber::fmt::Layer::new()
                         .compact()
@@ -111,7 +111,9 @@ impl VeilidTracing {
         }
 
         let subscriber = subscriber.with(layers);
-        subscriber.try_init().map_err(VeilidAPIError::generic)?;
+        subscriber
+            .try_init()
+            .map_err(|e| VeilidAPIError::generic(e.to_string()))?;
 
         Ok(Self { filters })
     }

@@ -8,8 +8,6 @@ struct OutboundSetValueContext {
     pub value: Arc<SignedValueData>,
     /// The number of non-sets since the last set we have received
     pub missed_since_last_set: usize,
-    /// If we should send a partial update with the current context
-    pub send_partial_update: bool,
 }
 
 /// The result of the outbound_set_value operation
@@ -120,13 +118,16 @@ impl StorageManager {
         veilid_log!(self debug "Writing subkey to the network: {}:{} len={}", opaque_record_key, subkey, signed_value_data.value_data().data().len() );
 
         // Use the safety selection we opened the record with
-        let res_rx = match self.outbound_set_value(
-            &opaque_record_key,
-            subkey,
-            safety_selection.clone(),
-            signed_value_data.clone(),
-            descriptor,
-        ) {
+        let result = match self
+            .outbound_set_value(
+                &opaque_record_key,
+                subkey,
+                safety_selection.clone(),
+                signed_value_data.clone(),
+                descriptor,
+            )
+            .await
+        {
             Ok(v) => v,
             Err(e) => {
                 // Failed to write, try again later
@@ -145,31 +146,16 @@ impl StorageManager {
             }
         };
 
-        let out = if allow_offline == AllowOffline(true) {
-            // Process one fanout result in the foreground, and if necessary, more in the background
-            // This trades off possibly having a consensus conflict, which requires watching for ValueChanged
-            // for lower latency. Can only be done if we are allowing offline processing because
-            // the network could go down after the first fanout result is processed and before we complete fanout.
-            self.background_process_set_value_results_locked(
-                subkey_lock,
-                res_rx,
-                record_key,
-                value_data,
-                safety_selection,
-            )
-            .await
-        } else {
-            // Process all fanout results in the foreground.
-            // Takes longer but ensures the value is fully committed to the network.
-            self.foreground_process_set_value_results_locked(
+        let out = self
+            .process_outbound_set_value_result_locked(
                 &subkey_lock,
-                res_rx,
                 record_key,
                 value_data,
                 safety_selection,
+                allow_offline,
+                result,
             )
-            .await
-        };
+            .await;
 
         if matches!(out, Err(VeilidAPIError::TryAgain { message: _ })) {
             return Ok(None);
@@ -260,100 +246,20 @@ impl StorageManager {
         Ok((signed_value_data, value_data, descriptor))
     }
 
-    async fn background_process_set_value_results_locked(
-        &self,
-        subkey_lock: StorageManagerSubkeyLockGuard,
-        res_rx: flume::Receiver<VeilidAPIResult<set_value::OutboundSetValueResult>>,
-        record_key: RecordKey,
-        value_data: ValueData,
-        safety_selection: SafetySelection,
-    ) -> VeilidAPIResult<Option<ValueData>> {
-        // Wait for the first result
-        let Ok(result) = res_rx.recv_async().await else {
-            apibail_internal!("failed to receive results");
-        };
-        let result = result?;
-        let partial = result.fanout_result.kind.is_incomplete();
-
-        // Process the returned result
-        let out = self
-            .process_outbound_set_value_result_locked(
-                &subkey_lock,
-                record_key.clone(),
-                value_data.clone(),
-                safety_selection.clone(),
-                AllowOffline(true),
-                result,
-            )
-            .await?;
-
-        // If there's more to process, do it in the background
-        if partial {
-            self.process_deferred_outbound_set_value_result(
-                subkey_lock,
-                res_rx,
-                record_key,
-                value_data,
-                safety_selection,
-            );
-        }
-
-        Ok(out)
-    }
-
-    async fn foreground_process_set_value_results_locked(
-        &self,
-        subkey_lock: &StorageManagerSubkeyLockGuard,
-        res_rx: flume::Receiver<VeilidAPIResult<set_value::OutboundSetValueResult>>,
-        record_key: RecordKey,
-        value_data: ValueData,
-        safety_selection: SafetySelection,
-    ) -> VeilidAPIResult<Option<ValueData>> {
-        let Some(stop_token) = self.startup_lock.stop_token() else {
-            apibail_not_initialized!();
-        };
-
-        loop {
-            let timeout_res = res_rx.recv_async().timeout_at(stop_token.clone()).await;
-            let Ok(res) = timeout_res else {
-                apibail_not_initialized!();
-            };
-            let Ok(result) = res else {
-                apibail_internal!("failed to receive results");
-            };
-            let result = result?;
-            let is_incomplete = result.fanout_result.kind.is_incomplete();
-
-            let opt_value_data = self
-                .process_outbound_set_value_result_locked(
-                    subkey_lock,
-                    record_key.clone(),
-                    value_data.clone(),
-                    safety_selection.clone(),
-                    AllowOffline(false),
-                    result,
-                )
-                .await?;
-            if !is_incomplete {
-                return Ok(opt_value_data);
-            }
-        }
-    }
-
     /// Perform a 'set value' query on the network
     /// Performs the work without a transaction
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "dht", skip_all, err)
     )]
-    pub(super) fn outbound_set_value(
+    pub(super) async fn outbound_set_value(
         &self,
         opaque_record_key: &OpaqueRecordKey,
         subkey: ValueSubkey,
         safety_selection: SafetySelection,
         value: Arc<SignedValueData>,
         descriptor: Arc<SignedValueDescriptor>,
-    ) -> VeilidAPIResult<flume::Receiver<VeilidAPIResult<OutboundSetValueResult>>> {
+    ) -> VeilidAPIResult<OutboundSetValueResult> {
         let routing_domain = RoutingDomain::PublicInternet;
 
         // Get the DHT parameters for 'SetValue'
@@ -376,15 +282,11 @@ impl StorageManager {
             })
             .collect();
 
-        // Make the return channel
-        let (out_tx, out_rx) = flume::unbounded::<VeilidAPIResult<OutboundSetValueResult>>();
-
         // Make operation context
         let schema = descriptor.schema()?;
         let context = Arc::new(Mutex::new(OutboundSetValueContext {
             value,
             missed_since_last_set: 0,
-            send_partial_update: true,
         }));
         let descriptor_cache = self.descriptor_cache.clone();
 
@@ -406,13 +308,22 @@ impl StorageManager {
                     let opaque_record_key = opaque_record_key.clone();
                     let safety_selection = safety_selection.clone();
                     let descriptor_cache = descriptor_cache.clone();
-                    Box::pin(async move {
+                    let fut = async move {
                         let rpc_processor = registry.rpc_processor();
 
                         // check the cache to see if we should send the descriptor
-                        let node_id = next_node.node_ids().get(opaque_record_key.kind()).unwrap_or_log();
-                        let dc_key = DescriptorCacheKey{ opaque_record_key: opaque_record_key.clone(), node_id };
-                        let mut descriptor_mode = SetDescriptorMode::new(descriptor_cache.lock().get(&dc_key).is_none(), descriptor);
+                        let node_id = next_node
+                            .node_ids()
+                            .get(opaque_record_key.kind())
+                            .unwrap_or_log();
+                        let dc_key = DescriptorCacheKey {
+                            opaque_record_key: opaque_record_key.clone(),
+                            node_id,
+                        };
+                        let mut descriptor_mode = SetDescriptorMode::new(
+                            descriptor_cache.lock().get(&dc_key).is_none(),
+                            descriptor,
+                        );
 
                         // get most recent value to send
                         let sent_value = {
@@ -423,26 +334,35 @@ impl StorageManager {
                         // send across the wire, with a retry if the remote needed the descriptor
                         let sva = loop {
                             // send across the wire
-                            let sva = match
-                                rpc_processor
-                                    .rpc_call_set_value(
-                                        Destination::direct(next_node.routing_domain_filtered(routing_domain), Some(safety_selection.clone())),
-                                        opaque_record_key.clone(),
-                                        subkey,
-                                        (*sent_value).clone(),
-                                        descriptor_mode.clone(),
-                                    )
-                                    .await? {
+                            let sva = match rpc_processor
+                                .rpc_call_set_value(
+                                    Destination::direct(
+                                        next_node.routing_domain_filtered(routing_domain),
+                                        Some(safety_selection.clone()),
+                                    ),
+                                    opaque_record_key.clone(),
+                                    subkey,
+                                    (*sent_value).clone(),
+                                    descriptor_mode.clone(),
+                                )
+                                .await?
+                            {
                                 NetworkResult::Timeout => {
-                                    return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Timeout});
+                                    return Ok(FanoutCallOutput {
+                                        peer_info_list: vec![],
+                                        disposition: FanoutCallDisposition::Timeout,
+                                    });
                                 }
-                                NetworkResult::ServiceUnavailable(_) |
-                                NetworkResult::NoConnection(_)  |
-                                NetworkResult::AlreadyExists(_) |
-                                NetworkResult::InvalidMessage(_) => {
-                                    return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                                NetworkResult::ServiceUnavailable(_)
+                                | NetworkResult::NoConnection(_)
+                                | NetworkResult::AlreadyExists(_)
+                                | NetworkResult::InvalidMessage(_) => {
+                                    return Ok(FanoutCallOutput {
+                                        peer_info_list: vec![],
+                                        disposition: FanoutCallDisposition::Invalid,
+                                    });
                                 }
-                                NetworkResult::Value(v) => v
+                                NetworkResult::Value(v) => v,
                             };
 
                             // Do a retry if we needed to send the descriptor
@@ -465,19 +385,22 @@ impl StorageManager {
 
                         // If the node was close enough to possibly set the value
                         if !sva.answer.accepted {
-                            let missed ={
+                            let missed = {
                                 let mut ctx = context.lock();
                                 ctx.missed_since_last_set += 1;
                                 ctx.missed_since_last_set
                             };
                             // Return peers if we have some
                             veilid_log!(registry debug target:"network_result", "SetValue missed: {}, fanout call returned peers {}", missed, sva.answer.peers.len());
-                            return Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Rejected});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: sva.answer.peers,
+                                disposition: FanoutCallDisposition::Rejected,
+                            });
                         }
 
                         // Cache if we sent the descriptor
                         if descriptor_mode.is_send() {
-                            descriptor_cache.lock().insert(dc_key,());
+                            descriptor_cache.lock().insert(dc_key, ());
                         }
 
                         // See if we got a newer value back
@@ -487,27 +410,41 @@ impl StorageManager {
 
                             // Return peers if we have some
                             veilid_log!(registry debug target:"network_result", "SetValue returned no value, fanout call returned peers {}", sva.answer.peers.len());
-                            return Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Accepted});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: sva.answer.peers,
+                                disposition: FanoutCallDisposition::Accepted,
+                            });
                         };
 
                         // Keep the value if we got one and it is newer and it passes schema validation
 
                         // Validate with schema
-                        if registry.storage_manager().check_subkey_value_data(&schema,
-                            descriptor_mode.ref_descriptor().ref_owner(),
-                            subkey,
-                            value.value_data(),
-                        ).is_err() {
+                        if registry
+                            .storage_manager()
+                            .check_subkey_value_data(
+                                &schema,
+                                descriptor_mode.ref_descriptor().ref_owner(),
+                                subkey,
+                                value.value_data(),
+                            )
+                            .is_err()
+                        {
                             // Validation failed, ignore this value and pretend we never saw this node
                             veilid_log!(registry debug "SetValue got value back but validation failed, marking as invalid: {}", value);
-                            return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: vec![],
+                                disposition: FanoutCallDisposition::Invalid,
+                            });
                         }
 
                         // If we got a value back it should be different than the one we sent, but because other nodes may have returned the same value
                         // we still may have that value already in our context
                         if sent_value.value_data() == value.value_data() {
                             veilid_log!(registry debug "SetValue got value back but was the same as what was, marking as invalid: {}", value);
-                            return Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Invalid});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: sva.answer.peers,
+                                disposition: FanoutCallDisposition::Invalid,
+                            });
                         }
 
                         // Ensure a newer sequence number was returned than what was sent
@@ -518,7 +455,10 @@ impl StorageManager {
                             // Skip this node and its closer list because it is misbehaving
                             // Ignore this value and pretend we never saw this node
                             veilid_log!(registry debug "SetValue got value back but was older, marking as invalid: {}", value);
-                            return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: vec![],
+                                disposition: FanoutCallDisposition::Invalid,
+                            });
                         }
 
                         // Check the value received against our current consensus value now
@@ -529,8 +469,13 @@ impl StorageManager {
                             if rcvd_seq < ctx_seq {
                                 // Ignore if we've got something newer already
                                 veilid_log!(registry debug "SetValue got value back, but it was older than our current value ({} < {}), marking as stale: {}  ", rcvd_seq, ctx_seq, value);
-                                Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Stale})
-                            } else if rcvd_seq > ctx_seq  || value.value_data() != ctx.value.value_data() {
+                                Ok(FanoutCallOutput {
+                                    peer_info_list: sva.answer.peers,
+                                    disposition: FanoutCallDisposition::Stale,
+                                })
+                            } else if rcvd_seq > ctx_seq
+                                || value.value_data() != ctx.value.value_data()
+                            {
                                 // If the sequence number is greater or equal than the one in our context,
                                 // keep it unless the context has the exact same value, even if the sequence number is the same, accept all conflicts in an attempt to resolve them
                                 veilid_log!(registry debug "SetValue got value back, (rcvd_seq={}, ctx_seq={}) restarting with newer or different value: {}", rcvd_seq, ctx_seq,  value);
@@ -538,223 +483,86 @@ impl StorageManager {
                                 ctx.value = Arc::new(value);
                                 // One node has shown us this value so far
                                 ctx.missed_since_last_set = 0;
-                                // Send an update since the value changed
-                                ctx.send_partial_update = true;
 
-                                Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::AcceptedNewerRestart})
+                                Ok(FanoutCallOutput {
+                                    peer_info_list: sva.answer.peers,
+                                    disposition: FanoutCallDisposition::AcceptedNewerRestart,
+                                })
                             } else {
                                 // If the sequence numbers were the same and the values were the same, then mark it as accepted
                                 // since this contributes to our consensus
                                 veilid_log!(registry debug "SetValue got value back, and it matched the current value received from other nodes: {}", value);
-                                Ok(FanoutCallOutput{peer_info_list:sva.answer.peers, disposition: FanoutCallDisposition::Accepted})
-
+                                Ok(FanoutCallOutput {
+                                    peer_info_list: sva.answer.peers,
+                                    disposition: FanoutCallDisposition::Accepted,
+                                })
                             }
                         }
-                    }.instrument(tracing::trace_span!("fanout call_routine"))) as PinBoxFuture<FanoutCallResult>
+                    };
+                    #[cfg(feature = "instrument")]
+                    let fut =
+                        fut.instrument(tracing::trace_span!(target: "dht", "fanout call_routine"));
+                    Box::pin(fut) as PinBoxFuture<FanoutCallResult>
                 },
             )
         };
 
         // Routine to call to check if we're done at each step
         let check_done = {
-            let context = context.clone();
-            let out_tx = out_tx.clone();
-            let registry = self.registry();
             Arc::new(
                 move |fanout_result: &FanoutResult| -> FanoutDoneDisposition {
-                    let mut ctx = context.lock();
-
                     match fanout_result.kind {
-                        FanoutResultKind::Incomplete => {
-                            // Send partial update if desired, if we've gotten at least one consensus node
-                            if ctx.send_partial_update && !fanout_result.consensus_nodes.is_empty()
-                            {
-                                ctx.send_partial_update = false;
-
-                                // Return partial result
-                                let out = OutboundSetValueResult {
-                                    fanout_result: fanout_result.clone(),
-                                    signed_value_data: ctx.value.clone(),
-                                };
-                                veilid_log!(registry debug "Sending partial SetValue result: {:?}", out);
-                                if let Err(e) = out_tx.send(Ok(out)) {
-                                    veilid_log!(registry debug "Sending partial SetValue result failed: {}", e);
-                                }
-                            }
-                            // Keep going
-                            FanoutDoneDisposition::NotDone
-                        }
-                        FanoutResultKind::Timeout | FanoutResultKind::Exhausted => {
-                            // Signal we're done
-                            FanoutDoneDisposition::DoneEarly
-                        }
-                        FanoutResultKind::Consensus => {
-                            // Signal we're done
-                            FanoutDoneDisposition::DoneEarly
-                        }
+                        FanoutResultKind::Incomplete => FanoutDoneDisposition::NotDone,
+                        FanoutResultKind::Timeout
+                        | FanoutResultKind::Exhausted
+                        | FanoutResultKind::Consensus => FanoutDoneDisposition::DoneEarly,
                     }
                 },
             )
         };
 
         // Call the fanout in a spawned task
-        let registry = self.registry();
         let hash_coordinate = opaque_record_key.to_hash_coordinate();
-        let detached_spawn_guard = self
-            .detached_spawns
-            .try_read_arc()
-            .ok_or_else(VeilidAPIError::not_initialized)?;
         let shutdown_stop_source = self
             .startup_lock
             .stop_token()
             .ok_or_else(VeilidAPIError::not_initialized)?;
-        spawn(
-            "outbound_set_value fanout",
-            Box::pin(
-                async move {
-                    let routing_table = registry.routing_table();
-                    let fanout_call = FanoutCall::new(
-                        &routing_table,
-                        FanoutCallParams {
-                            name: format!("outbound_set_value({})", Timestamp::now_increasing()),
-                            hash_coordinate,
-                            node_count,
-                            fanout_tasks,
-                            consensus_count,
-                            consensus_width,
-                            timeout,
-                        },
-                        capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]),
-                        call_routine,
-                        check_done,
-                    );
-                    let fanout_result = match fanout_call.run(init_fanout_queue, FanoutQueueMode::ThrottleAtConsensus, shutdown_stop_source).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            // If we finished with an error, return that
-                            veilid_log!(registry debug "SetValue fanout error: {}", e);
-                            if let Err(e) = out_tx.send(Err(e.into())) {
-                                veilid_log!(registry debug "Sending SetValue fanout error failed: {}", e);
-                            }
 
-                            return;
-                        }
-                    };
-
-                    veilid_log!(registry debug "SetValue Fanout: {:#}", fanout_result);
-
-                    let out = {
-                        let ctx = context.lock();
-                        OutboundSetValueResult {
-                            fanout_result,
-                            signed_value_data: ctx.value.clone(),
-                        }
-                    };
-
-                    if let Err(e) = out_tx.send(Ok(out)) {
-                        veilid_log!(registry debug "Sending SetValue result failed: {}", e);
-                    }
-
-                    // Ensure we move in the guard and drop it here explicitly
-                    drop(detached_spawn_guard);
-                }
-                .instrument(tracing::trace_span!("outbound_set_value fanout routine")),
-            ),
-        )
-        .detach();
-
-        Ok(out_rx)
-    }
-
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "dht", skip_all)
-    )]
-    pub(super) fn process_deferred_outbound_set_value_result(
-        &self,
-        subkey_lock: StorageManagerSubkeyLockGuard,
-        res_rx: flume::Receiver<Result<set_value::OutboundSetValueResult, VeilidAPIError>>,
-        record_key: RecordKey,
-        requested_value_data: ValueData,
-        safety_selection: SafetySelection,
-    ) {
-        let registry = self.registry();
-        let last_requested_value_data = Arc::new(Mutex::new(requested_value_data));
-        let subkey = subkey_lock.subkey();
-        let subkey_lock_mutex = Arc::new(Mutex::new(Some(subkey_lock)));
-
-        self.process_deferred_results(
-            res_rx,
-            Box::new(
-                move |result: VeilidAPIResult<set_value::OutboundSetValueResult>| -> PinBoxFutureStatic<DeferredStreamResult> {
-                    let registry = registry.clone();
-                    let last_requested_value_data = last_requested_value_data.clone();
-                    let safety_selection = safety_selection.clone();
-                    let record_key = record_key.clone();
-                    let subkey_lock_mutex = subkey_lock_mutex.clone();
-                    Box::pin(async move {
-                        let this = registry.storage_manager();
-                        let Some(subkey_lock) = subkey_lock_mutex.lock().take() else {
-                            veilid_log!(registry error "Subkey lock is dead");
-                            return DeferredStreamResult::Done;
-                        };
-
-                        let result = match result {
-                            Ok(v) => v,
-                            Err(e) => {
-                                veilid_log!(registry debug "Deferred fanout error: {}", e);
-                                return DeferredStreamResult::Done;
-                            }
-                        };
-                        let is_incomplete = result.fanout_result.kind.is_incomplete();
-                        let requested_value_data = last_requested_value_data.lock().clone();
-
-                        let value_data = match this.process_outbound_set_value_result_locked(&subkey_lock, record_key.clone(), requested_value_data, safety_selection, AllowOffline(true), result).await {
-                            Ok(Some(v)) => v,
-                            Ok(None) => {
-                                return if is_incomplete {
-                                    *subkey_lock_mutex.lock() = Some(subkey_lock);
-                                    DeferredStreamResult::Continue
-                                } else {
-                                    DeferredStreamResult::Done
-                                };
-                            }
-                            Err(VeilidAPIError::KeyNotFound { key }) => {
-                                veilid_log!(registry debug "Record no longer exists during deferred outbound set value: {}", key);
-                                return DeferredStreamResult::Done;
-                            }
-                            Err(e) => {
-                                veilid_log!(registry debug "Deferred fanout error: {}", e);
-                                return DeferredStreamResult::Done;
-                            }
-                        };
-                        if is_incomplete {
-                            // If more partial results show up, don't send an update until we're done
-                            *subkey_lock_mutex.lock() = Some(subkey_lock);
-                            return DeferredStreamResult::Continue;
-                        }
-                        // If we processed the final result, possibly send an update
-                        // if the sequence number changed since our first partial update
-                        // Send with a max count as this is not attached to any watch
-                        let changed = {
-                            let mut lvd = last_requested_value_data.lock();
-                            if lvd.seq() != value_data.seq() {
-                                *lvd = value_data.clone();
-                                true
-                            } else {
-                                false
-                            }
-                        };
-                        if changed {
-                            this.update_callback_value_change(record_key,ValueSubkeyRangeSet::single(subkey), u32::MAX, Some(value_data));
-                        }
-
-                        // Return done
-                        DeferredStreamResult::Done
-                    }.instrument(tracing::trace_span!("outbound_set_value deferred results")))
-                },
-            ),
+        let routing_table = self.routing_table();
+        let fanout_call = FanoutCall::new(
+            &routing_table,
+            FanoutCallParams {
+                name: format!("outbound_set_value({})", Timestamp::now_increasing()),
+                hash_coordinate,
+                node_count,
+                fanout_tasks,
+                consensus_count,
+                consensus_width,
+                timeout,
+            },
+            capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]),
+            call_routine,
+            check_done,
         );
+
+        let fanout_result = fanout_call
+            .run(
+                init_fanout_queue,
+                FanoutQueueMode::ThrottleAtConsensus,
+                shutdown_stop_source,
+            )
+            .await
+            .inspect_err(|e| {
+                veilid_log!(self debug "SetValue fanout error: {}", e);
+            })?;
+
+        veilid_log!(self debug "SetValue Fanout: {:#}", fanout_result);
+
+        let ctx = context.lock();
+        Ok(OutboundSetValueResult {
+            fanout_result,
+            signed_value_data: ctx.value.clone(),
+        })
     }
 
     #[cfg_attr(

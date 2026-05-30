@@ -74,4 +74,41 @@ impl TableStoreDriver {
 
         Ok(true)
     }
+
+    /// Delete every table file for the currently configured namespace.
+    #[expect(clippy::unused_async)]
+    pub async fn delete_all_in_namespace(&self) -> VeilidAPIResult<usize> {
+        let config = self.config();
+        let tablestoredir = config.table_store.directory.clone();
+        let namespace = config.namespace.clone();
+        let dir = std::path::PathBuf::from(&tablestoredir);
+        if !dir.exists() {
+            return Ok(0);
+        }
+
+        let prefix = if namespace.is_empty() {
+            String::new()
+        } else {
+            format!("{}_", namespace)
+        };
+
+        let mut deleted = 0usize;
+        for entry in std::fs::read_dir(&dir).map_err(VeilidAPIError::from)? {
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+            let Some(fname) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !prefix.is_empty() && !fname.starts_with(&prefix) {
+                continue;
+            }
+            if let Err(e) = std::fs::remove_file(&path) {
+                veilid_log!(self warn "delete_all_in_namespace: failed to remove '{}': {}", fname, e);
+                continue;
+            }
+            deleted += 1;
+            veilid_log!(self debug "delete_all_in_namespace: removed '{}'", fname);
+        }
+        Ok(deleted)
+    }
 }

@@ -207,7 +207,6 @@ class VeilidAPIExceptionUnimplemented implements VeilidAPIException {
 @immutable
 class VeilidAPIExceptionParseError implements VeilidAPIException {
   final String message;
-
   final String value;
 
   //
@@ -224,9 +223,7 @@ class VeilidAPIExceptionParseError implements VeilidAPIException {
 @immutable
 class VeilidAPIExceptionInvalidArgument implements VeilidAPIException {
   final String context;
-
   final String argument;
-
   final String value;
 
   //
@@ -244,7 +241,6 @@ class VeilidAPIExceptionInvalidArgument implements VeilidAPIException {
 @immutable
 class VeilidAPIExceptionMissingArgument implements VeilidAPIException {
   final String context;
-
   final String argument;
 
   //

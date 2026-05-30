@@ -1,8 +1,10 @@
 library;
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:veilid/veilid.dart';
+import 'package:veilid_integration_test/veilid_integration_test.dart';
 import 'package:veilid_test/veilid_test.dart';
 // import 'package:test_api/src/backend/invoker.dart';
 
@@ -14,12 +16,15 @@ import 'test_routing_context.dart';
 import 'test_table_db.dart';
 import 'test_veilid_config.dart';
 
-void main() {
+void main() => runWithIntegrationLog(() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  runApp(const IntegrationLogApp());
 
   final fixture = DefaultVeilidFixture(
       programName: 'veilid_flutter integration test',
       logFixture: LogFixture.instance);
+  final updateProcessorFixture =
+      UpdateProcessorFixture(veilidFixture: fixture);
 
   // setUp(() {
   //   final liveTest = Invoker.current?.liveTest;
@@ -37,6 +42,10 @@ void main() {
   group('Initialized', () {
     setUpAll(fixture.setUp);
     tearDownAll(fixture.tearDown);
+    setUpAll(updateProcessorFixture.setUp);
+    tearDownAll(updateProcessorFixture.tearDown);
+    // Fail the run if any subsystem (online/relay/route/connection/readiness) flapped
+    tearDownAll(LogFixture.instance.assertNoFlapping);
 
     group('Crypto', () {
       test('list cryptosystems', testListCryptoSystems, tags: ['crypto']);
@@ -122,7 +131,8 @@ void main() {
         });
 
         group('DHT Transactions $cryptoKind', () {
-          final testDHTTransactions = TestDHTTransactions(cryptoKind);
+          final testDHTTransactions =
+              TestDHTTransactions(cryptoKind, updateProcessorFixture);
           setUpAll(testDHTTransactions.setUpAll);
           tearDownAll(testDHTTransactions.tearDownAll);
 
@@ -143,6 +153,12 @@ void main() {
               tags: ['dht_transactions']);
           test('should create transaction, add sets, and commit',
               testDHTTransactions.testTxAddSetsAndCommit,
+              tags: ['dht_transactions']);
+          test('should extend transaction with new record and commit',
+              testDHTTransactions.testTxExtendAndCommit,
+              tags: ['dht_transactions']);
+          test('should extend transaction with new record and rollback',
+              testDHTTransactions.testTxExtendAndRollback,
               tags: ['dht_transactions']);
           test('should create transaction, add sets, gets, and commit',
               testDHTTransactions.testTxAddSetsGetsAndCommit,
@@ -181,4 +197,4 @@ void main() {
       }
     });
   });
-}
+});

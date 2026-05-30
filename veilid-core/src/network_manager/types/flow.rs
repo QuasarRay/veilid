@@ -68,17 +68,14 @@ impl Flow {
     pub fn address_type(&self) -> AddressType {
         self.remote.address_type()
     }
+    pub fn transport_type(&self) -> TransportType {
+        TransportType::new(self.protocol_type(), self.address_type())
+    }
 }
 
 impl MatchesDialInfoFilter for Flow {
     fn matches_filter(&self, filter: &DialInfoFilter) -> bool {
-        if !filter.protocol_type_set.contains(self.protocol_type()) {
-            return false;
-        }
-        if !filter.address_type_set.contains(self.address_type()) {
-            return false;
-        }
-        true
+        filter.contains_transport(self.transport_type())
     }
 }
 

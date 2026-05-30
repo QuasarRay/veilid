@@ -47,6 +47,19 @@ impl PublicInternetRoutingDomainController {
             return None;
         }
 
+        // Pathological: protected connections die too fast on this relay.
+        if let Some(drop_stats) = relay_node.peer_stats().protected_connection_drop {
+            if drop_stats.tm90 < RELAY_MIN_PROTECTED_CONNECTION_TM90 {
+                veilid_log!(routing_table debug
+                    "Relay protected connection lifetime tm90={} < {}, dropping relay {}",
+                    drop_stats.tm90,
+                    RELAY_MIN_PROTECTED_CONNECTION_TM90,
+                    relay_node
+                );
+                return None;
+            }
+        }
+
         // See if our relay was optimized last long enough ago to consider getting a new one
         // if it is no longer fast enough
         let last_optimized_duration = cur_ts.duration_since(relay_state.last_optimized);
@@ -148,7 +161,9 @@ impl PublicInternetRoutingDomainController {
                             c.relays
                                 .iter()
                                 .filter_map(|r| {
-                                    detail.relay_state(r.relay_id()).map(|s| (r.relay_id(), s))
+                                    detail
+                                        .relay_state(r.relay_id.clone())
+                                        .map(|s| (r.relay_id.clone(), s))
                                 })
                                 .collect()
                         })
@@ -167,9 +182,9 @@ impl PublicInternetRoutingDomainController {
             let mut state_updates = vec![];
             if let Some(last_relay_compilation) = opt_last_relay_compilation {
                 for relay in last_relay_compilation.relays.iter() {
-                    let Some(relay_state) = prefetched_relay_states.get(&relay.relay_id()).copied()
+                    let Some(relay_state) = prefetched_relay_states.get(&relay.relay_id).copied()
                     else {
-                        veilid_log!(self error "relay state not found for relay {}", relay.relay_id());
+                        veilid_log!(self error "relay state not found for relay {}", relay.relay_id);
                         continue;
                     };
                     if let Some(updated_relay_state) = Self::check_relay_valid(
@@ -181,7 +196,7 @@ impl PublicInternetRoutingDomainController {
                         &relay_snapshot,
                     ) {
                         if updated_relay_state != relay_state {
-                            state_updates.push((relay.relay_id(), updated_relay_state));
+                            state_updates.push((relay.relay_id.clone(), updated_relay_state));
                         }
                         valid_relays.push(relay.clone());
                     }

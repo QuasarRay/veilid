@@ -360,10 +360,11 @@ impl JsonRequestProcessor {
                 subkeys,
                 expiration,
                 count,
+                transactional,
             } => RoutingContextResponseOp::WatchDhtValues {
                 result: to_json_api_result(
                     routing_context
-                        .watch_dht_values(key, subkeys, expiration, count)
+                        .watch_dht_values(key, subkeys, expiration, count, transactional)
                         .await,
                 ),
             },
@@ -685,6 +686,12 @@ impl JsonRequestProcessor {
                     self.release_dht_transaction(dhttr.dhttx_id);
                 })),
             },
+            DhtTransactionRequestOp::Extend {
+                record_keys,
+                options,
+            } => DhtTransactionResponseOp::Extend {
+                result: to_json_api_result(dht_transaction.extend(record_keys, options).await),
+            },
             DhtTransactionRequestOp::Get { key, subkey } => DhtTransactionResponseOp::Get {
                 result: to_json_api_result(dht_transaction.get(key, subkey).await),
             },
@@ -937,6 +944,12 @@ impl JsonRequestProcessor {
             },
             RequestOp::Now => ResponseOp::Now {
                 value: Timestamp::now(),
+            },
+            RequestOp::NowNonDecreasing => ResponseOp::NowNonDecreasing {
+                value: Timestamp::now_non_decreasing(),
+            },
+            RequestOp::NowIncreasing => ResponseOp::NowIncreasing {
+                value: Timestamp::now_increasing(),
             },
             RequestOp::Debug { command } => ResponseOp::Debug {
                 result: to_json_api_result(self.api.debug(command).await),

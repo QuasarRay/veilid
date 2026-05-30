@@ -3,9 +3,24 @@ use super::*;
 impl_veilid_log_facility!("rpc");
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Hash, Default)]
-pub struct StatusResult {
+pub struct StatusSenderInfo {
     pub opt_sender_info: Option<SenderInfo>,
     pub opt_previous_sender_info: Option<SenderInfo>,
+}
+
+/// Outcome of `rpc_call_status`. Callers inspect `send_data_result` (when present)
+/// for the transport that was actually attempted at the first hop.
+#[derive(Debug)]
+pub enum StatusResult {
+    /// Question was sent and an answer was received (boxed: much larger than the other variants).
+    Answer {
+        answer: Box<Answer<StatusSenderInfo>>,
+        send_data_result: SendDataResult,
+    },
+    /// Send was attempted but produced no usable answer (send failure, timeout, bad answer).
+    Failed(SendDataResult),
+    /// Never reached send_envelope (render failure, no routing domain, etc.).
+    NotSent(NetworkResult<()>),
 }
 
 impl RPCProcessor {
@@ -19,10 +34,7 @@ impl RPCProcessor {
     // safety -> node status
     // private -> nothing
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rpc", skip(self), ret, err(level=Level::DEBUG)))]
-    pub async fn rpc_call_status(
-        &self,
-        dest: Destination,
-    ) -> RPCNetworkResult<Answer<StatusResult>> {
+    pub async fn rpc_call_status(&self, dest: Destination) -> Result<StatusResult, RPCError> {
         let _guard = self
             .startup_context
             .startup_lock
@@ -38,13 +50,12 @@ impl RPCProcessor {
             dest.get_unsafe_routing_info(&routing_table)
         {
             let Some(routing_domain) = opt_routing_domain else {
-                let send_ts = Timestamp::now_non_decreasing();
                 if let Some(node) = &opt_node {
-                    self.record_no_routing_domain(RPCKind::Question, send_ts, node.clone());
+                    self.record_unreachable(node.clone());
                 }
-                return Ok(NetworkResult::no_connection_other(
+                return Ok(StatusResult::NotSent(NetworkResult::no_connection_other(
                     "no routing domain for target",
-                ));
+                )));
             };
 
             let node_status = Some(self.network_manager().generate_node_status(routing_domain));
@@ -54,25 +65,43 @@ impl RPCProcessor {
             (None, RoutingDomain::PublicInternet, None)
         };
 
+        // Get destination respond_to
+        let respond_to = match self.get_destination_respond_to(&dest).await? {
+            NetworkResult::Value(v) => v,
+            other => return Ok(StatusResult::NotSent(other.map(|_| unreachable!()))),
+        };
+
         // Create status rpc question
         let status_q = RPCOperationStatusQ::new(node_status);
-        let question = RPCQuestion::new(
-            network_result_try!(self.get_destination_respond_to(&dest).await?),
-            RPCQuestionDetail::StatusQ(Box::new(status_q)),
-        );
+        let question = RPCQuestion::new(respond_to, RPCQuestionDetail::StatusQ(Box::new(status_q)));
 
-        let debug_string = format!("Status => {}", dest);
+        let debug_string = format!("Status => {:#}", dest);
 
         // Send the info request
-        let waitable_reply =
-            network_result_try!(self.question(dest.clone(), question, None, None).await?);
+        let waitable_reply = match self.question(dest.clone(), question, None, None).await? {
+            QuestionOutcome::Sent(wr) => *wr,
+            QuestionOutcome::Failed(sdr) => return Ok(StatusResult::Failed(sdr)),
+            QuestionOutcome::NotSent(nr) => return Ok(StatusResult::NotSent(nr)),
+        };
 
         // Note what kind of ping this was and to what peer scope
-        let send_data_method = waitable_reply.context.send_data_result.clone();
+        let send_direct_dial_info = waitable_reply.context.send_data_result.direct_dial_info();
+        let send_unique_flow = waitable_reply.context.send_data_result.unique_flow();
+
+        // Snapshot send_data_result for the return value (NCM is Clone; success-path NR is
+        // Value(UniqueFlow) which is Copy)
+        let send_data_result = SendDataResult::new(
+            waitable_reply
+                .context
+                .send_data_result
+                .node_contact_method_result()
+                .clone(),
+            NetworkResult::Value(send_unique_flow),
+        );
 
         // Wait for reply
         let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {
-            TimeoutOr::Timeout => return Ok(NetworkResult::Timeout),
+            TimeoutOr::Timeout => return Ok(StatusResult::Failed(send_data_result)),
             TimeoutOr::Value(v) => v,
         };
 
@@ -81,9 +110,9 @@ impl RPCProcessor {
         let status_a = match kind {
             RPCOperationKind::Answer(a) => match a.destructure() {
                 RPCAnswerDetail::StatusA(a) => a,
-                _ => return Ok(NetworkResult::invalid_message("not a status answer")),
+                _ => return Ok(StatusResult::Failed(send_data_result)),
             },
-            _ => return Ok(NetworkResult::invalid_message("not an answer")),
+            _ => return Ok(StatusResult::Failed(send_data_result)),
         };
         let (a_node_status, sender_info) = status_a.destructure();
 
@@ -107,13 +136,12 @@ impl RPCProcessor {
             } => {
                 if matches!(safety_selection, SafetySelection::Unsafe(_)) {
                     if let Some(sender_info) = sender_info {
-                        if send_data_method.is_direct() {
+                        if send_direct_dial_info.is_some() {
                             // Directly requested status that actually gets sent directly and not over a relay will tell us what our IP address appears as
                             // If this changes, we'd want to know about that to reset the networking stack
                             opt_previous_sender_info = target.report_sender_info(
                                 routing_domain,
-                                send_data_method.unique_flow().flow.protocol_type(),
-                                send_data_method.unique_flow().flow.address_type(),
+                                send_unique_flow,
                                 sender_info,
                             );
                         };
@@ -124,7 +152,7 @@ impl RPCProcessor {
                             routing_domain,
                             socket_address: sender_info.socket_address,
                             old_socket_address: opt_previous_sender_info.map(|s| s.socket_address),
-                            flow: send_data_method.unique_flow().flow,
+                            flow: send_unique_flow.flow,
                             reporting_peer: target.unfiltered(),
                         }) {
                             veilid_log!(self debug "Failed to post event: {}", e);
@@ -143,13 +171,16 @@ impl RPCProcessor {
                 // sender info is irrelevant over relays and routes
             }
         };
-        Ok(NetworkResult::value(Answer::new(
-            answer_context,
-            StatusResult {
-                opt_sender_info,
-                opt_previous_sender_info,
-            },
-        )))
+        Ok(StatusResult::Answer {
+            answer: Box::new(Answer::new(
+                answer_context,
+                StatusSenderInfo {
+                    opt_sender_info,
+                    opt_previous_sender_info,
+                },
+            )),
+            send_data_result,
+        })
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////

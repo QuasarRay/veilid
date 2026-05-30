@@ -15,8 +15,8 @@ pub struct RelayRequirements {
     /// This node's outbound dial info filter
     /// Used to determine if a relay's dialinfo is directly reachable
     pub dial_info_filter: DialInfoFilter,
-    /// All protocol/address types requiring inbound relays for this node
-    pub need_relay_protocols: HashSet<(ProtocolType, AddressType)>,
+    /// All transport types requiring inbound relays for this node
+    pub need_relay_transports: HashSet<TransportType>,
     /// Ordering modes we still need for relaying, per address type
     pub need_relay_orderings: HashSet<(SequenceOrdering, AddressType)>,
     /// All the low level protocols and ports that require nat keepalive pings
@@ -27,10 +27,10 @@ impl fmt::Display for RelayRequirements {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Low Level Port Info:\n{}\nDial Info Filter: {}\nNeed Relay Protocols: {}\nNeed Relay Orderings: {}\nNeed NAT Keepalives: {}",
+            "Low Level Port Info:\n{}\nDial Info Filter: {}\nNeed Relay Transports: {}\nNeed Relay Orderings: {}\nNeed NAT Keepalives: {}",
             indent_all_string(f.to_string(&self.low_level_port_info)),
             f.to_string(self.dial_info_filter),
-            self.need_relay_protocols.iter().map(|(pt,at)| format!("{}:{}", f.to_string(pt), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
+            self.need_relay_transports.iter().map(|tt| f.to_string(tt)).collect::<Vec<_>>().join(", ").string_if_empty("None"),
             self.need_relay_orderings.iter().map(|(om,at)| format!("{}:{}", f.to_string(om), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
             self.need_nat_keepalives.iter().map(|(lpt,at,p)| format!("{}:{}:{}", f.to_string(lpt), f.to_string(at), p)).collect::<Vec<_>>().join(", ").string_if_empty("None"),
         )
@@ -53,11 +53,11 @@ impl RelayRequirements {
         dial_info_list.sort_by(DialInfoDetail::ordered_sequencing_sort);
 
         // Start with all possible combinations we might need to have relays for
-        let mut need_relay_protocols = HashSet::<(ProtocolType, AddressType)>::new();
+        let mut need_relay_transports = HashSet::<TransportType>::new();
         let mut need_relay_orderings = HashSet::<(SequenceOrdering, AddressType)>::new();
         for at in AddressTypeSet::all() {
             for pt in ProtocolTypeSet::all() {
-                need_relay_protocols.insert((pt, at));
+                need_relay_transports.insert(TransportType::new(pt, at));
                 need_relay_orderings.insert((pt.sequence_ordering(), at));
             }
         }
@@ -74,7 +74,7 @@ impl RelayRequirements {
 
             // Remove this protocol+address type combination from our requirements if we don't want a relay for it
             if !wants_relay {
-                need_relay_protocols.remove(&(pt, at));
+                need_relay_transports.remove(&TransportType::new(pt, at));
                 need_relay_orderings.remove(&(pt.sequence_ordering(), at));
             }
 
@@ -92,7 +92,7 @@ impl RelayRequirements {
             routing_domain,
             low_level_port_info,
             dial_info_filter,
-            need_relay_protocols,
+            need_relay_transports,
             need_relay_orderings,
             need_nat_keepalives,
         })
@@ -100,7 +100,7 @@ impl RelayRequirements {
 
     /// Check if we need relays at all to satisfy these requirements
     pub fn needs_relays(&self) -> bool {
-        !self.need_relay_protocols.is_empty()
+        !self.need_relay_transports.is_empty()
             || !self.need_relay_orderings.is_empty()
             || !self.need_nat_keepalives.is_empty()
     }
@@ -110,7 +110,7 @@ impl RelayRequirements {
         self.routing_domain == other.routing_domain
             && self.low_level_port_info == other.low_level_port_info
             && self.dial_info_filter == other.dial_info_filter
-            && self.need_relay_protocols == other.need_relay_protocols
+            && self.need_relay_transports == other.need_relay_transports
             && self.need_relay_orderings == other.need_relay_orderings
             && self.need_nat_keepalives == other.need_nat_keepalives
     }
@@ -120,7 +120,7 @@ impl RelayRequirements {
     pub fn make_relay_compiler(self: Arc<Self>) -> RelayCompiler {
         RelayCompiler {
             requirements: self.clone(),
-            want_relay_protocols: self.need_relay_protocols.clone(),
+            want_relay_transports: self.need_relay_transports.clone(),
             want_relay_orderings: self.need_relay_orderings.clone(),
             want_nat_keepalives: self.need_nat_keepalives.clone(),
             relays: vec![],
@@ -132,8 +132,8 @@ impl RelayRequirements {
 pub struct RelayCompiler {
     /// Relay requirements we are trying to satisfy
     pub requirements: Arc<RelayRequirements>,
-    /// All protocol/address types requiring inbound relays for this node
-    pub want_relay_protocols: HashSet<(ProtocolType, AddressType)>,
+    /// All transport types requiring inbound relays for this node
+    pub want_relay_transports: HashSet<TransportType>,
     /// Ordering modes we still need for relaying, per address type
     pub want_relay_orderings: HashSet<(SequenceOrdering, AddressType)>,
     /// All the low level protocols and ports that require nat keepalive pings
@@ -146,9 +146,9 @@ impl fmt::Display for RelayCompiler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Requirements:\n{}\nWant Relay Protocols: {}\nWant Relay Orderings: {}\nWant NAT Keepalives: {}\nRelays:\n{}",
+            "Requirements:\n{}\nWant Relay Transports: {}\nWant Relay Orderings: {}\nWant NAT Keepalives: {}\nRelays:\n{}",
             indent_all_string(f.to_string(&self.requirements)),
-            self.want_relay_protocols.iter().map(|(pt,at)| format!("{}:{}", f.to_string(pt), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
+            self.want_relay_transports.iter().map(|tt| f.to_string(tt)).collect::<Vec<_>>().join(", ").string_if_empty("None"),
             self.want_relay_orderings.iter().map(|(om,at)| format!("{}:{}", f.to_string(om), f.to_string(at))).collect::<Vec<_>>().join(", ").string_if_empty("None"),
             self.want_nat_keepalives.iter().map(|(lpt,at,p)| format!("{}:{}:{}", f.to_string(lpt), f.to_string(at), p)).collect::<Vec<_>>().join(", ").string_if_empty("None"),
             indent_all_string(f.to_multiline_indexed_string(self.relays.iter()).string_if_empty("None"))
@@ -185,15 +185,13 @@ impl RelayCompiler {
             if did.class.requires_signal() {
                 continue;
             }
-            let didpa = (did.dial_info.protocol_type(), did.dial_info.address_type());
-
             // If this dial info can be contacted directly, then it can be used for receiving
             // relaying and satsifying an ordering mode
             if did
                 .dial_info
                 .matches_filter(&self.requirements.dial_info_filter)
             {
-                possible_ordering_modes.insert(didpa.0.sequence_ordering());
+                possible_ordering_modes.insert(did.dial_info.protocol_type().sequence_ordering());
             }
         }
 
@@ -211,18 +209,21 @@ impl RelayCompiler {
             if did.class.requires_signal() {
                 continue;
             }
-            let didpa = (did.dial_info.protocol_type(), did.dial_info.address_type());
+            let didtt =
+                TransportType::new(did.dial_info.protocol_type(), did.dial_info.address_type());
 
-            if self.want_relay_protocols.remove(&didpa) {
-                // Still needed this protocol+address type
+            if self.want_relay_transports.remove(&didtt) {
+                // Still needed this transport type
                 useful = true;
 
                 // Mark this dial info as one we're using
                 relay.dial_info_details.push(did.clone());
 
                 // Mark this ordering mode as satisfied
-                self.want_relay_orderings
-                    .remove(&(didpa.0.sequence_ordering(), didpa.1));
+                self.want_relay_orderings.remove(&(
+                    didtt.protocol_type().sequence_ordering(),
+                    didtt.address_type(),
+                ));
             }
         }
 
@@ -231,7 +232,8 @@ impl RelayCompiler {
             if did.class.requires_signal() {
                 continue;
             }
-            let didpa = (did.dial_info.protocol_type(), did.dial_info.address_type());
+            let didtt =
+                TransportType::new(did.dial_info.protocol_type(), did.dial_info.address_type());
 
             // If this dial info can be contacted directly, then it is a ping candidate
             if did
@@ -242,7 +244,7 @@ impl RelayCompiler {
                 let mut add_ping = false;
 
                 // See if we should add the ping for ordering mode coverage
-                let ordering = didpa.0.sequence_ordering();
+                let ordering = didtt.protocol_type().sequence_ordering();
                 add_ping |= possible_ordering_modes.remove(ordering);
 
                 // See if we should add the ping for low level port mapping coverage
@@ -250,10 +252,10 @@ impl RelayCompiler {
                     .requirements
                     .low_level_port_info
                     .protocol_to_port
-                    .get(&didpa)
+                    .get(&didtt)
                     .copied()
                 {
-                    let wnk = (llpt, didpa.1, port);
+                    let wnk = (llpt, didtt.address_type(), port);
                     add_ping |= self.want_nat_keepalives.remove(&wnk);
                 }
 
@@ -288,7 +290,7 @@ impl RelayCompiler {
         }
         // If there are any protocol/address type combinations we need
         // relaying for still, we want more relays
-        !self.want_relay_protocols.is_empty()
+        !self.want_relay_transports.is_empty()
     }
 
     /// Check if we can publish the relays we have

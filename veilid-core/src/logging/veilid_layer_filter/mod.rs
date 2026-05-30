@@ -417,21 +417,79 @@ impl VeilidLayerFilter {
             return Interest::never();
         }
 
-        // See if the facility enable map has this target overridden
-        // Can't check tags here because we don't know the log key yet
-        if let Some(enable_state) = inner.facility_enable_map.get_name(target) {
-            let level_filter: LevelFilter = enable_state.level.into();
-            if let Some(tracing_level) = level_filter.into_level() {
-                if level <= tracing_level {
-                    return Interest::always();
-                }
+        if metadata.is_span() {
+            // Spans go through enabled() only; there is no event_enabled()
+            // pass to gate by tag/default_log_level later. Make a final
+            // decision here, applying tag fallback against the empty
+            // log_key (the per-log_key tag check needs a runtime field
+            // value we don't have at callsite time).
+            if Self::check_enabled(&inner, target, level, None) {
+                Interest::always()
             } else {
-                return Interest::never();
+                Interest::never()
+            }
+        } else {
+            // For events, defer the full tag + default_log_level decision
+            // to event_enabled, which has the recorded log_key field.
+            if let Some(enable_state) = inner.facility_enable_map.get_name(target) {
+                let level_filter: LevelFilter = enable_state.level.into();
+                if let Some(tracing_level) = level_filter.into_level() {
+                    if level <= tracing_level {
+                        return Interest::always();
+                    }
+                } else {
+                    return Interest::never();
+                }
+            }
+            Interest::sometimes()
+        }
+    }
+
+    /// Decide whether `target` at `level` is enabled, using the same logic
+    /// as `event_enabled` (direct facility match → tag match → default level).
+    /// `opt_log_key` is the runtime log key for events; pass `None` for spans
+    /// or when no log key is available — the tag check then only consults
+    /// the global ("") log_key fallback.
+    fn check_enabled(
+        inner: &VeilidLayerFilterInner,
+        target: &str,
+        level: tracing::Level,
+        opt_log_key: Option<&str>,
+    ) -> bool {
+        // Direct facility name override
+        if let Some(state) = inner.facility_enable_map.get_name(target) {
+            let level_filter: LevelFilter = state.level.into();
+            match level_filter.into_level() {
+                Some(tl) if level <= tl => return true,
+                Some(_) => {}         // too low — fall through to tag/default
+                None => return false, // explicitly off
             }
         }
 
-        // If not in the map, it may still be interesting but must be checked at the event itself
-        Interest::sometimes()
+        // Tag-via-log_key override
+        let filter_globals = FILTER_GLOBALS.load();
+        let log_keys: &[&str] = match opt_log_key {
+            Some(k) => &[k, ""],
+            None => &[""],
+        };
+        for log_key in log_keys {
+            if let Some(component) = filter_globals.get_facilities(log_key) {
+                let tags = component.get_tags_for_facility(target);
+                for tag in tags {
+                    if let Some(state) = inner.facility_enable_map.get_tag(tag.as_str()) {
+                        let level_filter: LevelFilter = state.level.into();
+                        match level_filter.into_level() {
+                            Some(tl) if level <= tl => return true,
+                            Some(_) => {}         // too low — keep looking
+                            None => return false, // tag explicitly off
+                        }
+                    }
+                }
+            }
+        }
+
+        // No override — gate by default_log_level
+        LevelFilter::from(level) <= inner.default_log_level
     }
 }
 
@@ -467,43 +525,8 @@ impl<S: tracing::Subscriber> layer::Filter<S> for VeilidLayerFilter {
             return false;
         }
 
-        // See if this log key has component defaults yet
         let event_target = event.metadata().target();
         let event_level = *event.metadata().level();
-
-        // See if the facility enable map has this target overridden by name
-        if let Some(enable_state) = inner.facility_enable_map.get_name(event_target) {
-            let level_filter: LevelFilter = enable_state.level.into();
-            if let Some(tracing_level) = level_filter.into_level() {
-                if event_level <= tracing_level {
-                    return true;
-                }
-            } else {
-                return false;
-            }
-        }
-
-        // Get the per log key component facilites and check this target's tags against the facility enable map tags
-        let filter_globals = FILTER_GLOBALS.load();
-        for log_key in [log_key.as_str(), ""] {
-            if let Some(component_log_facilities) = filter_globals.get_facilities(log_key) {
-                let tags = component_log_facilities.get_tags_for_facility(event_target);
-                for tag in tags {
-                    if let Some(enable_state) = inner.facility_enable_map.get_tag(tag.as_str()) {
-                        let level_filter: LevelFilter = enable_state.level.into();
-                        if let Some(tracing_level) = level_filter.into_level() {
-                            if event_level <= tracing_level {
-                                return true;
-                            }
-                        } else {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-
-        // No direct target or tag overrides, so go with the configured 'default all' for this filter
-        LevelFilter::from(event_level) <= inner.default_log_level
+        Self::check_enabled(&inner, event_target, event_level, Some(log_key.as_str()))
     }
 }

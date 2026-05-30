@@ -21,11 +21,24 @@ class AttachmentState(StrEnum):
     DETACHED = "Detached"
     ATTACHING = "Attaching"
     ATTACHED_WEAK = "AttachedWeak"
+    ATTACHED_FAIR = "AttachedFair"
     ATTACHED_GOOD = "AttachedGood"
     ATTACHED_STRONG = "AttachedStrong"
-    FULLY_ATTACHED = "FullyAttached"
-    OVER_ATTACHED = "OverAttached"
+    ATTACHED_FULL = "AttachedFull"
     DETACHING = "Detaching"
+
+    def bar_count(self) -> int:
+        """Signal-strength bars (0..=5)."""
+        return {
+            AttachmentState.DETACHED: 0,
+            AttachmentState.DETACHING: 0,
+            AttachmentState.ATTACHING: 0,
+            AttachmentState.ATTACHED_WEAK: 1,
+            AttachmentState.ATTACHED_FAIR: 2,
+            AttachmentState.ATTACHED_GOOD: 3,
+            AttachmentState.ATTACHED_STRONG: 4,
+            AttachmentState.ATTACHED_FULL: 5,
+        }[self]
 
 
 class VeilidStateAttachment:
@@ -34,6 +47,11 @@ class VeilidStateAttachment:
     local_network_ready: bool
     uptime: TimestampDuration
     attached_uptime: Optional[TimestampDuration]
+    reliable_peer_count: int
+    live_peer_count: int
+    estimated_network_size: int
+    median_latency: Optional[TimestampDuration]
+    over_attached_nodes: int
 
     def __init__(
         self,
@@ -42,12 +60,22 @@ class VeilidStateAttachment:
         local_network_ready: bool,
         uptime: TimestampDuration,
         attached_uptime: Optional[TimestampDuration],
+        reliable_peer_count: int,
+        live_peer_count: int,
+        estimated_network_size: int,
+        median_latency: Optional[TimestampDuration],
+        over_attached_nodes: int,
     ):
         self.state = state
         self.public_internet_ready = public_internet_ready
         self.local_network_ready = local_network_ready
         self.uptime = uptime
         self.attached_uptime = attached_uptime
+        self.reliable_peer_count = reliable_peer_count
+        self.live_peer_count = live_peer_count
+        self.estimated_network_size = estimated_network_size
+        self.median_latency = median_latency
+        self.over_attached_nodes = over_attached_nodes
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -58,6 +86,11 @@ class VeilidStateAttachment:
             j["local_network_ready"],
             j["uptime"],
             j["attached_uptime"],
+            j["reliable_peer_count"],
+            j["live_peer_count"],
+            j["estimated_network_size"],
+            j["median_latency"],
+            j["over_attached_nodes"],
         )
 
     def to_json(self) -> dict:
@@ -127,11 +160,8 @@ class RPCStats:
     last_question_ts: Optional[Timestamp]
     last_seen_ts: Optional[Timestamp]
     first_consecutive_seen_ts: Optional[Timestamp]
-    recent_lost_answers_unordered: int
-    recent_lost_answers_ordered: int
     failed_to_send: int
-    answer_unordered: AnswerStats
-    answer_ordered: AnswerStats
+    unreachable: int
 
     def __init__(
         self,
@@ -141,11 +171,8 @@ class RPCStats:
         last_question_ts: Optional[Timestamp],
         last_seen_ts: Optional[Timestamp],
         first_consecutive_seen_ts: Optional[Timestamp],
-        recent_lost_answers_unordered: int,
-        recent_lost_answers_ordered: int,
         failed_to_send: int,
-        answer_unordered: AnswerStats,
-        answer_ordered: AnswerStats,
+        unreachable: int,
     ):
         self.messages_sent = messages_sent
         self.messages_rcvd = messages_rcvd
@@ -153,11 +180,8 @@ class RPCStats:
         self.last_question_ts = last_question_ts
         self.last_seen_ts = last_seen_ts
         self.first_consecutive_seen_ts = first_consecutive_seen_ts
-        self.recent_lost_answers_unordered = recent_lost_answers_unordered
-        self.recent_lost_answers_ordered = recent_lost_answers_ordered
         self.failed_to_send = failed_to_send
-        self.answer_unordered = answer_unordered
-        self.answer_ordered = answer_ordered
+        self.unreachable = unreachable
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -171,11 +195,8 @@ class RPCStats:
             None
             if j["first_consecutive_seen_ts"] is None
             else Timestamp(j["first_consecutive_seen_ts"]),
-            j["recent_lost_answers_unordered"],
-            j["recent_lost_answers_ordered"],
             j["failed_to_send"],
-            AnswerStats.from_json(j["answer_unordered"]),
-            AnswerStats.from_json(j["answer_ordered"]),
+            j["unreachable"],
         )
 
     def to_json(self) -> dict:

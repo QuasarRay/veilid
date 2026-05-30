@@ -9,7 +9,8 @@ environment:
 
 # Add regular dependencies here.
 dependencies:
-  async_tools: ^0.1.11
+  async_tools: ^0.1.13
+  path: ^1.9.0
   veilid:
     path: ../..
 

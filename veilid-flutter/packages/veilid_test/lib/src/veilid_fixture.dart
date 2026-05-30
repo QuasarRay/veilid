@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:async_tools/async_tools.dart';
+import 'package:path/path.dart' as p;
 import 'package:veilid/veilid.dart';
 
 import 'log_fixture.dart';
@@ -62,6 +63,21 @@ class DefaultVeilidFixture implements VeilidFixture {
     );
 
     final flamePathStr = const String.fromEnvironment('FLAME').trim();
+    final otlpEndpoint = const String.fromEnvironment(
+      'OTLP_GRPC_ENDPOINT',
+      defaultValue: 'localhost:4317',
+    ).trim();
+    final otlpEnabled = const String.fromEnvironment('OTLP').trim() == '1';
+    // OTLP gets its own directive list so the user can keep api-log scope
+    // broad (e.g. dht=debug for stdout) while emitting only the spans they
+    // want over OTLP. Empty defaults to off-level + no directives, which
+    // emits no spans.
+    final otlpDirectivesStr = const String.fromEnvironment(
+      'OTLP_DIRECTIVES',
+    ).trim();
+    final otlpDirectives = otlpDirectivesStr.isEmpty
+        ? <String>[]
+        : otlpDirectivesStr.split(',').map((e) => e.trim()).toList();
 
     final Map<String, dynamic> platformConfigJson;
     if (kIsWeb) {
@@ -106,11 +122,11 @@ class DefaultVeilidFixture implements VeilidFixture {
             ignoreLogTargets: ignoreLogTargets,
           ),
           otlp: VeilidFFIConfigLoggingOtlp(
-            enabled: false,
-            level: VeilidConfigLogLevel.trace,
-            grpcEndpoint: 'localhost:4317',
+            enabled: otlpEnabled,
+            level: VeilidConfigLogLevel.off,
+            grpcEndpoint: otlpEndpoint,
             serviceName: 'Veilid Tests',
-            directives: logDirectives,
+            directives: otlpDirectives,
             // pass through for backwards compatibility
             // ignore: deprecated_member_use
             ignoreLogTargets: ignoreLogTargets,
@@ -137,15 +153,29 @@ class DefaultVeilidFixture implements VeilidFixture {
       networkKeyPassword: const String.fromEnvironment('NETWORK_KEY'),
     );
 
-    config = config.copyWith(
-      tableStore: config.tableStore.copyWith(delete: true),
-    );
-    config = config.copyWith(
-      protectedStore: config.protectedStore.copyWith(delete: true),
-    );
-    config = config.copyWith(
-      blockStore: config.blockStore.copyWith(delete: true),
-    );
+    // Isolate per-programName stores from the host app's stores.
+    if (!kIsWeb) {
+      config = config.copyWith(
+        tableStore: config.tableStore.copyWith(
+          directory: p.join(config.tableStore.directory, programName),
+          delete: true,
+        ),
+        protectedStore: config.protectedStore.copyWith(
+          directory: p.join(config.protectedStore.directory, programName),
+          delete: true,
+        ),
+        blockStore: config.blockStore.copyWith(
+          directory: p.join(config.blockStore.directory, programName),
+          delete: true,
+        ),
+      );
+    } else {
+      config = config.copyWith(
+        tableStore: config.tableStore.copyWith(delete: true),
+        protectedStore: config.protectedStore.copyWith(delete: true),
+        blockStore: config.blockStore.copyWith(delete: true),
+      );
+    }
     config = config.copyWith(
       capabilities:
           // XXX: Remove after https://gitlab.com/veilid/veilid/-/issues/492
@@ -197,11 +227,11 @@ class DefaultVeilidFixture implements VeilidFixture {
             break;
           case AttachmentState.detaching:
             break;
+          case AttachmentState.attachedWeak:
+          case AttachmentState.attachedFair:
           case AttachmentState.attachedGood:
           case AttachmentState.attachedStrong:
-          case AttachmentState.attachedWeak:
-          case AttachmentState.overAttached:
-          case AttachmentState.fullyAttached:
+          case AttachmentState.attachedFull:
             done = true;
         }
       }
@@ -227,11 +257,11 @@ class DefaultVeilidFixture implements VeilidFixture {
           break;
         case AttachmentState.attaching:
         case AttachmentState.detaching:
+        case AttachmentState.attachedWeak:
+        case AttachmentState.attachedFair:
         case AttachmentState.attachedGood:
         case AttachmentState.attachedStrong:
-        case AttachmentState.attachedWeak:
-        case AttachmentState.overAttached:
-        case AttachmentState.fullyAttached:
+        case AttachmentState.attachedFull:
           break;
       }
       if (done) {

@@ -68,11 +68,7 @@ impl<T: ?Sized> AsyncMutex<T> {
         AsyncMutexGuard {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::Write,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         }
     }
 
@@ -94,11 +90,7 @@ impl<T: ?Sized> AsyncMutex<T> {
         AsyncMutexGuardArc {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::Write,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         }
     }
 
@@ -110,11 +102,7 @@ impl<T: ?Sized> AsyncMutex<T> {
         let out = AsyncMutexGuard {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::TryWrite,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         };
 
         Some(out)
@@ -128,11 +116,7 @@ impl<T: ?Sized> AsyncMutex<T> {
         let out = AsyncMutexGuardArc {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::TryWrite,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         };
 
         Some(out)

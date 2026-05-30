@@ -2,6 +2,10 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
+/// Drop a relay whose protected connections survive less than this on average.
+pub(super) const RELAY_MIN_PROTECTED_CONNECTION_TM90: TimestampDuration =
+    TimestampDuration::new_secs(20);
+
 /// Public Internet routing domain internals
 pub struct PublicInternetRoutingDomainDetail {
     /// Registry accessor
@@ -112,10 +116,11 @@ impl PublicInternetRoutingDomainDetail {
                 return false;
             }
 
-            // Exclude any nodes that have 'failed to send' state indicating a
-            // connection drop or inability to reach the node
-            if snap.peer_stats.rpc_stats.failed_to_send > 0 {
-                return false;
+            // Exclude nodes whose past protected connections died too fast.
+            if let Some(drop_stats) = &snap.peer_stats.protected_connection_drop {
+                if drop_stats.tm90 < RELAY_MIN_PROTECTED_CONNECTION_TM90 {
+                    return false;
+                }
             }
 
             // Get the public internet peer info so we can validate it
@@ -151,20 +156,33 @@ impl PublicInternetRoutingDomainDetail {
                 return false;
             }
 
-            // Ensure there is a way to reach this relay
-            let mut directly_reachable = false;
+            // Only select relays we have tested and proven reachable. A failed send
+            // clears the consecutive-seen timestamp, so this also drops a relay as
+            // soon as we can no longer reach it.
+            if !snap.is_tested() {
+                return false;
+            }
+
+            // Ensure a transport we can reach this relay through is currently healthy.
+            let mut has_reachable_transport = false;
             for did in peer_info.node_info().dial_info_detail_list() {
                 if did.class.requires_signal() {
                     continue;
                 }
-                // If this dial info can be contacted directly, then it is a relay candidate
-                if did.dial_info.matches_filter(&outbound_dif) {
-                    directly_reachable = true;
+                if !did.dial_info.matches_filter(&outbound_dif) {
+                    continue;
+                }
+                let t: LowLevelTransportType = (&did.dial_info).into();
+                let healthy = snap.per_transport.get(&t).is_some_and(|pt| {
+                    pt.state != BucketEntryTransportState::Dead && pt.failed_to_send == 0
+                });
+                if healthy {
+                    has_reachable_transport = true;
                     break;
                 }
             }
 
-            if !directly_reachable {
+            if !has_reachable_transport {
                 return false;
             }
 

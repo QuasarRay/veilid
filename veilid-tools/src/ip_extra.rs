@@ -17,6 +17,7 @@ pub enum Ipv6MulticastScope {
     Global,
 }
 
+/// Address has the all-zeros bit pattern (IPv4 `0.0.0.0` or IPv6 `::`).
 #[must_use]
 pub fn ipaddr_is_unspecified(addr: &IpAddr) -> bool {
     match addr {
@@ -25,6 +26,7 @@ pub fn ipaddr_is_unspecified(addr: &IpAddr) -> bool {
     }
 }
 
+/// Address points at the host itself (`127.0.0.0/8` or `::1`).
 #[must_use]
 pub fn ipaddr_is_loopback(addr: &IpAddr) -> bool {
     match addr {
@@ -33,6 +35,7 @@ pub fn ipaddr_is_loopback(addr: &IpAddr) -> bool {
     }
 }
 
+/// Address is globally routable on the public internet.
 #[must_use]
 pub fn ipaddr_is_global(addr: &IpAddr) -> bool {
     match addr {
@@ -41,6 +44,7 @@ pub fn ipaddr_is_global(addr: &IpAddr) -> bool {
     }
 }
 
+/// Address is in a multicast range (IPv4 `224.0.0.0/4` or IPv6 `ff00::/8`).
 #[must_use]
 pub fn ipaddr_is_multicast(addr: &IpAddr) -> bool {
     match addr {
@@ -49,6 +53,7 @@ pub fn ipaddr_is_multicast(addr: &IpAddr) -> bool {
     }
 }
 
+/// Address is reserved for documentation (RFC 5737 / RFC 3849).
 #[must_use]
 pub fn ipaddr_is_documentation(addr: &IpAddr) -> bool {
     match addr {
@@ -57,16 +62,19 @@ pub fn ipaddr_is_documentation(addr: &IpAddr) -> bool {
     }
 }
 
+/// IPv4 unspecified address `0.0.0.0`.
 #[must_use]
 pub fn ipv4addr_is_unspecified(addr: &Ipv4Addr) -> bool {
     addr.octets() == [0u8, 0u8, 0u8, 0u8]
 }
 
+/// IPv4 loopback range `127.0.0.0/8` (RFC 1122).
 #[must_use]
 pub fn ipv4addr_is_loopback(addr: &Ipv4Addr) -> bool {
     addr.octets()[0] == 127
 }
 
+/// IPv4 RFC 1918 private ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`.
 #[must_use]
 pub fn ipv4addr_is_private(addr: &Ipv4Addr) -> bool {
     match addr.octets() {
@@ -77,15 +85,21 @@ pub fn ipv4addr_is_private(addr: &Ipv4Addr) -> bool {
     }
 }
 
+/// IPv4 link-local / APIPA range `169.254.0.0/16` (RFC 3927) — DHCP-fallback addresses.
 #[must_use]
 pub fn ipv4addr_is_link_local(addr: &Ipv4Addr) -> bool {
     matches!(addr.octets(), [169, 254, ..])
 }
 
+/// IPv4 address is globally routable on the public internet.
+///
+/// Excludes private, loopback, link-local, broadcast, documentation, shared (CGNAT),
+/// IETF protocol assignment, reserved (future-use), benchmarking, and the `0.0.0.0/8`
+/// "this network" range. The two anycast addresses `192.0.0.9` (PCP) and
+/// `192.0.0.10` (PCP DHCP server) are special-cased as global despite living in the
+/// IETF protocol assignment block.
 #[must_use]
 pub fn ipv4addr_is_global(addr: &Ipv4Addr) -> bool {
-    // check if this address is 192.0.0.9 or 192.0.0.10. These addresses are the only two
-    // globally routable addresses in the 192.0.0.0/24 range.
     if u32::from(*addr) == 0xc0000009 || u32::from(*addr) == 0xc000000a {
         return true;
     }
@@ -98,40 +112,49 @@ pub fn ipv4addr_is_global(addr: &Ipv4Addr) -> bool {
         && !ipv4addr_is_ietf_protocol_assignment(addr)
         && !ipv4addr_is_reserved(addr)
         && !ipv4addr_is_benchmarking(addr)
-        // Make sure the address is not in 0.0.0.0/8
         && addr.octets()[0] != 0
 }
 
+/// IPv4 RFC 6598 shared address space `100.64.0.0/10` — used for carrier-grade NAT (CGNAT).
 #[must_use]
 pub fn ipv4addr_is_shared(addr: &Ipv4Addr) -> bool {
     addr.octets()[0] == 100 && (addr.octets()[1] & 0b1100_0000 == 0b0100_0000)
 }
 
+/// IPv4 IETF protocol assignment range `192.0.0.0/24` (RFC 6890).
+///
+/// Includes the CLAT46 / 464XLAT translator IPv4 source range `192.0.0.0/29` (RFC 7335)
+/// and other IETF-reserved well-known anycast addresses.
 #[must_use]
 pub fn ipv4addr_is_ietf_protocol_assignment(addr: &Ipv4Addr) -> bool {
     addr.octets()[0] == 192 && addr.octets()[1] == 0 && addr.octets()[2] == 0
 }
 
+/// IPv4 RFC 2544 benchmarking range `198.18.0.0/15`.
 #[must_use]
 pub fn ipv4addr_is_benchmarking(addr: &Ipv4Addr) -> bool {
     addr.octets()[0] == 198 && (addr.octets()[1] & 0xfe) == 18
 }
 
+/// IPv4 reserved range `240.0.0.0/4` (RFC 1112), excluding the broadcast address.
 #[must_use]
 pub fn ipv4addr_is_reserved(addr: &Ipv4Addr) -> bool {
     addr.octets()[0] & 240 == 240 && !addr.is_broadcast()
 }
 
+/// IPv4 multicast range `224.0.0.0/4` (RFC 5771).
 #[must_use]
 pub fn ipv4addr_is_multicast(addr: &Ipv4Addr) -> bool {
     addr.octets()[0] >= 224 && addr.octets()[0] <= 239
 }
 
+/// IPv4 limited broadcast address `255.255.255.255`.
 #[must_use]
 pub fn ipv4addr_is_broadcast(addr: &Ipv4Addr) -> bool {
     addr.octets() == [255u8, 255u8, 255u8, 255u8]
 }
 
+/// IPv4 documentation ranges (RFC 5737): `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`.
 #[must_use]
 pub fn ipv4addr_is_documentation(addr: &Ipv4Addr) -> bool {
     matches!(
@@ -140,16 +163,22 @@ pub fn ipv4addr_is_documentation(addr: &Ipv4Addr) -> bool {
     )
 }
 
+/// IPv6 unspecified address `::`.
 #[must_use]
 pub fn ipv6addr_is_unspecified(addr: &Ipv6Addr) -> bool {
     addr.segments() == [0, 0, 0, 0, 0, 0, 0, 0]
 }
 
+/// IPv6 loopback `::1`.
 #[must_use]
 pub fn ipv6addr_is_loopback(addr: &Ipv6Addr) -> bool {
     addr.segments() == [0, 0, 0, 0, 0, 0, 0, 1]
 }
 
+/// IPv6 address is globally routable on the public internet.
+///
+/// True for unicast-global addresses (which excludes link-local, unique-local, loopback,
+/// unspecified, documentation) and global-scoped multicast.
 #[must_use]
 pub fn ipv6addr_is_global(addr: &Ipv6Addr) -> bool {
     match ipv6addr_multicast_scope(addr) {
@@ -159,11 +188,13 @@ pub fn ipv6addr_is_global(addr: &Ipv6Addr) -> bool {
     }
 }
 
+/// IPv6 unique-local range `fc00::/7` (RFC 4193) — organisation-internal addresses.
 #[must_use]
 pub fn ipv6addr_is_unique_local(addr: &Ipv6Addr) -> bool {
     (addr.segments()[0] & 0xfe00) == 0xfc00
 }
 
+/// IPv6 strict link-local `fe80::/64` — the canonical link-local prefix with all-zero subnet ID.
 #[must_use]
 pub fn ipv6addr_is_unicast_link_local_strict(addr: &Ipv6Addr) -> bool {
     addr.segments()[0] == 0xfe80
@@ -172,21 +203,49 @@ pub fn ipv6addr_is_unicast_link_local_strict(addr: &Ipv6Addr) -> bool {
         && addr.segments()[3] == 0
 }
 
+/// IPv6 link-local range `fe80::/10` (RFC 4291).
 #[must_use]
 pub fn ipv6addr_is_unicast_link_local(addr: &Ipv6Addr) -> bool {
     (addr.segments()[0] & 0xffc0) == 0xfe80
 }
 
+/// IPv6 deprecated site-local range `fec0::/10` (RFC 3879, deprecated by RFC 4291).
 #[must_use]
 pub fn ipv6addr_is_unicast_site_local(addr: &Ipv6Addr) -> bool {
     (addr.segments()[0] & 0xffc0) == 0xfec0
 }
 
+/// IPv6 documentation range `2001:db8::/32` (RFC 3849).
 #[must_use]
 pub fn ipv6addr_is_documentation(addr: &Ipv6Addr) -> bool {
     (addr.segments()[0] == 0x2001) && (addr.segments()[1] == 0xdb8)
 }
 
+/// IPv6 well-known NAT64 prefix `64:ff9b::/96` (RFC 6052) — synthesised IPv6 wrapping public IPv4.
+#[must_use]
+pub fn ipv6addr_is_nat64_well_known(addr: &Ipv6Addr) -> bool {
+    let s = addr.segments();
+    s[0] == 0x0064 && s[1] == 0xff9b && s[2] == 0 && s[3] == 0 && s[4] == 0 && s[5] == 0
+}
+
+/// IPv6 Teredo prefix `2001::/32` (RFC 4380) — IPv6-in-UDP/IPv4 transitional encapsulation.
+#[must_use]
+pub fn ipv6addr_is_teredo(addr: &Ipv6Addr) -> bool {
+    let s = addr.segments();
+    s[0] == 0x2001 && s[1] == 0x0000
+}
+
+/// IPv6 6to4 prefix `2002::/16` (RFC 3056) — IPv6-in-IPv4 transitional encapsulation.
+#[must_use]
+pub fn ipv6addr_is_6to4(addr: &Ipv6Addr) -> bool {
+    addr.segments()[0] == 0x2002
+}
+
+/// IPv6 unicast address that is globally routable.
+///
+/// True for any unicast address not falling into multicast, loopback, link-local,
+/// unique-local, unspecified, or documentation. NAT64 / Teredo / 6to4 ranges are
+/// included here — they wrap public IPv4 endpoints and route on the public internet.
 #[must_use]
 pub fn ipv6addr_is_unicast_global(addr: &Ipv6Addr) -> bool {
     !ipv6addr_is_multicast(addr)
@@ -197,6 +256,7 @@ pub fn ipv6addr_is_unicast_global(addr: &Ipv6Addr) -> bool {
         && !ipv6addr_is_documentation(addr)
 }
 
+/// IPv6 multicast scope (RFC 4291 § 2.7) when the address is multicast; `None` otherwise.
 #[must_use]
 pub fn ipv6addr_multicast_scope(addr: &Ipv6Addr) -> Option<Ipv6MulticastScope> {
     if ipv6addr_is_multicast(addr) {
@@ -215,6 +275,7 @@ pub fn ipv6addr_multicast_scope(addr: &Ipv6Addr) -> Option<Ipv6MulticastScope> {
     }
 }
 
+/// IPv6 multicast range `ff00::/8` (RFC 4291).
 #[must_use]
 pub fn ipv6addr_is_multicast(addr: &Ipv6Addr) -> bool {
     (addr.segments()[0] & 0xff00) == 0xff00

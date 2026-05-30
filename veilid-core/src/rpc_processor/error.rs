@@ -74,10 +74,10 @@ impl From<RPCError> for VeilidAPIError {
     fn from(e: RPCError) -> Self {
         match e {
             RPCError::Unimplemented(message) => VeilidAPIError::Unimplemented { message },
-            RPCError::InvalidFormat(message) => VeilidAPIError::Generic { message },
-            RPCError::Protocol(message) => VeilidAPIError::Generic { message },
+            RPCError::InvalidFormat(message) => VeilidAPIError::NoConnection { message },
+            RPCError::Protocol(message) => VeilidAPIError::NoConnection { message },
             RPCError::Internal(message) => VeilidAPIError::Internal { message },
-            RPCError::Network(message) => VeilidAPIError::Generic { message },
+            RPCError::Network(message) => VeilidAPIError::NoConnection { message },
             RPCError::TryAgain(message) => VeilidAPIError::TryAgain { message },
             RPCError::Ignore(message) => VeilidAPIError::Generic { message },
         }

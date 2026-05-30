@@ -212,7 +212,10 @@ impl Destination {
             Destination::Relay { relay_di, node } => {
                 let opt_routing_domain =
                     routing_table.routing_domain_for_address(relay_di.address());
-
+                if opt_routing_domain.is_none() {
+                    // No routing domain for relay, no node info, can't send to this dialinfo
+                    veilid_log!(node warn "No routing domain for relay {} for node={}", relay_di, node);
+                };
                 (Some(node.clone()), opt_routing_domain)
             }
             Destination::PrivateRoute {
@@ -264,30 +267,41 @@ impl fmt::Display for Destination {
             Destination::Direct {
                 node,
                 safety_selection,
-            } => {
-                let sr = if matches!(safety_selection, SafetySelection::Safe(_)) {
-                    "%SR"
-                } else {
-                    ""
-                };
-
-                write!(f, "{}{}", node, sr)
-            }
+            } => match safety_selection {
+                // When a safety route wraps a Direct node, the dest node_ref's filter is
+                // stubbed out — only the safety_selection's sequencing applies. Print the
+                // unfiltered node and the safety spec instead of the misleading filter.
+                SafetySelection::Safe(ss) => {
+                    let spec = f.to_string(ss);
+                    if spec.is_empty() {
+                        write!(f, "{}%SR", node.unfiltered())
+                    } else {
+                        write!(f, "{}%SR({})", node.unfiltered(), spec)
+                    }
+                }
+                SafetySelection::Unsafe(_) => {
+                    write!(f, "{}", node)
+                }
+            },
             Destination::Relay { relay_di, node } => {
                 write!(f, "{}@{}", node, relay_di)
             }
             Destination::PrivateRoute {
                 private_route,
                 safety_selection,
-            } => {
-                let sr = if matches!(safety_selection, SafetySelection::Safe(_)) {
-                    "%SR"
-                } else {
-                    ""
-                };
-
-                write!(f, "PR%{}{}", private_route.public_key, sr)
-            }
+            } => match safety_selection {
+                SafetySelection::Safe(ss) => {
+                    let spec = f.to_string(ss);
+                    if spec.is_empty() {
+                        write!(f, "PR%{}%SR", private_route.public_key)
+                    } else {
+                        write!(f, "PR%{}%SR({})", private_route.public_key, spec)
+                    }
+                }
+                SafetySelection::Unsafe(_) => {
+                    write!(f, "PR%{}", private_route.public_key)
+                }
+            },
         }
     }
 }
@@ -318,10 +332,11 @@ impl RPCProcessor {
             }
             Target::RouteId(rsid) => {
                 // Get remote private route
+                let rrid = RemoteRouteSetId::from_route_id(rsid);
                 let Some(private_route) = self
                     .routing_table()
                     .route_spec_store()
-                    .best_remote_private_route(&rsid)
+                    .best_remote_private_route(&rrid)
                 else {
                     return Err(RPCError::network("could not get remote private route"));
                 };
@@ -360,7 +375,10 @@ impl RPCProcessor {
                     } = network_result_try!(rss
                         .select_single_route(RouteSelectParams {
                             crypto_kind,
-                            preferred_route: safety_spec.preferred_route.clone(),
+                            preferred_route: safety_spec
+                                .preferred_route
+                                .as_ref()
+                                .map(|r| AllocatedRouteSetId::from_route_id(r.clone())),
                             hop_count: safety_spec.hop_count,
                             stability: safety_spec.stability,
                             sequencing: safety_spec.sequencing,
@@ -446,7 +464,10 @@ impl RPCProcessor {
                             network_result_try!(rss
                                 .select_single_route(RouteSelectParams {
                                     crypto_kind,
-                                    preferred_route: safety_spec.preferred_route.clone(),
+                                    preferred_route: safety_spec
+                                        .preferred_route
+                                        .as_ref()
+                                        .map(|r| AllocatedRouteSetId::from_route_id(r.clone())),
                                     hop_count: safety_spec.hop_count,
                                     stability: safety_spec.stability,
                                     sequencing: safety_spec.sequencing,

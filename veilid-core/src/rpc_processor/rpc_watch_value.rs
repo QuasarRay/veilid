@@ -61,7 +61,7 @@ impl RPCProcessor {
         };
 
         let debug_string = format!(
-            "OUT ==> WatchValueQ({} {} {}@{}+{}) => {} (watcher={}) ",
+            "OUT ==> WatchValueQ({} {} {}@{}+{}) => {:#} (watcher={}) ",
             if let Some(watch_id) = watch_id {
                 format!("id={} ", watch_id)
             } else {
@@ -90,10 +90,10 @@ impl RPCProcessor {
 
         veilid_log!(self debug target: "dht", "{}", debug_string);
 
-        let waitable_reply = network_result_try!(
-            self.question(dest.clone(), question, Some(watcher), None)
-                .await?
-        );
+        let waitable_reply = network_result_try!(self
+            .question(dest.clone(), question, Some(watcher), None)
+            .await?
+            .into_network_result());
 
         // Wait for reply
         let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {

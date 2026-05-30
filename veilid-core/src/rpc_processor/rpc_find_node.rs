@@ -43,11 +43,13 @@ impl RPCProcessor {
             find_node_q_detail,
         );
 
-        let debug_string = format!("FindNode(node_id={}) => {}", hash_coordinate, dest);
+        let debug_string = format!("FindNode(node_id={}) => {:#}", hash_coordinate, dest);
 
         // Send the find_node request
-        let waitable_reply =
-            network_result_try!(self.question(dest, find_node_q, None, None).await?);
+        let waitable_reply = network_result_try!(self
+            .question(dest, find_node_q, None, None)
+            .await?
+            .into_network_result());
 
         // Wait for reply
         let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {

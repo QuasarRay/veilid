@@ -658,13 +658,15 @@ fn get_route_id(
         match RouteId::from_str(text).ok() {
             Some(key) => {
                 if allow_allocated {
-                    let routes = rss.list_allocated_routes(|k, _| Some(k.clone()));
+                    let routes: Vec<RouteId> =
+                        rss.list_allocated_routes(|k, _| Some(k.clone().into()));
                     if routes.contains(&key) {
                         return Some(key);
                     }
                 }
                 if allow_remote {
-                    let rroutes = rss.list_remote_routes(|k, _| Some(k.clone()));
+                    let rroutes: Vec<RouteId> =
+                        rss.list_remote_routes(|k, _| Some(k.clone().into()));
                     if rroutes.contains(&key) {
                         return Some(key);
                     }
@@ -672,7 +674,8 @@ fn get_route_id(
             }
             None => {
                 if allow_allocated {
-                    let routes = rss.list_allocated_routes(|k, _| Some(k.clone()));
+                    let routes: Vec<RouteId> =
+                        rss.list_allocated_routes(|k, _| Some(k.clone().into()));
                     for r in routes {
                         let rkey = r.to_string();
                         if rkey.starts_with(text)
@@ -686,7 +689,8 @@ fn get_route_id(
                     }
                 }
                 if allow_remote {
-                    let routes = rss.list_remote_routes(|k, _| Some(k.clone()));
+                    let routes: Vec<RouteId> =
+                        rss.list_remote_routes(|k, _| Some(k.clone().into()));
                     for r in routes {
                         let rkey = r.to_string();
                         if rkey.starts_with(text)
@@ -1071,7 +1075,7 @@ fn get_debug_argument_at<T, G: FnOnce(&str) -> Option<T>>(
     }
     let value = &debug_args[pos];
     let Some(val) = getter(value) else {
-        apibail_invalid_argument!(context, argument, value);
+        apibail_invalid_argument!(context, argument, value.clone());
     };
     Ok(val)
 }
@@ -1088,7 +1092,7 @@ async fn async_get_debug_argument_at<T, G: FnOnce(&str) -> PinBoxFutureStatic<Op
     }
     let value = &debug_args[pos];
     let Some(val) = getter(value).await else {
-        apibail_invalid_argument!(context, argument, value);
+        apibail_invalid_argument!(context, argument, value.clone());
     };
     Ok(val)
 }
@@ -1562,17 +1566,14 @@ impl VeilidAPI {
 
         // Send a StatusQ
         let rpc_processor = registry.rpc_processor();
-        let out = match Box::pin(rpc_processor.rpc_call_status(dest))
+        let result = Box::pin(rpc_processor.rpc_call_status(dest))
             .await
-            .map_err(VeilidAPIError::internal)?
-        {
-            NetworkResult::Value(v) => v,
-            r => {
-                return Ok(r.to_string());
-            }
-        };
-
-        Ok(format!("{:#?}", out))
+            .map_err(VeilidAPIError::internal)?;
+        match result {
+            StatusResult::Answer { answer, .. } => Ok(format!("{:#?}", answer)),
+            StatusResult::Failed(sdr) => Ok(format!("send failed: {}", sdr)),
+            StatusResult::NotSent(nr) => Ok(format!("not sent: {:?}", nr)),
+        }
     }
 
     async fn debug_app_message(
@@ -1667,7 +1668,8 @@ impl VeilidAPI {
         let (call_id, data) = if let Some(id) = id {
             let stripped_id = id.strip_prefix('#').unwrap_or(id.as_str());
             let call_id = OperationId::new(
-                u64::from_str_radix(stripped_id, 16).map_err(VeilidAPIError::generic)?,
+                u64::from_str_radix(stripped_id, 16)
+                    .map_err(|e| VeilidAPIError::parse_error(e.to_string(), stripped_id))?,
             );
             let data_text = join_args(data_parts);
             let data = get_debug_argument(&data_text, "debug_app_reply", "data", get_data)?;
@@ -1810,9 +1812,10 @@ impl VeilidAPI {
         };
 
         // Publish route
-        let out = match rss.assemble_private_route_set(&route_id, Some(!full)).await {
+        let arsid = AllocatedRouteSetId::from_route_id(route_id.clone());
+        let out = match rss.assemble_private_route_set(&arsid, Some(!full)).await {
             Ok(private_routes) => {
-                if let Err(e) = rss.mark_route_published(&route_id, true) {
+                if let Err(e) = rss.mark_route_published(&arsid, true) {
                     return Ok(format!("Couldn't mark route published: {}", e));
                 }
                 // Convert to blob
@@ -1849,7 +1852,8 @@ impl VeilidAPI {
         )?;
 
         // Unpublish route
-        let out = if let Err(e) = rss.mark_route_published(&route_id, false) {
+        let arsid = AllocatedRouteSetId::from_route_id(route_id);
+        let out = if let Err(e) = rss.mark_route_published(&arsid, false) {
             return Ok(format!("Couldn't mark route unpublished: {}", e));
         } else {
             "Route unpublished".to_owned()
@@ -1914,11 +1918,9 @@ impl VeilidAPI {
         let blob = get_debug_argument_at(&args, 0, "debug_route", "blob", get_string)?;
         let blob_dec = BASE64URL_NOPAD
             .decode(blob.as_bytes())
-            .map_err(VeilidAPIError::generic)?;
+            .map_err(|e| VeilidAPIError::parse_error(e.to_string(), blob))?;
 
-        let route_id = rss
-            .import_remote_route_blob(blob_dec)
-            .map_err(VeilidAPIError::generic)?;
+        let route_id = rss.import_remote_route_blob(blob_dec)?;
 
         let out = self.with_debug_cache(|dc| {
             let n = dc.imported_routes.len();
@@ -1944,10 +1946,7 @@ impl VeilidAPI {
             get_route_id(registry.clone(), true, true),
         )?;
 
-        let success = rss
-            .test_route(route_id)
-            .await
-            .map_err(VeilidAPIError::internal)?;
+        let success = rss.test_route(route_id).await?;
 
         let out = match success {
             Some(true) => "SUCCESS".to_owned(),
@@ -2417,7 +2416,7 @@ impl VeilidAPI {
 
         // Do a record watch
         let active = match rc
-            .watch_dht_values(key, subkeys, opt_expiration, count)
+            .watch_dht_values(key, subkeys, opt_expiration, count, None)
             .await
         {
             Err(e) => {
@@ -2971,8 +2970,8 @@ impl VeilidAPI {
     /// components.
     pub async fn debug(&self, args: String) -> VeilidAPIResult<String> {
         let res = {
-            let argv_parts =
-                shell_words::split(&args).map_err(|e| VeilidAPIError::parse_error(e, args))?;
+            let argv_parts = shell_words::split(&args)
+                .map_err(|e| VeilidAPIError::parse_error(e.to_string(), args))?;
 
             if argv_parts.is_empty() {
                 return self.debug_help();
@@ -3075,13 +3074,14 @@ impl VeilidAPI {
                     let private_route = if let Some(prid) =
                         get_route_id(registry.clone(), false, true)(text)
                     {
-                        rss.best_remote_private_route(&prid)?
+                        rss.best_remote_private_route(&RemoteRouteSetId::from_route_id(prid))?
                     } else {
                         let n = get_number(text)?;
 
                         self.with_debug_cache(|dc| {
-                            let prid = dc.imported_routes.get(n)?;
-                            let Some(private_route) = rss.best_remote_private_route(prid) else {
+                            let prid: &RouteId = dc.imported_routes.get(n)?;
+                            let prid = RemoteRouteSetId::from_route_id(prid.clone());
+                            let Some(private_route) = rss.best_remote_private_route(&prid) else {
                                 // Remove imported route
                                 let _ = dc.imported_routes.remove(n);
                                 veilid_log!(registry info "removed dead imported route {}", n);

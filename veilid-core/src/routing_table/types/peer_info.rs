@@ -123,11 +123,13 @@ impl PeerInfo {
             node_info_message,
             capnp::message::ReaderOptions::new(),
         )
-        .map_err(VeilidAPIError::generic)?;
+        .map_err(|e| VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message)))?;
 
         let node_info_reader = node_info_message_reader
             .get_root::<veilid_capnp::node_info::Reader>()
-            .map_err(VeilidAPIError::generic)?;
+            .map_err(|e| {
+                VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message))
+            })?;
 
         let node_info = decode_node_info(&node_info_reader)?;
 

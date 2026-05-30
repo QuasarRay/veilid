@@ -25,7 +25,10 @@ impl fmt::Display for LowLevelProtocolType {
 }
 
 impl LowLevelProtocolType {
-    pub fn is_connection_oriented(&self) -> bool {
-        matches!(self, Self::TCP)
+    pub fn socket_type(&self) -> SocketType {
+        match self {
+            Self::TCP => SocketType::Stream,
+            Self::UDP => SocketType::Datagram,
+        }
     }
 }

@@ -1,4 +1,5 @@
 mod close_record;
+mod constants;
 mod create_record;
 mod debug;
 mod delete_record;
@@ -35,6 +36,7 @@ use super::*;
 
 use hashlink::{LinkedHashMap, LruCache};
 
+use constants::*;
 use inspect_record::OutboundInspectValueResult;
 use local_record_detail::*;
 use offline_subkey_writes::*;
@@ -48,12 +50,12 @@ use routing_table::*;
 use rpc_processor::*;
 use stop_token::future::FutureExt as _;
 use storage_manager_locks::*;
-use tasks::outbound_transaction_keepalive::OutboundTransactionKeepaliveProcessor;
 
+pub(crate) use constants::STORAGE_MANAGER_METADATA;
 pub(crate) use get_value::InboundGetValueResult;
 pub(crate) use inspect_record::InboundInspectValueResult;
+pub(crate) use outbound_transaction_manager::OutboundTransactionHandle;
 pub(crate) use set_value::InboundSetValueResult;
-pub(crate) use transaction::OutboundTransactionHandle;
 pub(crate) use transaction_begin::{InboundTransactBeginResult, TransactBeginSuccess};
 pub(crate) use transaction_command::{InboundTransactCommandResult, TransactCommandSuccess};
 pub(crate) use watch_value::{InboundWatchParameters, InboundWatchValueResult};
@@ -61,59 +63,6 @@ pub(crate) use watch_value::{InboundWatchParameters, InboundWatchValueResult};
 pub use types::*;
 
 impl_veilid_log_facility!("stor");
-
-/// Fixed length of MemberId (DHT Schema member id) in bytes
-pub const MEMBER_ID_LENGTH: usize = 32;
-/// The maximum size of a single subkey
-pub(crate) const MAX_SUBKEY_SIZE: usize = EncryptedValueData::MAX_LEN;
-/// The maximum total size of all subkeys of a record
-pub(crate) const MAX_RECORD_DATA_SIZE: usize = 1_048_576;
-/// Frequency to flush record stores to disk
-const FLUSH_RECORD_STORES_INTERVAL_SECS: u32 = 1;
-/// Frequency to save metadata to disk
-const SAVE_METADATA_INTERVAL_SECS: u32 = 30;
-/// Frequency to check for offline subkeys writes to send to the network
-const OFFLINE_SUBKEY_WRITES_INTERVAL_SECS: u32 = 1;
-/// Total number of offline subkey write requests to process in parallel
-const OFFLINE_SUBKEY_WRITES_BATCH_SIZE: usize = 16;
-/// Number of subkeys per offline subkey write keys to process in a chunk
-const OFFLINE_SUBKEY_WRITES_SUBKEY_CHUNK_SIZE: u64 = 4;
-/// Frequency to send ValueChanged notifications to the network
-const SEND_VALUE_CHANGES_INTERVAL_SECS: u32 = 1;
-/// Frequency to check for dead nodes and routes for client-side outbound watches
-const CHECK_OUTBOUND_WATCHES_INTERVAL_SECS: u32 = 1;
-/// Frequency to retry reconciliation of watches that are not at consensus
-const RECONCILE_OUTBOUND_WATCHES_INTERVAL: TimestampDuration = TimestampDuration::new_secs(60);
-/// How long before expiration to try to renew per-node watches
-const RENEW_OUTBOUND_WATCHES_DURATION: TimestampDuration = TimestampDuration::new_secs(30);
-/// Frequency to check for expired server-side watched records
-const CHECK_INBOUND_WATCHES_INTERVAL_SECS: u32 = 1;
-/// Frequency to check for expired client-side transactions
-const CHECK_OUTBOUND_TRANSACTIONS_INTERVAL_SECS: u32 = 1;
-/// Multiplier applied to rpc_timeout_ms to derive the server-side transaction TTL
-const TRANSACTION_TIMEOUT_RPC_MULTIPLIER: u64 = 2;
-/// Frequency to check for expired server-side transactions
-const CHECK_INBOUND_TRANSACTIONS_INTERVAL_SECS: u32 = 1;
-/// Frequency to process record rehydration requests
-const REHYDRATE_RECORDS_INTERVAL_SECS: u32 = 1;
-/// Number of rehydration requests to process in parallel
-const REHYDRATE_BATCH_SIZE: usize = 16;
-/// Maximum 'offline lag' before we decide to poll for changed watches
-const CHANGE_INSPECT_LAG: TimestampDuration = TimestampDuration::new_secs(2);
-/// Length of descriptor cache (512 records and 5 nodes per record, roughly 184320 bytes)
-const DESCRIPTOR_CACHE_SIZE: usize = 2560;
-/// Table store table for storage manager metadata
-const STORAGE_MANAGER_METADATA: &str = "storage_manager_metadata";
-/// Storage manager metadata key name for offline subkey write persistence
-const OFFLINE_SUBKEY_WRITES: &[u8] = b"offline_subkey_writes";
-/// Outbound watch manager metadata key name for watch persistence
-const OUTBOUND_WATCH_MANAGER: &[u8] = b"outbound_watch_manager";
-/// Rehydration requests metadata key name for rehydration persistence
-const REHYDRATION_REQUESTS: &[u8] = b"rehydration_requests";
-/// Descriptor cache metadata key name for persistence
-const DESCRIPTOR_CACHE: &[u8] = b"descriptor_cache";
-/// Remote store connection pool divisor
-const REMOTE_POOL_CONCURRENCY_DIVISOR: usize = 4;
 
 #[derive(Debug, Clone)]
 /// A single 'value changed' message to send
@@ -134,7 +83,6 @@ struct DescriptorCacheKey {
 }
 
 /// Locked structure for storage manager
-#[derive(Default)]
 struct StorageManagerInner {
     /// Records that have been 'opened' and are not yet closed
     pub opened_records: HashMap<OpaqueRecordKey, OpenedRecord>,
@@ -216,13 +164,6 @@ pub(crate) struct StorageManager {
     // Cache of which nodes have seen descriptors for which records to optimize outbound set_value and transact_begin operations
     descriptor_cache: Arc<Mutex<LruCache<DescriptorCacheKey, ()>>>,
 
-    // Outbound transaction keepalive processor
-    outbound_transaction_keepalive_processor: OutboundTransactionKeepaliveProcessor,
-
-    // Detached spawn counter to wait for before shutting down
-    // Adding a read lock adds a detached spawn, use write lock to wait for them to all to finish
-    detached_spawns: Arc<AsyncRwLock<()>>,
-
     // Online check
     is_online: AtomicBool,
 }
@@ -240,7 +181,6 @@ impl fmt::Debug for StorageManager {
             .field("anonymous_signing_keys", &self.anonymous_signing_keys)
             .field("is_online", &self.is_online)
             .field("descriptor_cache", &self.descriptor_cache)
-            .field("detached_spawns", &self.detached_spawns)
             .finish()
     }
 }
@@ -259,12 +199,21 @@ impl StorageManager {
             anonymous_signing_keys.add(kp);
         }
 
-        let outbound_transaction_keepalive_processor =
-            OutboundTransactionKeepaliveProcessor::new(registry.clone());
-
         let this = StorageManager {
-            registry,
-            inner: Default::default(),
+            inner: Mutex::new(StorageManagerInner {
+                opened_records: Default::default(),
+                local_record_store: Default::default(),
+                remote_record_store: Default::default(),
+                offline_subkey_writes: Default::default(),
+                rehydration_requests: Default::default(),
+                flush_record_waiters: Default::default(),
+                outbound_watch_manager: Default::default(),
+                outbound_transaction_manager: OutboundTransactionManager::new(registry.clone()),
+                metadata_db: Default::default(),
+                peer_info_change_subscription: None,
+                tick_subscription: None,
+            }),
+            registry: registry.clone(),
             startup_lock: Arc::new(StartupLock::new()),
 
             save_metadata_task: TickTask::new("save_metadata_task", SAVE_METADATA_INTERVAL_SECS),
@@ -300,13 +249,11 @@ impl StorageManager {
                 "rehydrate_records_task",
                 REHYDRATE_RECORDS_INTERVAL_SECS,
             ),
-            record_lock_table: StorageManagerRecordLockTable::new(),
+            record_lock_table: StorageManagerRecordLockTable::new(registry.clone()),
             anonymous_signing_keys,
             background_operation_processor: DeferredStreamProcessor::new(),
-            outbound_transaction_keepalive_processor,
             is_online: AtomicBool::new(false),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
-            detached_spawns: Arc::new(AsyncRwLock::new(())),
         };
 
         this.setup_tasks();
@@ -397,15 +344,15 @@ impl StorageManager {
             inner.metadata_db = Some(metadata_db);
             inner.local_record_store = Some(local_record_store);
             inner.remote_record_store = Some(remote_record_store);
+
+            // Start up outbound transaction manager
+            inner.outbound_transaction_manager.init();
         }
 
         self.load_metadata().await?;
 
         // Start deferred results processors
         self.background_operation_processor.init();
-
-        // Start outbound transaction keepalive processor
-        self.outbound_transaction_keepalive_processor.init();
 
         guard.success();
 
@@ -428,11 +375,6 @@ impl StorageManager {
         // Resolve outbound watch manager noderefs
         inner.outbound_watch_manager.prepare(&self.routing_table());
 
-        // Resolve transaction manager noderefs
-        inner
-            .outbound_transaction_manager
-            .prepare(&self.routing_table());
-
         // Schedule tick
         inner.peer_info_change_subscription = Some(peer_info_change_subscription);
         inner.tick_subscription = Some(tick_subscription);
@@ -446,7 +388,7 @@ impl StorageManager {
     )]
     #[allow(clippy::unused_async)]
     async fn pre_terminate_async(&self) {
-        // Unsubscribe from ticker
+        // Unsubscribe from tickers and shut down outbound transaction manager
         {
             let mut inner = self.inner.lock();
             if let Some(sub) = inner.peer_info_change_subscription.take() {
@@ -472,16 +414,12 @@ impl StorageManager {
         // Cancel all tasks associated with the tick future
         self.cancel_tasks().await;
 
-        // Stop outbound transaction keepalive processor
-        self.outbound_transaction_keepalive_processor
-            .terminate()
-            .await;
+        // Shutdown keepalive processor
+        let cleanup = { self.inner.lock().outbound_transaction_manager.terminate() };
+        cleanup.await;
 
         // Stop deferred result processor
         self.background_operation_processor.terminate().await;
-
-        // Wait for all detached spawns to finish
-        let _ = self.detached_spawns.write().await;
 
         // Terminate and release the storage manager
         let (opt_local_record_store, opt_remote_record_store) = {
@@ -511,7 +449,19 @@ impl StorageManager {
         // Reset inner state
         {
             let mut inner = self.inner.lock();
-            *inner = Default::default();
+            *inner = StorageManagerInner {
+                outbound_transaction_manager: OutboundTransactionManager::new(self.registry()),
+                opened_records: Default::default(),
+                local_record_store: Default::default(),
+                remote_record_store: Default::default(),
+                offline_subkey_writes: Default::default(),
+                rehydration_requests: Default::default(),
+                flush_record_waiters: Default::default(),
+                outbound_watch_manager: Default::default(),
+                metadata_db: Default::default(),
+                peer_info_change_subscription: None,
+                tick_subscription: None,
+            };
         }
 
         guard.success();
@@ -795,19 +745,6 @@ impl StorageManager {
             .is_some();
 
         Ok(existed)
-    }
-
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "stor", skip_all)
-    )]
-    fn process_deferred_results<T: Send + 'static>(
-        &self,
-        receiver: flume::Receiver<T>,
-        handler: impl FnMut(T) -> PinBoxFutureStatic<DeferredStreamResult> + Send + 'static,
-    ) -> bool {
-        self.background_operation_processor
-            .add_stream(receiver.into_stream(), handler)
     }
 
     fn peer_info_change_event_handler(&self, evt: Arc<PeerInfoChangeEvent>) {

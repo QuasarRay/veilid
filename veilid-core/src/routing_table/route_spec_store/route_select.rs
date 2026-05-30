@@ -3,7 +3,7 @@ use super::*;
 #[derive(Clone, Debug)]
 pub struct RouteSelectParams {
     pub crypto_kind: CryptoKind,
-    pub preferred_route: Option<RouteId>,
+    pub preferred_route: Option<AllocatedRouteSetId>,
     pub hop_count: usize,
     pub stability: Stability,
     pub sequencing: Sequencing,
@@ -25,7 +25,7 @@ struct FirstAvailableRouteParams {
 
 #[derive(Clone, Debug)]
 pub struct RouteIdAndKeys {
-    pub route_id: RouteId,
+    pub route_id: AllocatedRouteSetId,
     pub route_set_keys: PublicKeyGroup,
 }
 
@@ -34,12 +34,28 @@ impl RouteSpecStore {
     /// Returns the public key associated with a single allocated route
     #[cfg_attr(
         feature = "instrument",
-        instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
+        instrument(level = "trace", target = "rtab::route", skip_all, fields(
+            __VEILID_LOG_KEY = self.log_key(),
+            arg_crypto_kind = ?params.crypto_kind,
+            arg_preferred_route = tracing::field::debug(&params.preferred_route),
+            arg_requested_hop_count = params.hop_count,
+            arg_stability = %params.stability,
+            arg_sequencing = %params.sequencing,
+            arg_is_destination_safe = params.is_destination_safe,
+            arg_avoid_nodes_len = params.avoid_nodes.len(),
+            actual_hop_count = tracing::field::Empty,
+            doubled = tracing::field::Empty,
+            selected_via = tracing::field::Empty,
+            selected_route_id = tracing::field::Empty,
+        ))
     )]
     pub async fn select_single_route(
         &self,
         mut params: RouteSelectParams,
     ) -> VeilidAPIResult<RouteIdAndKeys> {
+        #[cfg(feature = "instrument")]
+        let requested_hop_count = params.hop_count;
+
         // Ensure the total hop count isn't too long for our config
         if params.hop_count == 0 {
             apibail_invalid_argument!(
@@ -64,6 +80,13 @@ impl RouteSpecStore {
             params.hop_count = (params.hop_count * 2).min(self.get_max_route_hop_count());
         };
 
+        #[cfg(feature = "instrument")]
+        {
+            let span = tracing::Span::current();
+            span.record("actual_hop_count", params.hop_count);
+            span.record("doubled", params.hop_count != requested_hop_count);
+        }
+
         let first_available_route_params = FirstAvailableRouteParams {
             crypto_kind: params.crypto_kind,
             min_hop_count: params.hop_count,
@@ -86,6 +109,15 @@ impl RouteSpecStore {
                         // Only use the preferred route if it doesn't contain the avoid nodes
                         if !preferred_arce.contains_nodes(&first_available_route_params.avoid_nodes)
                         {
+                            #[cfg(feature = "instrument")]
+                            {
+                                let span = tracing::Span::current();
+                                span.record("selected_via", "preferred");
+                                span.record(
+                                    "selected_route_id",
+                                    tracing::field::display(preferred_route),
+                                );
+                            }
                             return Ok(RouteIdAndKeys {
                                 route_id: preferred_route.clone(),
                                 route_set_keys: public_keys.clone(),
@@ -103,6 +135,15 @@ impl RouteSpecStore {
                 &self.route_selection_counter,
             ) {
                 // Found a route to use
+                #[cfg(feature = "instrument")]
+                {
+                    let span = tracing::Span::current();
+                    span.record("selected_via", "first_available");
+                    span.record(
+                        "selected_route_id",
+                        tracing::field::display(&sr_route_id_and_public_keys.route_id),
+                    );
+                }
                 return Ok(sr_route_id_and_public_keys);
             }
 
@@ -132,6 +173,15 @@ impl RouteSpecStore {
                     &self.route_selection_counter,
                 ) {
                     // Found a route to use
+                    #[cfg(feature = "instrument")]
+                    {
+                        let span = tracing::Span::current();
+                        span.record("selected_via", "first_available_post_lock");
+                        span.record(
+                            "selected_route_id",
+                            tracing::field::display(&sr_route_id_and_public_keys.route_id),
+                        );
+                    }
                     return Ok(sr_route_id_and_public_keys);
                 }
 
@@ -150,8 +200,18 @@ impl RouteSpecStore {
             avoid_nodes: first_available_route_params.avoid_nodes,
             automatic: true,
         };
-        self.allocate_route_inner(&allocate_route_lock_guard, params)
-            .await
+        let allocated = self
+            .allocate_route_inner(&allocate_route_lock_guard, params)
+            .await;
+        #[cfg(feature = "instrument")]
+        {
+            let span = tracing::Span::current();
+            span.record("selected_via", "newly_allocated");
+            if let Ok(rk) = &allocated {
+                span.record("selected_route_id", tracing::field::display(&rk.route_id));
+            }
+        }
+        allocated
     }
 
     /// Find first matching unpublished route that fits into the selection criteria
@@ -159,7 +219,7 @@ impl RouteSpecStore {
     /// Round-robins among top-tier routes to distribute load across safety routes
     #[cfg_attr(
         feature = "instrument",
-        instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = inner.cache.log_key()))
+        instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = cache.log_key()))
     )]
     fn first_available_route_inner(
         cache: &RouteSpecStoreCache,
@@ -173,7 +233,7 @@ impl RouteSpecStore {
         // Get all valid routes, allow routes that need testing
         // but definitely prefer routes that have been recently tested
         for (id, arce) in cache.iter_allocated_routes() {
-            if arce.is_sequencing_match(params.sequencing)
+            if arce.is_live_sequencing_match(params.sequencing)
                 && arce.hop_count() >= params.min_hop_count
                 && arce.hop_count() <= params.max_hop_count
                 && arce.directions().is_superset(params.directions)
@@ -194,8 +254,8 @@ impl RouteSpecStore {
         // Sort the routes by preference
         routes.sort_by(|a, b| {
             // Prefer routes that don't need testing
-            let a_needs_testing = a.2.needs_testing(cur_ts);
-            let b_needs_testing = b.2.needs_testing(cur_ts);
+            let a_needs_testing = a.2.needs_testing(a.1.orderings(), cur_ts);
+            let b_needs_testing = b.2.needs_testing(b.1.orderings(), cur_ts);
             if !a_needs_testing && b_needs_testing {
                 return cmp::Ordering::Less;
             }
@@ -224,7 +284,7 @@ impl RouteSpecStore {
         let good_count = routes
             .iter()
             .take_while(|(_, rssd, stats)| {
-                let needs_testing = stats.needs_testing(cur_ts);
+                let needs_testing = stats.needs_testing(rssd.orderings(), cur_ts);
                 let meets_stability = rssd.stability() >= params.stability;
                 !needs_testing && meets_stability
             })

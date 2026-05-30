@@ -44,7 +44,7 @@ impl RouteSpecStore {
                 arce.hop_node_refs(),
                 secret_key,
                 SafetySpec {
-                    preferred_route: Some(id),
+                    preferred_route: Some(id.into()),
                     hop_count: arce.hop_count(),
                     stability: arce.stability(),
                     sequencing,

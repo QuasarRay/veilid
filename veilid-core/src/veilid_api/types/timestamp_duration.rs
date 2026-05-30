@@ -110,4 +110,46 @@ impl TimestampDuration {
     pub const fn saturating_mul_assign(&mut self, rhs: u64) {
         *self = self.saturating_mul(rhs);
     }
+
+    /// Wrap a future with a timeout based on this duration.
+    /// Saturates to u32::MAX milliseconds (~49.7 days) on overflow.
+    pub fn timeout<F, T>(self, f: F) -> impl Future<Output = Result<T, TimeoutError>>
+    where
+        F: Future<Output = T>,
+    {
+        veilid_tools::timeout(self.millis_u32().unwrap_or(u32::MAX), f)
+    }
+
+    /// Run a periodic callback at this duration's interval.
+    /// Saturates to u32::MAX milliseconds (~49.7 days) on overflow.
+    pub fn interval<F, FUT>(
+        self,
+        name: &str,
+        immediate: bool,
+        callback: F,
+    ) -> PinBoxFutureStatic<()>
+    where
+        F: Fn() -> FUT + Send + Sync + 'static,
+        FUT: Future<Output = ()> + Send,
+    {
+        veilid_tools::interval(
+            name,
+            self.millis_u32().unwrap_or(u32::MAX),
+            immediate,
+            callback,
+        )
+    }
 }
+
+/// Future extension trait that mirrors `TimestampDuration::timeout` for ergonomic chaining.
+/// Named `timeout_duration` to avoid conflict with `futures_time::FutureExt::timeout`.
+pub trait TimestampDurationTimeoutFutureExt: Future + Sized {
+    fn timeout_duration(
+        self,
+        duration: TimestampDuration,
+    ) -> impl Future<Output = Result<Self::Output, TimeoutError>> {
+        duration.timeout(self)
+    }
+}
+
+impl<F: Future + Sized> TimestampDurationTimeoutFutureExt for F {}

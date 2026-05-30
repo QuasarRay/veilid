@@ -3,7 +3,7 @@ use super::*;
 impl_veilid_log_facility!("rtab");
 
 /// Minimum number of nodes after initial discovery for a routing domain
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LowWaterMark {
     pub per_crypto_kind: BTreeMap<CryptoKind, CapabilityCounts>,
 }

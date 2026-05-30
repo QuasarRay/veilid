@@ -15,7 +15,11 @@ pub enum RecordStoreRecordLockPurpose {
     TransactGet,
 }
 
-impl LockPurpose for RecordStoreRecordLockPurpose {}
+impl RecordLockPurpose for RecordStoreRecordLockPurpose {
+    fn record_lock_mode(&self) -> RecordLockMode {
+        RecordLockMode::Lifetime
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum RecordStoreSubkeyLockPurpose {
@@ -24,13 +28,17 @@ pub enum RecordStoreSubkeyLockPurpose {
     Set,
 }
 
-impl LockPurpose for RecordStoreSubkeyLockPurpose {}
+impl RecordLockPurpose for RecordStoreSubkeyLockPurpose {
+    fn record_lock_mode(&self) -> RecordLockMode {
+        RecordLockMode::Lifetime
+    }
+}
 
 pub type RecordStoreRecordLockTable =
     RecordLockTable<RecordStoreRecordLockPurpose, RecordStoreSubkeyLockPurpose>;
 pub type RecordStoreRecordLockGuard =
     RecordLockGuard<RecordStoreRecordLockPurpose, RecordStoreSubkeyLockPurpose>;
-// pub type RecordStoreRecordsLockGuard =
-//     RecordsLockGuard<RecordStoreRecordLockPurpose, RecordStoreSubkeyLockPurpose>;
+pub type RecordStoreRecordsLockGuard =
+    RecordsLockGuard<RecordStoreRecordLockPurpose, RecordStoreSubkeyLockPurpose>;
 // pub type RecordStoreSubkeyLockGuard =
 //     SubkeyLockGuard<RecordStoreRecordLockPurpose, RecordStoreSubkeyLockPurpose>;

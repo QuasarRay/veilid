@@ -67,7 +67,7 @@ macro_rules! fourcc_type {
             impl TryFrom<&[u8]> for $name {
                 type Error = VeilidAPIError;
                 fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
-                    Ok(Self(b.try_into().map_err(VeilidAPIError::generic)?))
+                    Ok(Self(b.try_into().map_err(|e: std::array::TryFromSliceError| VeilidAPIError::parse_error(e.to_string(), hex::encode(b)))?))
                 }
             }
 
@@ -93,7 +93,7 @@ macro_rules! fourcc_type {
                 type Err = VeilidAPIError;
                 fn from_str(s: &str) -> Result<Self, Self::Err> {
                     Ok(Self(
-                        s.as_bytes().try_into().map_err(VeilidAPIError::generic)?,
+                        s.as_bytes().try_into().map_err(|e: std::array::TryFromSliceError| VeilidAPIError::parse_error(e.to_string(), s))?,
                     ))
                 }
             }

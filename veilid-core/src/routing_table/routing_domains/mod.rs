@@ -75,13 +75,29 @@ impl RoutingTable {
             .find_map(|(k, v)| v.read_dyn().can_contain_address(address).then_some(*k))
     }
 
-    /// Select the most specific compatible routing domain for a flow
+    /// Select the most specific compatible routing domain for a flow.
+    ///
+    /// Local-address handling for ranges that don't represent real network membership
+    /// (translator endpoints, transitional encapsulation, fallbacks) defers to the remote:
+    /// - `is_unspecified` (`0.0.0.0` / `::`)
+    /// - `is_synthetic_local` (CLAT46, CGNAT, NAT64-well-known, Teredo, 6to4)
+    /// - APIPA `169.254/16` when remote is global (DHCP failed but route exists)
+    /// - IPv6 link-local `fe80::/10` when remote is global
+    ///
+    /// Otherwise, pick the most specific domain compatible with both ends.
     pub fn routing_domain_for_flow(&self, flow: Flow) -> Option<RoutingDomain> {
-        let rd_remote = self.routing_domain_for_address(flow.remote_address().address())?;
+        let remote_address = flow.remote_address().address();
+        let rd_remote = self.routing_domain_for_address(remote_address)?;
         let Some(local_address) = flow.local().map(|x| x.address()) else {
             return Some(rd_remote);
         };
-        if local_address.is_unspecified() {
+        if local_address.is_unspecified() || local_address.is_synthetic_local() {
+            return Some(rd_remote);
+        }
+        if local_address.is_ipv4_link_local() && !remote_address.is_ipv4_link_local() {
+            return Some(rd_remote);
+        }
+        if local_address.is_ipv6_link_local() && !remote_address.is_ipv6_link_local() {
             return Some(rd_remote);
         }
         let rd_local = self.routing_domain_for_address(local_address)?;

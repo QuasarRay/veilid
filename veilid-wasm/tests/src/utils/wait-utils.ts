@@ -24,6 +24,7 @@ export const waitForPublicAttachment = async () => {
   //console.log('waitForPublicAttachment...');
 
   const startTime = Date.now();
+  let looped = false;
   while (true) {
 
     const state = await veilidClient.getState();
@@ -44,8 +45,11 @@ export const waitForPublicAttachment = async () => {
     }
     await waitForMs(250);
     //console.log('waitForPublicAttachment loop...');
+    looped = true;
   }
-  console.log(`waitForPublicAttachment took ${Date.now() - startTime}ms`);
+  if (looped) {
+    console.log(`waitForPublicAttachment took ${Date.now() - startTime}ms`);
+  }
 }
 
 export const waitForDetached = async () => {
@@ -121,4 +125,32 @@ export const waitForSingleEvent = <T extends Event>(element: EventTarget, eventN
   element.addEventListener(eventName, listener);
 
   return promise;
+}
+
+// A fire-and-forget app message can be slow or silently dropped on a single-threaded WASM node
+// whose public-internet readiness flaps and whose routes occasionally fail a hop. Resend until
+// received, best-effort re-confirming readiness between attempts, bounded by attempts and a
+// per-attempt timeout. One listener spans all attempts, so a late copy of an earlier send still
+// satisfies it and a resend never double-counts a delivered result.
+export const sendUntilReceived = async <T extends Event>(
+  send: () => Promise<void>,
+  eventTarget: EventTarget,
+  eventName: string,
+  perAttemptMs = 15_000,
+  attempts = 3,
+): Promise<T> => {
+  const oneShot = waitForSingleEvent<T>(eventTarget, eventName);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (attempt > 1) {
+      await asyncCallWithTimeout(waitForPublicAttachment(), perAttemptMs).catch(() => { });
+    }
+    await send();
+    try {
+      return await asyncCallWithTimeout<T>(oneShot, perAttemptMs);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }

@@ -1,5 +1,6 @@
 use super::*;
 use futures_util::{FutureExt, StreamExt};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{io, sync::Arc};
 use stop_token::prelude::*;
 
@@ -107,6 +108,9 @@ pub(crate) struct NetworkConnection {
     stop_source: Option<StopSource>,
     /// The node we are responsible for protecting the connection for if it is protected
     protected_nr: Option<NodeRef>,
+    /// Mirrors `protected_nr.is_some()` so the connection-processor loop can skip
+    /// inactivity-timeout-driven closure on protected connections without holding a lock.
+    is_protected: Arc<AtomicBool>,
     /// The number of references to the network connection that exist (handles)
     ref_count: usize,
 }
@@ -163,6 +167,7 @@ impl NetworkConnection {
             sender,
             stop_source: None,
             protected_nr: None,
+            is_protected: Arc::new(AtomicBool::new(false)),
             ref_count: 0,
         }
     }
@@ -190,6 +195,8 @@ impl NetworkConnection {
         let stop_source = StopSource::new();
         let local_stop_token = stop_source.token();
 
+        let is_protected = Arc::new(AtomicBool::new(false));
+
         // Spawn connection processor and pass in protocol connection
         let registry = connection_manager.registry();
         let processor = spawn(
@@ -203,6 +210,7 @@ impl NetworkConnection {
                 receiver,
                 protocol_connection,
                 stats.clone(),
+                is_protected.clone(),
             ),
         );
 
@@ -218,6 +226,7 @@ impl NetworkConnection {
             sender,
             stop_source: Some(stop_source),
             protected_nr: None,
+            is_protected,
             ref_count: 0,
         }
     }
@@ -256,10 +265,12 @@ impl NetworkConnection {
 
     pub fn protect(&mut self, protect_nr: NodeRef) {
         self.protected_nr = Some(protect_nr);
+        self.is_protected.store(true, Ordering::Relaxed);
     }
 
     pub fn unprotect(&mut self) {
         self.protected_nr = None;
+        self.is_protected.store(false, Ordering::Relaxed);
     }
 
     pub fn add_ref(&mut self) {
@@ -312,7 +323,6 @@ impl NetworkConnection {
         stats.clone()
     }
 
-    #[expect(dead_code)]
     pub fn established_time(&self) -> Timestamp {
         self.established_time
     }
@@ -329,6 +339,7 @@ impl NetworkConnection {
         receiver: flume::Receiver<(Option<Id>, Bytes)>,
         protocol_connection: ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
+        is_protected: Arc<AtomicBool>,
     ) -> PinBoxFutureStatic<()> {
         Box::pin(async move {
             let registry = connection_manager.registry();
@@ -342,12 +353,18 @@ impl NetworkConnection {
             let mut need_receiver = true;
             let mut need_sender = true;
 
-            // Add activity timer to unord
+            // Protected connections are owned by the connection_manager's drop
+            // accounting and should not be closed for recv-side inactivity.
             let inactivity_duration = TimestampDuration::new_ms(connection_manager.connection_inactivity_timeout_ms() as u64);
             let last_activity_timestamp = Arc::new(AtomicTimestamp::now());
             let last_activity_timestamp_clone = last_activity_timestamp.clone();
+            let is_protected_clone = is_protected.clone();
             let inactivity_timer = Box::pin(async move {
                     loop {
+                        if is_protected_clone.load(Ordering::Relaxed) {
+                            sleep(inactivity_duration.millis_u32().unwrap_or(60_000)).await;
+                            continue;
+                        }
                         let cur_ts = Timestamp::now_non_decreasing();
 
                         let last_activity_ts = last_activity_timestamp_clone.get();
@@ -435,8 +452,22 @@ impl NetworkConnection {
                                         return RecvLoopAction::Finish;
                                     }
 
-                                    // Punish invalid framing (tcp framing or websocket framing)
+                                    // Invalid framing (tcp framing or websocket framing)
                                     if v.is_invalid_message() {
+                                        // Outbound: protocol collision (simultaneous open), not an attack; don't punish the IP
+                                        if protocol_connection.direction() == Direction::Out {
+                                            veilid_log!(registry debug
+                                                "InvalidFraming on outbound {} (protocol collision, not punished): {:?}",
+                                                protocol_connection.flow(),
+                                                v
+                                            );
+                                            return RecvLoopAction::Finish;
+                                        }
+                                        veilid_log!(registry debug
+                                            "InvalidFraming on {}: {:?}",
+                                            protocol_connection.flow(),
+                                            v
+                                        );
                                         network_manager.address_filter().punish_ip_addr(peer_address.socket_addr().ip(), PunishmentReason::InvalidFraming);
                                         return RecvLoopAction::Finish;
                                     }

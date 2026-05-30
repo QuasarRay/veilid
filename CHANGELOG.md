@@ -1,7 +1,13 @@
 **UNRELEASED**
-
+- Breaking API Changes:
+  - `AttachmentState` enum values have changed to eliminate `OverAttached` state
+  - `VeilidUpdate::Attachment` now includes much more visibility into actual attachment conditions and network size estimations
+  - All RPCStats referring to 'Unordered' and 'Ordered' traffic have been removed. Internally these are now being tracked on a per-transport basis, and have little utility in the API anyway.
 - Global API Additions:
   - `TransactionNotFound` added to `VeilidAPIError`
+  - `transactional` parameter to `watch_dht_records` refuses to add value change notifications to the local record store until a transaction is performed to fetch them
+
+- Minimum Supported Rust Version (MSRV) is now 1.89.0
 
 - veilid-core:
   - Added record flush on DHT record close to ensure closed records are fully flushed to the TableStore
@@ -15,15 +21,33 @@
   - Fixes for handling SLAAC, APIPA, CLAT46/XLAT464, and earlier detection of CGNAT. Big day for acroynms.
   - Dynamic source Binding for low level protocols to ensure non-temporary addresses are used for outbound flows.
   - Added `OnlineDetector` to `NetworkManager` to enhance detecting switching networks. Things are now reactive to low level address switches rather than tick-based. Next up, OS-level subscriptions to routing table and interface table changes.
+  - Improved unit tests
   - (@neequ57) Extract compression from crypto
   - (@kirks) Fix recursion limit for Rust 1.94.0
+  - Update keyring-manager to 0.8.2 to fix secret-service connection problems
+  - Add flush_dht_record to VeilidAPI interface
+  - `NodeCount` aligned u64 type added
+  - implemented TransportType and transport-level stats for nodes
+  - Simplified route testing, eliminated route exhaustion problems
 
 - veilid-tools:
   - Formatting cleanup across the board, primarily for debugging purposes
-  - (@hamanasu_ruka) Break up monolithic unit tests 
+  - (@hamanasu_ruka) Break up monolithic unit tests
+  - Async lock deadlock detection (debug-locks feature) streamlined
+  - AsyncKeyedCache added to async_tools
+  - Added FlapDetector - hooked in to a bunch of places in veilid-core to check for connection, online, relay, and route flaps
 
 - veilid-flutter:
   - Add `LogFixture` to `veilid_test` package
+  - Dart/WASM now lives here next to Dart/FFI
+  - Improved unit tests
+
+- veilid-wasm:
+  - Dart WASM implementation moved to veilid-flutter, this now only has the Javascript/Typescript bindings
+  - Improved unit tests
+  - No more wasm-pack. All tests use wasm-bindgen-test / wdio directly.
+  - Fixed route leak in tests
+  - Switched to chromedriver for tests
 
 **Changed in Veilid 0.5.3**
 

@@ -10,12 +10,19 @@ import veilid
 from veilid import *
 from veilid.types import *
 
+from .conftest import dht_retry
+from .test_dht import sync
+
 ##################################################################
 BOGUS_KEY = RecordKey.from_value(
     CryptoKind.CRYPTO_KIND_VLD0, BareRecordKey.from_parts(BareOpaqueRecordKey.from_bytes(b'                                '), None))
 
 TEST_MESSAGE_1 = b"BLAH BLAH BLAH"
 TEST_MESSAGE_2 = b"blah blah blah blah"
+
+# Idle window for the keepalive test — must exceed the server-side TX timeout
+# (rpc.timeout_ms * TRANSACTION_TIMEOUT_RPC_MULTIPLIER, default 10s).
+KEEPALIVE_IDLE_SECONDS = 60
 
 @pytest.mark.asyncio
 async def test_transact_dht_records_empty(api_connection: VeilidAPI):
@@ -125,6 +132,172 @@ async def test_transact_dht_records_set_commit_get(api_connection: VeilidAPI):
 
             await rc.close_dht_record(rec.key)
             await rc.delete_dht_record(rec.key)
+
+
+# Extend a transaction with a single fresh record and commit writes against both.
+@pytest.mark.asyncio
+async def test_transact_dht_records_extend_single(api_connection: VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            rec_a = await rc.create_dht_record(kind, DHTSchema.dflt(1))
+            rec_b = await rc.create_dht_record(kind, DHTSchema.dflt(1))
+            try:
+                tx = await dht_retry(
+                    api_connection,
+                    lambda: api_connection.transact_dht_records([rec_a.key], None),
+                    label="begin",
+                )
+                async with tx:
+                    assert await tx.set(rec_a.key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    await dht_retry(api_connection, lambda: tx.extend([rec_b.key]), label="extend")
+                    assert await tx.set(rec_b.key, ValueSubkey(0), TEST_MESSAGE_2) is None
+                    await tx.commit()
+
+                vd_a = await rc.get_dht_value(rec_a.key, ValueSubkey(0), False)
+                vd_b = await rc.get_dht_value(rec_b.key, ValueSubkey(0), False)
+                assert vd_a is not None and vd_a.data == TEST_MESSAGE_1
+                assert vd_b is not None and vd_b.data == TEST_MESSAGE_2
+            finally:
+                for rec in (rec_a, rec_b):
+                    await rc.close_dht_record(rec.key)
+                    await rc.delete_dht_record(rec.key)
+
+
+# Extend a transaction multiple times before committing. Exercises repeated
+# merge + keepalive re-keying across several extend calls.
+@pytest.mark.asyncio
+async def test_transact_dht_records_extend_multiple(api_connection: VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            recs = [await rc.create_dht_record(kind, DHTSchema.dflt(1)) for _ in range(4)]
+            try:
+                tx = await dht_retry(
+                    api_connection,
+                    lambda: api_connection.transact_dht_records([recs[0].key], None),
+                    label="begin",
+                )
+                async with tx:
+                    assert await tx.set(recs[0].key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    await dht_retry(
+                        api_connection,
+                        lambda: tx.extend([recs[1].key, recs[2].key]),
+                        label="extend pair",
+                    )
+                    assert await tx.set(recs[1].key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    assert await tx.set(recs[2].key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    await dht_retry(
+                        api_connection,
+                        lambda: tx.extend([recs[3].key]),
+                        label="extend single",
+                    )
+                    assert await tx.set(recs[3].key, ValueSubkey(0), TEST_MESSAGE_2) is None
+                    await tx.commit()
+
+                for rec in recs[:3]:
+                    vd = await rc.get_dht_value(rec.key, ValueSubkey(0), False)
+                    assert vd is not None and vd.data == TEST_MESSAGE_1
+                vd = await rc.get_dht_value(recs[3].key, ValueSubkey(0), False)
+                assert vd is not None and vd.data == TEST_MESSAGE_2
+            finally:
+                for rec in recs:
+                    await rc.close_dht_record(rec.key)
+                    await rc.delete_dht_record(rec.key)
+
+
+# extend() with records already in the transaction is a no-op.
+@pytest.mark.asyncio
+async def test_transact_dht_records_extend_idempotent(api_connection: VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            rec = await rc.create_dht_record(kind, DHTSchema.dflt(1))
+            try:
+                tx = await dht_retry(
+                    api_connection,
+                    lambda: api_connection.transact_dht_records([rec.key], None),
+                    label="begin",
+                )
+                async with tx:
+                    # extend with a record already in the transaction should no-op
+                    await tx.extend([rec.key])
+                    assert await tx.set(rec.key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    await tx.commit()
+
+                vd = await rc.get_dht_value(rec.key, ValueSubkey(0), False)
+                assert vd is not None and vd.data == TEST_MESSAGE_1
+            finally:
+                await rc.close_dht_record(rec.key)
+                await rc.delete_dht_record(rec.key)
+
+
+# extend() then rollback — neither the original nor the extended writes commit.
+@pytest.mark.asyncio
+async def test_transact_dht_records_extend_rollback(api_connection: VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            rec_a = await rc.create_dht_record(kind, DHTSchema.dflt(1))
+            rec_b = await rc.create_dht_record(kind, DHTSchema.dflt(1))
+            try:
+                tx = await dht_retry(
+                    api_connection,
+                    lambda: api_connection.transact_dht_records([rec_a.key], None),
+                    label="begin",
+                )
+                async with tx:
+                    assert await tx.set(rec_a.key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    await dht_retry(api_connection, lambda: tx.extend([rec_b.key]), label="extend")
+                    assert await tx.set(rec_b.key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    await tx.rollback()
+
+                vd_a = await rc.get_dht_value(rec_a.key, ValueSubkey(0), True)
+                vd_b = await rc.get_dht_value(rec_b.key, ValueSubkey(0), True)
+                assert vd_a is None
+                assert vd_b is None
+            finally:
+                for rec in (rec_a, rec_b):
+                    await rc.close_dht_record(rec.key)
+                    await rc.delete_dht_record(rec.key)
+
+
+# Idle past server-side TX timeout between extend and commit so the extended
+# record's keepalive train has to survive merge + idle.
+@pytest.mark.skipif(os.getenv("KEEPALIVE") != "1", reason="keepalive test is slow; opt-in via KEEPALIVE=1")
+@pytest.mark.asyncio
+async def test_transact_dht_records_extend_keepalive_holds(api_connection: VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            rec_a = await rc.create_dht_record(kind, DHTSchema.dflt(1))
+            rec_b = await rc.create_dht_record(kind, DHTSchema.dflt(1))
+            try:
+                tx = await dht_retry(
+                    api_connection,
+                    lambda: api_connection.transact_dht_records([rec_a.key], None),
+                    label="begin",
+                )
+                async with tx:
+                    assert await tx.set(rec_a.key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    await dht_retry(api_connection, lambda: tx.extend([rec_b.key]), label="extend")
+                    assert await tx.set(rec_b.key, ValueSubkey(0), TEST_MESSAGE_2) is None
+
+                    print(f"idling {KEEPALIVE_IDLE_SECONDS}s after extend")
+                    idle_start = time.time()
+                    await asyncio.sleep(KEEPALIVE_IDLE_SECONDS)
+                    print(f"idle done: {time.time() - idle_start:.1f}s")
+
+                    await tx.commit()
+
+                vd_a = await rc.get_dht_value(rec_a.key, ValueSubkey(0), False)
+                vd_b = await rc.get_dht_value(rec_b.key, ValueSubkey(0), False)
+                assert vd_a is not None and vd_a.data == TEST_MESSAGE_1
+                assert vd_b is not None and vd_b.data == TEST_MESSAGE_2
+            finally:
+                for rec in (rec_a, rec_b):
+                    await rc.close_dht_record(rec.key)
+                    await rc.delete_dht_record(rec.key)
 
 
 
@@ -305,6 +478,74 @@ async def test_transact_dht_records_set_commit_delete_get_rollback(api_connectio
             await rc.delete_dht_record(rec.key)
 
 
+# Verify per-record-per-transaction keepalives keep every record of each
+# transaction alive past the server-side TX timeout, including records we
+# never wrote to.
+#
+# Three transactions (1, 2, 3 records) are opened; subkey 0 of the FIRST
+# record of each is written; then we idle for KEEPALIVE_IDLE_SECONDS before
+# committing all three. If keepalives are working, all commits succeed and
+# the written subkeys are readable. If a record's keepalive lapses, that
+# transaction's commit will raise VeilidAPIError (typically TransactionNotFound).
+@pytest.mark.skipif(os.getenv("KEEPALIVE") != "1", reason="keepalive test is slow; opt-in via KEEPALIVE=1")
+@pytest.mark.asyncio
+async def test_transact_dht_records_keepalive_holds_idle_records(api_connection: VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            print(f"kind: {kind}")
+
+            # Create 6 records: 1 for tx_a, 2 for tx_b, 3 for tx_c.
+            recs_a = [await rc.create_dht_record(kind, DHTSchema.dflt(1))]
+            recs_b = [await rc.create_dht_record(kind, DHTSchema.dflt(1)) for _ in range(2)]
+            recs_c = [await rc.create_dht_record(kind, DHTSchema.dflt(1)) for _ in range(3)]
+
+            try:
+                tx_a = await dht_retry(
+                    api_connection,
+                    lambda: api_connection.transact_dht_records([r.key for r in recs_a], None),
+                    label="begin tx_a",
+                )
+                tx_b = await dht_retry(
+                    api_connection,
+                    lambda: api_connection.transact_dht_records([r.key for r in recs_b], None),
+                    label="begin tx_b",
+                )
+                tx_c = await dht_retry(
+                    api_connection,
+                    lambda: api_connection.transact_dht_records([r.key for r in recs_c], None),
+                    label="begin tx_c",
+                )
+
+                async with tx_a, tx_b, tx_c:
+                    # Write subkey 0 of each transaction's first record only.
+                    assert await tx_a.set(recs_a[0].key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    assert await tx_b.set(recs_b[0].key, ValueSubkey(0), TEST_MESSAGE_1) is None
+                    assert await tx_c.set(recs_c[0].key, ValueSubkey(0), TEST_MESSAGE_1) is None
+
+                    # Idle past server-side TX timeout to force keepalives to carry all
+                    # records (including the untouched ones in tx_b and tx_c).
+                    print(f"idling {KEEPALIVE_IDLE_SECONDS}s to let keepalives run")
+                    idle_start = time.time()
+                    await asyncio.sleep(KEEPALIVE_IDLE_SECONDS)
+                    print(f"idle done: {time.time() - idle_start:.1f}s")
+
+                    # All three commits must succeed; a missed keepalive on any
+                    # record of a transaction surfaces as a VeilidAPIError here.
+                    await tx_a.commit()
+                    await tx_b.commit()
+                    await tx_c.commit()
+
+                # Confirm the written subkeys round-trip from local cache.
+                for rec in [recs_a[0], recs_b[0], recs_c[0]]:
+                    vd = await rc.get_dht_value(rec.key, ValueSubkey(0), False)
+                    assert vd is not None and vd.data == TEST_MESSAGE_1
+            finally:
+                for rec in recs_a + recs_b + recs_c:
+                    await rc.close_dht_record(rec.key)
+                    await rc.delete_dht_record(rec.key)
+
+
 @pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
 @pytest.mark.asyncio
 async def test_dht_transaction_integration_writer_reader_fail_begin():
@@ -480,6 +721,305 @@ async def test_dht_transaction_integration_writer_reader_fail_commit():
                 await rc0.delete_dht_record(rec0.key)
                 await rc1.close_dht_record(rec1.key)
                 await rc1.delete_dht_record(rec1.key)
+
+
+@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.asyncio
+async def test_dht_transaction_watch_values():
+    # A transactional commit on a watched record must notify a remote watcher.
+    #
+    # Mirrors test_watch_dht_values, and the veilidchat topology: the record
+    # OWNER (server 0) writes its own record via DHT transactions (begin/set/
+    # commit), and a REMOTE read-only watcher (server 1) watches it. A
+    # transactional ValueChanged carries the changed subkey range but NO inline
+    # ValueData for a single subkey (unlike non-transactional sets), so the
+    # watcher's core must fall back to a change inspection to fetch and report.
+    # If the watcher never sees the VALUE_CHANGE, the live-watch-over-transaction
+    # path is broken (the "messages don't flow until chat reopen" symptom).
+
+    value_change_queue: asyncio.Queue[veilid.VeilidUpdate] = asyncio.Queue()
+
+    async def value_change_update_callback(update: veilid.VeilidUpdate):
+        if update.kind == veilid.VeilidUpdateKind.VALUE_CHANGE:
+            await value_change_queue.put(update)
+
+    async def null_update_callback(update: veilid.VeilidUpdate):
+        pass
+
+    # Server 0 owns/writes; server 1 is the remote watcher.
+    try:
+        api0 = await veilid.api_connector(null_update_callback, 0)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 0.")
+        return
+
+    try:
+        api1 = await veilid.api_connector(value_change_update_callback, 1)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 1.")
+        return
+
+    async with api0, api1:
+        # purge local and remote record stores to ensure we start fresh
+        await api0.debug("record purge local")
+        await api0.debug("record purge remote")
+        await api1.debug("record purge local")
+        await api1.debug("record purge remote")
+
+        # Clear the change queue if record purge cancels old watches
+        while True:
+            try:
+                await asyncio.wait_for(value_change_queue.get(), timeout=3)
+            except asyncio.TimeoutError:
+                break
+
+        rc0 = await api0.new_routing_context()
+        rc1 = await api1.new_routing_context()
+        async with rc0, rc1:
+            for kind in await api0.valid_crypto_kinds():
+
+                # Server 0 (owner): create a record and write a baseline value
+                # transactionally so subkey 3 has seq 0.
+                rec0 = await rc0.create_dht_record(kind, veilid.DHTSchema.dflt(10))
+                tx0 = await dht_retry(
+                    api0,
+                    lambda: api0.transact_dht_records([rec0.key], None),
+                    label="begin baseline",
+                )
+                async with tx0:
+                    assert await tx0.set(rec0.key, ValueSubkey(3), b"BLAH") is None
+                    await tx0.commit()
+                await sync(rc0, [rec0])
+
+                # Server 1 (watcher): open read-only, fetch the baseline so the
+                # local seq is 0, then watch all subkeys.
+                rec1 = await rc1.open_dht_record(rec0.key)
+                vd = await rc1.get_dht_value(rec1.key, ValueSubkey(3), True)
+                assert vd is not None and vd.data == b"BLAH"
+                active = await rc1.watch_dht_values(rec1.key)
+                assert active
+
+                # Server 0 (owner): overwrite subkey 3 transactionally (same-node
+                # overwrite -> seq 1, returns None) and commit.
+                tx = await dht_retry(
+                    api0,
+                    lambda: api0.transact_dht_records([rec0.key], None),
+                    label="begin",
+                )
+                async with tx:
+                    assert await tx.set(rec0.key, ValueSubkey(3), b"BLAH BLAH") is None
+                    await tx.commit()
+
+                # Server 1: the transactional change must still produce a
+                # ValueChange. The wire notification has no inline value for a
+                # single subkey, so core falls back to a change inspection that
+                # runs on the watch task tick — hence the generous timeout.
+                upd = await asyncio.wait_for(value_change_queue.get(), timeout=30)
+                print(f"transactional value change: {VeilidJSONEncoder.dumps(upd)}")
+
+                assert isinstance(upd.detail, veilid.VeilidValueChange)
+                assert upd.detail.key == rec1.key
+                assert upd.detail.subkeys == [(3, 3)]
+                # The change-inspection fallback re-fetches the value, so the
+                # API-level update should still carry the new data.
+                assert upd.detail.value is not None
+                assert upd.detail.value.data == b"BLAH BLAH"
+
+                # Clean up
+                await rc1.close_dht_record(rec1.key)
+                await rc1.delete_dht_record(rec1.key)
+                await rc0.close_dht_record(rec0.key)
+                await rc0.delete_dht_record(rec0.key)
+
+
+@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.asyncio
+async def test_dht_transaction_watch_values_transactional():
+    # Same setup as test_dht_transaction_watch_values, but the watcher opts in
+    # to transactional=True. Core MUST then suppress the inline-value
+    # local-store auto-update: the delivered VeilidValueChange has no inline
+    # value, the watcher's local store stays behind the network for the watched
+    # subkey, and a subsequent inspect must report local < network so the
+    # watcher's transactional refresh (DHTLog / DHTShortArray) can detect the
+    # gap via subkeyNeedsSync and fetch under its own transaction.
+
+    value_change_queue: asyncio.Queue[veilid.VeilidUpdate] = asyncio.Queue()
+
+    async def value_change_update_callback(update: veilid.VeilidUpdate):
+        if update.kind == veilid.VeilidUpdateKind.VALUE_CHANGE:
+            await value_change_queue.put(update)
+
+    async def null_update_callback(update: veilid.VeilidUpdate):
+        pass
+
+    try:
+        api0 = await veilid.api_connector(null_update_callback, 0)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 0.")
+        return
+    try:
+        api1 = await veilid.api_connector(value_change_update_callback, 1)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 1.")
+        return
+
+    async with api0, api1:
+        await api0.debug("record purge local")
+        await api0.debug("record purge remote")
+        await api1.debug("record purge local")
+        await api1.debug("record purge remote")
+
+        while True:
+            try:
+                await asyncio.wait_for(value_change_queue.get(), timeout=3)
+            except asyncio.TimeoutError:
+                break
+
+        rc0 = await api0.new_routing_context()
+        rc1 = await api1.new_routing_context()
+        async with rc0, rc1:
+            for kind in await api0.valid_crypto_kinds():
+                # Owner: baseline subkey 3 = v1 (seq 0) transactionally
+                rec0 = await rc0.create_dht_record(kind, veilid.DHTSchema.dflt(10))
+                tx0 = await dht_retry(
+                    api0,
+                    lambda: api0.transact_dht_records([rec0.key], None),
+                    label="begin baseline",
+                )
+                async with tx0:
+                    assert await tx0.set(rec0.key, ValueSubkey(3), b"BLAH") is None
+                    await tx0.commit()
+                await sync(rc0, [rec0])
+
+                # Watcher: open read-only, fetch subkey 3 -> local seq 0
+                rec1 = await rc1.open_dht_record(rec0.key)
+                vd = await rc1.get_dht_value(rec1.key, ValueSubkey(3), True)
+                assert vd is not None and vd.data == b"BLAH"
+
+                # Watcher: TRANSACTIONAL watch on all subkeys
+                active = await rc1.watch_dht_values(rec1.key, transactional=True)
+                assert active
+
+                # Owner: overwrite subkey 3 = v2 transactionally (seq 1)
+                tx = await dht_retry(
+                    api0,
+                    lambda: api0.transact_dht_records([rec0.key], None),
+                    label="begin",
+                )
+                async with tx:
+                    assert await tx.set(rec0.key, ValueSubkey(3), b"BLAH BLAH") is None
+                    await tx.commit()
+
+                # Watcher: receives ValueChange but with NO inline value
+                upd = await asyncio.wait_for(value_change_queue.get(), timeout=30)
+                print(f"transactional value change: {VeilidJSONEncoder.dumps(upd)}")
+                assert isinstance(upd.detail, veilid.VeilidValueChange)
+                assert upd.detail.key == rec1.key
+                assert upd.detail.subkeys == [(3, 3)]
+                # Transactional: inline value is dropped, only subkey range is reported.
+                assert upd.detail.value is None, (
+                    "transactional watch must suppress inline value; "
+                    f"got value={upd.detail.value}"
+                )
+
+                # Watcher: local store stays at seq 0 (no auto-update on the
+                # ValueChanged), so an inspect must show local < network for the
+                # watcher's transactional refresh to detect the change.
+                report = await rc1.inspect_dht_record(
+                    rec1.key,
+                    [(ValueSubkey(3), ValueSubkey(3))],
+                    scope=DHTReportScope.SYNC_GET,
+                )
+                print(f"post-watch inspect: {report}")
+                assert report.network_seqs[0] is not None
+                assert report.local_seqs[0] != report.network_seqs[0], (
+                    "core auto-updated local on transactional watch: "
+                    f"local={report.local_seqs[0]} network={report.network_seqs[0]}"
+                )
+
+                await rc1.close_dht_record(rec1.key)
+                await rc1.delete_dht_record(rec1.key)
+                await rc0.close_dht_record(rec0.key)
+                await rc0.delete_dht_record(rec0.key)
+
+
+@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.asyncio
+async def test_dht_transaction_inspect_local_vs_network_seqs():
+    # A reader whose local cache is behind the network must see that gap in a
+    # transaction inspect: report.local_seqs (stale) must differ from
+    # report.network_seqs (the begin snapshot). If the begin snapshot collapses
+    # local_seqs to EQUAL network_seqs, then subkeyNeedsSync (network > local) is
+    # structurally always false, so a DHTLog watcher can never detect that the
+    # head advanced and received messages never reconcile live (the veilidchat
+    # "messages don't arrive until chat reopen" bug). Core-level reproduction.
+
+    async def null_update_callback(update: veilid.VeilidUpdate):
+        pass
+
+    try:
+        api0 = await veilid.api_connector(null_update_callback, 0)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 0.")
+        return
+    try:
+        api1 = await veilid.api_connector(null_update_callback, 1)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 1.")
+        return
+
+    async with api0, api1:
+        await api0.debug("record purge local")
+        await api0.debug("record purge remote")
+        await api1.debug("record purge local")
+        await api1.debug("record purge remote")
+
+        rc0 = await api0.new_routing_context()
+        rc1 = await api1.new_routing_context()
+        async with rc0, rc1:
+            for kind in await api0.valid_crypto_kinds():
+                # Owner writes subkey 0 = v1 (seq 0)
+                rec0 = await rc0.create_dht_record(kind, DHTSchema.dflt(2))
+                assert await rc0.set_dht_value(rec0.key, ValueSubkey(0), b"v1") is None
+                await sync(rc0, [rec0])
+
+                # Reader opens read-only and fetches subkey 0 -> local seq 0
+                rec1 = await rc1.open_dht_record(rec0.key)
+                vd = await rc1.get_dht_value(rec1.key, ValueSubkey(0), True)
+                assert vd is not None and vd.data == b"v1"
+
+                # Owner advances subkey 0 = v2 (network seq 1); reader local stays 0
+                assert await rc0.set_dht_value(rec0.key, ValueSubkey(0), b"v2") is None
+                await sync(rc0, [rec0])
+
+                # Reader begins a transaction and inspects subkey 0
+                tx = await dht_retry(
+                    api1,
+                    lambda: api1.transact_dht_records([rec1.key], None),
+                    label="begin",
+                )
+                async with tx:
+                    report = await tx.inspect(
+                        rec1.key,
+                        [(ValueSubkey(0), ValueSubkey(0))],
+                        scope=DHTReportScope.SYNC_GET,
+                    )
+                    print(f"tx inspect report: {report}")
+                    await tx.rollback()
+
+                # local cache (seq 0) is behind the network (seq 1): the report
+                # must preserve that gap so subkeyNeedsSync can fire.
+                assert report.network_seqs[0] is not None
+                assert report.local_seqs[0] != report.network_seqs[0], (
+                    "transaction inspect collapsed local_seqs to network_seqs "
+                    f"(local={report.local_seqs[0]} network={report.network_seqs[0]}): "
+                    "a watcher can never detect a remote change"
+                )
+
+                await rc1.close_dht_record(rec1.key)
+                await rc1.delete_dht_record(rec1.key)
+                await rc0.close_dht_record(rec0.key)
+                await rc0.delete_dht_record(rec0.key)
 
 
 @pytest.mark.skipif(os.getenv("STRESS") != "1", reason="stress test takes a long time")
@@ -679,16 +1219,12 @@ async def test_dht_transaction_write_read_full_records_serial():
                                 subkey_start = time.time()
                                 print(f'subkey {subkey} start time offset: {subkey_start-start}')
 
-                                cnt = 0
-                                while True:
-                                    try:
-                                        res = await transaction.set(key, subkey, subkey_data)
-                                        break
-                                    except veilid.VeilidAPIErrorTryAgain:
-                                        cnt += 1
-                                        print(f'  retry #{cnt} setting {key} #{subkey}')
-                                        continue
-                                
+                                res = await dht_retry(
+                                    api0,
+                                    lambda: transaction.set(key, subkey, subkey_data),
+                                    label=f"set {key} #{subkey}",
+                                )
+
                                 subkey_finish = time.time()
                                 print(f'subkey {subkey} finish time offset: {subkey_finish-start}, duration: {subkey_finish-subkey_start}')
                                 return res
@@ -739,15 +1275,11 @@ async def test_dht_transaction_write_read_full_records_serial():
                                     subkey_start = time.time()
                                     print(f'subkey {subkey} start time offset: {subkey_start-start}')
 
-                                    cnt = 0
-                                    while True:
-                                        try:
-                                            res = await transaction.get(key, subkey)
-                                            break
-                                        except veilid.VeilidAPIErrorTryAgain:
-                                            cnt += 1
-                                            print(f'  retry #{cnt} setting {key} #{subkey}')
-                                            continue
+                                    res = await dht_retry(
+                                        api0,
+                                        lambda: transaction.get(key, subkey),
+                                        label=f"get {key} #{subkey}",
+                                    )
 
                                     subkey_finish = time.time()
                                     print(f'subkey {subkey} finish time offset: {subkey_finish-start}, duration: {subkey_finish-subkey_start}')
@@ -968,17 +1500,11 @@ async def test_dht_transaction_write_read_full_parallel():
                                 subkey_data = subkey_data_list[n]
 
                                 async def setter(key: RecordKey, subkey: ValueSubkey, data: bytes):
-                                    # start = time.time()
-                                    cnt = 0
-                                    while True:
-                                        try:
-                                            await transaction.set(key, subkey, data)
-                                            break
-                                        except veilid.VeilidAPIErrorTryAgain:
-                                            cnt += 1
-                                            print(f'  retry #{cnt} setting {key} #{subkey}')
-                                            continue
-                                    # print(f'set {key} #{subkey}: {time.time()-start}')
+                                    await dht_retry(
+                                        api0,
+                                        lambda: transaction.set(key, subkey, data),
+                                        label=f"set {key} #{subkey}",
+                                    )
 
                                 init_set_futures.add(setter(key, subkey, subkey_data))
 
@@ -1102,15 +1628,11 @@ async def test_dht_fill_dht_transact():
                             subkey_data = subkey_data_list[n]
 
                             async def setter(key: RecordKey, subkey: ValueSubkey, data: bytes):
-                                start = time.time()
-                                cnt = 0
-                                while True:
-                                    try:
-                                        await transaction.set(key, subkey, data)
-                                        break
-                                    except veilid.VeilidAPIErrorTryAgain:
-                                        cnt += 1
-                                        continue
+                                await dht_retry(
+                                    api0,
+                                    lambda: transaction.set(key, subkey, data),
+                                    label=f"set {key} #{subkey}",
+                                )
 
                             init_set_futures.add(setter(key, ValueSubkey(i), subkey_data))
 

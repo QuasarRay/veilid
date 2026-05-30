@@ -32,6 +32,10 @@ abstract class VeilidDHTTransaction {
 
   Future<void> commit();
   Future<void> rollback();
+  Future<void> extend(
+    List<RecordKey> recordKeys, {
+    TransactDHTRecordsOptions? options,
+  });
   Future<ValueData?> get(RecordKey key, int subkey);
   Future<ValueData?> set(
     RecordKey key,

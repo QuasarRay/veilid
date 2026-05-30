@@ -94,3 +94,58 @@ pub(super) enum RoutingDomainChange {
         confirmed: bool,
     },
 }
+
+pub(super) struct CommitSnapshot {
+    pub dial_info_details: Vec<DialInfoDetail>,
+    pub relays: Vec<RoutingDomainRelay>,
+    pub outbound_protocols: ProtocolTypeSet,
+    pub inbound_protocols: ProtocolTypeSet,
+    pub address_types: AddressTypeSet,
+    pub capabilities: BTreeSet<VeilidCapability>,
+    pub confirmed: bool,
+}
+
+pub(super) struct CommitChanged {
+    pub dial_info_changed: bool,
+    pub relays_changed: bool,
+    pub outbound_protocols_changed: bool,
+    pub inbound_protocols_changed: bool,
+    pub address_types_changed: bool,
+    pub capabilities_changed: bool,
+    pub confirmation_changed: bool,
+    pub peer_info_changed: bool,
+}
+
+impl CommitSnapshot {
+    pub(super) fn diff(&self, new: &CommitSnapshot) -> CommitChanged {
+        let dial_info_changed = self.dial_info_details != new.dial_info_details;
+        let relays_changed = self.relays.len() != new.relays.len()
+            || self
+                .relays
+                .iter()
+                .zip(new.relays.iter())
+                .any(|x| !x.0.relay_node.same_entry(&x.1.relay_node));
+        let outbound_protocols_changed = self.outbound_protocols != new.outbound_protocols;
+        let inbound_protocols_changed = self.inbound_protocols != new.inbound_protocols;
+        let address_types_changed = self.address_types != new.address_types;
+        let capabilities_changed = self.capabilities != new.capabilities;
+        let confirmation_changed = self.confirmed != new.confirmed;
+        let peer_info_changed = dial_info_changed
+            || relays_changed
+            || outbound_protocols_changed
+            || inbound_protocols_changed
+            || address_types_changed
+            || capabilities_changed
+            || confirmation_changed;
+        CommitChanged {
+            dial_info_changed,
+            relays_changed,
+            outbound_protocols_changed,
+            inbound_protocols_changed,
+            address_types_changed,
+            capabilities_changed,
+            confirmation_changed,
+            peer_info_changed,
+        }
+    }
+}

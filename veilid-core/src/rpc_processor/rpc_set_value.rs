@@ -59,7 +59,7 @@ impl RPCProcessor {
         };
 
         let debug_string = format!(
-            "OUT ==> SetValueQ({} #{}{} {}) => {}",
+            "OUT ==> SetValueQ({} #{}{} {}) => {:#}",
             opaque_record_key, subkey, descriptor_mode, value, dest
         );
 
@@ -97,10 +97,10 @@ impl RPCProcessor {
             veilid_log!(self debug target: "dht", "{}", debug_string);
         }
 
-        let waitable_reply = network_result_try!(
-            self.question(dest.clone(), question, None, Some(question_context))
-                .await?
-        );
+        let waitable_reply = network_result_try!(self
+            .question(dest.clone(), question, None, Some(question_context))
+            .await?
+            .into_network_result());
 
         // Wait for reply
         let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {

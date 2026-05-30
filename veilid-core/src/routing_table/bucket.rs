@@ -117,6 +117,10 @@ impl Bucket {
         self.entries.iter()
     }
 
+    pub(super) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     pub(super) fn kick(
         &mut self,
         bucket_depth: usize,

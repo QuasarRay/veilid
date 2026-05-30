@@ -28,7 +28,9 @@ impl From<&CompileRouteParams> for CompiledRouteCacheKey {
 #[derive(Debug)]
 pub struct CompiledRoute {
     /// The safety route attached to the private route
-    pub safety_route: Arc<SafetyRoute>,
+    pub compiled_safety_route: Arc<SafetyRoute>,
+    /// Whether or not the private route was allocated (false for stubs, imported remote routes, or non-imported remote routes)
+    pub pr_allocated: bool,
     /// The secret used to encrypt the message payload
     pub secret: SecretKey,
     /// The node ref to the first hop in the compiled route
@@ -36,6 +38,16 @@ pub struct CompiledRoute {
     pub first_hop: FilteredNodeRef,
     /// Whether this compiled route was built with optimized hop encoding (NodeId only vs full PeerInfo)
     pub optimized: bool,
+}
+
+/// The state of a cache lookup for a compiled route
+pub enum RouteCompileCacheDisposition {
+    /// The route needs to be compiled and re-cached; carries the locked cache entry
+    Compile(CompiledRouteCacheEntry),
+    /// The route needs to be optimized and re-cached; carries the locked cache entry
+    Optimize(CompiledRouteCacheEntry),
+    /// The route exists in the cache and can be used as-is
+    Cached(Arc<CompiledRoute>),
 }
 
 /// Internal parameters for building route hops, shared between optimized and unoptimized compilation
@@ -50,16 +62,19 @@ struct RouteCompileContext {
     hop_node_refs: Vec<NodeRef>,
     /// Whether this compiled route can be built with optimized hop encoding (NodeId only vs full PeerInfo)
     optimize: bool,
+    /// Whether or not the private route was allocated
+    pr_allocated: bool,
 }
 
 impl RouteSpecStore {
     /// Extracts the compile context from route spec details for a resolved safety route.
     fn get_route_compile_context(
         &self,
-        safety_route_id: &RouteId,
+        safety_route_id: &AllocatedRouteSetId,
         sr_pubkey: PublicKey,
         safety_spec: &SafetySpec,
         optimize: bool,
+        pr_allocated: bool,
     ) -> VeilidAPIResult<RouteCompileContext> {
         let cache = self.cache.read();
 
@@ -87,6 +102,7 @@ impl RouteSpecStore {
             secret,
             hop_node_refs,
             optimize,
+            pr_allocated,
         })
     }
 
@@ -246,13 +262,14 @@ impl RouteSpecStore {
         let hops = SafetyRouteHops::Data(route_hop_data);
 
         Ok(Arc::new(CompiledRoute {
-            safety_route: Arc::new(SafetyRoute {
+            compiled_safety_route: Arc::new(SafetyRoute {
                 public_key: ctx.sr_pubkey,
                 hops,
             }),
             secret: ctx.secret,
             first_hop: ctx.first_hop,
             optimized: ctx.optimize,
+            pr_allocated: ctx.pr_allocated,
         }))
     }
 
@@ -283,54 +300,19 @@ impl RouteSpecStore {
     ) -> VeilidAPIResult<Arc<CompiledRoute>> {
         #[cfg(feature = "verbose-tracing")]
         let profile_start_ts = Timestamp::now();
-        let compiled_route_cache_key: CompiledRouteCacheKey = params.into();
 
-        let mut optimize: bool;
-        let opt_compile_lock = {
-            let cache = self.cache.read();
-            let disposition = cache.lookup_compiled_route_cache(&compiled_route_cache_key);
+        // Obtain the compile route lock cache lock and determine if we need to compile or optimize
+        let (optimize, entry) = {
+            let disposition = self.lookup_compiled_route_cache(params).await;
             match disposition {
-                RouteCompileCacheDisposition::Compile => optimize = false,
-                RouteCompileCacheDisposition::Optimize => optimize = true,
+                RouteCompileCacheDisposition::Compile(entry) => (false, entry),
+                RouteCompileCacheDisposition::Optimize(entry) => (true, entry),
                 RouteCompileCacheDisposition::Cached(compiled_route) => {
                     #[cfg(feature = "verbose-tracing")]
                     veilid_log!(self trace "compile_route profile (fast path cached): {:#}", Timestamp::now().duration_since(profile_start_ts));
                     return Ok(compiled_route);
                 }
             }
-            self.compile_lock_table
-                .try_lock_tag(compiled_route_cache_key.clone())
-        };
-
-        // Get the compile lock to ensure we only do this for a particular private route one at at time
-        let compile_lock = if let Some(compile_lock) = opt_compile_lock {
-            // Fast path, we have a compile lock
-            compile_lock
-        } else {
-            // Slow path, we have to get a compile lock and account for race conditions on route cache
-            let compile_lock = self
-                .compile_lock_table
-                .lock_tag(compiled_route_cache_key.clone())
-                .measure_debug(
-                    TimestampDuration::new_ms(1),
-                    veilid_log_dbg!(self, "compile_lock"),
-                )
-                .await;
-
-            // Check again due to race condition on route cache
-            let cache = self.cache.read();
-            let disposition = cache.lookup_compiled_route_cache(&compiled_route_cache_key);
-            match disposition {
-                RouteCompileCacheDisposition::Compile => optimize = false,
-                RouteCompileCacheDisposition::Optimize => optimize = true,
-                RouteCompileCacheDisposition::Cached(compiled_route) => {
-                    #[cfg(feature = "verbose-tracing")]
-                    veilid_log!(self debug "compile_route profile (slow path cached): {:#}", Timestamp::now().duration_since(profile_start_ts));
-                    return Ok(compiled_route);
-                }
-            }
-
-            compile_lock
         };
 
         let routing_table = self.routing_table();
@@ -338,6 +320,11 @@ impl RouteSpecStore {
         // Get useful private route properties
         let crypto_kind = params.private_route.crypto_kind();
         let pr_pubkey = params.private_route.public_key.clone();
+        let opt_private_route_id = {
+            // See if this is an allocated private route, if so, get its id
+            let cache = self.cache.read();
+            cache.get_allocated_route_id_by_key(&pr_pubkey)
+        };
 
         // See if we are using a safety route, if not, short circuit this operation
         let safety_spec = match &params.safety_selection {
@@ -376,20 +363,18 @@ impl RouteSpecStore {
 
                 // Return the compiled safety route
                 let stub_compiled_route = Arc::new(CompiledRoute {
-                    safety_route: Arc::new(SafetyRoute::new_stub(
+                    compiled_safety_route: Arc::new(SafetyRoute::new_stub(
                         routing_table.public_key(crypto_kind),
                         Arc::new(private_route),
                     )),
                     secret: routing_table.secret_key(crypto_kind),
                     first_hop,
                     optimized: true, // Stubs are always considered optimized
+                    pr_allocated: opt_private_route_id.is_some(),
                 });
 
                 // Cache the compiled route stub
-                self.cache.read().add_to_compiled_route_cache(
-                    compiled_route_cache_key,
-                    stub_compiled_route.clone(),
-                )?;
+                entry.insert(stub_compiled_route.clone());
 
                 #[cfg(feature = "verbose-tracing")]
                 veilid_log!(self debug "compile_route profile (stub): {:#}", Timestamp::now().duration_since(profile_start_ts));
@@ -398,12 +383,17 @@ impl RouteSpecStore {
         };
 
         // If the safety route requested is also the private route, this is a loopback test, just accept it
+        // This means that is a reply private route was specified,
         let opt_safety_route_id_and_public_key = {
             let cache = self.cache.read();
             let opt_private_route_id = cache.get_allocated_route_id_by_key(&pr_pubkey);
 
-            if safety_spec.preferred_route.is_some()
-                && safety_spec.preferred_route == opt_private_route_id
+            let preferred_route_as_set_id = safety_spec
+                .preferred_route
+                .as_ref()
+                .map(|r| AllocatedRouteSetId::from_route_id(r.clone()));
+            if preferred_route_as_set_id.is_some()
+                && preferred_route_as_set_id == opt_private_route_id
             {
                 // Private route is also safety route during loopback test
                 Some((opt_private_route_id.unwrap(), pr_pubkey.clone()))
@@ -436,7 +426,10 @@ impl RouteSpecStore {
                 };
                 let select_params = RouteSelectParams {
                     crypto_kind,
-                    preferred_route: safety_spec.preferred_route.clone(),
+                    preferred_route: safety_spec
+                        .preferred_route
+                        .as_ref()
+                        .map(|r| AllocatedRouteSetId::from_route_id(r.clone())),
                     hop_count: safety_spec.hop_count,
                     stability: safety_spec.stability,
                     sequencing: safety_spec.sequencing,
@@ -453,8 +446,13 @@ impl RouteSpecStore {
             };
 
         // Get the compile context (shared state for both optimized and unoptimized paths)
-        let ctx =
-            self.get_route_compile_context(&safety_route_id, sr_pubkey, safety_spec, optimize)?;
+        let ctx = self.get_route_compile_context(
+            &safety_route_id,
+            sr_pubkey,
+            safety_spec,
+            optimize,
+            opt_private_route_id.is_some(),
+        )?;
 
         #[cfg(feature = "verbose-tracing")]
         let optimize = ctx.optimize;
@@ -465,17 +463,186 @@ impl RouteSpecStore {
         // Always cache the compiled route (both optimized and unoptimized)
         // Unoptimized routes are cached to pin the safety route selection,
         // and will be upgraded to optimized on cache hit once validated
-        self.cache
-            .read()
-            .add_to_compiled_route_cache(compiled_route_cache_key, compiled_route.clone())?;
+        entry.insert(compiled_route.clone());
 
-        // Release compile lock (doing this explicitly here for clarity)
-        drop(compile_lock);
+        // Release the cache entry lock (doing this explicitly here for clarity)
+        drop(entry);
 
         // Return compiled route
         #[cfg(feature = "verbose-tracing")]
         veilid_log!(self debug "compile_route profile (uncached{}): {:#}", if optimize { "" } else { " unoptimized" }, Timestamp::now().duration_since(profile_start_ts));
 
         Ok(compiled_route)
+    }
+
+    /// Looks up an existing compiled route from the safety and private route components
+    /// Single location for all cache validation logic.
+    /// Returns either a compiled route, or a lock to the cache entry and whether or not to compile or optimize
+    async fn lookup_compiled_route_cache(
+        &self,
+        params: &CompileRouteParams,
+    ) -> RouteCompileCacheDisposition {
+        // Get the compile route cache key for the parameters
+        let key: CompiledRouteCacheKey = params.into();
+
+        // Lock this key's cache slot (does not block other keys)
+        let entry = self.compiled_route_cache.lookup(key.clone()).await;
+
+        // See if we have anything in the cache for this key
+        let Some(compiled_route) = entry.get() else {
+            // Nothing in the cache, we have to compile the route, return the locked entry
+            return RouteCompileCacheDisposition::Compile(entry);
+        };
+
+        // -------------------------------------------------------
+        // Cache validation
+        //
+        // We do all of the cache validation here to avoid having invalidation spread all over the codebase.
+        //
+        // 1. Safety route in cache key must still exist
+        // 2. If the private route being compiled with is allocated it must still exist
+        // 3. Check the safety route and private route for validity and optimizability:
+        //    a. If the route has a bad stats disposition, it should be invalidated so we have a chance at a different route selection
+        //    b. If the route is optimizable, and the cache is optimized it is valid
+        //    c. If the route is not optimizable, and the cache is unoptimized it is valid
+        //    d. If there is no optimizability match, then we either need to compile, or optimize
+        //
+        // While allocated routes themselves are only valid while our node info is equivalent to
+        // the node info at time of allocation, we do not need to check for this here because
+        // if a route is no longer valid, it will be removed from the route spec store cache
+        // by the time we get here.
+        //
+        // The reply private route, if specified is only used to choose a symmetric safety route
+        // and is not part of the compile route itself. We do not need to check it explicitly here
+        // because checking 'compiled_route.safety_route' already does this for us.
+
+        let cache = self.cache.read();
+
+        // Sequencing this compiled route was built for; an allocated route is invalid here when
+        // it is dead for every ordering it provides that matches this sequencing (per-ordering
+        // death), rather than the aggregate disposition.
+        let sequencing = key.safety_selection.get_sequencing();
+
+        // Check #1: Safety route must still exist
+        let safety_route_key = &compiled_route.compiled_safety_route.public_key;
+        let Some(safety_route_id) = cache.get_allocated_route_id_by_key(safety_route_key) else {
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(self debug "Safety route no longer exists for key {}, invalidating cache entry {:?}", safety_route_key, key);
+
+            drop(cache);
+            entry.remove();
+            return RouteCompileCacheDisposition::Compile(entry);
+        };
+
+        let safety_route_is_optimizable = {
+            // Check #1: Safety route must still exist
+            let Some(arce) = cache.get_allocated_route_by_id(&safety_route_id) else {
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self error "Safety route no longer exists for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
+                drop(cache);
+                entry.remove();
+                return RouteCompileCacheDisposition::Compile(entry);
+            };
+
+            // Check #3a: If the route is dead for this sequencing, invalidate so we get a chance at a different route selection
+            if !arce.is_live_sequencing_match(sequencing) {
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self error "Safety route dead for sequencing {} for id {} with key={}, invalidating cache entry {:?}", sequencing, safety_route_id, safety_route_key, key);
+                drop(cache);
+                entry.remove();
+                return RouteCompileCacheDisposition::Compile(entry);
+            }
+            arce.is_route_optimizable()
+        };
+
+        // Check #2: Private route must still exist if it is an allocated route
+        // XXX: We don't optimize private routes today. Route optimization will go away as part of PR2.0, so for now, we let this be.
+        let private_route_key = &key.pr_pubkey;
+        if compiled_route.pr_allocated {
+            // Allocated private route
+
+            // Check #2: Private route must still exist if it is an allocated route
+            let Some(private_route_id) = cache.get_allocated_route_id_by_key(private_route_key)
+            else {
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self debug "Private route no longer exists for key {}, invalidating cache entry {:?}", private_route_key, key);
+                drop(cache);
+                entry.remove();
+                return RouteCompileCacheDisposition::Compile(entry);
+            };
+
+            // Check #2: Private route must still exist if it is an allocated route
+            let Some(arce) = cache.get_allocated_route_by_id(&private_route_id) else {
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self error "Private route no longer exists for id {} with key={}, invalidating cache entry {:?}", private_route_id, private_route_key, key);
+                drop(cache);
+                entry.remove();
+                return RouteCompileCacheDisposition::Compile(entry);
+            };
+
+            // Check #3a: If the route is dead for this sequencing, invalidate so we get a chance at a different route selection
+            if !arce.is_live_sequencing_match(sequencing) {
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self error "Private route dead for sequencing {} for id {} with key={}, invalidating cache entry {:?}", sequencing, private_route_id, private_route_key, key);
+                drop(cache);
+                entry.remove();
+                return RouteCompileCacheDisposition::Compile(entry);
+            }
+        } else {
+            // Non-allocated, but imported, remote private route
+            if let Some(private_route_id) = cache.get_remote_route_id_by_key(private_route_key) {
+                let cur_ts = Timestamp::now();
+
+                // Check #2: Private route must still exist if it is is imported
+                let Some(rrce) = cache.peek_remote_route(cur_ts, &private_route_id) else {
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self error "Private route no longer exists for id {} with key={}, invalidating cache entry {:?}", private_route_id, private_route_key, key);
+                    drop(cache);
+                    entry.remove();
+                    return RouteCompileCacheDisposition::Compile(entry);
+                };
+
+                // Check #3a: Remote route orderings aren't tracked locally, so fall back to the
+                // aggregate disposition here (conservative: only invalidate when all orderings dead).
+                let disposition = rrce.with_stats(|stats| stats.aggregate_disposition());
+                match disposition {
+                    RouteStatsDisposition::Valid => {}
+                    _ => {
+                        #[cfg(feature = "verbose-tracing")]
+                        veilid_log!(self error "Private route was {:?} for id {} with key={}, invalidating cache entry {:?}", disposition, private_route_id, private_route_key, key);
+                        drop(cache);
+                        entry.remove();
+                        return RouteCompileCacheDisposition::Compile(entry);
+                    }
+                }
+            }
+        }
+
+        drop(cache);
+
+        // Check a cached compiled route and determine if it can be used as-is or needs recompilation.
+        // If the cached route is unoptimized but the safety route and/or local private route has since been validated,
+        // removes the stale cache entry and signals recompilation.
+        if compiled_route.optimized == safety_route_is_optimizable {
+            // If the route has the same optimizability as the cache, then return the cached route
+            return RouteCompileCacheDisposition::Cached(compiled_route);
+        }
+
+        // Invalidate the cache entry so we can recompile or optimize
+        entry.remove();
+
+        // If what was in the cache was optimized, then we need to recompile unoptimized
+        // If what was in the cache was unoptimized, then we can optimize it now
+        if compiled_route.optimized {
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(self error "Compiled route needs recompilation for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
+
+            RouteCompileCacheDisposition::Compile(entry)
+        } else {
+            #[cfg(feature = "verbose-tracing")]
+            veilid_log!(self error "Compiled route needs optimization for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
+
+            RouteCompileCacheDisposition::Optimize(entry)
+        }
     }
 }

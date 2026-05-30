@@ -5621,7 +5621,7 @@ as int?,
 /// @nodoc
 mixin _$VeilidConfigRoutingTable implements DiagnosticableTreeMixin {
 
- List<PublicKey> get publicKeys; List<SecretKey> get secretKeys; List<String> get bootstrap; List<PublicKey> get bootstrapKeys; int get limitOverAttached; int get limitFullyAttached; int get limitAttachedStrong; int get limitAttachedGood; int get limitAttachedWeak;
+ List<PublicKey> get publicKeys; List<SecretKey> get secretKeys; List<String> get bootstrap; List<PublicKey> get bootstrapKeys;
 /// Create a copy of VeilidConfigRoutingTable
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -5635,21 +5635,21 @@ $VeilidConfigRoutingTableCopyWith<VeilidConfigRoutingTable> get copyWith => _$Ve
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigRoutingTable'))
-    ..add(DiagnosticsProperty('publicKeys', publicKeys))..add(DiagnosticsProperty('secretKeys', secretKeys))..add(DiagnosticsProperty('bootstrap', bootstrap))..add(DiagnosticsProperty('bootstrapKeys', bootstrapKeys))..add(DiagnosticsProperty('limitOverAttached', limitOverAttached))..add(DiagnosticsProperty('limitFullyAttached', limitFullyAttached))..add(DiagnosticsProperty('limitAttachedStrong', limitAttachedStrong))..add(DiagnosticsProperty('limitAttachedGood', limitAttachedGood))..add(DiagnosticsProperty('limitAttachedWeak', limitAttachedWeak));
+    ..add(DiagnosticsProperty('publicKeys', publicKeys))..add(DiagnosticsProperty('secretKeys', secretKeys))..add(DiagnosticsProperty('bootstrap', bootstrap))..add(DiagnosticsProperty('bootstrapKeys', bootstrapKeys));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigRoutingTable&&const DeepCollectionEquality().equals(other.publicKeys, publicKeys)&&const DeepCollectionEquality().equals(other.secretKeys, secretKeys)&&const DeepCollectionEquality().equals(other.bootstrap, bootstrap)&&const DeepCollectionEquality().equals(other.bootstrapKeys, bootstrapKeys)&&(identical(other.limitOverAttached, limitOverAttached) || other.limitOverAttached == limitOverAttached)&&(identical(other.limitFullyAttached, limitFullyAttached) || other.limitFullyAttached == limitFullyAttached)&&(identical(other.limitAttachedStrong, limitAttachedStrong) || other.limitAttachedStrong == limitAttachedStrong)&&(identical(other.limitAttachedGood, limitAttachedGood) || other.limitAttachedGood == limitAttachedGood)&&(identical(other.limitAttachedWeak, limitAttachedWeak) || other.limitAttachedWeak == limitAttachedWeak));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigRoutingTable&&const DeepCollectionEquality().equals(other.publicKeys, publicKeys)&&const DeepCollectionEquality().equals(other.secretKeys, secretKeys)&&const DeepCollectionEquality().equals(other.bootstrap, bootstrap)&&const DeepCollectionEquality().equals(other.bootstrapKeys, bootstrapKeys));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(publicKeys),const DeepCollectionEquality().hash(secretKeys),const DeepCollectionEquality().hash(bootstrap),const DeepCollectionEquality().hash(bootstrapKeys),limitOverAttached,limitFullyAttached,limitAttachedStrong,limitAttachedGood,limitAttachedWeak);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(publicKeys),const DeepCollectionEquality().hash(secretKeys),const DeepCollectionEquality().hash(bootstrap),const DeepCollectionEquality().hash(bootstrapKeys));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigRoutingTable(publicKeys: $publicKeys, secretKeys: $secretKeys, bootstrap: $bootstrap, bootstrapKeys: $bootstrapKeys, limitOverAttached: $limitOverAttached, limitFullyAttached: $limitFullyAttached, limitAttachedStrong: $limitAttachedStrong, limitAttachedGood: $limitAttachedGood, limitAttachedWeak: $limitAttachedWeak)';
+  return 'VeilidConfigRoutingTable(publicKeys: $publicKeys, secretKeys: $secretKeys, bootstrap: $bootstrap, bootstrapKeys: $bootstrapKeys)';
 }
 
 
@@ -5660,7 +5660,7 @@ abstract mixin class $VeilidConfigRoutingTableCopyWith<$Res>  {
   factory $VeilidConfigRoutingTableCopyWith(VeilidConfigRoutingTable value, $Res Function(VeilidConfigRoutingTable) _then) = _$VeilidConfigRoutingTableCopyWithImpl;
 @useResult
 $Res call({
- List<PublicKey> publicKeys, List<SecretKey> secretKeys, List<String> bootstrap, List<PublicKey> bootstrapKeys, int limitOverAttached, int limitFullyAttached, int limitAttachedStrong, int limitAttachedGood, int limitAttachedWeak
+ List<PublicKey> publicKeys, List<SecretKey> secretKeys, List<String> bootstrap, List<PublicKey> bootstrapKeys
 });
 
 
@@ -5677,18 +5677,13 @@ class _$VeilidConfigRoutingTableCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigRoutingTable
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? publicKeys = null,Object? secretKeys = null,Object? bootstrap = null,Object? bootstrapKeys = null,Object? limitOverAttached = null,Object? limitFullyAttached = null,Object? limitAttachedStrong = null,Object? limitAttachedGood = null,Object? limitAttachedWeak = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? publicKeys = null,Object? secretKeys = null,Object? bootstrap = null,Object? bootstrapKeys = null,}) {
   return _then(_self.copyWith(
 publicKeys: null == publicKeys ? _self.publicKeys : publicKeys // ignore: cast_nullable_to_non_nullable
 as List<PublicKey>,secretKeys: null == secretKeys ? _self.secretKeys : secretKeys // ignore: cast_nullable_to_non_nullable
 as List<SecretKey>,bootstrap: null == bootstrap ? _self.bootstrap : bootstrap // ignore: cast_nullable_to_non_nullable
 as List<String>,bootstrapKeys: null == bootstrapKeys ? _self.bootstrapKeys : bootstrapKeys // ignore: cast_nullable_to_non_nullable
-as List<PublicKey>,limitOverAttached: null == limitOverAttached ? _self.limitOverAttached : limitOverAttached // ignore: cast_nullable_to_non_nullable
-as int,limitFullyAttached: null == limitFullyAttached ? _self.limitFullyAttached : limitFullyAttached // ignore: cast_nullable_to_non_nullable
-as int,limitAttachedStrong: null == limitAttachedStrong ? _self.limitAttachedStrong : limitAttachedStrong // ignore: cast_nullable_to_non_nullable
-as int,limitAttachedGood: null == limitAttachedGood ? _self.limitAttachedGood : limitAttachedGood // ignore: cast_nullable_to_non_nullable
-as int,limitAttachedWeak: null == limitAttachedWeak ? _self.limitAttachedWeak : limitAttachedWeak // ignore: cast_nullable_to_non_nullable
-as int,
+as List<PublicKey>,
   ));
 }
 
@@ -5770,10 +5765,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys,  int limitOverAttached,  int limitFullyAttached,  int limitAttachedStrong,  int limitAttachedGood,  int limitAttachedWeak)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigRoutingTable() when $default != null:
-return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys,_that.limitOverAttached,_that.limitFullyAttached,_that.limitAttachedStrong,_that.limitAttachedGood,_that.limitAttachedWeak);case _:
+return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys);case _:
   return orElse();
 
 }
@@ -5791,10 +5786,10 @@ return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstra
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys,  int limitOverAttached,  int limitFullyAttached,  int limitAttachedStrong,  int limitAttachedGood,  int limitAttachedWeak)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigRoutingTable():
-return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys,_that.limitOverAttached,_that.limitFullyAttached,_that.limitAttachedStrong,_that.limitAttachedGood,_that.limitAttachedWeak);}
+return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -5808,10 +5803,10 @@ return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstra
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys,  int limitOverAttached,  int limitFullyAttached,  int limitAttachedStrong,  int limitAttachedGood,  int limitAttachedWeak)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<PublicKey> publicKeys,  List<SecretKey> secretKeys,  List<String> bootstrap,  List<PublicKey> bootstrapKeys)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigRoutingTable() when $default != null:
-return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys,_that.limitOverAttached,_that.limitFullyAttached,_that.limitAttachedStrong,_that.limitAttachedGood,_that.limitAttachedWeak);case _:
+return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstrapKeys);case _:
   return null;
 
 }
@@ -5823,7 +5818,7 @@ return $default(_that.publicKeys,_that.secretKeys,_that.bootstrap,_that.bootstra
 @JsonSerializable()
 
 class _VeilidConfigRoutingTable with DiagnosticableTreeMixin implements VeilidConfigRoutingTable {
-  const _VeilidConfigRoutingTable({required final  List<PublicKey> publicKeys, required final  List<SecretKey> secretKeys, required final  List<String> bootstrap, required final  List<PublicKey> bootstrapKeys, required this.limitOverAttached, required this.limitFullyAttached, required this.limitAttachedStrong, required this.limitAttachedGood, required this.limitAttachedWeak}): _publicKeys = publicKeys,_secretKeys = secretKeys,_bootstrap = bootstrap,_bootstrapKeys = bootstrapKeys;
+  const _VeilidConfigRoutingTable({required final  List<PublicKey> publicKeys, required final  List<SecretKey> secretKeys, required final  List<String> bootstrap, required final  List<PublicKey> bootstrapKeys}): _publicKeys = publicKeys,_secretKeys = secretKeys,_bootstrap = bootstrap,_bootstrapKeys = bootstrapKeys;
   factory _VeilidConfigRoutingTable.fromJson(Map<String, dynamic> json) => _$VeilidConfigRoutingTableFromJson(json);
 
  final  List<PublicKey> _publicKeys;
@@ -5854,11 +5849,6 @@ class _VeilidConfigRoutingTable with DiagnosticableTreeMixin implements VeilidCo
   return EqualUnmodifiableListView(_bootstrapKeys);
 }
 
-@override final  int limitOverAttached;
-@override final  int limitFullyAttached;
-@override final  int limitAttachedStrong;
-@override final  int limitAttachedGood;
-@override final  int limitAttachedWeak;
 
 /// Create a copy of VeilidConfigRoutingTable
 /// with the given fields replaced by the non-null parameter values.
@@ -5874,21 +5864,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigRoutingTable'))
-    ..add(DiagnosticsProperty('publicKeys', publicKeys))..add(DiagnosticsProperty('secretKeys', secretKeys))..add(DiagnosticsProperty('bootstrap', bootstrap))..add(DiagnosticsProperty('bootstrapKeys', bootstrapKeys))..add(DiagnosticsProperty('limitOverAttached', limitOverAttached))..add(DiagnosticsProperty('limitFullyAttached', limitFullyAttached))..add(DiagnosticsProperty('limitAttachedStrong', limitAttachedStrong))..add(DiagnosticsProperty('limitAttachedGood', limitAttachedGood))..add(DiagnosticsProperty('limitAttachedWeak', limitAttachedWeak));
+    ..add(DiagnosticsProperty('publicKeys', publicKeys))..add(DiagnosticsProperty('secretKeys', secretKeys))..add(DiagnosticsProperty('bootstrap', bootstrap))..add(DiagnosticsProperty('bootstrapKeys', bootstrapKeys));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigRoutingTable&&const DeepCollectionEquality().equals(other._publicKeys, _publicKeys)&&const DeepCollectionEquality().equals(other._secretKeys, _secretKeys)&&const DeepCollectionEquality().equals(other._bootstrap, _bootstrap)&&const DeepCollectionEquality().equals(other._bootstrapKeys, _bootstrapKeys)&&(identical(other.limitOverAttached, limitOverAttached) || other.limitOverAttached == limitOverAttached)&&(identical(other.limitFullyAttached, limitFullyAttached) || other.limitFullyAttached == limitFullyAttached)&&(identical(other.limitAttachedStrong, limitAttachedStrong) || other.limitAttachedStrong == limitAttachedStrong)&&(identical(other.limitAttachedGood, limitAttachedGood) || other.limitAttachedGood == limitAttachedGood)&&(identical(other.limitAttachedWeak, limitAttachedWeak) || other.limitAttachedWeak == limitAttachedWeak));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigRoutingTable&&const DeepCollectionEquality().equals(other._publicKeys, _publicKeys)&&const DeepCollectionEquality().equals(other._secretKeys, _secretKeys)&&const DeepCollectionEquality().equals(other._bootstrap, _bootstrap)&&const DeepCollectionEquality().equals(other._bootstrapKeys, _bootstrapKeys));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_publicKeys),const DeepCollectionEquality().hash(_secretKeys),const DeepCollectionEquality().hash(_bootstrap),const DeepCollectionEquality().hash(_bootstrapKeys),limitOverAttached,limitFullyAttached,limitAttachedStrong,limitAttachedGood,limitAttachedWeak);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_publicKeys),const DeepCollectionEquality().hash(_secretKeys),const DeepCollectionEquality().hash(_bootstrap),const DeepCollectionEquality().hash(_bootstrapKeys));
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigRoutingTable(publicKeys: $publicKeys, secretKeys: $secretKeys, bootstrap: $bootstrap, bootstrapKeys: $bootstrapKeys, limitOverAttached: $limitOverAttached, limitFullyAttached: $limitFullyAttached, limitAttachedStrong: $limitAttachedStrong, limitAttachedGood: $limitAttachedGood, limitAttachedWeak: $limitAttachedWeak)';
+  return 'VeilidConfigRoutingTable(publicKeys: $publicKeys, secretKeys: $secretKeys, bootstrap: $bootstrap, bootstrapKeys: $bootstrapKeys)';
 }
 
 
@@ -5899,7 +5889,7 @@ abstract mixin class _$VeilidConfigRoutingTableCopyWith<$Res> implements $Veilid
   factory _$VeilidConfigRoutingTableCopyWith(_VeilidConfigRoutingTable value, $Res Function(_VeilidConfigRoutingTable) _then) = __$VeilidConfigRoutingTableCopyWithImpl;
 @override @useResult
 $Res call({
- List<PublicKey> publicKeys, List<SecretKey> secretKeys, List<String> bootstrap, List<PublicKey> bootstrapKeys, int limitOverAttached, int limitFullyAttached, int limitAttachedStrong, int limitAttachedGood, int limitAttachedWeak
+ List<PublicKey> publicKeys, List<SecretKey> secretKeys, List<String> bootstrap, List<PublicKey> bootstrapKeys
 });
 
 
@@ -5916,18 +5906,13 @@ class __$VeilidConfigRoutingTableCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigRoutingTable
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? publicKeys = null,Object? secretKeys = null,Object? bootstrap = null,Object? bootstrapKeys = null,Object? limitOverAttached = null,Object? limitFullyAttached = null,Object? limitAttachedStrong = null,Object? limitAttachedGood = null,Object? limitAttachedWeak = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? publicKeys = null,Object? secretKeys = null,Object? bootstrap = null,Object? bootstrapKeys = null,}) {
   return _then(_VeilidConfigRoutingTable(
 publicKeys: null == publicKeys ? _self._publicKeys : publicKeys // ignore: cast_nullable_to_non_nullable
 as List<PublicKey>,secretKeys: null == secretKeys ? _self._secretKeys : secretKeys // ignore: cast_nullable_to_non_nullable
 as List<SecretKey>,bootstrap: null == bootstrap ? _self._bootstrap : bootstrap // ignore: cast_nullable_to_non_nullable
 as List<String>,bootstrapKeys: null == bootstrapKeys ? _self._bootstrapKeys : bootstrapKeys // ignore: cast_nullable_to_non_nullable
-as List<PublicKey>,limitOverAttached: null == limitOverAttached ? _self.limitOverAttached : limitOverAttached // ignore: cast_nullable_to_non_nullable
-as int,limitFullyAttached: null == limitFullyAttached ? _self.limitFullyAttached : limitFullyAttached // ignore: cast_nullable_to_non_nullable
-as int,limitAttachedStrong: null == limitAttachedStrong ? _self.limitAttachedStrong : limitAttachedStrong // ignore: cast_nullable_to_non_nullable
-as int,limitAttachedGood: null == limitAttachedGood ? _self.limitAttachedGood : limitAttachedGood // ignore: cast_nullable_to_non_nullable
-as int,limitAttachedWeak: null == limitAttachedWeak ? _self.limitAttachedWeak : limitAttachedWeak // ignore: cast_nullable_to_non_nullable
-as int,
+as List<PublicKey>,
   ));
 }
 
@@ -6369,7 +6354,7 @@ $VeilidConfigPrivacyCopyWith<$Res> get privacy {
 /// @nodoc
 mixin _$VeilidConfigTableStore implements DiagnosticableTreeMixin {
 
- String get directory; bool get delete;
+ String get directory; bool get delete; bool get wipeOnInvalidDeviceEncryptionKey; int get maxValueSizeMb;
 /// Create a copy of VeilidConfigTableStore
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -6383,21 +6368,21 @@ $VeilidConfigTableStoreCopyWith<VeilidConfigTableStore> get copyWith => _$Veilid
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigTableStore'))
-    ..add(DiagnosticsProperty('directory', directory))..add(DiagnosticsProperty('delete', delete));
+    ..add(DiagnosticsProperty('directory', directory))..add(DiagnosticsProperty('delete', delete))..add(DiagnosticsProperty('wipeOnInvalidDeviceEncryptionKey', wipeOnInvalidDeviceEncryptionKey))..add(DiagnosticsProperty('maxValueSizeMb', maxValueSizeMb));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigTableStore&&(identical(other.directory, directory) || other.directory == directory)&&(identical(other.delete, delete) || other.delete == delete));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigTableStore&&(identical(other.directory, directory) || other.directory == directory)&&(identical(other.delete, delete) || other.delete == delete)&&(identical(other.wipeOnInvalidDeviceEncryptionKey, wipeOnInvalidDeviceEncryptionKey) || other.wipeOnInvalidDeviceEncryptionKey == wipeOnInvalidDeviceEncryptionKey)&&(identical(other.maxValueSizeMb, maxValueSizeMb) || other.maxValueSizeMb == maxValueSizeMb));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,directory,delete);
+int get hashCode => Object.hash(runtimeType,directory,delete,wipeOnInvalidDeviceEncryptionKey,maxValueSizeMb);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigTableStore(directory: $directory, delete: $delete)';
+  return 'VeilidConfigTableStore(directory: $directory, delete: $delete, wipeOnInvalidDeviceEncryptionKey: $wipeOnInvalidDeviceEncryptionKey, maxValueSizeMb: $maxValueSizeMb)';
 }
 
 
@@ -6408,7 +6393,7 @@ abstract mixin class $VeilidConfigTableStoreCopyWith<$Res>  {
   factory $VeilidConfigTableStoreCopyWith(VeilidConfigTableStore value, $Res Function(VeilidConfigTableStore) _then) = _$VeilidConfigTableStoreCopyWithImpl;
 @useResult
 $Res call({
- String directory, bool delete
+ String directory, bool delete, bool wipeOnInvalidDeviceEncryptionKey, int maxValueSizeMb
 });
 
 
@@ -6425,11 +6410,13 @@ class _$VeilidConfigTableStoreCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigTableStore
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? directory = null,Object? delete = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? directory = null,Object? delete = null,Object? wipeOnInvalidDeviceEncryptionKey = null,Object? maxValueSizeMb = null,}) {
   return _then(_self.copyWith(
 directory: null == directory ? _self.directory : directory // ignore: cast_nullable_to_non_nullable
 as String,delete: null == delete ? _self.delete : delete // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,wipeOnInvalidDeviceEncryptionKey: null == wipeOnInvalidDeviceEncryptionKey ? _self.wipeOnInvalidDeviceEncryptionKey : wipeOnInvalidDeviceEncryptionKey // ignore: cast_nullable_to_non_nullable
+as bool,maxValueSizeMb: null == maxValueSizeMb ? _self.maxValueSizeMb : maxValueSizeMb // ignore: cast_nullable_to_non_nullable
+as int,
   ));
 }
 
@@ -6511,10 +6498,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String directory,  bool delete)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String directory,  bool delete,  bool wipeOnInvalidDeviceEncryptionKey,  int maxValueSizeMb)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigTableStore() when $default != null:
-return $default(_that.directory,_that.delete);case _:
+return $default(_that.directory,_that.delete,_that.wipeOnInvalidDeviceEncryptionKey,_that.maxValueSizeMb);case _:
   return orElse();
 
 }
@@ -6532,10 +6519,10 @@ return $default(_that.directory,_that.delete);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String directory,  bool delete)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String directory,  bool delete,  bool wipeOnInvalidDeviceEncryptionKey,  int maxValueSizeMb)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigTableStore():
-return $default(_that.directory,_that.delete);}
+return $default(_that.directory,_that.delete,_that.wipeOnInvalidDeviceEncryptionKey,_that.maxValueSizeMb);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -6549,10 +6536,10 @@ return $default(_that.directory,_that.delete);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String directory,  bool delete)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String directory,  bool delete,  bool wipeOnInvalidDeviceEncryptionKey,  int maxValueSizeMb)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigTableStore() when $default != null:
-return $default(_that.directory,_that.delete);case _:
+return $default(_that.directory,_that.delete,_that.wipeOnInvalidDeviceEncryptionKey,_that.maxValueSizeMb);case _:
   return null;
 
 }
@@ -6564,11 +6551,13 @@ return $default(_that.directory,_that.delete);case _:
 @JsonSerializable()
 
 class _VeilidConfigTableStore with DiagnosticableTreeMixin implements VeilidConfigTableStore {
-  const _VeilidConfigTableStore({required this.directory, required this.delete});
+  const _VeilidConfigTableStore({required this.directory, required this.delete, required this.wipeOnInvalidDeviceEncryptionKey, required this.maxValueSizeMb});
   factory _VeilidConfigTableStore.fromJson(Map<String, dynamic> json) => _$VeilidConfigTableStoreFromJson(json);
 
 @override final  String directory;
 @override final  bool delete;
+@override final  bool wipeOnInvalidDeviceEncryptionKey;
+@override final  int maxValueSizeMb;
 
 /// Create a copy of VeilidConfigTableStore
 /// with the given fields replaced by the non-null parameter values.
@@ -6584,21 +6573,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigTableStore'))
-    ..add(DiagnosticsProperty('directory', directory))..add(DiagnosticsProperty('delete', delete));
+    ..add(DiagnosticsProperty('directory', directory))..add(DiagnosticsProperty('delete', delete))..add(DiagnosticsProperty('wipeOnInvalidDeviceEncryptionKey', wipeOnInvalidDeviceEncryptionKey))..add(DiagnosticsProperty('maxValueSizeMb', maxValueSizeMb));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigTableStore&&(identical(other.directory, directory) || other.directory == directory)&&(identical(other.delete, delete) || other.delete == delete));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigTableStore&&(identical(other.directory, directory) || other.directory == directory)&&(identical(other.delete, delete) || other.delete == delete)&&(identical(other.wipeOnInvalidDeviceEncryptionKey, wipeOnInvalidDeviceEncryptionKey) || other.wipeOnInvalidDeviceEncryptionKey == wipeOnInvalidDeviceEncryptionKey)&&(identical(other.maxValueSizeMb, maxValueSizeMb) || other.maxValueSizeMb == maxValueSizeMb));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,directory,delete);
+int get hashCode => Object.hash(runtimeType,directory,delete,wipeOnInvalidDeviceEncryptionKey,maxValueSizeMb);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigTableStore(directory: $directory, delete: $delete)';
+  return 'VeilidConfigTableStore(directory: $directory, delete: $delete, wipeOnInvalidDeviceEncryptionKey: $wipeOnInvalidDeviceEncryptionKey, maxValueSizeMb: $maxValueSizeMb)';
 }
 
 
@@ -6609,7 +6598,7 @@ abstract mixin class _$VeilidConfigTableStoreCopyWith<$Res> implements $VeilidCo
   factory _$VeilidConfigTableStoreCopyWith(_VeilidConfigTableStore value, $Res Function(_VeilidConfigTableStore) _then) = __$VeilidConfigTableStoreCopyWithImpl;
 @override @useResult
 $Res call({
- String directory, bool delete
+ String directory, bool delete, bool wipeOnInvalidDeviceEncryptionKey, int maxValueSizeMb
 });
 
 
@@ -6626,11 +6615,13 @@ class __$VeilidConfigTableStoreCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigTableStore
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? directory = null,Object? delete = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? directory = null,Object? delete = null,Object? wipeOnInvalidDeviceEncryptionKey = null,Object? maxValueSizeMb = null,}) {
   return _then(_VeilidConfigTableStore(
 directory: null == directory ? _self.directory : directory // ignore: cast_nullable_to_non_nullable
 as String,delete: null == delete ? _self.delete : delete // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,wipeOnInvalidDeviceEncryptionKey: null == wipeOnInvalidDeviceEncryptionKey ? _self.wipeOnInvalidDeviceEncryptionKey : wipeOnInvalidDeviceEncryptionKey // ignore: cast_nullable_to_non_nullable
+as bool,maxValueSizeMb: null == maxValueSizeMb ? _self.maxValueSizeMb : maxValueSizeMb // ignore: cast_nullable_to_non_nullable
+as int,
   ));
 }
 

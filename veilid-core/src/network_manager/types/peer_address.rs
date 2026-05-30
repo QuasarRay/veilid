@@ -30,6 +30,11 @@ impl PeerAddress {
     pub fn address_type(&self) -> AddressType {
         self.socket_address.address_type()
     }
+
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn transport_type(&self) -> TransportType {
+        TransportType::new(self.protocol_type(), self.address_type())
+    }
 }
 
 impl fmt::Display for PeerAddress {

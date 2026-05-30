@@ -5,6 +5,9 @@ variables:
   EARTHLY_DISABLE_REMOTE_REGISTRY_PROXY: 1
   GIT_SUBMODULE_STRATEGY: normal
 
+###########################################################################
+# Stages
+
 stages:
   - prepare
   - test
@@ -14,28 +17,17 @@ stages:
   - cleanup
   - failed
 
-format:
-  stage: test
-  image: rust:slim
-  before_script:
-    - rustup component add rustfmt
+###########################################################################
+# Common YAML fragments
 
-  script:
-    - cargo fmt --all -- --check --verbose
-
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - veilid-*/**/*.rs #Should fire when rust source files are changed
-        - "**/*[Cc]argo*"
-
-# base earthly setup for jobs
+# Base earthly setup for jobs
 .base:
   tags: [saas-linux-medium-amd64]
   image: docker
   services:
     - docker:dind
-      
+
+# Common earthly setup for jobs
 .earthly: &earthly_setup
   - apk update && apk add git
   - wget https://github.com/earthly/earthly/releases/download/v0.8.15/earthly-linux-amd64 -O /usr/local/bin/earthly
@@ -44,6 +36,29 @@ format:
   - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
   - test "$CI_PROJECT_PATH" != "veilid/veilid" && project_args="--CI_REGISTRY_IMAGE=$CI_REGISTRY_IMAGE"
 
+# Rules for running tests
+# Runs on merge requests and events that cause update to merge requests (like pushing to a branch with an open merge request)
+# Only runs if files have been changed in the veilid-* directories or in Cargo files
+.branch_test_rules: &branch_test_rules
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    changes:
+      - veilid-*/**/*
+      - "**/*[Cc]argo*"
+    when: on_success
+  # Do not run any other pipeline types
+  - when: never
+
+# Rules for running formatting checks
+.branch_format_rules: &branch_format_rules
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    changes:
+      - veilid-*/**/*.rs # Should fire when rust source files are changed
+      - "**/*[Cc]argo*"
+    when: on_success
+  # Do not run any other pipeline types
+  - when: never
+
+# Common unit test base
 .unit_test:
   extends: .base
   variables:
@@ -72,25 +87,24 @@ format:
     - 'echo "Using cache from: $CACHE_NAME:$CACHE_TAG"'
     - *earthly_setup
   script:
-      - earthly --use-inline-cache +$earthly_target --BASE=container $project_args --CACHE_TAG=$CACHE_TAG --CACHE_NAME=$CACHE_NAME
+    - earthly --use-inline-cache +$earthly_target --BASE=container $project_args --CACHE_TAG=$CACHE_TAG --CACHE_NAME=$CACHE_NAME
   rules:
-    # Run if branch is not Main and in response to branch push
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
-    # Run if branch is not Main and in response to branch merge request
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
-    # Run if branch is a merge request of Main
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
-      when: always
-    - when: never
+    - *branch_test_rules
+
+###########################################################################
+# Jobs
+
+format:
+  stage: test
+  image: rust:slim
+  before_script:
+    - rustup component add rustfmt
+
+  script:
+    - cargo fmt --all -- --check --verbose
+
+  rules:
+    - *branch_format_rules
 
 # Create the build container if:
 #  - no container in the registry
@@ -160,28 +174,15 @@ build_cache:
     # Do not run in pipeline dry runs or nightly releases
     - if: $CI_COMMIT_MESSAGE =~ /\[ci dryrun]/ || $IS_NIGHTLY == "true"
       when: never
-    # Run if branch is not Main and in response to branch push
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
-    # Run if branch is not Main and in response to branch merge request
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
-    # Run if branch is a merge request of Main
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - veilid-*/**/*
-        - "**/*[Cc]argo*"
+    # Otherwise, default to whenever tests run
+    - *branch_test_rules
 
-# Runs 
+# Runs
 test_msrv_all:
   extends: .unit_test
   variables:
     earthly_target: test-msrv-all
-  
+
 # test_check_wasm_builds_dart:
 #   extends: .unit_test
 #   variables:
@@ -226,7 +227,6 @@ test_unit_tests_all:
   extends: .unit_test
   variables:
     earthly_target: test-unit-tests-all
-
 
 semgrep:
   # A Docker image with Semgrep installed.

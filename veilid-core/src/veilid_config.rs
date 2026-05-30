@@ -562,11 +562,6 @@ pub struct VeilidConfigRoutingTable {
         tsify(type = "string[]")
     )]
     pub bootstrap_keys: Vec<PublicKey>,
-    pub limit_over_attached: u32,
-    pub limit_fully_attached: u32,
-    pub limit_attached_strong: u32,
-    pub limit_attached_good: u32,
-    pub limit_attached_weak: u32,
     // xxx pub enable_public_internet: bool,
     // xxx pub enable_local_network: bool,
 }
@@ -594,11 +589,6 @@ impl Default for VeilidConfigRoutingTable {
             secret_keys: SecretKeyGroup::default(),
             bootstrap,
             bootstrap_keys,
-            limit_over_attached: 64,
-            limit_fully_attached: 32,
-            limit_attached_strong: 16,
-            limit_attached_good: 8,
-            limit_attached_weak: 4,
         }
     }
 }
@@ -664,7 +654,7 @@ impl Default for VeilidConfigNetwork {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
@@ -675,6 +665,19 @@ impl Default for VeilidConfigNetwork {
 pub struct VeilidConfigTableStore {
     pub directory: String,
     pub delete: bool,
+    pub wipe_on_invalid_device_encryption_key: bool,
+    pub max_value_size_mb: u32,
+}
+
+impl Default for VeilidConfigTableStore {
+    fn default() -> Self {
+        Self {
+            directory: "".to_string(),
+            delete: false,
+            wipe_on_invalid_device_encryption_key: true,
+            max_value_size_mb: 64,
+        }
+    }
 }
 
 #[cfg_attr(

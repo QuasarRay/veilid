@@ -64,7 +64,9 @@ export const config: Options.Testrunner = {
   // and 30 processes will get spawned. The property handles how many capabilities
   // from the same test should run tests.
   //
-  maxInstances: process.env.WDIO_HEADLESS ? 10 : 1,
+  // Run one spec file at a time: each spec attaches a veilid node to the public
+  // network, and concurrent attachments starve each other (60s+ attach timeouts).
+  maxInstances: 1,
   //
   // If you have trouble getting all important capabilities together, check out the
   // Sauce Labs platform configurator - a great tool to configure your capabilities:
@@ -73,17 +75,23 @@ export const config: Options.Testrunner = {
   capabilities: [
     {
       // capabilities for local browser web tests
-      browserName: 'firefox', // or "chrome", "microsoftedge", "safari"
-      'moz:firefoxOptions': {
-        args: process.env.WDIO_HEADLESS ? ['-headless'] : [],
+      browserName: 'chrome', // or "firefox", "microsoftedge", "safari"
+      'goog:chromeOptions': {
+        args: [
+          '--use-fake-device-for-media-stream',
+          '--use-fake-ui-for-media-stream',
+          ...(process.env.WDIO_HEADLESS ? ['headless', 'disable-gpu'] : []),
+        ],
       },
-    },
-    // {
-    //   browserName: 'chrome',
-    //   'goog:chromeOptions': {
-    //     args: process.env.WDIO_HEADLESS ? ['headless', 'disable-gpu'] : [],
-    //   },
-    // },
+      // Disable browser log capture. Chrome logs benign P2P WebSocket connect failures as
+      // SEVERE browser-log entries, which the wdio browser runner (via browser.getLogs)
+      // treats as test failures. Real JS errors still fail tests via window 'error' events
+      // (window.__wdioErrors__) and assertions, so only browser-generated network noise is
+      // suppressed. (Firefox didn't surface these as severe logs, so it never tripped.)
+      // 'goog:loggingPrefs' is the runtime key chromedriver wants but isn't in wdio's
+      // capability types, hence the cast.
+      'goog:loggingPrefs': { browser: 'OFF' },
+    } as WebdriverIO.Capabilities & { 'goog:loggingPrefs': { browser: string } },
   ],
 
   //

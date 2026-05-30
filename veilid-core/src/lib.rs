@@ -155,10 +155,12 @@ use self::component::*;
 use self::core_context::RegisteredComponents;
 #[allow(unused_imports)]
 use self::logging::{
-    debug_duration, record_duration, record_duration_fut, MeasureDebugFuture, MeasureFuture,
-    VeilidComponentLogFacilities, VeilidComponentLogFacility, DEBUGWARN,
+    debug_duration, record_duration, record_duration_fut, DurationRecorder, MeasureDebugFuture,
+    MeasureFuture, VeilidComponentLogFacilities, VeilidComponentLogFacility, DEBUGWARN,
 };
 use self::stats_accounting::*;
+
+use core::future::IntoFuture as _;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::*;

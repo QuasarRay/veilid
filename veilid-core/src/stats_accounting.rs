@@ -10,6 +10,10 @@ const ROLLING_LATENCIES_SIZE: usize = 50;
 const ROLLING_TRANSFERS_SIZE: usize = 10;
 pub const ROLLING_TRANSFERS_INTERVAL_SECS: u32 = 1;
 
+// Per-local-route stats LRU bound. Sized for typical safety-route counts (4–8 per kind)
+// with headroom; entries that age out by LRU are gone — we don't actively purge.
+pub const ROUTED_STATS_LRU_SIZE: usize = 16;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TransferCount {
     down: ByteCount,
@@ -149,5 +153,40 @@ impl LatencyStatsAccounting {
             p90,
             p75,
         }
+    }
+}
+
+/// Per-local-route stats bundle, keyed in an LRU on BucketEntry / RouteStats.
+#[derive(Debug, Clone, Default)]
+pub struct PerLocalRouteStats {
+    /// Full RTT samples (not one-way latency); don't sum with other LatencyStats.
+    pub round_trip: LatencyStats,
+    /// Bytes flowing through this (target, local-route) pair.
+    pub transfer: TransferStatsDownUp,
+    round_trip_accounting: LatencyStatsAccounting,
+    transfer_accounting: TransferStatsAccounting,
+}
+
+impl PerLocalRouteStats {
+    pub fn record_round_trip(&mut self, sample: TimestampDuration) {
+        self.round_trip = self.round_trip_accounting.record_latency(sample);
+    }
+    pub fn add_up(&mut self, bytes: ByteCount) {
+        self.transfer_accounting.add_up(bytes);
+    }
+    pub fn add_down(&mut self, bytes: ByteCount) {
+        self.transfer_accounting.add_down(bytes);
+    }
+    pub fn roll_transfers(&mut self, last_ts: Timestamp, cur_ts: Timestamp) {
+        self.transfer_accounting
+            .roll_transfers(last_ts, cur_ts, &mut self.transfer);
+    }
+}
+
+impl fmt::Display for PerLocalRouteStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "round_trip: {}", f.to_string(&self.round_trip))?;
+        write!(f, "transfer:   {}", f.to_string(&self.transfer))?;
+        Ok(())
     }
 }

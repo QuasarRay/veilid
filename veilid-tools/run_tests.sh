@@ -4,7 +4,11 @@ set -e -o pipefail
 
 pushd $SCRIPTDIR 2>/dev/null
 if [[ "$1" == "wasm" ]]; then
-    WASM_BINDGEN_TEST_TIMEOUT=120 wasm-pack test --firefox --headless --no-default-features --features=rt-wasm-bindgen,test-util
+    # shellcheck disable=SC1091
+    source "$SCRIPTDIR/../scripts/_chromedriver_helper.sh"
+    CHROMEDRIVER="$(chromedriver_binary_path)" || { echo "Failed to resolve chromedriver"; exit 1; }
+    export CHROMEDRIVER
+    WASM_BINDGEN_TEST_TIMEOUT=120 cargo nextest run --target wasm32-unknown-unknown --no-default-features --features=rt-wasm-bindgen,test-util,debug-locks
 elif [[ "$1" == "ios" ]]; then
     SYMROOT=/tmp/testout
     APPNAME=veilidtools-tests
@@ -60,10 +64,10 @@ elif [[ "$1" == "android" ]]; then
     popd >/dev/null
 
 else
-    RUST_LOG=#common=debug cargo nextest run
-    RUST_LOG=#common=debug cargo nextest run --features=tracing
-    RUST_LOG=#common=debug cargo nextest run --no-default-features --features=rt-async-std
-    RUST_LOG=#common=debug cargo nextest run --no-default-features --features=rt-async-std,tracing
+    RUST_LOG=#common=debug cargo nextest run --features=debug-locks
+    RUST_LOG=#common=debug cargo nextest run --features=tracing,debug-locks
+    RUST_LOG=#common=debug cargo nextest run --no-default-features --features=rt-async-std,debug-locks
+    RUST_LOG=#common=debug cargo nextest run --no-default-features --features=rt-async-std,tracing,debug-locks
     cargo test --doc
 fi
 popd 2>/dev/null

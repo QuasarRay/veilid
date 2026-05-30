@@ -20,8 +20,9 @@ pub struct RouteSetSpecDetailStats {
     pub transfer: TransferStatsDownUp,
     /// Latency stats
     pub latency: LatencyStats,
-    /// Answer stats
-    pub answer: AnswerStats,
+    /// Answer stats per SequenceOrdering (serde-default: old aggregate field is dropped)
+    #[serde(default)]
+    pub answer_by_ordering: Vec<(SequenceOrdering, AnswerStats)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -183,6 +184,6 @@ impl RouteSetSpecDetail {
 
     pub fn update_answers(&self, route_stats: &RouteStats) {
         let mut stats = self.stats.write();
-        stats.answer = route_stats.answer.clone();
+        stats.answer_by_ordering = route_stats.answer_by_ordering();
     }
 }

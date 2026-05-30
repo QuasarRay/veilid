@@ -64,11 +64,40 @@ impl Address {
     /// protocol assignments (192.0.0.0/24). When seen on a local interface, inbound from the
     /// public internet to this host is not reachable, even if peers report a globally routable
     /// external address (because the carrier owns the public range and uses it for CGNAT).
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     pub fn is_cgnat_indicator(&self) -> bool {
         match self {
             Address::IPV4(v4) => ipv4addr_is_shared(v4) || ipv4addr_is_ietf_protocol_assignment(v4),
             Address::IPV6(_) => false,
         }
+    }
+
+    /// Translator / encapsulation source address whose value does not represent real network membership.
+    ///
+    /// When seen as a flow's local address, the routing domain of the flow is determined by the
+    /// remote address's domain rather than by classifying the local side. Covers:
+    /// - IPv4 `192.0.0.0/29` CLAT46 plat (RFC 7335; subset of IETF protocol assignment)
+    /// - IPv4 `100.64.0.0/10` CGNAT shared (RFC 6598)
+    /// - IPv6 `64:ff9b::/96` NAT64 well-known prefix (RFC 6052)
+    /// - IPv6 `2001::/32` Teredo (RFC 4380)
+    /// - IPv6 `2002::/16` 6to4 (RFC 3056)
+    pub fn is_synthetic_local(&self) -> bool {
+        match self {
+            Address::IPV4(v4) => ipv4addr_is_shared(v4) || ipv4addr_is_ietf_protocol_assignment(v4),
+            Address::IPV6(v6) => {
+                ipv6addr_is_nat64_well_known(v6) || ipv6addr_is_teredo(v6) || ipv6addr_is_6to4(v6)
+            }
+        }
+    }
+
+    /// IPv4 link-local / APIPA `169.254.0.0/16` (RFC 3927) — DHCP-failed fallback.
+    pub fn is_ipv4_link_local(&self) -> bool {
+        matches!(self, Address::IPV4(v4) if ipv4addr_is_link_local(v4))
+    }
+
+    /// IPv6 link-local `fe80::/10` (RFC 4291).
+    pub fn is_ipv6_link_local(&self) -> bool {
+        matches!(self, Address::IPV6(v6) if ipv6addr_is_unicast_link_local(v6))
     }
     pub fn ip_addr(&self) -> IpAddr {
         match self {

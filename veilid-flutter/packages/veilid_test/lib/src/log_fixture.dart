@@ -1,25 +1,28 @@
 import 'package:veilid/veilid.dart';
 
-/// Test logging fixture that formats messages with timestamps and level.
-///
-/// Uses the LOG_LEVEL dart-define to filter output. Provides both
-/// direct logging methods (trace/debug/info/warn/error) and a
-/// [processVeilidLog] method for use with the VeilidLog update stream.
-/// Global accessor for the log fixture singleton
+/// Test logging fixture. Formats and prints whatever veilid-core forwards;
+/// filtering is done internally by veilid-core via LOG_DIRECTIVES.
 LogFixture get log => LogFixture.instance;
 
 class LogFixture {
-  // ignore: do_not_use_environment
-  static const _logLevelStr =
-      String.fromEnvironment('LOG_LEVEL', defaultValue: 'info');
-
   static final LogFixture instance = LogFixture._();
 
-  late final VeilidConfigLogLevel _maxLevel;
+  LogFixture._();
 
-  LogFixture._() {
-    _maxLevel = VeilidConfigLogLevel.fromJson(_logLevelStr);
-  }
+  final List<void Function(String)> _listeners = [];
+
+  /// Flap-detector warnings seen this run (messages containing the FLAPPING marker).
+  /// Tests assert this is empty at teardown to catch online/relay/route/connection/readiness
+  /// flapping regressions automatically.
+  final List<String> flapWarnings = [];
+
+  /// Register a sink that receives every formatted log line in addition to
+  /// the stdout print. Used by veilid_integration_test to mirror lines into
+  /// the in-window terminal widget.
+  void addListener(void Function(String) listener) => _listeners.add(listener);
+
+  void removeListener(void Function(String) listener) =>
+      _listeners.remove(listener);
 
   String _timestamp() {
     final dt = DateTime.now();
@@ -29,13 +32,13 @@ class LogFixture {
         '${dt.millisecond.toString().padLeft(3, '0')}';
   }
 
-  bool _shouldLog(VeilidConfigLogLevel level) =>
-      level.index <= _maxLevel.index;
-
   void _log(VeilidConfigLogLevel level, String message) {
-    if (_shouldLog(level)) {
-      // ignore: avoid_print
-      print('${_timestamp()} ${level.name.toUpperCase()} [test] $message');
+    final line =
+        '${_timestamp()} ${level.name.toUpperCase()} [test] $message';
+    // ignore: avoid_print
+    print(line);
+    for (final listener in _listeners) {
+      listener(line);
     }
   }
 
@@ -48,7 +51,19 @@ class LogFixture {
       VeilidLogLevel.debug => VeilidConfigLogLevel.debug,
       VeilidLogLevel.trace => VeilidConfigLogLevel.trace,
     };
+    if (log.message.contains('FLAPPING')) {
+      flapWarnings.add(log.message);
+    }
     _log(level, log.message);
+  }
+
+  /// Throw if any flapping was detected during the test. Call in tearDownAll.
+  void assertNoFlapping() {
+    if (flapWarnings.isNotEmpty) {
+      final seen = flapWarnings.join('\n  ');
+      flapWarnings.clear();
+      throw StateError('Flap detector tripped during test:\n  $seen');
+    }
   }
 
   void error(String message) => _log(VeilidConfigLogLevel.error, message);

@@ -4,6 +4,7 @@ use super::*;
 /// containing everything the rest of the system needs to know about a single relay
 #[derive(Debug, Clone)]
 pub struct RoutingDomainRelay {
+    pub relay_id: NodeId,
     pub relay_node: FilteredNodeRef,
     pub relay_kind: RelayKind,
     pub pings: Vec<RelayPing>,
@@ -11,10 +12,6 @@ pub struct RoutingDomainRelay {
 }
 
 impl RoutingDomainRelay {
-    pub fn relay_id(&self) -> NodeId {
-        self.relay_node.best_node_id()
-    }
-
     /// Checks if this relay is configured the same way as another relay
     pub fn equivalent(&self, other: &Self) -> bool {
         self.relay_node.equivalent(&other.relay_node)
@@ -31,9 +28,12 @@ impl RoutingDomainRelay {
 
 impl RoutingDomainRelay {
     pub fn new(routing_domain: RoutingDomain, relay_node: NodeRef, relay_kind: RelayKind) -> Self {
+        let relay_node =
+            relay_node.custom_filtered(NodeRefFilter::new().with_routing_domain(routing_domain));
+        let relay_id = relay_node.best_node_id();
         RoutingDomainRelay {
-            relay_node: relay_node
-                .custom_filtered(NodeRefFilter::new().with_routing_domain(routing_domain)),
+            relay_id,
+            relay_node,
             relay_kind,
             dial_info_details: vec![],
             pings: vec![],

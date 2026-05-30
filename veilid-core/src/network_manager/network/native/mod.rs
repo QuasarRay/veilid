@@ -71,8 +71,8 @@ struct NetworkInner {
     tls_acceptor: Option<TlsAcceptor>,
     /// Multiplexer record for protocols on low level TCP sockets
     listener_states: BTreeMap<SocketAddr, Arc<RwLock<ListenerState>>>,
-    /// Preferred local addresses for protocols/address combinations for outgoing connections
-    preferred_local_addresses: BTreeMap<(ProtocolType, AddressType), SocketAddr>,
+    /// Preferred local addresses for transports for outgoing connections
+    preferred_local_addresses: BTreeMap<TransportType, SocketAddr>,
     /// Network state
     network_state: Option<Arc<NetworkState>>,
 }
@@ -525,6 +525,15 @@ impl PlatformNetwork for NativeNetwork {
                     let ip_addr = dial_info.address().ip_addr();
 
                     if dial_info.protocol_type() == ProtocolType::UDP {
+                        // Never send to one of our own addresses; it loops back to our own socket
+                        if network_manager
+                            .routing_table()
+                            .is_own_direct_dial_info_address(&dial_info.socket_address())
+                        {
+                            return Ok(NetworkResult::no_connection_other(
+                                "refusing to send to our own address",
+                            ));
+                        }
                         // Handle connectionless protocol
                         let peer_socket_addr = dial_info.to_socket_addr();
                         let preferred_local = self.preferred_outbound_source_addr(&dial_info);
@@ -635,18 +644,15 @@ impl PlatformNetwork for NativeNetwork {
 
     fn get_preferred_local_address(&self, dial_info: &DialInfo) -> Option<SocketAddr> {
         let inner = self.inner.lock();
-        let key = (dial_info.protocol_type(), dial_info.address_type());
-        inner.preferred_local_addresses.get(&key).copied()
+        inner
+            .preferred_local_addresses
+            .get(&dial_info.transport_type())
+            .copied()
     }
 
-    fn get_preferred_local_address_by_key(
-        &self,
-        pt: ProtocolType,
-        at: AddressType,
-    ) -> Option<SocketAddr> {
+    fn get_preferred_local_address_by_key(&self, tt: TransportType) -> Option<SocketAddr> {
         let inner = self.inner.lock();
-        let key = (pt, at);
-        inner.preferred_local_addresses.get(&key).copied()
+        inner.preferred_local_addresses.get(&tt).copied()
     }
 
     fn preferred_outbound_source_addr(&self, dial_info: &DialInfo) -> Option<SocketAddr> {
@@ -658,9 +664,7 @@ impl PlatformNetwork for NativeNetwork {
             return None;
         }
 
-        let pt = dial_info.protocol_type();
-        let at = dial_info.address_type();
-        let configured = self.get_preferred_local_address_by_key(pt, at)?;
+        let configured = self.get_preferred_local_address_by_key(dial_info.transport_type())?;
 
         // User pinned a specific listen address via config; use it as the outbound source
         if !configured.ip().is_unspecified() {
@@ -674,7 +678,7 @@ impl PlatformNetwork for NativeNetwork {
         for ifaddr in interface_address_state.interface_addresses.iter() {
             let ip = ifaddr.ip();
             let matches_family = matches!(
-                (ip, at),
+                (ip, dial_info.address_type()),
                 (IpAddr::V4(_), AddressType::IPV4) | (IpAddr::V6(_), AddressType::IPV6)
             );
             if !matches_family {
@@ -873,7 +877,7 @@ impl NativeNetwork {
         ) {
             self.network_manager()
                 .address_filter()
-                .set_dial_info_failed(dial_info);
+                .set_transport_failed(dial_info);
         }
         Ok(network_result)
     }

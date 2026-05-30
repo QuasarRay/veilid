@@ -1,26 +1,20 @@
 PODS:
   - FlutterMacOS (1.0.0)
-  - macos_window_utils (1.0.0):
-    - FlutterMacOS
   - veilid (0.0.1):
     - FlutterMacOS
 
 DEPENDENCIES:
   - FlutterMacOS (from `Flutter/ephemeral`)
-  - macos_window_utils (from `Flutter/ephemeral/.symlinks/plugins/macos_window_utils/macos`)
   - veilid (from `Flutter/ephemeral/.symlinks/plugins/veilid/macos`)
 
 EXTERNAL SOURCES:
   FlutterMacOS:
     :path: Flutter/ephemeral
-  macos_window_utils:
-    :path: Flutter/ephemeral/.symlinks/plugins/macos_window_utils/macos
   veilid:
     :path: Flutter/ephemeral/.symlinks/plugins/veilid/macos
 
 SPEC CHECKSUMS:
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  macos_window_utils: 23f54331a0fd51eea9e0ed347253bf48fd379d1d
   veilid: 059faf20a285aa96604e24cf6ec7e343aa0ba43e
 
 PODFILE CHECKSUM: baef3dbaa815cbf69d6e618f45542405746a7853

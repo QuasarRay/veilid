@@ -6,9 +6,11 @@ mod remote_route_cache_entry;
 mod route_allocate;
 mod route_assemble;
 mod route_compile;
-mod route_lock;
+mod route_ref;
 mod route_remote;
 mod route_select;
+mod route_set_id;
+mod route_set_ref;
 mod route_set_spec_detail;
 mod route_spec_store_cache;
 mod route_spec_store_content;
@@ -25,10 +27,12 @@ use route_spec_store_content::*;
 
 pub(crate) use route_allocate::AllocateRouteParams;
 pub(crate) use route_compile::{CompileRouteParams, CompiledRoute};
-pub(crate) use route_lock::LockedRoutes;
+pub(crate) use route_ref::{AllocatedRouteRef, RemoteRouteRef};
 pub(crate) use route_select::{RouteIdAndKeys, RouteSelectParams};
+pub(crate) use route_set_id::{AllocatedRouteSetId, RemoteRouteSetId};
+pub(crate) use route_set_ref::{AllocatedRouteSetRef, RemoteRouteSetRef};
 pub use route_stats::*;
-pub(crate) use route_test::AllocatedRouteTestInfo;
+pub(crate) use route_test::RouteKeepaliveRequest;
 
 impl_veilid_log_facility!("rtab");
 
@@ -42,6 +46,14 @@ const ROUTE_MIN_IDLE_TIME_MS: u32 = 30_000;
 const ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD: usize = 5;
 /// Number of consecutive send failures before invalidating compiled route cache for a safety route
 const ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD: usize = 1;
+/// The size of the compiled route cache
+const COMPILED_ROUTE_CACHE_SIZE: usize = 1024;
+
+/// Per-key-locked cache of compiled routes (one compile per route at a time)
+pub(crate) type CompiledRouteCache = AsyncKeyedCache<CompiledRouteCacheKey, Arc<CompiledRoute>>;
+/// A locked entry in the [CompiledRouteCache]
+pub(crate) type CompiledRouteCacheEntry =
+    AsyncKeyedCacheEntry<CompiledRouteCacheKey, Arc<CompiledRoute>>;
 
 /// The routing table's storage for private/safety routes
 /// Lock order is always content before cache
@@ -51,10 +63,10 @@ pub(crate) struct RouteSpecStore {
     registry: VeilidComponentRegistry,
     /// Allocated route content
     content: RwLock<RouteSpecStoreContent>,
-    /// Allocated and compiled route caches, as well as imported remote routes (not persisted)
+    /// Allocated route cache, as well as imported remote routes (not persisted)
     cache: RwLock<RouteSpecStoreCache>,
-    /// Ensure we don't compile the same route more than once at a time
-    compile_lock_table: AsyncTagLockTable<CompiledRouteCacheKey>,
+    /// Per-key-locked compiled route cache (one compile per route at a time)
+    compiled_route_cache: CompiledRouteCache,
     /// Ensure we don't try to select the first available route for more the same parameters than once at a time
     allocate_route_lock: AsyncMutex<()>,
     /// Maximum number of hops in a route
@@ -65,6 +77,8 @@ pub(crate) struct RouteSpecStore {
     default_route_hop_count_unsafe: usize,
     /// Round-robin counter for distributing route selection across available routes
     route_selection_counter: AtomicUsize,
+    /// Round-robin counter for distributing route-test destination selection
+    test_destination_rotation_counter: AtomicUsize,
 }
 
 impl_veilid_component_accessors!(RouteSpecStore);
@@ -82,12 +96,13 @@ impl RouteSpecStore {
             registry: registry.clone(),
             content: RwLock::new(RouteSpecStoreContent::new(registry.clone())),
             cache: RwLock::new(RouteSpecStoreCache::new(registry.clone())),
-            compile_lock_table: AsyncTagLockTable::new(),
+            compiled_route_cache: AsyncKeyedCache::new(COMPILED_ROUTE_CACHE_SIZE),
             allocate_route_lock: AsyncMutex::new(()),
             max_route_hop_count,
             default_route_hop_count_safe,
             default_route_hop_count_unsafe,
             route_selection_counter: AtomicUsize::new(0),
+            test_destination_rotation_counter: AtomicUsize::new(0),
         }
     }
 
@@ -175,8 +190,8 @@ impl RouteSpecStore {
         };
 
         let update = VeilidUpdate::RouteChange(Box::new(VeilidRouteChange {
-            dead_routes,
-            dead_remote_routes,
+            dead_routes: dead_routes.into_iter().map(Into::into).collect(),
+            dead_remote_routes: dead_remote_routes.into_iter().map(Into::into).collect(),
         }));
 
         let update_callback = self.registry.update_callback();
@@ -205,16 +220,16 @@ impl RouteSpecStore {
     pub fn release_route(&self, id: RouteId) -> bool {
         let is_remote = self.is_route_id_remote(&id);
         if is_remote {
-            self.release_remote_route_id(id)
+            self.release_remote_route_id(RemoteRouteSetId::from_route_id(id))
         } else {
-            self.release_allocated_route(id)
+            self.release_allocated_route(AllocatedRouteSetId::from_route_id(id))
         }
     }
 
     /// List all allocated routes with a filter. Filter must not access the route spec store due to locking.
     pub fn list_allocated_routes<F, R>(&self, mut filter: F) -> Vec<R>
     where
-        F: FnMut(&RouteId, &AllocatedRouteCacheEntry) -> Option<R>,
+        F: FnMut(&AllocatedRouteSetId, &AllocatedRouteCacheEntry) -> Option<R>,
     {
         let cache = self.cache.read();
         let mut out = Vec::with_capacity(cache.get_allocated_route_count());
@@ -241,40 +256,10 @@ impl RouteSpecStore {
         out
     }
 
-    /// Return the hop node ids of an allocated route by one of its public keys, as a deduplicated set.
-    /// Empty if the key isn't a known allocated route.
-    pub fn allocated_route_hop_node_ids(&self, key: &PublicKey) -> HashSet<NodeId> {
-        let cache = self.cache.read();
-        let Some(rid) = cache.get_allocated_route_id_by_key(key) else {
-            return HashSet::new();
-        };
-        let Some(arce) = cache.get_allocated_route_by_id(&rid) else {
-            return HashSet::new();
-        };
-        arce.hop_node_refs()
-            .iter()
-            .map(|nr| nr.best_node_id())
-            .collect()
-    }
-
-    /// Return the first hop node id of a remote private route by one of its public keys.
-    /// The remaining hops of a remote private route are encrypted, so only the first hop is visible to us.
-    pub fn remote_route_first_hop_node_id(&self, key: &PublicKey) -> Option<NodeId> {
-        let cache = self.cache.read();
-        let cur_ts = Timestamp::now();
-        let rrid = cache.get_remote_route_id_by_key(key)?;
-        let rrce = cache.peek_remote_route(cur_ts, &rrid)?;
-        let pr = rrce.best_private_route()?;
-        match &pr.hops {
-            PrivateRouteHops::FirstHop(rh) => rh.node.node_id(),
-            _ => None,
-        }
-    }
-
-    /// List all allocated routes with a filter. Filter must not access the route spec store due to locking.
+    /// List all remote routes with a filter. Filter must not access the route spec store due to locking.
     pub fn list_remote_routes<F, R>(&self, mut filter: F) -> Vec<R>
     where
-        F: FnMut(&RouteId, &RemoteRouteCacheEntry) -> Option<R>,
+        F: FnMut(&RemoteRouteSetId, &RemoteRouteCacheEntry) -> Option<R>,
     {
         let cache = self.cache.read();
         let cur_ts = Timestamp::now();
@@ -287,7 +272,7 @@ impl RouteSpecStore {
         let mut out = Vec::with_capacity(remote_routes.len());
 
         for (id, rpri) in remote_routes {
-            if let Some(x) = filter(id, rpri) {
+            if let Some(x) = filter(id, &rpri) {
                 out.push(x);
             }
         }
@@ -312,7 +297,11 @@ impl RouteSpecStore {
     /// Mark route as published
     /// When first deserialized, routes must be re-published in order to ensure they remain
     /// in the RouteSpecStore.
-    pub fn mark_route_published(&self, id: &RouteId, published: bool) -> VeilidAPIResult<()> {
+    pub fn mark_route_published(
+        &self,
+        id: &AllocatedRouteSetId,
+        published: bool,
+    ) -> VeilidAPIResult<()> {
         let cache = self.cache.read();
         let Some(rssd) = cache.get_allocated_route_by_id(id) else {
             apibail_invalid_target!("route does not exist");
@@ -386,9 +375,12 @@ impl RouteSpecStore {
 
         let cur_ts = Timestamp::now();
 
-        let rstr = if let Some(arce) = cache.get_allocated_route_by_id(id) {
+        let arsid = AllocatedRouteSetId::from_route_id(id.clone());
+        let rrsid = RemoteRouteSetId::from_route_id(id.clone());
+
+        let rstr = if let Some(arce) = cache.get_allocated_route_by_id(&arsid) {
             format!("allocated: {:#}", arce)
-        } else if let Some(rrce) = cache.peek_remote_route(cur_ts, id) {
+        } else if let Some(rrce) = cache.peek_remote_route(cur_ts, &rrsid) {
             format!("remote: {:#}", rrce)
         } else {
             "(route missing)".to_string()
@@ -443,10 +435,12 @@ impl RouteSpecStore {
         let cache = self.cache.read();
 
         let cur_ts = Timestamp::now();
+        let arsid = AllocatedRouteSetId::from_route_id(id.clone());
+        let rrsid = RemoteRouteSetId::from_route_id(id.clone());
 
-        let rstr = if let Some(rssd) = content.get_detail(id) {
+        let rstr = if let Some(rssd) = content.get_detail(&arsid) {
             format!("allocated: {:#?}", rssd)
-        } else if let Some(rpri) = cache.peek_remote_route(cur_ts, id) {
+        } else if let Some(rpri) = cache.peek_remote_route(cur_ts, &rrsid) {
             format!("remote: {:#?}", rpri)
         } else {
             "(route missing)".to_string()

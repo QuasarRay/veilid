@@ -2,7 +2,7 @@ use super::*;
 
 impl RouteSpecStore {
     /// Choose the best private route from a private route set to communicate with
-    pub fn best_remote_private_route(&self, id: &RouteId) -> Option<Arc<PrivateRoute>> {
+    pub fn best_remote_private_route(&self, id: &RemoteRouteSetId) -> Option<Arc<PrivateRoute>> {
         let mut cache = self.cache.write();
         let cur_ts = Timestamp::now();
         let rrce = cache.get_remote_route(cur_ts, id)?;
@@ -13,7 +13,9 @@ impl RouteSpecStore {
     pub fn is_route_id_remote(&self, id: &RouteId) -> bool {
         let cache = self.cache.read();
         let cur_ts = Timestamp::now();
-        cache.peek_remote_route(cur_ts, id).is_some()
+        cache
+            .peek_remote_route(cur_ts, &RemoteRouteSetId::from_route_id(id.clone()))
+            .is_some()
     }
 
     /// Import a remote private route set blob for compilation
@@ -41,7 +43,11 @@ impl RouteSpecStore {
             }
         }
 
-        cache.add_remote_route(cur_ts, id.clone(), private_routes);
+        cache.add_remote_route(
+            cur_ts,
+            RemoteRouteSetId::from_route_id(id.clone()),
+            private_routes,
+        );
 
         Ok(id)
     }
@@ -73,9 +79,11 @@ impl RouteSpecStore {
             }
         }
 
-        self.cache
-            .write()
-            .add_remote_route(cur_ts, id.clone(), private_routes);
+        self.cache.write().add_remote_route(
+            cur_ts,
+            RemoteRouteSetId::from_route_id(id.clone()),
+            private_routes,
+        );
 
         Ok(id)
     }
@@ -85,7 +93,7 @@ impl RouteSpecStore {
         feature = "instrument",
         instrument(level = "trace", target = "rtab::route", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub(super) fn release_remote_route_id(&self, id: RouteId) -> bool {
+    pub(super) fn release_remote_route_id(&self, id: RemoteRouteSetId) -> bool {
         self.cache.write().remove_remote_route(id)
     }
 
@@ -97,12 +105,12 @@ impl RouteSpecStore {
 
         // Check for allocated route
         if let Some(id) = content.get_id_by_key(key) {
-            return Some(id);
+            return Some(id.into());
         }
 
         // Check for remote route
         if let Some(rrid) = cache.get_remote_route_id_by_key(key) {
-            return Some(rrid);
+            return Some(rrid.into());
         }
 
         None
@@ -134,53 +142,11 @@ impl RouteSpecStore {
         false
     }
 
-    /// Mark a remote private route as having seen our current published node info
-    /// PRIVACY:
-    /// We do not accept node info timestamps from remote private routes because this would
-    /// enable a deanonymization attack, whereby a node could be 'pinged' with a doctored node_info with a
-    /// special 'timestamp', which then may be sent back over a private route, identifying that it
-    /// was that node that had the private route.
-    pub fn mark_remote_private_route_seen_our_node_info(
-        &self,
-        key: &PublicKey,
-        cur_ts: Timestamp,
-    ) -> VeilidAPIResult<()> {
-        let Some(our_node_info_ts) = self
-            .routing_table()
-            .get_published_peer_info(RoutingDomain::PublicInternet)
-            .map(|pi| pi.node_info().timestamp())
-        else {
-            apibail_internal!("peer info is not yet published");
-        };
-
-        let cache = self.cache.read();
-
-        // Check for allocated route. If this is not a remote private route
-        // then we just skip the recording. We may be running a test and using
-        // our own allocated route as the destination private route.
-        if cache.get_allocated_route_id_by_key(key).is_some() {
-            return Ok(());
-        }
-
-        if let Some(rrid) = cache.get_remote_route_id_by_key(key) {
-            if let Some(rrce) = cache.peek_remote_route(cur_ts, &rrid) {
-                rrce.set_last_seen_our_node_info_ts(our_node_info_ts);
-                return Ok(());
-            }
-        }
-
-        apibail_invalid_target!("private route is missing from store");
-    }
-
     /// Convert binary blob to private route vector
     fn blob_to_private_routes(&self, blob: Vec<u8>) -> VeilidAPIResult<Vec<Arc<PrivateRoute>>> {
         // Deserialize count
         if blob.is_empty() {
-            apibail_invalid_argument!(
-                "not deserializing empty private route blob",
-                "blob.is_empty",
-                true
-            );
+            apibail_invalid_argument!("not deserializing empty private route blob", "blob", &blob);
         }
 
         let pr_count = blob[0] as usize;
@@ -201,13 +167,15 @@ impl RouteSpecStore {
                 &mut pr_cursor,
                 capnp::message::ReaderOptions::new(),
             )
-            .map_err(|e| VeilidAPIError::invalid_argument("failed to read blob", "e", e))?;
+            .map_err(|e| {
+                VeilidAPIError::parse_error(format!("failed to read blob: {}", e), &blob)
+            })?;
 
             let pr_reader = reader
                 .get_root::<veilid_capnp::private_route::Reader>()
                 .map_err(VeilidAPIError::internal)?;
             let private_route = decode_private_route(&decode_context, &pr_reader).map_err(|e| {
-                VeilidAPIError::invalid_argument("failed to decode private route", "e", e)
+                VeilidAPIError::parse_error(format!("failed to decode private route: {}", e), &blob)
             })?;
 
             out.push(Arc::new(private_route));

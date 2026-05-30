@@ -2,8 +2,8 @@ use super::*;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) struct DialInfoFilter {
-    pub protocol_type_set: ProtocolTypeSet,
-    pub address_type_set: AddressTypeSet,
+    protocol_type_set: ProtocolTypeSet,
+    address_type_set: AddressTypeSet,
 }
 
 impl fmt::Display for DialInfoFilter {
@@ -33,6 +33,20 @@ impl DialInfoFilter {
             address_type_set: AddressTypeSet::all(),
         }
     }
+
+    pub fn protocol_type_set(&self) -> ProtocolTypeSet {
+        self.protocol_type_set
+    }
+
+    pub fn address_type_set(&self) -> AddressTypeSet {
+        self.address_type_set
+    }
+
+    pub fn contains_transport(&self, transport: TransportType) -> bool {
+        self.protocol_type_set.contains(transport.protocol_type())
+            && self.address_type_set.contains(transport.address_type())
+    }
+
     pub fn with_protocol_type(mut self, protocol_type: ProtocolType) -> Self {
         self.protocol_type_set = ProtocolTypeSet::only(protocol_type);
         self
@@ -118,6 +132,15 @@ impl From<AddressType> for DialInfoFilter {
 
 impl From<Flow> for DialInfoFilter {
     fn from(other: Flow) -> Self {
+        Self {
+            protocol_type_set: ProtocolTypeSet::from(other.protocol_type()),
+            address_type_set: AddressTypeSet::from(other.address_type()),
+        }
+    }
+}
+
+impl From<TransportType> for DialInfoFilter {
+    fn from(other: TransportType) -> Self {
         Self {
             protocol_type_set: ProtocolTypeSet::from(other.protocol_type()),
             address_type_set: AddressTypeSet::from(other.address_type()),

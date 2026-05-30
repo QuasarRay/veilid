@@ -158,7 +158,7 @@ impl ProtectedStore {
                 kr.set_value(value.as_ref())?;
                 Ok(existed)
             })
-            .map_err(VeilidAPIError::generic)
+            .map_err(|e| VeilidAPIError::generic(format!("failed to save user secret: {}", e)))
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]

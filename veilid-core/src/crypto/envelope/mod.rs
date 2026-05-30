@@ -96,7 +96,7 @@ impl Envelope {
                 env0: EnvelopeENV0::try_from_signed_data(crypto, data, network_key).await?,
             }),
             _ => {
-                apibail_parse_error!("unsupported envelope version", version);
+                apibail_parse_error!("unsupported envelope version", version.to_string());
             }
         }
     }
@@ -357,7 +357,7 @@ impl EnvelopeENV0 {
             .await?;
 
         // Decompress body
-        let body = decompress_size_prepended(&body, Some(ENV0_MAX_ENVELOPE_SIZE))?;
+        let body = decompress_size_prepended(&body, ENV0_MAX_ENVELOPE_SIZE)?;
 
         Ok(body.into())
     }

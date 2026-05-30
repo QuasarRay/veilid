@@ -95,6 +95,7 @@ class RoutingContext(ABC):
         subkeys: list[tuple[types.ValueSubkey, types.ValueSubkey]] = [],
         expiration: types.Timestamp = types.Timestamp(0),
         count: int = 0xFFFFFFFF,
+        transactional: bool = False,
     ) -> bool:
         pass
 
@@ -421,6 +422,14 @@ class DHTTransaction(ABC):
         pass
 
     @abstractmethod
+    async def extend(
+        self,
+        record_keys: list[types.RecordKey],
+        options: Optional[types.TransactDHTRecordsOptions] = None,
+    ):
+        pass
+
+    @abstractmethod
     async def get(
         self, key: types.RecordKey, subkey: types.ValueSubkey
     ) -> Optional[types.ValueData]:
@@ -561,6 +570,14 @@ class VeilidAPI(ABC):
 
     @abstractmethod
     async def now(self) -> types.Timestamp:
+        pass
+
+    @abstractmethod
+    async def now_non_decreasing(self) -> types.Timestamp:
+        pass
+
+    @abstractmethod
+    async def now_increasing(self) -> types.Timestamp:
         pass
 
     @abstractmethod

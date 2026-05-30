@@ -50,29 +50,29 @@ impl StateStatsAccounting {
                 }
                 BucketEntryStateReason::Dead(bucket_entry_dead_reason) => {
                     match bucket_entry_dead_reason {
-                        BucketEntryDeadReason::CanNotSend => {
+                        BucketEntryTransportDeadReason::CanNotSend => {
                             srs.can_not_send.saturating_add_assign(span_dur)
                         }
-                        BucketEntryDeadReason::TooManyLostAnswers => {
+                        BucketEntryTransportDeadReason::TooManyLostAnswers => {
                             srs.too_many_lost_answers.saturating_add_assign(span_dur)
                         }
-                        BucketEntryDeadReason::NoPingResponse => {
+                        BucketEntryTransportDeadReason::NoPingResponse => {
                             srs.no_ping_response.saturating_add_assign(span_dur)
                         }
                     }
                 }
                 BucketEntryStateReason::Unreliable(bucket_entry_unreliable_reason) => {
                     match bucket_entry_unreliable_reason {
-                        BucketEntryUnreliableReason::FailedToSend => {
+                        BucketEntryTransportUnreliableReason::FailedToSend => {
                             srs.failed_to_send.saturating_add_assign(span_dur)
                         }
-                        BucketEntryUnreliableReason::LostAnswers => {
+                        BucketEntryTransportUnreliableReason::LostAnswers => {
                             srs.lost_answers.saturating_add_assign(span_dur)
                         }
-                        BucketEntryUnreliableReason::NotSeenConsecutively => {
+                        BucketEntryTransportUnreliableReason::NotSeenConsecutively => {
                             srs.not_seen_consecutively.saturating_add_assign(span_dur)
                         }
-                        BucketEntryUnreliableReason::InUnreliablePingSpan => {
+                        BucketEntryTransportUnreliableReason::InUnreliablePingSpan => {
                             srs.in_unreliable_ping_span.saturating_add_assign(span_dur)
                         }
                     }
@@ -160,12 +160,6 @@ pub struct AnswerStatsAccounting {
 }
 
 impl AnswerStatsAccounting {
-    pub fn new() -> Self {
-        Self {
-            rolling_answer_spans: VecDeque::new(),
-        }
-    }
-
     fn current_span(&mut self, cur_ts: Timestamp) -> &mut AnswerSpan {
         if self.rolling_answer_spans.is_empty() {
             self.rolling_answer_spans.push_back(AnswerSpan::new(cur_ts));
@@ -192,28 +186,26 @@ impl AnswerStatsAccounting {
 
             consecutive_answers_maximum.max_assign(ras.consecutive_answers_maximum);
             consecutive_answers_minimum.min_assign(ras.consecutive_answers_minimum);
-            consecutive_answers_average += if ras.consecutive_answers_total > 0 {
-                ras.consecutive_answers_count / ras.consecutive_answers_total
-            } else {
-                0
-            };
+            consecutive_answers_average += ras
+                .consecutive_answers_total
+                .checked_div(ras.consecutive_answers_count)
+                .unwrap_or(0);
 
             consecutive_lost_answers_maximum.max_assign(ras.consecutive_lost_answers_maximum);
             consecutive_lost_answers_minimum.min_assign(ras.consecutive_lost_answers_minimum);
-            consecutive_lost_answers_average += if ras.consecutive_lost_answers_total > 0 {
-                ras.consecutive_lost_answers_count / ras.consecutive_lost_answers_total
-            } else {
-                0
-            };
+            consecutive_lost_answers_average += ras
+                .consecutive_lost_answers_total
+                .checked_div(ras.consecutive_lost_answers_count)
+                .unwrap_or(0);
 
             last_ts = ras.enter_ts;
         }
 
         let len = self.rolling_answer_spans.len() as u32;
-        if len > 0 {
-            consecutive_answers_average /= len;
-            consecutive_lost_answers_average /= len;
-        }
+        consecutive_answers_average = consecutive_answers_average.checked_div(len).unwrap_or(0);
+        consecutive_lost_answers_average = consecutive_lost_answers_average
+            .checked_div(len)
+            .unwrap_or(0);
 
         let span = cur_ts.duration_since(last_ts);
 

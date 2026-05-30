@@ -12,6 +12,8 @@ pub struct RoutingTableHealth {
     pub reliable_entry_count: usize,
     /// Number of unreliable (occasionally unresponsive) entries in the routing table
     pub unreliable_entry_count: usize,
+    /// Number of live entries we have actually contacted (tested: seen + latency)
+    pub tested_entry_count: usize,
     /// Number of punished (manually or automatically) entries in the routing table
     pub punished_entry_count: usize,
     /// Number of dead (always unresponsive) entries in the routing table
@@ -42,11 +44,12 @@ impl fmt::Display for RoutingTableHealth {
         let mut domains_health = Vec::new();
 
         domains_health.push(format!(
-            "All Domains:\n    total={}, live={} (reliable={}, unreliable={}), dead={}, punished={}",
+            "All Domains:\n    total={}, live={} (reliable={}, unreliable={}), tested={}, dead={}, punished={}",
             self.total_entry_count,
             self.live_entry_count(),
             self.reliable_entry_count,
             self.unreliable_entry_count,
+            self.tested_entry_count,
             self.dead_entry_count,
             self.punished_entry_count
         ));

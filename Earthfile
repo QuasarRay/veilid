@@ -121,9 +121,6 @@ deps-rust:
     # Install cargo tools (try binstall of musl targets first, then fallback to regular install)
     # (Doing it this way so we don't have to install the musl rust targets, which binstall will default to building with)
 
-    # Wasm build tool
-    RUN cargo binstall wasm-pack --disable-strategies=compile --targets $DEFAULT_CARGO_MUSL_TARGET || \
-        cargo install wasm-pack --locked
     # Caching tool (custom build supports zigbuild clippy)
     RUN curl --retry $RETRY_COUNT --retry-connrefused -L --proto '=https' --tlsv1.2 -sSf https://gitlab.com/api/v4/projects/79785586/packages/generic/cargo-chef/0.1.73/cargo-chef-x86_64-unknown-linux-musl.tar.gz | tar -xz -C $CARGO_HOME/bin
     # RUN cargo install cargo-chef --git https://gitlab.com/veilid/cargo-chef.git --locked
@@ -201,7 +198,8 @@ build-linux-cache:
     RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target aarch64-unknown-linux-gnu --all-targets --locked -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
     RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target x86_64-pc-windows-gnu --all-targets --locked -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
     RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target aarch64-apple-darwin --all-targets --locked -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
-    RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target wasm32-unknown-unknown --all-targets --locked --features=js,dart -p veilid-wasm
+    RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target wasm32-unknown-unknown --all-targets --locked -p veilid-wasm
+    RUN cargo chef cook --recipe-path recipe.json --zigbuild=clippy --target wasm32-unknown-unknown --all-targets --locked --no-default-features --features=default-wasm -p veilid-flutter
     ARG CI_REGISTRY_IMAGE=registry.gitlab.com/veilid/veilid
     ARG CACHE_NAME
     ARG CACHE_TAG

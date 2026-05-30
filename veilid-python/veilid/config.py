@@ -58,6 +58,8 @@ class VeilidConfigProtectedStore(ConfigBase):
 class VeilidConfigTableStore(ConfigBase):
     directory: str
     delete: bool
+    wipe_on_invalid_device_encryption_key: bool
+    max_value_size_mb: int
 
 
 @dataclass
@@ -72,11 +74,6 @@ class VeilidConfigRoutingTable(ConfigBase):
     secret_keys: list[SecretKey]
     bootstrap: list[str]
     bootstrap_keys: list[PublicKey]
-    limit_over_attached: int
-    limit_fully_attached: int
-    limit_attached_strong: int
-    limit_attached_good: int
-    limit_attached_weak: int
 
 
 @dataclass

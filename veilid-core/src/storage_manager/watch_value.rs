@@ -19,8 +19,8 @@ pub(super) struct AcceptedWatch {
     pub node_ref: NodeRef,
     /// The expiration of a successful watch
     pub expiration: Timestamp,
-    /// Which private route is responsible for receiving ValueChanged notifications
-    pub opt_value_changed_route: Option<PublicKey>,
+    /// Ref to the route receiving ValueChanged notifications
+    pub opt_value_changed_route: Option<AllocatedRouteRef>,
 }
 
 /// The result of the outbound_watch_value operation
@@ -79,6 +79,17 @@ impl OutboundWatchValueResult {
     }
 }
 
+/// Result of update_watch_per_node_state_inner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum WatchChangeAcceptance {
+    /// Per-node state update rejected; skip this notification.
+    Reject,
+    /// Accept normally: report value + run change-inspection if needed.
+    Accept,
+    /// Accept transactionally: report subkey range only, no local-store update.
+    AcceptTransactional,
+}
+
 impl StorageManager {
     /// Create, update or cancel an outbound watch to a DHT value
     #[cfg_attr(
@@ -91,20 +102,27 @@ impl StorageManager {
         subkeys: ValueSubkeyRangeSet,
         expiration: Timestamp,
         count: u32,
+        transactional: bool,
     ) -> VeilidAPIResult<bool> {
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
         };
 
-        // Obtain the watch change lock
-        // (may need to wait for background operations to complete on the watch)
-        let _records_lock = self
+        // Watch mode: excludes close/delete and other watch ops on this record
+        let _record_lock = self
             .record_lock_table
             .lock_record(record_key.opaque(), StorageManagerRecordLockPurpose::Watch)
             .await;
 
         let mut inner = self.inner.lock();
-        self.watch_values_inner(&mut inner, record_key, subkeys, expiration, count)
+        self.watch_values_inner(
+            &mut inner,
+            record_key,
+            subkeys,
+            expiration,
+            count,
+            transactional,
+        )
     }
 
     #[cfg_attr(
@@ -121,9 +139,8 @@ impl StorageManager {
         };
         let opaque_record_key = record_key.opaque();
 
-        // Obtain the watch change lock
-        // (may need to wait for background operations to complete on the watch)
-        let _records_lock = self
+        // Watch mode: excludes close/delete and other watch ops on this record
+        let _record_lock = self
             .record_lock_table
             .lock_record(
                 opaque_record_key.clone(),
@@ -181,12 +198,14 @@ impl StorageManager {
 
         // Update the watch. This just calls through to the above watch_values_inner() function
         // This will update the active_watch so we don't need to do that in this routine.
+        let transactional = desired.transactional;
         self.watch_values_inner(
             &mut inner,
             record_key,
             new_subkeys,
             desired.expiration,
             count,
+            transactional,
         )
     }
 
@@ -230,6 +249,7 @@ impl StorageManager {
         subkeys: ValueSubkeyRangeSet,
         expiration: Timestamp,
         count: u32,
+        transactional: bool,
     ) -> VeilidAPIResult<bool> {
         let opaque_record_key = record_key.opaque();
 
@@ -287,6 +307,7 @@ impl StorageManager {
                 subkeys,
                 opt_watcher,
                 safety_selection,
+                transactional,
             })
         };
 
@@ -407,7 +428,8 @@ impl StorageManager {
                     opt_value_changed_route: wva
                         .answer_context
                         .waitable_reply_context
-                        .opt_reply_private_route,
+                        .opt_reply_private_route_ref
+                        .clone(),
                 }],
                 rejected: vec![],
                 ignored: vec![],
@@ -491,36 +513,45 @@ impl StorageManager {
                     };
                     let watch_id = per_node_state.get(&pnk).map(|pns| pns.watch_id);
 
-                    Box::pin(async move {
+                    let fut = async move {
                         let rpc_processor = registry.rpc_processor();
 
-                        let wva = match
-                            rpc_processor
-                                .rpc_call_watch_value(
-                                    Destination::direct(next_node.routing_domain_filtered(routing_domain), Some(params.safety_selection)),
-                                    record_key.opaque(),
-                                    params.subkeys,
-                                    params.expiration,
-                                    params.count,
-                                    watcher,
-                                    watch_id
-                                )
-                                .await? {
-                                    NetworkResult::Timeout => {
-                                        let mut ctx = context.lock();
-                                        ctx.watch_value_result.ignored.push(next_node.clone());
-                                        return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Timeout});
-                                    }
-                                    NetworkResult::ServiceUnavailable(_) |
-                                    NetworkResult::NoConnection(_)  |
-                                    NetworkResult::AlreadyExists(_) |
-                                    NetworkResult::InvalidMessage(_) => {
-                                        let mut ctx = context.lock();
-                                        ctx.watch_value_result.ignored.push(next_node.clone());
-                                        return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
-                                    }
-                                    NetworkResult::Value(v) => v
-                                };
+                        let wva = match rpc_processor
+                            .rpc_call_watch_value(
+                                Destination::direct(
+                                    next_node.routing_domain_filtered(routing_domain),
+                                    Some(params.safety_selection),
+                                ),
+                                record_key.opaque(),
+                                params.subkeys,
+                                params.expiration,
+                                params.count,
+                                watcher,
+                                watch_id,
+                            )
+                            .await?
+                        {
+                            NetworkResult::Timeout => {
+                                let mut ctx = context.lock();
+                                ctx.watch_value_result.ignored.push(next_node.clone());
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Timeout,
+                                });
+                            }
+                            NetworkResult::ServiceUnavailable(_)
+                            | NetworkResult::NoConnection(_)
+                            | NetworkResult::AlreadyExists(_)
+                            | NetworkResult::InvalidMessage(_) => {
+                                let mut ctx = context.lock();
+                                ctx.watch_value_result.ignored.push(next_node.clone());
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Invalid,
+                                });
+                            }
+                            NetworkResult::Value(v) => v,
+                        };
 
                         // Keep answer if we got one
                         // (accepted means the node could provide an answer, not that the watch is active)
@@ -531,11 +562,15 @@ impl StorageManager {
 
                                 // Add to accepted watches
                                 let mut ctx = context.lock();
-                                ctx.watch_value_result.accepted.push(AcceptedWatch{
+                                ctx.watch_value_result.accepted.push(AcceptedWatch {
                                     watch_id: wva.answer.watch_id,
                                     node_ref: next_node.clone(),
                                     expiration: wva.answer.expiration,
-                                    opt_value_changed_route: wva.answer_context.waitable_reply_context.opt_reply_private_route,
+                                    opt_value_changed_route: wva
+                                        .answer_context
+                                        .waitable_reply_context
+                                        .opt_reply_private_route_ref
+                                        .clone(),
                                 });
 
                                 FanoutCallDisposition::Accepted
@@ -564,8 +599,17 @@ impl StorageManager {
                         // Return peers if we have some
                         veilid_log!(registry debug target:"network_result", "WatchValue fanout call returned peers {} ({})", wva.answer.peers.len(), next_node);
 
-                        Ok(FanoutCallOutput{peer_info_list: wva.answer.peers, disposition})
-                    }.instrument(tracing::trace_span!("outbound_watch_value call routine"))) as PinBoxFuture<FanoutCallResult>
+                        Ok(FanoutCallOutput {
+                            peer_info_list: wva.answer.peers,
+                            disposition,
+                        })
+                    };
+                    #[cfg(feature = "instrument")]
+                    let fut = fut.instrument(tracing::trace_span!(
+                        target: "dht",
+                        "outbound_watch_value call routine"
+                    ));
+                    Box::pin(fut) as PinBoxFuture<FanoutCallResult>
                 },
             )
         };
@@ -651,8 +695,8 @@ impl StorageManager {
     }
 
     /// Remove dead watches from the table
-    pub(super) fn process_outbound_watch_dead(&self, watch_lock: StorageManagerRecordLockGuard) {
-        let opaque_record_key = watch_lock.record();
+    pub(super) fn process_outbound_watch_dead(&self, record_lock: StorageManagerRecordLockGuard) {
+        let opaque_record_key = record_lock.record();
 
         let Some(outbound_watch) = self
             .inner
@@ -673,7 +717,7 @@ impl StorageManager {
         }
 
         // Send valuechange with dead count and no subkeys to inform the api that this watch is now gone completely
-        drop(watch_lock);
+        drop(record_lock);
         self.update_callback_value_change(
             outbound_watch.record_key(),
             ValueSubkeyRangeSet::new(),
@@ -686,9 +730,9 @@ impl StorageManager {
     /// and call their nodes to cancel the watch
     pub(super) async fn process_outbound_watch_cancel(
         &self,
-        watch_lock: StorageManagerRecordLockGuard,
+        record_lock: StorageManagerRecordLockGuard,
     ) {
-        let opaque_record_key = watch_lock.record();
+        let opaque_record_key = record_lock.record();
 
         // If we can't do this operation right now, don't try
         if !self.dht_is_online() {
@@ -802,9 +846,9 @@ impl StorageManager {
     /// and drop the ones that can't be or are dead
     pub(super) async fn process_outbound_watch_renew(
         &self,
-        watch_lock: StorageManagerRecordLockGuard,
+        record_lock: StorageManagerRecordLockGuard,
     ) {
-        let opaque_record_key = watch_lock.record();
+        let opaque_record_key = record_lock.record();
 
         // If we can't do this operation right now, don't try
         if !self.dht_is_online() {
@@ -905,9 +949,9 @@ impl StorageManager {
     /// Perform fanout to add or update per-node watches to an outbound watch
     pub(super) async fn process_outbound_watch_reconcile(
         &self,
-        watch_lock: StorageManagerRecordLockGuard,
+        record_lock: StorageManagerRecordLockGuard,
     ) {
-        let opaque_record_key = watch_lock.record();
+        let opaque_record_key = record_lock.record();
 
         // If we can't do this operation right now, don't try
         if !self.dht_is_online() {
@@ -1071,7 +1115,10 @@ impl StorageManager {
                 let opt_watcher = desired.opt_watcher.clone();
                 let safety_selection = desired.safety_selection.clone();
                 let watch_node_ref = Some(accepted_watch.node_ref);
-                let opt_value_changed_route = accepted_watch.opt_value_changed_route;
+                // Persisted state stores the key, not the lock ref (not serializable)
+                let opt_value_changed_route = accepted_watch
+                    .opt_value_changed_route
+                    .map(|r| r.route_key().clone());
 
                 inner.outbound_watch_manager.per_node_states.insert(
                     pnk.clone(),
@@ -1144,8 +1191,9 @@ impl StorageManager {
         let registry = self.registry();
         let consensus_count = self.config().network.dht.get_value_count as usize;
 
-        // Operate on this watch only if it isn't already being operated on
-        let watch_lock = self
+        // Operate on this watch only if it isn't already being operated on.
+        // Watch mode (lifetime.read + watch_lock) is concurrent with reads/sets/transactions.
+        let record_lock = self
             .record_lock_table
             .try_lock_record(key.opaque(), StorageManagerRecordLockPurpose::Watch)?;
 
@@ -1161,7 +1209,7 @@ impl StorageManager {
                 async move {
                     registry
                         .storage_manager()
-                        .process_outbound_watch_dead(watch_lock)
+                        .process_outbound_watch_dead(record_lock)
                 }
             };
             return Some(pin_dyn_future!(fut));
@@ -1172,7 +1220,7 @@ impl StorageManager {
                 async move {
                     registry
                         .storage_manager()
-                        .process_outbound_watch_cancel(watch_lock)
+                        .process_outbound_watch_cancel(record_lock)
                         .await
                 }
             };
@@ -1184,7 +1232,7 @@ impl StorageManager {
                 async move {
                     registry
                         .storage_manager()
-                        .process_outbound_watch_renew(watch_lock)
+                        .process_outbound_watch_renew(record_lock)
                         .await
                 }
             };
@@ -1196,7 +1244,7 @@ impl StorageManager {
                 async move {
                     registry
                         .storage_manager()
-                        .process_outbound_watch_reconcile(watch_lock)
+                        .process_outbound_watch_reconcile(record_lock)
                         .await
                 }
             };
@@ -1252,7 +1300,7 @@ impl StorageManager {
                         if value.seq() > local_seq {
                             // Calculate the update
                             let (changed_subkeys, remaining_count, value) = {
-                                let _watch_lock = this
+                                let _record_lock = this
                                     .record_lock_table
                                     .lock_record(
                                         opaque_record_key.clone(),
@@ -1392,19 +1440,19 @@ impl StorageManager {
         count: u32,
         inbound_node_id: &NodeId,
         watch_id: u64,
-    ) -> VeilidAPIResult<bool> {
+    ) -> VeilidAPIResult<WatchChangeAcceptance> {
         let opaque_record_key = record_key.opaque();
         let owm = &mut inner.outbound_watch_manager;
 
         // Get the outbound watch
         let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
             // No outbound watch means no callback
-            return Ok(false);
+            return Ok(WatchChangeAcceptance::Reject);
         };
 
         let Some(state) = outbound_watch.state_mut() else {
             // No outbound watch current state means no callback (we haven't reconciled yet)
-            return Ok(false);
+            return Ok(WatchChangeAcceptance::Reject);
         };
 
         // If the reporting node is not part of our current watch, don't process the value change
@@ -1413,20 +1461,20 @@ impl StorageManager {
             node_id: inbound_node_id.clone(),
         };
         if !state.nodes().contains(&pnk) {
-            return Ok(false);
+            return Ok(WatchChangeAcceptance::Reject);
         }
 
         // Get per node state
         let Some(per_node_state) = owm.per_node_states.get_mut(&pnk) else {
             // No per node state means no callback
             veilid_log!(self warn "Missing per node state in outbound watch: {:?}", pnk);
-            return Ok(false);
+            return Ok(WatchChangeAcceptance::Reject);
         };
 
         // If watch id doesn't match it's for an older watch and should be ignored
         if per_node_state.watch_id != watch_id {
             veilid_log!(self debug "Incorrect watch id for per node state in outbound watch: {:?} {} != {}", pnk, per_node_state.watch_id, watch_id);
-            return Ok(false);
+            return Ok(WatchChangeAcceptance::Reject);
         }
 
         // Update per node state
@@ -1444,7 +1492,7 @@ impl StorageManager {
 
             // Force count to zero for this node id so it gets cancelled out by the background process
             per_node_state.count = 0;
-            return Ok(false);
+            return Ok(WatchChangeAcceptance::Reject);
         } else if count == per_node_state.count {
             // If a packet gets delivered twice or something else is wrong, report a non-decremented watch count
             // Log this because watch counts should always be decrementing non a per-node basis.
@@ -1470,6 +1518,9 @@ impl StorageManager {
             per_node_state.count = count;
         }
 
+        // Read the transactional flag before state.edit reborrows
+        let transactional = state.params().transactional;
+
         // Record that we received a valid ValueChanged — resets fallback inspection timer
         // NOTE: It is possible this should be a per-node state, but for now let's try it on the whole watch
         // Done after per_node_state usage to avoid borrow conflicts with owm.per_node_states
@@ -1477,7 +1528,11 @@ impl StorageManager {
             editor.touch_value_changed(Timestamp::now_non_decreasing());
         });
 
-        Ok(true)
+        Ok(if transactional {
+            WatchChangeAcceptance::AcceptTransactional
+        } else {
+            WatchChangeAcceptance::Accept
+        })
     }
 
     async fn accept_single_value_change_and_report(
@@ -1571,7 +1626,7 @@ impl StorageManager {
 
         // Determine if we have reportable subkeys
         // Also clears the value if the value should not be reported
-        let mut reportable_subkeys = {
+        let (mut reportable_subkeys, transactional) = {
             let inner = &mut *self.inner.lock();
 
             // No subkeys means remote node cancelled, but we already captured that with the
@@ -1592,18 +1647,26 @@ impl StorageManager {
                 return Ok(NetworkResult::value(()));
             };
 
-            // Update the per-node watch state and determine if this watch should be be reported
-            let watch_change_accepted = self.update_watch_per_node_state_inner(
+            // Update the per-node watch state and determine acceptance
+            let acceptance = self.update_watch_per_node_state_inner(
                 inner,
                 &record_key,
                 count,
                 &inbound_node_id,
                 watch_id,
             )?;
-            if !watch_change_accepted {
-                // Per-node state update was rejected, skip this
-                return Ok(NetworkResult::value(()));
-            }
+            let transactional = match acceptance {
+                WatchChangeAcceptance::Reject => {
+                    // Per-node state update was rejected, skip this
+                    return Ok(NetworkResult::value(()));
+                }
+                WatchChangeAcceptance::AcceptTransactional => {
+                    // Drop the inline value; the watcher fetches transactionally
+                    opt_value = None;
+                    true
+                }
+                WatchChangeAcceptance::Accept => false,
+            };
 
             // If our watched subkey range differs from the reported change's range
             // we should only report changes that we care about
@@ -1616,7 +1679,7 @@ impl StorageManager {
                 opt_value = None;
             }
 
-            reportable_subkeys
+            (reportable_subkeys, transactional)
         };
 
         // See if the value we received can be reported as-is
@@ -1678,17 +1741,53 @@ impl StorageManager {
             )
             .await?;
         } else if !reportable_subkeys.is_empty() {
-            // We have subkeys that have be reported as possibly changed
-            // but not a specific record reported, so we should defer reporting and
-            // inspect the range to see what changed
+            if transactional {
+                // Transactional watcher: emit ValueChange with the changed
+                // subkey range only. Decrement remaining count to match the
+                // non-transactional accept path. The watcher will fetch the
+                // new value under its own transaction; do NOT enqueue a
+                // change inspection (its forced get would update the local
+                // store outside that transaction).
+                let remaining_count = {
+                    let inner = &mut *self.inner.lock();
+                    if let Some(outbound_watch) = inner
+                        .outbound_watch_manager
+                        .outbound_watches
+                        .get_mut(&opaque_record_key)
+                    {
+                        if let Some(state) = outbound_watch.state_mut() {
+                            let rc = state.remaining_count().saturating_sub(1);
+                            state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+                                editor.set_remaining_count(rc)
+                            });
+                            rc
+                        } else {
+                            0
+                        }
+                    } else {
+                        0
+                    }
+                };
+                drop(record_lock);
+                self.update_callback_value_change(
+                    record_key,
+                    reportable_subkeys,
+                    remaining_count,
+                    None,
+                );
+            } else {
+                // We have subkeys that have be reported as possibly changed
+                // but not a specific record reported, so we should defer reporting and
+                // inspect the range to see what changed
 
-            // Queue this up for inspection
-            let mut inner = self.inner.lock();
-            inner.outbound_watch_manager.enqueue_change_inspect(
-                self,
-                record_key,
-                reportable_subkeys,
-            );
+                // Queue this up for inspection
+                let mut inner = self.inner.lock();
+                inner.outbound_watch_manager.enqueue_change_inspect(
+                    self,
+                    record_key,
+                    reportable_subkeys,
+                );
+            }
         }
 
         Ok(NetworkResult::value(()))

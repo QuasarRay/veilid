@@ -196,12 +196,15 @@ impl PublicInternetRoutingDomainController {
                     let bsdi = match network_manager
                         .get_node_contact_method(nr.sequencing_filtered(Sequencing::PreferOrdered))
                     {
-                        Ok(Some(ncm)) if ncm.is_direct() => ncm.direct_dial_info().unwrap_or_log(),
+                        Ok(NodeContactMethodResult::Resolved(ncm)) => {
+                            let Some(di) = ncm.direct_dial_info() else {
+                                veilid_log!(nr debug "invalid contact method for bootstrap, ignoring peer: {}", NodeContactMethodResult::Resolved(ncm));
+                                return None;
+                            };
+                            di
+                        }
                         Ok(v) => {
-                            veilid_log!(nr debug "invalid contact method for bootstrap, ignoring peer: {:?}", v);
-                            // let _ =
-                            //     network_manager
-                            //     .get_node_contact_method(nr.clone());
+                            veilid_log!(nr debug "invalid contact method for bootstrap, ignoring peer: {}", v);
                             return None;
                         }
                         Err(e) => {
@@ -219,7 +222,7 @@ impl PublicInternetRoutingDomainController {
                         veilid_log!(nr info "bootstrap server is not responding for dialinfo: {}", bsdi);
 
                         // Try a different dialinfo next time
-                        network_manager.address_filter().set_dial_info_failed(bsdi);
+                        network_manager.address_filter().set_transport_failed(bsdi);
                         None
                     } else {
                         // otherwise this bootstrap is valid, lets ask it to find ourselves now

@@ -30,82 +30,6 @@
     }
   ],
   "$defs": {
-    "AnswerStats": {
-      "description": "Measurement of round-trip RPC question/answer performance",
-      "type": "object",
-      "properties": {
-        "answers": {
-          "description": "number of answers received in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "consecutive_answers_average": {
-          "description": "average number of received answers before a lost answer in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "consecutive_answers_maximum": {
-          "description": "maximum number of received answers before a lost answer in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "consecutive_answers_minimum": {
-          "description": "minimum number of received answers before a lost answer in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "consecutive_lost_answers_average": {
-          "description": "average number of timeouts before a received answer in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "consecutive_lost_answers_maximum": {
-          "description": "maximum number of timeouts before a received answer in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "consecutive_lost_answers_minimum": {
-          "description": "minimum number of timeouts before a received answer in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "lost_answers": {
-          "description": "number of lost answers in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "questions": {
-          "description": "number of questions sent in this span",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "span": {
-          "description": "total amount of time measured",
-          "$ref": "#/$defs/TimestampDuration"
-        }
-      },
-      "required": [
-        "span",
-        "questions",
-        "answers",
-        "lost_answers",
-        "consecutive_answers_maximum",
-        "consecutive_answers_average",
-        "consecutive_answers_minimum",
-        "consecutive_lost_answers_maximum",
-        "consecutive_lost_answers_average",
-        "consecutive_lost_answers_minimum"
-      ]
-    },
     "AttachmentState": {
       "description": "Attachment abstraction for network 'signal strength'.",
       "type": "string",
@@ -113,10 +37,10 @@
         "Detached",
         "Attaching",
         "AttachedWeak",
+        "AttachedFair",
         "AttachedGood",
         "AttachedStrong",
-        "FullyAttached",
-        "OverAttached",
+        "AttachedFull",
         "Detaching"
       ]
     },
@@ -1353,6 +1277,42 @@
           "properties": {
             "dhttx_op": {
               "type": "string",
+              "const": "Extend"
+            }
+          },
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "dhttx_op"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dhttx_op": {
+              "type": "string",
               "const": "Get"
             }
           },
@@ -1512,6 +1472,9 @@
         "slowest"
       ]
     },
+    "NodeCount": {
+      "type": "string"
+    },
     "PeerStats": {
       "description": "Statistics for a peer in the routing table",
       "type": "object",
@@ -1528,34 +1491,22 @@
           ],
           "default": null
         },
+        "protected_connection_drop": {
+          "description": "how long protected connections to this peer survived before being closed\nby the remote side; longer is better. None = no remote-closed protected\ndrops yet observed.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LatencyStats"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "rpc_stats": {
           "description": "information about RPCs",
           "$ref": "#/$defs/RPCStats",
           "default": {
-            "answer_ordered": {
-              "answers": 0,
-              "consecutive_answers_average": 0,
-              "consecutive_answers_maximum": 0,
-              "consecutive_answers_minimum": 0,
-              "consecutive_lost_answers_average": 0,
-              "consecutive_lost_answers_maximum": 0,
-              "consecutive_lost_answers_minimum": 0,
-              "lost_answers": 0,
-              "questions": 0,
-              "span": "0"
-            },
-            "answer_unordered": {
-              "answers": 0,
-              "consecutive_answers_average": 0,
-              "consecutive_answers_maximum": 0,
-              "consecutive_answers_minimum": 0,
-              "consecutive_lost_answers_average": 0,
-              "consecutive_lost_answers_maximum": 0,
-              "consecutive_lost_answers_minimum": 0,
-              "lost_answers": 0,
-              "questions": 0,
-              "span": "0"
-            },
             "failed_to_send": 0,
             "first_consecutive_seen_ts": null,
             "last_question_ts": null,
@@ -1563,8 +1514,7 @@
             "messages_rcvd": 0,
             "messages_sent": 0,
             "questions_in_flight": 0,
-            "recent_lost_answers_ordered": 0,
-            "recent_lost_answers_unordered": 0
+            "unreachable": 0
           }
         },
         "state": {
@@ -1644,38 +1594,6 @@
       "description": "Statistics for RPC operations performed on a node",
       "type": "object",
       "properties": {
-        "answer_ordered": {
-          "description": "ordered rpc answer stats for this peer",
-          "$ref": "#/$defs/AnswerStats",
-          "default": {
-            "answers": 0,
-            "consecutive_answers_average": 0,
-            "consecutive_answers_maximum": 0,
-            "consecutive_answers_minimum": 0,
-            "consecutive_lost_answers_average": 0,
-            "consecutive_lost_answers_maximum": 0,
-            "consecutive_lost_answers_minimum": 0,
-            "lost_answers": 0,
-            "questions": 0,
-            "span": "0"
-          }
-        },
-        "answer_unordered": {
-          "description": "unordered rpc answer stats for this peer",
-          "$ref": "#/$defs/AnswerStats",
-          "default": {
-            "answers": 0,
-            "consecutive_answers_average": 0,
-            "consecutive_answers_maximum": 0,
-            "consecutive_answers_minimum": 0,
-            "consecutive_lost_answers_average": 0,
-            "consecutive_lost_answers_maximum": 0,
-            "consecutive_lost_answers_minimum": 0,
-            "lost_answers": 0,
-            "questions": 0,
-            "span": "0"
-          }
-        },
         "failed_to_send": {
           "description": "number of messages that have failed to send or connections dropped since we last successfully sent one",
           "type": "integer",
@@ -1733,15 +1651,8 @@
           "format": "uint32",
           "minimum": 0
         },
-        "recent_lost_answers_ordered": {
-          "description": "number of answers that have been lost consecutively over an ordered channel",
-          "type": "integer",
-          "format": "uint32",
-          "default": 0,
-          "minimum": 0
-        },
-        "recent_lost_answers_unordered": {
-          "description": "number of answers that have been lost consecutively over an unordered channel",
+        "unreachable": {
+          "description": "number of attempts where no transport could be chosen (no routing domain, no peer info, no contact method)",
           "type": "integer",
           "format": "uint32",
           "default": 0,
@@ -2590,6 +2501,38 @@
             "op": {
               "type": "string",
               "const": "Now"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "NowNonDecreasing"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "NowIncreasing"
             },
             "value": {
               "type": "string"
@@ -4058,18 +4001,6 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "Shutdown"
-            }
-          },
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
               "const": "InvalidTarget"
             },
             "message": {
@@ -4095,6 +4026,18 @@
           "required": [
             "kind",
             "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "Shutdown"
+            }
+          },
+          "required": [
+            "kind"
           ]
         },
         {
@@ -4773,31 +4716,6 @@
             "type": "string"
           }
         },
-        "limit_attached_good": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "limit_attached_strong": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "limit_attached_weak": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "limit_fully_attached": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "limit_over_attached": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
         "public_keys": {
           "type": "array",
           "items": {
@@ -4815,12 +4733,7 @@
         "public_keys",
         "secret_keys",
         "bootstrap",
-        "bootstrap_keys",
-        "limit_over_attached",
-        "limit_fully_attached",
-        "limit_attached_strong",
-        "limit_attached_good",
-        "limit_attached_weak"
+        "bootstrap_keys"
       ]
     },
     "VeilidConfigTCP": {
@@ -4885,11 +4798,21 @@
         },
         "directory": {
           "type": "string"
+        },
+        "max_value_size_mb": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "wipe_on_invalid_device_encryption_key": {
+          "type": "boolean"
         }
       },
       "required": [
         "directory",
-        "delete"
+        "delete",
+        "wipe_on_invalid_device_encryption_key",
+        "max_value_size_mb"
       ]
     },
     "VeilidConfigUDP": {
@@ -5038,7 +4961,7 @@
       "type": "object",
       "properties": {
         "attached_uptime": {
-          "description": "Uptime since last attach, empty if the node is currently detached",
+          "description": "Uptime since last attach, None when detached.",
           "anyOf": [
             {
               "$ref": "#/$defs/TimestampDuration"
@@ -5048,20 +4971,47 @@
             }
           ]
         },
+        "estimated_network_size": {
+          "description": "Smoothed estimate of total reachable network size.",
+          "$ref": "#/$defs/NodeCount"
+        },
+        "live_peer_count": {
+          "description": "Live peers (reliable + unreliable) in the routing table.",
+          "$ref": "#/$defs/NodeCount"
+        },
         "local_network_ready": {
-          "description": "If attached and there are enough reachable nodes in the routing table to perform all the actions of the LocalNetwork RoutingDomain.",
+          "description": "Whether the LocalNetwork routing domain is ready for all operations.",
           "type": "boolean"
+        },
+        "median_latency": {
+          "description": "Median p75 latency across reliable peers, None when no samples yet.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimestampDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "over_attached_nodes": {
+          "description": "Entries in bucket overflow awaiting lazy kick.",
+          "$ref": "#/$defs/NodeCount"
         },
         "public_internet_ready": {
-          "description": "If attached and there are enough reachable nodes in the routing table to perform all the actions of the PublicInternet RoutingDomain,\nincluding things like private/safety route allocation and DHT operations.",
+          "description": "Whether the PublicInternet routing domain is ready for all operations.",
           "type": "boolean"
         },
+        "reliable_peer_count": {
+          "description": "Reliable peers in the routing table.",
+          "$ref": "#/$defs/NodeCount"
+        },
         "state": {
-          "description": "The overall quality of the routing table if attached, or the current state the attachment state machine.",
+          "description": "Overall network quality (signal-strength bars).",
           "$ref": "#/$defs/AttachmentState"
         },
         "uptime": {
-          "description": "Node uptime",
+          "description": "Node uptime.",
           "$ref": "#/$defs/TimestampDuration"
         }
       },
@@ -5069,7 +5019,11 @@
         "state",
         "public_internet_ready",
         "local_network_ready",
-        "uptime"
+        "uptime",
+        "reliable_peer_count",
+        "live_peer_count",
+        "estimated_network_size",
+        "over_attached_nodes"
       ]
     },
     "VeilidStateConfig": {

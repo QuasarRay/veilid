@@ -36,24 +36,29 @@ enum ContactMethodKind {
     InboundRelay,
     OutboundRelay,
 }
-impl From<Option<&NodeContactMethod>> for ContactMethodKind {
-    fn from(value: Option<&NodeContactMethod>) -> Self {
+impl From<&NodeContactMethodResult> for ContactMethodKind {
+    fn from(value: &NodeContactMethodResult) -> Self {
         match value {
-            None => ContactMethodKind::Unreachable,
-            Some(NodeContactMethod::Existing) => ContactMethodKind::Existing,
-            Some(NodeContactMethod::Direct { target_di: _ }) => ContactMethodKind::Direct,
-            Some(NodeContactMethod::SignalReverse { relay_di: _ }) => {
+            NodeContactMethodResult::NoRoutingDomain
+            | NodeContactMethodResult::NoPeerInfo
+            | NodeContactMethodResult::NoContactMethod
+            | NodeContactMethodResult::Punished => ContactMethodKind::Unreachable,
+            NodeContactMethodResult::Resolved(NodeContactMethod::Existing) => {
+                ContactMethodKind::Existing
+            }
+            NodeContactMethodResult::Resolved(NodeContactMethod::Direct { .. }) => {
+                ContactMethodKind::Direct
+            }
+            NodeContactMethodResult::Resolved(NodeContactMethod::SignalReverse { .. }) => {
                 ContactMethodKind::SignalReverse
             }
-            Some(NodeContactMethod::SignalHolePunch {
-                relay_di: _,
-                hole_punch_di: _,
-                reverse_hole_punch_di: _,
-            }) => ContactMethodKind::SignalHolePunch,
-            Some(NodeContactMethod::InboundRelay { relay_di: _ }) => {
+            NodeContactMethodResult::Resolved(NodeContactMethod::SignalHolePunch { .. }) => {
+                ContactMethodKind::SignalHolePunch
+            }
+            NodeContactMethodResult::Resolved(NodeContactMethod::InboundRelay { .. }) => {
                 ContactMethodKind::InboundRelay
             }
-            Some(NodeContactMethod::OutboundRelay { relay_nr: _ }) => {
+            NodeContactMethodResult::Resolved(NodeContactMethod::OutboundRelay { .. }) => {
                 ContactMethodKind::OutboundRelay
             }
         }
@@ -79,7 +84,7 @@ impl fmt::Display for HitMissStats {
 }
 
 pub struct NodeContactMethodCache {
-    cache: hashlink::LruCache<NodeContactMethodCacheKey, Option<NodeContactMethod>>,
+    cache: hashlink::LruCache<NodeContactMethodCacheKey, NodeContactMethodResult>,
 
     // Statistics for cache hits/misses
     cache_stats: HitMissStats,
@@ -109,32 +114,26 @@ impl NodeContactMethodCache {
     pub fn insert(
         &mut self,
         ncm_key: NodeContactMethodCacheKey,
-        opt_ncm_kind: Option<NodeContactMethod>,
+        ncm_result: NodeContactMethodResult,
     ) {
-        // Cache this
-        self.cache.insert(ncm_key, opt_ncm_kind);
+        self.cache.insert(ncm_key, ncm_result);
     }
 
-    pub fn get(
-        &mut self,
-        ncm_key: &NodeContactMethodCacheKey,
-    ) -> Option<Option<NodeContactMethod>> {
-        if let Some(opt_ncm_kind) = self.cache.get(ncm_key) {
+    pub fn get(&mut self, ncm_key: &NodeContactMethodCacheKey) -> Option<NodeContactMethodResult> {
+        if let Some(ncm_result) = self.cache.get(ncm_key) {
             self.cache_stats.hit += 1;
-
-            return Some(opt_ncm_kind.clone());
+            return Some(ncm_result.clone());
         }
-        // Record miss
         self.cache_stats.miss += 1;
         None
     }
 
-    pub fn record_contact_method_success(&mut self, ncm_kind: Option<&NodeContactMethod>) {
-        let cmk = ContactMethodKind::from(ncm_kind);
+    pub fn record_contact_method_success(&mut self, ncm_result: &NodeContactMethodResult) {
+        let cmk = ContactMethodKind::from(ncm_result);
         self.contact_method_kind_stats.entry(cmk).or_default().hit += 1;
     }
-    pub fn record_contact_method_failure(&mut self, ncm_kind: Option<&NodeContactMethod>) {
-        let cmk = ContactMethodKind::from(ncm_kind);
+    pub fn record_contact_method_failure(&mut self, ncm_result: &NodeContactMethodResult) {
+        let cmk = ContactMethodKind::from(ncm_result);
         self.contact_method_kind_stats.entry(cmk).or_default().miss += 1;
     }
 

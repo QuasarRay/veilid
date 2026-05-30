@@ -259,7 +259,7 @@ InputDecoration newInputDecoration(
         labelText: labelText,
         errorText: errorText,
         filled: !enabled,
-        fillColor: materialPrimaryColor.shade300.withOpacity(0.1));
+        fillColor: materialPrimaryColor.shade300.withValues(alpha: 0.1));
 
 InputDecorationTheme newInputDecorationTheme() => InputDecorationTheme(
     border: OutlineInputBorder(

@@ -13,10 +13,10 @@ pub enum AttachmentState {
     Detached = 0,
     Attaching = 1,
     AttachedWeak = 2,
-    AttachedGood = 3,
-    AttachedStrong = 4,
-    FullyAttached = 5,
-    OverAttached = 6,
+    AttachedFair = 3,
+    AttachedGood = 4,
+    AttachedStrong = 5,
+    AttachedFull = 6,
     Detaching = 7,
 }
 impl AttachmentState {
@@ -29,11 +29,27 @@ impl AttachmentState {
         matches!(
             self,
             Self::AttachedWeak
+                | Self::AttachedFair
                 | Self::AttachedGood
                 | Self::AttachedStrong
-                | Self::FullyAttached
-                | Self::OverAttached
+                | Self::AttachedFull
         )
+    }
+
+    /// Signal-strength bars (0..=5).
+    /// Detached/Detaching/Attaching → 0
+    /// AttachedWeak → 1, AttachedFair → 2, AttachedGood → 3,
+    /// AttachedStrong → 4, AttachedFull → 5.
+    #[must_use]
+    pub fn bar_count(&self) -> u8 {
+        match self {
+            Self::Detached | Self::Detaching | Self::Attaching => 0,
+            Self::AttachedWeak => 1,
+            Self::AttachedFair => 2,
+            Self::AttachedGood => 3,
+            Self::AttachedStrong => 4,
+            Self::AttachedFull => 5,
+        }
     }
 }
 
@@ -43,10 +59,10 @@ impl fmt::Display for AttachmentState {
             match self {
                 AttachmentState::Attaching => "Attaching",
                 AttachmentState::AttachedWeak => "AttachedWeak",
+                AttachmentState::AttachedFair => "AttachedFair",
                 AttachmentState::AttachedGood => "AttachedGood",
                 AttachmentState::AttachedStrong => "AttachedStrong",
-                AttachmentState::FullyAttached => "FullyAttached",
-                AttachmentState::OverAttached => "OverAttached",
+                AttachmentState::AttachedFull => "AttachedFull",
                 AttachmentState::Detaching => "Detaching",
                 AttachmentState::Detached => "Detached",
             }
@@ -54,10 +70,10 @@ impl fmt::Display for AttachmentState {
             match self {
                 AttachmentState::Attaching => "attaching",
                 AttachmentState::AttachedWeak => "attached_weak",
+                AttachmentState::AttachedFair => "attached_fair",
                 AttachmentState::AttachedGood => "attached_good",
                 AttachmentState::AttachedStrong => "attached_strong",
-                AttachmentState::FullyAttached => "fully_attached",
-                AttachmentState::OverAttached => "over_attached",
+                AttachmentState::AttachedFull => "attached_full",
                 AttachmentState::Detaching => "detaching",
                 AttachmentState::Detached => "detached",
             }
@@ -82,10 +98,10 @@ impl TryFrom<&str> for AttachmentState {
         Ok(match s {
             "attaching" => AttachmentState::Attaching,
             "attached_weak" => AttachmentState::AttachedWeak,
+            "attached_fair" => AttachmentState::AttachedFair,
             "attached_good" => AttachmentState::AttachedGood,
             "attached_strong" => AttachmentState::AttachedStrong,
-            "fully_attached" => AttachmentState::FullyAttached,
-            "over_attached" => AttachmentState::OverAttached,
+            "attached_full" => AttachmentState::AttachedFull,
             "detaching" => AttachmentState::Detaching,
             "detached" => AttachmentState::Detached,
             _ => return Err(()),
@@ -99,27 +115,43 @@ impl TryFrom<&str> for AttachmentState {
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
 pub struct VeilidStateAttachment {
-    /// The overall quality of the routing table if attached, or the current state the attachment state machine.
+    /// Overall network quality (signal-strength bars).
     pub state: AttachmentState,
-    /// If attached and there are enough reachable nodes in the routing table to perform all the actions of the PublicInternet RoutingDomain,
-    /// including things like private/safety route allocation and DHT operations.
+    /// Whether the PublicInternet routing domain is ready for all operations.
     pub public_internet_ready: bool,
-    /// If attached and there are enough reachable nodes in the routing table to perform all the actions of the LocalNetwork RoutingDomain.
+    /// Whether the LocalNetwork routing domain is ready for all operations.
     pub local_network_ready: bool,
-    /// Node uptime
+    /// Node uptime.
     pub uptime: TimestampDuration,
-    /// Uptime since last attach, empty if the node is currently detached
+    /// Uptime since last attach, None when detached.
     pub attached_uptime: Option<TimestampDuration>,
+    /// Reliable peers in the routing table.
+    pub reliable_peer_count: NodeCount,
+    /// Live peers (reliable + unreliable) in the routing table.
+    pub live_peer_count: NodeCount,
+    /// Smoothed estimate of total reachable network size.
+    pub estimated_network_size: NodeCount,
+    /// Median p75 latency across reliable peers, None when no samples yet.
+    pub median_latency: Option<TimestampDuration>,
+    /// Entries in bucket overflow awaiting lazy kick.
+    pub over_attached_nodes: NodeCount,
 }
 
 impl fmt::Display for VeilidStateAttachment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "state: {}\npublic_internet_ready: {}\nlocal_network_ready: {}\nuptime: {}\nattached_uptime: {}", 
+        write!(
+            f,
+            "state: {}\npublic_internet_ready: {}\nlocal_network_ready: {}\nuptime: {}\nattached_uptime: {}\nreliable_peer_count: {}\nlive_peer_count: {}\nestimated_network_size: {}\nmedian_latency: {}\nover_attached_nodes: {}",
             f.to_string(self.state),
-            if self.public_internet_ready { "true" } else { "false" }, 
-            if self.local_network_ready { "true" } else { "false" }, 
+            if self.public_internet_ready { "true" } else { "false" },
+            if self.local_network_ready { "true" } else { "false" },
             f.to_string(self.uptime),
-            f.to_string_opt(self.attached_uptime.as_ref())
+            f.to_string_opt(self.attached_uptime.as_ref()),
+            self.reliable_peer_count,
+            self.live_peer_count,
+            self.estimated_network_size,
+            f.to_string_opt(self.median_latency.as_ref()),
+            self.over_attached_nodes,
         )
     }
 }

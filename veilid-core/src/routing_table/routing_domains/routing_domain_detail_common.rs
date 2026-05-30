@@ -294,7 +294,7 @@ impl RoutingDomainDetailCommon {
                 let new_relay_ids = new_compilation
                     .relays
                     .iter()
-                    .map(|r| r.relay_id())
+                    .map(|r| r.relay_id.clone())
                     .collect::<HashSet<_>>();
 
                 // Drop any relay states that are no longer in the new compilation, and add default ones for the new relays
@@ -330,7 +330,7 @@ impl RoutingDomainDetailCommon {
     // Update a single relay's state
     pub fn set_relay_state(&mut self, relay_id: NodeId, state: RoutingDomainRelayState) {
         if let Some(rc) = self.opt_relay_compilation.as_ref() {
-            if rc.relays.iter().any(|r| r.relay_id() == relay_id) {
+            if rc.relays.iter().any(|r| r.relay_id == relay_id) {
                 self.relay_states.insert(relay_id, state);
             }
         }

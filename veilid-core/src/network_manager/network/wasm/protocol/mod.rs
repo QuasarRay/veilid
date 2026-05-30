@@ -19,6 +19,13 @@ impl PlatformProtocolNetworkConnection for WasmProtocolNetworkConnection {
         }
     }
 
+    fn direction(&self) -> Direction {
+        match self {
+            // WASM can only connect, never accept
+            Self::Ws(_) => Direction::Out,
+        }
+    }
+
     fn close(&self) -> PinBoxFuture<'_, std::io::Result<NetworkResult<()>>> {
         Box::pin(async move {
             match self {

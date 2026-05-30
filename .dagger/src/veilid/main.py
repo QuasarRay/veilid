@@ -179,8 +179,6 @@ class Veilid:
         container = container.with_exec([
             "sh", "-c",
             "curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash",
-        ]).with_exec([ "sh", "-c",
-            f"cargo binstall wasm-pack --disable-strategies=compile --targets {DEFAULT_CARGO_MUSL_TARGET} || cargo install wasm-pack --locked"
         ]).with_exec([
             "sh", "-c",
             f"curl --retry {RETRY_COUNT} --retry-connrefused -L --proto '=https' --tlsv1.2 -sSf https://gitlab.com/api/v4/projects/79785586/packages/generic/cargo-chef/0.1.73/cargo-chef-x86_64-unknown-linux-musl.tar.gz | tar -xz -C {CARGO_HOME}/bin"
@@ -306,8 +304,13 @@ class Veilid:
         container = container.with_exec([
             "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
             "--target", "wasm32-unknown-unknown", "--all-targets", "--locked",
-            "--features=js,dart", 
             "-p", "veilid-wasm"
+        ])
+        container = container.with_exec([
+            "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
+            "--target", "wasm32-unknown-unknown", "--all-targets", "--locked",
+            "--no-default-features", "--features=default-wasm",
+            "-p", "veilid-flutter"
         ])
 
         return container

@@ -2,19 +2,26 @@ use futures_util::future::MaybeDone;
 
 use super::*;
 
-/// Collection of node xids per record
-pub(in crate::storage_manager) type PerRecordNodeTransactionIds =
-    Vec<(OpaqueRecordKey, Vec<NodeTransactionId>)>;
+/// Durability signal for the outbound transaction check task.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(in crate::storage_manager) enum DurabilityExpiration {
+    /// Durability already broken; drop now.
+    Lost,
+    /// At least required_strict_consensus_count nodes alive on every record until this timestamp.
+    AliveUntil(Timestamp),
+    /// No keepalive-active nodes. Don't drop on this signal.
+    NotApplicable,
+}
 
 /// Stage consensus for transaction state across all records
 #[derive(Clone, Debug)]
 pub(in crate::storage_manager) struct OutboundTransactionStageConsensus {
     /// The best consensus stage we could come up with for this transaction
     pub stage: OutboundTransactionStage,
-    /// The list of node transactions that should be rolled back at this point per record
-    pub per_record_node_xids_to_rollback: PerRecordNodeTransactionIds,
     /// The list of node transactions that should be dropped at this point
-    pub per_record_node_xids_to_drop: PerRecordNodeTransactionIds,
+    pub node_transactions_to_drop: LocalNodeTransactionIdSet,
+    /// The list of node transactions that should be rolled back at this point per record
+    pub node_transactions_to_rollback: LocalNodeTransactionIdSet,
 }
 
 /// State of a single transaction across multiple records
@@ -34,9 +41,9 @@ pub(in crate::storage_manager) struct OutboundTransactionState {
     #[serde(skip)]
     #[serde(default = "default_operation_concurrency")]
     operation_concurrency: Arc<AsyncSemaphore>,
-    /// Routes locked during this transaction
+    /// Refs to routes used during this transaction, held to keep them locked
     #[serde(skip)]
-    locked_routes: Option<LockedRoutes>,
+    route_refs: Vec<AllocatedRouteRef>,
 }
 
 fn default_operation_concurrency() -> Arc<AsyncSemaphore> {
@@ -78,8 +85,8 @@ impl Drop for OutboundTransactionState {
             eprintln!("BUG: OutboundTransactionState dropped without registry");
             return;
         }
-        if let Some(lsr) = &self.locked_routes {
-            veilid_log!(self error "OutboundTransactionState dropped with {} locked safety routes still held", lsr.len());
+        if !self.route_refs.is_empty() {
+            veilid_log!(self error "OutboundTransactionState dropped with {} locked safety routes still held", self.route_refs.len());
         }
         let active_bg = self
             .background_tokens
@@ -93,7 +100,7 @@ impl Drop for OutboundTransactionState {
 }
 
 impl OutboundTransactionState {
-    pub fn new(registry: VeilidComponentRegistry) -> Self {
+    pub(super) fn new(registry: VeilidComponentRegistry) -> Self {
         Self {
             opt_registry: Some(registry),
             created_ts: Timestamp::now(),
@@ -102,15 +109,35 @@ impl OutboundTransactionState {
             operation_concurrency: Arc::new(AsyncSemaphore::new(
                 PER_TRANSACTION_OPERATION_CONCURRENCY,
             )),
-            locked_routes: None,
+            route_refs: Vec::new(),
         }
     }
 
-    pub fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) {
+    pub(super) fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) {
         self.opt_registry = Some(routing_table.registry());
         for record_info in &mut self.record_states {
             record_info.prepare(routing_table, cur_ts);
         }
+    }
+
+    pub fn keys(&self) -> Vec<OpaqueRecordKey> {
+        let mut keys = self
+            .record_states
+            .iter()
+            .map(|x| x.record_key().opaque())
+            .collect::<Vec<_>>();
+        keys.sort();
+        keys
+    }
+
+    pub(super) fn merge(&mut self, mut other: OutboundTransactionState) {
+        self.created_ts.min_assign(other.created_ts);
+        self.record_states.append(&mut other.record_states);
+        self.background_tokens.append(&mut other.background_tokens);
+        self.route_refs.append(&mut other.route_refs);
+        // Note: skips self.operation_concurrency merge because both transactions have all records locked
+        // for TransactExtend, so there should be no background operations on the semaphore
+        // There is no safe way to check for this currently
     }
 
     #[expect(dead_code)]
@@ -118,26 +145,37 @@ impl OutboundTransactionState {
         self.created_ts
     }
 
-    pub fn opt_expiration(&self) -> Option<Timestamp> {
-        self.record_states
-            .iter()
-            .map(|x| x.opt_expiration())
-            .reduce(|a, b| match (a, b) {
-                (None, None) => None,
-                (None, Some(b)) => Some(b),
-                (Some(a), None) => Some(a),
-                (Some(a), Some(b)) => Some(a.min(b)),
-            })
-            .flatten()
+    pub fn durability_expiration(&self) -> DurabilityExpiration {
+        // Across records: Lost wins; otherwise MIN of AliveUntil values;
+        // NotApplicable only if every record is NotApplicable.
+        let mut earliest: Option<Timestamp> = None;
+        let mut any_applicable = false;
+        for record_state in &self.record_states {
+            match record_state.durability_expiration() {
+                DurabilityExpiration::Lost => return DurabilityExpiration::Lost,
+                DurabilityExpiration::AliveUntil(t) => {
+                    any_applicable = true;
+                    earliest = Some(match earliest {
+                        Some(prev) => prev.min(t),
+                        None => t,
+                    });
+                }
+                DurabilityExpiration::NotApplicable => {}
+            }
+        }
+        match (any_applicable, earliest) {
+            (true, Some(t)) => DurabilityExpiration::AliveUntil(t),
+            _ => DurabilityExpiration::NotApplicable,
+        }
     }
 
     pub fn stage_consensus(&self) -> Option<OutboundTransactionStageConsensus> {
         // All record stages must be the same or this is a failed state
         let mut opt_best_opt_stage: Option<Option<OutboundTransactionStage>> = None;
-        let mut per_record_node_xids_to_rollback: Vec<(OpaqueRecordKey, Vec<NodeTransactionId>)> =
-            vec![];
-        let mut per_record_node_xids_to_drop: Vec<(OpaqueRecordKey, Vec<NodeTransactionId>)> =
-            vec![];
+        let mut node_transactions_to_rollback: LocalNodeTransactionIdSet =
+            LocalNodeTransactionIdSet::new();
+        let mut node_transactions_to_drop: LocalNodeTransactionIdSet =
+            LocalNodeTransactionIdSet::new();
         let mut force_fail = false;
 
         for record_state in &self.record_states {
@@ -165,23 +203,18 @@ impl OutboundTransactionState {
             } else {
                 opt_best_opt_stage = Some(Some(record_stage));
             }
-            per_record_node_xids_to_rollback.push((
-                record_state.record_key().opaque(),
-                record_stage_consensus.node_xids_to_rollback,
-            ));
-            per_record_node_xids_to_drop.push((
-                record_state.record_key().opaque(),
-                record_stage_consensus.node_xids_to_drop,
-            ));
+            node_transactions_to_rollback
+                .extend(record_stage_consensus.node_transactions_to_rollback);
+            node_transactions_to_drop.extend(record_stage_consensus.node_transactions_to_drop);
         }
 
         // If we are forcing a failed state, sum up the rollbacks instead
         if force_fail {
-            let per_record_node_xids_to_rollback = self.get_all_rollbacks();
+            let node_transactions_to_rollback = self.get_all_rollbacks();
             return Some(OutboundTransactionStageConsensus {
                 stage: OutboundTransactionStage::Failed,
-                per_record_node_xids_to_rollback,
-                per_record_node_xids_to_drop: vec![],
+                node_transactions_to_rollback,
+                node_transactions_to_drop,
             });
         }
 
@@ -198,20 +231,16 @@ impl OutboundTransactionState {
         // and all of the actions to perform for reconciliation
         Some(OutboundTransactionStageConsensus {
             stage,
-            per_record_node_xids_to_rollback,
-            per_record_node_xids_to_drop,
+            node_transactions_to_rollback,
+            node_transactions_to_drop,
         })
     }
 
-    pub fn get_all_rollbacks(&self) -> PerRecordNodeTransactionIds {
-        let mut per_record_node_xids_to_rollback = PerRecordNodeTransactionIds::new();
-
-        for record_state in &self.record_states {
-            let node_xids_to_rollback = record_state.get_all_rollbacks();
-            per_record_node_xids_to_rollback
-                .push((record_state.record_key().opaque(), node_xids_to_rollback));
-        }
-        per_record_node_xids_to_rollback
+    pub fn get_all_rollbacks(&self) -> LocalNodeTransactionIdSet {
+        self.record_states
+            .iter()
+            .flat_map(|x| x.get_all_rollbacks())
+            .collect()
     }
 
     pub fn stage_ts(&self) -> Timestamp {
@@ -222,10 +251,10 @@ impl OutboundTransactionState {
             .unwrap_or(self.created_ts)
     }
 
-    pub fn new_record_state(
+    pub(super) fn new_record_state(
         &mut self,
         params: OutboundTransactionRecordParams,
-    ) -> VeilidAPIResult<&mut OutboundTransactionRecordState> {
+    ) -> VeilidAPIResult<()> {
         let opaque_record_key = params.record_key.opaque();
         if self.get_record_state(&opaque_record_key).is_some() {
             apibail_internal!("record info already exists");
@@ -234,14 +263,14 @@ impl OutboundTransactionState {
         self.record_states
             .push(OutboundTransactionRecordState::new(self.registry(), params));
 
-        Ok(self.record_states.last_mut().unwrap_or_log())
+        Ok(())
     }
 
     pub fn get_record_states(&self) -> &[OutboundTransactionRecordState] {
         &self.record_states
     }
 
-    pub fn get_record_states_mut(&mut self) -> &mut [OutboundTransactionRecordState] {
+    pub(super) fn get_record_states_mut(&mut self) -> &mut [OutboundTransactionRecordState] {
         &mut self.record_states
     }
 
@@ -254,7 +283,7 @@ impl OutboundTransactionState {
             .find(|ri| &ri.record_key().opaque() == opaque_record_key)
     }
 
-    pub fn get_record_state_mut(
+    pub(super) fn get_record_state_mut(
         &mut self,
         opaque_record_key: &OpaqueRecordKey,
     ) -> Option<&mut OutboundTransactionRecordState> {
@@ -263,22 +292,19 @@ impl OutboundTransactionState {
             .find(|ri| &ri.record_key().opaque() == opaque_record_key)
     }
 
-    pub fn add_background_token(&mut self, background_token: StopToken) {
+    pub(super) fn add_background_token(&mut self, background_token: StopToken) {
         self.background_tokens
             .push(futures_util::future::maybe_done(background_token));
     }
 
-    pub fn remove_completed_background_tokens(&mut self) {
+    pub(super) fn remove_completed_background_tokens(&mut self) {
         self.background_tokens.retain(|x| match x {
             MaybeDone::Future(_) => true,
             MaybeDone::Done(_) | MaybeDone::Gone => false,
         });
     }
 
-    pub fn into_transaction_cleanup(
-        mut self,
-        transaction_handle: OutboundTransactionHandle,
-    ) -> TransactionCleanup {
+    pub fn into_transaction_cleanup(mut self) -> TransactionCleanup {
         let background_tokens = std::mem::take(&mut self.background_tokens)
             .into_iter()
             .filter_map(|x| match x {
@@ -287,15 +313,7 @@ impl OutboundTransactionState {
             })
             .collect();
 
-        let storage_manager = self.storage_manager();
-        storage_manager
-            .outbound_transaction_keepalive_processor
-            .unregister(transaction_handle.clone());
-        storage_manager
-            .outbound_transaction_keepalive_processor
-            .cleanup_transaction(transaction_handle);
-
-        drop(std::mem::take(&mut self.locked_routes));
+        drop(std::mem::take(&mut self.route_refs));
 
         TransactionCleanup::new(background_tokens)
     }
@@ -304,11 +322,7 @@ impl OutboundTransactionState {
         self.operation_concurrency.clone()
     }
 
-    pub fn add_locked_routes(&mut self, mut locked_routes: LockedRoutes) {
-        if let Some(self_locked_routes) = self.locked_routes.as_mut() {
-            self_locked_routes.take_from(&mut locked_routes);
-        } else {
-            self.locked_routes = Some(locked_routes);
-        }
+    pub(super) fn add_route_refs(&mut self, route_refs: Vec<AllocatedRouteRef>) {
+        self.route_refs.extend(route_refs);
     }
 }

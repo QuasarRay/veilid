@@ -17,15 +17,17 @@ impl StorageManager {
         let mut expired_transactions = vec![];
 
         for (transaction_handle, outbound_transaction_state) in otm.transactions() {
-            let transaction_handle = transaction_handle.clone();
+            let transaction_handle = *transaction_handle;
+            let transaction_keys = outbound_transaction_state.keys();
 
-            let expired = outbound_transaction_state
-                .opt_expiration()
-                .map(|expiration| expiration < cur_ts)
-                .unwrap_or(false);
+            let expired = match outbound_transaction_state.durability_expiration() {
+                DurabilityExpiration::Lost => true,
+                DurabilityExpiration::AliveUntil(t) => t < cur_ts,
+                DurabilityExpiration::NotApplicable => false,
+            };
             if expired {
                 if let Some(records_lock) = self.record_lock_table.try_lock_records(
-                    transaction_handle.keys().to_vec(),
+                    transaction_keys,
                     StorageManagerRecordLockPurpose::TransactDrop,
                 ) {
                     veilid_log!(registry debug "Dropping expired transaction: {}", transaction_handle);
@@ -36,8 +38,8 @@ impl StorageManager {
         }
 
         for (transaction_handle, records_lock) in expired_transactions {
-            if let Some(state) = otm.drop_transaction(transaction_handle.clone()) {
-                let cleanup = state.into_transaction_cleanup(transaction_handle);
+            if let Some(state) = otm.drop_transaction(transaction_handle) {
+                let cleanup = state.into_transaction_cleanup();
                 let drop_fut = async move {
                     cleanup.await;
                     drop(records_lock);

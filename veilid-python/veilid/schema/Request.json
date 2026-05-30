@@ -450,6 +450,30 @@
     {
       "type": "object",
       "properties": {
+        "op": {
+          "type": "string",
+          "const": "NowNonDecreasing"
+        }
+      },
+      "required": [
+        "op"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "NowIncreasing"
+        }
+      },
+      "required": [
+        "op"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
         "command": {
           "type": "string"
         },
@@ -1307,6 +1331,35 @@
           },
           "required": [
             "dhttx_op"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dhttx_op": {
+              "type": "string",
+              "const": "Extend"
+            },
+            "options": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TransactDHTRecordsOptions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "record_keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "dhttx_op",
+            "record_keys"
           ]
         },
         {

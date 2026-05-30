@@ -360,11 +360,6 @@ sealed class VeilidConfigRoutingTable with _$VeilidConfigRoutingTable {
     required List<SecretKey> secretKeys,
     required List<String> bootstrap,
     required List<PublicKey> bootstrapKeys,
-    required int limitOverAttached,
-    required int limitFullyAttached,
-    required int limitAttachedStrong,
-    required int limitAttachedGood,
-    required int limitAttachedWeak,
   }) = _VeilidConfigRoutingTable;
 
   factory VeilidConfigRoutingTable.fromJson(dynamic json) =>
@@ -408,6 +403,8 @@ sealed class VeilidConfigTableStore with _$VeilidConfigTableStore {
   const factory VeilidConfigTableStore({
     required String directory,
     required bool delete,
+    required bool wipeOnInvalidDeviceEncryptionKey,
+    required int maxValueSizeMb,
   }) = _VeilidConfigTableStore;
 
   factory VeilidConfigTableStore.fromJson(dynamic json) =>

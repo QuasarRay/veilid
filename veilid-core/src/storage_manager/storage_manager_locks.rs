@@ -8,12 +8,25 @@ pub enum StorageManagerRecordLockPurpose {
     Delete,
     Watch,
     TransactBegin,
+    TransactExtend,
     TransactEndAndCommit,
     TransactRollback,
     TransactDrop,
 }
 
-impl LockPurpose for StorageManagerRecordLockPurpose {}
+impl RecordLockPurpose for StorageManagerRecordLockPurpose {
+    fn record_lock_mode(&self) -> RecordLockMode {
+        match self {
+            Self::Create | Self::Open | Self::Close | Self::Delete => RecordLockMode::Lifetime,
+            Self::Watch => RecordLockMode::Watch,
+            Self::TransactBegin
+            | Self::TransactExtend
+            | Self::TransactEndAndCommit
+            | Self::TransactRollback
+            | Self::TransactDrop => RecordLockMode::Transaction,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum StorageManagerSubkeyLockPurpose {
@@ -23,7 +36,11 @@ pub enum StorageManagerSubkeyLockPurpose {
     TransactSet,
 }
 
-impl LockPurpose for StorageManagerSubkeyLockPurpose {}
+impl RecordLockPurpose for StorageManagerSubkeyLockPurpose {
+    fn record_lock_mode(&self) -> RecordLockMode {
+        RecordLockMode::Lifetime
+    }
+}
 
 pub type StorageManagerRecordLockTable =
     RecordLockTable<StorageManagerRecordLockPurpose, StorageManagerSubkeyLockPurpose>;
@@ -34,5 +51,3 @@ pub type StorageManagerRecordsLockGuard =
     RecordsLockGuard<StorageManagerRecordLockPurpose, StorageManagerSubkeyLockPurpose>;
 pub type StorageManagerSubkeyLockGuard =
     SubkeyLockGuard<StorageManagerRecordLockPurpose, StorageManagerSubkeyLockPurpose>;
-pub type StorageManagerPeekLockGuard =
-    PeekLockGuard<StorageManagerRecordLockPurpose, StorageManagerSubkeyLockPurpose>;

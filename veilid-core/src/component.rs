@@ -331,11 +331,22 @@ impl VeilidComponentRegistryAccessor for VeilidComponentRegistry {
     }
 }
 
+impl VeilidComponentRegistryAccessor for &VeilidComponentRegistry {
+    fn registry(&self) -> VeilidComponentRegistry {
+        (*self).clone()
+    }
+}
+
 ////////////////////////////////////////////////////////////////////
 
 macro_rules! impl_veilid_component_accessors {
     ($struct_name:ty) => {
         impl VeilidComponentRegistryAccessor for $struct_name {
+            fn registry(&self) -> VeilidComponentRegistry {
+                self.registry.clone()
+            }
+        }
+        impl VeilidComponentRegistryAccessor for &$struct_name {
             fn registry(&self) -> VeilidComponentRegistry {
                 self.registry.clone()
             }
@@ -490,3 +501,17 @@ macro_rules! impl_subscribe_event_bus_async_clone {
 }
 
 pub(crate) use impl_subscribe_event_bus_async_clone;
+
+macro_rules! impl_subscribe_event_bus_clone {
+    ($this:expr, $event_handler:ident ) => {{
+        let this = $this.clone();
+        $this.event_bus().subscribe(move |evt| {
+            let this = this.clone();
+            Box::pin(async move {
+                this.$event_handler(evt);
+            })
+        })
+    }};
+}
+
+pub(crate) use impl_subscribe_event_bus_clone;

@@ -1,6 +1,7 @@
 use super::*;
 
 impl StorageManager {
+    /// Wait for any pending offline subkey writes on a record to drain.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))

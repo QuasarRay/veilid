@@ -256,6 +256,37 @@ impl fmt::Display for AnswerStats {
     }
 }
 
+impl AnswerStats {
+    /// Approximate aggregation for projecting per-transport stats into a
+    /// coarser view: sum counts, max/min bounds, average the averages.
+    pub fn merge(&mut self, other: &AnswerStats) {
+        if self.questions == 0 && self.answers == 0 && self.lost_answers == 0 {
+            *self = other.clone();
+            return;
+        }
+        self.span = self.span.max(other.span);
+        self.questions += other.questions;
+        self.answers += other.answers;
+        self.lost_answers += other.lost_answers;
+        self.consecutive_answers_maximum = self
+            .consecutive_answers_maximum
+            .max(other.consecutive_answers_maximum);
+        self.consecutive_answers_minimum = self
+            .consecutive_answers_minimum
+            .min(other.consecutive_answers_minimum);
+        self.consecutive_answers_average =
+            (self.consecutive_answers_average + other.consecutive_answers_average) / 2;
+        self.consecutive_lost_answers_maximum = self
+            .consecutive_lost_answers_maximum
+            .max(other.consecutive_lost_answers_maximum);
+        self.consecutive_lost_answers_minimum = self
+            .consecutive_lost_answers_minimum
+            .min(other.consecutive_lost_answers_minimum);
+        self.consecutive_lost_answers_average =
+            (self.consecutive_lost_answers_average + other.consecutive_lost_answers_average) / 2;
+    }
+}
+
 /// Statistics for RPC operations performed on a node
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
@@ -275,18 +306,9 @@ pub struct RPCStats {
     pub first_consecutive_seen_ts: Option<Timestamp>,
     /// number of messages that have failed to send or connections dropped since we last successfully sent one
     pub failed_to_send: u32,
-    /// number of answers that have been lost consecutively over an unordered channel
+    /// number of attempts where no transport could be chosen (no routing domain, no peer info, no contact method)
     #[serde(default)]
-    pub recent_lost_answers_unordered: u32,
-    /// number of answers that have been lost consecutively over an ordered channel
-    #[serde(default)]
-    pub recent_lost_answers_ordered: u32,
-    /// unordered rpc answer stats for this peer
-    #[serde(default)]
-    pub answer_unordered: AnswerStats,
-    /// ordered rpc answer stats for this peer
-    #[serde(default)]
-    pub answer_ordered: AnswerStats,
+    pub unreachable: u32,
 }
 
 impl fmt::Display for RPCStats {
@@ -296,12 +318,8 @@ impl fmt::Display for RPCStats {
             "# sent/received/in-flight:      {} / {} / {}",
             self.messages_sent, self.messages_rcvd, self.questions_in_flight
         )?;
-        writeln!(
-            f,
-            "# recently-lost unordered/ordered: {} / {}",
-            self.recent_lost_answers_unordered, self.recent_lost_answers_ordered,
-        )?;
         writeln!(f, "# failed-to-send: {}", self.failed_to_send)?;
+        writeln!(f, "# unreachable: {}", self.unreachable)?;
         writeln!(
             f,
             "last_question:      {}",
@@ -317,17 +335,6 @@ impl fmt::Display for RPCStats {
             "first_consecutive:  {}",
             f.to_string_opt(self.first_consecutive_seen_ts.as_ref())
         )?;
-        writeln!(
-            f,
-            "unreliable answers:\n{}",
-            indent_all_string(f.to_string(&self.answer_unordered))
-        )?;
-        writeln!(
-            f,
-            "reliable answers:\n{}",
-            indent_all_string(f.to_string(&self.answer_ordered))
-        )?;
-
         Ok(())
     }
 }
@@ -351,6 +358,11 @@ pub struct PeerStats {
     /// state stats for this peer
     #[serde(default)]
     pub state: StateStats,
+    /// how long protected connections to this peer survived before being closed
+    /// by the remote side; longer is better. None = no remote-closed protected
+    /// drops yet observed.
+    #[serde(default)]
+    pub protected_connection_drop: Option<LatencyStats>,
 }
 
 impl fmt::Display for PeerStats {
@@ -362,6 +374,11 @@ impl fmt::Display for PeerStats {
             indent_all_string(f.to_string(&self.rpc_stats))
         )?;
         writeln!(f, "latency: {}", f.to_string_opt(self.latency.as_ref()))?;
+        writeln!(
+            f,
+            "protected_connection_drop: {}",
+            f.to_string_opt(self.protected_connection_drop.as_ref())
+        )?;
         write!(
             f,
             "transfer:\n{}",

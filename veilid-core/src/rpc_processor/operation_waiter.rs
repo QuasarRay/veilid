@@ -132,7 +132,7 @@ where
             .iter()
             .map(|x| (*x.0, x.1.timestamp))
             .collect();
-        opids.sort_by(|a, b| a.1.cmp(&b.1));
+        opids.sort_by_key(|a| a.1);
         opids.into_iter().map(|x| x.0).collect()
     }
 
@@ -194,13 +194,14 @@ where
         handle: OperationWaitHandle<T, C>,
         timeout_us: TimestampDuration,
     ) -> Result<TimeoutOr<(T, TimestampDuration)>, RPCError> {
-        let timeout_ms = us_to_ms(timeout_us.as_u64()).map_err(RPCError::internal)?;
-
         let result_fut = handle.result_receiver.recv_async().in_current_span();
 
         // wait for eventualvalue
         let start_ts = Timestamp::now();
-        let res = timeout(timeout_ms, result_fut).await.into_timeout_or();
+        let res = result_fut
+            .timeout_duration(timeout_us)
+            .await
+            .into_timeout_or();
 
         match res {
             TimeoutOr::Timeout => Ok(TimeoutOr::Timeout),

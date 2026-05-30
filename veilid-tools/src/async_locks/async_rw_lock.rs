@@ -44,11 +44,7 @@ impl<T> AsyncRwLock<T> {
         AsyncRwLockReadGuardArc {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::Read,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         }
     }
 
@@ -60,11 +56,7 @@ impl<T> AsyncRwLock<T> {
         let out = AsyncRwLockReadGuardArc {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::TryRead,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         };
 
         Some(out)
@@ -80,11 +72,7 @@ impl<T: ?Sized> AsyncRwLock<T> {
         let out = AsyncRwLockReadGuard {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::TryRead,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         };
 
         Some(out)
@@ -108,11 +96,7 @@ impl<T: ?Sized> AsyncRwLock<T> {
         AsyncRwLockReadGuard {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::Read,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         }
     }
 
@@ -124,11 +108,7 @@ impl<T: ?Sized> AsyncRwLock<T> {
         let out = AsyncRwLockWriteGuard {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::TryWrite,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         };
 
         Some(out)
@@ -152,11 +132,7 @@ impl<T: ?Sized> AsyncRwLock<T> {
         AsyncRwLockWriteGuard {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::Write,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         }
     }
 
@@ -168,11 +144,7 @@ impl<T: ?Sized> AsyncRwLock<T> {
         let out = AsyncRwLockWriteGuardArc {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::TryWrite,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         };
 
         Some(out)
@@ -196,11 +168,7 @@ impl<T: ?Sized> AsyncRwLock<T> {
         AsyncRwLockWriteGuardArc {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::Write,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         }
     }
 }

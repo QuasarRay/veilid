@@ -26,14 +26,18 @@ pub mod async_locks;
 pub mod async_peek_stream;
 pub mod bytes_writer;
 pub mod clone_stream;
+#[cfg(feature = "debug-locks")]
+pub mod deadlock_detector;
 pub mod deferred_stream_processor;
 pub mod event_bus;
 pub mod eventual;
 pub mod eventual_base;
 pub mod eventual_value;
 pub mod eventual_value_clone;
+pub mod flap_detector;
 pub mod formatting;
 pub mod future_queue;
+pub mod future_race_completion;
 pub mod interval;
 pub mod ip_addr_port;
 pub mod ip_extra;
@@ -155,6 +159,9 @@ pub use async_peek_stream::*;
 pub use bytes_writer::*;
 #[doc(inline)]
 pub use clone_stream::*;
+#[cfg(feature = "debug-locks")]
+#[doc(inline)]
+pub use deadlock_detector::*;
 #[doc(inline)]
 pub use deferred_stream_processor::*;
 #[doc(inline)]
@@ -168,9 +175,13 @@ pub use eventual_value::*;
 #[doc(inline)]
 pub use eventual_value_clone::*;
 #[doc(inline)]
+pub use flap_detector::*;
+#[doc(inline)]
 pub use formatting::*;
 #[doc(inline)]
 pub use future_queue::*;
+#[doc(inline)]
+pub use future_race_completion::*;
 #[doc(inline)]
 pub use interval::*;
 #[doc(inline)]

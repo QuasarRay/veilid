@@ -207,15 +207,12 @@ impl StorageManager {
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub(super) async fn handle_inspect_local_values_with_peek_lock(
+    pub(super) async fn handle_inspect_local_values(
         &self,
-        peek_lock: &StorageManagerPeekLockGuard,
+        opaque_record_key: OpaqueRecordKey,
         subkeys: ValueSubkeyRangeSet,
         want_descriptor: bool,
     ) -> VeilidAPIResult<InspectResult> {
-        let opaque_record_key = peek_lock.record();
-
-        // See if it's in the local record store
         let local_record_store = self.get_local_record_store()?;
 
         if let Some(inspect_result) = local_record_store

@@ -18,6 +18,7 @@ default-async-std = ["rt-async-std"]
 
 rt-tokio = ["veilid-core/default-tokio"]
 rt-async-std = ["veilid-core/default-async-std"]
+debug-locks = ["veilid-core/debug-locks"]
 
 [lib]
 path = "src/lib.rs"

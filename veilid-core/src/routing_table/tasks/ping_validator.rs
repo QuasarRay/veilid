@@ -6,9 +6,6 @@ use stop_token::future::FutureExt as _;
 
 impl_veilid_log_facility!("rtab");
 
-/// Number of consecutive successful pings required to consider a route tested
-const ROUTE_TEST_PING_COUNT: usize = 3;
-
 /////////////////////////////////////
 // Priority Groups
 
@@ -42,13 +39,11 @@ pub enum PingValidationKey {
 }
 
 /// Callback invoked when a ping completes.
-/// Receives the registry and the ping result.
+/// Receives the registry and the StatusResult (which carries the SendDataResult so
+/// the callback can see which transport was actually attempted at the first hop).
 /// Returns follow-up entries to re-enqueue (e.g., next ping in a route test chain).
 pub type PingCompletionCallback = Box<
-    dyn FnOnce(
-            VeilidComponentRegistry,
-            Result<NetworkResult<Answer<StatusResult>>, RPCError>,
-        ) -> Vec<PingValidationEntry>
+    dyn FnOnce(VeilidComponentRegistry, Result<StatusResult, RPCError>) -> Vec<PingValidationEntry>
         + Send
         + 'static,
 >;
@@ -67,7 +62,7 @@ pub struct PingValidationEntry {
 struct PingCompletionResult {
     group: PingValidationGroup,
     key: PingValidationKey,
-    result: Result<NetworkResult<Answer<StatusResult>>, RPCError>,
+    result: Result<StatusResult, RPCError>,
     on_complete: Option<PingCompletionCallback>,
 }
 
@@ -326,7 +321,9 @@ impl RoutingTable {
     /////////////////////////////////////
     // Reliability Ping Validations
 
-    /// Ping each node in the routing table if they need to be pinged to determine their reliability
+    /// Ping each node in the routing table if they need to be pinged to determine their reliability.
+    /// For priority-100 entries with a specific transport, pin the dial info filter to that transport
+    /// so the ping actually exercises (and updates stats for) the targeted protocol/address pair.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err))]
     pub fn add_reliability_ping_validations(
         &self,
@@ -337,11 +334,10 @@ impl RoutingTable {
 
         let name = format!("Reliability({})", routing_domain);
         for (priority, node_refs) in priority_nodes {
-            let mut validations = vec![];
-            for nr in node_refs {
-                let nr = nr.with_sequencing(Sequencing::PreferOrdered);
-                validations.push(Destination::direct(nr, None));
-            }
+            let validations = node_refs
+                .into_iter()
+                .map(|nr| Destination::direct(nr, None))
+                .collect();
             self.enqueue_ping_validations(
                 name.clone(),
                 PingValidationGroup::Reliability,
@@ -357,8 +353,14 @@ impl RoutingTable {
     // Route Test Integration
 
     /// Enqueue route test pings for a set of routes.
-    /// Builds loopback destinations and creates callback chains for multi-ping testing.
-    pub async fn enqueue_route_tests(&self, route_ids: Vec<RouteId>, priority: usize) {
+    /// Allocated routes: one loopback per SequenceOrdering the route supports.
+    /// Remote routes: a single ping.
+    pub async fn enqueue_route_tests(
+        &self,
+        cur_ts: Timestamp,
+        route_ids: Vec<RouteId>,
+        priority: usize,
+    ) {
         let rss = self.route_spec_store();
 
         let mut entries = Vec::new();
@@ -366,21 +368,26 @@ impl RoutingTable {
             let is_remote = rss.is_route_id_remote(&route_id);
 
             if is_remote {
-                // Remote route: single ping, simpler setup
-                match Self::build_remote_route_test_entry(rss, &route_id, priority) {
+                let rrid = RemoteRouteSetId::from_route_id(route_id.clone());
+                match Self::build_remote_route_test_entry(rss, &rrid, priority) {
                     Some(entry) => entries.push(entry),
                     None => {
                         veilid_log!(self debug "Could not build remote route test for {}", route_id);
                     }
                 }
             } else {
-                // Allocated route: multi-ping with callback chain
-                match Self::build_allocated_route_test_entry(rss, &route_id, priority).await {
-                    Some(entry) => entries.push(entry),
-                    None => {
-                        veilid_log!(self debug "Could not build allocated route test for {}", route_id);
-                    }
-                }
+                let arsid = AllocatedRouteSetId::from_route_id(route_id);
+                let Some(info) = rss.get_allocated_route_test_info(&arsid) else {
+                    veilid_log!(self debug "Could not build allocated route test for {}", arsid);
+                    continue;
+                };
+                let req = RouteKeepaliveRequest {
+                    route_id: arsid,
+                    orderings: info.orderings,
+                };
+                let route_entries =
+                    Self::build_route_loopback_entries(rss, cur_ts, &req, priority).await;
+                entries.extend(route_entries);
             }
         }
 
@@ -389,77 +396,128 @@ impl RoutingTable {
         }
     }
 
-    /// Build a PingValidationEntry for testing an allocated (local) route
-    async fn build_allocated_route_test_entry(
-        rss: &RouteSpecStore,
-        route_id: &RouteId,
+    /// Enqueue per-ordering loopback pings for allocated routes. Same shape as a test,
+    /// driven by the keepalive rate limiter — the entry it produces is identical.
+    pub async fn enqueue_route_loopback_keepalives(
+        &self,
+        cur_ts: Timestamp,
+        requests: Vec<RouteKeepaliveRequest>,
         priority: usize,
-    ) -> Option<PingValidationEntry> {
-        // Get the best route key and hop refs
-        let Some(AllocatedRouteTestInfo { key, hops }) =
-            rss.get_allocated_route_test_info(route_id)
-        else {
-            // Route doesn't exist or has no best key
-            return None;
-        };
+    ) {
+        let rss = self.route_spec_store();
 
-        // Assemble the private route
-        let private_route = match rss.assemble_single_private_route(&key, None).await {
+        let mut entries = Vec::new();
+        for req in requests {
+            let route_entries =
+                Self::build_route_loopback_entries(rss, cur_ts, &req, priority).await;
+            entries.extend(route_entries);
+        }
+
+        if !entries.is_empty() {
+            self.enqueue_ping_validation_entries(entries);
+        }
+    }
+
+    /// Assemble the components needed to build a loopback Destination for an allocated route.
+    /// Releases the route on InvalidTarget; returns None on TryAgain or assembly error.
+    async fn assemble_loopback_route_components(
+        rss: &RouteSpecStore,
+        route_id: &AllocatedRouteSetId,
+    ) -> Option<(PublicKey, Arc<PrivateRoute>, usize)> {
+        let info = rss.get_allocated_route_test_info(route_id)?;
+        let private_route = match rss.assemble_single_private_route(&info.key, None).await {
             Ok(v) => v,
             Err(VeilidAPIError::InvalidTarget { message: _ }) => {
-                // Route missing means it's dead
                 veilid_log!(rss debug "Route {} is dead (invalid target), releasing", route_id);
-                rss.release_route(route_id.clone());
+                rss.release_route(route_id.clone().into());
                 return None;
             }
-            Err(VeilidAPIError::TryAgain { message: _ }) => {
-                // Can't assemble right now, skip
-                return None;
-            }
+            Err(VeilidAPIError::TryAgain { message: _ }) => return None,
             Err(e) => {
                 veilid_log!(rss debug "Error assembling route {}: {}", route_id, e);
                 return None;
             }
         };
+        Some((info.key, private_route, info.hops.len()))
+    }
 
-        // Build the loopback destination
+    /// Wrap an assembled private route in a loopback Destination::PrivateRoute at the given sequencing.
+    fn build_loopback_destination(
+        route_id: &AllocatedRouteSetId,
+        private_route: Arc<PrivateRoute>,
+        hop_count: usize,
+        sequencing: Sequencing,
+    ) -> Destination {
         let safety_spec = SafetySpec {
-            preferred_route: Some(route_id.clone()),
-            hop_count: hops.len(),
+            preferred_route: Some(route_id.clone().into()),
+            hop_count,
             stability: Stability::Reliable,
-            sequencing: Sequencing::PreferOrdered,
+            sequencing,
         };
-        let safety_selection = SafetySelection::Safe(safety_spec);
-        let dest = Destination::PrivateRoute {
+        Destination::PrivateRoute {
             private_route,
-            safety_selection,
+            safety_selection: SafetySelection::Safe(safety_spec),
+        }
+    }
+
+    /// Build one loopback PingValidationEntry per requested SequenceOrdering.
+    /// Each entry's callback reports per-(first-hop, transport) failure on definitive failure
+    /// and a per-ordering keepalive timestamp is stamped at enqueue so the keepalive rate
+    /// limiter sees the work even before the answer comes back.
+    async fn build_route_loopback_entries(
+        rss: &RouteSpecStore,
+        cur_ts: Timestamp,
+        req: &RouteKeepaliveRequest,
+        priority: usize,
+    ) -> Vec<PingValidationEntry> {
+        let Some(info) = rss.get_allocated_route_test_info(&req.route_id) else {
+            return Vec::new();
+        };
+        let Some((key, private_route, hop_count)) =
+            Self::assemble_loopback_route_components(rss, &req.route_id).await
+        else {
+            return Vec::new();
         };
 
-        let route_id_clone = route_id.clone();
-        let dest_clone = dest.clone();
+        let mut entries = Vec::new();
+        for (idx, ordering) in req.orderings.iter().enumerate() {
+            let dest = Self::build_loopback_destination(
+                &req.route_id,
+                private_route.clone(),
+                hop_count,
+                ordering.strict_sequencing(),
+            );
+            entries.push(PingValidationEntry {
+                group: PingValidationGroup::RouteTest,
+                priority,
+                key: PingValidationKey::RouteTest {
+                    route_id: req.route_id.clone().into(),
+                    ping_index: idx,
+                },
+                dest,
+                on_complete: Some(Self::make_loopback_probe_callback(
+                    req.route_id.clone().into(),
+                    key.clone(),
+                    info.hops.clone(),
+                    ordering,
+                )),
+            });
+        }
 
-        Some(PingValidationEntry {
-            group: PingValidationGroup::RouteTest,
-            priority,
-            key: PingValidationKey::RouteTest {
-                route_id: route_id.clone(),
-                ping_index: 0,
-            },
-            dest,
-            on_complete: Some(Self::make_route_test_callback(
-                route_id_clone,
-                dest_clone,
-                hops,
-                0,
-                ROUTE_TEST_PING_COUNT,
-            )),
-        })
+        rss.update_allocated_route_stats(cur_ts, &key, |s| {
+            for ordering in req.orderings.iter() {
+                s.record_loopback_keepalive(cur_ts, ordering);
+            }
+            Ok(())
+        });
+
+        entries
     }
 
     /// Build a PingValidationEntry for testing a remote route
     fn build_remote_route_test_entry(
         rss: &RouteSpecStore,
-        route_id: &RouteId,
+        route_id: &RemoteRouteSetId,
         priority: usize,
     ) -> Option<PingValidationEntry> {
         let private_route = rss.best_remote_private_route(route_id)?;
@@ -476,28 +534,26 @@ impl RoutingTable {
             safety_selection,
         };
 
-        let route_id_clone = route_id.clone();
+        let route_id_clone: RouteId = route_id.clone().into();
 
         // Remote routes: single ping, callback just handles success/failure
         Some(PingValidationEntry {
             group: PingValidationGroup::RouteTest,
             priority,
             key: PingValidationKey::RouteTest {
-                route_id: route_id.clone(),
+                route_id: route_id.clone().into(),
                 ping_index: 0,
             },
             dest,
             on_complete: Some(Box::new(
                 move |registry: VeilidComponentRegistry,
-                      result: Result<NetworkResult<Answer<StatusResult>>, RPCError>|
+                      result: Result<StatusResult, RPCError>|
                       -> Vec<PingValidationEntry> {
                     match result {
-                        Ok(NetworkResult::Value(_)) => {
-                            // Success - route is alive
+                        Ok(StatusResult::Answer { .. }) => {
                             veilid_log!(registry trace "Remote route test PASSED: {}", route_id_clone);
                         }
-                        Ok(_) => {
-                            // Network result but not a value - route failed
+                        Ok(StatusResult::Failed(_)) => {
                             let routing_table = registry.routing_table();
                             let nm = routing_table.network_manager();
                             if nm
@@ -513,6 +569,9 @@ impl RoutingTable {
                                     .release_route(route_id_clone);
                             }
                         }
+                        Ok(StatusResult::NotSent(nr)) => {
+                            veilid_log!(registry debug "Remote route test not sent: {} - {:?}", route_id_clone, nr);
+                        }
                         Err(e) => {
                             veilid_log!(registry debug "Remote route test error: {} - {}", route_id_clone, e);
                         }
@@ -523,84 +582,77 @@ impl RoutingTable {
         })
     }
 
-    /// Create a callback for the route test chain.
-    /// On success with more pings needed: returns next entry in the chain.
-    /// On failure: reports failed route test on hop nodes, releases route.
-    /// On final success: returns empty (RPC processor already set last_known_valid_ts).
-    fn make_route_test_callback(
+    /// Completion callback for a per-ordering route loopback ping. On Answer we record a
+    /// per-ordering pass on the route (drives last_known_valid_ts / clears failures). On Failed
+    /// we record a per-ordering failure on the route (drives the ordering, and eventually the
+    /// route, to dead) and attribute failure to the transport actually used at the first hop.
+    /// NotSent is treated as a non-network failure and left for next cycle.
+    fn make_loopback_probe_callback(
         route_id: RouteId,
-        dest: Destination,
+        route_key: PublicKey,
         hops: Vec<NodeRef>,
-        ping_index: usize,
-        total_pings: usize,
+        ordering: SequenceOrdering,
     ) -> PingCompletionCallback {
         Box::new(
             move |registry: VeilidComponentRegistry,
-                  result: Result<NetworkResult<Answer<StatusResult>>, RPCError>|
+                  result: Result<StatusResult, RPCError>|
                   -> Vec<PingValidationEntry> {
-                match result {
-                    Ok(NetworkResult::Value(_)) => {
-                        // Ping succeeded
-                        let next_index = ping_index + 1;
-                        veilid_log!(registry trace "Route test ping {}/{} succeeded: {}", ping_index + 1, total_pings, route_id);
-                        if next_index < total_pings {
-                            // More pings needed - return next entry in chain
-                            vec![PingValidationEntry {
-                                group: PingValidationGroup::RouteTest,
-                                priority: 0, // Keep highest priority for chain continuation
-                                key: PingValidationKey::RouteTest {
-                                    route_id: route_id.clone(),
-                                    ping_index: next_index,
-                                },
-                                dest: dest.clone(),
-                                on_complete: Some(Self::make_route_test_callback(
-                                    route_id,
-                                    dest,
-                                    hops,
-                                    next_index,
-                                    total_pings,
-                                )),
-                            }]
-                        } else {
-                            // All pings passed - route is verified
-                            // Note: last_known_valid_ts is already set by record_answer_received
-                            // in the RPC processor on the first successful response
-                            veilid_log!(registry trace "Route test PASSED ({} pings): {}", total_pings, route_id);
-                            Vec::new()
-                        }
+                let routing_table = registry.routing_table();
+                let rss = routing_table.route_spec_store();
+                let sdr = match result {
+                    Ok(StatusResult::Answer { answer, .. }) => {
+                        // End-to-end route round-trip (includes inter-hop legs), not a per-node RTT.
+                        let rtt = answer.answer_context.latency;
+                        veilid_log!(registry debug "Route loopback rtt: route={} ord={} rtt={} hops={}", route_key, ordering, rtt, hops.len());
+                        let cur_ts = Timestamp::now();
+                        rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
+                            s.record_loopback_result(ordering, true, cur_ts);
+                            Ok(())
+                        });
+                        return Vec::new();
                     }
-                    Ok(_) => {
-                        let routing_table = registry.routing_table();
-                        let nm = routing_table.network_manager();
-                        if nm
-                            .online_detector()
-                            .online_state(RoutingDomain::PublicInternet)
-                            == OnlineState::Offline
-                        {
-                            veilid_log!(registry debug "Deferring route release (offline detected) at ping {}/{}: {}",
-                                ping_index + 1, total_pings, route_id);
-                        } else {
-                            veilid_log!(registry debug "Route test failed at ping {}/{}: {} (no response)",
-                                ping_index + 1, total_pings, route_id);
-
-                            // Report failed route test on hop nodes
-                            for hop in &hops {
-                                hop.report_failed_route_test();
-                            }
-
-                            // Release the dead route
-                            routing_table.route_spec_store().release_route(route_id);
-                        }
-
-                        Vec::new()
+                    Ok(StatusResult::Failed(sdr)) => sdr,
+                    Ok(StatusResult::NotSent(nr)) => {
+                        veilid_log!(registry debug "Route loopback not sent: {} ({}) - {:?}", route_id, ordering, nr);
+                        return Vec::new();
                     }
                     Err(e) => {
-                        veilid_log!(registry debug "Route test error at ping {}/{}: {} - {}",
-                            ping_index + 1, total_pings, route_id, e);
-                        // Don't release on RPC error (could be transient)
-                        Vec::new()
+                        veilid_log!(registry debug "Deferring route loopback failure (RPC error): {} ({}) - {}", route_id, ordering, e);
+                        return Vec::new();
                     }
+                };
+
+                if routing_table
+                    .network_manager()
+                    .online_detector()
+                    .online_state(RoutingDomain::PublicInternet)
+                    == OnlineState::Offline
+                {
+                    veilid_log!(registry debug "Deferring route loopback failure (offline): {} ({})", route_id, ordering);
+                    return Vec::new();
                 }
+
+                // Record a per-ordering failure on the route so repeated loopback failures
+                // drive this ordering (and eventually the route) to dead and release.
+                let cur_ts = Timestamp::now();
+                rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
+                    s.record_loopback_result(ordering, false, cur_ts);
+                    Ok(())
+                });
+                // If this failure leaves the route dead for all orderings, mark it for release
+                // now (sticky) so it gets released once its refcount drains.
+                rss.mark_allocated_route_for_release_if_dead(&route_key);
+
+                let Some(transport) = sdr.opt_transport_type() else {
+                    veilid_log!(registry debug "Route loopback FAILED with no transport recorded: {} ({})", route_id, ordering);
+                    return Vec::new();
+                };
+                veilid_log!(registry debug "Route loopback FAILED: {} ({} via {})", route_id, ordering, transport);
+                for hop in &hops {
+                    hop.report_failed_route_test(transport);
+                }
+
+                Vec::new()
             },
         )
     }

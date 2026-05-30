@@ -90,9 +90,10 @@ typedef _RoutingContextGetDHTValueDart =
 typedef _RoutingContextSetDHTValueDart =
     void Function(int, int, Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>);
 // fn routing_context_watch_dht_values(port: i64,
-//     id: u32, key: FfiStr, subkeys: FfiStr, expiration: FfiStr, count: u32)
+//     id: u32, key: FfiStr, subkeys: FfiStr, expiration: FfiStr, count: u32,
+//     transactional: bool)
 typedef _RoutingContextWatchDHTValuesDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, int, int);
+    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, int, int, bool);
 // fn routing_context_cancel_dht_watch(port: i64,
 //     id: u32, key: FfiStr, subkeys: FfiStr)
 typedef _RoutingContextCancelDHTWatchDart =
@@ -167,6 +168,9 @@ typedef _ReleaseDHTTransactionDart = int Function(int);
 typedef _DHTTransactionCommitDart = void Function(int, int);
 // fn dht_transaction_rollback(port: i64, id: u32)
 typedef _DHTTransactionRollbackDart = void Function(int, int);
+// fn dht_transaction_extend(port: i64, id: u32, record_keys: FfiStr, options: FfiStr)
+typedef _DHTTransactionExtendDart =
+    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
 // fn dht_transaction_get(port: i64, id: u32, key: FfiStr, subkey: u32)
 typedef _DHTTransactionGetDart = void Function(int, int, Pointer<Utf8>, int);
 // fn dht_transaction_set(port: i64, id: u32, key: FfiStr, subkey: u32,
@@ -886,10 +890,12 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     List<ValueSubkeyRange>? subkeys,
     Timestamp? expiration,
     int? count,
+    bool? transactional,
   }) async {
     subkeys ??= [];
     expiration ??= Timestamp.zero();
     count ??= 0xFFFFFFFF;
+    transactional ??= false;
 
     _ctx.ensureValid();
     final nativeKey = jsonEncode(key).toNativeUtf8();
@@ -905,6 +911,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeSubkeys,
       nativeExpiration,
       count,
+      transactional,
     );
     final active = await processFuturePlain<bool>(recvPort.first);
     return active;
@@ -1030,6 +1037,28 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
     _dtx.ffi._dhtTransactionRollback(sendPort.nativePort, id);
     await processFutureVoid(recvPort.first);
     _dtx.close();
+  }
+
+  @override
+  Future<void> extend(
+    List<RecordKey> recordKeys, {
+    TransactDHTRecordsOptions? options,
+  }) async {
+    final id = _dtx.requireId();
+    final nativeRecordKeys = jsonEncode(recordKeys).toNativeUtf8();
+    final nativeOptions = options != null
+        ? jsonEncode(options).toNativeUtf8()
+        : nullptr;
+
+    final recvPort = ReceivePort('veilid_dht_transaction_extend');
+    final sendPort = recvPort.sendPort;
+    _dtx.ffi._dhtTransactionExtend(
+      sendPort.nativePort,
+      id,
+      nativeRecordKeys,
+      nativeOptions,
+    );
+    await processFutureVoid(recvPort.first);
   }
 
   @override
@@ -1775,6 +1804,7 @@ class VeilidFFI extends Veilid {
   final _ReleaseDHTTransactionDart _releaseDHTTransaction;
   final _DHTTransactionCommitDart _dhtTransactionCommit;
   final _DHTTransactionRollbackDart _dhtTransactionRollback;
+  final _DHTTransactionExtendDart _dhtTransactionExtend;
   final _DHTTransactionGetDart _dhtTransactionGet;
   final _DHTTransactionSetDart _dhtTransactionSet;
   final _DHTTransactionInspectDart _dhtTransactionInspect;
@@ -1837,6 +1867,8 @@ class VeilidFFI extends Veilid {
   final _CryptoCryptNoAuthDart _cryptoCryptNoAuth;
 
   final _NowDart _now;
+  final _NowDart _nowNonDecreasing;
+  final _NowDart _nowIncreasing;
   final _DebugDart _debug;
   final _VeilidVersionStringDart _veilidVersionString;
   final _VeilidVersionDart _veilidVersion;
@@ -1970,6 +2002,7 @@ class VeilidFFI extends Veilid {
               Pointer<Utf8>,
               Uint64,
               Uint32,
+              Bool,
             ),
             _RoutingContextWatchDHTValuesDart
           >('routing_context_watch_dht_values'),
@@ -2048,6 +2081,11 @@ class VeilidFFI extends Veilid {
             Void Function(Uint64, Uint32),
             _DHTTransactionRollbackDart
           >('dht_transaction_rollback'),
+      _dhtTransactionExtend = dylib
+          .lookupFunction<
+            Void Function(Uint64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
+            _DHTTransactionExtendDart
+          >('dht_transaction_extend'),
       _dhtTransactionGet = dylib
           .lookupFunction<
             Void Function(Uint64, Uint32, Pointer<Utf8>, Uint32),
@@ -2359,6 +2397,10 @@ class VeilidFFI extends Veilid {
             _CryptoCryptNoAuthDart
           >('crypto_crypt_no_auth'),
       _now = dylib.lookupFunction<Uint64 Function(), _NowDart>('now'),
+      _nowNonDecreasing = dylib
+          .lookupFunction<Uint64 Function(), _NowDart>('now_non_decreasing'),
+      _nowIncreasing = dylib
+          .lookupFunction<Uint64 Function(), _NowDart>('now_increasing'),
       _debug = dylib
           .lookupFunction<Void Function(Int64, Pointer<Utf8>), _DebugDart>(
             'debug',
@@ -2673,6 +2715,18 @@ class VeilidFFI extends Veilid {
   @override
   Timestamp now() {
     final ts = _now();
+    return Timestamp(value: BigInt.from(ts));
+  }
+
+  @override
+  Timestamp nowNonDecreasing() {
+    final ts = _nowNonDecreasing();
+    return Timestamp(value: BigInt.from(ts));
+  }
+
+  @override
+  Timestamp nowIncreasing() {
+    final ts = _nowIncreasing();
     return Timestamp(value: BigInt.from(ts));
   }
 

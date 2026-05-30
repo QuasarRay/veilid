@@ -22,9 +22,9 @@ pub enum DeferredStreamResult {
 
 /// Background processor for streams
 /// Handles streams to completion, passing each item from the stream to a callback
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DeferredStreamProcessor {
-    inner: Mutex<DeferredStreamProcessorInner>,
+    inner: Arc<Mutex<DeferredStreamProcessorInner>>,
 }
 
 impl DeferredStreamProcessor {
@@ -32,11 +32,11 @@ impl DeferredStreamProcessor {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(DeferredStreamProcessorInner {
+            inner: Arc::new(Mutex::new(DeferredStreamProcessorInner {
                 opt_deferred_stream_channel: None,
                 opt_stopper: None,
                 opt_join_handle: None,
-            }),
+            })),
         }
     }
 

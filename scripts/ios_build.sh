@@ -12,11 +12,11 @@ TARGET_PATH=$(python3 -c "import os; print(os.path.realpath(\"$CARGO_WORKSPACE_P
 PACKAGE_NAME=$1
 shift
 
-if [ "$CONFIGURATION" == "Debug" ]; then 
-    EXTRA_CARGO_OPTIONS="$@"
+if [ "$CONFIGURATION" == "Debug" ]; then
+    EXTRA_CARGO_OPTIONS="$@ ${VEILID_CARGO_EXTRA_OPTIONS:-}"
     BUILD_MODE="debug"
 else
-    EXTRA_CARGO_OPTIONS="$@ --release"
+    EXTRA_CARGO_OPTIONS="$@ --release ${VEILID_CARGO_EXTRA_OPTIONS:-}"
     BUILD_MODE="release"
 fi
 ARCHS=${ARCHS:=arm64}

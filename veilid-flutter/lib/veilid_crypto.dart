@@ -80,7 +80,6 @@ class Typed<V extends EncodedString> extends Equatable
     implements TypedCryptoKey<V> {
   @override
   final CryptoKind kind;
-
   @override
   final V value;
 
@@ -123,7 +122,6 @@ class Typed<V extends EncodedString> extends Equatable
 @immutable
 class BareKeyPair extends Equatable {
   final BarePublicKey key;
-
   final BareSecretKey secret;
 
   const BareKeyPair({required this.key, required this.secret});
@@ -153,7 +151,6 @@ class BareKeyPair extends Equatable {
 @immutable
 class KeyPair extends Equatable implements TypedCryptoKey<BareKeyPair> {
   final PublicKey key;
-
   final SecretKey secret;
 
   KeyPair({required this.key, required this.secret})
@@ -213,7 +210,6 @@ class KeyPair extends Equatable implements TypedCryptoKey<BareKeyPair> {
 @immutable
 class BareRecordKey extends Equatable {
   final BareOpaqueRecordKey key;
-
   final BareSharedSecret? encryptionKey;
 
   const BareRecordKey({required this.key, required this.encryptionKey});
@@ -247,7 +243,6 @@ class BareRecordKey extends Equatable {
 @immutable
 class RecordKey extends Equatable implements TypedCryptoKey<BareRecordKey> {
   final OpaqueRecordKey opaque;
-
   final SharedSecret? encryptionKey;
 
   RecordKey({required this.opaque, required this.encryptionKey})

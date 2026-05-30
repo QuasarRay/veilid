@@ -1,11 +1,12 @@
 use super::*;
 
-/// Shared record lock guard for a single record and an exclusive lock on a single subkey
+/// Subkey lock guard: holds Subkey-mode locks (lifetime.read + transaction.read + per-subkey).
 #[derive(Debug)]
 #[must_use]
-pub struct SubkeyLockGuard<R: LockPurpose, S: LockPurpose> {
+pub struct SubkeyLockGuard<R: RecordLockPurpose, S: RecordLockPurpose> {
     record_lock: Arc<RecordLock<R, S>>,
-    _whole_record_lock_guard: AsyncRwLockReadGuardArc<()>,
+    _lifetime_lock_guard: AsyncRwLockReadGuardArc<()>,
+    _transaction_lock_guard: AsyncRwLockReadGuardArc<()>,
     _subkey_lock_guard: AsyncMutexGuardArc<()>,
     subkey: ValueSubkey,
     #[cfg(feature = "debug-locks")]
@@ -14,10 +15,11 @@ pub struct SubkeyLockGuard<R: LockPurpose, S: LockPurpose> {
     active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
 }
 
-impl<R: LockPurpose, S: LockPurpose> SubkeyLockGuard<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> SubkeyLockGuard<R, S> {
     pub(super) fn new(
         record_lock: Arc<RecordLock<R, S>>,
-        whole_record_lock_guard: AsyncRwLockReadGuardArc<()>,
+        lifetime_lock_guard: AsyncRwLockReadGuardArc<()>,
+        transaction_lock_guard: AsyncRwLockReadGuardArc<()>,
         subkey_lock_guard: AsyncMutexGuardArc<()>,
         subkey: ValueSubkey,
     ) -> Self {
@@ -31,7 +33,8 @@ impl<R: LockPurpose, S: LockPurpose> SubkeyLockGuard<R, S> {
 
         Self {
             record_lock,
-            _whole_record_lock_guard: whole_record_lock_guard,
+            _lifetime_lock_guard: lifetime_lock_guard,
+            _transaction_lock_guard: transaction_lock_guard,
             _subkey_lock_guard: subkey_lock_guard,
             subkey,
             #[cfg(feature = "debug-locks")]
@@ -48,7 +51,7 @@ impl<R: LockPurpose, S: LockPurpose> SubkeyLockGuard<R, S> {
         self.subkey
     }
 }
-impl<R: LockPurpose, S: LockPurpose> Drop for SubkeyLockGuard<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> Drop for SubkeyLockGuard<R, S> {
     fn drop(&mut self) {
         #[cfg(feature = "debug-locks")]
         self.active_guards.lock().remove(&self.id);
@@ -57,7 +60,7 @@ impl<R: LockPurpose, S: LockPurpose> Drop for SubkeyLockGuard<R, S> {
     }
 }
 
-impl<R: LockPurpose, S: LockPurpose> fmt::Display for SubkeyLockGuard<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> fmt::Display for SubkeyLockGuard<R, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Subkey({}:{})", self.record(), self.subkey())
     }

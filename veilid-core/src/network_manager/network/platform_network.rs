@@ -131,12 +131,8 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
     /// established NAT flows are reused.
     fn get_preferred_local_address(&self, dial_info: &DialInfo) -> Option<SocketAddr>;
 
-    /// Local address to use for a flow given a specific protocol+address-type pair.
-    fn get_preferred_local_address_by_key(
-        &self,
-        pt: ProtocolType,
-        at: AddressType,
-    ) -> Option<SocketAddr>;
+    /// Local address to use for a flow given a specific transport type.
+    fn get_preferred_local_address_by_key(&self, tt: TransportType) -> Option<SocketAddr>;
 
     /// Preferred local source for an outbound send to `dial_info`; None for LocalNetwork
     /// or NATed cases (let OS pick the source)

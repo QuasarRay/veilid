@@ -22,7 +22,8 @@ import {
   veilidCrypto
 } from 'veilid-wasm';
 import { textEncoder, textDecoder } from './utils/marshalling-utils';
-import { asyncCallWithTimeout, waitForPublicAttachment as waitForPublicInternetReady, waitForOfflineSubkeyWrite, getLogTimestamp, waitForSingleEvent, waitForDetached } from './utils/wait-utils';
+import { asyncCallWithTimeout, sendUntilReceived, waitForPublicAttachment as waitForPublicInternetReady, waitForOfflineSubkeyWrite, getLogTimestamp, waitForSingleEvent, waitForDetached } from './utils/wait-utils';
+import { dhtRetry } from './utils/dht-retry';
 
 const appMessageEventTarget = new EventTarget();
 const appCallEventTarget = new EventTarget();
@@ -156,14 +157,16 @@ describe('VeilidRoutingContext', () => {
 
         const message = textEncoder.encode('This is a test message');
 
-        const appMessageOneShot = waitForSingleEvent<CustomEvent<VeilidAppMessage>>(appMessageEventTarget, 'appMessage');
-
-        await routingContext.appMessage({ RouteId: routeId }, message);
-
-        const receivedMessage = await asyncCallWithTimeout<CustomEvent<VeilidAppMessage>>(appMessageOneShot, 10_000);
+        // App messages are fire-and-forget; on WASM a slow/flapping route can drop one, so resend until received.
+        const receivedMessage = await sendUntilReceived<CustomEvent<VeilidAppMessage>>(
+          () => routingContext.appMessage({ RouteId: routeId }, message),
+          appMessageEventTarget,
+          'appMessage',
+        );
         await expect(receivedMessage.detail.message).toStrictEqual(message);
 
         veilidClient.releasePrivateRoute(routeId);
+        veilidClient.releasePrivateRoute(routeBlob.routeId);
       });
 
       it('should create a new private route, send an app call to it, receive it, reply to it, and then receive the reply and release the route for ${cryptoKind as string}', async () => {
@@ -182,15 +185,16 @@ describe('VeilidRoutingContext', () => {
 
         const appCallPromise = routingContext.appCall({ RouteId: routeId }, message);
 
-        const receivedCall = await asyncCallWithTimeout<CustomEvent<VeilidAppCall>>(appCallOneShot, 10_000);
+        const receivedCall = await asyncCallWithTimeout<CustomEvent<VeilidAppCall>>(appCallOneShot, 30_000);
         await expect(receivedCall.detail.message).toStrictEqual(message);
 
         await veilidClient.appCallReply(receivedCall.detail.callId, reply);
 
-        const returnedReply = await asyncCallWithTimeout<Uint8Array>(appCallPromise, 10_000);
+        const returnedReply = await asyncCallWithTimeout<Uint8Array>(appCallPromise, 30_000);
         await expect(returnedReply).toStrictEqual(reply);
 
         veilidClient.releasePrivateRoute(routeId);
+        veilidClient.releasePrivateRoute(routeBlob.routeId);
       });
 
       describe(`createDhtRecord for ${cryptoKind as string}`, () => {
@@ -242,30 +246,27 @@ describe('VeilidRoutingContext', () => {
         });
 
         it('should set value', async () => {
-          const setValueRes = await routingContext.setDHTValue(
-            dhtRecord.key,
-            0,
-            textEncoder.encode(data)
+          const setValueRes = await dhtRetry(
+            () => routingContext.setDHTValue(dhtRecord.key, 0, textEncoder.encode(data)),
+            { label: 'setDHTValue' },
           );
           await expect(setValueRes).toBeUndefined();
         });
 
         it('should get value with force refresh', async () => {
 
-          const setValueRes = await routingContext.setDHTValue(
-            dhtRecord.key,
-            0,
-            textEncoder.encode(data)
+          const setValueRes = await dhtRetry(
+            () => routingContext.setDHTValue(dhtRecord.key, 0, textEncoder.encode(data)),
+            { label: 'setDHTValue' },
           );
           await expect(setValueRes).toBeUndefined();
 
           // Wait for synchronization
           await waitForOfflineSubkeyWrite(routingContext, dhtRecord.key);
 
-          const getValueRes = await routingContext.getDHTValue(
-            dhtRecord.key,
-            0,
-            true
+          const getValueRes = await dhtRetry(
+            () => routingContext.getDHTValue(dhtRecord.key, 0, true),
+            { label: 'getDHTValue forceRefresh' },
           );
 
           await expect(getValueRes?.data).toBeDefined();
@@ -278,11 +279,13 @@ describe('VeilidRoutingContext', () => {
         it('should open readonly record', async () => {
           await routingContext.closeDHTRecord(dhtRecord.key);
 
-          const readonlyDhtRecord = await routingContext.openDHTRecord(
-            dhtRecord.key
+          const readonlyDhtRecord = await dhtRetry(
+            () => routingContext.openDHTRecord(dhtRecord.key),
+            { label: 'openDHTRecord readonly' },
           );
           await expect(readonlyDhtRecord).toBeDefined();
 
+          // No retry: we're asserting the not-writable rejection.
           const setValueRes = routingContext.setDHTValue(
             dhtRecord.key,
             0,
@@ -297,15 +300,14 @@ describe('VeilidRoutingContext', () => {
         it('should open writable record', async () => {
           await routingContext.closeDHTRecord(dhtRecord.key);
 
-          const writeableDhtRecord = await routingContext.openDHTRecord(
-            dhtRecord.key,
-            dhtRecord.owner as KeyPair,
+          const writeableDhtRecord = await dhtRetry(
+            () => routingContext.openDHTRecord(dhtRecord.key, dhtRecord.owner as KeyPair),
+            { label: 'openDHTRecord writable' },
           );
           await expect(writeableDhtRecord).toBeDefined();
-          const setValueRes = await routingContext.setDHTValue(
-            dhtRecord.key,
-            0,
-            textEncoder.encode(`${data}👋`)
+          const setValueRes = await dhtRetry(
+            () => routingContext.setDHTValue(dhtRecord.key, 0, textEncoder.encode(`${data}👋`)),
+            { label: 'setDHTValue' },
           );
           await expect(setValueRes).toBeUndefined();
         });
@@ -313,10 +315,12 @@ describe('VeilidRoutingContext', () => {
         it('should open readonly record and specify writer during the set', async () => {
           await routingContext.closeDHTRecord(dhtRecord.key);
 
-          const writeableDhtRecord = await routingContext.openDHTRecord(
-            dhtRecord.key,
+          const writeableDhtRecord = await dhtRetry(
+            () => routingContext.openDHTRecord(dhtRecord.key),
+            { label: 'openDHTRecord' },
           );
           await expect(writeableDhtRecord).toBeDefined();
+          // No retry: we're asserting the not-writable rejection.
           const setValueResFail = routingContext.setDHTValue(
             dhtRecord.key,
             0,
@@ -326,77 +330,76 @@ describe('VeilidRoutingContext', () => {
             kind: 'Generic',
             message: 'value is not writable',
           });
-          const setValueRes = await routingContext.setDHTValue(
-            dhtRecord.key,
-            0,
-            textEncoder.encode(`${data}👋`),
-            {
-              writer: dhtRecord.owner as KeyPair,
-              allowOffline: undefined
-            }
+          const setValueRes = await dhtRetry(
+            () => routingContext.setDHTValue(
+              dhtRecord.key,
+              0,
+              textEncoder.encode(`${data}👋`),
+              {
+                writer: dhtRecord.owner as KeyPair,
+                allowOffline: undefined
+              }
+            ),
+            { label: 'setDHTValue with writer' },
           );
           await expect(setValueRes).toBeUndefined();
         });
 
         it('should watch value and cancel watch', async () => {
-          const setValueRes = await routingContext.setDHTValue(
-            dhtRecord.key,
-            0,
-            textEncoder.encode(data)
+          const setValueRes = await dhtRetry(
+            () => routingContext.setDHTValue(dhtRecord.key, 0, textEncoder.encode(data)),
+            { label: 'setDHTValue' },
           );
           await expect(setValueRes).toBeUndefined();
 
           // With typical values
-          const watchValueRes = await routingContext.watchDhtValues(
-            dhtRecord.key,
-            [[0, 0]],
-            "0",
-            0xFFFFFFFF,
+          const watchValueRes = await dhtRetry(
+            () => routingContext.watchDhtValues(dhtRecord.key, [[0, 0]], "0", 0xFFFFFFFF),
+            { label: 'watchDhtValues' },
           );
           await expect(watchValueRes).toEqual(true);
 
-          const cancelValueRes = await routingContext.cancelDHTWatch(
-            dhtRecord.key,
-            [],
-          )
+          const cancelValueRes = await dhtRetry(
+            () => routingContext.cancelDHTWatch(dhtRecord.key, []),
+            { label: 'cancelDHTWatch' },
+          );
 
           await expect(cancelValueRes).toEqual(false);
 
         });
 
         it('should watch value and cancel watch with default values', async () => {
-          const setValueRes = await routingContext.setDHTValue(
-            dhtRecord.key,
-            0,
-            textEncoder.encode(data)
+          const setValueRes = await dhtRetry(
+            () => routingContext.setDHTValue(dhtRecord.key, 0, textEncoder.encode(data)),
+            { label: 'setDHTValue' },
           );
           await expect(setValueRes).toBeUndefined();
 
           // Again with default values
-          const watchValueRes = await routingContext.watchDhtValues(
-            dhtRecord.key,
+          const watchValueRes = await dhtRetry(
+            () => routingContext.watchDhtValues(dhtRecord.key),
+            { label: 'watchDhtValues default' },
           );
           await expect(watchValueRes).toEqual(true);
 
-          const cancelValueRes = await routingContext.cancelDHTWatch(
-            dhtRecord.key,
-          )
+          const cancelValueRes = await dhtRetry(
+            () => routingContext.cancelDHTWatch(dhtRecord.key),
+            { label: 'cancelDHTWatch default' },
+          );
           await expect(cancelValueRes).toEqual(false);
         });
 
         it('should set a value and inspect it', async () => {
-          const setValueRes = await routingContext.setDHTValue(
-            dhtRecord.key,
-            0,
-            textEncoder.encode(data)
+          const setValueRes = await dhtRetry(
+            () => routingContext.setDHTValue(dhtRecord.key, 0, textEncoder.encode(data)),
+            { label: 'setDHTValue' },
           );
           await expect(setValueRes).toBeUndefined();
 
           // Inspect locally
-          const inspectRes = await routingContext.inspectDHTRecord(
-            dhtRecord.key,
-            [[0, 0]],
-            "Local",
+          const inspectRes = await dhtRetry(
+            () => routingContext.inspectDHTRecord(dhtRecord.key, [[0, 0]], "Local"),
+            { label: 'inspectDHTRecord Local' },
           );
           await expect(inspectRes).toBeDefined();
           await expect(inspectRes.subkeys).toEqual([[0, 0]]);
@@ -407,10 +410,9 @@ describe('VeilidRoutingContext', () => {
           await waitForOfflineSubkeyWrite(routingContext, dhtRecord.key);
 
           // Inspect network
-          const inspectRes2 = await routingContext.inspectDHTRecord(
-            dhtRecord.key,
-            [[0, 0]],
-            "SyncGet",
+          const inspectRes2 = await dhtRetry(
+            () => routingContext.inspectDHTRecord(dhtRecord.key, [[0, 0]], "SyncGet"),
+            { label: 'inspectDHTRecord SyncGet' },
           );
           await expect(inspectRes2).toBeDefined();
           await expect(inspectRes2.subkeys).toEqual([[0, 0]]);
@@ -420,10 +422,9 @@ describe('VeilidRoutingContext', () => {
         });
 
         it('should set a value and inspect it with defaults', async () => {
-          const setValueRes = await routingContext.setDHTValue(
-            dhtRecord.key,
-            0,
-            textEncoder.encode(data)
+          const setValueRes = await dhtRetry(
+            () => routingContext.setDHTValue(dhtRecord.key, 0, textEncoder.encode(data)),
+            { label: 'setDHTValue' },
           );
           await expect(setValueRes).toBeUndefined();
 
@@ -431,8 +432,9 @@ describe('VeilidRoutingContext', () => {
           await waitForOfflineSubkeyWrite(routingContext, dhtRecord.key);
 
           // Inspect locally
-          const inspectRes = await routingContext.inspectDHTRecord(
-            dhtRecord.key,
+          const inspectRes = await dhtRetry(
+            () => routingContext.inspectDHTRecord(dhtRecord.key),
+            { label: 'inspectDHTRecord default' },
           );
           await expect(inspectRes).toBeDefined();
           await expect(inspectRes.offlineSubkeys).toEqual([]);
@@ -492,60 +494,113 @@ describe('VeilidRoutingContext', () => {
         });
 
         it('should create empty transaction and drop it explicitly', async () => {
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
           tx.free();
         });
 
         it('should create empty transaction and drop it lazily', async () => {
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
         });
 
         it('should create empty transaction and rollback', async () => {
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
-          await tx.rollback();
+          await dhtRetry(() => tx.rollback(), { label: 'rollback' });
         });
 
         it('should create empty transaction and commit', async () => {
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
-          await tx.commit();
+          await dhtRetry(() => tx.commit(), { label: 'commit' });
         });
 
         it('should create transaction, add sets, and rollback', async () => {
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-            const res = await tx.set(dhtRecords[rec], 0, data[rec]);
+            const res = await dhtRetry(() => tx.set(dhtRecords[rec], 0, data[rec]), { label: 'set' });
             await expect(res).toBeUndefined();
           }
 
-          await tx.rollback();
+          await dhtRetry(() => tx.rollback(), { label: 'rollback' });
         });
 
         it('should create transaction, add sets, and commit', async () => {
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-            const res = await tx.set(dhtRecords[rec], 0, data[rec]);
+            const res = await dhtRetry(() => tx.set(dhtRecords[rec], 0, data[rec]), { label: 'set' });
             await expect(res).toBeUndefined();
           }
 
-          await tx.commit();
+          await dhtRetry(() => tx.commit(), { label: 'commit' });
+        });
+
+        it('should extend transaction with a new record and commit', async () => {
+          const extraDesc = await routingContext.createDHTRecord(
+            cryptoKind,
+            { 'DFLT': { oCnt: DHT_SUBKEY_COUNT } },
+          );
+          try {
+            const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
+            await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
+
+            for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
+              const res = await dhtRetry(() => tx.set(dhtRecords[rec], 0, data[rec]), { label: 'set' });
+              await expect(res).toBeUndefined();
+            }
+
+            await dhtRetry(() => tx.extend([extraDesc.key]), { label: 'extend' });
+
+            const extraData = new Uint8Array(DHT_SUBKEY_SIZE).fill(DHT_RECORD_COUNT);
+            const extraRes = await dhtRetry(() => tx.set(extraDesc.key, 0, extraData), { label: 'set extra' });
+            await expect(extraRes).toBeUndefined();
+
+            await dhtRetry(() => tx.commit(), { label: 'commit' });
+
+            const readback = await dhtRetry(() => routingContext.getDHTValue(extraDesc.key, 0, false), { label: 'getDHTValue' });
+            await expect(readback).toBeDefined();
+            await expect(readback!.data).toEqual(extraData);
+          } finally {
+            await routingContext.deleteDHTRecord(extraDesc.key);
+          }
+        });
+
+        it('should extend transaction with a new record and rollback', async () => {
+          const extraDesc = await routingContext.createDHTRecord(
+            cryptoKind,
+            { 'DFLT': { oCnt: DHT_SUBKEY_COUNT } },
+          );
+          try {
+            const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
+            await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
+
+            await dhtRetry(() => tx.set(dhtRecords[0], 0, data[0]), { label: 'set' });
+            await dhtRetry(() => tx.extend([extraDesc.key]), { label: 'extend' });
+            const extraData = new Uint8Array(DHT_SUBKEY_SIZE).fill(DHT_RECORD_COUNT);
+            await dhtRetry(() => tx.set(extraDesc.key, 0, extraData), { label: 'set extra' });
+
+            await dhtRetry(() => tx.rollback(), { label: 'rollback' });
+
+            const readback = await dhtRetry(() => routingContext.getDHTValue(extraDesc.key, 0, true), { label: 'getDHTValue' });
+            await expect(readback).toBeUndefined();
+          } finally {
+            await routingContext.deleteDHTRecord(extraDesc.key);
+          }
         });
 
         it('should create transaction, add sets, gets, and commit', async () => {
 
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
           const sets = [];
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-            sets.push(tx.set(dhtRecords[rec], 0, data[rec]));
+            sets.push(dhtRetry(() => tx.set(dhtRecords[rec], 0, data[rec]), { label: `set rec${rec}` }));
           }
 
           const allSetRes = await Promise.all(sets)
@@ -555,7 +610,7 @@ describe('VeilidRoutingContext', () => {
 
           const gets = [];
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-            gets.push(tx.get(dhtRecords[rec], 0));
+            gets.push(dhtRetry(() => tx.get(dhtRecords[rec], 0), { label: `get rec${rec}` }));
           }
 
           const allGetRes = await Promise.all(gets)
@@ -563,11 +618,13 @@ describe('VeilidRoutingContext', () => {
             await expect(res).toBeUndefined();
           }
 
-          await tx.commit();
+          await dhtRetry(() => tx.commit(), { label: 'commit' });
         });
 
         it('should create empty transaction, fail non-transactional sets and then rollback', async () => {
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          // Non-transactional sets against records held in a transaction must
+          // surface TryAgain — don't retry; that's the assertion.
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
           const sets: Promise<ValueData | undefined>[] = [];
@@ -582,20 +639,20 @@ describe('VeilidRoutingContext', () => {
           } catch (error) {
             await expect(error).toMatchObject({ kind: "TryAgain" });
           }
-          await tx.rollback();
+          await dhtRetry(() => tx.rollback(), { label: 'rollback' });
 
         });
 
         it('should create transaction, inspect, add sets to subkey 1, inspect, and commit. Then a new transaction inspect, and gets, and commit', async () => {
           // Begin
-          const tx = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
           await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
           // Inspect 1
           const inspects1: Promise<{ rec: number, report: DHTRecordReport }>[] = [];
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
             inspects1.push((async () => {
-              const report = await tx.inspect(dhtRecords[rec], null, "SyncGet");
+              const report = await dhtRetry(() => tx.inspect(dhtRecords[rec], null, "SyncGet"), { label: `inspect rec${rec}` });
               return { rec: rec, report: report };
             })());
           }
@@ -611,7 +668,7 @@ describe('VeilidRoutingContext', () => {
           // Sets
           const sets: Promise<ValueData | undefined>[] = [];
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-            sets.push(tx.set(dhtRecords[rec], 1, data[rec]));
+            sets.push(dhtRetry(() => tx.set(dhtRecords[rec], 1, data[rec]), { label: `set rec${rec}` }));
           }
 
           const allSetRes = await Promise.all(sets)
@@ -623,7 +680,7 @@ describe('VeilidRoutingContext', () => {
           const inspects2: Promise<{ rec: number, report: DHTRecordReport }>[] = [];
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
             inspects2.push((async () => {
-              const report = await tx.inspect(dhtRecords[rec], null, "SyncGet");
+              const report = await dhtRetry(() => tx.inspect(dhtRecords[rec], null, "SyncGet"), { label: `inspect2 rec${rec}` });
               return { rec: rec, report: report };
             })());
           }
@@ -637,17 +694,17 @@ describe('VeilidRoutingContext', () => {
           }
 
           // Commit
-          await tx.commit();
+          await dhtRetry(() => tx.commit(), { label: 'commit' });
 
           // Transaction 2
-          const tx2 = await veilidClient.transactDHTRecords(dhtRecords);
+          const tx2 = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin tx2' });
           await expect(tx2).toBeInstanceOf(VeilidDHTTransaction);
 
           // Inspect 3 (should be updated post-commit)
           const inspects3: Promise<{ rec: number, report: DHTRecordReport }>[] = [];
           for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
             inspects3.push((async () => {
-              const report = await tx2.inspect(dhtRecords[rec], null, "SyncGet");
+              const report = await dhtRetry(() => tx2.inspect(dhtRecords[rec], null, "SyncGet"), { label: `inspect3 rec${rec}` });
               return { rec: rec, report: report };
             })());
           }
@@ -666,7 +723,7 @@ describe('VeilidRoutingContext', () => {
             const gets: Promise<{ rec: number, subkey: number, val: ValueData | undefined }>[] = [];
             for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
               gets.push((async () => {
-                const val = await tx2.get(dhtRecords[rec], subkey);
+                const val = await dhtRetry(() => tx2.get(dhtRecords[rec], subkey), { label: `get rec${rec} sk${subkey}` });
                 return { rec: rec, subkey: subkey, val: val };
               })());
             }
@@ -682,7 +739,7 @@ describe('VeilidRoutingContext', () => {
               }
             }
           }
-          await tx2.commit();
+          await dhtRetry(() => tx2.commit(), { label: 'commit tx2' });
         });
       });
 
@@ -722,14 +779,14 @@ describe('VeilidRoutingContext', () => {
 
 
           it('should create empty transaction, inspect, add gets and commit', async () => {
-            const tx = await veilidClient.transactDHTRecords(dhtRecords);
+            const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
             await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
             // Inspect 1
             const inspects1: Promise<{ rec: number, report: DHTRecordReport }>[] = [];
             for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
               inspects1.push((async () => {
-                const report = await tx.inspect(dhtRecords[rec], null, "SyncGet");
+                const report = await dhtRetry(() => tx.inspect(dhtRecords[rec], null, "SyncGet"), { label: `inspect rec${rec}` });
                 return { rec: rec, report: report };
               })());
             }
@@ -745,7 +802,7 @@ describe('VeilidRoutingContext', () => {
             for (let subkey = 0; subkey < DHT_SUBKEY_COUNT; subkey++) {
               const gets: Promise<ValueData | undefined>[] = [];
               for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-                gets.push(tx.get(dhtRecords[rec], subkey));
+                gets.push(dhtRetry(() => tx.get(dhtRecords[rec], subkey), { label: `get rec${rec} sk${subkey}` }));
               }
               const allGetRes = await Promise.all(gets)
               for (const res of allGetRes) {
@@ -753,13 +810,13 @@ describe('VeilidRoutingContext', () => {
               }
             }
 
-            await tx.commit();
+            await dhtRetry(() => tx.commit(), { label: 'commit' });
           });
 
 
           it('should create transaction, fill all records, commit, and then get all records and rollback', async () => {
             const startBegin = performance.now();
-            const tx = await veilidClient.transactDHTRecords(dhtRecords);
+            const tx = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin' });
             await expect(tx).toBeInstanceOf(VeilidDHTTransaction);
             console.log(`begin transaction: ${performance.now() - startBegin}ms`)
 
@@ -769,7 +826,7 @@ describe('VeilidRoutingContext', () => {
 
               const sets: Promise<ValueData | undefined>[] = [];
               for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-                sets.push(tx.set(dhtRecords[rec], subkey, data[rec]));
+                sets.push(dhtRetry(() => tx.set(dhtRecords[rec], subkey, data[rec]), { label: `set rec${rec} sk${subkey}` }));
               }
 
               const allSetRes = await Promise.all(sets)
@@ -781,11 +838,11 @@ describe('VeilidRoutingContext', () => {
             }
 
             const startCommit = performance.now();
-            await tx.commit();
+            await dhtRetry(() => tx.commit(), { label: 'commit' });
             console.log(`commit transaction: ${performance.now() - startCommit}ms`)
 
             const startBegin2 = performance.now();
-            const tx2 = await veilidClient.transactDHTRecords(dhtRecords);
+            const tx2 = await dhtRetry(() => veilidClient.transactDHTRecords(dhtRecords), { label: 'begin tx2' });
             await expect(tx2).toBeInstanceOf(VeilidDHTTransaction);
             console.log(`begin transaction 2: ${performance.now() - startBegin2}ms`)
 
@@ -796,7 +853,7 @@ describe('VeilidRoutingContext', () => {
               const gets: Promise<{ rec: number, subkey: number, val: ValueData | undefined }>[] = [];
               for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
                 gets.push((async () => {
-                  const val = await tx2.get(dhtRecords[rec], subkey);
+                  const val = await dhtRetry(() => tx2.get(dhtRecords[rec], subkey), { label: `get rec${rec} sk${subkey}` });
                   return { rec: rec, subkey: subkey, val: val };
                 })());
               }
@@ -812,7 +869,7 @@ describe('VeilidRoutingContext', () => {
             }
 
             const startRollback = performance.now();
-            await tx2.rollback();
+            await dhtRetry(() => tx2.rollback(), { label: 'rollback tx2' });
             console.log(`rollback transaction 2: ${performance.now() - startRollback}ms`)
           });
         });

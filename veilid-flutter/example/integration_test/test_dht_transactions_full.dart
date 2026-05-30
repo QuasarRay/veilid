@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
 
@@ -91,7 +91,7 @@ class TestDHTTransactionsFull {
     // Begin
     final tx = await Veilid.instance.transactDHTRecords(dhtRecords);
     expect(tx, isInstanceOf<VeilidDHTTransaction>());
-    print('begin transaction: ${Veilid.instance.now().diff(startBegin)}');
+    debugPrint('begin transaction: ${Veilid.instance.now().diff(startBegin)}');
 
     // Sets
     for (var subkey = 0; subkey < dhtSubkeyCount; subkey++) {
@@ -106,19 +106,19 @@ class TestDHTTransactionsFull {
         expect(res, isNull);
       }
 
-      print('set subkey $subkey: ${Veilid.instance.now().diff(startSet)}');
+      debugPrint('set subkey $subkey: ${Veilid.instance.now().diff(startSet)}');
     }
 
     // Commit
     final startCommit = Veilid.instance.now();
     await tx.commit();
-    print('commit transaction: ${Veilid.instance.now().diff(startCommit)}');
+    debugPrint('commit transaction: ${Veilid.instance.now().diff(startCommit)}');
 
     // Transaction 2
     final startCommit2 = Veilid.instance.now();
     final tx2 = await Veilid.instance.transactDHTRecords(dhtRecords);
     expect(tx2, isInstanceOf<VeilidDHTTransaction>());
-    print('begin transaction 2: ${Veilid.instance.now().diff(startCommit2)}');
+    debugPrint('begin transaction 2: ${Veilid.instance.now().diff(startCommit2)}');
 
     // Gets
     for (var subkey = 0; subkey < dhtSubkeyCount; subkey++) {
@@ -139,11 +139,11 @@ class TestDHTTransactionsFull {
         expect(res.$3!.seq, equals(0));
       }
 
-      print('get subkey $subkey: ${Veilid.instance.now().diff(startGet)}');
+      debugPrint('get subkey $subkey: ${Veilid.instance.now().diff(startGet)}');
     }
     final startRollback = Veilid.instance.now();
     await tx2.rollback();
-    print(
+    debugPrint(
         'rollback transaction 2: ${Veilid.instance.now().diff(startRollback)}');
   }
 }

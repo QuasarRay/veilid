@@ -147,6 +147,8 @@ pub enum RequestOp {
     },
     // Misc
     Now,
+    NowNonDecreasing,
+    NowIncreasing,
     Debug {
         command: String,
     },
@@ -260,6 +262,14 @@ pub enum ResponseOp {
     },
     // Misc
     Now {
+        #[schemars(with = "String")]
+        value: Timestamp,
+    },
+    NowNonDecreasing {
+        #[schemars(with = "String")]
+        value: Timestamp,
+    },
+    NowIncreasing {
         #[schemars(with = "String")]
         value: Timestamp,
     },

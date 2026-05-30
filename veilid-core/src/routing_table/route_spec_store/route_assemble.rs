@@ -25,7 +25,7 @@ impl RouteSpecStore {
             // See if we can optimize this compilation yet
             // We don't want to include full nodeinfo if we don't have to
             let optimized =
-                optimized.unwrap_or(arce.with_stats(|stats| stats.last_known_valid_ts.is_some()));
+                optimized.unwrap_or(arce.with_stats(|stats| stats.last_known_valid_ts().is_some()));
 
             let secret_key = arce.route_set_secret_for_key(allocated_route_key)?;
 
@@ -56,7 +56,7 @@ impl RouteSpecStore {
     )]
     pub async fn assemble_private_route_set(
         &self,
-        id: &RouteId,
+        id: &AllocatedRouteSetId,
         optimized: Option<bool>,
     ) -> VeilidAPIResult<Vec<Arc<PrivateRoute>>> {
         let route_params = {
@@ -68,7 +68,7 @@ impl RouteSpecStore {
             // See if we can optimize this compilation yet
             // We don't want to include full nodeinfo if we don't have to
             let optimized =
-                optimized.unwrap_or(arce.with_stats(|stats| stats.last_known_valid_ts.is_some()));
+                optimized.unwrap_or(arce.with_stats(|stats| stats.last_known_valid_ts().is_some()));
 
             let mut route_params = Vec::new();
 

@@ -147,12 +147,12 @@ pub enum VeilidAPIError {
     Timeout,
     #[error("TryAgain: {message}")]
     TryAgain { message: String },
-    #[error("Shutdown")]
-    Shutdown,
     #[error("Invalid target: {message}")]
     InvalidTarget { message: String },
     #[error("No connection: {message}")]
     NoConnection { message: String },
+    #[error("Shutdown")]
+    Shutdown,
     #[error("Key not found: {key}")]
     KeyNotFound {
         #[schemars(with = "String")]
@@ -188,79 +188,80 @@ impl VeilidAPIError {
     pub fn timeout() -> Self {
         Self::Timeout
     }
-    pub fn try_again<T: ToString>(msg: T) -> Self {
+    pub fn try_again<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::TryAgain {
-            message: msg.to_string(),
+            message: msg.to_veilid_api_error_argument(),
         }
     }
     pub fn shutdown() -> Self {
         Self::Shutdown
     }
-    pub fn invalid_target<T: ToString>(msg: T) -> Self {
+    pub fn invalid_target<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::InvalidTarget {
-            message: msg.to_string(),
+            message: msg.to_veilid_api_error_argument(),
         }
     }
-    pub fn no_connection<T: ToString>(msg: T) -> Self {
+    pub fn no_connection<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::NoConnection {
-            message: msg.to_string(),
+            message: msg.to_veilid_api_error_argument(),
         }
     }
     pub fn key_not_found(key: OpaqueRecordKey) -> Self {
         Self::KeyNotFound { key }
     }
-    pub fn internal<T: ToString>(msg: T) -> Self {
-        Self::Internal {
-            message: msg.to_string(),
-        }
-    }
-    pub fn unimplemented<T: ToString>(msg: T) -> Self {
-        Self::Unimplemented {
-            message: msg.to_string(),
-        }
-    }
-    pub fn parse_error<T: ToString, S: ToString>(msg: T, value: S) -> Self {
+    pub fn parse_error<T: ToVeilidAPIErrorArgument, S: ToVeilidAPIErrorArgument>(
+        msg: T,
+        value: S,
+    ) -> Self {
         Self::ParseError {
-            message: msg.to_string(),
-            value: value.to_string(),
+            message: msg.to_veilid_api_error_argument(),
+            value: value.to_veilid_api_error_argument(),
         }
     }
-    pub fn invalid_argument<T: ToString, S: ToString, R: ToString>(
+    pub fn invalid_argument<
+        T: ToVeilidAPIErrorArgument,
+        S: ToVeilidAPIErrorArgument,
+        R: ToVeilidAPIErrorArgument,
+    >(
         context: T,
         argument: S,
         value: R,
     ) -> Self {
         Self::InvalidArgument {
-            context: context.to_string(),
-            argument: argument.to_string(),
-            value: value.to_string(),
+            context: context.to_veilid_api_error_argument(),
+            argument: argument.to_veilid_api_error_argument(),
+            value: value.to_veilid_api_error_argument(),
         }
     }
-    pub fn missing_argument<T: ToString, S: ToString>(context: T, argument: S) -> Self {
+    pub fn missing_argument<T: ToVeilidAPIErrorArgument, S: ToVeilidAPIErrorArgument>(
+        context: T,
+        argument: S,
+    ) -> Self {
         Self::MissingArgument {
-            context: context.to_string(),
-            argument: argument.to_string(),
+            context: context.to_veilid_api_error_argument(),
+            argument: argument.to_veilid_api_error_argument(),
         }
     }
-    pub fn generic<T: ToString>(msg: T) -> Self {
+    pub fn generic<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::Generic {
-            message: msg.to_string(),
+            message: msg.to_veilid_api_error_argument(),
         }
     }
-    pub fn transaction_not_found<T: ToString>(msg: T) -> Self {
+    pub(crate) fn transaction_not_found<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::TransactionNotFound {
-            message: msg.to_string(),
+            message: msg.to_veilid_api_error_argument(),
         }
     }
 
-    pub(crate) fn from_network_result<T>(nr: NetworkResult<T>) -> Result<T, Self> {
+    pub fn from_network_result<T>(nr: NetworkResult<T>) -> Result<T, Self> {
         match nr {
             NetworkResult::Timeout => Err(VeilidAPIError::timeout()),
             NetworkResult::ServiceUnavailable(m) => Err(VeilidAPIError::invalid_target(m)),
-            NetworkResult::NoConnection(m) => Err(VeilidAPIError::no_connection(m)),
-            NetworkResult::AlreadyExists(m) => {
-                Err(VeilidAPIError::generic(format!("Already exists: {}", m)))
-            }
+            NetworkResult::NoConnection(m) => Err(VeilidAPIError::no_connection(m.to_string())),
+            NetworkResult::AlreadyExists(m) => Err(VeilidAPIError::no_connection(format!(
+                "Already exists: {}",
+                m
+            ))),
             NetworkResult::InvalidMessage(m) => {
                 Err(VeilidAPIError::parse_error("Invalid message", m))
             }
@@ -268,7 +269,7 @@ impl VeilidAPIError {
         }
     }
 
-    pub(crate) fn log_level(&self) -> Level {
+    pub fn log_level(&self) -> Level {
         match self {
             VeilidAPIError::NotInitialized
             | VeilidAPIError::AlreadyInitialized
@@ -299,8 +300,305 @@ impl VeilidAPIError {
             | VeilidAPIError::TransactionNotFound { message: _ } => Level::DEBUG,
         }
     }
+
+    pub fn internal<T: ToString>(msg: T) -> Self {
+        let message = msg.to_string();
+        // Constructing an internal error should get logged because it must be a programming error on our part
+        // veilid_log!(acc error "Internal error: {}", &message);
+        Self::Internal { message }
+    }
+    pub fn unimplemented<T: ToString>(msg: T) -> Self {
+        let message = msg.to_string();
+        // Constructing an unimplemented error should get logged because it must be a programming error on our part
+        // veilid_log!(acc error "Unimplemented: {}", &message);
+        Self::Unimplemented { message }
+    }
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////
+
+/// Trait for types that can be directly converted into parameters for VeilidAPIError
+pub trait ToVeilidAPIErrorArgument {
+    fn to_veilid_api_error_argument(&self) -> String;
+}
+
+impl ToVeilidAPIErrorArgument for String {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.clone()
+    }
+}
+impl ToVeilidAPIErrorArgument for str {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for [u8] {
+    fn to_veilid_api_error_argument(&self) -> String {
+        hex::encode(self)
+    }
+}
+impl ToVeilidAPIErrorArgument for Vec<u8> {
+    fn to_veilid_api_error_argument(&self) -> String {
+        hex::encode(self)
+    }
+}
+
+impl ToVeilidAPIErrorArgument for usize {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for u64 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for u32 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for u16 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for u8 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for isize {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for i64 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for i32 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for i16 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for i8 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for f64 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for f32 {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl<T: ToVeilidAPIErrorArgument> ToVeilidAPIErrorArgument for core::ops::Range<T> {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}..{}",
+            self.start.to_veilid_api_error_argument(),
+            self.end.to_veilid_api_error_argument()
+        )
+    }
+}
+
+impl ToVeilidAPIErrorArgument for Timestamp {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for TimestampDuration {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for ValueSeqNum {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for ValueSubkeyRangeSet {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for CryptoKind {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for VeilidCapability {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToVeilidAPIErrorArgument for RouteId {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for NodeId {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for PublicKey {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for SecretKey {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}:{}",
+            self.kind(),
+            self.ref_value().to_veilid_api_error_argument()
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for SharedSecret {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}:{}",
+            self.kind(),
+            self.ref_value().to_veilid_api_error_argument()
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for Signature {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}:{}",
+            self.kind(),
+            self.ref_value().to_veilid_api_error_argument()
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for HashDigest {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}:{}",
+            self.kind(),
+            self.ref_value().to_veilid_api_error_argument()
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for KeyPair {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}:{}",
+            self.kind(),
+            self.ref_value().to_veilid_api_error_argument(),
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for RecordKey {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}:{}",
+            self.kind(),
+            self.value().to_veilid_api_error_argument()
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for MemberId {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for OpaqueRecordKey {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}:{}",
+            self.kind(),
+            self.ref_value().to_veilid_api_error_argument()
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for BareRecordKey {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}{}",
+            self.ref_key(),
+            self.ref_encryption_key()
+                .map(|ek| ek.to_veilid_api_error_argument())
+                .unwrap_or("".to_string())
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for BareKeyPair {
+    fn to_veilid_api_error_argument(&self) -> String {
+        format!(
+            "{}:{}",
+            self.ref_key().to_veilid_api_error_argument(),
+            self.ref_secret().to_veilid_api_error_argument()
+        )
+    }
+}
+impl ToVeilidAPIErrorArgument for BarePublicKey {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for BareSecretKey {
+    fn to_veilid_api_error_argument(&self) -> String {
+        "*".repeat(self.to_string().len())
+    }
+}
+impl ToVeilidAPIErrorArgument for BareSharedSecret {
+    fn to_veilid_api_error_argument(&self) -> String {
+        "*".repeat(self.to_string().len())
+    }
+}
+impl ToVeilidAPIErrorArgument for BareSignature {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for BareHashDigest {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for BareOpaqueRecordKey {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+impl ToVeilidAPIErrorArgument for BareMemberId {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToVeilidAPIErrorArgument for serde_json::Error {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl<T: ToVeilidAPIErrorArgument + ?Sized> ToVeilidAPIErrorArgument for &T {
+    fn to_veilid_api_error_argument(&self) -> String {
+        (**self).to_veilid_api_error_argument()
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+
+/// Result type for public Veilid API errors
 pub type VeilidAPIResult<T> = Result<T, VeilidAPIError>;
 
 pub trait OkVeilidAPIResult<T> {

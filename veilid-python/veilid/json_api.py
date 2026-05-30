@@ -512,6 +512,16 @@ class _JsonVeilidAPI(VeilidAPI):
     async def now(self) -> Timestamp:
         return Timestamp(raise_api_result(await self.send_ndjson_request(Operation.NOW)))
 
+    async def now_non_decreasing(self) -> Timestamp:
+        return Timestamp(
+            raise_api_result(await self.send_ndjson_request(Operation.NOW_NON_DECREASING))
+        )
+
+    async def now_increasing(self) -> Timestamp:
+        return Timestamp(
+            raise_api_result(await self.send_ndjson_request(Operation.NOW_INCREASING))
+        )
+
     async def debug(self, command: str) -> str:
         assert isinstance(command, str)
         return raise_api_result(await self.send_ndjson_request(Operation.DEBUG, command=command))
@@ -793,6 +803,7 @@ class _JsonRoutingContext(RoutingContext):
         subkeys: list[tuple[ValueSubkey, ValueSubkey]] = [],
         expiration: Timestamp = Timestamp(0),
         count: int = 0xFFFFFFFF,
+        transactional: bool = False,
     ) -> bool:
         assert isinstance(key, RecordKey)
         assert isinstance(subkeys, list)
@@ -802,6 +813,7 @@ class _JsonRoutingContext(RoutingContext):
             assert isinstance(s[1], ValueSubkey)
         assert isinstance(expiration, Timestamp)
         assert isinstance(count, int)
+        assert isinstance(transactional, bool)
 
         return raise_api_result(
             await self.api.send_ndjson_request(
@@ -813,6 +825,7 @@ class _JsonRoutingContext(RoutingContext):
                 subkeys=subkeys,
                 expiration=str(expiration),
                 count=count,
+                transactional=transactional,
             )
         )
 
@@ -1041,6 +1054,28 @@ class _JsonDHTTransaction(DHTTransaction):
             dhttx_op=DhtTransactionOperation.ROLLBACK,
         )
         self.done = True
+
+    async def extend(
+        self,
+        record_keys: list[RecordKey],
+        options: Optional[TransactDHTRecordsOptions] = None,
+    ):
+        if self.done:
+            raise AssertionError("Transaction is already done")
+        assert isinstance(record_keys, list)
+        assert all(isinstance(k, RecordKey) for k in record_keys)
+        assert options is None or isinstance(options, TransactDHTRecordsOptions)
+
+        raise_api_result(
+            await self.api.send_ndjson_request(
+                Operation.DHT_TRANSACTION,
+                validate=validate_dhttx_op,
+                dhttx_id=self.dhttx_id,
+                dhttx_op=DhtTransactionOperation.EXTEND,
+                record_keys=record_keys,
+                options=options,
+            )
+        )
 
     async def get(self, key: RecordKey, subkey: ValueSubkey) -> Optional[ValueData]:
         assert isinstance(key, RecordKey)

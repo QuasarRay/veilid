@@ -147,12 +147,8 @@ _RPCStats _$RPCStatsFromJson(Map<String, dynamic> json) => _RPCStats(
   firstConsecutiveSeenTs: json['firstConsecutiveSeenTs'] == null
       ? null
       : Timestamp.fromJson(json['firstConsecutiveSeenTs']),
-  recentLostAnswersUnordered: (json['recentLostAnswersUnordered'] as num)
-      .toInt(),
-  recentLostAnswersOrdered: (json['recentLostAnswersOrdered'] as num).toInt(),
   failedToSend: (json['failedToSend'] as num).toInt(),
-  answerUnordered: AnswerStats.fromJson(json['answerUnordered']),
-  answerOrdered: AnswerStats.fromJson(json['answerOrdered']),
+  unreachable: (json['unreachable'] as num).toInt(),
 );
 
 Map<String, dynamic> _$RPCStatsToJson(_RPCStats instance) => <String, dynamic>{
@@ -162,11 +158,8 @@ Map<String, dynamic> _$RPCStatsToJson(_RPCStats instance) => <String, dynamic>{
   'lastQuestionTs': instance.lastQuestionTs?.toJson(),
   'lastSeenTs': instance.lastSeenTs?.toJson(),
   'firstConsecutiveSeenTs': instance.firstConsecutiveSeenTs?.toJson(),
-  'recentLostAnswersUnordered': instance.recentLostAnswersUnordered,
-  'recentLostAnswersOrdered': instance.recentLostAnswersOrdered,
   'failedToSend': instance.failedToSend,
-  'answerUnordered': instance.answerUnordered.toJson(),
-  'answerOrdered': instance.answerOrdered.toJson(),
+  'unreachable': instance.unreachable,
 };
 
 _PeerStats _$PeerStatsFromJson(Map<String, dynamic> json) => _PeerStats(
@@ -272,6 +265,13 @@ VeilidUpdateAttachment _$VeilidUpdateAttachmentFromJson(
   attachedUptime: json['attachedUptime'] == null
       ? null
       : TimestampDuration.fromJson(json['attachedUptime']),
+  reliablePeerCount: BigInt.parse(json['reliablePeerCount'] as String),
+  livePeerCount: BigInt.parse(json['livePeerCount'] as String),
+  estimatedNetworkSize: BigInt.parse(json['estimatedNetworkSize'] as String),
+  medianLatency: json['medianLatency'] == null
+      ? null
+      : TimestampDuration.fromJson(json['medianLatency']),
+  overAttachedNodes: BigInt.parse(json['overAttachedNodes'] as String),
   $type: json['kind'] as String?,
 );
 
@@ -283,6 +283,11 @@ Map<String, dynamic> _$VeilidUpdateAttachmentToJson(
   'localNetworkReady': instance.localNetworkReady,
   'uptime': instance.uptime.toJson(),
   'attachedUptime': instance.attachedUptime?.toJson(),
+  'reliablePeerCount': instance.reliablePeerCount.toString(),
+  'livePeerCount': instance.livePeerCount.toString(),
+  'estimatedNetworkSize': instance.estimatedNetworkSize.toString(),
+  'medianLatency': instance.medianLatency?.toJson(),
+  'overAttachedNodes': instance.overAttachedNodes.toString(),
   'kind': instance.$type,
 };
 
@@ -375,6 +380,13 @@ _VeilidStateAttachment _$VeilidStateAttachmentFromJson(
   attachedUptime: json['attachedUptime'] == null
       ? null
       : TimestampDuration.fromJson(json['attachedUptime']),
+  reliablePeerCount: BigInt.parse(json['reliablePeerCount'] as String),
+  livePeerCount: BigInt.parse(json['livePeerCount'] as String),
+  estimatedNetworkSize: BigInt.parse(json['estimatedNetworkSize'] as String),
+  medianLatency: json['medianLatency'] == null
+      ? null
+      : TimestampDuration.fromJson(json['medianLatency']),
+  overAttachedNodes: BigInt.parse(json['overAttachedNodes'] as String),
 );
 
 Map<String, dynamic> _$VeilidStateAttachmentToJson(
@@ -385,6 +397,11 @@ Map<String, dynamic> _$VeilidStateAttachmentToJson(
   'localNetworkReady': instance.localNetworkReady,
   'uptime': instance.uptime.toJson(),
   'attachedUptime': instance.attachedUptime?.toJson(),
+  'reliablePeerCount': instance.reliablePeerCount.toString(),
+  'livePeerCount': instance.livePeerCount.toString(),
+  'estimatedNetworkSize': instance.estimatedNetworkSize.toString(),
+  'medianLatency': instance.medianLatency?.toJson(),
+  'overAttachedNodes': instance.overAttachedNodes.toString(),
 };
 
 _VeilidStateNetwork _$VeilidStateNetworkFromJson(Map<String, dynamic> json) =>

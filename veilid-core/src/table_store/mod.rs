@@ -631,10 +631,6 @@ impl TableStore {
             self.delete_all().await;
         }
 
-        // Set up crypto
-        let crypto = self.crypto();
-        crypto.table_store_setup(self).await?;
-
         Ok(())
     }
 
@@ -739,7 +735,7 @@ impl TableStore {
             }
         }
 
-        let table_name = self.name_get_or_create(name)?;
+        let mut table_name = self.name_get_or_create(name)?;
 
         // See if this table is already opened, if so the column count must be the same
         {
@@ -808,59 +804,77 @@ impl TableStore {
 
         // Validate keys are readable if they exist, otherwise wipe this database
         // because there is an invalid encryption key and no way to read the data
-        let mut keys_ok = true;
+        let mut first_failure: Option<(u32, String)> = None;
         for col in 0..existing_col_count {
             match table_db.get_keys(col).await {
-                Ok(_) => {
-                    // Keys read okay from column
+                Ok(keys) => {
+                    veilid_log!(self debug "table {}({}) col {}: {} keys read ok", name, table_name, col, keys.len());
                 }
-                Err(_) => {
-                    keys_ok = false;
+                Err(e) => {
+                    veilid_log!(self warn "table {}({}) col {}: get_keys failed: {}", name, table_name, col, e);
+                    if first_failure.is_none() {
+                        first_failure = Some((col, e.to_string()));
+                    }
                 }
             }
         }
 
-        let table_db = if !keys_ok {
-            if self.config().table_store.delete {
-                veilid_log!(self warn "table {}({}) has invalid encryption key, wiping database because config has 'delete' enabled", name, table_name);
-            } else {
-                apibail_generic!(
-                    "table {}({}) has invalid encryption key, refusing to open database",
-                    name,
-                    table_name
+        let table_db = if let Some((failed_col, failure_msg)) = first_failure {
+            let namespace = self.config().namespace.clone();
+
+            // If the wipe policy is disabled, return NotInitialized so the caller
+            // can decide what to do (e.g., prompt for the right key).
+            if !self
+                .config()
+                .table_store
+                .wipe_on_invalid_device_encryption_key
+            {
+                veilid_log!(self error
+                    "table {}({}) has invalid encryption key (col {} failed: {}); wipe_on_invalid_device_encryption_key=false, refusing to wipe namespace '{}'",
+                    name, table_name, failed_col, failure_msg, namespace
                 );
+                return Err(VeilidAPIError::not_initialized());
             }
 
-            // Drop database
+            veilid_log!(self warn
+                "table {}({}) has invalid encryption key (col {} failed: {}); wiping all tables in namespace '{}' and starting fresh",
+                name, table_name, failed_col, failure_msg, namespace
+            );
+
+            // Drop our open handle to the bad table before deleting files.
             drop(table_db);
 
-            // Delete the database
-            match self.table_store_driver.delete(&table_name).await {
-                Ok(_) => {
-                    // Delete was successful
-                }
-                Err(e) => {
-                    self.name_delete(name)
-                        .expect_or_log("removing name failed after delete");
-                    self.flush().await;
-                    return Err(e);
-                }
+            // Drop the open all_tables_db handle and clear cached state so
+            // we can delete and re-create everything in the namespace.
+            {
+                let mut inner = self.inner.lock();
+                inner.all_tables_db = None;
+                inner.all_table_names.clear();
+                inner.opened.clear();
             }
 
-            // Reopen a new database
-            let db = match self
+            let deleted = self.table_store_driver.delete_all_in_namespace().await?;
+            veilid_log!(self warn "wiped {} table file(s) from namespace '{}'", deleted, namespace);
+
+            // Reopen __veilid_all_tables fresh.
+            let all_tables_db = self
                 .table_store_driver
-                .open(&table_name, existing_col_count, concurrency)
-                .await
+                .open("__veilid_all_tables", 1, 1)
+                .await?;
             {
-                Ok(db) => db,
-                Err(e) => {
-                    self.name_delete(name)
-                        .expect_or_log("removing name failed recreating database");
-                    self.flush().await;
-                    return Err(e);
-                }
-            };
+                let mut inner = self.inner.lock();
+                inner.all_tables_db = Some(all_tables_db);
+            }
+
+            // Generate a new random real_name for the requested friendly name
+            // and open an empty database for it.
+            table_name = self.name_get_or_create(name)?;
+            self.flush().await;
+
+            let db = self
+                .table_store_driver
+                .open(&table_name, column_count, concurrency)
+                .await?;
 
             TableDB::new(
                 table_name.clone(),

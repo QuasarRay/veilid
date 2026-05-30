@@ -50,6 +50,7 @@ abstract class VeilidRoutingContext {
     List<ValueSubkeyRange>? subkeys,
     Timestamp? expiration,
     int? count,
+    bool? transactional,
   });
   Future<bool> cancelDHTWatch(RecordKey key, {List<ValueSubkeyRange>? subkeys});
   Future<DHTRecordReport> inspectDHTRecord(

@@ -210,6 +210,29 @@ pub(crate) trait NodeRefCommonTrait:
         })
     }
 
+    /// Get the most recent 'last connection' flow whose remote matches the given address.
+    /// Prefers an exact (IP, port) match. Falls back to any flow with the same remote IP,
+    /// which covers incoming connections from a peer (ephemeral source port) where exact
+    /// port match would miss. Relay-mediated flows have a different remote IP and don't match.
+    fn last_flow_to(&self, remote: SocketAddress) -> Option<Flow> {
+        self.operate(|e| {
+            let routing_table = self.routing_table();
+            let sequencing = self.sequencing();
+            let filter = self.filter();
+            let (_ordering, filter) = filter.apply_sequencing(sequencing);
+            let mut last_flows = e.last_flows(&routing_table, true, filter);
+            last_flows.retain(|(flow, _)| flow.remote_address().address() == remote.address());
+            // Prefer exact port match
+            if let Some(exact) = last_flows
+                .iter()
+                .find(|(flow, _)| flow.remote_address() == &remote)
+            {
+                return Some(exact.0);
+            }
+            last_flows.first().map(|x| x.0)
+        })
+    }
+
     fn clear_last_flows(&self) {
         self.operate_mut(|e| e.clear_last_flows(self.dial_info_filter()))
     }
@@ -257,12 +280,16 @@ pub(crate) trait NodeRefCommonTrait:
         })
     }
 
-    fn report_protected_connection_dropped(&self) {
-        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false);
+    fn record_protected_connection_drop(&self, lifetime: TimestampDuration) {
+        self.operate_mut(|e| e.record_protected_connection_drop(lifetime));
     }
 
-    fn report_failed_route_test(&self) {
-        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false);
+    fn record_protected_connection_dead(&self, transport: TransportType) {
+        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport);
+    }
+
+    fn report_failed_route_test(&self, transport: TransportType) {
+        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport);
     }
 
     fn stats_question_sent(
@@ -270,23 +297,23 @@ pub(crate) trait NodeRefCommonTrait:
         ts: Timestamp,
         bytes: ByteCount,
         expects_answer: bool,
-        ordering: SequenceOrdering,
+        transport: TransportType,
     ) {
         self.operate_mut(|e| {
             self.routing_table().record_sent_bytes(bytes);
-            e.question_sent(ts, bytes, expects_answer, ordering);
+            e.question_sent(ts, bytes, expects_answer, transport);
         })
     }
-    fn stats_question_rcvd(&self, ts: Timestamp, bytes: ByteCount) {
+    fn stats_question_rcvd(&self, ts: Timestamp, bytes: ByteCount, transport: TransportType) {
         self.routing_table().record_received_bytes(bytes);
         self.operate_mut(|e| {
-            e.question_rcvd(ts, bytes);
+            e.question_rcvd(ts, bytes, transport);
         })
     }
-    fn stats_answer_sent(&self, bytes: ByteCount) {
+    fn stats_answer_sent(&self, bytes: ByteCount, transport: TransportType) {
         self.routing_table().record_sent_bytes(bytes);
         self.operate_mut(|e| {
-            e.answer_sent(bytes);
+            e.answer_sent(bytes, transport);
         })
     }
     fn stats_answer_rcvd(
@@ -294,35 +321,54 @@ pub(crate) trait NodeRefCommonTrait:
         send_ts: Timestamp,
         recv_ts: Timestamp,
         bytes: ByteCount,
-        ordering: SequenceOrdering,
+        transport: TransportType,
     ) {
         self.operate_mut(|e| {
             self.routing_table().record_received_bytes(bytes);
             self.routing_table()
                 .record_latency(recv_ts.duration_since(send_ts));
-            e.answer_rcvd(send_ts, recv_ts, bytes, ordering);
+            e.answer_rcvd(send_ts, recv_ts, bytes, transport);
         })
     }
-    fn stats_lost_answer(&self, ordering: SequenceOrdering) {
+    fn stats_lost_answer(&self, transport: TransportType) {
         self.operate_mut(|e| {
-            e.lost_answer(ordering);
+            e.lost_answer(transport);
         })
     }
-    fn stats_failed_to_send(&self, ts: Timestamp, expects_answer: bool) {
+    fn stats_routed_up(&self, key: PublicKey, bytes: ByteCount) {
+        self.operate_mut(|e| e.record_routed_up(key, bytes))
+    }
+    fn stats_routed_round_trip(
+        &self,
+        key: PublicKey,
+        send_ts: Timestamp,
+        recv_ts: Timestamp,
+        bytes: ByteCount,
+    ) {
+        self.operate_mut(|e| e.record_routed_round_trip(key, send_ts, recv_ts, bytes))
+    }
+    fn stats_failed_to_send(&self, ts: Timestamp, expects_answer: bool, transport: TransportType) {
         self.operate_mut(|e| {
-            e.failed_to_send(ts, expects_answer);
+            e.failed_to_send(ts, expects_answer, transport);
+        })
+    }
+    fn stats_unreachable(&self) {
+        self.operate_mut(|e| {
+            e.unreachable();
         })
     }
     fn report_sender_info(
         &self,
         routing_domain: RoutingDomain,
-        protocol_type: ProtocolType,
-        address_type: AddressType,
+        unique_flow: UniqueFlow,
         sender_info: SenderInfo,
     ) -> Option<SenderInfo> {
         self.operate_mut(|e| {
             e.report_sender_info(
-                LastSenderInfoKey(routing_domain, protocol_type, address_type),
+                LastSenderInfoKey {
+                    routing_domain,
+                    transport: unique_flow.flow.transport_type(),
+                },
                 sender_info,
             )
         })

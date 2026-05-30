@@ -184,7 +184,7 @@ impl NativeNetwork {
 
     #[cfg_attr(
         feature = "instrument",
-        instrument(level = "trace", skip(self, editor), fields(__VEILID_LOG_KEY = self.log_key()))
+        instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     fn process_detected_dial_info(
         &self,
@@ -202,7 +202,7 @@ impl NativeNetwork {
 
     #[cfg_attr(
         feature = "instrument",
-        instrument(level = "trace", skip(self, editor), fields(__VEILID_LOG_KEY = self.log_key()))
+        instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     fn update_with_detection_result(
         &self,
@@ -339,9 +339,11 @@ impl NativeNetwork {
             // Get the static dial info we don't want to change
             let static_dial_info_details =
                 network_state.static_dial_info_details(RoutingDomain::PublicInternet);
-            let static_di_types: BTreeSet<(ProtocolType, AddressType)> = static_dial_info_details
+            let static_di_types: BTreeSet<TransportType> = static_dial_info_details
                 .iter()
-                .map(|did| (did.dial_info.protocol_type(), did.dial_info.address_type()))
+                .map(|did| {
+                    TransportType::new(did.dial_info.protocol_type(), did.dial_info.address_type())
+                })
                 .collect();
 
             let mut inbound_protocol_map =
@@ -349,9 +351,9 @@ impl NativeNetwork {
 
             for at in protocol_config.family_global {
                 for pt in protocol_config.inbound {
-                    // Skip protocol+address combinations that already have static public dialinfo
+                    // Skip transport types that already have static public dialinfo
                     // as they don't need to participate in discovery
-                    let key = (pt, at);
+                    let key = TransportType::new(pt, at);
                     if static_di_types.contains(&key) {
                         continue;
                     }

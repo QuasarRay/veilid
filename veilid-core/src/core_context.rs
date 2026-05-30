@@ -15,6 +15,15 @@ pub type UpdateCallback = Arc<dyn Fn(VeilidUpdate) + Send + Sync>;
 
 type InitKey = (String, String);
 
+/// Convert an eyre::Report into a VeilidAPIError, preserving typed variants
+/// when possible. Falls back to `Internal` for unknown error chains.
+fn eyre_to_veilid_api_error(report: eyre::Report) -> VeilidAPIError {
+    match report.downcast::<VeilidAPIError>() {
+        Ok(api_err) => api_err,
+        Err(report) => VeilidAPIError::internal(report),
+    }
+}
+
 /////////////////////////////////////////////////////////////////////////////
 #[derive(Clone, Debug)]
 pub(crate) struct VeilidCoreContext {
@@ -123,7 +132,7 @@ impl VeilidCoreContext {
 
         // Run initialization
         // This should make the majority of subsystems functional
-        registry.init().await.map_err(VeilidAPIError::internal)?;
+        registry.init().await.map_err(eyre_to_veilid_api_error)?;
 
         // Run post-initialization
         // This should resolve any inter-subsystem dependencies
@@ -133,7 +142,7 @@ impl VeilidCoreContext {
         // This is where the attachment manager starts the background tick
         if let Err(e) = registry.post_init().await {
             registry.terminate().await;
-            return Err(VeilidAPIError::internal(e));
+            return Err(eyre_to_veilid_api_error(e));
         }
 
         veilid_log!(registry info "Veilid API startup complete");
@@ -268,6 +277,9 @@ pub async fn api_startup(
     update_callback: UpdateCallback,
     config: VeilidConfig,
 ) -> VeilidAPIResult<VeilidAPI> {
+    #[cfg(feature = "debug-locks")]
+    veilid_tools::deadlock_detector::start_deadlock_detector();
+
     // Get the program_name and namespace we're starting up in
     let program_name = config.program_name.clone();
     let namespace = config.namespace.clone();

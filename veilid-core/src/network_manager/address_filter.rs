@@ -5,8 +5,8 @@ impl_veilid_log_facility!("net");
 
 const PUNISHMENT_DURATION_MIN: usize = 60;
 const MAX_PUNISHMENTS_BY_NODE_ID: usize = 65536;
-const DIAL_INFO_FAILURE_DURATION_MIN: usize = 10;
-const MAX_DIAL_INFO_FAILURES: usize = 65536;
+const TRANSPORT_FAILURE_DURATION_MIN: usize = 10;
+const MAX_TRANSPORT_FAILURES: usize = 65536;
 const MAX_ENVELOPE_INFO_BY_NODE_ID: usize = 16384;
 const DEFAULT_OLDEST_TIMESTAMP_DURATION: TimestampDuration = TimestampDuration::new_secs(10);
 
@@ -50,6 +50,34 @@ pub(crate) enum TimestampError {
 #[error("Address not in table")]
 pub struct AddressNotInTableError {}
 
+/// AddressFilter failure key. Failures share an entry when the underlying
+/// kernel socket would be shared (TCP and WS to the same addr+port).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct LowLevelTransportTarget {
+    socket_address: SocketAddress,
+    low_level_protocol: LowLevelProtocolType,
+}
+
+impl LowLevelTransportTarget {
+    fn from_dial_info(dial_info: &DialInfo) -> Self {
+        Self {
+            socket_address: dial_info.socket_address(),
+            low_level_protocol: dial_info.protocol_type().low_level_protocol_type(),
+        }
+    }
+}
+
+impl fmt::Display for LowLevelTransportTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}|{}",
+            f.to_string(self.low_level_protocol),
+            self.socket_address
+        )
+    }
+}
+
 struct AddressFilterInner {
     conn_count_by_ip4: BTreeMap<Ipv4Addr, usize>,
     conn_count_by_ip6_prefix: BTreeMap<Ipv6Addr, usize>,
@@ -59,7 +87,7 @@ struct AddressFilterInner {
     punishments_by_ip6_prefix: BTreeMap<Ipv6Addr, Punishment>,
     punishments_by_node_id: BTreeMap<NodeId, Punishment>,
     envelope_info_by_node_id: hashlink::LruCache<NodeId, EnvelopeInfo>,
-    dial_info_failures: BTreeMap<DialInfo, Timestamp>,
+    transport_failures: BTreeMap<LowLevelTransportTarget, Timestamp>,
 }
 
 impl fmt::Debug for AddressFilterInner {
@@ -96,7 +124,7 @@ impl fmt::Debug for AddressFilterInner {
             .field("punishments_by_ip6_prefix", &self.punishments_by_ip6_prefix)
             .field("punishments_by_node_id", &self.punishments_by_node_id)
             .field(&envelope_info_by_node_id_name, &envelope_by_node_id)
-            .field("dial_info_failures", &self.dial_info_failures)
+            .field("transport_failures", &self.transport_failures)
             .finish()
     }
 }
@@ -109,7 +137,7 @@ pub(crate) struct AddressFilter {
     max_connections_per_ip6_prefix_size: usize,
     max_connection_frequency_per_min: usize,
     punishment_duration_min: usize,
-    dial_info_failure_duration_min: usize,
+    transport_failure_duration_min: usize,
     opt_max_timestamp_ahead: Option<TimestampDuration>,
     opt_max_timestamp_behind: Option<TimestampDuration>,
 }
@@ -134,8 +162,8 @@ impl fmt::Debug for AddressFilter {
             )
             .field("punishment_duration_min", &self.punishment_duration_min)
             .field(
-                "dial_info_failure_duration_min",
-                &self.dial_info_failure_duration_min,
+                "transport_failure_duration_min",
+                &self.transport_failure_duration_min,
             )
             .field("opt_max_timestamp_ahead", &self.opt_max_timestamp_ahead)
             .field("opt_max_timestamp_behind", &self.opt_max_timestamp_behind)
@@ -173,7 +201,7 @@ impl AddressFilter {
                 punishments_by_ip6_prefix: BTreeMap::new(),
                 punishments_by_node_id: BTreeMap::new(),
                 envelope_info_by_node_id: hashlink::LruCache::new(MAX_ENVELOPE_INFO_BY_NODE_ID),
-                dial_info_failures: BTreeMap::new(),
+                transport_failures: BTreeMap::new(),
             }),
             max_connections_per_ip4: config.network.max_connections_per_ip4 as usize,
             max_connections_per_ip6_prefix: config.network.max_connections_per_ip6_prefix as usize,
@@ -182,7 +210,7 @@ impl AddressFilter {
             max_connection_frequency_per_min: config.network.max_connection_frequency_per_min
                 as usize,
             punishment_duration_min: PUNISHMENT_DURATION_MIN,
-            dial_info_failure_duration_min: DIAL_INFO_FAILURE_DURATION_MIN,
+            transport_failure_duration_min: TRANSPORT_FAILURE_DURATION_MIN,
             opt_max_timestamp_ahead,
             opt_max_timestamp_behind,
         }
@@ -193,7 +221,7 @@ impl AddressFilter {
         let mut inner = self.inner.lock();
         inner.conn_count_by_ip4.clear();
         inner.conn_count_by_ip6_prefix.clear();
-        inner.dial_info_failures.clear();
+        inner.transport_failures.clear();
     }
 
     fn purge_old_connection_timestamps_inner(
@@ -281,20 +309,20 @@ impl AddressFilter {
                 self.forgive_node_id_inner(inner, key);
             }
         }
-        // dial info
+        // transport failures
         {
-            let mut dead_keys = Vec::<DialInfo>::new();
-            for (key, value) in &mut inner.dial_info_failures {
+            let mut dead_keys = Vec::<LowLevelTransportTarget>::new();
+            for (key, value) in &mut inner.transport_failures {
                 // Drop failures older than the failure duration
                 if cur_ts.as_u64().saturating_sub(value.as_u64())
-                    > self.dial_info_failure_duration_min as u64 * 60_000_000u64
+                    > self.transport_failure_duration_min as u64 * 60_000_000u64
                 {
-                    dead_keys.push(key.clone());
+                    dead_keys.push(*key);
                 }
             }
             for key in dead_keys {
-                veilid_log!(self debug "DialInfo Permit: {}", key);
-                inner.dial_info_failures.remove(&key);
+                veilid_log!(self debug "Transport Permit: {}", key);
+                inner.transport_failures.remove(&key);
             }
         }
     }
@@ -315,12 +343,15 @@ impl AddressFilter {
         false
     }
 
-    fn get_dial_info_failed_ts_inner(
+    fn get_transport_failed_ts_inner(
         &self,
         inner: &AddressFilterInner,
         dial_info: &DialInfo,
     ) -> Option<Timestamp> {
-        inner.dial_info_failures.get(dial_info).copied()
+        inner
+            .transport_failures
+            .get(&LowLevelTransportTarget::from_dial_info(dial_info))
+            .copied()
     }
 
     pub fn is_ip_addr_punished(&self, addr: IpAddr) -> bool {
@@ -329,23 +360,25 @@ impl AddressFilter {
         self.is_ip_addr_punished_inner(&inner, ipblock)
     }
 
-    pub fn get_dial_info_failed_ts(&self, dial_info: &DialInfo) -> Option<Timestamp> {
+    pub fn get_transport_failed_ts(&self, dial_info: &DialInfo) -> Option<Timestamp> {
         let inner = self.inner.lock();
-        self.get_dial_info_failed_ts_inner(&inner, dial_info)
+        self.get_transport_failed_ts_inner(&inner, dial_info)
     }
 
-    pub fn set_dial_info_failed(&self, dial_info: DialInfo) {
+    pub fn set_transport_failed(&self, dial_info: DialInfo) {
         let ts = Timestamp::now();
+        let key = LowLevelTransportTarget::from_dial_info(&dial_info);
 
         let mut inner = self.inner.lock();
-        if inner.dial_info_failures.len() >= MAX_DIAL_INFO_FAILURES {
-            veilid_log!(self warn "DialInfo failure table full: {}", dial_info);
+        if inner.transport_failures.len() >= MAX_TRANSPORT_FAILURES {
+            veilid_log!(self warn "Transport failure table full: {}", key);
             return;
         }
-        veilid_log!(self debug "DialInfo failure: {:?}", dial_info);
+        #[cfg(feature = "verbose-tracing")]
+        veilid_log!(self debug "Transport failure: {} (from {:?})", key, dial_info);
         inner
-            .dial_info_failures
-            .entry(dial_info)
+            .transport_failures
+            .entry(key)
             .and_modify(|v| *v = ts)
             .or_insert(ts);
     }
@@ -355,7 +388,7 @@ impl AddressFilter {
         inner.punishments_by_ip4.clear();
         inner.punishments_by_ip6_prefix.clear();
         inner.punishments_by_node_id.clear();
-        inner.dial_info_failures.clear();
+        inner.transport_failures.clear();
 
         self.routing_table().clear_punishments();
     }

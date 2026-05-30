@@ -54,11 +54,41 @@ impl DHTTransaction {
         self.api.log_key()
     }
 
+    /// Extend the transaction with additional record keys
+    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
+    pub async fn extend(
+        &self,
+        record_keys: Vec<RecordKey>,
+        options: Option<TransactDHTRecordsOptions>,
+    ) -> VeilidAPIResult<()> {
+        async move {
+            let storage_manager = self.api.core_context()?.storage_manager();
+            let transaction_handle = {
+                let inner = self.inner.lock();
+                inner.opt_transaction_handle.ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))?
+            };
+            tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
+
+            let recorder = DurationRecorder::new("DHTTransaction::extend", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](transaction_handle: {}, record_keys: {:?}, options: {:?})", name, start, transaction_handle, record_keys, options);
+            });
+            recorder.record_fut(
+                storage_manager.extend_transaction(transaction_handle, record_keys, options),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
+    }
+
     /// Commit the transaction
     /// All write operations are performed atomically
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
     pub async fn commit(self) -> VeilidAPIResult<()> {
-        record_duration_fut(async {
+        async {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let mut inner = self.inner.lock();
@@ -66,15 +96,23 @@ impl DHTTransaction {
                     VeilidAPIError::transaction_not_found("transaction already completed")
                 })?
             };
-
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
 
-            veilid_log!(self debug
-                "DHTTransaction::commit(transaction_handle: {}", transaction_handle);
-
-            // End and commit transaction
-            Box::pin(storage_manager.end_and_commit_transaction(transaction_handle)).await
-        })
+            let recorder = DurationRecorder::new("DHTTransaction::commit", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](transaction_handle: {})", name, start, transaction_handle);
+            });
+            recorder
+                .record_fut(
+                    Box::pin(storage_manager.end_and_commit_transaction(transaction_handle)),
+                    |name, start, dur, ret| {
+                        veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                        ret
+                    },
+                )
+                .await
+        }
         .await
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -83,7 +121,7 @@ impl DHTTransaction {
     /// No write operations are performed,
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
     pub async fn rollback(self) -> VeilidAPIResult<()> {
-        record_duration_fut(async {
+        async {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let mut inner = self.inner.lock();
@@ -91,14 +129,23 @@ impl DHTTransaction {
                     VeilidAPIError::transaction_not_found("transaction already completed")
                 })?
             };
-
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
 
-            veilid_log!(self debug
-                "DHTTransaction::rollback(transaction_handle: {}", transaction_handle);
-
-            Box::pin(storage_manager.rollback_transaction(transaction_handle)).await
-        })
+            let recorder = DurationRecorder::new("DHTTransaction::rollback", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](transaction_handle: {})", name, start, transaction_handle);
+            });
+            recorder
+                .record_fut(
+                    Box::pin(storage_manager.rollback_transaction(transaction_handle)),
+                    |name, start, dur, ret| {
+                        veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                        ret
+                    },
+                )
+                .await
+        }
         .await
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -112,7 +159,7 @@ impl DHTTransaction {
     ///
     /// Returns `None` if the value was successfully set.
     /// Returns `Some(data)` if the value set was older than the one available on the network.
-    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle, data = print_data(&data, Some(64))), skip(self, data), ret))]
+    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle, data.len = data.len()), skip(self, data), ret))]
     pub async fn set(
         &self,
         record_key: RecordKey,
@@ -120,32 +167,37 @@ impl DHTTransaction {
         data: Vec<u8>,
         options: Option<DHTTransactionSetValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
-        record_duration_fut(async {
+        async move {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let inner = self.inner.lock();
                 inner
                     .opt_transaction_handle
-                    .clone()
                     .ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))?
             };
-
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
-
-            veilid_log!(self debug
-                "DHTTransaction::set(transaction_handle: {}, key: {}, subkey: {}, data: len={}, options: {:?})", transaction_handle, record_key, subkey, data.len(), options);
-
             storage_manager.check_record_key(&record_key)?;
 
-            Box::pin(storage_manager.transaction_set(
-                transaction_handle,
-                record_key,
-                subkey,
-                data,
-                options,
-            ))
-            .await
-        }).await.inspect_err(log_veilid_api_error!(self))
+            let data_len = data.len();
+            let recorder = DurationRecorder::new("DHTTransaction::set", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](transaction_handle: {}, key: {}, subkey: {}, data: len={}, options: {:?})", name, start, transaction_handle, record_key, subkey, data_len, options);
+            });
+            recorder.record_fut(
+                Box::pin(storage_manager.transaction_set(
+                    transaction_handle,
+                    record_key,
+                    subkey,
+                    data,
+                    options,
+                )),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Perform a get_dht_value operation inside the transaction
@@ -162,26 +214,30 @@ impl DHTTransaction {
         record_key: RecordKey,
         subkey: ValueSubkey,
     ) -> VeilidAPIResult<Option<ValueData>> {
-        record_duration_fut(async {
+        async move {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let inner = self.inner.lock();
                 inner
                     .opt_transaction_handle
-                    .clone()
                     .ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))?
             };
-
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
-
-            veilid_log!(self debug
-                "DHTTransaction::get(transaction_handle: {}, key: {}, subkey: {})", transaction_handle, record_key, subkey);
-
             storage_manager.check_record_key(&record_key)?;
 
-            let storage_manager = self.api.core_context()?.storage_manager();
-            Box::pin(storage_manager.transaction_get(transaction_handle, record_key, subkey)).await
-        }).await.inspect_err(log_veilid_api_error!(self))
+            let recorder = DurationRecorder::new("DHTTransaction::get", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](transaction_handle: {}, key: {}, subkey: {})", name, start, transaction_handle, record_key, subkey);
+            });
+            recorder.record_fut(
+                Box::pin(storage_manager.transaction_get(transaction_handle, record_key, subkey)),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
+            ).await
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 
     /// Perform a inspect_dht_record operation inside the transaction
@@ -198,31 +254,30 @@ impl DHTTransaction {
         subkeys: Option<ValueSubkeyRangeSet>,
         scope: DHTReportScope,
     ) -> VeilidAPIResult<DHTRecordReport> {
-        record_duration_fut(async {
+        async move {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let inner = self.inner.lock();
                 inner
                     .opt_transaction_handle
-                    .clone()
                     .ok_or_else(|| VeilidAPIError::transaction_not_found("transaction already completed"))?
             };
-
             tracing::Span::current().record("transaction_handle", transaction_handle.to_string());
-
-            veilid_log!(self debug
-                "DHTTransaction::inspect(transaction_handle: {}, record_key: {}, subkeys: {}, scope: {:?})", transaction_handle, record_key, subkeys.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "None".to_string()), scope);
-
             storage_manager.check_record_key(&record_key)?;
 
-            let storage_manager = self.api.core_context()?.storage_manager();
-            storage_manager.transaction_inspect(
-                transaction_handle,
-                record_key,
-                subkeys,
-                scope,
+            let recorder = DurationRecorder::new("DHTTransaction::inspect", |name, start| {
+                veilid_log!(self debug
+                    "{}[start={:#}](transaction_handle: {}, record_key: {}, subkeys: {}, scope: {:?})", name, start, transaction_handle, record_key, subkeys.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "None".to_string()), scope);
+            });
+            recorder.record(
+                || storage_manager.transaction_inspect(transaction_handle, record_key, subkeys, scope),
+                |name, start, dur, ret| {
+                    veilid_log!(self debug
+                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                    ret
+                },
             )
-        }).await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self))
     }
 }
 //////////////////////////////////////////////////////////////////////////////////////

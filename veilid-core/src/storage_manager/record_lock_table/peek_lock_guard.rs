@@ -1,21 +1,21 @@
 use super::*;
 
-/// Shared record lock guard for a single record with no subkey locks
+/// Peek lock guard: holds Peek-mode lock (lifetime.read only). Excludes Lifetime ops; concurrent with everything else.
 #[derive(Debug)]
 #[must_use]
-pub struct PeekLockGuard<R: LockPurpose, S: LockPurpose> {
+pub struct PeekLockGuard<R: RecordLockPurpose, S: RecordLockPurpose> {
     record_lock: Arc<RecordLock<R, S>>,
-    _whole_record_lock_guard: AsyncRwLockReadGuardArc<()>,
+    _lifetime_lock_guard: AsyncRwLockReadGuardArc<()>,
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
     active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
 }
 
-impl<R: LockPurpose, S: LockPurpose> PeekLockGuard<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> PeekLockGuard<R, S> {
     pub(super) fn new(
         record_lock: Arc<RecordLock<R, S>>,
-        whole_record_lock_guard: AsyncRwLockReadGuardArc<()>,
+        lifetime_lock_guard: AsyncRwLockReadGuardArc<()>,
     ) -> Self {
         #[cfg(feature = "debug-locks")]
         let (id, active_guards) = {
@@ -27,7 +27,7 @@ impl<R: LockPurpose, S: LockPurpose> PeekLockGuard<R, S> {
 
         Self {
             record_lock,
-            _whole_record_lock_guard: whole_record_lock_guard,
+            _lifetime_lock_guard: lifetime_lock_guard,
             #[cfg(feature = "debug-locks")]
             id,
             #[cfg(feature = "debug-locks")]
@@ -39,7 +39,7 @@ impl<R: LockPurpose, S: LockPurpose> PeekLockGuard<R, S> {
     }
 }
 
-impl<R: LockPurpose, S: LockPurpose> Drop for PeekLockGuard<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> Drop for PeekLockGuard<R, S> {
     fn drop(&mut self) {
         #[cfg(feature = "debug-locks")]
         self.active_guards.lock().remove(&self.id);
@@ -48,7 +48,7 @@ impl<R: LockPurpose, S: LockPurpose> Drop for PeekLockGuard<R, S> {
     }
 }
 
-impl<R: LockPurpose, S: LockPurpose> fmt::Display for PeekLockGuard<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> fmt::Display for PeekLockGuard<R, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Peek({})", self.record())
     }

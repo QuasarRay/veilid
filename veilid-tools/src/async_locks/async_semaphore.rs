@@ -30,11 +30,7 @@ impl AsyncSemaphore {
         let out = AsyncSemaphoreGuard {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::TryWrite,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         };
 
         Some(out)
@@ -59,11 +55,7 @@ impl AsyncSemaphore {
         AsyncSemaphoreGuard {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::Write,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         }
     }
 
@@ -74,11 +66,7 @@ impl AsyncSemaphore {
         let out = AsyncSemaphoreGuardArc {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::TryWrite,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         };
 
         Some(out)
@@ -103,11 +91,7 @@ impl AsyncSemaphore {
         AsyncSemaphoreGuardArc {
             inner,
             #[cfg(feature = "debug-locks")]
-            _guard_id_container: GuardIdContainer::next(
-                self.lock_id_container.clone(),
-                #[cfg(feature = "debug-locks-detect")]
-                LockSense::Write,
-            ),
+            _guard_id_container: GuardIdContainer::next(self.lock_id_container.clone()),
         }
     }
 }

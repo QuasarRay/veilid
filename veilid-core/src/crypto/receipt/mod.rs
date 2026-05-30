@@ -85,7 +85,7 @@ impl Receipt {
                 rcp0: ReceiptRCP0::try_from_signed_data(crypto, data).await?,
             }),
             _ => {
-                apibail_parse_error!("unsupported receipt version", version);
+                apibail_parse_error!("unsupported receipt version", version.to_string());
             }
         }
     }
@@ -228,8 +228,7 @@ impl ReceiptRCP0 {
                 data.slice(0..(data.len() - 64)),
                 &signature,
             )
-            .await
-            .map_err(VeilidAPIError::generic)?
+            .await?
         {
             apibail_parse_error!("signature failure in receipt", signature);
         }
@@ -302,8 +301,7 @@ impl ReceiptRCP0 {
                 0..(receipt_size - RCP0_SIGNATURE_LENGTH),
                 receipt_size - RCP0_SIGNATURE_LENGTH,
             )
-            .await
-            .map_err(VeilidAPIError::generic)?;
+            .await?;
 
         Ok(data.freeze())
     }

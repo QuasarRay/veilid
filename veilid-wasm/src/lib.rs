@@ -2,7 +2,7 @@
 #![no_std]
 #![recursion_limit = "256"]
 
-/// Veilid WASM Bindings
+/// Veilid WASM Bindings (TypeScript / JavaScript)
 extern crate alloc;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -21,28 +21,14 @@ use veilid_core::*;
 use veilid_core::{tools::*, VeilidAPIError};
 use veilid_tracing_wasm::*;
 
-cfg_if::cfg_if! {
-    if #[cfg(feature="dart")] {
-        use wasm_bindgen_futures::*;
-        use futures_util::FutureExt;
-        use gloo_utils::format::JsValueSerdeExt;
-
-        pub mod dart;
-    }
-}
-
-cfg_if::cfg_if! {
-    if #[cfg(feature="js")] {
-        pub mod js;
-    }
-}
-
+pub mod veilid_api_js;
+pub mod veilid_client_js;
+pub mod veilid_crypto_js;
+pub mod veilid_routing_context_js;
+pub mod veilid_table_db_js;
 pub mod veilid_version;
 pub mod veilid_wasm_config;
 
-mod wasm_helpers;
-
+pub use veilid_api_js::*;
 pub use veilid_version::*;
 pub use veilid_wasm_config::*;
-
-use wasm_helpers::*;

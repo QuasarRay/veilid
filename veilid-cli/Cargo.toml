@@ -26,6 +26,7 @@ rt-async-std = [
     "cursive/rt-async-std",
 ]
 rt-tokio = ["tokio", "tokio-util", "veilid-tools/rt-tokio", "cursive/rt-tokio"]
+debug-locks = ["veilid-tools/debug-locks"]
 
 [dependencies]
 async-std = { version = "1.13.0", features = [

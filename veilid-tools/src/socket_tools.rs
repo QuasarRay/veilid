@@ -293,6 +293,35 @@ pub fn domain_for_address(address: SocketAddr) -> core::ffi::c_int {
     socket2::Domain::for_address(address).into()
 }
 
+// Local IP the kernel would pick as the source for outbound traffic. UDP-connects
+// to an unallocated probe; no packets are sent. None if no default route exists.
+
+#[must_use]
+pub fn primary_source_ipv4() -> Option<Ipv4Addr> {
+    let ipv4addr = "1.2.3.4".parse::<Ipv4Addr>().unwrap();
+    let sockaddrv4 = SocketAddr::V4(SocketAddrV4::new(ipv4addr, 5155));
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect(sockaddrv4).ok()?;
+    if let Ok(SocketAddr::V4(local)) = socket.local_addr() {
+        Some(*local.ip())
+    } else {
+        None
+    }
+}
+
+#[must_use]
+pub fn primary_source_ipv6() -> Option<Ipv6Addr> {
+    let ipv6addr = "2222::1".parse::<Ipv6Addr>().unwrap();
+    let sockaddrv6 = SocketAddr::V6(SocketAddrV6::new(ipv6addr, 5155, 0, 0));
+    let socket = std::net::UdpSocket::bind("[::]:0").ok()?;
+    socket.connect(sockaddrv6).ok()?;
+    if let Ok(SocketAddr::V6(local)) = socket.local_addr() {
+        Some(*local.ip())
+    } else {
+        None
+    }
+}
+
 // Run operations on underlying socket
 cfg_if! {
     if #[cfg(unix)] {

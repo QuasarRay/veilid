@@ -691,7 +691,7 @@ where
 
         // No failures beyond this point
         for ((stk, new_data, is_new_subkey), opt_old_data) in
-            new_data_list.into_iter().zip(opt_old_data_list.into_iter())
+            new_data_list.into_iter().zip(opt_old_data_list)
         {
             if let Some(old_data) = opt_old_data {
                 // If it was in the cache, it must have been on disk too, so just update
@@ -862,7 +862,7 @@ where
         } in record_updates
         {
             for ((stk, new_data, is_new_subkey), opt_old_data) in
-                new_data_list.into_iter().zip(opt_old_data_list.into_iter())
+                new_data_list.into_iter().zip(opt_old_data_list)
             {
                 if let Some(old_data) = opt_old_data {
                     // If it was in the cache, it must have been on disk too, so just update
@@ -1051,7 +1051,7 @@ where
         let st_xact = self.unlocked_inner.subkey_table.transact();
 
         // Sort the record index by reverse last touched time (newest first)
-        record_index_sorted.sort_by(|a, b| b.1.last_touched().cmp(&a.1.last_touched()));
+        record_index_sorted.sort_by_key(|b| std::cmp::Reverse(b.1.last_touched()));
 
         // Truncate the record list to the max record count
         let record_index_limit = self.record_cache.capacity();

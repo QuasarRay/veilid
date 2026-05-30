@@ -295,12 +295,23 @@ impl TableDB {
             .await
             .map_err(VeilidAPIError::from)?;
 
-        for k in &mut out {
-            *k = decompress_size_prepended(
-                &self.maybe_decrypt(k).await.map_err(VeilidAPIError::from)?,
-                None,
-            )
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        veilid_log!(self debug "TableDB::get_keys({}) col={}: read {} raw keys", self.unlocked_inner.table, col, out.len());
+
+        let max_value_size = self.config().table_store.max_value_size_mb as usize * 1024 * 1024;
+        for (idx, k) in out.iter_mut().enumerate() {
+            let raw_len = k.len();
+            let decrypted = self.maybe_decrypt(k).await.map_err(|e| {
+                let msg = format!("idx={} maybe_decrypt failed (raw_len={}): {}", idx, raw_len, e);
+                veilid_log!(self warn "TableDB::get_keys({}) col={} {}", self.unlocked_inner.table, col, msg);
+                VeilidAPIError::generic(msg)
+            })?;
+            let decompressed = decompress_size_prepended(&decrypted, max_value_size).map_err(|e| {
+                let preview: Vec<u8> = decrypted.as_ref()[..decrypted.len().min(16)].to_vec();
+                let msg = format!("idx={} decompress failed (raw_len={} decrypted_len={} first_bytes={:02x?}): {}", idx, raw_len, decrypted.len(), preview, e);
+                veilid_log!(self warn "TableDB::get_keys({}) col={} {}", self.unlocked_inner.table, col, msg);
+                std::io::Error::other(msg)
+            })?;
+            *k = decompressed;
         }
         Ok(out)
     }
@@ -355,7 +366,9 @@ impl TableDB {
             self.maybe_encrypt(&compress_prepend_size(value), false)
                 .await,
         );
-        db.write(dbt).await.map_err(VeilidAPIError::generic)
+        db.write(dbt)
+            .await
+            .map_err(|e| VeilidAPIError::generic(format!("failed to store: {}", e)))
     }
 
     /// Store a key in json format with a value in a column in the TableDB. Performs a single transaction immediately.
@@ -386,11 +399,12 @@ impl TableDB {
         }
         let db = self.unlocked_inner.database.clone();
         let key = self.maybe_encrypt(&compress_prepend_size(key), true).await;
+        let max_value_size = self.config().table_store.max_value_size_mb as usize * 1024 * 1024;
         match db.get(col, &key).await.map_err(VeilidAPIError::from)? {
             Some(v) => Ok(Some(
                 decompress_size_prepended(
                     &self.maybe_decrypt(&v).await.map_err(VeilidAPIError::from)?,
-                    None,
+                    max_value_size,
                 )
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
             )),
@@ -431,11 +445,12 @@ impl TableDB {
 
         let db = self.unlocked_inner.database.clone();
 
+        let max_value_size = self.config().table_store.max_value_size_mb as usize * 1024 * 1024;
         match db.delete(col, &key).await.map_err(VeilidAPIError::from)? {
             Some(v) => Ok(Some(
                 decompress_size_prepended(
                     &self.maybe_decrypt(&v).await.map_err(VeilidAPIError::from)?,
-                    None,
+                    max_value_size,
                 )
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
             )),

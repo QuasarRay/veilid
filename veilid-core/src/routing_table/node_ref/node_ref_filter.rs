@@ -2,8 +2,8 @@ use super::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeRefFilter {
-    pub routing_domain_set: RoutingDomainSet,
-    pub dial_info_filter: DialInfoFilter,
+    routing_domain_set: RoutingDomainSet,
+    dial_info_filter: DialInfoFilter,
 }
 
 impl Default for NodeRefFilter {
@@ -19,6 +19,19 @@ impl NodeRefFilter {
             dial_info_filter: DialInfoFilter::all(),
         }
     }
+
+    pub fn routing_domain_set(&self) -> RoutingDomainSet {
+        self.routing_domain_set
+    }
+
+    pub fn dial_info_filter(&self) -> DialInfoFilter {
+        self.dial_info_filter
+    }
+
+    pub fn contains_transport(&self, transport: TransportType) -> bool {
+        self.dial_info_filter.contains_transport(transport)
+    }
+
     pub fn with_routing_domain(mut self, routing_domain: RoutingDomain) -> Self {
         self.routing_domain_set = routing_domain.into();
         self
@@ -124,37 +137,23 @@ impl From<Flow> for NodeRefFilter {
 impl fmt::Display for NodeRefFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut mods = vec![];
-        if self.dial_info_filter.protocol_type_set.is_empty() {
+        let pts = self.dial_info_filter.protocol_type_set();
+        if pts.is_empty() {
             mods.push("no-protocol-type".to_string());
-        } else if self.dial_info_filter.protocol_type_set == ProtocolTypeSet::all() {
-            //
-        } else {
-            mods.extend(
-                self.dial_info_filter
-                    .protocol_type_set
-                    .iter()
-                    .map(|x| x.to_string()),
-            );
-        };
-        if self.dial_info_filter.address_type_set.is_empty() {
+        } else if pts != ProtocolTypeSet::all() {
+            mods.extend(pts.iter().map(|x| x.to_string()));
+        }
+        let ats = self.dial_info_filter.address_type_set();
+        if ats.is_empty() {
             mods.push("no-address-type".to_string());
-        } else if self.dial_info_filter.address_type_set == AddressTypeSet::all() {
-            //
-        } else {
-            mods.extend(
-                self.dial_info_filter
-                    .address_type_set
-                    .iter()
-                    .map(|x| x.to_string()),
-            )
-        };
+        } else if ats != AddressTypeSet::all() {
+            mods.extend(ats.iter().map(|x| x.to_string()));
+        }
         if self.routing_domain_set.is_empty() {
             mods.push("no-routing-domain".to_string());
-        } else if self.routing_domain_set == RoutingDomainSet::all() {
-            //
-        } else {
+        } else if self.routing_domain_set != RoutingDomainSet::all() {
             mods.extend(self.routing_domain_set.iter().map(|x| x.to_string()))
-        };
+        }
         let mods: String = mods.join("/");
 
         write!(f, "{}", mods)
@@ -232,10 +231,9 @@ impl FromStr for NodeRefFilter {
 
         Ok(NodeRefFilter {
             routing_domain_set: rdset,
-            dial_info_filter: DialInfoFilter {
-                protocol_type_set: ptset,
-                address_type_set: atset,
-            },
+            dial_info_filter: DialInfoFilter::all()
+                .with_protocol_type_set(ptset)
+                .with_address_type_set(atset),
         })
     }
 }

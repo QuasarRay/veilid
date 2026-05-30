@@ -137,6 +137,16 @@ impl PublicInternetRoutingDomainController {
         ctx: &ContactMethodContext,
         target_did: &DialInfoDetail,
     ) -> Option<ContactMethod> {
+        // Never direct-dial one of our own addresses (would loop back); fall through to the relay
+        if ctx
+            .node_a
+            .dial_info_detail_list()
+            .iter()
+            .any(|did| did.dial_info.socket_address() == target_did.dial_info.socket_address())
+        {
+            return None;
+        }
+
         // Do we need to signal before going inbound?
         if !target_did.class.requires_signal() {
             // Go direct without signaling

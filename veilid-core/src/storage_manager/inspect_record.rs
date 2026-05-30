@@ -83,60 +83,110 @@ impl StorageManager {
             subkeys
         };
 
-        let peek_lock = self
-            .record_lock_table
-            .peek_lock(opaque_record_key.clone())
-            .measure_debug(
-                TimestampDuration::new_ms(200),
-                veilid_log_dbg!(self, "StorageManager::inspect_record lock"),
-            )
-            .await;
+        // Local scope skips peek_lock; inner RecordStore lock keeps local reads consistent
+        let is_local_scope = match scope {
+            DHTReportScope::Local => true,
+            DHTReportScope::SyncGet
+            | DHTReportScope::SyncSet
+            | DHTReportScope::UpdateGet
+            | DHTReportScope::UpdateSet => false,
+        };
 
-        let safety_selection = {
+        let _opt_peek_lock = if is_local_scope {
+            None
+        } else {
+            Some(
+                self.record_lock_table
+                    .peek_lock(opaque_record_key.clone())
+                    .measure_debug(
+                        TimestampDuration::new_ms(200),
+                        veilid_log_dbg!(self, "StorageManager::inspect_record lock"),
+                    )
+                    .await,
+            )
+        };
+
+        let (safety_selection, offline_subkey_writes) = {
             let inner = self.inner.lock();
             let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
                 apibail_generic!("record not open");
             };
-            opened_record.safety_selection()
-        };
+            let safety_selection = opened_record.safety_selection();
 
-        // See if the requested record is our local record store
-        let mut local_inspect_result = self
-            .handle_inspect_local_values_with_peek_lock(&peek_lock, subkeys.clone(), true)
-            .await?;
+            let in_flight_transaction = inner
+                .outbound_transaction_manager
+                .get_transaction_by_record(&opaque_record_key)
+                .is_some();
 
-        // Get the offline subkeys for this record still only returning the ones we're inspecting
-        // Merge in the currently offline in-flight records and the actively-being-written subkeys as well
-        let offline_subkey_writes = {
-            let inner = self.inner.lock();
-
-            // Get actively-being-written subkeys
             let purpose_state = self
                 .record_lock_table
                 .get_record_lock_purpose_state(&opaque_record_key);
 
             let mut active_subkey_writes = ValueSubkeyRangeSet::new();
-            if purpose_state.whole_record_lock_purpose.is_none() {
+            let mut transaction_record_lock = false;
+            if let Some(p) = &purpose_state.whole_record_lock_purpose {
+                match p {
+                    StorageManagerRecordLockPurpose::TransactBegin
+                    | StorageManagerRecordLockPurpose::TransactExtend
+                    | StorageManagerRecordLockPurpose::TransactEndAndCommit
+                    | StorageManagerRecordLockPurpose::TransactRollback
+                    | StorageManagerRecordLockPurpose::TransactDrop => {
+                        transaction_record_lock = true;
+                        if !in_flight_transaction {
+                            veilid_log!(self debug
+                                "whole-record lock purpose {:?} on {} without an in-flight transaction",
+                                p, opaque_record_key);
+                        }
+                    }
+                    StorageManagerRecordLockPurpose::Create
+                    | StorageManagerRecordLockPurpose::Open
+                    | StorageManagerRecordLockPurpose::Close
+                    | StorageManagerRecordLockPurpose::Delete
+                    | StorageManagerRecordLockPurpose::Watch => {}
+                }
+            }
+
+            if in_flight_transaction || transaction_record_lock {
+                active_subkey_writes = ValueSubkeyRangeSet::full();
+            } else if purpose_state.whole_record_lock_purpose.is_none() {
                 for (subkey, purpose) in purpose_state.subkey_lock_purpose.into_iter() {
-                    if matches!(
-                        purpose,
-                        StorageManagerSubkeyLockPurpose::Set
-                            | StorageManagerSubkeyLockPurpose::TransactSet
-                    ) {
-                        active_subkey_writes.insert(subkey);
+                    match purpose {
+                        StorageManagerSubkeyLockPurpose::TransactSet => {
+                            if !in_flight_transaction {
+                                veilid_log!(self debug
+                                    "subkey lock purpose TransactSet on {}/{} without an in-flight transaction",
+                                    opaque_record_key, subkey);
+                            }
+                            active_subkey_writes.insert(subkey);
+                        }
+                        StorageManagerSubkeyLockPurpose::TransactGet => {
+                            if !in_flight_transaction {
+                                veilid_log!(self debug
+                                    "subkey lock purpose TransactGet on {}/{} without an in-flight transaction",
+                                    opaque_record_key, subkey);
+                            }
+                        }
+                        StorageManagerSubkeyLockPurpose::Set => {
+                            active_subkey_writes.insert(subkey);
+                        }
+                        StorageManagerSubkeyLockPurpose::Get => {}
                     }
                 }
-            };
+            }
 
-            // Merge offline subkeys + offline-in-flight subkeys + actively-being-written subkeys
-            inner
+            let offline_subkey_writes = inner
                 .offline_subkey_writes
                 .get(&opaque_record_key)
                 .map(|o| o.subkeys.union(&o.subkeys_in_flight))
                 .unwrap_or_default()
                 .union(&active_subkey_writes)
-                .intersect(&subkeys)
+                .intersect(&subkeys);
+            (safety_selection, offline_subkey_writes)
         };
+
+        let mut local_inspect_result = self
+            .handle_inspect_local_values(opaque_record_key.clone(), subkeys.clone(), true)
+            .await?;
 
         // If this is the maximum scope we're interested in, return the report
         if matches!(scope, DHTReportScope::Local) {
@@ -186,7 +236,7 @@ impl StorageManager {
             .subkeys()
             .iter()
             .map(ValueSubkeyRangeSet::single)
-            .zip(outbound_inspect_result.subkey_fanout_results.into_iter());
+            .zip(outbound_inspect_result.subkey_fanout_results);
 
         let existed = self.process_fanout_results(
             opaque_record_key.clone(),
@@ -307,30 +357,45 @@ impl StorageManager {
                     let subkeys = subkeys.clone();
                     let opaque_record_key = opaque_record_key.clone();
                     let safety_selection = safety_selection.clone();
-                    Box::pin(async move {
+                    let fut = async move {
                         let rpc_processor = registry.rpc_processor();
 
-                        let descriptor_mode = GetDescriptorMode::new(context.lock().opt_descriptor_info.as_ref().map(|x| x.descriptor.clone()));
+                        let descriptor_mode = GetDescriptorMode::new(
+                            context
+                                .lock()
+                                .opt_descriptor_info
+                                .as_ref()
+                                .map(|x| x.descriptor.clone()),
+                        );
 
-                        let iva = match
-                            rpc_processor
-                                .rpc_call_inspect_value(
-                                    Destination::direct(next_node.routing_domain_filtered(routing_domain), Some(safety_selection)),
-                                    opaque_record_key.clone(),
-                                    subkeys.clone(),
-                                    descriptor_mode,
-                                )
-                                .await? {
+                        let iva = match rpc_processor
+                            .rpc_call_inspect_value(
+                                Destination::direct(
+                                    next_node.routing_domain_filtered(routing_domain),
+                                    Some(safety_selection),
+                                ),
+                                opaque_record_key.clone(),
+                                subkeys.clone(),
+                                descriptor_mode,
+                            )
+                            .await?
+                        {
                             NetworkResult::Timeout => {
-                                return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Timeout});
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Timeout,
+                                });
                             }
-                            NetworkResult::ServiceUnavailable(_) |
-                            NetworkResult::NoConnection(_)  |
-                            NetworkResult::AlreadyExists(_) |
-                            NetworkResult::InvalidMessage(_) => {
-                                return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                            NetworkResult::ServiceUnavailable(_)
+                            | NetworkResult::NoConnection(_)
+                            | NetworkResult::AlreadyExists(_)
+                            | NetworkResult::InvalidMessage(_) => {
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Invalid,
+                                });
                             }
-                            NetworkResult::Value(v) => v
+                            NetworkResult::Value(v) => v,
                         };
 
                         let answer = iva.answer;
@@ -339,7 +404,10 @@ impl StorageManager {
                         if !answer.accepted {
                             // Return peers if we have some
                             veilid_log!(registry debug target:"network_result", "InspectValue missed, fanout call returned peers {}", answer.peers.len());
-                            return Ok(FanoutCallOutput{peer_info_list: answer.peers, disposition: FanoutCallDisposition::Rejected});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: answer.peers,
+                                disposition: FanoutCallDisposition::Rejected,
+                            });
                         }
 
                         // Keep the descriptor if we got one. If we had a last_descriptor it will
@@ -348,14 +416,19 @@ impl StorageManager {
                             let mut ctx = context.lock();
                             if ctx.opt_descriptor_info.is_none() {
                                 // Get the descriptor info. This also truncates the subkeys list to what can be returned from the network.
-                                let descriptor_info =
-                                    match InspectDescriptorInfo::new(Arc::new(descriptor.clone()), &subkeys) {
-                                        Ok(v) => v,
-                                        Err(e) => {
-                                            veilid_log!(registry debug target:"network_result", "InspectValue returned an invalid descriptor: {}", e);
-                                            return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
-                                        }
-                                    };
+                                let descriptor_info = match InspectDescriptorInfo::new(
+                                    Arc::new(descriptor.clone()),
+                                    &subkeys,
+                                ) {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        veilid_log!(registry debug target:"network_result", "InspectValue returned an invalid descriptor: {}", e);
+                                        return Ok(FanoutCallOutput {
+                                            peer_info_list: vec![],
+                                            disposition: FanoutCallDisposition::Invalid,
+                                        });
+                                    }
+                                };
                                 ctx.opt_descriptor_info = Some(descriptor_info);
                             }
                         }
@@ -363,7 +436,10 @@ impl StorageManager {
                         // Keep the value if we got one and it is newer and it passes schema validation
                         if answer.seqs.is_empty() {
                             veilid_log!(registry debug target:"network_result", "InspectValue returned no seq, fanout call returned peers {}", answer.peers.len());
-                            return Ok(FanoutCallOutput{peer_info_list: answer.peers, disposition: FanoutCallDisposition::Rejected});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: answer.peers,
+                                disposition: FanoutCallDisposition::Rejected,
+                            });
                         }
 
                         veilid_log!(registry debug target:"network_result", "Got seqs back: len={}", answer.seqs.len());
@@ -374,7 +450,10 @@ impl StorageManager {
                             // Got a value but no descriptor for it
                             // Move to the next node
                             veilid_log!(registry debug target:"network_result", "InspectValue returned a value with no descriptor invalid descriptor");
-                            return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: vec![],
+                                disposition: FanoutCallDisposition::Invalid,
+                            });
                         };
 
                         // Get number of subkeys from schema and ensure we are getting the
@@ -386,7 +465,10 @@ impl StorageManager {
                             veilid_log!(registry debug target:"network_result", "wrong number of seqs returned {} (wanted {})",
                                 answer.seqs.len(),
                                 descriptor_info.subkeys.len());
-                            return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: vec![],
+                                disposition: FanoutCallDisposition::Invalid,
+                            });
                         }
 
                         // If we have a prior seqs list, merge in the new seqs
@@ -406,8 +488,10 @@ impl StorageManager {
                                 veilid_log!(registry debug target:"network_result", "seqs list length should always be equal by now: {} (wanted {})",
                                     answer.seqs.len(),
                                     ctx.seqcounts.len());
-                                return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
-
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Invalid,
+                                });
                             }
                             for pair in ctx.seqcounts.iter_mut().zip(answer.seqs.iter()) {
                                 let ctx_seqcnt = pair.0;
@@ -438,13 +522,21 @@ impl StorageManager {
                             }
                         }
 
-
                         // Return peers if we have some
                         veilid_log!(registry debug target:"network_result", "InspectValue fanout call returned peers {}", answer.peers.len());
 
                         // Inspect doesn't actually use the fanout queue consensus tracker
-                        Ok(FanoutCallOutput { peer_info_list: answer.peers, disposition: FanoutCallDisposition::Accepted})
-                    }.instrument(tracing::trace_span!("outbound_inspect_value fanout call"))) as PinBoxFuture<FanoutCallResult>
+                        Ok(FanoutCallOutput {
+                            peer_info_list: answer.peers,
+                            disposition: FanoutCallDisposition::Accepted,
+                        })
+                    };
+                    #[cfg(feature = "instrument")]
+                    let fut = fut.instrument(tracing::trace_span!(
+                        target: "dht",
+                        "outbound_inspect_value fanout call"
+                    ));
+                    Box::pin(fut) as PinBoxFuture<FanoutCallResult>
                 },
             )
         };

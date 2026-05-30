@@ -203,7 +203,7 @@ pub fn test_veilid_log() {
 // veilid_state
 
 pub fn test_attachment_state() {
-    let orig = AttachmentState::FullyAttached;
+    let orig = AttachmentState::AttachedFull;
     let copy = deserialize_json(&serialize_json(orig)).unwrap();
 
     assert_eq!(orig, copy);
@@ -211,11 +211,16 @@ pub fn test_attachment_state() {
 
 pub fn test_veilid_state_attachment() {
     let orig = VeilidStateAttachment {
-        state: AttachmentState::OverAttached,
+        state: AttachmentState::AttachedFair,
         public_internet_ready: true,
         local_network_ready: false,
         uptime: TimestampDuration::new_secs(10),
         attached_uptime: Some(TimestampDuration::new_secs(10)),
+        reliable_peer_count: NodeCount::from(12),
+        live_peer_count: NodeCount::from(18),
+        estimated_network_size: NodeCount::from(60),
+        median_latency: Some(TimestampDuration::new_ms(120)),
+        over_attached_nodes: NodeCount::from(3),
     };
     let copy = deserialize_json(&serialize_json(&orig)).unwrap();
 
@@ -278,11 +283,16 @@ pub fn test_veilid_update() {
 pub fn test_veilid_state() {
     let orig = VeilidState {
         attachment: Box::new(VeilidStateAttachment {
-            state: AttachmentState::OverAttached,
+            state: AttachmentState::AttachedFull,
             public_internet_ready: true,
             local_network_ready: false,
             uptime: TimestampDuration::new_secs(900),
             attached_uptime: Some(TimestampDuration::new_secs(600)),
+            reliable_peer_count: NodeCount::from(35),
+            live_peer_count: NodeCount::from(48),
+            estimated_network_size: NodeCount::from(120),
+            median_latency: Some(TimestampDuration::new_ms(45)),
+            over_attached_nodes: NodeCount::from(0),
         }),
         network: Box::new(VeilidStateNetwork {
             started: true,

@@ -127,10 +127,35 @@ impl RoutingTable {
                     routing_table_health.punished_entry_count += 1;
                 }
             }
+            // Live entries we have actually contacted (seen + latency)
+            if matches!(
+                entry.state,
+                BucketEntryState::Reliable | BucketEntryState::Unreliable
+            ) && entry.is_tested()
+            {
+                routing_table_health.tested_entry_count += 1;
+            }
         }
+
+        // Same ipv6 prefix used by route allocation to identify nodes on our own network
+        let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
 
         // Update the entry summarie per routing domain and routing domain health
         for routing_domain in RoutingDomainSet::all() {
+            // Own peer info for this domain — used to identify NAT-sibling entries that can't
+            // serve as safety-route hops (excluded from live_external and the low water mark)
+            let own_peer_info = self.get_current_peer_info(routing_domain);
+
+            let entry_is_own_network = |snap: &BucketEntrySnapshot| -> bool {
+                snap.get_peer_info(routing_domain)
+                    .map(|their_pi| {
+                        own_peer_info
+                            .node_info()
+                            .is_any_node_on_same_ipblock(their_pi.node_info(), ip6_prefix_size)
+                    })
+                    .unwrap_or(false)
+            };
+
             // Make entry summary for this routing domain
             let mut entry_summary = EntrySummary::new();
 
@@ -138,7 +163,7 @@ impl RoutingTable {
                 if let Some(pi) = entry.get_peer_info(routing_domain) {
                     // Only consider entries that have valid signed node info in this domain
                     if !pi.signatures().is_empty() {
-                        entry_summary.add_entry(routing_domain, entry);
+                        entry_summary.add_entry(routing_domain, entry, entry_is_own_network(entry));
                     }
                 }
             }
@@ -152,6 +177,7 @@ impl RoutingTable {
                     if entry.state >= BucketEntryState::Unreliable
                         && entry.routing_domain_set().contains(routing_domain)
                         && entry.crypto_kinds().contains(&ck)
+                        && !entry_is_own_network(entry)
                     {
                         count.add_entry(routing_domain, entry);
                     }
@@ -182,6 +208,34 @@ impl RoutingTable {
                     .routing_domain_health
                     .insert(routing_domain, health);
             }
+        }
+
+        // Fold a network observation into the estimator histogram.
+        {
+            let mut bucket_counts: BTreeMap<CryptoKind, Vec<usize>> = BTreeMap::new();
+            for ck in VALID_CRYPTO_KINDS {
+                bucket_counts.insert(ck, self.bucket_counts(ck));
+            }
+
+            let mut pairwise_intersection_counts: BTreeMap<(CryptoKind, CryptoKind), usize> =
+                BTreeMap::new();
+            for entry in entry_snapshot.entries().iter() {
+                let kinds = entry.crypto_kinds();
+                for i in 0..kinds.len() {
+                    for j in (i + 1)..kinds.len() {
+                        let k1 = kinds[i];
+                        let k2 = kinds[j];
+                        let pair = if k1 < k2 { (k1, k2) } else { (k2, k1) };
+                        *pairwise_intersection_counts.entry(pair).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            self.network_estimator.lock().record_observation(
+                Timestamp::now(),
+                &bucket_counts,
+                &pairwise_intersection_counts,
+            );
         }
 
         // Update health cache

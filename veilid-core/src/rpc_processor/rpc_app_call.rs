@@ -17,7 +17,7 @@ impl RPCProcessor {
             .enter()
             .map_err(RPCError::map_try_again("not started up"))?;
 
-        let debug_string = format!("AppCall(message(len)={}) => {}", message.len(), dest);
+        let debug_string = format!("AppCall(message(len)={}) => {:#}", message.len(), dest);
 
         let app_call_q = RPCOperationAppCallQ::new(message)?;
         let question = RPCQuestion::new(
@@ -26,7 +26,10 @@ impl RPCProcessor {
         );
 
         // Send the app call question
-        let waitable_reply = network_result_try!(self.question(dest, question, None, None).await?);
+        let waitable_reply = network_result_try!(self
+            .question(dest, question, None, None)
+            .await?
+            .into_network_result());
 
         // Wait for reply
         let (msg, answer_context) = match self.wait_for_reply(waitable_reply, debug_string).await? {

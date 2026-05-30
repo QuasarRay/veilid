@@ -122,6 +122,49 @@ impl PublicInternetRoutingDomainController {
         let state = self.state();
         let nodes_needed = self.nodes_needed();
 
+        // Log stage transitions for attach-time diagnostics
+        {
+            let mut last = self.last_observed_stages.lock();
+            let cur = (state.outbound_stage, state.inbound_stage);
+            if last.as_ref() != Some(&cur) {
+                veilid_log!(self debug "[PublicInternet] stage: outbound={:?} inbound={:?}", cur.0, cur.1);
+                *last = Some(cur);
+            }
+        }
+
+        // public_internet_ready should stay true once true on a stable network; warn if it flaps
+        let ready = state.is_ready_inbound && state.is_ready_outbound;
+        let opt_penalty = self
+            .readiness_flap_detector
+            .lock()
+            .record(Timestamp::now().as_u64(), ready);
+        if let Some(penalty) = opt_penalty {
+            veilid_log!(self debugwarn "[PublicInternet] public_internet_ready FLAPPING (penalty={:.1}): now ready={} (outbound={:?} inbound={:?})",
+                penalty, ready, state.outbound_stage, state.inbound_stage);
+        }
+
+        // The selected relay set should be stable on a stable network; warn if it churns
+        let relays = self.read_dyn().relays();
+        let relay_set: BTreeSet<NodeId> =
+            relays.iter().map(|r| r.relay_node.best_node_id()).collect();
+        let opt_relay_penalty = self
+            .relay_flap_detector
+            .lock()
+            .record(Timestamp::now().as_u64(), relay_set);
+        if let Some(penalty) = opt_relay_penalty {
+            veilid_log!(self debugwarn "[PublicInternet] relay set FLAPPING (penalty={:.1})", penalty);
+        }
+
+        // Route validity (safety_routes_ready) should be stable once established; warn if it churns
+        let safety_ready = self.safety_routes_ready();
+        let opt_route_penalty = self
+            .route_flap_detector
+            .lock()
+            .record(Timestamp::now().as_u64(), safety_ready);
+        if let Some(penalty) = opt_route_penalty {
+            veilid_log!(self debugwarn "[PublicInternet] safety_routes_ready FLAPPING (penalty={:.1}): now ready={}", penalty, safety_ready);
+        }
+
         if Self::check_bootstrap(&state) {
             self.bootstrap_task.tick().await?;
         }

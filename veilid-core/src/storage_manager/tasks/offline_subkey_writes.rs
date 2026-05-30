@@ -62,47 +62,43 @@ impl StorageManager {
             return Ok(OfflineSubkeyWriteResult::Dropped);
         };
         veilid_log!(self debug "Offline subkey write: {}:{} len={}", opaque_record_key, subkey, value.value_data().data().len());
-        let osvres = self.outbound_set_value(
-            &opaque_record_key,
-            subkey,
-            safety_selection,
-            value.clone(),
-            descriptor,
-        );
+        let osvres = self
+            .outbound_set_value(
+                &opaque_record_key,
+                subkey,
+                safety_selection,
+                value.clone(),
+                descriptor,
+            )
+            .timeout_at(stop_token.clone())
+            .await;
         match osvres {
-            Ok(res_rx) => {
-                while let Ok(Ok(res)) = res_rx.recv_async().timeout_at(stop_token.clone()).await {
-                    match res {
-                        Ok(result) => {
-                            let partial = result.fanout_result.kind.is_incomplete();
-                            // Skip partial results in offline subkey write mode
-                            if partial {
-                                continue;
-                            }
-
-                            // Set the new value if it differs from what was asked to set
-                            if result.signed_value_data.value_data() != value.value_data() {
-                                // Record the newer value and send and update since it is different than what we just set
-                                self.handle_set_single_local_value_with_subkey_lock(
-                                    subkey_lock,
-                                    result.signed_value_data.clone(),
-                                )
-                                .await?;
-                            }
-
-                            return Ok(OfflineSubkeyWriteResult::Finished(result));
-                        }
-                        Err(e) => {
-                            veilid_log!(self debug "failed to get offline subkey write result: {}:{} {}", opaque_record_key, subkey, e);
-                            return Ok(OfflineSubkeyWriteResult::Cancelled);
-                        }
-                    }
+            Ok(Ok(result)) => {
+                // Defensive: outbound_set_value no longer emits partials, but
+                // skip them if reintroduced for some fanout in the future.
+                if result.fanout_result.kind.is_incomplete() {
+                    veilid_log!(self debug "Offline subkey write got partial result: {}:{}", opaque_record_key, subkey);
+                    return Ok(OfflineSubkeyWriteResult::Cancelled);
                 }
-                veilid_log!(self debug "writing offline subkey did not complete {}:{}", opaque_record_key, subkey);
+
+                // Set the new value if it differs from what was asked to set
+                if result.signed_value_data.value_data() != value.value_data() {
+                    // Record the newer value and send and update since it is different than what we just set
+                    self.handle_set_single_local_value_with_subkey_lock(
+                        subkey_lock,
+                        result.signed_value_data.clone(),
+                    )
+                    .await?;
+                }
+
+                Ok(OfflineSubkeyWriteResult::Finished(result))
+            }
+            Ok(Err(e)) => {
+                veilid_log!(self debug "failed to write offline subkey: {}:{} {}", opaque_record_key, subkey, e);
                 Ok(OfflineSubkeyWriteResult::Cancelled)
             }
-            Err(e) => {
-                veilid_log!(self debug "failed to write offline subkey: {}:{} {}", opaque_record_key, subkey, e);
+            Err(_) => {
+                veilid_log!(self debug "writing offline subkey did not complete {}:{}", opaque_record_key, subkey);
                 Ok(OfflineSubkeyWriteResult::Cancelled)
             }
         }

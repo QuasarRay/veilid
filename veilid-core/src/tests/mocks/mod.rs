@@ -22,6 +22,8 @@ pub fn fake_veilid_config() -> VeilidConfig {
         table_store: VeilidConfigTableStore {
             directory: "Yellow Pages".to_string(),
             delete: false,
+            wipe_on_invalid_device_encryption_key: true,
+            max_value_size_mb: 64,
         },
         block_store: VeilidConfigBlockStore {
             directory: "C:\\Program Files".to_string(),
@@ -46,11 +48,6 @@ pub fn fake_veilid_config() -> VeilidConfig {
                     "VLD0:qrxwD1-aM9xiUw4IAPVXE_4qgoIfyR4Y6MEPyaDl_GQ",
                 )
                 .unwrap()],
-                limit_over_attached: 1,
-                limit_fully_attached: 2,
-                limit_attached_strong: 3,
-                limit_attached_good: 4,
-                limit_attached_weak: 5,
             },
             rpc: VeilidConfigRPC {
                 concurrency: 5,

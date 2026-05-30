@@ -2,7 +2,7 @@ use futures_util::StreamExt as _;
 
 use super::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
 pub(in crate::storage_manager) struct RecordSnapshot {
     all_value_data: Vec<Option<Arc<SignedValueData>>>,
 }
@@ -54,12 +54,12 @@ where
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all)
     )]
-    pub async fn prepare_snapshot_lock(
+    pub async fn prepare_snapshot_locks(
         &self,
-        opaque_record_key: OpaqueRecordKey,
-    ) -> RecordStoreRecordLockGuard {
+        opaque_record_keys: Vec<OpaqueRecordKey>,
+    ) -> RecordStoreRecordsLockGuard {
         self.record_store_lock_table
-            .lock_record(opaque_record_key, RecordStoreRecordLockPurpose::Snapshot)
+            .lock_records(opaque_record_keys, RecordStoreRecordLockPurpose::Snapshot)
             .await
     }
 

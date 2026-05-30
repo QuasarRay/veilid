@@ -30,6 +30,16 @@ pub struct AllocatedRouteCacheEntry {
     /// If the route is published yet or not (upon node restart, this is reset to false to force republication)
     published: AtomicBool,
 
+    /// In-use reference count for the whole set (AllocatedRouteSetRef)
+    lock_count: AtomicUsize,
+
+    /// Per-route in-use reference counts (AllocatedRouteRef), keyed by the
+    /// route's PublicKey. Slots initialized for every key in `route_set_keys`.
+    per_route_lock_counts: BTreeMap<PublicKey, AtomicUsize>,
+
+    /// Sticky terminal flag: route is dead, release it once its refcount hits zero
+    marked_for_release: AtomicBool,
+
     /// Stats
     stats: RwLock<RouteStats>,
 }
@@ -71,6 +81,10 @@ impl AllocatedRouteCacheEntry {
         orderings: SequenceOrderingSet,
         stats: RouteSetSpecDetailStats,
     ) -> Self {
+        let per_route_lock_counts = route_set_keys
+            .iter()
+            .map(|k| (k.clone(), AtomicUsize::new(0)))
+            .collect();
         AllocatedRouteCacheEntry {
             route_set_keys,
             route_set_secrets,
@@ -81,6 +95,9 @@ impl AllocatedRouteCacheEntry {
             stability,
             orderings,
             published: AtomicBool::new(false),
+            lock_count: AtomicUsize::new(0),
+            per_route_lock_counts,
+            marked_for_release: AtomicBool::new(false),
             stats: RwLock::new(RouteStats::new_from_spec_detail_stats(stats)),
         }
     }
@@ -109,6 +126,63 @@ impl AllocatedRouteCacheEntry {
     }
     pub fn set_published(&self, published: bool) {
         self.published.store(published, Ordering::Relaxed);
+    }
+
+    /// Add one in-flight use of the whole set (held by AllocatedRouteSetRef)
+    pub(super) fn lock(&self) {
+        self.lock_count.fetch_add(1, Ordering::AcqRel);
+    }
+    /// Release `count` in-flight set-level uses, saturating at zero
+    pub(super) fn unlock(&self, count: usize) {
+        let _ = self
+            .lock_count
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |c| {
+                Some(c.saturating_sub(count))
+            });
+    }
+
+    /// Add one in-flight use of a specific route within this set
+    /// (held by AllocatedRouteRef). No-op if `key` is not in the set.
+    pub(super) fn lock_route(&self, key: &PublicKey) {
+        if let Some(c) = self.per_route_lock_counts.get(key) {
+            c.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    /// Release `count` in-flight uses of a specific route, saturating at zero.
+    /// No-op if `key` is not in the set.
+    pub(super) fn unlock_route(&self, key: &PublicKey, count: usize) {
+        if let Some(c) = self.per_route_lock_counts.get(key) {
+            let _ = c.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+                Some(v.saturating_sub(count))
+            });
+        }
+    }
+
+    /// Whether any in-flight operation currently holds this set or any of its routes
+    #[must_use]
+    pub fn is_locked(&self) -> bool {
+        self.lock_count.load(Ordering::Acquire) > 0
+            || self
+                .per_route_lock_counts
+                .values()
+                .any(|c| c.load(Ordering::Acquire) > 0)
+    }
+    /// Whether any in-flight operation currently holds a specific route within the set
+    #[expect(dead_code, reason = "consumed by AllocatedRouteRef in upcoming phase")]
+    #[must_use]
+    pub fn is_route_locked(&self, key: &PublicKey) -> bool {
+        self.per_route_lock_counts
+            .get(key)
+            .is_some_and(|c| c.load(Ordering::Acquire) > 0)
+    }
+
+    /// Mark this route dead; it will be released once its refcount hits zero
+    pub fn mark_for_release(&self) {
+        self.marked_for_release.store(true, Ordering::Release);
+    }
+    #[must_use]
+    pub fn is_marked_for_release(&self) -> bool {
+        self.marked_for_release.load(Ordering::Acquire)
     }
     #[must_use]
     pub fn hop_count(&self) -> usize {
@@ -147,17 +221,27 @@ impl AllocatedRouteCacheEntry {
         self.stability
     }
 
-    pub fn is_sequencing_match(&self, sequencing: Sequencing) -> bool {
-        for ordering in self.orderings.iter() {
-            if sequencing.matches_ordering(ordering) {
-                return true;
-            }
+    pub fn orderings(&self) -> SequenceOrderingSet {
+        self.orderings
+    }
+
+    /// Whether the route is a usable match for a sequencing, excluding routes whose matching
+    /// ordering(s) are all dead. Death-based: the route is a live match if at least one ordering
+    /// it provides matches the sequencing and is not dead, so brand-new/untested routes stay
+    /// selectable.
+    pub fn is_live_sequencing_match(&self, sequencing: Sequencing) -> bool {
+        if self.is_marked_for_release() {
+            return false;
         }
-        false
+        self.with_stats(|stats| {
+            self.orderings.iter().any(|ordering| {
+                sequencing.matches_ordering(ordering) && !stats.is_dead_for_ordering(ordering)
+            })
+        })
     }
 
     pub fn is_route_optimizable(&self) -> bool {
-        self.with_stats(|stats| stats.last_known_valid_ts.is_some())
+        self.with_stats(|stats| stats.last_known_valid_ts().is_some())
     }
 
     pub fn with_stats<F, R>(&self, f: F) -> R
@@ -168,12 +252,11 @@ impl AllocatedRouteCacheEntry {
         f(&stats)
     }
 
-    pub(super) fn with_stats_mut<F>(&self, f: F) -> VeilidAPIResult<RouteStatsDisposition>
+    pub(super) fn with_stats_mut<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&mut RouteStats) -> VeilidAPIResult<()>,
+        F: FnOnce(&mut RouteStats) -> R,
     {
         let mut stats = self.stats.write();
-        f(&mut stats)?;
-        Ok(stats.disposition())
+        f(&mut stats)
     }
 }

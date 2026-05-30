@@ -137,10 +137,12 @@ impl FromStr for ValueSubkeyRangeSet {
                     r,
                 ));
             };
-            let sn = ValueSubkey::from_str(ss)
-                .map_err(|e| VeilidAPIError::parse_error("could not parse ValueSubkey", e))?;
-            let en = ValueSubkey::from_str(es)
-                .map_err(|e| VeilidAPIError::parse_error("could not parse ValueSubkey", e))?;
+            let sn = ValueSubkey::from_str(ss).map_err(|e| {
+                VeilidAPIError::parse_error(format!("could not parse ValueSubkey: {e}"), ss)
+            })?;
+            let en = ValueSubkey::from_str(es).map_err(|e| {
+                VeilidAPIError::parse_error(format!("could not parse ValueSubkey: {e}"), es)
+            })?;
             data.ranges_insert(sn..=en);
         }
 

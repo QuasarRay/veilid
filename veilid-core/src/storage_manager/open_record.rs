@@ -253,7 +253,7 @@ impl StorageManager {
             .subkeys()
             .iter()
             .map(ValueSubkeyRangeSet::single)
-            .zip(outbound_inspect_result.subkey_fanout_results.into_iter());
+            .zip(outbound_inspect_result.subkey_fanout_results);
 
         let existed = self.process_fanout_results(
             opaque_record_key.clone(),

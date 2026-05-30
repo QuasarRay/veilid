@@ -40,15 +40,15 @@
     {{flutter_js}}
     {{flutter_build_config}}
 
-    import * as veilid_wasm_module from './wasm/veilid_wasm.js';
+    import * as veilid_flutter_module from './wasm/veilid_flutter.js';
 
     async function initVeilidWASM() {
       // save the wasm exports
-      window.veilid_wasm = veilid_wasm_module;
+      window.veilid_flutter = veilid_flutter_module;
       // init the js module
-      await veilid_wasm_module.default();
+      await veilid_flutter_module.default();
       // init the wasm library
-      await veilid_wasm_module.initialize_veilid_wasm();
+      await veilid_flutter_module.initialize_veilid_wasm();
     }
 
     const loading = document.createElement('div');

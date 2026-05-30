@@ -453,120 +453,125 @@ impl IGDManager {
         }
 
         let this = self.clone();
-        blocking_wrapper(
-            move || {
-                let mut inner = this.inner.lock();
+        let fut = blocking_wrapper(move || {
+            let mut inner = this.inner.lock();
 
-                // Process full renewals
-                for (k, v) in full_renews {
-                    // Get local ip for address type
-                    let local_ip = match Self::find_local_ip_inner(&inner, k.address_type) {
-                        Some(ip) => ip,
-                        None => {
-                            return Err(eyre!("local ip missing for address type"));
-                        }
-                    };
+            // Process full renewals
+            for (k, v) in full_renews {
+                // Get local ip for address type
+                let local_ip = match Self::find_local_ip_inner(&inner, k.address_type) {
+                    Some(ip) => ip,
+                    None => {
+                        return Err(eyre!("local ip missing for address type"));
+                    }
+                };
 
-                    // Get gateway for interface
-                    let gw = match Self::find_gateway_inner(&inner, local_ip) {
-                        Some(gw) => gw,
-                        None => {
-                            return Err(eyre!("gateway missing for interface"));
-                        }
-                    };
+                // Get gateway for interface
+                let gw = match Self::find_gateway_inner(&inner, local_ip) {
+                    Some(gw) => gw,
+                    None => {
+                        return Err(eyre!("gateway missing for interface"));
+                    }
+                };
 
-                    // Delete the mapping if it exists, ignore any errors here
-                    let _ = gw.remove_port(convert_protocol_type(k.protocol_type), v.mapped_port);
-                    inner.port_maps.remove(&k);
+                // Delete the mapping if it exists, ignore any errors here
+                let _ = gw.remove_port(convert_protocol_type(k.protocol_type), v.mapped_port);
+                inner.port_maps.remove(&k);
 
-                    let desc = this.get_description(k.protocol_type, k.local_port);
-                    match gw.add_any_port(
-                        convert_protocol_type(k.protocol_type),
-                        SocketAddr::new(local_ip, k.local_port),
-                        UPNP_MAPPING_LIFETIME.millis_u32().unwrap_or_log().div_ceil(1000),
-                        &desc,
-                    ) {
-                        Ok(mapped_port) => {
-                            veilid_log!(this debug "full-renewed mapped port {:?} -> {:?}", v, k);
-                            inner.port_maps.insert(
-                                k,
-                                PortMapValue {
-                                    ext_ip: v.ext_ip,
-                                    mapped_port,
-                                    timestamp: Timestamp::now(),
-                                    renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
-                                    renewal_attempts: 0,
-                                },
-                            );
-                        }
-                        Err(e) => {
-                            veilid_log!(this info "failed to full-renew mapped port {:?} -> {:?}: {}", v, k, e);
+                let desc = this.get_description(k.protocol_type, k.local_port);
+                match gw.add_any_port(
+                    convert_protocol_type(k.protocol_type),
+                    SocketAddr::new(local_ip, k.local_port),
+                    UPNP_MAPPING_LIFETIME
+                        .millis_u32()
+                        .unwrap_or_log()
+                        .div_ceil(1000),
+                    &desc,
+                ) {
+                    Ok(mapped_port) => {
+                        veilid_log!(this debug "full-renewed mapped port {:?} -> {:?}", v, k);
+                        inner.port_maps.insert(
+                            k,
+                            PortMapValue {
+                                ext_ip: v.ext_ip,
+                                mapped_port,
+                                timestamp: Timestamp::now(),
+                                renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
+                                renewal_attempts: 0,
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        veilid_log!(this info "failed to full-renew mapped port {:?} -> {:?}: {}", v, k, e);
 
-                            // Must restart network now :(
-                            return Ok(false);
-                        }
-                    };
-                }
-                // Process normal renewals
-                for (k, mut v) in renews {
-                    // Get local ip for address type
-                    let local_ip = match Self::find_local_ip_inner(&inner, k.address_type) {
-                        Some(ip) => ip,
-                        None => {
-                            return Err(eyre!("local ip missing for address type"));
-                        }
-                    };
-
-                    // Get gateway for interface
-                    let gw = match Self::find_gateway_inner(&inner, local_ip) {
-                        Some(gw) => gw,
-                        None => {
-                            return Err(eyre!("gateway missing for address type"));
-                        }
-                    };
-
-                    let desc = this.get_description(k.protocol_type, k.local_port);
-                    match gw.add_port(
-                        convert_protocol_type(k.protocol_type),
-                        v.mapped_port,
-                        SocketAddr::new(local_ip, k.local_port),
-                        UPNP_MAPPING_LIFETIME.millis_u32().unwrap_or_log().div_ceil(1000),
-                        &desc,
-                    ) {
-                        Ok(()) => {
-                            veilid_log!(this trace "renewed mapped port {:?} -> {:?}", v, k);
-
-                            inner.port_maps.insert(
-                                k,
-                                PortMapValue {
-                                    ext_ip: v.ext_ip,
-                                    mapped_port: v.mapped_port,
-                                    timestamp: Timestamp::now(),
-                                    renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
-                                    renewal_attempts: 0,
-                                },
-                            );
-                        }
-                        Err(e) => {
-                            veilid_log!(this debug "failed to renew mapped port {:?} -> {:?}: {}", v, k, e);
-
-                            // Get closer to the maximum renewal timeline by a factor of two each time
-                            v.renewal_lifetime =
-                                (v.renewal_lifetime.saturating_add(UPNP_MAPPING_LIFETIME)).div(2);
-                            v.renewal_attempts += 1;
-
-                            // Store new value to try again
-                            inner.port_maps.insert(k, v);
-                        }
-                    };
-                }
-
-                // Normal exit, no restart
-                Ok(true)
+                        // Must restart network now :(
+                        return Ok(false);
+                    }
+                };
             }
-        )
-        .instrument(tracing::trace_span!("igd tick fut"))
-        .await
+            // Process normal renewals
+            for (k, mut v) in renews {
+                // Get local ip for address type
+                let local_ip = match Self::find_local_ip_inner(&inner, k.address_type) {
+                    Some(ip) => ip,
+                    None => {
+                        return Err(eyre!("local ip missing for address type"));
+                    }
+                };
+
+                // Get gateway for interface
+                let gw = match Self::find_gateway_inner(&inner, local_ip) {
+                    Some(gw) => gw,
+                    None => {
+                        return Err(eyre!("gateway missing for address type"));
+                    }
+                };
+
+                let desc = this.get_description(k.protocol_type, k.local_port);
+                match gw.add_port(
+                    convert_protocol_type(k.protocol_type),
+                    v.mapped_port,
+                    SocketAddr::new(local_ip, k.local_port),
+                    UPNP_MAPPING_LIFETIME
+                        .millis_u32()
+                        .unwrap_or_log()
+                        .div_ceil(1000),
+                    &desc,
+                ) {
+                    Ok(()) => {
+                        veilid_log!(this trace "renewed mapped port {:?} -> {:?}", v, k);
+
+                        inner.port_maps.insert(
+                            k,
+                            PortMapValue {
+                                ext_ip: v.ext_ip,
+                                mapped_port: v.mapped_port,
+                                timestamp: Timestamp::now(),
+                                renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
+                                renewal_attempts: 0,
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        veilid_log!(this debug "failed to renew mapped port {:?} -> {:?}: {}", v, k, e);
+
+                        // Get closer to the maximum renewal timeline by a factor of two each time
+                        v.renewal_lifetime =
+                            (v.renewal_lifetime.saturating_add(UPNP_MAPPING_LIFETIME)).div(2);
+                        v.renewal_attempts += 1;
+
+                        // Store new value to try again
+                        inner.port_maps.insert(k, v);
+                    }
+                };
+            }
+
+            // Normal exit, no restart
+            Ok(true)
+        });
+        #[cfg(feature = "instrument")]
+        let fut = fut.instrument(tracing::trace_span!("igd tick fut"));
+        fut.await
     }
 
     /////////////////////////////////////////////////////////////////////

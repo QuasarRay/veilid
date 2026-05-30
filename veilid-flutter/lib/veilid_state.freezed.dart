@@ -1701,7 +1701,7 @@ as int,
 /// @nodoc
 mixin _$RPCStats {
 
- int get messagesSent; int get messagesRcvd; int get questionsInFlight; Timestamp? get lastQuestionTs; Timestamp? get lastSeenTs; Timestamp? get firstConsecutiveSeenTs; int get recentLostAnswersUnordered; int get recentLostAnswersOrdered; int get failedToSend; AnswerStats get answerUnordered; AnswerStats get answerOrdered;
+ int get messagesSent; int get messagesRcvd; int get questionsInFlight; Timestamp? get lastQuestionTs; Timestamp? get lastSeenTs; Timestamp? get firstConsecutiveSeenTs; int get failedToSend; int get unreachable;
 /// Create a copy of RPCStats
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -1714,16 +1714,16 @@ $RPCStatsCopyWith<RPCStats> get copyWith => _$RPCStatsCopyWithImpl<RPCStats>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is RPCStats&&(identical(other.messagesSent, messagesSent) || other.messagesSent == messagesSent)&&(identical(other.messagesRcvd, messagesRcvd) || other.messagesRcvd == messagesRcvd)&&(identical(other.questionsInFlight, questionsInFlight) || other.questionsInFlight == questionsInFlight)&&(identical(other.lastQuestionTs, lastQuestionTs) || other.lastQuestionTs == lastQuestionTs)&&(identical(other.lastSeenTs, lastSeenTs) || other.lastSeenTs == lastSeenTs)&&(identical(other.firstConsecutiveSeenTs, firstConsecutiveSeenTs) || other.firstConsecutiveSeenTs == firstConsecutiveSeenTs)&&(identical(other.recentLostAnswersUnordered, recentLostAnswersUnordered) || other.recentLostAnswersUnordered == recentLostAnswersUnordered)&&(identical(other.recentLostAnswersOrdered, recentLostAnswersOrdered) || other.recentLostAnswersOrdered == recentLostAnswersOrdered)&&(identical(other.failedToSend, failedToSend) || other.failedToSend == failedToSend)&&(identical(other.answerUnordered, answerUnordered) || other.answerUnordered == answerUnordered)&&(identical(other.answerOrdered, answerOrdered) || other.answerOrdered == answerOrdered));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is RPCStats&&(identical(other.messagesSent, messagesSent) || other.messagesSent == messagesSent)&&(identical(other.messagesRcvd, messagesRcvd) || other.messagesRcvd == messagesRcvd)&&(identical(other.questionsInFlight, questionsInFlight) || other.questionsInFlight == questionsInFlight)&&(identical(other.lastQuestionTs, lastQuestionTs) || other.lastQuestionTs == lastQuestionTs)&&(identical(other.lastSeenTs, lastSeenTs) || other.lastSeenTs == lastSeenTs)&&(identical(other.firstConsecutiveSeenTs, firstConsecutiveSeenTs) || other.firstConsecutiveSeenTs == firstConsecutiveSeenTs)&&(identical(other.failedToSend, failedToSend) || other.failedToSend == failedToSend)&&(identical(other.unreachable, unreachable) || other.unreachable == unreachable));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,messagesSent,messagesRcvd,questionsInFlight,lastQuestionTs,lastSeenTs,firstConsecutiveSeenTs,recentLostAnswersUnordered,recentLostAnswersOrdered,failedToSend,answerUnordered,answerOrdered);
+int get hashCode => Object.hash(runtimeType,messagesSent,messagesRcvd,questionsInFlight,lastQuestionTs,lastSeenTs,firstConsecutiveSeenTs,failedToSend,unreachable);
 
 @override
 String toString() {
-  return 'RPCStats(messagesSent: $messagesSent, messagesRcvd: $messagesRcvd, questionsInFlight: $questionsInFlight, lastQuestionTs: $lastQuestionTs, lastSeenTs: $lastSeenTs, firstConsecutiveSeenTs: $firstConsecutiveSeenTs, recentLostAnswersUnordered: $recentLostAnswersUnordered, recentLostAnswersOrdered: $recentLostAnswersOrdered, failedToSend: $failedToSend, answerUnordered: $answerUnordered, answerOrdered: $answerOrdered)';
+  return 'RPCStats(messagesSent: $messagesSent, messagesRcvd: $messagesRcvd, questionsInFlight: $questionsInFlight, lastQuestionTs: $lastQuestionTs, lastSeenTs: $lastSeenTs, firstConsecutiveSeenTs: $firstConsecutiveSeenTs, failedToSend: $failedToSend, unreachable: $unreachable)';
 }
 
 
@@ -1734,11 +1734,11 @@ abstract mixin class $RPCStatsCopyWith<$Res>  {
   factory $RPCStatsCopyWith(RPCStats value, $Res Function(RPCStats) _then) = _$RPCStatsCopyWithImpl;
 @useResult
 $Res call({
- int messagesSent, int messagesRcvd, int questionsInFlight, Timestamp? lastQuestionTs, Timestamp? lastSeenTs, Timestamp? firstConsecutiveSeenTs, int recentLostAnswersUnordered, int recentLostAnswersOrdered, int failedToSend, AnswerStats answerUnordered, AnswerStats answerOrdered
+ int messagesSent, int messagesRcvd, int questionsInFlight, Timestamp? lastQuestionTs, Timestamp? lastSeenTs, Timestamp? firstConsecutiveSeenTs, int failedToSend, int unreachable
 });
 
 
-$AnswerStatsCopyWith<$Res> get answerUnordered;$AnswerStatsCopyWith<$Res> get answerOrdered;
+
 
 }
 /// @nodoc
@@ -1751,7 +1751,7 @@ class _$RPCStatsCopyWithImpl<$Res>
 
 /// Create a copy of RPCStats
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? messagesSent = null,Object? messagesRcvd = null,Object? questionsInFlight = null,Object? lastQuestionTs = freezed,Object? lastSeenTs = freezed,Object? firstConsecutiveSeenTs = freezed,Object? recentLostAnswersUnordered = null,Object? recentLostAnswersOrdered = null,Object? failedToSend = null,Object? answerUnordered = null,Object? answerOrdered = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? messagesSent = null,Object? messagesRcvd = null,Object? questionsInFlight = null,Object? lastQuestionTs = freezed,Object? lastSeenTs = freezed,Object? firstConsecutiveSeenTs = freezed,Object? failedToSend = null,Object? unreachable = null,}) {
   return _then(_self.copyWith(
 messagesSent: null == messagesSent ? _self.messagesSent : messagesSent // ignore: cast_nullable_to_non_nullable
 as int,messagesRcvd: null == messagesRcvd ? _self.messagesRcvd : messagesRcvd // ignore: cast_nullable_to_non_nullable
@@ -1759,33 +1759,12 @@ as int,questionsInFlight: null == questionsInFlight ? _self.questionsInFlight : 
 as int,lastQuestionTs: freezed == lastQuestionTs ? _self.lastQuestionTs : lastQuestionTs // ignore: cast_nullable_to_non_nullable
 as Timestamp?,lastSeenTs: freezed == lastSeenTs ? _self.lastSeenTs : lastSeenTs // ignore: cast_nullable_to_non_nullable
 as Timestamp?,firstConsecutiveSeenTs: freezed == firstConsecutiveSeenTs ? _self.firstConsecutiveSeenTs : firstConsecutiveSeenTs // ignore: cast_nullable_to_non_nullable
-as Timestamp?,recentLostAnswersUnordered: null == recentLostAnswersUnordered ? _self.recentLostAnswersUnordered : recentLostAnswersUnordered // ignore: cast_nullable_to_non_nullable
-as int,recentLostAnswersOrdered: null == recentLostAnswersOrdered ? _self.recentLostAnswersOrdered : recentLostAnswersOrdered // ignore: cast_nullable_to_non_nullable
-as int,failedToSend: null == failedToSend ? _self.failedToSend : failedToSend // ignore: cast_nullable_to_non_nullable
-as int,answerUnordered: null == answerUnordered ? _self.answerUnordered : answerUnordered // ignore: cast_nullable_to_non_nullable
-as AnswerStats,answerOrdered: null == answerOrdered ? _self.answerOrdered : answerOrdered // ignore: cast_nullable_to_non_nullable
-as AnswerStats,
+as Timestamp?,failedToSend: null == failedToSend ? _self.failedToSend : failedToSend // ignore: cast_nullable_to_non_nullable
+as int,unreachable: null == unreachable ? _self.unreachable : unreachable // ignore: cast_nullable_to_non_nullable
+as int,
   ));
 }
-/// Create a copy of RPCStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$AnswerStatsCopyWith<$Res> get answerUnordered {
-  
-  return $AnswerStatsCopyWith<$Res>(_self.answerUnordered, (value) {
-    return _then(_self.copyWith(answerUnordered: value));
-  });
-}/// Create a copy of RPCStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$AnswerStatsCopyWith<$Res> get answerOrdered {
-  
-  return $AnswerStatsCopyWith<$Res>(_self.answerOrdered, (value) {
-    return _then(_self.copyWith(answerOrdered: value));
-  });
-}
+
 }
 
 
@@ -1864,10 +1843,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int recentLostAnswersUnordered,  int recentLostAnswersOrdered,  int failedToSend,  AnswerStats answerUnordered,  AnswerStats answerOrdered)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int failedToSend,  int unreachable)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _RPCStats() when $default != null:
-return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.recentLostAnswersUnordered,_that.recentLostAnswersOrdered,_that.failedToSend,_that.answerUnordered,_that.answerOrdered);case _:
+return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.failedToSend,_that.unreachable);case _:
   return orElse();
 
 }
@@ -1885,10 +1864,10 @@ return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int recentLostAnswersUnordered,  int recentLostAnswersOrdered,  int failedToSend,  AnswerStats answerUnordered,  AnswerStats answerOrdered)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int failedToSend,  int unreachable)  $default,) {final _that = this;
 switch (_that) {
 case _RPCStats():
-return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.recentLostAnswersUnordered,_that.recentLostAnswersOrdered,_that.failedToSend,_that.answerUnordered,_that.answerOrdered);}
+return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.failedToSend,_that.unreachable);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -1902,10 +1881,10 @@ return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int recentLostAnswersUnordered,  int recentLostAnswersOrdered,  int failedToSend,  AnswerStats answerUnordered,  AnswerStats answerOrdered)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int failedToSend,  int unreachable)?  $default,) {final _that = this;
 switch (_that) {
 case _RPCStats() when $default != null:
-return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.recentLostAnswersUnordered,_that.recentLostAnswersOrdered,_that.failedToSend,_that.answerUnordered,_that.answerOrdered);case _:
+return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.failedToSend,_that.unreachable);case _:
   return null;
 
 }
@@ -1917,7 +1896,7 @@ return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_t
 @JsonSerializable()
 
 class _RPCStats implements RPCStats {
-  const _RPCStats({required this.messagesSent, required this.messagesRcvd, required this.questionsInFlight, required this.lastQuestionTs, required this.lastSeenTs, required this.firstConsecutiveSeenTs, required this.recentLostAnswersUnordered, required this.recentLostAnswersOrdered, required this.failedToSend, required this.answerUnordered, required this.answerOrdered});
+  const _RPCStats({required this.messagesSent, required this.messagesRcvd, required this.questionsInFlight, required this.lastQuestionTs, required this.lastSeenTs, required this.firstConsecutiveSeenTs, required this.failedToSend, required this.unreachable});
   factory _RPCStats.fromJson(Map<String, dynamic> json) => _$RPCStatsFromJson(json);
 
 @override final  int messagesSent;
@@ -1926,11 +1905,8 @@ class _RPCStats implements RPCStats {
 @override final  Timestamp? lastQuestionTs;
 @override final  Timestamp? lastSeenTs;
 @override final  Timestamp? firstConsecutiveSeenTs;
-@override final  int recentLostAnswersUnordered;
-@override final  int recentLostAnswersOrdered;
 @override final  int failedToSend;
-@override final  AnswerStats answerUnordered;
-@override final  AnswerStats answerOrdered;
+@override final  int unreachable;
 
 /// Create a copy of RPCStats
 /// with the given fields replaced by the non-null parameter values.
@@ -1945,16 +1921,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _RPCStats&&(identical(other.messagesSent, messagesSent) || other.messagesSent == messagesSent)&&(identical(other.messagesRcvd, messagesRcvd) || other.messagesRcvd == messagesRcvd)&&(identical(other.questionsInFlight, questionsInFlight) || other.questionsInFlight == questionsInFlight)&&(identical(other.lastQuestionTs, lastQuestionTs) || other.lastQuestionTs == lastQuestionTs)&&(identical(other.lastSeenTs, lastSeenTs) || other.lastSeenTs == lastSeenTs)&&(identical(other.firstConsecutiveSeenTs, firstConsecutiveSeenTs) || other.firstConsecutiveSeenTs == firstConsecutiveSeenTs)&&(identical(other.recentLostAnswersUnordered, recentLostAnswersUnordered) || other.recentLostAnswersUnordered == recentLostAnswersUnordered)&&(identical(other.recentLostAnswersOrdered, recentLostAnswersOrdered) || other.recentLostAnswersOrdered == recentLostAnswersOrdered)&&(identical(other.failedToSend, failedToSend) || other.failedToSend == failedToSend)&&(identical(other.answerUnordered, answerUnordered) || other.answerUnordered == answerUnordered)&&(identical(other.answerOrdered, answerOrdered) || other.answerOrdered == answerOrdered));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _RPCStats&&(identical(other.messagesSent, messagesSent) || other.messagesSent == messagesSent)&&(identical(other.messagesRcvd, messagesRcvd) || other.messagesRcvd == messagesRcvd)&&(identical(other.questionsInFlight, questionsInFlight) || other.questionsInFlight == questionsInFlight)&&(identical(other.lastQuestionTs, lastQuestionTs) || other.lastQuestionTs == lastQuestionTs)&&(identical(other.lastSeenTs, lastSeenTs) || other.lastSeenTs == lastSeenTs)&&(identical(other.firstConsecutiveSeenTs, firstConsecutiveSeenTs) || other.firstConsecutiveSeenTs == firstConsecutiveSeenTs)&&(identical(other.failedToSend, failedToSend) || other.failedToSend == failedToSend)&&(identical(other.unreachable, unreachable) || other.unreachable == unreachable));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,messagesSent,messagesRcvd,questionsInFlight,lastQuestionTs,lastSeenTs,firstConsecutiveSeenTs,recentLostAnswersUnordered,recentLostAnswersOrdered,failedToSend,answerUnordered,answerOrdered);
+int get hashCode => Object.hash(runtimeType,messagesSent,messagesRcvd,questionsInFlight,lastQuestionTs,lastSeenTs,firstConsecutiveSeenTs,failedToSend,unreachable);
 
 @override
 String toString() {
-  return 'RPCStats(messagesSent: $messagesSent, messagesRcvd: $messagesRcvd, questionsInFlight: $questionsInFlight, lastQuestionTs: $lastQuestionTs, lastSeenTs: $lastSeenTs, firstConsecutiveSeenTs: $firstConsecutiveSeenTs, recentLostAnswersUnordered: $recentLostAnswersUnordered, recentLostAnswersOrdered: $recentLostAnswersOrdered, failedToSend: $failedToSend, answerUnordered: $answerUnordered, answerOrdered: $answerOrdered)';
+  return 'RPCStats(messagesSent: $messagesSent, messagesRcvd: $messagesRcvd, questionsInFlight: $questionsInFlight, lastQuestionTs: $lastQuestionTs, lastSeenTs: $lastSeenTs, firstConsecutiveSeenTs: $firstConsecutiveSeenTs, failedToSend: $failedToSend, unreachable: $unreachable)';
 }
 
 
@@ -1965,11 +1941,11 @@ abstract mixin class _$RPCStatsCopyWith<$Res> implements $RPCStatsCopyWith<$Res>
   factory _$RPCStatsCopyWith(_RPCStats value, $Res Function(_RPCStats) _then) = __$RPCStatsCopyWithImpl;
 @override @useResult
 $Res call({
- int messagesSent, int messagesRcvd, int questionsInFlight, Timestamp? lastQuestionTs, Timestamp? lastSeenTs, Timestamp? firstConsecutiveSeenTs, int recentLostAnswersUnordered, int recentLostAnswersOrdered, int failedToSend, AnswerStats answerUnordered, AnswerStats answerOrdered
+ int messagesSent, int messagesRcvd, int questionsInFlight, Timestamp? lastQuestionTs, Timestamp? lastSeenTs, Timestamp? firstConsecutiveSeenTs, int failedToSend, int unreachable
 });
 
 
-@override $AnswerStatsCopyWith<$Res> get answerUnordered;@override $AnswerStatsCopyWith<$Res> get answerOrdered;
+
 
 }
 /// @nodoc
@@ -1982,7 +1958,7 @@ class __$RPCStatsCopyWithImpl<$Res>
 
 /// Create a copy of RPCStats
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? messagesSent = null,Object? messagesRcvd = null,Object? questionsInFlight = null,Object? lastQuestionTs = freezed,Object? lastSeenTs = freezed,Object? firstConsecutiveSeenTs = freezed,Object? recentLostAnswersUnordered = null,Object? recentLostAnswersOrdered = null,Object? failedToSend = null,Object? answerUnordered = null,Object? answerOrdered = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? messagesSent = null,Object? messagesRcvd = null,Object? questionsInFlight = null,Object? lastQuestionTs = freezed,Object? lastSeenTs = freezed,Object? firstConsecutiveSeenTs = freezed,Object? failedToSend = null,Object? unreachable = null,}) {
   return _then(_RPCStats(
 messagesSent: null == messagesSent ? _self.messagesSent : messagesSent // ignore: cast_nullable_to_non_nullable
 as int,messagesRcvd: null == messagesRcvd ? _self.messagesRcvd : messagesRcvd // ignore: cast_nullable_to_non_nullable
@@ -1990,34 +1966,13 @@ as int,questionsInFlight: null == questionsInFlight ? _self.questionsInFlight : 
 as int,lastQuestionTs: freezed == lastQuestionTs ? _self.lastQuestionTs : lastQuestionTs // ignore: cast_nullable_to_non_nullable
 as Timestamp?,lastSeenTs: freezed == lastSeenTs ? _self.lastSeenTs : lastSeenTs // ignore: cast_nullable_to_non_nullable
 as Timestamp?,firstConsecutiveSeenTs: freezed == firstConsecutiveSeenTs ? _self.firstConsecutiveSeenTs : firstConsecutiveSeenTs // ignore: cast_nullable_to_non_nullable
-as Timestamp?,recentLostAnswersUnordered: null == recentLostAnswersUnordered ? _self.recentLostAnswersUnordered : recentLostAnswersUnordered // ignore: cast_nullable_to_non_nullable
-as int,recentLostAnswersOrdered: null == recentLostAnswersOrdered ? _self.recentLostAnswersOrdered : recentLostAnswersOrdered // ignore: cast_nullable_to_non_nullable
-as int,failedToSend: null == failedToSend ? _self.failedToSend : failedToSend // ignore: cast_nullable_to_non_nullable
-as int,answerUnordered: null == answerUnordered ? _self.answerUnordered : answerUnordered // ignore: cast_nullable_to_non_nullable
-as AnswerStats,answerOrdered: null == answerOrdered ? _self.answerOrdered : answerOrdered // ignore: cast_nullable_to_non_nullable
-as AnswerStats,
+as Timestamp?,failedToSend: null == failedToSend ? _self.failedToSend : failedToSend // ignore: cast_nullable_to_non_nullable
+as int,unreachable: null == unreachable ? _self.unreachable : unreachable // ignore: cast_nullable_to_non_nullable
+as int,
   ));
 }
 
-/// Create a copy of RPCStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$AnswerStatsCopyWith<$Res> get answerUnordered {
-  
-  return $AnswerStatsCopyWith<$Res>(_self.answerUnordered, (value) {
-    return _then(_self.copyWith(answerUnordered: value));
-  });
-}/// Create a copy of RPCStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$AnswerStatsCopyWith<$Res> get answerOrdered {
-  
-  return $AnswerStatsCopyWith<$Res>(_self.answerOrdered, (value) {
-    return _then(_self.copyWith(answerOrdered: value));
-  });
-}
+
 }
 
 
@@ -2830,13 +2785,13 @@ return valueChange(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( VeilidLogLevel logLevel,  String message,  String? backtrace)?  log,TResult Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  PublicKey? sender,  String? routeId)?  appMessage,TResult Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  String callId,  PublicKey? sender,  String? routeId)?  appCall,TResult Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime)?  attachment,TResult Function( bool started,  BigInt bpsDown,  BigInt bpsUp,  List<PeerTableData> peers,  List<NodeId> nodeIds)?  network,TResult Function( VeilidConfig config)?  config,TResult Function( List<String> deadRoutes,  List<String> deadRemoteRoutes)?  routeChange,TResult Function( RecordKey key,  List<ValueSubkeyRange> subkeys,  int count,  ValueData? value)?  valueChange,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( VeilidLogLevel logLevel,  String message,  String? backtrace)?  log,TResult Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  PublicKey? sender,  String? routeId)?  appMessage,TResult Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  String callId,  PublicKey? sender,  String? routeId)?  appCall,TResult Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime,  BigInt reliablePeerCount,  BigInt livePeerCount,  BigInt estimatedNetworkSize,  TimestampDuration? medianLatency,  BigInt overAttachedNodes)?  attachment,TResult Function( bool started,  BigInt bpsDown,  BigInt bpsUp,  List<PeerTableData> peers,  List<NodeId> nodeIds)?  network,TResult Function( VeilidConfig config)?  config,TResult Function( List<String> deadRoutes,  List<String> deadRemoteRoutes)?  routeChange,TResult Function( RecordKey key,  List<ValueSubkeyRange> subkeys,  int count,  ValueData? value)?  valueChange,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case VeilidLog() when log != null:
 return log(_that.logLevel,_that.message,_that.backtrace);case VeilidAppMessage() when appMessage != null:
 return appMessage(_that.message,_that.sender,_that.routeId);case VeilidAppCall() when appCall != null:
 return appCall(_that.message,_that.callId,_that.sender,_that.routeId);case VeilidUpdateAttachment() when attachment != null:
-return attachment(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime);case VeilidUpdateNetwork() when network != null:
+return attachment(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime,_that.reliablePeerCount,_that.livePeerCount,_that.estimatedNetworkSize,_that.medianLatency,_that.overAttachedNodes);case VeilidUpdateNetwork() when network != null:
 return network(_that.started,_that.bpsDown,_that.bpsUp,_that.peers,_that.nodeIds);case VeilidUpdateConfig() when config != null:
 return config(_that.config);case VeilidUpdateRouteChange() when routeChange != null:
 return routeChange(_that.deadRoutes,_that.deadRemoteRoutes);case VeilidUpdateValueChange() when valueChange != null:
@@ -2858,13 +2813,13 @@ return valueChange(_that.key,_that.subkeys,_that.count,_that.value);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( VeilidLogLevel logLevel,  String message,  String? backtrace)  log,required TResult Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  PublicKey? sender,  String? routeId)  appMessage,required TResult Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  String callId,  PublicKey? sender,  String? routeId)  appCall,required TResult Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime)  attachment,required TResult Function( bool started,  BigInt bpsDown,  BigInt bpsUp,  List<PeerTableData> peers,  List<NodeId> nodeIds)  network,required TResult Function( VeilidConfig config)  config,required TResult Function( List<String> deadRoutes,  List<String> deadRemoteRoutes)  routeChange,required TResult Function( RecordKey key,  List<ValueSubkeyRange> subkeys,  int count,  ValueData? value)  valueChange,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( VeilidLogLevel logLevel,  String message,  String? backtrace)  log,required TResult Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  PublicKey? sender,  String? routeId)  appMessage,required TResult Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  String callId,  PublicKey? sender,  String? routeId)  appCall,required TResult Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime,  BigInt reliablePeerCount,  BigInt livePeerCount,  BigInt estimatedNetworkSize,  TimestampDuration? medianLatency,  BigInt overAttachedNodes)  attachment,required TResult Function( bool started,  BigInt bpsDown,  BigInt bpsUp,  List<PeerTableData> peers,  List<NodeId> nodeIds)  network,required TResult Function( VeilidConfig config)  config,required TResult Function( List<String> deadRoutes,  List<String> deadRemoteRoutes)  routeChange,required TResult Function( RecordKey key,  List<ValueSubkeyRange> subkeys,  int count,  ValueData? value)  valueChange,}) {final _that = this;
 switch (_that) {
 case VeilidLog():
 return log(_that.logLevel,_that.message,_that.backtrace);case VeilidAppMessage():
 return appMessage(_that.message,_that.sender,_that.routeId);case VeilidAppCall():
 return appCall(_that.message,_that.callId,_that.sender,_that.routeId);case VeilidUpdateAttachment():
-return attachment(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime);case VeilidUpdateNetwork():
+return attachment(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime,_that.reliablePeerCount,_that.livePeerCount,_that.estimatedNetworkSize,_that.medianLatency,_that.overAttachedNodes);case VeilidUpdateNetwork():
 return network(_that.started,_that.bpsDown,_that.bpsUp,_that.peers,_that.nodeIds);case VeilidUpdateConfig():
 return config(_that.config);case VeilidUpdateRouteChange():
 return routeChange(_that.deadRoutes,_that.deadRemoteRoutes);case VeilidUpdateValueChange():
@@ -2882,13 +2837,13 @@ return valueChange(_that.key,_that.subkeys,_that.count,_that.value);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( VeilidLogLevel logLevel,  String message,  String? backtrace)?  log,TResult? Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  PublicKey? sender,  String? routeId)?  appMessage,TResult? Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  String callId,  PublicKey? sender,  String? routeId)?  appCall,TResult? Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime)?  attachment,TResult? Function( bool started,  BigInt bpsDown,  BigInt bpsUp,  List<PeerTableData> peers,  List<NodeId> nodeIds)?  network,TResult? Function( VeilidConfig config)?  config,TResult? Function( List<String> deadRoutes,  List<String> deadRemoteRoutes)?  routeChange,TResult? Function( RecordKey key,  List<ValueSubkeyRange> subkeys,  int count,  ValueData? value)?  valueChange,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( VeilidLogLevel logLevel,  String message,  String? backtrace)?  log,TResult? Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  PublicKey? sender,  String? routeId)?  appMessage,TResult? Function(@Uint8ListJsonConverter.jsIsArray()  Uint8List message,  String callId,  PublicKey? sender,  String? routeId)?  appCall,TResult? Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime,  BigInt reliablePeerCount,  BigInt livePeerCount,  BigInt estimatedNetworkSize,  TimestampDuration? medianLatency,  BigInt overAttachedNodes)?  attachment,TResult? Function( bool started,  BigInt bpsDown,  BigInt bpsUp,  List<PeerTableData> peers,  List<NodeId> nodeIds)?  network,TResult? Function( VeilidConfig config)?  config,TResult? Function( List<String> deadRoutes,  List<String> deadRemoteRoutes)?  routeChange,TResult? Function( RecordKey key,  List<ValueSubkeyRange> subkeys,  int count,  ValueData? value)?  valueChange,}) {final _that = this;
 switch (_that) {
 case VeilidLog() when log != null:
 return log(_that.logLevel,_that.message,_that.backtrace);case VeilidAppMessage() when appMessage != null:
 return appMessage(_that.message,_that.sender,_that.routeId);case VeilidAppCall() when appCall != null:
 return appCall(_that.message,_that.callId,_that.sender,_that.routeId);case VeilidUpdateAttachment() when attachment != null:
-return attachment(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime);case VeilidUpdateNetwork() when network != null:
+return attachment(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime,_that.reliablePeerCount,_that.livePeerCount,_that.estimatedNetworkSize,_that.medianLatency,_that.overAttachedNodes);case VeilidUpdateNetwork() when network != null:
 return network(_that.started,_that.bpsDown,_that.bpsUp,_that.peers,_that.nodeIds);case VeilidUpdateConfig() when config != null:
 return config(_that.config);case VeilidUpdateRouteChange() when routeChange != null:
 return routeChange(_that.deadRoutes,_that.deadRemoteRoutes);case VeilidUpdateValueChange() when valueChange != null:
@@ -3137,7 +3092,7 @@ as String?,
 @JsonSerializable()
 
 class VeilidUpdateAttachment implements VeilidUpdate {
-  const VeilidUpdateAttachment({required this.state, required this.publicInternetReady, required this.localNetworkReady, required this.uptime, required this.attachedUptime, final  String? $type}): $type = $type ?? 'Attachment';
+  const VeilidUpdateAttachment({required this.state, required this.publicInternetReady, required this.localNetworkReady, required this.uptime, required this.attachedUptime, required this.reliablePeerCount, required this.livePeerCount, required this.estimatedNetworkSize, required this.medianLatency, required this.overAttachedNodes, final  String? $type}): $type = $type ?? 'Attachment';
   factory VeilidUpdateAttachment.fromJson(Map<String, dynamic> json) => _$VeilidUpdateAttachmentFromJson(json);
 
  final  AttachmentState state;
@@ -3145,6 +3100,11 @@ class VeilidUpdateAttachment implements VeilidUpdate {
  final  bool localNetworkReady;
  final  TimestampDuration uptime;
  final  TimestampDuration? attachedUptime;
+ final  BigInt reliablePeerCount;
+ final  BigInt livePeerCount;
+ final  BigInt estimatedNetworkSize;
+ final  TimestampDuration? medianLatency;
+ final  BigInt overAttachedNodes;
 
 @JsonKey(name: 'kind')
 final String $type;
@@ -3163,16 +3123,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidUpdateAttachment&&(identical(other.state, state) || other.state == state)&&(identical(other.publicInternetReady, publicInternetReady) || other.publicInternetReady == publicInternetReady)&&(identical(other.localNetworkReady, localNetworkReady) || other.localNetworkReady == localNetworkReady)&&(identical(other.uptime, uptime) || other.uptime == uptime)&&(identical(other.attachedUptime, attachedUptime) || other.attachedUptime == attachedUptime));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidUpdateAttachment&&(identical(other.state, state) || other.state == state)&&(identical(other.publicInternetReady, publicInternetReady) || other.publicInternetReady == publicInternetReady)&&(identical(other.localNetworkReady, localNetworkReady) || other.localNetworkReady == localNetworkReady)&&(identical(other.uptime, uptime) || other.uptime == uptime)&&(identical(other.attachedUptime, attachedUptime) || other.attachedUptime == attachedUptime)&&(identical(other.reliablePeerCount, reliablePeerCount) || other.reliablePeerCount == reliablePeerCount)&&(identical(other.livePeerCount, livePeerCount) || other.livePeerCount == livePeerCount)&&(identical(other.estimatedNetworkSize, estimatedNetworkSize) || other.estimatedNetworkSize == estimatedNetworkSize)&&(identical(other.medianLatency, medianLatency) || other.medianLatency == medianLatency)&&(identical(other.overAttachedNodes, overAttachedNodes) || other.overAttachedNodes == overAttachedNodes));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,state,publicInternetReady,localNetworkReady,uptime,attachedUptime);
+int get hashCode => Object.hash(runtimeType,state,publicInternetReady,localNetworkReady,uptime,attachedUptime,reliablePeerCount,livePeerCount,estimatedNetworkSize,medianLatency,overAttachedNodes);
 
 @override
 String toString() {
-  return 'VeilidUpdate.attachment(state: $state, publicInternetReady: $publicInternetReady, localNetworkReady: $localNetworkReady, uptime: $uptime, attachedUptime: $attachedUptime)';
+  return 'VeilidUpdate.attachment(state: $state, publicInternetReady: $publicInternetReady, localNetworkReady: $localNetworkReady, uptime: $uptime, attachedUptime: $attachedUptime, reliablePeerCount: $reliablePeerCount, livePeerCount: $livePeerCount, estimatedNetworkSize: $estimatedNetworkSize, medianLatency: $medianLatency, overAttachedNodes: $overAttachedNodes)';
 }
 
 
@@ -3183,7 +3143,7 @@ abstract mixin class $VeilidUpdateAttachmentCopyWith<$Res> implements $VeilidUpd
   factory $VeilidUpdateAttachmentCopyWith(VeilidUpdateAttachment value, $Res Function(VeilidUpdateAttachment) _then) = _$VeilidUpdateAttachmentCopyWithImpl;
 @useResult
 $Res call({
- AttachmentState state, bool publicInternetReady, bool localNetworkReady, TimestampDuration uptime, TimestampDuration? attachedUptime
+ AttachmentState state, bool publicInternetReady, bool localNetworkReady, TimestampDuration uptime, TimestampDuration? attachedUptime, BigInt reliablePeerCount, BigInt livePeerCount, BigInt estimatedNetworkSize, TimestampDuration? medianLatency, BigInt overAttachedNodes
 });
 
 
@@ -3200,14 +3160,19 @@ class _$VeilidUpdateAttachmentCopyWithImpl<$Res>
 
 /// Create a copy of VeilidUpdate
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? state = null,Object? publicInternetReady = null,Object? localNetworkReady = null,Object? uptime = null,Object? attachedUptime = freezed,}) {
+@pragma('vm:prefer-inline') $Res call({Object? state = null,Object? publicInternetReady = null,Object? localNetworkReady = null,Object? uptime = null,Object? attachedUptime = freezed,Object? reliablePeerCount = null,Object? livePeerCount = null,Object? estimatedNetworkSize = null,Object? medianLatency = freezed,Object? overAttachedNodes = null,}) {
   return _then(VeilidUpdateAttachment(
 state: null == state ? _self.state : state // ignore: cast_nullable_to_non_nullable
 as AttachmentState,publicInternetReady: null == publicInternetReady ? _self.publicInternetReady : publicInternetReady // ignore: cast_nullable_to_non_nullable
 as bool,localNetworkReady: null == localNetworkReady ? _self.localNetworkReady : localNetworkReady // ignore: cast_nullable_to_non_nullable
 as bool,uptime: null == uptime ? _self.uptime : uptime // ignore: cast_nullable_to_non_nullable
 as TimestampDuration,attachedUptime: freezed == attachedUptime ? _self.attachedUptime : attachedUptime // ignore: cast_nullable_to_non_nullable
-as TimestampDuration?,
+as TimestampDuration?,reliablePeerCount: null == reliablePeerCount ? _self.reliablePeerCount : reliablePeerCount // ignore: cast_nullable_to_non_nullable
+as BigInt,livePeerCount: null == livePeerCount ? _self.livePeerCount : livePeerCount // ignore: cast_nullable_to_non_nullable
+as BigInt,estimatedNetworkSize: null == estimatedNetworkSize ? _self.estimatedNetworkSize : estimatedNetworkSize // ignore: cast_nullable_to_non_nullable
+as BigInt,medianLatency: freezed == medianLatency ? _self.medianLatency : medianLatency // ignore: cast_nullable_to_non_nullable
+as TimestampDuration?,overAttachedNodes: null == overAttachedNodes ? _self.overAttachedNodes : overAttachedNodes // ignore: cast_nullable_to_non_nullable
+as BigInt,
   ));
 }
 
@@ -3577,7 +3542,7 @@ $ValueDataCopyWith<$Res>? get value {
 /// @nodoc
 mixin _$VeilidStateAttachment {
 
- AttachmentState get state; bool get publicInternetReady; bool get localNetworkReady; TimestampDuration get uptime; TimestampDuration? get attachedUptime;
+ AttachmentState get state; bool get publicInternetReady; bool get localNetworkReady; TimestampDuration get uptime; TimestampDuration? get attachedUptime; BigInt get reliablePeerCount; BigInt get livePeerCount; BigInt get estimatedNetworkSize; TimestampDuration? get medianLatency; BigInt get overAttachedNodes;
 /// Create a copy of VeilidStateAttachment
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -3590,16 +3555,16 @@ $VeilidStateAttachmentCopyWith<VeilidStateAttachment> get copyWith => _$VeilidSt
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidStateAttachment&&(identical(other.state, state) || other.state == state)&&(identical(other.publicInternetReady, publicInternetReady) || other.publicInternetReady == publicInternetReady)&&(identical(other.localNetworkReady, localNetworkReady) || other.localNetworkReady == localNetworkReady)&&(identical(other.uptime, uptime) || other.uptime == uptime)&&(identical(other.attachedUptime, attachedUptime) || other.attachedUptime == attachedUptime));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidStateAttachment&&(identical(other.state, state) || other.state == state)&&(identical(other.publicInternetReady, publicInternetReady) || other.publicInternetReady == publicInternetReady)&&(identical(other.localNetworkReady, localNetworkReady) || other.localNetworkReady == localNetworkReady)&&(identical(other.uptime, uptime) || other.uptime == uptime)&&(identical(other.attachedUptime, attachedUptime) || other.attachedUptime == attachedUptime)&&(identical(other.reliablePeerCount, reliablePeerCount) || other.reliablePeerCount == reliablePeerCount)&&(identical(other.livePeerCount, livePeerCount) || other.livePeerCount == livePeerCount)&&(identical(other.estimatedNetworkSize, estimatedNetworkSize) || other.estimatedNetworkSize == estimatedNetworkSize)&&(identical(other.medianLatency, medianLatency) || other.medianLatency == medianLatency)&&(identical(other.overAttachedNodes, overAttachedNodes) || other.overAttachedNodes == overAttachedNodes));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,state,publicInternetReady,localNetworkReady,uptime,attachedUptime);
+int get hashCode => Object.hash(runtimeType,state,publicInternetReady,localNetworkReady,uptime,attachedUptime,reliablePeerCount,livePeerCount,estimatedNetworkSize,medianLatency,overAttachedNodes);
 
 @override
 String toString() {
-  return 'VeilidStateAttachment(state: $state, publicInternetReady: $publicInternetReady, localNetworkReady: $localNetworkReady, uptime: $uptime, attachedUptime: $attachedUptime)';
+  return 'VeilidStateAttachment(state: $state, publicInternetReady: $publicInternetReady, localNetworkReady: $localNetworkReady, uptime: $uptime, attachedUptime: $attachedUptime, reliablePeerCount: $reliablePeerCount, livePeerCount: $livePeerCount, estimatedNetworkSize: $estimatedNetworkSize, medianLatency: $medianLatency, overAttachedNodes: $overAttachedNodes)';
 }
 
 
@@ -3610,7 +3575,7 @@ abstract mixin class $VeilidStateAttachmentCopyWith<$Res>  {
   factory $VeilidStateAttachmentCopyWith(VeilidStateAttachment value, $Res Function(VeilidStateAttachment) _then) = _$VeilidStateAttachmentCopyWithImpl;
 @useResult
 $Res call({
- AttachmentState state, bool publicInternetReady, bool localNetworkReady, TimestampDuration uptime, TimestampDuration? attachedUptime
+ AttachmentState state, bool publicInternetReady, bool localNetworkReady, TimestampDuration uptime, TimestampDuration? attachedUptime, BigInt reliablePeerCount, BigInt livePeerCount, BigInt estimatedNetworkSize, TimestampDuration? medianLatency, BigInt overAttachedNodes
 });
 
 
@@ -3627,14 +3592,19 @@ class _$VeilidStateAttachmentCopyWithImpl<$Res>
 
 /// Create a copy of VeilidStateAttachment
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? state = null,Object? publicInternetReady = null,Object? localNetworkReady = null,Object? uptime = null,Object? attachedUptime = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? state = null,Object? publicInternetReady = null,Object? localNetworkReady = null,Object? uptime = null,Object? attachedUptime = freezed,Object? reliablePeerCount = null,Object? livePeerCount = null,Object? estimatedNetworkSize = null,Object? medianLatency = freezed,Object? overAttachedNodes = null,}) {
   return _then(_self.copyWith(
 state: null == state ? _self.state : state // ignore: cast_nullable_to_non_nullable
 as AttachmentState,publicInternetReady: null == publicInternetReady ? _self.publicInternetReady : publicInternetReady // ignore: cast_nullable_to_non_nullable
 as bool,localNetworkReady: null == localNetworkReady ? _self.localNetworkReady : localNetworkReady // ignore: cast_nullable_to_non_nullable
 as bool,uptime: null == uptime ? _self.uptime : uptime // ignore: cast_nullable_to_non_nullable
 as TimestampDuration,attachedUptime: freezed == attachedUptime ? _self.attachedUptime : attachedUptime // ignore: cast_nullable_to_non_nullable
-as TimestampDuration?,
+as TimestampDuration?,reliablePeerCount: null == reliablePeerCount ? _self.reliablePeerCount : reliablePeerCount // ignore: cast_nullable_to_non_nullable
+as BigInt,livePeerCount: null == livePeerCount ? _self.livePeerCount : livePeerCount // ignore: cast_nullable_to_non_nullable
+as BigInt,estimatedNetworkSize: null == estimatedNetworkSize ? _self.estimatedNetworkSize : estimatedNetworkSize // ignore: cast_nullable_to_non_nullable
+as BigInt,medianLatency: freezed == medianLatency ? _self.medianLatency : medianLatency // ignore: cast_nullable_to_non_nullable
+as TimestampDuration?,overAttachedNodes: null == overAttachedNodes ? _self.overAttachedNodes : overAttachedNodes // ignore: cast_nullable_to_non_nullable
+as BigInt,
   ));
 }
 
@@ -3716,10 +3686,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime,  BigInt reliablePeerCount,  BigInt livePeerCount,  BigInt estimatedNetworkSize,  TimestampDuration? medianLatency,  BigInt overAttachedNodes)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidStateAttachment() when $default != null:
-return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime);case _:
+return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime,_that.reliablePeerCount,_that.livePeerCount,_that.estimatedNetworkSize,_that.medianLatency,_that.overAttachedNodes);case _:
   return orElse();
 
 }
@@ -3737,10 +3707,10 @@ return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime,  BigInt reliablePeerCount,  BigInt livePeerCount,  BigInt estimatedNetworkSize,  TimestampDuration? medianLatency,  BigInt overAttachedNodes)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidStateAttachment():
-return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime);}
+return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime,_that.reliablePeerCount,_that.livePeerCount,_that.estimatedNetworkSize,_that.medianLatency,_that.overAttachedNodes);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -3754,10 +3724,10 @@ return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( AttachmentState state,  bool publicInternetReady,  bool localNetworkReady,  TimestampDuration uptime,  TimestampDuration? attachedUptime,  BigInt reliablePeerCount,  BigInt livePeerCount,  BigInt estimatedNetworkSize,  TimestampDuration? medianLatency,  BigInt overAttachedNodes)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidStateAttachment() when $default != null:
-return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime);case _:
+return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_that.uptime,_that.attachedUptime,_that.reliablePeerCount,_that.livePeerCount,_that.estimatedNetworkSize,_that.medianLatency,_that.overAttachedNodes);case _:
   return null;
 
 }
@@ -3769,7 +3739,7 @@ return $default(_that.state,_that.publicInternetReady,_that.localNetworkReady,_t
 @JsonSerializable()
 
 class _VeilidStateAttachment implements VeilidStateAttachment {
-  const _VeilidStateAttachment({required this.state, required this.publicInternetReady, required this.localNetworkReady, required this.uptime, required this.attachedUptime});
+  const _VeilidStateAttachment({required this.state, required this.publicInternetReady, required this.localNetworkReady, required this.uptime, required this.attachedUptime, required this.reliablePeerCount, required this.livePeerCount, required this.estimatedNetworkSize, required this.medianLatency, required this.overAttachedNodes});
   factory _VeilidStateAttachment.fromJson(Map<String, dynamic> json) => _$VeilidStateAttachmentFromJson(json);
 
 @override final  AttachmentState state;
@@ -3777,6 +3747,11 @@ class _VeilidStateAttachment implements VeilidStateAttachment {
 @override final  bool localNetworkReady;
 @override final  TimestampDuration uptime;
 @override final  TimestampDuration? attachedUptime;
+@override final  BigInt reliablePeerCount;
+@override final  BigInt livePeerCount;
+@override final  BigInt estimatedNetworkSize;
+@override final  TimestampDuration? medianLatency;
+@override final  BigInt overAttachedNodes;
 
 /// Create a copy of VeilidStateAttachment
 /// with the given fields replaced by the non-null parameter values.
@@ -3791,16 +3766,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidStateAttachment&&(identical(other.state, state) || other.state == state)&&(identical(other.publicInternetReady, publicInternetReady) || other.publicInternetReady == publicInternetReady)&&(identical(other.localNetworkReady, localNetworkReady) || other.localNetworkReady == localNetworkReady)&&(identical(other.uptime, uptime) || other.uptime == uptime)&&(identical(other.attachedUptime, attachedUptime) || other.attachedUptime == attachedUptime));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidStateAttachment&&(identical(other.state, state) || other.state == state)&&(identical(other.publicInternetReady, publicInternetReady) || other.publicInternetReady == publicInternetReady)&&(identical(other.localNetworkReady, localNetworkReady) || other.localNetworkReady == localNetworkReady)&&(identical(other.uptime, uptime) || other.uptime == uptime)&&(identical(other.attachedUptime, attachedUptime) || other.attachedUptime == attachedUptime)&&(identical(other.reliablePeerCount, reliablePeerCount) || other.reliablePeerCount == reliablePeerCount)&&(identical(other.livePeerCount, livePeerCount) || other.livePeerCount == livePeerCount)&&(identical(other.estimatedNetworkSize, estimatedNetworkSize) || other.estimatedNetworkSize == estimatedNetworkSize)&&(identical(other.medianLatency, medianLatency) || other.medianLatency == medianLatency)&&(identical(other.overAttachedNodes, overAttachedNodes) || other.overAttachedNodes == overAttachedNodes));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,state,publicInternetReady,localNetworkReady,uptime,attachedUptime);
+int get hashCode => Object.hash(runtimeType,state,publicInternetReady,localNetworkReady,uptime,attachedUptime,reliablePeerCount,livePeerCount,estimatedNetworkSize,medianLatency,overAttachedNodes);
 
 @override
 String toString() {
-  return 'VeilidStateAttachment(state: $state, publicInternetReady: $publicInternetReady, localNetworkReady: $localNetworkReady, uptime: $uptime, attachedUptime: $attachedUptime)';
+  return 'VeilidStateAttachment(state: $state, publicInternetReady: $publicInternetReady, localNetworkReady: $localNetworkReady, uptime: $uptime, attachedUptime: $attachedUptime, reliablePeerCount: $reliablePeerCount, livePeerCount: $livePeerCount, estimatedNetworkSize: $estimatedNetworkSize, medianLatency: $medianLatency, overAttachedNodes: $overAttachedNodes)';
 }
 
 
@@ -3811,7 +3786,7 @@ abstract mixin class _$VeilidStateAttachmentCopyWith<$Res> implements $VeilidSta
   factory _$VeilidStateAttachmentCopyWith(_VeilidStateAttachment value, $Res Function(_VeilidStateAttachment) _then) = __$VeilidStateAttachmentCopyWithImpl;
 @override @useResult
 $Res call({
- AttachmentState state, bool publicInternetReady, bool localNetworkReady, TimestampDuration uptime, TimestampDuration? attachedUptime
+ AttachmentState state, bool publicInternetReady, bool localNetworkReady, TimestampDuration uptime, TimestampDuration? attachedUptime, BigInt reliablePeerCount, BigInt livePeerCount, BigInt estimatedNetworkSize, TimestampDuration? medianLatency, BigInt overAttachedNodes
 });
 
 
@@ -3828,14 +3803,19 @@ class __$VeilidStateAttachmentCopyWithImpl<$Res>
 
 /// Create a copy of VeilidStateAttachment
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? state = null,Object? publicInternetReady = null,Object? localNetworkReady = null,Object? uptime = null,Object? attachedUptime = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? state = null,Object? publicInternetReady = null,Object? localNetworkReady = null,Object? uptime = null,Object? attachedUptime = freezed,Object? reliablePeerCount = null,Object? livePeerCount = null,Object? estimatedNetworkSize = null,Object? medianLatency = freezed,Object? overAttachedNodes = null,}) {
   return _then(_VeilidStateAttachment(
 state: null == state ? _self.state : state // ignore: cast_nullable_to_non_nullable
 as AttachmentState,publicInternetReady: null == publicInternetReady ? _self.publicInternetReady : publicInternetReady // ignore: cast_nullable_to_non_nullable
 as bool,localNetworkReady: null == localNetworkReady ? _self.localNetworkReady : localNetworkReady // ignore: cast_nullable_to_non_nullable
 as bool,uptime: null == uptime ? _self.uptime : uptime // ignore: cast_nullable_to_non_nullable
 as TimestampDuration,attachedUptime: freezed == attachedUptime ? _self.attachedUptime : attachedUptime // ignore: cast_nullable_to_non_nullable
-as TimestampDuration?,
+as TimestampDuration?,reliablePeerCount: null == reliablePeerCount ? _self.reliablePeerCount : reliablePeerCount // ignore: cast_nullable_to_non_nullable
+as BigInt,livePeerCount: null == livePeerCount ? _self.livePeerCount : livePeerCount // ignore: cast_nullable_to_non_nullable
+as BigInt,estimatedNetworkSize: null == estimatedNetworkSize ? _self.estimatedNetworkSize : estimatedNetworkSize // ignore: cast_nullable_to_non_nullable
+as BigInt,medianLatency: freezed == medianLatency ? _self.medianLatency : medianLatency // ignore: cast_nullable_to_non_nullable
+as TimestampDuration?,overAttachedNodes: null == overAttachedNodes ? _self.overAttachedNodes : overAttachedNodes // ignore: cast_nullable_to_non_nullable
+as BigInt,
   ));
 }
 

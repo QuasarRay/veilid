@@ -146,11 +146,12 @@ impl PublicInternetRoutingDomainController {
                 needs_peer_minimum_refresh.push(ck);
             }
 
-            // See if we need more tested nodes
-            let live_count = entry_summary
+            // See if we need more tested nodes. Use live_external (excludes our NAT siblings)
+            // because tested nodes are only useful if they can serve as safety-route hops.
+            let live_external_count = entry_summary
                 .per_crypto_kind
                 .get(&ck)
-                .map(|x| x.live)
+                .map(|x| x.live_external)
                 .unwrap_or_default();
             let tested_count = entry_summary
                 .per_crypto_kind
@@ -162,9 +163,9 @@ impl PublicInternetRoutingDomainController {
                 .get(&ck)
                 .copied()
                 .unwrap_or_default();
-            let required_tested_connectivity_nodes = (live_count.connectivity_capabilities as f32
-                * ALLOCATION_CONNECTIVITY_NODES_TESTED_FACTOR)
-                as usize;
+            let required_tested_connectivity_nodes =
+                (live_external_count.connectivity_capabilities as f32
+                    * ALLOCATION_CONNECTIVITY_NODES_TESTED_FACTOR) as usize;
             let required_tested_low_water_mark_connectivity_nodes =
                 (low_water_mark_count.connectivity_capabilities as f32
                     * ALLOCATION_LOW_WATER_MARK_NODES_TESTED_FACTOR) as usize;

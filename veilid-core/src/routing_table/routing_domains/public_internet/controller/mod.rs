@@ -21,6 +21,15 @@ pub const RELAY_MANAGEMENT_INTERVAL_SECS: u32 = 1;
 /// How frequently we tick the private route management routine
 pub const PRIVATE_ROUTE_MANAGEMENT_INTERVAL_SECS: u32 = 1;
 
+/// Table store key for the PublicInternet routing domain persisted state
+const PUBLIC_INTERNET_PERSISTED_STATE_KEY: &[u8] = b"public_internet_persisted_state";
+
+/// PublicInternet routing domain state that survives across restarts
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct PublicInternetPersistedState {
+    low_water_mark: LowWaterMark,
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub struct PublicInternetRoutingDomainControllerUnlockedInner {
@@ -30,6 +39,14 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     published_peer_info: Mutex<Option<Arc<PeerInfo>>>,
     /// Last time we pinged checked the active watches
     opt_active_watch_keepalive_ts: Mutex<Option<Timestamp>>,
+    /// Last observed (outbound, inbound) stage pair; used to log stage transitions
+    last_observed_stages: Mutex<Option<(RoutingDomainOutboundStage, RoutingDomainInboundStage)>>,
+    /// Flap detector over public_internet_ready (should stay true once true on a stable network)
+    readiness_flap_detector: Mutex<FlapDetector<bool>>,
+    /// Flap detector over the selected relay set (should be stable on a stable network)
+    relay_flap_detector: Mutex<FlapDetector<BTreeSet<NodeId>>>,
+    /// Flap detector over safety_routes_ready (route validity should be stable once established)
+    route_flap_detector: Mutex<FlapDetector<bool>>,
 
     /// Background process to get our initial routing table
     bootstrap_task: TickTask<EyreReport>,
@@ -105,6 +122,13 @@ impl PublicInternetRoutingDomainController {
             detail,
             published_peer_info: Default::default(),
             opt_active_watch_keepalive_ts: Default::default(),
+            last_observed_stages: Default::default(),
+            // 3 readiness flips within ~30s = flapping (one-time startup/teardown flip won't trip)
+            readiness_flap_detector: Mutex::new(FlapDetector::new_secs(3.0, 30)),
+            // 4 relay-set changes within ~60s = flapping
+            relay_flap_detector: Mutex::new(FlapDetector::new_secs(4.0, 60)),
+            // 3 safety_routes_ready flips within ~30s = route validity flapping
+            route_flap_detector: Mutex::new(FlapDetector::new_secs(3.0, 30)),
             bootstrap_task: TickTask::new("bootstrap_task", 1),
             peer_minimum_refresh_task: TickTask::new("peer_minimum_refresh_task", 1),
             closest_peers_refresh_task: TickTask::new_ms(
@@ -201,6 +225,34 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         Box::pin(PublicInternetRoutingDomainController::cancel_tasks(self))
     }
 
+    fn load<'a>(&'a self, db: &'a TableDB) -> PinBoxFuture<'a, EyreResult<()>> {
+        Box::pin(async move {
+            let Some(persisted): Option<PublicInternetPersistedState> =
+                db.load_json(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY).await?
+            else {
+                return Ok(());
+            };
+            let lwm = Arc::new(persisted.low_water_mark);
+            let detail = self.read_dyn();
+            detail.reset_low_water_mark();
+            detail.update_low_water_mark(lwm);
+            Ok(())
+        })
+    }
+
+    fn save<'a>(&'a self, dbx: &'a TableDBTransaction) -> PinBoxFuture<'a, EyreResult<()>> {
+        Box::pin(async move {
+            let low_water_mark = {
+                let detail = self.read_dyn();
+                detail.get_low_water_mark().as_ref().clone()
+            };
+            let persisted = PublicInternetPersistedState { low_water_mark };
+            dbx.store_json(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY, &persisted)
+                .await?;
+            Ok(())
+        })
+    }
+
     fn state(&self) -> RoutingDomainState {
         PublicInternetRoutingDomainController::state(self)
     }
@@ -249,6 +301,19 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             }
 
             veilid_log!(self debug "[PublicInternet] Published new peer info: {}", new_peer_info);
+
+            // Purge any routing-table entries whose direct dial info overlaps with ours.
+            // Done before commit so any reliability/route work that fires off the change event
+            // doesn't see those entries.
+            let removed = self
+                .routing_table()
+                .purge_entries_with_overlapping_dial_info(
+                    RoutingDomain::PublicInternet,
+                    new_peer_info.node_info(),
+                );
+            if removed > 0 {
+                veilid_log!(self debug "[PublicInternet] Purged {} entries with dial info overlapping our own", removed);
+            }
 
             *ppi_lock = Some(new_peer_info.clone());
 

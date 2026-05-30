@@ -10,8 +10,6 @@ struct OutboundGetValueContext {
     pub descriptor_mode: GetDescriptorMode,
     /// The parsed schema from the descriptor if we have one
     pub schema: Option<DHTSchema>,
-    /// If we should send a partial update with the current context
-    pub send_partial_update: bool,
 }
 
 /// The result of the outbound_get_value operation
@@ -97,19 +95,14 @@ impl StorageManager {
             .as_ref()
             .map(|v| v.value_data().seq())
             .unwrap_or_default();
-        let res_rx = self.outbound_get_value(
-            opaque_record_key.clone(),
-            subkey,
-            safety_selection,
-            last_get_result,
-        )?;
-
-        // Wait for the first result
-        let Ok(result) = res_rx.recv_async().await else {
-            apibail_internal!("failed to receive results");
-        };
-        let result = result?;
-        let partial = result.fanout_result.kind.is_incomplete();
+        let result = self
+            .outbound_get_value(
+                opaque_record_key.clone(),
+                subkey,
+                safety_selection,
+                last_get_result,
+            )
+            .await?;
 
         // Process the returned result
         let out_encrypted = self
@@ -120,18 +113,6 @@ impl StorageManager {
         } else {
             None
         };
-
-        if let Some(out) = &out {
-            // If there's more to process, do it in the background
-            if partial {
-                self.process_deferred_outbound_get_value_result(
-                    res_rx,
-                    record_key.clone(),
-                    subkey,
-                    out.seq(),
-                );
-            }
-        }
 
         Ok(out)
     }
@@ -238,13 +219,13 @@ impl StorageManager {
         feature = "instrument",
         instrument(level = "trace", target = "dht", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub(super) fn outbound_get_value(
+    pub(super) async fn outbound_get_value(
         &self,
         opaque_record_key: OpaqueRecordKey,
         subkey: ValueSubkey,
         safety_selection: SafetySelection,
         last_get_result: GetResult,
-    ) -> VeilidAPIResult<flume::Receiver<VeilidAPIResult<OutboundGetValueResult>>> {
+    ) -> VeilidAPIResult<OutboundGetValueResult> {
         let routing_domain = RoutingDomain::PublicInternet;
         let config = self.config();
 
@@ -277,15 +258,11 @@ impl StorageManager {
         // Make the descriptor mode
         let descriptor_mode = GetDescriptorMode::new(last_get_result.opt_descriptor.clone());
 
-        // Make the return channel
-        let (out_tx, out_rx) = flume::unbounded::<VeilidAPIResult<OutboundGetValueResult>>();
-
         // Make operation context
         let context = Arc::new(Mutex::new(OutboundGetValueContext {
             value: last_get_result.opt_value,
             descriptor_mode,
             schema,
-            send_partial_update: true,
         }));
 
         // Routine to call to generate fanout
@@ -300,35 +277,47 @@ impl StorageManager {
                     let registry = registry.clone();
                     let opaque_record_key = opaque_record_key.clone();
                     let safety_selection = safety_selection.clone();
-                    Box::pin(async move {
+                    let fut = async move {
                         let rpc_processor = registry.rpc_processor();
                         let descriptor_mode = context.lock().descriptor_mode.clone();
-                        let gva = match
-                            rpc_processor
-                                .rpc_call_get_value(
-                                    Destination::direct(next_node.routing_domain_filtered(routing_domain), Some(safety_selection)),
-                                    opaque_record_key.clone(),
-                                    subkey,
-                                    descriptor_mode,
-                                )
-                                .await? {
-                                    NetworkResult::Timeout => {
-                                        return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Timeout});
-                                    }
-                                    NetworkResult::ServiceUnavailable(_) |
-                                    NetworkResult::NoConnection(_)  |
-                                    NetworkResult::AlreadyExists(_) |
-                                    NetworkResult::InvalidMessage(_) => {
-                                        return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
-                                    }
-                                    NetworkResult::Value(v) => v
-                                };
+                        let gva = match rpc_processor
+                            .rpc_call_get_value(
+                                Destination::direct(
+                                    next_node.routing_domain_filtered(routing_domain),
+                                    Some(safety_selection),
+                                ),
+                                opaque_record_key.clone(),
+                                subkey,
+                                descriptor_mode,
+                            )
+                            .await?
+                        {
+                            NetworkResult::Timeout => {
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Timeout,
+                                });
+                            }
+                            NetworkResult::ServiceUnavailable(_)
+                            | NetworkResult::NoConnection(_)
+                            | NetworkResult::AlreadyExists(_)
+                            | NetworkResult::InvalidMessage(_) => {
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Invalid,
+                                });
+                            }
+                            NetworkResult::Value(v) => v,
+                        };
 
                         // Check if we got an accepted result
                         if !gva.answer.accepted {
                             // Return peers if we have some
                             veilid_log!(registry debug target:"network_result", "GetValue missed, fanout call returned peers {}", gva.answer.peers.len());
-                            return Ok(FanoutCallOutput{peer_info_list: gva.answer.peers, disposition: FanoutCallDisposition::Rejected});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: gva.answer.peers,
+                                disposition: FanoutCallDisposition::Rejected,
+                            });
                         }
 
                         // Keep the descriptor if we got one. If we had a last_descriptor it will
@@ -341,11 +330,15 @@ impl StorageManager {
                                         Ok(v) => v,
                                         Err(e) => {
                                             veilid_log!(registry debug target:"network_result", "GetValue returned an invalid descriptor: {}", e);
-                                            return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                                            return Ok(FanoutCallOutput {
+                                                peer_info_list: vec![],
+                                                disposition: FanoutCallDisposition::Invalid,
+                                            });
                                         }
                                     };
                                     ctx.schema = Some(schema);
-                                    ctx.descriptor_mode = GetDescriptorMode::have(Arc::new(descriptor));
+                                    ctx.descriptor_mode =
+                                        GetDescriptorMode::have(Arc::new(descriptor));
                                 }
                             }
                             (ctx.descriptor_mode.opt_arc_descriptor(), ctx.schema.clone())
@@ -355,28 +348,41 @@ impl StorageManager {
                         let Some(value) = gva.answer.value else {
                             // Return peers if we have some
                             veilid_log!(registry debug target:"network_result", "GetValue returned no value, fanout call returned peers {}", gva.answer.peers.len());
-                            return Ok(FanoutCallOutput{peer_info_list: gva.answer.peers, disposition: FanoutCallDisposition::Stale});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: gva.answer.peers,
+                                disposition: FanoutCallDisposition::Stale,
+                            });
                         };
 
                         veilid_log!(registry debug "GetValue got value back: {}", value);
 
                         // Ensure we have a schema and descriptor
-                        let (Some(descriptor), Some(schema)) = (opt_descriptor, opt_schema)
-                        else {
+                        let (Some(descriptor), Some(schema)) = (opt_descriptor, opt_schema) else {
                             // Got a value but no descriptor for it
                             // Move to the next node
-                            return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: vec![],
+                                disposition: FanoutCallDisposition::Invalid,
+                            });
                         };
 
                         // Validate with schema
-                        if registry.storage_manager().check_subkey_value_data(&schema,
-                            descriptor.ref_owner(),
-                            subkey,
-                            value.value_data(),
-                        ).is_err() {
+                        if registry
+                            .storage_manager()
+                            .check_subkey_value_data(
+                                &schema,
+                                descriptor.ref_owner(),
+                                subkey,
+                                value.value_data(),
+                            )
+                            .is_err()
+                        {
                             // Validation failed, ignore this value
                             // Move to the next node
-                            return Ok(FanoutCallOutput{peer_info_list: vec![], disposition: FanoutCallDisposition::Invalid});
+                            return Ok(FanoutCallOutput {
+                                peer_info_list: vec![],
+                                disposition: FanoutCallDisposition::Invalid,
+                            });
                         }
 
                         // If we have a prior value, see if this is a newer sequence number
@@ -400,8 +406,6 @@ impl StorageManager {
                                 } else if new_seq > prior_seq {
                                     // If the sequence number is greater, start over with the new value
                                     ctx.value = Some(Arc::new(value));
-                                    // Send an update since the value changed
-                                    ctx.send_partial_update = true;
 
                                     // Restart the consensus since we have a new value, but
                                     // don't retry nodes we've already seen because they will return
@@ -420,9 +424,18 @@ impl StorageManager {
                             // Return peers if we have some
                             veilid_log!(registry debug target:"network_result", "GetValue fanout call returned peers {}", gva.answer.peers.len());
 
-                            Ok(FanoutCallOutput{peer_info_list: gva.answer.peers, disposition})
+                            Ok(FanoutCallOutput {
+                                peer_info_list: gva.answer.peers,
+                                disposition,
+                            })
                         }
-                    }.instrument(tracing::trace_span!("outbound_get_value fanout routine"))) as PinBoxFuture<FanoutCallResult>
+                    };
+                    #[cfg(feature = "instrument")]
+                    let fut = fut.instrument(tracing::trace_span!(
+                        target: "dht",
+                        "outbound_get_value fanout routine"
+                    ));
+                    Box::pin(fut) as PinBoxFuture<FanoutCallResult>
                 },
             )
         };
@@ -430,37 +443,13 @@ impl StorageManager {
         // Routine to call to check if we're done at each step
         let check_done = {
             let context = context.clone();
-            let out_tx = out_tx.clone();
-            let registry = self.registry();
             Arc::new(
                 move |fanout_result: &FanoutResult| -> FanoutDoneDisposition {
-                    let mut ctx = context.lock();
+                    let ctx = context.lock();
 
                     match fanout_result.kind {
-                        FanoutResultKind::Incomplete => {
-                            // Send partial update if desired, if we've gotten at least one consensus node
-                            if ctx.send_partial_update && !fanout_result.consensus_nodes.is_empty()
-                            {
-                                ctx.send_partial_update = false;
-
-                                // Return partial result
-                                let out = OutboundGetValueResult {
-                                    fanout_result: fanout_result.clone(),
-                                    get_result: GetResult {
-                                        opt_value: ctx.value.clone(),
-                                        opt_descriptor: ctx.descriptor_mode.opt_arc_descriptor(),
-                                    },
-                                };
-                                veilid_log!(registry debug "Sending partial GetValue result: {:?}", out);
-                                if let Err(e) = out_tx.send(Ok(out)) {
-                                    veilid_log!(registry debug "Sending partial GetValue result failed: {}", e);
-                                }
-                            }
-                            // Keep going
-                            FanoutDoneDisposition::NotDone
-                        }
+                        FanoutResultKind::Incomplete => FanoutDoneDisposition::NotDone,
                         FanoutResultKind::Timeout | FanoutResultKind::Exhausted => {
-                            // Signal we're done
                             FanoutDoneDisposition::DoneEarly
                         }
                         FanoutResultKind::Consensus => {
@@ -468,7 +457,6 @@ impl StorageManager {
                                 ctx.value.is_some() && ctx.descriptor_mode.is_have(),
                                 "should have gotten a value if we got consensus"
                             );
-                            // Signal we're done
                             FanoutDoneDisposition::DoneEarly
                         }
                     }
@@ -477,160 +465,50 @@ impl StorageManager {
         };
 
         // Call the fanout in a spawned task
-        let registry = self.registry();
         let hash_coordinate = opaque_record_key.to_hash_coordinate();
-        let detached_spawn_guard = self
-            .detached_spawns
-            .try_read_arc()
-            .ok_or_else(VeilidAPIError::not_initialized)?;
         let shutdown_stop_source = self
             .startup_lock
             .stop_token()
             .ok_or_else(VeilidAPIError::not_initialized)?;
 
-        spawn(
-            "outbound_get_value fanout",
-            Box::pin(
-                async move {
-                    let routing_table = registry.routing_table();
-                    let fanout_call = FanoutCall::new(
-                        &routing_table,
-                        FanoutCallParams {
-                            name: format!("outbound_get_value({})", Timestamp::now_increasing()),
-                            hash_coordinate,
-                            node_count,
-                            fanout_tasks,
-                            consensus_count,
-                            consensus_width,
-                            timeout,
-                        },
-                        capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]),
-                        call_routine,
-                        check_done,
-                    );
-
-                    let fanout_result = match fanout_call.run(init_fanout_queue, FanoutQueueMode::ThrottleAtConsensus, shutdown_stop_source).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            // If we finished with an error, return that
-                            veilid_log!(registry debug "GetValue fanout error: {}", e);
-                            if let Err(e) = out_tx.send(Err(e.into())) {
-                                veilid_log!(registry debug "Sending GetValue fanout error failed: {}", e);
-                            }
-                            return;
-                        }
-                    };
-
-                    veilid_log!(registry debug "GetValue Fanout: {:#}", fanout_result);
-
-                    let out = {
-                        let ctx = context.lock();
-                        OutboundGetValueResult {
-                            fanout_result,
-                            get_result: GetResult {
-                                opt_value: ctx.value.clone(),
-                                opt_descriptor: ctx.descriptor_mode.opt_arc_descriptor(),
-                            },
-                        }
-                    };
-
-                    if let Err(e) = out_tx.send(Ok(out)) {
-                        veilid_log!(registry debug "Sending GetValue result failed: {}", e);
-                    }
-
-                    // Ensure we move in the guard and drop it here explicitly
-                    drop(detached_spawn_guard);
-                }
-                .instrument(tracing::trace_span!("outbound_get_value result", __VEILID_LOG_KEY = self.log_key())),
-            ),
-        )
-        .detach();
-
-        Ok(out_rx)
-    }
-
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "dht", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    pub(super) fn process_deferred_outbound_get_value_result(
-        &self,
-        res_rx: flume::Receiver<Result<get_value::OutboundGetValueResult, VeilidAPIError>>,
-        record_key: RecordKey,
-        subkey: ValueSubkey,
-        last_seq: ValueSeqNum,
-    ) {
-        let registry = self.registry();
-        self.process_deferred_results(
-            res_rx,
-            Box::new(
-                move |result: VeilidAPIResult<get_value::OutboundGetValueResult>| -> PinBoxFutureStatic<DeferredStreamResult> {
-                    let registry=registry.clone();
-                    let record_key = record_key.clone();
-                    Box::pin(async move {
-                        let this = registry.storage_manager();
-                        let result = match result {
-                            Ok(v) => v,
-                            Err(e) => {
-                                veilid_log!(this debug "Deferred fanout error: {}", e);
-                                return DeferredStreamResult::Done;
-                            }
-                        };
-                        let is_incomplete = result.fanout_result.kind.is_incomplete();
-
-                        let subkey_lock = this
-                            .record_lock_table
-                            .lock_subkey(record_key.opaque(), subkey, StorageManagerSubkeyLockPurpose::Get)
-                            .await;
-
-                        let value_data = match this.process_outbound_get_value_result_locked(&subkey_lock, last_seq, result).await {
-                            Ok(Some(v)) => v,
-                            Ok(None) => {
-                                return if is_incomplete {
-                                    DeferredStreamResult::Continue
-                                } else {
-                                    DeferredStreamResult::Done
-                                };
-                            }
-                            Err(VeilidAPIError::KeyNotFound { key }) => {
-                                veilid_log!(registry debug "Record no longer exists during deferred outbound get value: {}", key);
-                                return DeferredStreamResult::Done;
-                            }
-                            Err(e) => {
-                                veilid_log!(this debug "Deferred fanout error: {}", e);
-                                return DeferredStreamResult::Done;
-                            }
-                        };
-                        if is_incomplete {
-                            // If more partial results show up, don't send an update until we're done
-                            return DeferredStreamResult::Continue;
-                        }
-                        // If we processed the final result, possibly send an update
-                        // if the sequence number changed since our first partial update
-                        // Send with a max count as this is not attached to any watch
-                        if last_seq != value_data.seq() {
-                            let value_data = match this.maybe_decrypt_value_data(&record_key, &value_data).await {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    veilid_log!(this debug "Deferred fanout error: {}", e);
-                                    return DeferredStreamResult::Done;
-                                }
-                            };
-
-                            this.update_callback_value_change(
-                                record_key.clone(),
-                                ValueSubkeyRangeSet::single(subkey),
-                                u32::MAX,
-                                Some(value_data),
-                            );
-                        }
-
-                        // Return done
-                        DeferredStreamResult::Done
-                    }.instrument(tracing::trace_span!("outbound_get_value deferred results")))
-                },
-            ),
+        let routing_table = self.routing_table();
+        let fanout_call = FanoutCall::new(
+            &routing_table,
+            FanoutCallParams {
+                name: format!("outbound_get_value({})", Timestamp::now_increasing()),
+                hash_coordinate,
+                node_count,
+                fanout_tasks,
+                consensus_count,
+                consensus_width,
+                timeout,
+            },
+            capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]),
+            call_routine,
+            check_done,
         );
+
+        let fanout_result = fanout_call
+            .run(
+                init_fanout_queue,
+                FanoutQueueMode::ThrottleAtConsensus,
+                shutdown_stop_source,
+            )
+            .await
+            .inspect_err(|e| {
+                veilid_log!(self debug "GetValue fanout error: {}", e);
+            })?;
+
+        veilid_log!(self debug "GetValue Fanout: {:#}", fanout_result);
+
+        let ctx = context.lock();
+        Ok(OutboundGetValueResult {
+            fanout_result,
+            get_result: GetResult {
+                opt_value: ctx.value.clone(),
+                opt_descriptor: ctx.descriptor_mode.opt_arc_descriptor(),
+            },
+        })
     }
 
     #[cfg_attr(

@@ -134,8 +134,8 @@ impl PublicInternetRoutingDomainController {
 
                         let mut nodes_found_mut = nodes_found_per_crypto_kind.lock();
                         let nodes_found_mut_entry = nodes_found_mut.entry(crypto_kind).or_insert((HashSet::new(), HashSet::new()));
-                        nodes_found_mut_entry.0.extend(close_node_refs.into_iter());
-                        nodes_found_mut_entry.1.extend(wide_node_refs.into_iter());
+                        nodes_found_mut_entry.0.extend(close_node_refs);
+                        nodes_found_mut_entry.1.extend(wide_node_refs);
                     }
                     .instrument(Span::current()),
                 );

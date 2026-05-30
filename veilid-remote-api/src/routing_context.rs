@@ -80,6 +80,7 @@ pub enum RoutingContextRequestOp {
         subkeys: Option<ValueSubkeyRangeSet>,
         expiration: Option<Timestamp>,
         count: Option<u32>,
+        transactional: Option<bool>,
     },
     CancelDhtWatch {
         #[schemars(with = "String")]

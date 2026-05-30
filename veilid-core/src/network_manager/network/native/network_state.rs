@@ -283,6 +283,11 @@ impl NativeNetwork {
         let address_config = self.make_address_config();
         let protocol_config = self.make_protocol_config(&address_config);
 
+        // Tell offline detection which socket classes this network uses
+        self.network_manager()
+            .online_detector()
+            .set_protocol_config(protocol_config.outbound, protocol_config.inbound);
+
         let mut new_network_state = NetworkState::new(
             self.registry(),
             protocol_config,

@@ -62,7 +62,7 @@ impl FromStr for SocketAddress {
     type Err = VeilidAPIError;
     fn from_str(s: &str) -> VeilidAPIResult<SocketAddress> {
         let sa = SocketAddr::from_str(s)
-            .map_err(|e| VeilidAPIError::parse_error("Failed to parse SocketAddress", e))?;
+            .map_err(|_| VeilidAPIError::parse_error("Failed to parse SocketAddress", s))?;
         Ok(SocketAddress::from_socket_addr(sa))
     }
 }

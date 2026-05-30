@@ -2,7 +2,7 @@ use super::*;
 
 pub type LowLevelProtocolPort = (LowLevelProtocolType, AddressType, u16);
 pub type LowLevelProtocolPorts = BTreeSet<LowLevelProtocolPort>;
-pub type ProtocolToPortMapping = BTreeMap<(ProtocolType, AddressType), (LowLevelProtocolType, u16)>;
+pub type ProtocolToPortMapping = BTreeMap<TransportType, (LowLevelProtocolType, u16)>;
 
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
 #[must_use]
@@ -18,18 +18,12 @@ impl fmt::Display for LowLevelPortInfo {
             "Ports: [{}]\nMapping: [{}]",
             self.low_level_protocol_ports
                 .iter()
-                .map(|(pt, at, p)| format!("{}:{}:{}", f.to_string(pt), f.to_string(at), p))
+                .map(|(pt, at, p)| format!("{}/{}/{}", f.to_string(pt), f.to_string(at), p))
                 .collect::<Vec<_>>()
                 .join(", "),
             self.protocol_to_port
                 .iter()
-                .map(|((pt, at), (lpt, p))| format!(
-                    "{}:{}->{}:{}",
-                    f.to_string(pt),
-                    f.to_string(at),
-                    f.to_string(lpt),
-                    p
-                ))
+                .map(|(tt, (lpt, p))| format!("{}->{}/{}", f.to_string(tt), f.to_string(lpt), p))
                 .collect::<Vec<_>>()
                 .join(", ")
         )

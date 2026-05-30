@@ -1,4 +1,4 @@
-pub mod sizes;
+mod sizes;
 
 use super::*;
 
@@ -144,14 +144,15 @@ impl CryptoSystem for CryptoSystemVLD0 {
         }
 
         // Hash password to PHC string ($argon2id$v=19$...)
-        let salt = SaltString::encode_b64(salt).map_err(VeilidAPIError::generic)?;
+        let salt = SaltString::encode_b64(salt)
+            .map_err(|e| VeilidAPIError::parse_error(e.to_string(), salt))?;
 
         // Argon2 with default params (Argon2id v19)
         let argon2 = Argon2::default();
 
         let password_hash = argon2
             .hash_password(password, &salt)
-            .map_err(VeilidAPIError::generic)?
+            .map_err(|e| VeilidAPIError::generic(e.to_string()))?
             .to_string();
         Ok(password_hash)
     }
@@ -160,7 +161,8 @@ impl CryptoSystem for CryptoSystemVLD0 {
         instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
     )]
     fn verify_password(&self, password: &[u8], password_hash: &str) -> VeilidAPIResult<bool> {
-        let parsed_hash = PasswordHash::new(password_hash).map_err(VeilidAPIError::generic)?;
+        let parsed_hash = PasswordHash::new(password_hash)
+            .map_err(|e| VeilidAPIError::parse_error(e.to_string(), password_hash))?;
         // Argon2 with default params (Argon2id v19)
         let argon2 = Argon2::default();
 
@@ -182,7 +184,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
         let mut output_key_material = [0u8; VLD0_SHARED_SECRET_LENGTH];
         argon2
             .hash_password_into(password, salt, &mut output_key_material)
-            .map_err(VeilidAPIError::generic)?;
+            .map_err(|e| VeilidAPIError::generic(e.to_string()))?;
         Ok(SharedSecret::new(
             CRYPTO_KIND_VLD0,
             BareSharedSecret::new(&output_key_material),
@@ -259,7 +261,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
     )]
     fn generate_hash_reader(&self, reader: &mut dyn std::io::Read) -> VeilidAPIResult<PublicKey> {
         let mut hasher = blake3::Hasher::new();
-        std::io::copy(reader, &mut hasher).map_err(VeilidAPIError::generic)?;
+        std::io::copy(reader, &mut hasher).map_err(|e| VeilidAPIError::generic(e.to_string()))?;
         Ok(PublicKey::new(
             CRYPTO_KIND_VLD0,
             BarePublicKey::new(hasher.finalize().as_bytes()),
@@ -338,7 +340,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
         self.check_hash_digest(hash_digest)?;
 
         let mut hasher = blake3::Hasher::new();
-        std::io::copy(reader, &mut hasher).map_err(VeilidAPIError::generic)?;
+        std::io::copy(reader, &mut hasher).map_err(|e| VeilidAPIError::generic(e.to_string()))?;
         let bytes = *hasher.finalize().as_bytes();
         Ok(bytes == *hash_digest.ref_value().bytes())
     }
@@ -361,8 +363,9 @@ impl CryptoSystem for CryptoSystemVLD0 {
 
         kpb.extend_from_slice(secret_key.ref_value().as_ref());
         kpb.extend_from_slice(public_key.ref_value().as_ref());
-        let keypair = ed::SigningKey::from_keypair_bytes(kpb.as_ref().try_into().unwrap_or_log())
-            .map_err(|e| VeilidAPIError::parse_error("Keypair is invalid", e))?;
+        let keypair =
+            ed::SigningKey::from_keypair_bytes(kpb.as_ref().try_into().unwrap_or_log())
+                .map_err(|e| VeilidAPIError::parse_error("Keypair is invalid", e.to_string()))?;
 
         let mut dig: ed::Sha512 = ed::Sha512::default();
         dig.update(data);
@@ -391,22 +394,24 @@ impl CryptoSystem for CryptoSystemVLD0 {
 
         kpb.extend_from_slice(secret_key.ref_value().as_ref());
         kpb.extend_from_slice(public_key.ref_value().as_ref());
-        let keypair = ed::SigningKey::from_keypair_bytes(kpb.as_ref().try_into().unwrap_or_log())
-            .map_err(|e| VeilidAPIError::parse_error("Keypair is invalid", e))?;
+        let keypair =
+            ed::SigningKey::from_keypair_bytes(kpb.as_ref().try_into().unwrap_or_log())
+                .map_err(|e| VeilidAPIError::parse_error("Keypair is invalid", e.to_string()))?;
 
         let mut dig: ed::Sha512 = ed::Sha512::default();
 
-        dig.update(
-            data.get(range)
-                .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
-        );
+        dig.update(data.get(range.clone()).ok_or_else(|| {
+            VeilidAPIError::invalid_argument("range is out of bounds", "range", range)
+        })?);
 
         let sig_bytes = keypair
             .sign_prehashed(dig, Some(VLD0_DOMAIN_SIGN))
             .map_err(VeilidAPIError::internal)?;
 
         data.get_mut(sig_idx..sig_idx + VLD0_SIGNATURE_LENGTH)
-            .ok_or_else(|| VeilidAPIError::internal("signature index is out of bounds"))?
+            .ok_or_else(|| {
+                VeilidAPIError::parse_error("signature index is out of bounds", sig_idx)
+            })?
             .copy_from_slice(&sig_bytes.to_bytes());
 
         Ok(())
@@ -432,7 +437,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
                 .try_into()
                 .map_err(VeilidAPIError::internal)?,
         )
-        .map_err(|e| VeilidAPIError::parse_error("Public key is invalid", e))?;
+        .map_err(|_| VeilidAPIError::parse_error("Public key is invalid", public_key.clone()))?;
         let sig = ed::Signature::from_bytes(
             signature
                 .ref_value()
@@ -469,7 +474,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
                 .try_into()
                 .map_err(VeilidAPIError::internal)?,
         )
-        .map_err(|e| VeilidAPIError::parse_error("Public key is invalid", e))?;
+        .map_err(|_| VeilidAPIError::parse_error("Public key is invalid", public_key.clone()))?;
 
         let mut dig: ed::Sha512 = ed::Sha512::default();
         dig.update(

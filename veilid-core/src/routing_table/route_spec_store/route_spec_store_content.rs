@@ -6,9 +6,9 @@ impl_veilid_log_facility!("rtab::route");
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RouteSpecStoreContentData {
     /// All of the route sets we have allocated so far indexed by key (many to one)
-    id_by_key: HashMap<PublicKey, RouteId>,
+    id_by_key: HashMap<PublicKey, AllocatedRouteSetId>,
     /// All of the route sets we have allocated so far
-    details: HashMap<RouteId, RouteSetSpecDetail>,
+    details: HashMap<AllocatedRouteSetId, RouteSetSpecDetail>,
 }
 
 /// The core representation of the RouteSpecStore that can be serialized
@@ -61,7 +61,7 @@ impl RouteSpecStoreContent {
     }
 
     /// Add a route set spec detail to the persistent content
-    pub fn add_detail(&mut self, id: RouteId, detail: RouteSetSpecDetail) {
+    pub fn add_detail(&mut self, id: AllocatedRouteSetId, detail: RouteSetSpecDetail) {
         assert!(!self.data.details.contains_key(&id));
 
         // also store in id by key table
@@ -70,22 +70,22 @@ impl RouteSpecStoreContent {
         }
         self.data.details.insert(id, detail);
     }
-    pub fn remove_detail(&mut self, id: &RouteId) -> Option<RouteSetSpecDetail> {
+    pub fn remove_detail(&mut self, id: &AllocatedRouteSetId) -> Option<RouteSetSpecDetail> {
         let detail = self.data.details.remove(id)?;
         for (pk, _) in detail.iter_route_set() {
             let _ = self.data.id_by_key.remove(pk).unwrap_or_log();
         }
         Some(detail)
     }
-    pub fn get_detail(&self, id: &RouteId) -> Option<&RouteSetSpecDetail> {
+    pub fn get_detail(&self, id: &AllocatedRouteSetId) -> Option<&RouteSetSpecDetail> {
         self.data.details.get(id)
     }
-    pub fn get_id_by_key(&self, key: &PublicKey) -> Option<RouteId> {
+    pub fn get_id_by_key(&self, key: &PublicKey) -> Option<AllocatedRouteSetId> {
         self.data.id_by_key.get(key).cloned()
     }
     pub fn iter_details(
         &self,
-    ) -> std::collections::hash_map::Iter<'_, RouteId, RouteSetSpecDetail> {
+    ) -> std::collections::hash_map::Iter<'_, AllocatedRouteSetId, RouteSetSpecDetail> {
         self.data.details.iter()
     }
 

@@ -5,7 +5,7 @@ SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 pushd "$SCRIPTDIR" &> /dev/null
 
 # Defaults
-WASM_PACK_FLAGS="--dev"
+BUILD_MODE=""
 CARGO_FEATURES=""
 TESTS=""
 DEBUG_MODE=""
@@ -13,12 +13,12 @@ DEBUG_MODE=""
 # Parse arguments
 for arg in "$@"; do
   case "$arg" in
-    
+
     release)
-      WASM_PACK_FLAGS="--release"
+      BUILD_MODE="release"
       ;;
     --release-build)
-      WASM_PACK_FLAGS="--release"
+      BUILD_MODE="release"
       ;;
     --tests=*)
       TESTS="${arg#--tests=}"
@@ -69,7 +69,7 @@ for arg in "$@"; do
 done
 
 # Build wasm into an npm package, output into ./pkg
-wasm-pack build $WASM_PACK_FLAGS --target bundler $CARGO_FEATURES $CARGO_OPTIONS
+./wasm_build_js.sh $BUILD_MODE $CARGO_FEATURES $CARGO_OPTIONS
 
 # Install test deps and run test suite
 cd tests
@@ -132,6 +132,11 @@ fi
 # Set DEBUG if requested
 if [[ -n "$DEBUG_MODE" ]]; then
   export DEBUG=1
+fi
+
+# macOS quarantines a freshly-installed/updated chromedriver, which blocks wdio from launching it
+if [[ "$(uname)" == "Darwin" ]] && command -v chromedriver >/dev/null; then
+  xattr -d com.apple.quarantine "$(command -v chromedriver)" 2>/dev/null || true
 fi
 
 WDIO_HEADLESS=true npx wdio run ./wdio.conf.ts "${WDIO_ARGS[@]}" $@

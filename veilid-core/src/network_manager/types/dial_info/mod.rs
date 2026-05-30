@@ -196,7 +196,7 @@ impl DialInfo {
             if socket_address.ip_addr() != a {
                 apibail_parse_error!(
                     format!("request address does not match socket address: {}", a),
-                    socket_address
+                    socket_address.to_string()
                 );
             }
         }
@@ -221,7 +221,7 @@ impl DialInfo {
             if socket_address.ip_addr() != a {
                 apibail_parse_error!(
                     format!("request address does not match socket address: {}", a),
-                    socket_address
+                    socket_address.to_string()
                 );
             }
         }
@@ -241,6 +241,10 @@ impl DialInfo {
     }
     pub fn address_type(&self) -> AddressType {
         self.socket_address().address_type()
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    pub fn transport_type(&self) -> TransportType {
+        TransportType::new(self.protocol_type(), self.address_type())
     }
     pub fn address(&self) -> Address {
         match self {
@@ -333,10 +337,7 @@ impl DialInfo {
     }
 
     pub fn make_filter(&self) -> DialInfoFilter {
-        DialInfoFilter {
-            protocol_type_set: ProtocolTypeSet::only(self.protocol_type()),
-            address_type_set: AddressTypeSet::only(self.address_type()),
-        }
+        DialInfoFilter::from(TransportType::from(self))
     }
 
     pub fn ordered_sequencing_sort(a: &DialInfo, b: &DialInfo) -> core::cmp::Ordering {
@@ -357,12 +358,6 @@ impl DialInfo {
 
 impl MatchesDialInfoFilter for DialInfo {
     fn matches_filter(&self, filter: &DialInfoFilter) -> bool {
-        if !filter.protocol_type_set.contains(self.protocol_type()) {
-            return false;
-        }
-        if !filter.address_type_set.contains(self.address_type()) {
-            return false;
-        }
-        true
+        filter.contains_transport(self.into())
     }
 }

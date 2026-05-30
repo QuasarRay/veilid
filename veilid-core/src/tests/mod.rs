@@ -21,6 +21,9 @@ pub async fn run_all_tests() {
     info!("TEST: veilid_core");
     test_attachment_manager::test_all().await;
 
+    info!("TEST: attachment_manager");
+    attachment_manager::tests_attachment_manager::test_all().await;
+
     info!("TEST: crypto");
     crypto::tests_crypto::test_all().await;
 

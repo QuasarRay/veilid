@@ -6,7 +6,6 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 @immutable
 class ValueSubkeyRange extends Equatable {
   final int low;
-
   final int high;
 
   const ValueSubkeyRange({required this.low, required this.high})

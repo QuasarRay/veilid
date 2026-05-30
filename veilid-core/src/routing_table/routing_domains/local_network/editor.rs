@@ -102,149 +102,126 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorLocalNetwork<'a> {
         }
         let routing_table = self.routing_table();
 
-        // Apply changes
-        let mut dial_info_changed = false;
-        let mut relays_changed = false;
-        let mut confirmation_changed = false;
-        let mut other_peer_info_changed = false;
-        let peer_info_changed: bool;
-        {
+        // Snapshot under the write lock; log/diff after release.
+        let (old_snapshot, new_snapshot, changed) = {
             let mut rdd = self.controller.write();
-            {
-                let old_dial_info_details = rdd.dial_info_details().clone();
-                let old_relays = rdd.relays();
-                let old_outbound_protocols = rdd.outbound_protocols();
-                let old_inbound_protocols = rdd.inbound_protocols();
-                let old_address_types = rdd.address_types();
-                let old_capabilities = rdd.capabilities();
-                let old_confirmed = rdd.confirmed();
 
-                for change in self.changes.drain(..) {
-                    match change {
-                        RoutingDomainChangeLocalNetwork::Common(common_change) => {
-                            rdd.apply_change(common_change);
-                        }
-                        RoutingDomainChangeLocalNetwork::SetInterfaceAddresses {
-                            interface_addresses,
-                        } => {
-                            rdd.set_interface_addresses(interface_addresses);
-                        }
+            let old_snapshot = CommitSnapshot {
+                dial_info_details: rdd.dial_info_details().clone(),
+                relays: rdd.relays(),
+                outbound_protocols: rdd.outbound_protocols(),
+                inbound_protocols: rdd.inbound_protocols(),
+                address_types: rdd.address_types(),
+                capabilities: rdd.capabilities(),
+                confirmed: rdd.confirmed(),
+            };
+
+            for change in self.changes.drain(..) {
+                match change {
+                    RoutingDomainChangeLocalNetwork::Common(common_change) => {
+                        rdd.apply_change(common_change);
+                    }
+                    RoutingDomainChangeLocalNetwork::SetInterfaceAddresses {
+                        interface_addresses,
+                    } => {
+                        rdd.set_interface_addresses(interface_addresses);
                     }
                 }
-
-                let new_dial_info_details = rdd.dial_info_details().clone();
-                let new_relays = rdd.relays();
-                let new_outbound_protocols = rdd.outbound_protocols();
-                let new_inbound_protocols = rdd.inbound_protocols();
-                let new_address_types = rdd.address_types();
-                let new_capabilities = rdd.capabilities();
-                let new_confirmed = rdd.confirmed();
-
-                // Compare and see if peerinfo needs republication
-                let removed_dial_info = old_dial_info_details
-                    .iter()
-                    .filter(|di| !new_dial_info_details.contains(di))
-                    .collect::<Vec<_>>();
-                if !removed_dial_info.is_empty() {
-                    veilid_log!(self info
-                        "[LocalNetwork] removed dial info:\n{}",
-                        indent_all_string(removed_dial_info.to_multiline_string())
-                            .strip_trailing_newline()
-                    );
-                    dial_info_changed = true;
-                }
-                let added_dial_info = new_dial_info_details
-                    .iter()
-                    .filter(|di| !old_dial_info_details.contains(di))
-                    .collect::<Vec<_>>();
-                if !added_dial_info.is_empty() {
-                    veilid_log!(self info
-                        "[LocalNetwork] added dial info:\n{}",
-                        indent_all_string(added_dial_info.to_multiline_string())
-                            .strip_trailing_newline()
-                    );
-                    dial_info_changed = true;
-                }
-
-                if old_relays.len() != new_relays.len()
-                    || old_relays
-                        .iter()
-                        .zip(new_relays.iter())
-                        .any(|x| !x.0.relay_node.same_entry(&x.1.relay_node))
-                {
-                    veilid_log!(self info "[LocalNetwork] relays changed: [{}] -> [{}]",
-                            old_relays.iter().map(|x| x.relay_node.to_string()).collect::<Vec<_>>().join(","),
-                            new_relays.iter().map(|x| x.relay_node.to_string()).collect::<Vec<_>>().join(","));
-                    relays_changed = true;
-                }
-
-                if old_outbound_protocols != new_outbound_protocols {
-                    veilid_log!(self info
-                        "[LocalNetwork] changed network: outbound {:?}->{:?}",
-                        old_outbound_protocols, new_outbound_protocols
-                    );
-                    other_peer_info_changed = true;
-                }
-                if old_inbound_protocols != new_inbound_protocols {
-                    veilid_log!(self info
-                        "[LocalNetwork] changed network: inbound {:?}->{:?}",
-                        old_inbound_protocols, new_inbound_protocols
-                    );
-                    other_peer_info_changed = true;
-                }
-                if old_address_types != new_address_types {
-                    veilid_log!(self info
-                        "[LocalNetwork] changed network: address types {:?}->{:?}",
-                        old_address_types, new_address_types
-                    );
-                    other_peer_info_changed = true;
-                }
-                if old_capabilities != new_capabilities {
-                    veilid_log!(self info
-                        "[LocalNetwork] changed network: capabilities {:?}->{:?}",
-                        old_capabilities, new_capabilities
-                    );
-                    other_peer_info_changed = true;
-                }
-                if old_confirmed != new_confirmed {
-                    veilid_log!(self info
-                        "[LocalNetwork] changed confirmation: {:?}->{:?}",
-                        old_confirmed, new_confirmed
-                    );
-                    confirmation_changed = true;
-                }
             }
 
-            peer_info_changed = dial_info_changed
-                || relays_changed
-                || confirmation_changed
-                || other_peer_info_changed;
+            let new_snapshot = CommitSnapshot {
+                dial_info_details: rdd.dial_info_details().clone(),
+                relays: rdd.relays(),
+                outbound_protocols: rdd.outbound_protocols(),
+                inbound_protocols: rdd.inbound_protocols(),
+                address_types: rdd.address_types(),
+                capabilities: rdd.capabilities(),
+                confirmed: rdd.confirmed(),
+            };
 
-            // Invalidate the caches so we re-generate cached peerinfo and relay status
-            if peer_info_changed {
+            let changed = old_snapshot.diff(&new_snapshot);
+
+            if changed.peer_info_changed {
                 rdd.invalidate();
             }
+
+            (old_snapshot, new_snapshot, changed)
+        };
+
+        // Lock released. Format and emit log lines.
+        let removed_dial_info = old_snapshot
+            .dial_info_details
+            .iter()
+            .filter(|di| !new_snapshot.dial_info_details.contains(di))
+            .collect::<Vec<_>>();
+        if !removed_dial_info.is_empty() {
+            veilid_log!(self info
+                "[LocalNetwork] removed dial info:\n{}",
+                indent_all_string(removed_dial_info.to_multiline_string())
+                    .strip_trailing_newline()
+            );
+        }
+        let added_dial_info = new_snapshot
+            .dial_info_details
+            .iter()
+            .filter(|di| !old_snapshot.dial_info_details.contains(di))
+            .collect::<Vec<_>>();
+        if !added_dial_info.is_empty() {
+            veilid_log!(self info
+                "[LocalNetwork] added dial info:\n{}",
+                indent_all_string(added_dial_info.to_multiline_string())
+                    .strip_trailing_newline()
+            );
+        }
+        if changed.relays_changed {
+            veilid_log!(self info "[LocalNetwork] relays changed: [{}] -> [{}]",
+                    old_snapshot.relays.iter().map(|x| x.relay_node.to_string()).collect::<Vec<_>>().join(","),
+                    new_snapshot.relays.iter().map(|x| x.relay_node.to_string()).collect::<Vec<_>>().join(","));
+        }
+        if changed.outbound_protocols_changed {
+            veilid_log!(self info
+                "[LocalNetwork] changed network: outbound {:?}->{:?}",
+                old_snapshot.outbound_protocols, new_snapshot.outbound_protocols
+            );
+        }
+        if changed.inbound_protocols_changed {
+            veilid_log!(self info
+                "[LocalNetwork] changed network: inbound {:?}->{:?}",
+                old_snapshot.inbound_protocols, new_snapshot.inbound_protocols
+            );
+        }
+        if changed.address_types_changed {
+            veilid_log!(self info
+                "[LocalNetwork] changed network: address types {:?}->{:?}",
+                old_snapshot.address_types, new_snapshot.address_types
+            );
+        }
+        if changed.capabilities_changed {
+            veilid_log!(self info
+                "[LocalNetwork] changed network: capabilities {:?}->{:?}",
+                old_snapshot.capabilities, new_snapshot.capabilities
+            );
+        }
+        if changed.confirmation_changed {
+            veilid_log!(self info
+                "[LocalNetwork] changed confirmation: {:?}->{:?}",
+                old_snapshot.confirmed, new_snapshot.confirmed
+            );
         }
 
-        if peer_info_changed {
+        if changed.peer_info_changed {
             // Allow signed node info updates at same timestamp for otherwise dead nodes if our network has changed
             routing_table
                 .inner
                 .write()
                 .reset_all_updated_since_last_network_change();
 
-            // Update protections
-            routing_table
-                .network_manager()
-                .connection_manager()
-                .update_protections();
-
             if let Err(e) = self.event_bus().post(RoutingDomainCommitEvent {
                 routing_domain: RoutingDomain::LocalNetwork,
-                peer_info_changed,
-                confirmation_changed,
-                dial_info_changed,
-                relays_changed,
+                peer_info_changed: changed.peer_info_changed,
+                confirmation_changed: changed.confirmation_changed,
+                dial_info_changed: changed.dial_info_changed,
+                relays_changed: changed.relays_changed,
             }) {
                 veilid_log!(self warn "failed to post RoutingDomainCommitEvent: {}", e);
             }

@@ -6,10 +6,16 @@ impl_veilid_log_facility!("rtab");
 const DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT: usize = 4;
 /// Number of automatic safety routes of each safe/unsafe default length required for operation
 const MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT: usize = 2;
+/// Interval between loopback keepalive ticks on allocated routes; suppressed when real traffic
+/// or a recent route test has already bumped `last_known_valid_ts` within the same window.
+const SR_LOOPBACK_KEEPALIVE_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
 
 impl PublicInternetRoutingDomainController {
     /// Fastest routes sort
-    fn route_sort_latency_fn(a: &(RouteId, u64), b: &(RouteId, u64)) -> cmp::Ordering {
+    fn route_sort_latency_fn(
+        a: &(AllocatedRouteSetId, u64),
+        b: &(AllocatedRouteSetId, u64),
+    ) -> cmp::Ordering {
         let mut al = a.1;
         let mut bl = b.1;
         // Treat zero latency as uncalculated
@@ -38,7 +44,7 @@ impl PublicInternetRoutingDomainController {
         let mut unsafe_route_count = 0;
 
         rss.list_allocated_routes(|_k, v| {
-            let is_known_valid = v.with_stats(|stats| stats.last_known_valid_ts.is_some());
+            let is_known_valid = v.with_stats(|stats| stats.last_known_valid_ts().is_some());
             if is_known_valid && v.is_automatic() {
                 if v.hop_count() == rss.get_default_route_hop_count_safe() {
                     safe_route_count += 1;
@@ -69,25 +75,35 @@ impl PublicInternetRoutingDomainController {
     ///
     /// If a route doesn't 'need_testing', then we neither test nor drop it
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), ret, fields(__VEILID_LOG_KEY = self.log_key())))]
-    fn get_allocated_routes_to_test(&self, cur_ts: Timestamp) -> Vec<RouteId> {
+    fn get_allocated_routes_to_test(&self, cur_ts: Timestamp) -> Vec<AllocatedRouteSetId> {
         let routing_table = self.routing_table();
         let rss = routing_table.route_spec_store();
         let default_route_hop_count_safe = rss.get_default_route_hop_count_safe();
         let default_route_hop_count_unsafe = rss.get_default_route_hop_count_unsafe();
 
-        let mut must_test_routes = Vec::<RouteId>::new();
-        let mut automatic_safe_routes = Vec::<(RouteId, u64)>::new();
-        let mut automatic_unsafe_routes = Vec::<(RouteId, u64)>::new();
-        let mut expired_routes = Vec::<RouteId>::new();
+        let mut must_test_routes = Vec::<AllocatedRouteSetId>::new();
+        let mut automatic_safe_routes = Vec::<(AllocatedRouteSetId, u64)>::new();
+        let mut automatic_unsafe_routes = Vec::<(AllocatedRouteSetId, u64)>::new();
+        let mut expired_routes = Vec::<AllocatedRouteSetId>::new();
         rss.list_allocated_routes(|k, v| {
+            // A route a test confirmed dead is marked for release; release it once its refcount
+            // drains to zero (in-flight RPCs finished). The background pool reallocates a
+            // replacement; selection already excludes it the whole time.
+            if v.is_marked_for_release() {
+                if !v.is_locked() {
+                    expired_routes.push(k.clone());
+                }
+                return Option::<()>::None;
+            }
+            let route_orderings = v.orderings();
             v.with_stats(|stats| {
                 // Ignore routes that don't need or want testing
-                if !stats.needs_testing(cur_ts) {
+                if !stats.needs_testing(route_orderings, cur_ts) {
                     return Option::<()>::None;
                 }
                 // If this has been published, always test if we need it
                 // Also if the route has never been tested, test it at least once
-                if v.is_published() || stats.last_known_valid_ts.is_none() {
+                if v.is_published() || stats.last_known_valid_ts().is_none() {
                     must_test_routes.push(k.clone());
                 }
                 // If this is of default safe route hop length, include it in routes to keep alive
@@ -98,8 +114,8 @@ impl PublicInternetRoutingDomainController {
                 else if v.is_automatic() && v.hop_count() == default_route_hop_count_unsafe {
                     automatic_unsafe_routes.push((k.clone(), stats.latency.average.as_u64()));
                 }
-                // Else this is a route that hasnt been used recently enough and we can tear it down
-                else {
+                // Else tear down only automatic (pool-managed) routes; manual routes are caller-owned
+                else if v.is_automatic() {
                     expired_routes.push(k.clone());
                 }
                 Option::<()>::None
@@ -139,11 +155,52 @@ impl PublicInternetRoutingDomainController {
         // Process dead routes
         for r in expired_routes {
             veilid_log!(self debug "Expired route: {}", r);
-            rss.release_route(r);
+            rss.release_route(r.into());
         }
 
         // return routes to test
         must_test_routes
+    }
+
+    /// Build the keepalive schedule for allocated routes: one request per route, with the
+    /// orderings whose last loopback keepalive is older than SR_LOOPBACK_KEEPALIVE_INTERVAL.
+    /// Per-ordering keying ensures a TCP-busy route doesn't starve UDP keepalives or vice versa.
+    fn get_allocated_routes_to_loopback_keepalive(
+        &self,
+        cur_ts: Timestamp,
+    ) -> Vec<RouteKeepaliveRequest> {
+        let routing_table = self.routing_table();
+        let rss = routing_table.route_spec_store();
+
+        let mut out = Vec::new();
+        rss.list_allocated_routes(|k, v| {
+            // Don't keepalive-test a route marked for release; it's slated for release and a
+            // test would re-hold it and defer that.
+            if v.is_marked_for_release() {
+                return Option::<()>::None;
+            }
+            let route_orderings = v.orderings();
+            let mut needed = SequenceOrderingSet::empty();
+            v.with_stats(|stats| {
+                for ordering in route_orderings {
+                    let stale = stats
+                        .last_loopback_keepalive_ts(ordering)
+                        .map(|ts| cur_ts.duration_since(ts) >= SR_LOOPBACK_KEEPALIVE_INTERVAL)
+                        .unwrap_or(true);
+                    if stale {
+                        needed.insert(ordering);
+                    }
+                }
+            });
+            if !needed.is_empty() {
+                out.push(RouteKeepaliveRequest {
+                    route_id: k.clone(),
+                    orderings: needed,
+                });
+            }
+            Option::<()>::None
+        });
+        out
     }
 
     /// Keep private routes assigned and accessible
@@ -165,7 +222,20 @@ impl PublicInternetRoutingDomainController {
         if !routes_needing_testing.is_empty() {
             veilid_log!(self debug "Enqueuing {} allocated route tests", routes_needing_testing.len());
             routing_table
-                .enqueue_route_tests(routes_needing_testing, 0)
+                .enqueue_route_tests(
+                    cur_ts,
+                    routes_needing_testing.into_iter().map(Into::into).collect(),
+                    0,
+                )
+                .await;
+        }
+
+        // Get locally allocated routes needing loopback keepalive and enqueue them
+        let routes_needing_keepalive = self.get_allocated_routes_to_loopback_keepalive(cur_ts);
+        if !routes_needing_keepalive.is_empty() {
+            veilid_log!(self debug "Enqueuing loopback keepalives for {} routes", routes_needing_keepalive.len());
+            routing_table
+                .enqueue_route_loopback_keepalives(cur_ts, routes_needing_keepalive, 0)
                 .await;
         }
 
@@ -260,14 +330,19 @@ impl PublicInternetRoutingDomainController {
             veilid_log!(self debug "Enqueuing {} newly allocated route tests ({} safe, {} unsafe)",
                 newly_allocated_routes.len(), newly_safe_routes.len(), newly_unsafe_routes.len());
             routing_table
-                .enqueue_route_tests(newly_allocated_routes, 0)
+                .enqueue_route_tests(
+                    cur_ts,
+                    newly_allocated_routes.into_iter().map(Into::into).collect(),
+                    0,
+                )
                 .await;
         }
 
         // Enqueue remote route tests at slightly lower priority
         let remote_routes_needing_testing = rss.list_remote_routes(|k, v| {
             v.with_stats(|stats| {
-                if stats.needs_testing(cur_ts) {
+                // Remote route orderings aren't tracked locally; test if any ordering is stale.
+                if stats.needs_testing(SequenceOrderingSet::all(), cur_ts) {
                     Some(k.clone())
                 } else {
                     None
@@ -277,7 +352,14 @@ impl PublicInternetRoutingDomainController {
         if !remote_routes_needing_testing.is_empty() {
             veilid_log!(self debug "Enqueuing {} remote route tests", remote_routes_needing_testing.len());
             routing_table
-                .enqueue_route_tests(remote_routes_needing_testing, 10)
+                .enqueue_route_tests(
+                    cur_ts,
+                    remote_routes_needing_testing
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
+                    10,
+                )
                 .await;
         }
 

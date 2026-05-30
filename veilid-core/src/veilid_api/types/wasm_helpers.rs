@@ -1,5 +1,59 @@
 use super::*;
 
+// JSON / JsValue helpers shared by all wasm-bindgen surfaces (veilid-wasm
+// TypeScript bindings and veilid-flutter dart bindings).
+
+pub fn to_json<T: Serialize + fmt::Debug>(val: T) -> JsValue {
+    JsValue::from_str(&serialize_json(val))
+}
+
+pub fn to_jsvalue<T>(val: T) -> JsValue
+where
+    JsValue: From<T>,
+{
+    JsValue::from(val)
+}
+
+pub fn from_json<T: serde::de::DeserializeOwned + fmt::Debug>(
+    val: JsValue,
+) -> Result<T, VeilidAPIError> {
+    let s = val.as_string().ok_or_else(|| VeilidAPIError::ParseError {
+        message: "Value is not String".to_owned(),
+        value: String::new(),
+    })?;
+    deserialize_json(&s)
+}
+
+pub fn unmarshall(b64: String) -> VeilidAPIResult<Vec<u8>> {
+    data_encoding::BASE64URL_NOPAD
+        .decode(b64.as_bytes())
+        .map_err(|e| {
+            VeilidAPIError::generic(format!(
+                "error decoding base64url string '{}' into bytes: {}",
+                b64, e
+            ))
+        })
+}
+
+#[must_use]
+pub fn marshall(data: &[u8]) -> String {
+    data_encoding::BASE64URL_NOPAD.encode(data)
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "Uint8Array[]")]
+    pub type Uint8ArrayArray;
+}
+
+#[must_use]
+pub fn into_unchecked_uint8array_array(items: Vec<js_sys::Uint8Array>) -> Uint8ArrayArray {
+    items
+        .iter()
+        .collect::<js_sys::Array>()
+        .unchecked_into::<Uint8ArrayArray>()
+}
+
 #[wasm_bindgen(typescript_custom_section)]
 const OPAQUE_NEW_TYPES: &'static str = r#"
 declare const OpaqueNewTypeSymbol: unique symbol
@@ -386,7 +440,7 @@ impl TryFrom<ts::DHTSchemaSMPL> for DHTSchemaSMPL {
         let o_cnt = value.o_cnt;
         let mut members = vec![];
         for member in value.members {
-            members.push(member.try_into().map_err(VeilidAPIError::generic)?);
+            members.push(member.try_into()?);
         }
         DHTSchemaSMPL::new(o_cnt, members)
     }

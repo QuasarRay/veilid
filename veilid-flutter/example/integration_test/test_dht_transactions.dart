@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
+import 'package:veilid_test/veilid_test.dart';
 
 final bogusKey =
     RecordKey.fromString('VLD0:qD10lHHPD1_Qr23_Qy-1JnxTht12eaWwENVG_m2v7II');
@@ -10,13 +11,14 @@ final bogusKey =
 class TestDHTTransactions {
   late final VeilidRoutingContext routingContext;
   final CryptoKind cryptoKind;
+  final UpdateProcessorFixture updateProcessorFixture;
   final dhtRecordCount = 2;
   final dhtSubkeySize = 16;
   final dhtSubkeyCount = 2;
   final data = <Uint8List>[];
   final dhtRecords = <RecordKey>[];
 
-  TestDHTTransactions(this.cryptoKind);
+  TestDHTTransactions(this.cryptoKind, this.updateProcessorFixture);
 
   Future<void> setUpAll() async {
     routingContext = await Veilid.instance.routingContext();
@@ -85,6 +87,76 @@ class TestDHTTransactions {
     }
 
     await tx.commit();
+  }
+
+  Future<void> testTxExtendAndCommit() async {
+    final extraDesc = await routingContext.createDHTRecord(
+      cryptoKind,
+      DHTSchema.dflt(oCnt: dhtSubkeyCount),
+    );
+    try {
+      final tx = await updateProcessorFixture.retry(
+        () => Veilid.instance.transactDHTRecords(dhtRecords),
+      );
+      expect(tx, isInstanceOf<VeilidDHTTransaction>());
+
+      for (var rec = 0; rec < dhtRecordCount; rec++) {
+        final res = await tx.set(dhtRecords[rec], 0, data[rec]);
+        expect(res, isNull);
+      }
+
+      await updateProcessorFixture.retry(
+        () => tx.extend([extraDesc.key]),
+      );
+
+      final extraData = Uint8List.fromList(
+        List.filled(dhtSubkeySize, dhtRecordCount),
+      );
+      final extraRes = await tx.set(extraDesc.key, 0, extraData);
+      expect(extraRes, isNull);
+
+      await tx.commit();
+
+      final readback = await routingContext.getDHTValue(extraDesc.key, 0);
+      expect(readback, isNotNull);
+      expect(readback!.data, equals(extraData));
+    } finally {
+      await routingContext.deleteDHTRecord(extraDesc.key);
+    }
+  }
+
+  Future<void> testTxExtendAndRollback() async {
+    final extraDesc = await routingContext.createDHTRecord(
+      cryptoKind,
+      DHTSchema.dflt(oCnt: dhtSubkeyCount),
+    );
+    try {
+      final tx = await updateProcessorFixture.retry(
+        () => Veilid.instance.transactDHTRecords(dhtRecords),
+      );
+      expect(tx, isInstanceOf<VeilidDHTTransaction>());
+
+      await tx.set(dhtRecords[0], 0, data[0]);
+      await updateProcessorFixture.retry(
+        () => tx.extend([extraDesc.key]),
+      );
+      final extraData = Uint8List.fromList(
+        List.filled(dhtSubkeySize, dhtRecordCount),
+      );
+      await tx.set(extraDesc.key, 0, extraData);
+
+      await tx.rollback();
+
+      // No commit happened — the extended record's subkey should be absent.
+      final readback = await routingContext.getDHTValue(
+        extraDesc.key,
+        0,
+        forceRefresh: true,
+      );
+      expect(readback, isNull);
+    } finally {
+      await routingContext.deleteDHTRecord(extraDesc.key);
+    }
   }
 
   Future<void> testTxAddSetsGetsAndCommit() async {

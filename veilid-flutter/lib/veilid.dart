@@ -19,6 +19,8 @@ import 'veilid_timestamp.dart';
 import 'veilid_types.dart';
 
 export 'default_config.dart';
+export 'processor_connection_state.dart';
+export 'processor_interface.dart';
 export 'routing_context.dart';
 export 'value_subkey_range.dart';
 export 'veilid.dart';
@@ -38,9 +40,7 @@ export 'veilid_types.dart';
 @immutable
 class VeilidVersion extends Equatable {
   final int major;
-
   final int minor;
-
   final int patch;
 
   const VeilidVersion(this.major, this.minor, this.patch);
@@ -132,6 +132,8 @@ abstract class Veilid {
 
   // Misc
   Timestamp now();
+  Timestamp nowNonDecreasing();
+  Timestamp nowIncreasing();
   String veilidVersionString();
   VeilidVersion veilidVersion();
   String defaultVeilidConfig();

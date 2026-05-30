@@ -61,9 +61,6 @@ async def test_routing_context_app_message_loopback():
         pytest.skip("Unable to connect to veilid-server.")
 
     async with api:
-        # purge routes to ensure we start fresh
-        await api.debug("purge routes")
-
         # make a routing context that uses a safety route
         rc = await api.new_routing_context()
         async with rc:
@@ -108,9 +105,6 @@ async def test_routing_context_app_call_loopback():
         pytest.skip("Unable to connect to veilid-server.")
 
     async with api:
-        # purge routes to ensure we start fresh
-        await api.debug("purge routes")
-
         # make a routing context
         rc = await api.new_routing_context()
         async with rc:
@@ -168,9 +162,6 @@ async def test_routing_context_app_message_loopback_big_packets():
         pytest.skip("Unable to connect to veilid-server.")
 
     async with api:
-        # purge routes to ensure we start fresh
-        await api.debug("purge routes")
-
         # make a routing context that uses a safety route
         rc = await api.new_routing_context()
         async with rc:
@@ -232,9 +223,6 @@ async def test_routing_context_app_call_loopback_big_packets():
         pytest.skip("Unable to connect to veilid-server.")
 
     async with api:
-        # purge routes to ensure we start fresh
-        await api.debug("purge routes")
-
         app_call_task = asyncio.create_task(app_call_queue_task_handler(api), name="app call task")
         try:
             # make a routing context that uses a safety route
@@ -284,9 +272,6 @@ async def test_routing_context_app_message_loopback_bandwidth():
         pytest.skip("Unable to connect to veilid-server.")
 
     async with api:
-        # purge routes to ensure we start fresh
-        await api.debug("purge routes")
-
         # make a routing context that uses a safety route
         rc = await api.new_routing_context()
         async with rc:

@@ -1,22 +1,35 @@
 use super::*;
 
+/// Per-mode lock guards held by a RecordLockGuard.
+#[derive(Debug)]
+pub(super) enum RecordLockGuards {
+    Lifetime {
+        _lifetime: AsyncRwLockWriteGuardArc<()>,
+    },
+    Watch {
+        _lifetime: AsyncRwLockReadGuardArc<()>,
+        _watch: AsyncMutexGuardArc<()>,
+    },
+    Transaction {
+        _lifetime: AsyncRwLockReadGuardArc<()>,
+        _transaction: AsyncRwLockWriteGuardArc<()>,
+    },
+}
+
 /// Record lock guard for a single record
 #[derive(Debug)]
 #[must_use]
-pub struct RecordLockGuard<R: LockPurpose, S: LockPurpose> {
+pub struct RecordLockGuard<R: RecordLockPurpose, S: RecordLockPurpose> {
     record_lock: Arc<RecordLock<R, S>>,
-    _whole_record_lock_guard: AsyncRwLockWriteGuardArc<()>,
+    _guards: RecordLockGuards,
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
     active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
 }
 
-impl<R: LockPurpose, S: LockPurpose> RecordLockGuard<R, S> {
-    pub(super) fn new(
-        record_lock: Arc<RecordLock<R, S>>,
-        whole_record_lock_guard: AsyncRwLockWriteGuardArc<()>,
-    ) -> Self {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockGuard<R, S> {
+    pub(super) fn new(record_lock: Arc<RecordLock<R, S>>, guards: RecordLockGuards) -> Self {
         #[cfg(feature = "debug-locks")]
         let (id, active_guards) = {
             let id = GUARD_ID.fetch_add(1, Ordering::AcqRel);
@@ -27,7 +40,7 @@ impl<R: LockPurpose, S: LockPurpose> RecordLockGuard<R, S> {
 
         Self {
             record_lock,
-            _whole_record_lock_guard: whole_record_lock_guard,
+            _guards: guards,
             #[cfg(feature = "debug-locks")]
             id,
             #[cfg(feature = "debug-locks")]
@@ -40,7 +53,7 @@ impl<R: LockPurpose, S: LockPurpose> RecordLockGuard<R, S> {
     }
 }
 
-impl<R: LockPurpose, S: LockPurpose> Drop for RecordLockGuard<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> Drop for RecordLockGuard<R, S> {
     fn drop(&mut self) {
         #[cfg(feature = "debug-locks")]
         self.active_guards.lock().remove(&self.id);
@@ -49,7 +62,7 @@ impl<R: LockPurpose, S: LockPurpose> Drop for RecordLockGuard<R, S> {
     }
 }
 
-impl<R: LockPurpose, S: LockPurpose> fmt::Display for RecordLockGuard<R, S> {
+impl<R: RecordLockPurpose, S: RecordLockPurpose> fmt::Display for RecordLockGuard<R, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Record({})", self.record())
     }

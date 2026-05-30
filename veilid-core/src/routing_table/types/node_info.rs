@@ -220,6 +220,61 @@ impl NodeInfo {
         true
     }
 
+    /// Set of LowLevelTransportTypes the node can be reached through (directly or
+    /// via any of its relays), filtered by our outbound dial-info filter. TCP and
+    /// WS dial infos at the same address+port collapse to one entry.
+    pub fn low_level_transport_set(
+        &self,
+        outbound_dif: &DialInfoFilter,
+    ) -> BTreeSet<LowLevelTransportType> {
+        let mut out = BTreeSet::new();
+        for did in self.dial_info_detail_list() {
+            if did.dial_info.matches_filter(outbound_dif) {
+                out.insert((&did.dial_info).into());
+            }
+        }
+        for ri in &self.relay_info_list {
+            for did in ri.dial_info_detail_list() {
+                if did.dial_info.matches_filter(outbound_dif) {
+                    out.insert((&did.dial_info).into());
+                }
+            }
+        }
+        out
+    }
+
+    /// Best high-level TransportType for a given low-level transport, considering
+    /// own and relay dial infos. Stream class prefers TCP > WS > WSS; Datagram
+    /// class is just UDP. None if no matching dial info passes outbound_dif.
+    pub fn preferred_transport_for(
+        &self,
+        low_level: LowLevelTransportType,
+        outbound_dif: &DialInfoFilter,
+    ) -> Option<TransportType> {
+        let mut candidates: Vec<TransportType> = Vec::new();
+        for did in self.dial_info_detail_list() {
+            if did.dial_info.matches_filter(outbound_dif) {
+                let llt: LowLevelTransportType = (&did.dial_info).into();
+                if llt == low_level {
+                    candidates.push((&did.dial_info).into());
+                }
+            }
+        }
+        for ri in &self.relay_info_list {
+            for did in ri.dial_info_detail_list() {
+                if did.dial_info.matches_filter(outbound_dif) {
+                    let llt: LowLevelTransportType = (&did.dial_info).into();
+                    if llt == low_level {
+                        candidates.push((&did.dial_info).into());
+                    }
+                }
+            }
+        }
+        candidates
+            .into_iter()
+            .min_by_key(|t| t.protocol_type().sort_order(Sequencing::EnsureOrdered))
+    }
+
     pub fn has_sequencing_matched_dial_info(&self, sequencing: Sequencing) -> bool {
         // Check our dial info
         for did in self.dial_info_detail_list() {

@@ -189,26 +189,34 @@ impl DiscoveryContext {
         // filtered down to the protocol/address type we are checking the public address for
         node_ref.clear_last_flows();
 
-        let res = network_result_value_or_log!(self match Box::pin(rpc.rpc_call_status(Destination::direct(node_ref.clone(), None))).await {
-                Ok(v) => v,
-                Err(e) => {
-                    veilid_log!(self error
-                        "failed to get status answer from {:?}: {}",
-                        node_ref, e
-                    );
-                    return None;
-                }
-            } => [ format!(": node_ref={}", node_ref) ] {
+        let answer = match Box::pin(
+            rpc.rpc_call_status(Destination::direct(node_ref.clone(), None)),
+        )
+        .await
+        {
+            Ok(StatusResult::Answer { answer, .. }) => answer,
+            Ok(other) => {
+                veilid_log!(self debug target: "network_result",
+                    "request_public_address {:?}: {:?}",
+                    node_ref, other
+                );
                 return None;
             }
-        );
+            Err(e) => {
+                veilid_log!(self error
+                    "failed to get status answer from {:?}: {}",
+                    node_ref, e
+                );
+                return None;
+            }
+        };
 
         veilid_log!(self debug target:"network_result",
             "request_public_address {:?}: Value({:?})",
             node_ref,
-            res.answer
+            answer
         );
-        res.answer.opt_sender_info.map(|si| si.socket_address)
+        answer.answer.opt_sender_info.map(|si| si.socket_address)
     }
 
     // find fast peers with a particular address type, and ask them to tell us what our external address is

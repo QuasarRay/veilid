@@ -7,6 +7,19 @@ pub(crate) struct BucketEntryRoutingDomainSnapshotInner {
     pub last_seen_our_node_info_ts: Timestamp,
 }
 
+/// Frozen per-transport view used by ping scheduling and selection.
+#[derive(Debug, Clone)]
+pub(crate) struct PerTransportSnapshot {
+    /// Reliability state of this transport.
+    pub state: BucketEntryTransportState,
+    /// Last time we asked this transport a question.
+    pub last_question_ts: Option<Timestamp>,
+    /// Timestamp of the first answer in the current consecutive-seen run.
+    pub first_consecutive_seen_ts: Option<Timestamp>,
+    /// Pending send failures since the last successful send on this transport.
+    pub failed_to_send: u32,
+}
+
 #[derive(Debug)]
 pub(crate) struct BucketEntrySnapshotInner {
     pub cur_ts: Timestamp,
@@ -15,6 +28,7 @@ pub(crate) struct BucketEntrySnapshotInner {
     pub state: BucketEntryState,
     pub node_ids: NodeIdGroup,
     pub routing_domain_snapshots: BTreeMap<RoutingDomain, BucketEntryRoutingDomainSnapshotInner>,
+    pub per_transport: BTreeMap<LowLevelTransportType, PerTransportSnapshot>,
 }
 
 /// A point-in-time snapshot of mutable BucketEntry fields used for sorting and filtering.
@@ -44,6 +58,7 @@ impl BucketEntrySnapshot {
         state: BucketEntryState,
         node_ids: NodeIdGroup,
         routing_domain_snapshots: BTreeMap<RoutingDomain, BucketEntryRoutingDomainSnapshotInner>,
+        per_transport: BTreeMap<LowLevelTransportType, PerTransportSnapshot>,
     ) -> Self {
         Self {
             inner: Arc::new(BucketEntrySnapshotInner {
@@ -53,6 +68,7 @@ impl BucketEntrySnapshot {
                 state,
                 node_ids,
                 routing_domain_snapshots,
+                per_transport,
             }),
         }
     }
@@ -67,6 +83,47 @@ impl BucketEntrySnapshot {
 
     pub fn is_reliable(&self) -> bool {
         self.state == BucketEntryState::Reliable
+    }
+
+    #[expect(dead_code)]
+    pub fn is_reliable_for(&self, transport: LowLevelTransportType) -> bool {
+        self.per_transport
+            .get(&transport)
+            .map(|t| t.state == BucketEntryTransportState::Reliable)
+            .unwrap_or(false)
+    }
+
+    pub fn transport_state(
+        &self,
+        transport: LowLevelTransportType,
+    ) -> Option<BucketEntryTransportState> {
+        self.per_transport.get(&transport).map(|t| t.state)
+    }
+
+    /// Set of low-level transports the node can be reached through (directly or
+    /// via any of its relays), filtered by our outbound dial-info filter.
+    pub fn supported_low_level_transports(
+        &self,
+        routing_domain: RoutingDomain,
+        outbound_dif: &DialInfoFilter,
+    ) -> BTreeSet<LowLevelTransportType> {
+        let Some(pi) = self.get_peer_info(routing_domain) else {
+            return BTreeSet::new();
+        };
+        pi.node_info().low_level_transport_set(outbound_dif)
+    }
+
+    /// Best high-level TransportType for a given low-level transport on this node,
+    /// considering own and relay dial infos. None if outbound_dif filters everything.
+    pub fn preferred_transport_for(
+        &self,
+        routing_domain: RoutingDomain,
+        low_level: LowLevelTransportType,
+        outbound_dif: &DialInfoFilter,
+    ) -> Option<TransportType> {
+        let pi = self.get_peer_info(routing_domain)?;
+        pi.node_info()
+            .preferred_transport_for(low_level, outbound_dif)
     }
 
     pub fn has_node_info(&self, routing_domain_set: RoutingDomainSet) -> bool {
@@ -180,92 +237,41 @@ impl BucketEntrySnapshot {
         our_node_info_ts == rds.last_seen_our_node_info_ts
     }
 
-    /// Return the last time we asked a node a question
-    pub fn last_outbound_contact_time(&self) -> Option<Timestamp> {
-        // This is outbound and inbound contact time which may be a reasonable optimization for nodes that have
-        // a very low rate of 'lost answers', but for now we are reverting this to ensure outbound connectivity before
-        // we claim a node is reliable
-        //
-        // self.peer_stats
-        //     .rpc_stats
-        //     .last_seen_ts
-        //     .max(self.peer_stats.rpc_stats.last_question_ts)
-
-        self.peer_stats.rpc_stats.last_question_ts
-    }
-
-    // /// Return the last time we asked a node a question
-    // pub fn last_question_time(&self) -> Option<Timestamp> {
-    //     self.peer_stats.rpc_stats.last_question_ts
-    // }
-
-    pub fn needs_constant_ping(&self, interval_duration: TimestampDuration) -> bool {
-        // If we have not either seen the node in the last 'interval' then we should ping it
-        let latest_contact_time = self.last_outbound_contact_time();
-
-        match latest_contact_time {
-            None => true,
-            Some(latest_contact_time) => {
-                // If we haven't done anything with this node in 'interval' seconds
-                self.cur_ts.duration_since(latest_contact_time) >= interval_duration
-            }
-        }
-    }
-
-    // Check if this node needs a ping right now to validate it is still reachable
-    pub fn needs_ping(&self) -> bool {
-        // See which ping pattern we are to use
-        match self.state {
-            BucketEntryState::Reliable => {
-                // If we are in a reliable state, we need a ping on an exponential scale
-                let latest_contact_time = self.last_outbound_contact_time();
-
-                match latest_contact_time {
-                    None => {
-                        // Peer may be appear reliable from a previous attach/detach
-                        // But reliability uses last_seen_ts not the last_outbound_contact_time
-                        // Regardless, if we haven't pinged it, we need to ping it.
-                        // But it it was reliable before, and pings successfully then it can
-                        // stay reliable, so we don't make it unreliable just because we haven't
-                        // contacted it yet during this attachment.
-                        true
-                    }
-                    Some(latest_contact_time) => {
-                        let first_consecutive_seen_ts = self
-                            .peer_stats
-                            .rpc_stats
-                            .first_consecutive_seen_ts
-                            .unwrap_or_log();
-                        let start_of_reliable_time =
-                            first_consecutive_seen_ts.later(TimestampDuration::new_secs(
-                                UNRELIABLE_PING_SPAN_SECS - UNRELIABLE_PING_INTERVAL_SECS,
-                            ));
-                        let reliable_cur = self.cur_ts.duration_since(start_of_reliable_time);
-                        let reliable_last =
-                            latest_contact_time.duration_since(start_of_reliable_time);
-
-                        retry_falloff_log(
-                            reliable_last.as_u64(),
-                            reliable_cur.as_u64(),
-                            RELIABLE_PING_INTERVAL_START_SECS as u64 * 1_000_000u64,
-                            RELIABLE_PING_INTERVAL_MAX_SECS as u64 * 1_000_000u64,
-                            RELIABLE_PING_INTERVAL_MULTIPLIER,
-                        )
-                    }
+    /// Per-transport ping decision. Returns false if the transport has no stats yet
+    /// (no DialInfo for it, or never used) - callers should check `supported_transports`
+    /// against the peer info for cold-start pings.
+    pub fn needs_ping_for(&self, transport: LowLevelTransportType) -> bool {
+        let Some(t) = self.per_transport.get(&transport) else {
+            return false;
+        };
+        match t.state {
+            BucketEntryTransportState::Reliable => match t.last_question_ts {
+                None => true,
+                Some(latest_contact_time) => {
+                    let first_consecutive_seen_ts = t.first_consecutive_seen_ts.unwrap_or_log();
+                    let start_of_reliable_time =
+                        first_consecutive_seen_ts.later(TimestampDuration::new_secs(
+                            UNRELIABLE_PING_SPAN_SECS - UNRELIABLE_PING_INTERVAL_SECS,
+                        ));
+                    let reliable_cur = self.cur_ts.duration_since(start_of_reliable_time);
+                    let reliable_last = latest_contact_time.duration_since(start_of_reliable_time);
+                    retry_falloff_log(
+                        reliable_last.as_u64(),
+                        reliable_cur.as_u64(),
+                        RELIABLE_PING_INTERVAL_START_SECS as u64 * 1_000_000u64,
+                        RELIABLE_PING_INTERVAL_MAX_SECS as u64 * 1_000_000u64,
+                        RELIABLE_PING_INTERVAL_MULTIPLIER,
+                    )
                 }
-            }
-            BucketEntryState::Unreliable => {
-                // If we are in an unreliable state, we need a ping every UNRELIABLE_PING_INTERVAL_SECS seconds
-                self.needs_constant_ping(TimestampDuration::new_secs(UNRELIABLE_PING_INTERVAL_SECS))
-            }
-            BucketEntryState::Dead => {
-                error!("Should not be asking this for dead nodes");
-                false
-            }
-            BucketEntryState::Punished => {
-                error!("Should not be asking this for punished nodes");
-                false
-            }
+            },
+            BucketEntryTransportState::Unreliable => match t.last_question_ts {
+                None => true,
+                Some(latest_contact_time) => {
+                    self.cur_ts.duration_since(latest_contact_time)
+                        >= TimestampDuration::new_secs(UNRELIABLE_PING_INTERVAL_SECS)
+                }
+            },
+            BucketEntryTransportState::Dead => false,
         }
     }
 }

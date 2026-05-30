@@ -29,6 +29,15 @@ pub trait RoutingDomainController:
     /// Cancel tasks for this domain
     fn cancel_tasks(&self) -> PinBoxFuture<'_, ()>;
 
+    /// Load persisted state from the routing table TableDB
+    fn load<'a>(&'a self, _db: &'a TableDB) -> PinBoxFuture<'a, EyreResult<()>> {
+        Box::pin(async move { Ok(()) })
+    }
+    /// Save persisted state into the supplied routing table transaction
+    fn save<'a>(&'a self, _dbx: &'a TableDBTransaction) -> PinBoxFuture<'a, EyreResult<()>> {
+        Box::pin(async move { Ok(()) })
+    }
+
     // Routing Domain Controller Operations
     ///////////////////////////////////////////////////////////////////////////////////////
 

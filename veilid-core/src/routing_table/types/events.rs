@@ -25,3 +25,20 @@ pub struct RoutingDomainReadyEvent {
     #[expect(dead_code)]
     pub is_ready_outbound: bool,
 }
+
+/// Posted when allocated routes are added to or removed from the route spec
+/// store. Subscribers (e.g. ConnectionManager) use this to refresh their view
+/// of route-related state — e.g. SR first-hop connection protections.
+#[derive(Clone, Debug)]
+pub struct RouteAllocationEvent {
+    #[expect(
+        dead_code,
+        reason = "informational, may be consumed by future subscribers"
+    )]
+    pub allocated: Vec<RouteId>,
+    #[expect(
+        dead_code,
+        reason = "informational, may be consumed by future subscribers"
+    )]
+    pub released: Vec<RouteId>,
+}

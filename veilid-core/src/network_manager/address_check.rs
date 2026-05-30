@@ -32,7 +32,7 @@ pub struct AddressCheckConfig {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
-struct AddressCheckCacheKey(RoutingDomain, ProtocolType, AddressType);
+struct AddressCheckCacheKey(RoutingDomain, TransportType);
 
 /// Address checker - keep track of how other nodes are seeing our node's address on a per-protocol basis
 /// Used to determine if our address has changed and if we should re-publish new PeerInfo
@@ -120,7 +120,10 @@ impl AddressCheck {
     ) {
         for protocol_type in ProtocolTypeSet::all() {
             for address_type in AddressTypeSet::all() {
-                let acck = AddressCheckCacheKey(routing_domain, protocol_type, address_type);
+                let acck = AddressCheckCacheKey(
+                    routing_domain,
+                    TransportType::new(protocol_type, address_type),
+                );
 
                 // Clear our current addresses so we can rebuild them for this routing domain
                 self.current_addresses.remove(&acck);
@@ -143,18 +146,15 @@ impl AddressCheck {
                 // If the this is a dynamically translated dial info, and the protocol is not something a
                 // router is going to change the source port for, then we should check the port.
                 // Effectively, this ends up checking the port just for UDP protocols when the port would matter for hole punching.
-                let acck = AddressCheckCacheKey(
-                    routing_domain,
-                    did.dial_info.protocol_type(),
-                    did.dial_info.address_type(),
-                );
+                let acck = AddressCheckCacheKey(routing_domain, (&did.dial_info).into());
                 let mut socket_address = did.dial_info.socket_address();
                 if did.class.is_dynamically_translated()
-                    && !did
+                    && did
                         .dial_info
                         .protocol_type()
                         .low_level_protocol_type()
-                        .is_connection_oriented()
+                        .socket_type()
+                        == SocketType::Datagram
                 {
                     self.port_checked_protocols.insert(acck);
                 } else {
@@ -229,7 +229,7 @@ impl AddressCheck {
         // because a router is going to map these differently
         let Some(pla) = self
             .net
-            .get_preferred_local_address_by_key(flow.protocol_type(), flow.address_type())
+            .get_preferred_local_address_by_key(flow.transport_type())
         else {
             return;
         };
@@ -311,8 +311,7 @@ impl AddressCheck {
         // Get registry for logging because we have &mut self
         let registry = self.registry();
 
-        let acckey =
-            AddressCheckCacheKey(routing_domain, flow.protocol_type(), flow.address_type());
+        let acckey = AddressCheckCacheKey(routing_domain, flow.transport_type());
 
         // Check the current socket address and see if it matches our current dial info
         let new_matches_current = self.matches_current_address(acckey, socket_address);
@@ -397,8 +396,7 @@ impl AddressCheck {
         let registry = self.registry();
 
         // Add the currently seen socket address into the consistency table
-        let acckey =
-            AddressCheckCacheKey(routing_domain, flow.protocol_type(), flow.address_type());
+        let acckey = AddressCheckCacheKey(routing_domain, flow.transport_type());
         let cache = self
             .address_consistency_table
             .entry(acckey)

@@ -111,7 +111,7 @@ impl StorageManager {
 
         // See if the requested record is our local record store
         let local_inspect_result = self
-            .handle_inspect_local_values_with_peek_lock(&peek_lock, subkeys.clone(), true)
+            .handle_inspect_local_values(peek_lock.record(), subkeys.clone(), true)
             .await?;
 
         // Get rpc processor and drop mutex so we don't block while getting the value from the network
@@ -140,12 +140,7 @@ impl StorageManager {
             .subkeys()
             .iter()
             .map(ValueSubkeyRangeSet::single)
-            .zip(
-                outbound_inspect_result
-                    .subkey_fanout_results
-                    .clone()
-                    .into_iter(),
-            );
+            .zip(outbound_inspect_result.subkey_fanout_results.clone());
 
         let existed = self.process_fanout_results(
             opaque_record_key.clone(),

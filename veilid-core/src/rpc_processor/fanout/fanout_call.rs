@@ -4,10 +4,16 @@ impl_veilid_log_facility!("fanout");
 
 #[derive(Debug)]
 struct FanoutContext<'a> {
+    /// Queue of nodes to process
     fanout_queue: FanoutQueue<'a>,
+    /// Current accumulated result
     result: FanoutResult,
+    /// Termination disposition from `check_done`
     done: FanoutDoneDisposition,
+    /// Ticker stop source — drives lane wake-ups, dropped on completion
     ticker_stop_source: Option<StopSource>,
+    /// Timestamp consensus was first reached
+    consensus_reached_ts: Option<Timestamp>,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -94,7 +100,10 @@ pub enum FanoutQueueMode {
     Unthrottled,
 }
 
-/// How long to wait before proceeding beyong a node that is being too slow after consensus is met
+/// How long to wait, as a fraction of the RPC timeout, before treating an in-progress node as slow
+/// and dispatching another node beyond `consensus_count` to compensate. Pegged to the RPC timeout
+/// rather than the per-fanout timeout so that all fanouts (set, get, transact_begin, watch, ...)
+/// share the same throttle window regardless of their overall budget.
 const THROTTLE_DURATION_PERCENT: u64 = 33;
 
 /// The return type of the fanout call routine
@@ -140,11 +149,30 @@ enum FanoutProcessorReturn {
     Tick,
 }
 
+/// Exit reason from the inner fanout loop
+enum FanoutLoopResult {
+    /// Exhausted or consensus reached; return the current result
+    Done,
+    /// A lane returned an error; propagate it
+    LaneFailed(RPCError),
+    /// Caller-supplied stop token fired
+    Cancelled,
+    /// Effective deadline reached; mark unfinished lanes as timed out and re-evaluate
+    DeadlineReached,
+}
+
+/// Result of a single per-node fanout call
 pub type FanoutCallResult = Result<FanoutCallOutput, RPCError>;
+/// Filter that decides whether a peer-info entry is eligible for fanout
 pub type FanoutPeerInfoFilter = Arc<dyn (Fn(Arc<PeerInfo>) -> bool) + Send + Sync>;
+/// Termination check called after each lane response
 pub type FanoutCheckDone = Arc<dyn (Fn(&FanoutResult) -> FanoutDoneDisposition) + Send + Sync>;
+/// Per-node call routine invoked once per fanout target
 pub type FanoutCallRoutine =
     Arc<dyn (Fn(NodeRef) -> PinBoxFutureStatic<FanoutCallResult>) + Send + Sync>;
+/// Post-consensus timeout, computed from the result when consensus is first reached
+pub type FanoutPostConsensusTimeoutCallback =
+    Arc<dyn (Fn(&FanoutResult) -> TimestampDuration) + Send + Sync>;
 
 pub fn empty_fanout_peer_info_filter() -> FanoutPeerInfoFilter {
     Arc::new(|_| true)
@@ -185,6 +213,7 @@ pub(crate) struct FanoutCall<'a> {
     peer_info_filter: FanoutPeerInfoFilter,
     call_routine: FanoutCallRoutine,
     check_done: FanoutCheckDone,
+    post_consensus_timeout_callback: Option<FanoutPostConsensusTimeoutCallback>,
 }
 
 impl VeilidComponentRegistryAccessor for FanoutCall<'_> {
@@ -231,7 +260,18 @@ impl<'a> FanoutCall<'a> {
             peer_info_filter,
             call_routine,
             check_done,
+            post_consensus_timeout_callback: None,
         }
+    }
+
+    /// Once consensus is first reached, the callback computes a tighter deadline
+    /// from the (consensus-state) result; the fanout exits when that elapses.
+    pub fn with_post_consensus_timeout_callback(
+        mut self,
+        callback: FanoutPostConsensusTimeoutCallback,
+    ) -> Self {
+        self.post_consensus_timeout_callback = Some(callback);
+        self
     }
 
     #[cfg_attr(
@@ -239,65 +279,57 @@ impl<'a> FanoutCall<'a> {
         instrument(level = "trace", target = "fanout", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     fn evaluate_done(&self, ctx: &mut FanoutContext) -> FanoutDoneDisposition {
-        // If we already finished, just return
-        if !matches!(ctx.done, FanoutDoneDisposition::NotDone) {
+        // DoneEarly is terminal — once set, no further re-evaluation. Done can
+        // still escalate to DoneEarly as more accepts arrive (e.g. when a
+        // safety-margin threshold is reached).
+        if matches!(ctx.done, FanoutDoneDisposition::DoneEarly) {
             return ctx.done;
         }
 
-        // Calculate fanout result so far
+        // Calculate fanout result so far. Consensus = `consensus_count` accepts
+        // anywhere within the `consensus_width` closest nodes, regardless of
+        // closeness ordering inside the window — a single slow closer node
+        // doesn't block faster peers within the window from reaching consensus.
+        // The post-consensus deadline still applies to in-progress stragglers.
         let fanout_result = ctx.fanout_queue.with_nodes(|nodes, sorted_nodes| {
-            // Count up nodes we have seen in order and see if our closest nodes have a consensus
-            let mut consensus: Option<bool> = None;
             let mut consensus_nodes: Vec<NodeRef> = vec![];
             let mut value_nodes: Vec<NodeRef> = vec![];
-            for sn in sorted_nodes {
+            let mut pending_in_window = false;
+            for (idx, sn) in sorted_nodes.iter().enumerate() {
                 let node = nodes.get(sn).unwrap_or_log();
+                let in_window = idx < self.consensus_width;
                 match node.status.stage() {
                     FanoutNodeStage::Queued | FanoutNodeStage::InProgress => {
-                        // Still have a closer node to do before reaching consensus,
-                        // or are doing it still, then wait until those are done
-                        if consensus.is_none() {
-                            consensus = Some(false);
+                        if in_window {
+                            pending_in_window = true;
                         }
                     }
                     FanoutNodeStage::Timeout
                     | FanoutNodeStage::Rejected
-                    | FanoutNodeStage::Disqualified => {
-                        // Node does not count toward consensus or value node list
-                    }
+                    | FanoutNodeStage::Disqualified => {}
                     FanoutNodeStage::Stale => {
-                        // Node does not count toward consensus but does count toward value node list
                         value_nodes.push(node.work_item.node_ref.clone());
                     }
                     FanoutNodeStage::Accepted => {
-                        // Node counts toward consensus and value node list
                         value_nodes.push(node.work_item.node_ref.clone());
-
-                        consensus_nodes.push(node.work_item.node_ref.clone());
-                        if consensus.is_none() && consensus_nodes.len() >= self.consensus_count {
-                            consensus = Some(true);
+                        if in_window {
+                            consensus_nodes.push(node.work_item.node_ref.clone());
                         }
                     }
                 }
             }
 
-            // If we have reached sufficient consensus, return done
-            match consensus {
-                Some(true) => FanoutResult {
-                    kind: FanoutResultKind::Consensus,
-                    consensus_nodes,
-                    value_nodes,
-                },
-                Some(false) => FanoutResult {
-                    kind: FanoutResultKind::Incomplete,
-                    consensus_nodes,
-                    value_nodes,
-                },
-                None => FanoutResult {
-                    kind: FanoutResultKind::Exhausted,
-                    consensus_nodes,
-                    value_nodes,
-                },
+            let kind = if consensus_nodes.len() >= self.consensus_count {
+                FanoutResultKind::Consensus
+            } else if pending_in_window {
+                FanoutResultKind::Incomplete
+            } else {
+                FanoutResultKind::Exhausted
+            };
+            FanoutResult {
+                kind,
+                consensus_nodes,
+                value_nodes,
             }
         });
 
@@ -305,6 +337,9 @@ impl<'a> FanoutCall<'a> {
         ctx.result = fanout_result;
         ctx.done = done;
         if !matches!(done, FanoutDoneDisposition::NotDone) {
+            if ctx.consensus_reached_ts.is_none() {
+                ctx.consensus_reached_ts = Some(Timestamp::now_non_decreasing());
+            }
             drop(ctx.ticker_stop_source.take())
         }
         done
@@ -516,11 +551,14 @@ impl<'a> FanoutCall<'a> {
                 self.consensus_count,
                 self.consensus_width,
                 match fanout_queue_mode {
-                    FanoutQueueMode::ThrottleAtConsensus => Some(
-                        self.timeout
-                            .saturating_mul(THROTTLE_DURATION_PERCENT)
-                            .div(100),
-                    ),
+                    FanoutQueueMode::ThrottleAtConsensus => {
+                        let rpc_timeout_ms = self.config().network.rpc.timeout_ms;
+                        Some(
+                            TimestampDuration::new_ms(rpc_timeout_ms.into())
+                                .saturating_mul(THROTTLE_DURATION_PERCENT)
+                                .div(100),
+                        )
+                    }
                     FanoutQueueMode::Unthrottled => None,
                 },
             ),
@@ -531,10 +569,8 @@ impl<'a> FanoutCall<'a> {
             },
             done: FanoutDoneDisposition::NotDone,
             ticker_stop_source: Some(StopSource::new()),
+            consensus_reached_ts: None,
         }));
-
-        // Get timeout in milliseconds
-        let timeout_ms = self.timeout.millis_u32().map_err(RPCError::internal)?;
 
         // Initialize closest nodes list
         {
@@ -587,82 +623,82 @@ impl<'a> FanoutCall<'a> {
             unord.push(make_tick_future());
         }
 
-        // Wait for them to complete
-        match timeout(
-            timeout_ms,
-            async {
-                loop {
-                    let fanout_stop_token = fanout_stop_token.clone();
-                    let res = unord
-                        .next()
-                        .in_current_span()
-                        .timeout_at(fanout_stop_token)
-                        .await;
+        // Effective deadline; shrinks once consensus is reached
+        let mut effective_deadline = Timestamp::now_non_decreasing().later(self.timeout);
+        let inner_result: FanoutLoopResult = loop {
+            // Time remaining to the (possibly shrunken) deadline
+            let now = Timestamp::now_non_decreasing();
+            if now >= effective_deadline {
+                break FanoutLoopResult::DeadlineReached;
+            }
+            let remaining = effective_deadline
+                .duration_since(now)
+                .max(TimestampDuration::new_ms(1));
 
-                    match res {
-                        Ok(Some(Ok(FanoutProcessorReturn::DoneEarly))) => {
-                            // Stop all lanes immediately
-                            break Ok(());
-                        }
-                        Ok(Some(Ok(FanoutProcessorReturn::Done))) => {
-                            // Lane finished but trying to finish other lanes
-                        }
-                        Ok(Some(Ok(FanoutProcessorReturn::Tick))) => {
-                            // Timer tick to push more work to the processor lanes
-                            let context_locked = &mut *context.lock();
-                            let cur_ts = Timestamp::now_non_decreasing();
-                            context_locked.fanout_queue.send_more_work(cur_ts);
+            let fanout_stop_token = fanout_stop_token.clone();
+            let next = unord
+                .next()
+                .in_current_span()
+                .timeout_at(fanout_stop_token)
+                .timeout_duration(remaining)
+                .await;
+            // Outer layer: deadline elapsed
+            let Ok(next) = next else {
+                break FanoutLoopResult::DeadlineReached;
+            };
+            // Inner layer: caller-supplied stop token fired
+            let Ok(next) = next else {
+                break FanoutLoopResult::Cancelled;
+            };
 
-                            // Set up next tick if there's still stuff processing
-                            if !unord.is_empty() {
-                                unord.push(make_tick_future());
+            match next {
+                // No more lanes to process
+                None => break FanoutLoopResult::Done,
+                // Lane errored
+                Some(Err(e)) => break FanoutLoopResult::LaneFailed(e),
+                // Stop all lanes immediately
+                Some(Ok(FanoutProcessorReturn::DoneEarly)) => break FanoutLoopResult::Done,
+                // Lane finished; arm post-consensus deadline if consensus was just reached
+                Some(Ok(FanoutProcessorReturn::Done)) => {
+                    if let Some(callback) = &self.post_consensus_timeout_callback {
+                        let context_locked = context.lock();
+                        if let Some(ts) = context_locked.consensus_reached_ts {
+                            let result_snapshot = context_locked.result.clone();
+                            drop(context_locked);
+                            let candidate = ts.later((callback)(&result_snapshot));
+                            if candidate < effective_deadline {
+                                effective_deadline = candidate;
                             }
-                        }
-                        Ok(Some(Err(e))) => {
-                            // Fanout died with an error
-                            break Err(e);
-                        }
-                        Ok(None) => {
-                            // No more lanes to process
-                            break Ok(());
-                        }
-                        Err(_) => {
-                            // Cancelled
-                            break Err(RPCError::ignore("fanout cancelled"));
                         }
                     }
                 }
+                // Timer tick: push more work and re-arm the tick
+                Some(Ok(FanoutProcessorReturn::Tick)) => {
+                    let context_locked = &mut *context.lock();
+                    let cur_ts = Timestamp::now_non_decreasing();
+                    context_locked.fanout_queue.send_more_work(cur_ts);
+                    if !unord.is_empty() {
+                        unord.push(make_tick_future());
+                    }
+                }
             }
-            .in_current_span(),
-        )
-        .await
-        {
-            Ok(Ok(())) => {
-                // Finished, either by exhaustion or consensus,
-                // time to return whatever value we came up with
+        };
+
+        match inner_result {
+            FanoutLoopResult::Done => {
                 let context_locked = &mut *context.lock();
-
-                // Print final queue
                 veilid_log!(self debug "{}: Finished FanoutQueue:\n{}", self.name, context_locked.fanout_queue);
-
                 Ok(core::mem::take(&mut context_locked.result))
             }
-            Ok(Err(e)) => {
-                // Fanout died with an error
-                Err(e)
-            }
-            Err(_) => {
-                // Timeout, do one last evaluate with remaining nodes in timeout state
+            FanoutLoopResult::LaneFailed(e) => Err(e),
+            FanoutLoopResult::Cancelled => Err(RPCError::ignore("fanout cancelled")),
+            FanoutLoopResult::DeadlineReached => {
                 let context_locked = &mut *context.lock();
                 let cur_ts = Timestamp::now_non_decreasing();
                 context_locked
                     .fanout_queue
                     .all_unfinished_to_timeout(cur_ts);
-
-                // Print final queue
                 veilid_log!(self debug "{}: Timeout FanoutQueue:\n{}", self.name, context_locked.fanout_queue);
-
-                // Final evaluate
                 if !matches!(
                     self.evaluate_done(context_locked),
                     FanoutDoneDisposition::NotDone,

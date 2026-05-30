@@ -42,14 +42,6 @@ else
     exit 1
 fi
 
-if command -v wasm-pack &> /dev/null; then
-    echo '[X] wasm-pack is available in the path'
-else
-    echo -e 'wasm-pack is not available in the path.
-  Install wasm-pack: cargo install wasm-pack'
-    exit 1
-fi
-
 if command -v wasm-opt &> /dev/null; then
     echo '[X] wasm-opt is available in the path'
 else

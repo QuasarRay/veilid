@@ -30,3 +30,5 @@ build/
 .flutter
 .gradle
 local.properties
+.flutter-plugins-dependencies
+.flutter-plugins

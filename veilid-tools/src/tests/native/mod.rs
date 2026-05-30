@@ -58,6 +58,8 @@ pub async fn run_all_tests() {
     test_network_interfaces::test_all().await;
     info!("TEST: exec_test_async_peek_stream");
     test_async_peek_stream::test_all().await;
+    info!("TEST: exec_test_async_keyed_cache");
+    test_async_keyed_cache::test_all().await;
     info!("TEST: exec_test_async_tag_lock");
     test_async_tag_lock::test_all().await;
     info!("TEST: exec_test_tag_lock");
@@ -69,10 +71,17 @@ pub async fn run_all_tests() {
 }
 
 #[cfg(feature = "rt-tokio")]
+static RUNTIME: std::sync::LazyLock<tokio::runtime::Runtime> = std::sync::LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to build Tokio runtime")
+});
+
+#[cfg(feature = "rt-tokio")]
 #[allow(dead_code)]
 pub fn block_on<F: Future<Output = T>, T>(f: F) -> T {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(f)
+    RUNTIME.block_on(f)
 }
 
 #[cfg(feature = "rt-async-std")]
@@ -105,6 +114,11 @@ cfg_if! {
                     }
                 }
 
+                #[cfg(feature = "debug-locks")]
+                block_on(async {
+                    crate::deadlock_detector::start_deadlock_detector();
+                });
+
             });
         }
 
@@ -129,6 +143,13 @@ cfg_if! {
             setup();
             test_random::test_get_random_u64();
             test_random::test_get_random_u32();
+        }
+
+        #[test]
+        fn run_test_ip_extra() {
+            setup();
+            test_ip_extra::test_ipv4addr_predicates();
+            test_ip_extra::test_ipv6addr_predicates();
         }
 
         #[test]

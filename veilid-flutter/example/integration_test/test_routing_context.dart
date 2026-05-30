@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
 
@@ -18,10 +19,10 @@ Future<T> _retryOnNetworkError<T>(Future<T> Function() fn,
       return await fn();
     } on VeilidAPIExceptionTryAgain {
       if (attempt >= maxRetries - 1) rethrow;
-      print('$label: TryAgain, retrying (attempt ${attempt + 1}/$maxRetries)');
+      debugPrint('$label: TryAgain, retrying (attempt ${attempt + 1}/$maxRetries)');
     } on VeilidAPIExceptionTimeout {
       if (attempt >= maxRetries - 1) rethrow;
-      print('$label: Timeout, retrying (attempt ${attempt + 1}/$maxRetries)');
+      debugPrint('$label: Timeout, retrying (attempt ${attempt + 1}/$maxRetries)');
     }
   }
 }
@@ -237,13 +238,13 @@ Future<void> testAppCallLoopbackBigPackets(
   final appCallQueue = StreamController<VeilidAppCall>();
   final appMessageSubscription = updateStream.listen((update) {
     if (update is VeilidAppCall) {
-      print('received app call ${update.callId}');
+      debugPrint('received app call ${update.callId}');
       appCallQueue.sink.add(update);
     }
   });
   final appCallQueueHandler = () async {
     await for (final update in appCallQueue.stream) {
-      print('replying to app call ${update.callId}');
+      debugPrint('replying to app call ${update.callId}');
       await Veilid.instance.appCallReply(update.callId, update.message);
     }
   }();
@@ -268,12 +269,12 @@ Future<void> testAppCallLoopbackBigPackets(
           for (var i = 0; i < 5; i++) {
             // send an app call to our own private route
             final message = await cs.randomBytes(random.nextInt(32768));
-            print('sending app call $i');
+            debugPrint('sending app call $i');
             final outmessage = await _retryOnNetworkError(
                 () => rc.appCall(TargetRouteId(routeId: prr), message),
                 maxRetries: 3,
                 label: 'appCall[$i]');
-            print('finished app call $i');
+            debugPrint('finished app call $i');
             expect(message, equals(outmessage));
           }
         } finally {

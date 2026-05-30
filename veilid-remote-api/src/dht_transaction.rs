@@ -20,6 +20,11 @@ pub enum DhtTransactionRequestOp {
     Release,
     Commit,
     Rollback,
+    Extend {
+        #[schemars(with = "Vec<String>")]
+        record_keys: Vec<RecordKey>,
+        options: Option<TransactDHTRecordsOptions>,
+    },
     Get {
         #[schemars(with = "String")]
         key: RecordKey,
@@ -53,6 +58,10 @@ pub enum DhtTransactionResponseOp {
         result: ApiResult<()>,
     },
     Rollback {
+        #[serde(flatten)]
+        result: ApiResult<()>,
+    },
+    Extend {
         #[serde(flatten)]
         result: ApiResult<()>,
     },

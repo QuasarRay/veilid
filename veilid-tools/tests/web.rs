@@ -49,6 +49,13 @@ async fn run_test_random() {
 }
 
 #[wasm_bindgen_test]
+async fn run_test_ip_extra() {
+    setup();
+    test_ip_extra::test_ipv4addr_predicates();
+    test_ip_extra::test_ipv6addr_predicates();
+}
+
+#[wasm_bindgen_test]
 async fn run_test_split_url() {
     setup();
     test_split_url::test_split_url();
