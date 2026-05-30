@@ -1693,6 +1693,18 @@ impl StorageManager {
                 .await?;
 
             let descriptor = last_get_result.opt_descriptor.unwrap_or_log();
+
+            // Verify signatures before reporting
+            network_result_try!(
+                self.verify_inbound_signed_value(
+                    &opaque_record_key,
+                    &descriptor,
+                    &value,
+                    first_subkey
+                )
+                .await
+            );
+
             let schema = descriptor.schema()?;
 
             // Validate with schema

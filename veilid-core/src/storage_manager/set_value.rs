@@ -633,6 +633,35 @@ impl StorageManager {
         Ok(None)
     }
 
+    /// Verify the signatures on an inbound descriptor+value before it is stored or reported
+    pub(super) async fn verify_inbound_signed_value(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+        descriptor: &SignedValueDescriptor,
+        value: &SignedValueData,
+        subkey: ValueSubkey,
+    ) -> NetworkResult<()> {
+        let crypto = self.crypto();
+        let Some(vcrypto) = crypto.get_async(opaque_record_key.kind()) else {
+            return NetworkResult::invalid_message("unsupported cryptosystem");
+        };
+        if descriptor
+            .validate(&vcrypto, opaque_record_key)
+            .await
+            .is_err()
+        {
+            return NetworkResult::invalid_message(
+                "invalid descriptor signature or record-key binding",
+            );
+        }
+        match value.validate(descriptor.ref_owner(), subkey, &vcrypto).await {
+            Ok(true) => NetworkResult::value(()),
+            Ok(false) | Err(_) => {
+                NetworkResult::invalid_message("invalid signed value data signature")
+            }
+        }
+    }
+
     /// Handle a received 'Set Value' query
     /// Returns a None if the value passed in was set
     /// Returns a Some(current value) if the value was older and the current value was kept
@@ -701,6 +730,12 @@ impl StorageManager {
                 }
             }
         };
+        // Verify signatures before storing
+        network_result_try!(
+            self.verify_inbound_signed_value(opaque_record_key, &actual_descriptor, &value, subkey)
+                .await
+        );
+
         let Ok(schema) = actual_descriptor.schema() else {
             return Ok(NetworkResult::invalid_message("invalid schema"));
         };
