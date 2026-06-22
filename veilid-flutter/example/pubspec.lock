@@ -522,7 +522,7 @@ packages:
       path: ".."
       relative: true
     source: path
-    version: "0.5.3"
+    version: "0.5.4"
   veilid_integration_test:
     dependency: "direct dev"
     description:

@@ -1,7 +1,7 @@
 [package]
 # --- Bumpversion match - do not reorder
 name = "veilid-wasm"
-version = "0.5.3"
+version = "0.5.4"
 # ---
 description = "Veilid bindings for WebAssembly"
 resolver = "2"
@@ -30,7 +30,7 @@ unstable-tunnels = ["veilid-core/unstable-tunnels"]
 unstable-blockstore = ["veilid-core/unstable-blockstore"]
 
 [dependencies]
-veilid-core = { version = "0.5.3", path = "../veilid-core", default-features = false, features = [
+veilid-core = { version = "0.5.4", path = "../veilid-core", default-features = false, features = [
     "json-camel-case",
 ] }
 
