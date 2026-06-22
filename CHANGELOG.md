@@ -1,4 +1,4 @@
-**UNRELEASED**
+**Changed in Veilid 0.5.4**
 
 - Breaking API Changes:
   - `AttachmentState` enum values have changed to eliminate `OverAttached` state

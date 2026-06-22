@@ -178,14 +178,6 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
-  globbing:
-    dependency: transitive
-    description:
-      name: globbing
-      sha256: "4f89cfaf6fa74c9c1740a96259da06bd45411ede56744e28017cc534a12b6e2d"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.0"
   hooks:
     dependency: transitive
     description:
@@ -452,22 +444,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.3.1"
-  system_info2:
-    dependency: transitive
-    description:
-      name: system_info2
-      sha256: b937736ecfa63c45b10dde1ceb6bb30e5c0c340e14c441df024150679d65ac43
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.1.0"
-  system_info_plus:
-    dependency: transitive
-    description:
-      name: system_info_plus
-      sha256: df94187e95527f9cb459e6a9f6e0b1ea20c157d8029bc233de34b3c1e17e1c48
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.0.6"
   term_glyph:
     dependency: transitive
     description:
@@ -572,4 +548,4 @@ packages:
     version: "0.0.6"
 sdks:
   dart: ">=3.10.3 <4.0.0"
-  flutter: ">=3.38.4"
+  flutter: ">=3.41.0"
