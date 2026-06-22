@@ -15,10 +15,14 @@ pub struct DHTSchemaDFLT {
 }
 
 impl DHTSchemaDFLT {
+    /// Four-character code identifying this schema in its compiled form.
     pub const FCC: [u8; 4] = *b"DFLT";
+    /// Byte length of the compiled schema (fourcc plus owner count).
     pub const FIXED_SIZE: usize = 6;
 
     /// Make a schema
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if `o_cnt` is 0 or exceeds [DHTSchema::MAX_SUBKEY_COUNT].
     pub fn new(o_cnt: u16) -> VeilidAPIResult<Self> {
         let out = Self { o_cnt };
         out.validate()?;
@@ -26,6 +30,8 @@ impl DHTSchemaDFLT {
     }
 
     /// Validate the data representation
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if `o_cnt` is 0 or exceeds [DHTSchema::MAX_SUBKEY_COUNT].
     pub fn validate(&self) -> VeilidAPIResult<()> {
         if self.o_cnt == 0 {
             apibail_invalid_argument!("must have at least one subkey", "o_cnt", self.o_cnt);
@@ -81,6 +87,8 @@ impl DHTSchemaDFLT {
 
 impl TryFrom<&[u8]> for DHTSchemaDFLT {
     type Error = VeilidAPIError;
+    /// Errors with `VeilidAPIError::Generic` if `b` is not [DHTSchemaDFLT::FIXED_SIZE] bytes or has
+    /// the wrong fourcc, or `VeilidAPIError::InvalidArgument` if the decoded schema fails validation.
     fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
         if b.len() != Self::FIXED_SIZE {
             apibail_generic!("invalid size");

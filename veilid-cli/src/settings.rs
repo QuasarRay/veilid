@@ -8,10 +8,8 @@ use std::path::{Path, PathBuf};
 
 pub fn load_default_config() -> Result<config::Config, config::ConfigError> {
     let default_config = r#"---
-enable_ipc: true
 ipc_path: '%IPC_DIRECTORY%'
-enable_network: false
-address: "localhost:5959"
+address: null
 autoconnect: true
 autoreconnect: true
 logging:
@@ -27,6 +25,7 @@ interface:
         scrollback: 10000
     command_line:
         history_size: 2048
+    tui: false
     theme:
         shadow: false
         borders: "simple"
@@ -124,7 +123,7 @@ impl From<LogLevel> for log::LevelFilter {
 
 #[derive(Clone, Debug)]
 pub struct NamedSocketAddrs {
-    pub _name: String,
+    pub name: String,
     pub addrs: Vec<SocketAddr>,
 }
 
@@ -134,7 +133,7 @@ impl TryFrom<String> for NamedSocketAddrs {
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let addrs = value.to_socket_addrs()?.collect();
         let name = value;
-        Ok(NamedSocketAddrs { _name: name, addrs })
+        Ok(NamedSocketAddrs { name, addrs })
     }
 }
 
@@ -146,7 +145,7 @@ impl<'de> serde::Deserialize<'de> for NamedSocketAddrs {
         let s = String::deserialize(deserializer)?;
         let addr_iter = s.to_socket_addrs().map_err(serde::de::Error::custom)?;
         Ok(NamedSocketAddrs {
-            _name: s,
+            name: s,
             addrs: addr_iter.collect(),
         })
     }
@@ -218,13 +217,12 @@ pub struct Interface {
     pub theme: Theme,
     pub node_log: NodeLog,
     pub command_line: CommandLine,
+    pub tui: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Settings {
-    pub enable_ipc: bool,
     pub ipc_path: Option<PathBuf>,
-    pub enable_network: bool,
     pub address: Option<NamedSocketAddrs>,
     pub autoconnect: bool,
     pub autoreconnect: bool,
@@ -252,52 +250,83 @@ impl Settings {
 
     pub fn resolve_ipc_path(
         &self,
-        ipc_path: Option<PathBuf>,
-        subnode_index: u16,
-    ) -> Option<PathBuf> {
-        let mut client_api_ipc_path = None;
+        opt_ipc_path: Option<PathBuf>,
+        subnode_index: Option<u16>,
+    ) -> Result<Option<PathBuf>, String> {
+        let Some(mut ipc_path) = opt_ipc_path.clone().or_else(|| self.ipc_path.clone()) else {
+            return Ok(None);
+        };
+
         // Determine IPC path to try
         cfg_if::cfg_if! {
             if #[cfg(windows)] {
-                if let Some(ipc_path) = ipc_path.or(self.ipc_path.clone()) {
-                    if is_ipc_socket_path(&ipc_path) {
-                        // try direct path
-                        client_api_ipc_path = Some(ipc_path);
-                    } else {
-                        // try subnode index inside path
-                        let ipc_path = ipc_path.join(subnode_index.to_string());
+                if is_ipc_socket_path(&ipc_path) {
+                    if let Some(subnode_index) = subnode_index {
+                        ipc_path = ipc_path.with_file_name(subnode_index.to_string());
                         if is_ipc_socket_path(&ipc_path) {
-                            // subnode indexed path exists
-                            client_api_ipc_path = Some(ipc_path);
+                            // Direct path with replaced subnode index existed
+                            return Ok(Some(ipc_path));
                         }
+                    } else {
+                        // Direct path existed
+                        return Ok(Some(ipc_path));
+                    }
+                } else {
+                    let subnode_index = subnode_index.unwrap_or(0);
+                    ipc_path = ipc_path.join(subnode_index.to_string());
+                    if is_ipc_socket_path(&ipc_path) {
+                        // Joinged path with subnode index existed
+                        return Ok(Some(ipc_path));
                     }
                 }
             } else {
-                if let Some(ipc_path) = ipc_path.or(self.ipc_path.clone()) {
-                    if is_ipc_socket_path(&ipc_path) {
-                        // try direct path
-                        client_api_ipc_path = Some(ipc_path);
-                    } else if ipc_path.exists() && ipc_path.is_dir() {
-                        // try subnode index inside path
-                        let ipc_path = ipc_path.join(subnode_index.to_string());
+                if is_ipc_socket_path(&ipc_path) {
+                    if let Some(subnode_index) = subnode_index {
+                        ipc_path = ipc_path.with_file_name(subnode_index.to_string());
                         if is_ipc_socket_path(&ipc_path) {
-                            // subnode indexed path exists
-                            client_api_ipc_path = Some(ipc_path);
+                            // Direct path with replaced subnode index existed
+                            return Ok(Some(ipc_path));
                         }
+                    } else {
+                        // Direct path existed
+                        return Ok(Some(ipc_path));
+                    }
+
+                } else if ipc_path.exists() && ipc_path.is_dir() {
+                    let subnode_index = subnode_index.unwrap_or(0);
+                    ipc_path = ipc_path.join(subnode_index.to_string());
+                    if is_ipc_socket_path(&ipc_path) {
+                        // Joinged path with subnode index existed
+                        return Ok(Some(ipc_path));
                     }
                 }
             }
         }
-        client_api_ipc_path
+
+        match (opt_ipc_path, subnode_index) {
+            (Some(ipc_path), Some(subnode_index)) => Err(format!(
+                "No IPC path found for {} and subnode index {}",
+                ipc_path.to_string_lossy(),
+                subnode_index
+            )),
+            (Some(ipc_path), None) => Err(format!(
+                "No IPC path found for {}",
+                ipc_path.to_string_lossy(),
+            )),
+            (None, Some(subnode_index)) => Err(format!(
+                "No IPC path found for subnode index {}",
+                subnode_index
+            )),
+            (None, None) => Ok(None),
+        }
     }
 
     pub fn resolve_network_address(
         &self,
-        address: Option<String>,
-    ) -> Result<Option<Vec<SocketAddr>>, String> {
-        let mut client_api_network_addresses = None;
-
-        let args_address = if let Some(args_address) = address {
+        opt_address: Option<String>,
+        port: u16,
+    ) -> Result<Option<SocketAddr>, String> {
+        let args_address = if let Some(args_address) = opt_address {
             match NamedSocketAddrs::try_from(args_address) {
                 Ok(v) => Some(v),
                 Err(e) => {
@@ -307,12 +336,17 @@ impl Settings {
         } else {
             None
         };
-        if let Some(address_arg) = args_address.or(self.address.clone()) {
-            client_api_network_addresses = Some(address_arg.addrs);
-        } else if let Some(address) = self.address.clone() {
-            client_api_network_addresses = Some(address.addrs.clone());
+        let Some(mut address_arg) = args_address.or_else(|| self.address.clone()) else {
+            return Ok(None);
+        };
+
+        if port != 0 {
+            for addr in &mut address_arg.addrs {
+                addr.set_port(port);
+            }
         }
-        Ok(client_api_network_addresses)
+
+        Ok(address_arg.addrs.into_iter().next())
     }
 
     ////////////////////////////////////////////////////////////////////////////

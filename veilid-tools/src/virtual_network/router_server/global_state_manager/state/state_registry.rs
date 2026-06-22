@@ -122,10 +122,9 @@ impl<S: State> StateRegistry<S> {
                 return Err(GlobalStateManagerError::DuplicateName(name));
             }
             // Register the named state
-            assert!(
-                self.state_id_by_name.insert(name, id.0).is_none(),
-                "should not have a duplicated name here"
-            );
+            if self.state_id_by_name.insert(name, id.0).is_some() {
+                return Err(GlobalStateManagerError::DuplicateName(state.debug_name()));
+            }
         }
 
         // Attach the state to the state slot
@@ -151,7 +150,9 @@ impl<S: State> StateRegistry<S> {
                 .state_id_by_name
                 .remove(&name)
                 .expect_or_log("name should be registered");
-            assert_eq!(dead_name_id, id.0, "name id and state id should match");
+            if dead_name_id != id.0 {
+                return Err(GlobalStateManagerError::InvalidId(id.external_id()));
+            }
         }
 
         Ok(state)

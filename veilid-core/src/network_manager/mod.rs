@@ -109,7 +109,6 @@ impl Default for NetworkManagerStartupContext {
 // The mutable state of the network manager
 #[derive(Debug)]
 struct NetworkManagerInner {
-    stats: NetworkManagerStats,
     client_allowlist: hashlink::LruCache<NodeId, ClientAllowlistEntry>,
     node_contact_method_cache: NodeContactMethodCache,
     address_check: Option<AddressCheck>,
@@ -129,6 +128,9 @@ struct NetworkManagerInner {
 pub(crate) struct NetworkManager {
     registry: VeilidComponentRegistry,
     inner: Mutex<NetworkManagerInner>,
+
+    // Aggregate network transfer stats, shared so they can be broadcast cheaply
+    stats: Arc<RwLock<NetworkManagerStats>>,
 
     // Address filter
     address_filter: AddressFilter,
@@ -174,7 +176,6 @@ impl fmt::Debug for NetworkManager {
 impl NetworkManager {
     fn new_inner() -> NetworkManagerInner {
         NetworkManagerInner {
-            stats: NetworkManagerStats::default(),
             client_allowlist: hashlink::LruCache::new_unbounded(),
             node_contact_method_cache: NodeContactMethodCache::new(),
             address_check: None,
@@ -229,8 +230,8 @@ impl NetworkManager {
             let config = registry.config();
 
             // set up channel
-            let mut concurrency = config.network.rpc.concurrency;
-            let queue_size = config.network.rpc.queue_size;
+            let mut concurrency = config.internal().network.rpc.concurrency;
+            let queue_size = config.internal().network.rpc.queue_size;
             if concurrency == 0 {
                 concurrency = get_concurrency();
                 if concurrency == 0 {
@@ -250,6 +251,7 @@ impl NetworkManager {
         let this = Self {
             registry,
             inner: Mutex::new(inner),
+            stats: Arc::new(RwLock::new(NetworkManagerStats::default())),
             address_filter,
             online_detector,
             components: RwLock::new(None),
@@ -319,6 +321,14 @@ impl NetworkManager {
             )
             .with_facility(VeilidComponentLogFacility::try_new("protocol").unwrap())
             .with_facility(VeilidComponentLogFacility::try_new("receipt").unwrap())
+            .with_facility(
+                VeilidComponentLogFacility::try_new_with_tags("network_result", ["#verbose"])
+                    .unwrap(),
+            )
+            .with_facility(
+                VeilidComponentLogFacility::try_new_with_tags("contact_method", ["#verbose"])
+                    .unwrap(),
+            )
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
@@ -335,10 +345,9 @@ impl NetworkManager {
     #[expect(clippy::unused_async)]
     async fn pre_terminate_async(&self) {
         // Ensure things have shut down
-        assert!(
-            self.startup_context.startup_lock.is_shut_down(),
-            "should have shut down by now"
-        );
+        if !self.startup_context.startup_lock.is_shut_down() {
+            veilid_log!(self error "network manager should have shut down by now");
+        }
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
@@ -354,6 +363,9 @@ impl NetworkManager {
 
         // Clean address filter for things that should not be persistent
         self.address_filter.restart();
+
+        // Re-arm online detector (offline/online history persists across detach)
+        self.online_detector.startup();
 
         // Create network components
         let net = new_platform_network(self.registry());
@@ -470,6 +482,10 @@ impl NetworkManager {
         }
         *self.components.write() = None;
 
+        // Report detached after components are down: no relay worker or network
+        // event can flip the detector back online. State survives for reattach.
+        self.online_detector.shutdown();
+
         // reset the state
         veilid_log!(self debug "resetting network manager state");
         {
@@ -523,7 +539,7 @@ impl NetworkManager {
     }
 
     pub fn purge_client_allowlist(&self) {
-        let timeout_ms = self.config().network.client_allowlist_timeout_ms;
+        let timeout_ms = self.config().internal().network.client_allowlist_timeout_ms;
         let mut inner = self.inner.lock();
         let cutoff_timestamp =
             Timestamp::now().earlier(TimestampDuration::new_ms(timeout_ms as u64));
@@ -1205,16 +1221,11 @@ impl NetworkManager {
                 match rpc
                     .resolve_node(
                         recipient_id.clone(),
-                        SafetySelection::Unsafe(Sequencing::NoPreference),
+                        SafetySelection::Unsafe(Sequencing::PreferUnordered),
                     )
                     .await
                 {
-                    Ok(v) => v.map(|nr| {
-                        (
-                            nr.sequencing_filtered(Sequencing::NoPreference),
-                            RelayKind::Outbound,
-                        )
-                    }),
+                    Ok(v) => v.map(|nr| (nr, RelayKind::Outbound)),
                     Err(e) => {
                         veilid_log!(self debug "failed to resolve recipient node for relay, dropping relayed envelope: {}" ,e);
                         return Ok(false);
@@ -1240,12 +1251,7 @@ impl NetworkManager {
                 // should be mutually in each others routing tables. The node needing the relay will be
                 // pinging this node regularly to keep itself in the routing table
                 match routing_table.lookup_node_id(recipient_id) {
-                    Ok(v) => v.map(|nr| {
-                        (
-                            nr.sequencing_filtered(Sequencing::NoPreference),
-                            RelayKind::Inbound,
-                        )
-                    }),
+                    Ok(v) => v.map(|nr| (nr, RelayKind::Inbound)),
                     Err(e) => {
                         veilid_log!(self debug "failed to look up recipient node for relay, dropping relayed envelope: {}" ,e);
                         return Ok(false);
@@ -1253,14 +1259,13 @@ impl NetworkManager {
                 }
             };
 
-            if let Some((mut relay_nr, relay_kind)) = some_relay {
+            if let Some((relay_nr, relay_kind)) = some_relay {
                 // Ensure the protocol used to forward is of the same sequencing requirement
                 // Address type is allowed to change if connectivity is better
                 let sequencing = flow.protocol_type().sequence_ordering().strict_sequencing();
-                relay_nr.set_sequencing(sequencing);
 
                 // Pass relay to RPC system
-                if let Err(e) = self.enqueue_relay(relay_nr, data, relay_kind) {
+                if let Err(e) = self.enqueue_relay(relay_nr, sequencing, data, relay_kind) {
                     // Couldn't enqueue, but not the sender's fault
                     veilid_log!(self debug "failed to enqueue relay: {}", e);
                     return Ok(false);
@@ -1293,12 +1298,7 @@ impl NetworkManager {
 
         // Add the sender's node without its peer info
         // Gets noderef filtered to the routing domain
-        let sender_noderef = match routing_table.register_node_with_id(
-            routing_domain,
-            sender_id,
-            flow.transport_type(),
-            local_timestamp,
-        ) {
+        let sender_noderef = match routing_table.register_node_with_id(routing_domain, sender_id) {
             Ok(v) => v,
             Err(e) => {
                 // If the node couldn't be registered just skip this envelope,

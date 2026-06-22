@@ -48,9 +48,13 @@ impl RPCProcessor {
         let (key, subkeys, count, watch_id, value) = match kind {
             RPCOperationKind::Statement(s) => match s.destructure() {
                 RPCStatementDetail::ValueChanged(s) => s.destructure(),
-                _ => panic!("not a value changed statement"),
+                _ => {
+                    return Ok(NetworkResult::invalid_message(
+                        "not a value changed statement",
+                    ))
+                }
             },
-            _ => panic!("not a statement"),
+            _ => return Ok(NetworkResult::invalid_message("not a statement")),
         };
 
         // Get the inbound node if if this came in directly

@@ -2,6 +2,9 @@ use super::*;
 
 use eventual_base::*;
 
+/// A one-shot signal carrying a single owned value. Instance futures complete
+/// when `resolve` is called; exactly one consumer may `take_value` the resolved
+/// value out.
 pub struct EventualValue<T: Unpin> {
     inner: Arc<Mutex<EventualBaseInner<T>>>,
 }
@@ -34,6 +37,7 @@ impl<T: Unpin> Default for EventualValue<T> {
 }
 
 impl<T: Unpin> EventualValue<T> {
+    /// Create an unresolved `EventualValue`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -41,6 +45,8 @@ impl<T: Unpin> EventualValue<T> {
         }
     }
 
+    /// Attach an instance future that completes when the value is resolved,
+    /// yielding a handle from which the value can be taken.
     #[must_use]
     pub fn instance(&self) -> EventualValueFuture<T> {
         EventualValueFuture {
@@ -49,10 +55,17 @@ impl<T: Unpin> EventualValue<T> {
         }
     }
 
+    /// Resolve to `value` and wake every attached instance future. The returned
+    /// future completes once all of them have run.
+    ///
+    /// A second `resolve` after resolution keeps the first value and drops the
+    /// new one.
     pub fn resolve(&self, value: T) -> EventualResolvedFuture<Self> {
         self.resolve_to_value(value)
     }
 
+    /// Take the resolved value, leaving the `Eventual` empty. Returns `None` if
+    /// unresolved or already taken. Does not block.
     #[must_use]
     pub fn take_value(&self) -> Option<T> {
         let mut inner = self.inner.lock();
@@ -60,6 +73,10 @@ impl<T: Unpin> EventualValue<T> {
     }
 }
 
+/// Instance future from `EventualValue::instance`; resolves to a clone of the
+/// owning `EventualValue` so the value can be taken from it.
+///
+/// Stays `Pending` until the owning `EventualValue` is resolved.
 pub struct EventualValueFuture<T: Unpin> {
     id: Option<usize>,
     eventual: EventualValue<T>,

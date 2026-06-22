@@ -1,3 +1,6 @@
+// ignore_for_file: public_member_api_docs
+// Low-level platform binding to veilid-core; not part of the documented public API.
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
@@ -90,10 +93,9 @@ typedef _RoutingContextGetDHTValueDart =
 typedef _RoutingContextSetDHTValueDart =
     void Function(int, int, Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>);
 // fn routing_context_watch_dht_values(port: i64,
-//     id: u32, key: FfiStr, subkeys: FfiStr, expiration: FfiStr, count: u32,
-//     transactional: bool)
+//     id: u32, key: FfiStr, subkeys: FfiStr, expiration: FfiStr, count: u32)
 typedef _RoutingContextWatchDHTValuesDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, int, int, bool);
+    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, int, int);
 // fn routing_context_cancel_dht_watch(port: i64,
 //     id: u32, key: FfiStr, subkeys: FfiStr)
 typedef _RoutingContextCancelDHTWatchDart =
@@ -890,12 +892,10 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     List<ValueSubkeyRange>? subkeys,
     Timestamp? expiration,
     int? count,
-    bool? transactional,
   }) async {
     subkeys ??= [];
     expiration ??= Timestamp.zero();
     count ??= 0xFFFFFFFF;
-    transactional ??= false;
 
     _ctx.ensureValid();
     final nativeKey = jsonEncode(key).toNativeUtf8();
@@ -911,7 +911,6 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeSubkeys,
       nativeExpiration,
       count,
-      transactional,
     );
     final active = await processFuturePlain<bool>(recvPort.first);
     return active;
@@ -2002,7 +2001,6 @@ class VeilidFFI extends Veilid {
               Pointer<Utf8>,
               Uint64,
               Uint32,
-              Bool,
             ),
             _RoutingContextWatchDHTValuesDart
           >('routing_context_watch_dht_values'),

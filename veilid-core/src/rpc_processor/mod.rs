@@ -186,9 +186,10 @@ impl RPCProcessor {
             let config = registry.config();
 
             // set up channel
-            let mut concurrency = config.network.rpc.concurrency;
-            let queue_size = config.network.rpc.queue_size;
-            let timeout_us = TimestampDuration::new(ms_to_us(config.network.rpc.timeout_ms));
+            let mut concurrency = config.internal().network.rpc.concurrency;
+            let queue_size = config.internal().network.rpc.queue_size;
+            let timeout_us =
+                TimestampDuration::new(ms_to_us(config.internal().network.rpc.timeout_ms));
             if concurrency == 0 {
                 concurrency = get_concurrency();
                 if concurrency == 0 {
@@ -255,7 +256,7 @@ impl RPCProcessor {
     #[expect(clippy::unused_async)]
     async fn pre_terminate_async(&self) {
         // Ensure things have shut down
-        assert!(
+        debug_assert!(
             self.startup_context.startup_lock.is_shut_down(),
             "should have shut down by now"
         );
@@ -390,11 +391,13 @@ impl RPCProcessor {
 
         // If nobody knows where this node is, ask the DHT for it
         let config = self.config();
-        let node_count = config.network.dht.max_find_node_count as usize;
-        // let consensus_count = config.network.dht.resolve_node_count as usize;
-        // let consensus_width = config.network.dht.consensus_width as usize;
-        let fanout_tasks = config.network.dht.resolve_node_fanout as usize;
-        let timeout = TimestampDuration::from(ms_to_us(config.network.dht.resolve_node_timeout_ms));
+        let node_count = config.internal().network.dht.max_find_node_count as usize;
+        // let consensus_count = config.internal().network.dht.resolve_node_count as usize;
+        // let consensus_width = config.internal().network.dht.consensus_width as usize;
+        let fanout_tasks = config.internal().network.dht.resolve_node_fanout as usize;
+        let timeout = TimestampDuration::from(ms_to_us(
+            config.internal().network.dht.resolve_node_timeout_ms,
+        ));
 
         // Routine to call to generate fanout
         let result = Arc::new(Mutex::new(Option::<NodeRef>::None));
@@ -445,9 +448,9 @@ impl RPCProcessor {
             };
 
             // ensure we have some dial info for the entry already,
-            // and that the node is still alive
+            // and that the node is not dead
             // if not, we should keep looking for better info
-            if nr.state(Timestamp::now_non_decreasing()).is_alive() && nr.has_any_dial_info() {
+            if nr.state(Timestamp::now_non_decreasing()).is_live() && nr.has_any_dial_info() {
                 *result2.lock() = Some(nr);
                 return FanoutDoneDisposition::DoneEarly;
             }
@@ -530,8 +533,7 @@ impl RPCProcessor {
                     // ensure we have some dial info for the entry already,
                     // and that the node is still alive
                     // if not, we should do the find_node anyway
-                    if nr.state(Timestamp::now_non_decreasing()).is_alive()
-                        && nr.has_any_dial_info()
+                    if nr.state(Timestamp::now_non_decreasing()).is_live() && nr.has_any_dial_info()
                     {
                         return Ok(Some(nr));
                     }
@@ -604,112 +606,120 @@ impl RPCProcessor {
         let waiter = self.waiting_rpc_table.clone();
         let timeout = waitable_reply.context.timeout;
         let handle = waitable_reply.handle;
+        let registry = self.registry();
         let rx = self
             .reply_pool
-            .channel_spawn(async move { waiter.wait_for_op(handle, timeout).await });
-        let res = match rx.recv_async().await {
+            .channel_spawn(async move {
+                let this = registry.rpc_processor();
+                let res = waiter.wait_for_op(handle, timeout).await;
+                match res {
+                    Err(e) => {
+                        #[cfg(feature = "verbose-tracing")]
+                        let context_debug = {
+                            let routing_table = &*this.routing_table();
+                            format!("{}\n", waitable_reply.context.debug(routing_table))
+                        };
+                        #[cfg(not(feature = "verbose-tracing"))]
+                        let context_debug = waitable_reply
+                            .context
+                            .send_data_result
+                            .unique_flow()
+                            .map(|uf| format!("flow={:#}", uf.flow))
+                            .unwrap_or_else(|| "flow=<none>".to_owned());
+                        veilid_log!(this debug "RPC Lost (id={:#} {} {}): {}", id, debug_string, e, context_debug);
+                        this.record_lost_question(&waitable_reply.context).await;
+
+                        #[cfg(feature = "instrument")]
+                        tracing::Span::current().record("ret_outcome", "error");
+
+                        Err(e)
+                    }
+                    Ok(TimeoutOr::Timeout) => {
+                        #[cfg(feature = "verbose-tracing")]
+                        let context_debug = {
+                            let routing_table = &*this.routing_table();
+                            format!("{}\n", waitable_reply.context.debug(routing_table))
+                        };
+                        #[cfg(not(feature = "verbose-tracing"))]
+                        let context_debug = waitable_reply
+                            .context
+                            .send_data_result
+                            .unique_flow()
+                            .map(|uf| format!("flow={:#}", uf.flow))
+                            .unwrap_or_else(|| "flow=<none>".to_owned());
+                        veilid_log!(this debug "RPC Lost (id={:#} {} Timeout): {}", id, debug_string, context_debug);
+                        this.record_lost_question(&waitable_reply.context).await;
+
+                        #[cfg(feature = "instrument")]
+                        tracing::Span::current().record("ret_outcome", "timeout");
+
+                        Ok(TimeoutOr::Timeout)
+                    }
+                    Ok(TimeoutOr::Value((rpcreader, latency))) => {
+                        // Reply received
+                        let recv_ts = Timestamp::now_non_decreasing();
+
+                        // Record answer received
+                        this.record_answer_received(
+                            recv_ts,
+                            rpcreader.header.body_len,
+                            &waitable_reply.context,
+                        );
+
+                        #[cfg(feature = "instrument")]
+                        {
+                            let span = tracing::Span::current();
+                            span.record("ret_outcome", "value");
+                            span.record("ret_latency_ms", latency.as_u64() / 1000);
+                            span.record("ret_answer_body_len", rpcreader.header.body_len.as_u64());
+                        }
+
+                        // Ensure the reply comes over the private route that was requested
+                        if let Some(reply_private_route) = waitable_reply
+                            .context
+                            .opt_reply_private_route_ref
+                            .as_ref()
+                            .map(|r| r.route_key().clone())
+                        {
+                            match &rpcreader.header.detail {
+                                RPCMessageHeaderDetail::Direct(_) => {
+                                    return Err(RPCError::protocol(
+                                        "should have received reply over private route or stub",
+                                    ));
+                                }
+                                RPCMessageHeaderDetail::SafetyRouted(sr) => {
+                                    let public_key = this
+                                        .routing_table()
+                                        .public_key(sr.direct.envelope.get_crypto_kind());
+                                    if public_key != reply_private_route {
+                                        return Err(RPCError::protocol(
+                                            "should have received reply from safety route to a stub",
+                                        ));
+                                    }
+                                }
+                                RPCMessageHeaderDetail::PrivateRouted(pr) => {
+                                    if pr.private_route != reply_private_route {
+                                        return Err(RPCError::protocol(
+                                            "received reply over the wrong private route",
+                                        ));
+                                    }
+                                }
+                            };
+                        }
+
+                        Ok(TimeoutOr::Value((
+                            rpcreader,
+                            AnswerContext {
+                                latency,
+                                waitable_reply_context: waitable_reply.context,
+                            },
+                        )))
+                    }
+                }
+            });
+        match rx.recv_async().await {
             Ok(inner) => inner,
-            Err(e) => return Err(RPCError::ignore(e)),
-        };
-        match res {
-            Err(e) => {
-                #[cfg(feature = "verbose-tracing")]
-                let context_debug = {
-                    let routing_table = &*self.routing_table();
-                    format!("{}\n", waitable_reply.context.debug(routing_table))
-                };
-                #[cfg(not(feature = "verbose-tracing"))]
-                let context_debug = format!(
-                    "flow={}",
-                    waitable_reply.context.send_data_result.unique_flow().flow
-                );
-                veilid_log!(self debug "RPC Lost (id={} {} {}): {}", id, debug_string, e, context_debug);
-                self.record_lost_answer(&waitable_reply.context).await;
-
-                #[cfg(feature = "instrument")]
-                tracing::Span::current().record("ret_outcome", "error");
-
-                Err(e)
-            }
-            Ok(TimeoutOr::Timeout) => {
-                #[cfg(feature = "verbose-tracing")]
-                let context_debug = {
-                    let routing_table = &*self.routing_table();
-                    format!("{}\n", waitable_reply.context.debug(routing_table))
-                };
-                #[cfg(not(feature = "verbose-tracing"))]
-                let context_debug = format!(
-                    "flow={}",
-                    waitable_reply.context.send_data_result.unique_flow().flow
-                );
-                veilid_log!(self debug "RPC Lost (id={} {} Timeout): {}", id, debug_string, context_debug);
-                self.record_lost_answer(&waitable_reply.context).await;
-
-                #[cfg(feature = "instrument")]
-                tracing::Span::current().record("ret_outcome", "timeout");
-
-                Ok(TimeoutOr::Timeout)
-            }
-            Ok(TimeoutOr::Value((rpcreader, latency))) => {
-                // Reply received
-                let recv_ts = Timestamp::now_non_decreasing();
-
-                // Record answer received
-                self.record_answer_received(
-                    recv_ts,
-                    rpcreader.header.body_len,
-                    &waitable_reply.context,
-                );
-
-                #[cfg(feature = "instrument")]
-                {
-                    let span = tracing::Span::current();
-                    span.record("ret_outcome", "value");
-                    span.record("ret_latency_ms", latency.as_u64() / 1000);
-                    span.record("ret_answer_body_len", rpcreader.header.body_len.as_u64());
-                }
-
-                // Ensure the reply comes over the private route that was requested
-                if let Some(reply_private_route) = waitable_reply
-                    .context
-                    .opt_reply_private_route_ref
-                    .as_ref()
-                    .map(|r| r.route_key().clone())
-                {
-                    match &rpcreader.header.detail {
-                        RPCMessageHeaderDetail::Direct(_) => {
-                            return Err(RPCError::protocol(
-                                "should have received reply over private route or stub",
-                            ));
-                        }
-                        RPCMessageHeaderDetail::SafetyRouted(sr) => {
-                            let public_key = self
-                                .routing_table()
-                                .public_key(sr.direct.envelope.get_crypto_kind());
-                            if public_key != reply_private_route {
-                                return Err(RPCError::protocol(
-                                    "should have received reply from safety route to a stub",
-                                ));
-                            }
-                        }
-                        RPCMessageHeaderDetail::PrivateRouted(pr) => {
-                            if pr.private_route != reply_private_route {
-                                return Err(RPCError::protocol(
-                                    "received reply over the wrong private route",
-                                ));
-                            }
-                        }
-                    };
-                }
-
-                Ok(TimeoutOr::Value((
-                    rpcreader,
-                    AnswerContext {
-                        latency,
-                        waitable_reply_context: waitable_reply.context,
-                    },
-                )))
-            }
+            Err(e) => Err(RPCError::ignore(e)),
         }
     }
 
@@ -1217,10 +1227,13 @@ impl RPCProcessor {
         if !is_routed {
             if !suppress_degradation {
                 if let Some(transport) = opt_transport {
+                    // A specific transport failed to send, record it on the transport
                     node_ref.stats_failed_to_send(send_ts, wants_answer, transport);
                 } else {
-                    // Pre-send abort with no transport attempted (NoRoutingDomain / NoPeerInfo /
-                    // NoContactMethod / Punished). Record at the node level.
+                    // Pre-send abort with no transport attempted:
+                    // * NoRoutingDomain / NoPeerInfo / NoContactMethod / Punished
+                    // * Or a ContactMethod::Existing that didn't exist
+                    // Record at the node level.
                     node_ref.stats_unreachable();
                 }
             }
@@ -1251,7 +1264,7 @@ impl RPCProcessor {
         feature = "instrument",
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    async fn record_lost_answer(&self, context: &WaitableReplyContext) {
+    async fn record_lost_question(&self, context: &WaitableReplyContext) {
         // Determine routing domain for online detection. Routed sends are PublicInternet by construction.
         let opt_rd = if context.is_routed() {
             Some(RoutingDomain::PublicInternet)
@@ -1273,12 +1286,9 @@ impl RPCProcessor {
             } else {
                 vec![context.node_ref.best_node_id()]
             };
-            online_detector.record_failure(
-                rd,
-                node_ids,
-                context.send_ts,
-                context.send_data_result.transport_type(),
-            );
+            if let Some(transport) = context.send_data_result.transport_type() {
+                online_detector.record_failure(rd, node_ids, context.send_ts, transport);
+            }
         }
         let suppress_degradation = opt_rd
             .map(|rd| online_detector.online_state(rd) == OnlineState::Offline)
@@ -1286,10 +1296,27 @@ impl RPCProcessor {
 
         // Record for node if this was not sent via a route
         if !context.is_routed() {
-            if !suppress_degradation {
-                context
-                    .node_ref
-                    .stats_lost_answer(context.send_data_result.transport_type());
+            // Skip demoting a node that was reliable before a recent reattach and
+            // hasn't been re-tested since: we haven't had a fair chance to ping it,
+            // so leave its reliability and ping cadence intact.
+            let cur_ts = Timestamp::now();
+            let protect_after_reattach = !suppress_degradation
+                && opt_rd
+                    .and_then(|rd| online_detector.online_since(rd))
+                    .map(|online_ts| {
+                        context
+                            .node_ref
+                            .rpc_stats()
+                            .last_seen_ts
+                            .map(|ls| ls < online_ts)
+                            .unwrap_or(false)
+                            && context.node_ref.state(cur_ts) == BucketEntryState::Reliable
+                    })
+                    .unwrap_or(false);
+            if !suppress_degradation && !protect_after_reattach {
+                if let Some(transport) = context.send_data_result.transport_type() {
+                    context.node_ref.stats_lost_question(transport);
+                }
             }
             // Always clear last_flows: the underlying flow is gone or broken regardless.
             context.node_ref.clear_last_flows();
@@ -1300,20 +1327,19 @@ impl RPCProcessor {
             return;
         }
 
-        // Ordering the send went out on; attribute the lost answer to that ordering on the route.
-        let ordering = context
-            .send_data_result
-            .transport_type()
-            .sequence_ordering();
+        // Ordering the send went out on; attribute the lost question to that ordering on the route.
+        let opt_ordering = context.send_data_result.sequence_ordering();
 
         // If safety route was used, record question lost there
         if let Some(sr) = &context.opt_safety_route_ref {
-            sr.with_stats_mut(|s| s.record_lost_answer(ordering, &context.destination));
+            if let Some(ordering) = opt_ordering {
+                sr.with_stats_mut(|s| s.record_lost_question(ordering, &context.destination));
+            }
 
             // Trigger an out-of-band route test so silently-degraded routes
             // get released without waiting for the next regular cycle. The safety
             // route ref is always allocated, so use its set id directly.
-            let route_id: RouteId = sr.set_id().clone().into();
+            let route_id: RouteId = sr.route_set_id().clone().into();
             veilid_log!(self debug "scheduling out-of-band route test for {} after %SR timeout", route_id);
             let cur_ts = Timestamp::now();
             self.routing_table()
@@ -1322,14 +1348,18 @@ impl RPCProcessor {
         }
         // If remote private route was used, record question lost there
         if let Some(pr) = &context.opt_remote_private_route_ref {
-            pr.with_stats_mut(|s| s.record_lost_answer(ordering, &context.destination));
+            if let Some(ordering) = opt_ordering {
+                pr.with_stats_mut(|s| s.record_lost_question(ordering, &context.destination));
+            }
         }
         // If reply private route was used, record question lost there
         // Skip if reply private route is the same as the safety route to avoid double-counting
         if let Some(rpr) = &context.opt_reply_private_route_ref {
             if context.opt_safety_route_ref.as_ref().map(|r| r.route_key()) != Some(rpr.route_key())
             {
-                rpr.with_stats_mut(|s| s.record_lost_answer(ordering, &context.destination));
+                if let Some(ordering) = opt_ordering {
+                    rpr.with_stats_mut(|s| s.record_lost_question(ordering, &context.destination));
+                }
             }
         }
     }
@@ -1417,21 +1447,17 @@ impl RPCProcessor {
             && context.opt_remote_private_route_ref.is_none()
             && context.opt_reply_private_route_ref.is_none()
         {
-            context.node_ref.stats_answer_rcvd(
-                context.send_ts,
-                recv_ts,
-                bytes,
-                context.send_data_result.transport_type(),
-            );
+            if let Some(transport) = context.send_data_result.transport_type() {
+                context
+                    .node_ref
+                    .stats_answer_rcvd(context.send_ts, recv_ts, bytes, transport);
+            }
             return;
         }
         let routing_table = self.routing_table();
 
         // Ordering the send/answer went out/came in on; marks that ordering valid on the route.
-        let ordering = context
-            .send_data_result
-            .transport_type()
-            .sequence_ordering();
+        let opt_ordering = context.send_data_result.sequence_ordering();
 
         // Get latency for all local routes
         let mut total_local_latency = TimestampDuration::new(0u64);
@@ -1471,7 +1497,9 @@ impl RPCProcessor {
         if let Some(sr) = &context.opt_safety_route_ref {
             sr.with_stats_mut(|s| {
                 // Record received bytes
-                s.record_answer_received(ordering, recv_ts, bytes, &context.destination);
+                if let Some(ordering) = opt_ordering {
+                    s.record_answer_received(ordering, recv_ts, bytes, &context.destination);
+                }
 
                 // If we used a safety route to send, use our last tested latency
                 total_local_latency = total_local_latency.saturating_add(s.latency_stats().average);
@@ -1485,7 +1513,9 @@ impl RPCProcessor {
             {
                 pr.with_stats_mut(|s| {
                     // Record received bytes
-                    s.record_answer_received(ordering, recv_ts, bytes, &context.destination);
+                    if let Some(ordering) = opt_ordering {
+                        s.record_answer_received(ordering, recv_ts, bytes, &context.destination);
+                    }
 
                     // If we used a private route to receive, use our last tested latency
                     total_local_latency =
@@ -1498,7 +1528,9 @@ impl RPCProcessor {
         if let Some(rpr) = &context.opt_remote_private_route_ref {
             rpr.with_stats_mut(|s| {
                 // Record received bytes
-                s.record_answer_received(ordering, recv_ts, bytes, &context.destination);
+                if let Some(ordering) = opt_ordering {
+                    s.record_answer_received(ordering, recv_ts, bytes, &context.destination);
+                }
 
                 // The remote route latency is recorded using the total latency minus the total local latency
                 let remote_latency = total_latency.saturating_sub(total_local_latency);
@@ -1800,20 +1832,24 @@ impl RPCProcessor {
         }
 
         // Successfully sent
-        self.record_send_success(
-            RPCKind::Question,
-            send_ts,
-            bytes,
-            node_ref.clone(),
-            destination_node_ref,
-            opt_safety_route_ref.clone(),
-            opt_remote_private_route_ref.clone(),
-            send_data_result.transport_type(),
-        );
+        if let Some(transport) = send_data_result.transport_type() {
+            self.record_send_success(
+                RPCKind::Question,
+                send_ts,
+                bytes,
+                node_ref.clone(),
+                destination_node_ref,
+                opt_safety_route_ref.clone(),
+                opt_remote_private_route_ref.clone(),
+                transport,
+            );
+        }
 
         // Ref the connection so it doesn't go away until we're done with the waitable reply
-        let opt_connection_ref_scope =
-            send_data_result.unique_flow().connection_id.and_then(|id| {
+        let opt_connection_ref_scope = send_data_result
+            .unique_flow()
+            .and_then(|uf| uf.connection_id)
+            .and_then(|id| {
                 self.network_manager()
                     .connection_manager()
                     .try_connection_ref_scope(id)
@@ -1947,16 +1983,18 @@ impl RPCProcessor {
         }
 
         // Successfully sent
-        self.record_send_success(
-            RPCKind::Statement,
-            send_ts,
-            bytes,
-            node_ref.clone(),
-            destination_node_ref,
-            safety_route,
-            remote_private_route,
-            send_data_result.transport_type(),
-        );
+        if let Some(transport) = send_data_result.transport_type() {
+            self.record_send_success(
+                RPCKind::Statement,
+                send_ts,
+                bytes,
+                node_ref.clone(),
+                destination_node_ref,
+                safety_route,
+                remote_private_route,
+                transport,
+            );
+        }
 
         Ok(NetworkResult::value(()))
     }
@@ -2074,16 +2112,18 @@ impl RPCProcessor {
         }
 
         // Reply successfully sent
-        self.record_send_success(
-            RPCKind::Answer,
-            send_ts,
-            bytes,
-            node_ref.clone(),
-            destination_node_ref,
-            safety_route,
-            remote_private_route,
-            send_data_result.transport_type(),
-        );
+        if let Some(transport) = send_data_result.transport_type() {
+            self.record_send_success(
+                RPCKind::Answer,
+                send_ts,
+                bytes,
+                node_ref.clone(),
+                destination_node_ref,
+                safety_route,
+                remote_private_route,
+                transport,
+            );
+        }
 
         Ok(NetworkResult::value(()))
     }

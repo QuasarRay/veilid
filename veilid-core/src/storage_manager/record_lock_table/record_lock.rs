@@ -14,6 +14,7 @@ struct RecordLockInner<R: RecordLockPurpose, S: RecordLockPurpose> {
 /// Record lock management structure
 #[derive(Debug)]
 pub(super) struct RecordLock<R: RecordLockPurpose, S: RecordLockPurpose> {
+    registry: VeilidComponentRegistry,
     record: OpaqueRecordKey,
     /// Write = Lifetime mode. Read = any non-Lifetime mode.
     lifetime_lock: Arc<AsyncRwLock<()>>,
@@ -26,9 +27,18 @@ pub(super) struct RecordLock<R: RecordLockPurpose, S: RecordLockPurpose> {
     active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
 }
 
+impl<R: RecordLockPurpose, S: RecordLockPurpose> VeilidComponentRegistryAccessor
+    for RecordLock<R, S>
+{
+    fn registry(&self) -> VeilidComponentRegistry {
+        self.registry.clone()
+    }
+}
+
 impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLock<R, S> {
-    pub fn new(record: OpaqueRecordKey) -> Self {
+    pub fn new(registry: VeilidComponentRegistry, record: OpaqueRecordKey) -> Self {
         Self {
+            registry,
             record,
             lifetime_lock: Arc::new(AsyncRwLock::new(())),
             transaction_lock: Arc::new(AsyncRwLock::new(())),

@@ -10,6 +10,7 @@ type AnyEventHandler =
     Arc<dyn Fn(Arc<dyn Any + Send + Sync>) -> PinBoxFutureStatic<()> + Send + Sync>;
 type SubscriptionId = u64;
 
+/// Handle to a registered event handler, passed to `unsubscribe` to remove it.
 #[derive(Debug)]
 pub struct EventBusSubscription {
     id: SubscriptionId,
@@ -92,6 +93,8 @@ impl EventBus {
     }
 
     /// Start up the EventBus background processor
+    ///
+    /// Pairs with `shutdown`. Not idempotent: returns `StartupLockAlreadyStartedError` if already started.
     pub fn startup(&self) -> Result<(), StartupLockAlreadyStartedError> {
         let guard = self.unlocked_inner.startup_lock.startup()?;
         {
@@ -113,6 +116,8 @@ impl EventBus {
 
     /// Shut down EventBus background processing
     /// This unregisters all handlers as well and discards any unprocessed events
+    ///
+    /// Awaits the background task's exit. Idempotent: a no-op if not started.
     pub async fn shutdown(&self) {
         let Ok(guard) = self.unlocked_inner.startup_lock.shutdown().await else {
             return;
@@ -134,6 +139,8 @@ impl EventBus {
     }
 
     /// Post an event to be processed
+    ///
+    /// Non-blocking; enqueues onto an unbounded channel and returns. Errors with `StartupLockNotStartedError` if not started.
     pub fn post<E: Any + Send + Sync + 'static>(
         &self,
         evt: E,
@@ -151,6 +158,8 @@ impl EventBus {
 
     /// Subscribe a handler to handle all posted events of a particular type
     /// Returns an subscription object that can be used to cancel this specific subscription if desired
+    ///
+    /// Pass the returned `EventBusSubscription` to `unsubscribe` to remove the handler; otherwise it stays registered until `shutdown`.
     pub fn subscribe<
         E: Any + Send + Sync + 'static,
         F: Fn(Arc<E>) -> PinBoxFutureStatic<()> + Send + Sync + 'static,
@@ -183,6 +192,8 @@ impl EventBus {
 
     /// Given a subscription object returned from `subscribe`, removes the
     /// subscription for the EventBus. The handler will no longer be called.
+    ///
+    /// Releases the handle from `subscribe`; consumes `sub` by value, so it cannot be applied twice.
     pub fn unsubscribe(&self, sub: EventBusSubscription) {
         let mut inner = self.inner.lock();
 
@@ -195,6 +206,8 @@ impl EventBus {
     }
 
     /// Returns the number of unprocessed events remaining
+    ///
+    /// Local non-blocking channel query.
     #[must_use]
     pub fn len(&self) -> usize {
         self.unlocked_inner.rx.len()

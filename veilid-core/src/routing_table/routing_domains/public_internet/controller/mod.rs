@@ -65,6 +65,9 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     commit_subscription: Mutex<Option<EventBusSubscription>>,
     /// Subscription to PeerInfoChangeEvent for fast-path tick of downstream stages
     peer_info_subscription: Mutex<Option<EventBusSubscription>>,
+
+    /// Bootstrap wait detector (to prevent spamming logs)
+    bootstrap_wait_detector: AtomicOptionTimestamp,
 }
 
 impl fmt::Debug for PublicInternetRoutingDomainControllerUnlockedInner {
@@ -133,7 +136,7 @@ impl PublicInternetRoutingDomainController {
             peer_minimum_refresh_task: TickTask::new("peer_minimum_refresh_task", 1),
             closest_peers_refresh_task: TickTask::new_ms(
                 "closest_peers_refresh_task",
-                config.network.dht.min_peer_refresh_time_ms,
+                config.internal().network.dht.min_peer_refresh_time_ms,
             ),
             ping_validator_public_internet_task: TickTask::new(
                 "ping_validator_public_internet_task",
@@ -149,6 +152,7 @@ impl PublicInternetRoutingDomainController {
             ),
             commit_subscription: Default::default(),
             peer_info_subscription: Default::default(),
+            bootstrap_wait_detector: AtomicOptionTimestamp::new(None),
         };
         let this = Self {
             unlocked_inner: Arc::new(unlocked_inner),
@@ -363,23 +367,7 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         self.published_peer_info.lock().clone()
     }
 
-    fn get_contact_method(
-        &self,
-        peer_a: Arc<PeerInfo>,
-        peer_a_published: bool,
-        peer_b: Arc<PeerInfo>,
-        dial_info_filter: DialInfoFilter,
-        sequencing: Sequencing,
-        context_sort: Option<&DialInfoDetailSort>,
-    ) -> ContactMethod {
-        PublicInternetRoutingDomainController::get_contact_method(
-            self,
-            peer_a,
-            peer_a_published,
-            peer_b,
-            dial_info_filter,
-            sequencing,
-            context_sort,
-        )
+    fn get_contact_methods(&self, request: ContactMethodRequest) -> Vec<ContactMethod> {
+        PublicInternetRoutingDomainController::get_contact_methods(self, request)
     }
 }

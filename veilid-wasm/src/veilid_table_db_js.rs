@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 use super::*;
 
+/// A handle to an opened encrypted key-value table.
 #[wasm_bindgen()]
 pub struct VeilidTableDB {
     inner_table_db: Option<TableDB>,
@@ -33,6 +34,10 @@ impl VeilidTableDB {
 
     /// Get or create the TableDB database table.
     /// This is called automatically when performing actions on the TableDB.
+    ///
+    /// Holds the opened table handle on this object until `deleteTable` or the object is dropped. Re-opening when already open replaces the handle. Awaits a disk open.
+    ///
+    /// Throws the same error its core twin `TableStore::open` returns: `InvalidArgument` if `columnCount` is zero or `tableName` has characters other than alphanumeric, `_`, or `-`; `Generic` if the table is already open elsewhere with a smaller column count or the backing-store open fails; and `NotInitialized` if the node is not started or stored data fails to decrypt.
     pub async fn openTable(&mut self) -> VeilidAPIResult<()> {
         let veilid_api = get_veilid_api()?;
         let tstore = veilid_api.table_store()?;
@@ -42,6 +47,10 @@ impl VeilidTableDB {
     }
 
     /// Delete this TableDB.
+    ///
+    /// Drops this object's open handle, then deletes the table from disk. Awaits a disk delete.
+    ///
+    /// Returns `false` if no table by that name exists. Throws the same error its core twin `TableStore::delete` returns: `InvalidArgument` if `tableName` has characters other than alphanumeric, `_`, or `-`; `Generic` if the table is still open elsewhere (drop all handles first) or the backing-store delete fails; and `NotInitialized` if the node is not started.
     pub async fn deleteTable(&mut self) -> VeilidAPIResult<bool> {
         self.inner_table_db = None;
 
@@ -57,6 +66,10 @@ impl VeilidTableDB {
     }
 
     /// Read a key from a column in the TableDB immediately.
+    ///
+    /// Opens the table if needed, then awaits a disk read.
+    ///
+    /// Returns `undefined` if the key is absent. Throws the same error its core twin `TableDB::load` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store read fails, or the stored value fails to decrypt or decompress. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
     pub async fn load(
         &mut self,
         columnId: u32,
@@ -72,6 +85,10 @@ impl VeilidTableDB {
 
     /// Store a key with a value in a column in the TableDB.
     /// Performs a single transaction immediately.
+    ///
+    /// Opens the table if needed, then awaits a disk write.
+    ///
+    /// Throws the same error its core twin `TableDB::store` returns: `Generic` if `columnId` is at or above the opened column count or the backing-store write fails. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
     pub async fn store(
         &mut self,
         columnId: u32,
@@ -85,6 +102,10 @@ impl VeilidTableDB {
     }
 
     /// Delete key with from a column in the TableDB.
+    ///
+    /// Opens the table if needed, then awaits a disk write.
+    ///
+    /// Returns `undefined` if the key was absent. Throws the same error its core twin `TableDB::delete` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store delete fails, or the prior value fails to decrypt or decompress. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
     pub async fn delete(
         &mut self,
         columnId: u32,
@@ -101,6 +122,10 @@ impl VeilidTableDB {
     /// Get the list of keys in a column of the TableDB.
     ///
     /// Returns an array of Uint8Array keys.
+    ///
+    /// Opens the table if needed, then awaits a disk read.
+    ///
+    /// Throws the same error its core twin `TableDB::get_keys` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store read fails, or a stored key fails to decrypt or decompress. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
     pub async fn getKeys(&mut self, columnId: u32) -> VeilidAPIResult<Uint8ArrayArray> {
         self.ensureOpen().await;
         let table_db = self.getTableDB()?;
@@ -118,6 +143,10 @@ impl VeilidTableDB {
 
     /// Start a TableDB write transaction.
     /// The transaction object must be committed or rolled back before dropping.
+    ///
+    /// Release the returned handle via [VeilidTableDBTransaction::commit] or [VeilidTableDBTransaction::rollback]; dropping it without either logs an error. Local, does not block.
+    ///
+    /// Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
     pub async fn createTransaction(&mut self) -> VeilidAPIResult<VeilidTableDBTransaction> {
         self.ensureOpen().await;
         let table_db = self.getTableDB()?;
@@ -129,6 +158,7 @@ impl VeilidTableDB {
     }
 }
 
+/// A TableDB write transaction. Atomically commits a group of writes or deletes to the TableDB.
 #[wasm_bindgen]
 pub struct VeilidTableDBTransaction {
     inner_transaction: Option<TableDBTransaction>,
@@ -146,12 +176,18 @@ impl VeilidTableDBTransaction {
     }
 
     /// Commit the transaction. Performs all actions atomically.
+    ///
+    /// The release for [VeilidTableDB::createTransaction] (the other half is [VeilidTableDBTransaction::rollback]). An empty transaction commits as a no-op; otherwise blocks on the serialized commit lock and the disk write. Calling commit or rollback again errors with "transaction already completed".
+    ///
+    /// Throws the same error its core twin `TableDBTransaction::commit` returns: `Generic` if this transaction was already committed or rolled back, or if the atomic backing-store write fails (the buffered writes are then lost).
     pub async fn commit(&self) -> VeilidAPIResult<()> {
         let transaction = self.getTransaction()?;
         transaction.commit().await
     }
 
     /// Rollback the transaction. Does nothing to the TableDB.
+    ///
+    /// The release for [VeilidTableDB::createTransaction] (the other half is [VeilidTableDBTransaction::commit]). Discards the buffered writes locally without blocking.
     #[allow(clippy::unused_async)]
     pub async fn rollback(&self) -> VeilidAPIResult<()> {
         let transaction = self.getTransaction()?;
@@ -161,12 +197,17 @@ impl VeilidTableDBTransaction {
 
     /// Store a key with a value in a column in the TableDB.
     /// Does not modify TableDB until `.commit()` is called.
+    ///
+    /// Throws the same error its core twin `TableDBTransaction::store` returns: `Generic` if `col` is at or above the opened column count, or if this transaction was already committed or rolled back.
     pub async fn store(&self, col: u32, key: Box<[u8]>, value: Box<[u8]>) -> VeilidAPIResult<()> {
         let transaction = self.getTransaction()?;
         transaction.store(col, &key, &value).await
     }
 
     /// Delete key with from a column in the TableDB
+    /// Does not modify TableDB until `.commit()` is called.
+    ///
+    /// Throws the same error its core twin `TableDBTransaction::delete` returns: `Generic` if `col` is at or above the opened column count, or if this transaction was already committed or rolled back.
     pub async fn deleteKey(&self, col: u32, key: Box<[u8]>) -> VeilidAPIResult<()> {
         let transaction = self.getTransaction()?;
         transaction.delete(col, &key).await

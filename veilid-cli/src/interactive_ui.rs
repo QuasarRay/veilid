@@ -11,6 +11,7 @@ use futures::io::AsyncWriteExt as _;
 use indent::indent_by;
 use rustyline_async::SharedWriter;
 use rustyline_async::{Readline, ReadlineError, ReadlineEvent};
+use std::time::SystemTime;
 use stop_token::future::FutureExt as StopTokenFutureExt;
 use stop_token::*;
 
@@ -83,71 +84,120 @@ impl InteractiveUI {
 
         CursiveUI::set_start_time();
 
+        let _ = stdout
+            .write_all(
+                format!(
+                    r#" _   ____________   _______ 
+| | / / __/  _/ /  /  _/ _ \
+| |/ / _/_/ // /___/ // // /
+|___/___/___/____/___/____/
+--==/ {} {} /==--
+
+"#,
+                    env!("CARGO_PKG_NAME"),
+                    env!("CARGO_PKG_VERSION")
+                )
+                .as_bytes(),
+            )
+            .await
+            .map(drop);
+
         // Wait for connection to be established
         let done2 = done.clone();
         let self2 = self.clone();
         let mut stdout2 = stdout.clone();
+
         let connection_state_jh = spawn("connection state handler", async move {
+            let mut prev_state = ConnectionState::Disconnected;
             loop {
-                let res = match connection_state_receiver
+                let next_state = match connection_state_receiver
                     .recv_async()
                     .timeout_at(done2.clone())
                     .await
                 {
-                    Ok(Ok(ConnectionState::ConnectedTCP(sa, st))) => {
-                        let tstr = st
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|n| human_timestamp(n.as_micros() as u64))
-                            .unwrap_or_else(|_| "???".to_string());
-
-                        stdout2
-                            .write(format!("\rConnected TCP: {} @ {}\n", sa, tstr).as_bytes())
-                            .await
-                            .map(drop)
-                    }
-                    Ok(Ok(ConnectionState::ConnectedIPC(pb, st))) => {
-                        let tstr = st
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|n| human_timestamp(n.as_micros() as u64))
-                            .unwrap_or_else(|_| "???".to_string());
-                        stdout2
-                            .write(
-                                format!("\rConnected IPC: {} @ {}\n", pb.to_string_lossy(), tstr)
-                                    .as_bytes(),
-                            )
-                            .await
-                            .map(drop)
-                    }
-                    Ok(Ok(ConnectionState::RetryingTCP(sa, st))) => {
-                        let tstr = st
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|n| human_timestamp(n.as_micros() as u64))
-                            .unwrap_or_else(|_| "???".to_string());
-                        stdout2
-                            .write(format!("\rRetrying TCP: {} @ {}\n", sa, tstr).as_bytes())
-                            .await
-                            .map(drop)
-                    }
-
-                    Ok(Ok(ConnectionState::RetryingIPC(pb, st))) => {
-                        let tstr = st
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|n| human_timestamp(n.as_micros() as u64))
-                            .unwrap_or_else(|_| "???".to_string());
-                        stdout2
-                            .write(
-                                format!("Retrying IPC: {} @ {}\n", pb.to_string_lossy(), tstr)
-                                    .as_bytes(),
-                            )
-                            .await
-                            .map(drop)
-                    }
-                    Ok(Ok(ConnectionState::Disconnected)) => {
-                        stdout2.write("Disconnected\n".as_bytes()).await.map(drop)
-                    }
-                    Ok(Err(e)) => Err(std::io::Error::other(e)),
-                    Err(_) => {
+                    Ok(Ok(state)) => state,
+                    Ok(Err(e)) => {
+                        // Error getting connection state
+                        eprintln!("Error: {:?}", e);
+                        self2.inner.lock().done.take();
                         break;
+                    }
+                    Err(_) => {
+                        // stop token
+                        break;
+                    }
+                };
+                let changed = prev_state.changed(&next_state);
+                prev_state = next_state.clone();
+
+                if !changed {
+                    continue;
+                }
+
+                let res = match next_state {
+                    ConnectionState::ConnectedTCP(_sa, st) => {
+                        let tstr = st
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|n| human_timestamp(n.as_micros() as u64))
+                            .unwrap_or_else(|_| "???".to_string());
+
+                        stdout2
+                            .write_all(format!("\r{}: Connected\n", tstr).as_bytes())
+                            .await
+                            .map(drop)
+                    }
+                    ConnectionState::ConnectedIPC(_pb, st) => {
+                        let tstr = st
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|n| human_timestamp(n.as_micros() as u64))
+                            .unwrap_or_else(|_| "???".to_string());
+
+                        stdout2
+                            .write_all(format!("\r{}: Connected\n", tstr).as_bytes())
+                            .await
+                            .map(drop)
+                    }
+                    ConnectionState::ConnectingTCP(sa, st) => {
+                        let tstr = st
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|n| human_timestamp(n.as_micros() as u64))
+                            .unwrap_or_else(|_| "???".to_string());
+                        stdout2
+                            .write_all(
+                                format!("\r{}: Connecting to TCP({})\n", tstr, sa).as_bytes(),
+                            )
+                            .await
+                            .map(drop)
+                    }
+
+                    ConnectionState::ConnectingIPC(pb, st) => {
+                        let tstr = st
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|n| human_timestamp(n.as_micros() as u64))
+                            .unwrap_or_else(|_| "???".to_string());
+                        stdout2
+                            .write_all(
+                                format!(
+                                    "\r{}: Connecting to IPC({})\n",
+                                    tstr,
+                                    pb.to_string_lossy()
+                                )
+                                .as_bytes(),
+                            )
+                            .await
+                            .map(drop)
+                    }
+                    ConnectionState::Disconnected => {
+                        let st = SystemTime::now();
+                        let tstr = st
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|n| human_timestamp(n.as_micros() as u64))
+                            .unwrap_or_else(|_| "???".to_string());
+
+                        stdout2
+                            .write_all(format!("\r{}: Disconnected\n", tstr).as_bytes())
+                            .await
+                            .map(drop)
                     }
                 };
 
@@ -177,112 +227,89 @@ impl InteractiveUI {
                         if let Err(e) = readline.clear() {
                             eprintln!("Error: {:?}", e);
                         }
-                    } else if line == "log error" {
-                        let opt_cmdproc = self.inner.lock().cmdproc.clone();
-                        if let Some(cmdproc) = opt_cmdproc {
-                            if let Err(e) = cmdproc.run_command(
-                                "change_log_level api #enabled=error",
-                                UICallback::Interactive(Box::new(|| {})),
-                            ) {
-                                eprintln!("Error: {:?}", e);
-                                self.inner.lock().done.take();
-                            }
-                        }
-                    } else if line == "log warn" {
-                        let opt_cmdproc = self.inner.lock().cmdproc.clone();
-                        if let Some(cmdproc) = opt_cmdproc {
-                            if let Err(e) = cmdproc.run_command(
-                                "change_log_level api #enabled=warn",
-                                UICallback::Interactive(Box::new(|| {})),
-                            ) {
-                                eprintln!("Error: {:?}", e);
-                                self.inner.lock().done.take();
-                            }
-                        }
-                    } else if line == "log info" {
-                        let opt_cmdproc = self.inner.lock().cmdproc.clone();
-                        if let Some(cmdproc) = opt_cmdproc {
-                            if let Err(e) = cmdproc.run_command(
-                                "change_log_level api #enabled=info",
-                                UICallback::Interactive(Box::new(|| {})),
-                            ) {
-                                eprintln!("Error: {:?}", e);
-                                self.inner.lock().done.take();
-                            }
-                        }
-                    } else if line == "log debug" || line == "log" {
-                        let opt_cmdproc = self.inner.lock().cmdproc.clone();
-                        if let Some(cmdproc) = opt_cmdproc {
-                            if let Err(e) = cmdproc.run_command(
-                                "change_log_level api #enabled=debug",
-                                UICallback::Interactive(Box::new(|| {})),
-                            ) {
-                                eprintln!("Error: {:?}", e);
-                                self.inner.lock().done.take();
-                            }
-                        }
-                        if line == "log" {
-                            self.inner.lock().log_enabled = true;
-                        }
-                    } else if line == "log trace" {
-                        let opt_cmdproc = self.inner.lock().cmdproc.clone();
-                        if let Some(cmdproc) = opt_cmdproc {
-                            if let Err(e) = cmdproc.run_command(
-                                "change_log_level api #enabled=trace",
-                                UICallback::Interactive(Box::new(|| {})),
-                            ) {
-                                eprintln!("Error: {:?}", e);
-                                self.inner.lock().done.take();
-                            }
-                        }
-                    } else if line == "log off" {
-                        let opt_cmdproc = self.inner.lock().cmdproc.clone();
-                        if let Some(cmdproc) = opt_cmdproc {
-                            if let Err(e) = cmdproc.run_command(
-                                "change_log_level api #enabled=off",
-                                UICallback::Interactive(Box::new(|| {})),
-                            ) {
-                                eprintln!("Error: {:?}", e);
-                                self.inner.lock().done.take();
-                            }
-                        }
-                    } else if line == "log hide" || line == "log disable" {
+                    } else if line == "hide" {
                         self.inner.lock().log_enabled = false;
-                    } else if line == "log show" || line == "log enable" {
+                    } else if line == "show" {
                         self.inner.lock().log_enabled = true;
                     } else if !line.is_empty() {
-                        if line == "help" {
-                            let _ = stdout.write(
-                                br#"
-Interactive Mode Commands:
-    help - Display this help
-    clear - Clear the screen
-    log [level]      - Set the api layer log level for currently enabled facility tag to one of: error,warn,info,debug,trace,off
-        hide|disable - Turn off viewing the log without changing the log level for the node
-        show|enable  - Turn on viewing the log without changing the log level for the node
-                     - With no option, 'log' turns on viewing the log and sets the level to 'debug'
-"#
-                            ).await;
-                        }
+                        let (cmd, rest) = CommandProcessor::word_split(line);
 
-                        let cmdproc = self.inner.lock().cmdproc.clone();
-                        if let Some(cmdproc) = &cmdproc {
-                            if let Err(e) = cmdproc.run_command(
-                                line,
-                                UICallback::Interactive(Box::new({
-                                    //let mut stdout = stdout.clone();
-                                    move || {
-                                        // if let Err(e) = writeln!(stdout) {
-                                        //     eprintln!("Error: {:?}", e);
-                                        // }
+                        let mut run_command = true;
+                        if cmd == "help" {
+                            let opt_help = if let Some(rest) = rest.as_deref() {
+                                match rest {
+                                    "clear" => {
+                                        run_command = false;
+                                        Some(
+                                            r#"Clear the screen
+
+Usage: clear
+"#
+                                            .to_string(),
+                                        )
                                     }
-                                })),
-                            ) {
-                                if let Err(e) =
-                                    stdout.write(format!("Error: {}", e).as_bytes()).await
-                                {
+                                    "show" => {
+                                        run_command = false;
+                                        Some(
+                                        r#"Turn on viewing the log without changing the log level for the node
+
+Usage: show
+"#
+                                        .to_string(),
+                                    )
+                                    }
+                                    "hide" => {
+                                        run_command = false;
+                                        Some(
+                                        r#"Turn off viewing the log without changing the log level for the node
+
+Usage: hide
+"#
+                                        .to_string(),
+                                    )
+                                    }
+                                    _ => None,
+                                }
+                            } else {
+                                Some(
+                                    r#"
+Interactive Mode Commands:
+  clear       Clear the screen
+  show        Turn on viewing the log without changing the log level for the node
+  hide        Turn off viewing the log without changing the log level for the node
+"#
+                                    .to_string(),
+                                )
+                            };
+
+                            if let Some(opt_help) = opt_help {
+                                if let Err(e) = stdout.write_all(opt_help.as_bytes()).await {
                                     eprintln!("Error: {:?}", e);
                                     break;
+                                }
+                            }
+                        }
+
+                        if run_command {
+                            let cmdproc = self.inner.lock().cmdproc.clone();
+                            if let Some(cmdproc) = &cmdproc {
+                                if let Err(e) = cmdproc.run_command(
+                                    line,
+                                    UICallback::Interactive(Box::new({
+                                        //let mut stdout = stdout.clone();
+                                        move || {
+                                            // if let Err(e) = writeln!(stdout) {
+                                            //     eprintln!("Error: {:?}", e);
+                                            // }
+                                        }
+                                    })),
+                                ) {
+                                    if let Err(e) =
+                                        stdout.write_all(format!("Error: {}", e).as_bytes()).await
+                                    {
+                                        eprintln!("Error: {:?}", e);
+                                        break;
+                                    }
                                 }
                             }
                         }

@@ -106,6 +106,7 @@ impl Logs {
             let filter = VeilidLayerFilter::new_with_config(
                 VeilidLayerFilterConfig::new()
                     .with_common_log_level(settingsr.logging.terminal.level.into())
+                    .try_with_directives_string(&settingsr.logging.terminal.directives)?
                     .try_with_default_env()?,
             );
             filter.set_log_key_filter(log_key_filter);
@@ -164,7 +165,8 @@ impl Logs {
 
             let filter = VeilidLayerFilter::new_with_config(
                 VeilidLayerFilterConfig::new()
-                    .with_common_log_level(settingsr.logging.otlp.level.into()),
+                    .with_common_log_level(settingsr.logging.otlp.level.into())
+                    .try_with_directives_string(&settingsr.logging.otlp.directives)?,
             );
 
             #[allow(deprecated)]
@@ -214,7 +216,8 @@ impl Logs {
 
             let filter = VeilidLayerFilter::new_with_config(
                 VeilidLayerFilterConfig::new()
-                    .with_common_log_level(settingsr.logging.file.level.into()),
+                    .with_common_log_level(settingsr.logging.file.level.into())
+                    .try_with_directives_string(&settingsr.logging.file.directives)?,
             );
             filter.set_log_key_filter(log_key_filter);
 
@@ -235,7 +238,8 @@ impl Logs {
         if settingsr.logging.api.enabled {
             let filter = VeilidLayerFilter::new_with_config(
                 VeilidLayerFilterConfig::new()
-                    .with_common_log_level(settingsr.logging.api.level.into()),
+                    .with_common_log_level(settingsr.logging.api.level.into())
+                    .try_with_directives_string(&settingsr.logging.api.directives)?,
             );
 
             #[allow(deprecated)]
@@ -254,7 +258,9 @@ impl Logs {
                         make_veilid_server_log_key_filter(settingsr.testing.subnode_index, true);
 
                     let filter = VeilidLayerFilter::new_with_config(
-                        VeilidLayerFilterConfig::new().with_common_log_level(settingsr.logging.system.level.into()),
+                        VeilidLayerFilterConfig::new()
+                            .with_common_log_level(settingsr.logging.system.level.into())
+                            .try_with_directives_string(&settingsr.logging.system.directives)?,
                     );
                     filter.set_log_key_filter(log_key_filter);
 

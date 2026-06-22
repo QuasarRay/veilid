@@ -217,26 +217,23 @@ impl RoutingTable {
     }
 
     /// Look up the best way for two nodes to reach each other over a specific routing domain
-    #[expect(clippy::too_many_arguments)]
-    pub fn get_contact_method(
+    pub fn get_best_contact_method(
         &self,
         routing_domain: RoutingDomain,
-        peer_a: Arc<PeerInfo>,
-        peer_a_published: bool,
-        peer_b: Arc<PeerInfo>,
-        dial_info_filter: DialInfoFilter,
-        sequencing: Sequencing,
-        context_sort: Option<&DialInfoDetailSort>,
-    ) -> ContactMethod {
+        contact_method_request: ContactMethodRequest,
+    ) -> Option<ContactMethod> {
         let rdc = self.get_routing_domain_controller(routing_domain);
-        rdc.get_contact_method(
-            peer_a,
-            peer_a_published,
-            peer_b,
-            dial_info_filter,
-            sequencing,
-            context_sort,
-        )
+        rdc.get_best_contact_method(contact_method_request)
+    }
+
+    /// Look up all the ways for two nodes to reach each other over a specific routing domain
+    pub fn get_contact_methods(
+        &self,
+        routing_domain: RoutingDomain,
+        contact_method_request: ContactMethodRequest,
+    ) -> Vec<ContactMethod> {
+        let rdc = self.get_routing_domain_controller(routing_domain);
+        rdc.get_contact_methods(contact_method_request)
     }
 
     /// Get the current published peer info

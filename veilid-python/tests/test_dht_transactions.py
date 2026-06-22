@@ -5,12 +5,13 @@ import pytest
 import asyncio
 import time
 import os
+import subprocess
 
 import veilid
 from veilid import *
 from veilid.types import *
 
-from .conftest import dht_retry
+from .conftest import dht_retry, wait_for_public_internet_ready
 from .test_dht import sync
 
 ##################################################################
@@ -835,13 +836,9 @@ async def test_dht_transaction_watch_values():
 @pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
 @pytest.mark.asyncio
 async def test_dht_transaction_watch_values_transactional():
-    # Same setup as test_dht_transaction_watch_values, but the watcher opts in
-    # to transactional=True. Core MUST then suppress the inline-value
-    # local-store auto-update: the delivered VeilidValueChange has no inline
-    # value, the watcher's local store stays behind the network for the watched
-    # subkey, and a subsequent inspect must report local < network so the
-    # watcher's transactional refresh (DHTLog / DHTShortArray) can detect the
-    # gap via subkeyNeedsSync and fetch under its own transaction.
+    # When the watcher's record carries a transaction membership, inbound value
+    # changes report as non-committing hints: no inline value, no local-store
+    # auto-update, so a later inspect shows local < network.
 
     value_change_queue: asyncio.Queue[veilid.VeilidUpdate] = asyncio.Queue()
 
@@ -896,8 +893,19 @@ async def test_dht_transaction_watch_values_transactional():
                 vd = await rc1.get_dht_value(rec1.key, ValueSubkey(3), True)
                 assert vd is not None and vd.data == b"BLAH"
 
-                # Watcher: TRANSACTIONAL watch on all subkeys
-                active = await rc1.watch_dht_values(rec1.key, transactional=True)
+                # Watcher: commit a transaction over rec1 so the record gains a
+                # transaction membership (this replaces the old transactional watch
+                # flag). Do this after the network get so it isn't cleared.
+                txw = await dht_retry(
+                    api1,
+                    lambda: api1.transact_dht_records([rec1.key], None),
+                    label="watcher membership",
+                )
+                async with txw:
+                    await txw.commit()
+
+                # Watcher: watch on all subkeys (transactional by record membership)
+                active = await rc1.watch_dht_values(rec1.key)
                 assert active
 
                 # Owner: overwrite subkey 3 = v2 transactionally (seq 1)
@@ -1067,7 +1075,7 @@ async def test_dht_transaction_write_read_full_subkeys():
                     schema = DHTSchema.dflt(SUBKEY_COUNT)
                     print(f'writing {COUNT} records with full subkeys')
                     for n in range(COUNT):
-                        desc = await rc0.create_dht_record(kind, schema)
+                        desc = await dht_retry(api0, lambda: rc0.create_dht_record(kind, schema), label="create")
                         print(f'  {n}: {desc.key} {desc.owner}:{desc.owner_secret}')
                         records.append(desc)
 
@@ -1077,8 +1085,15 @@ async def test_dht_transaction_write_read_full_subkeys():
                         subkey_data_list.append(subkey_data)
 
                     start = time.time()
-                    transaction = await api0.transact_dht_records([x.key for x in records], None)
+                    transaction = await dht_retry(api0, lambda: api0.transact_dht_records([x.key for x in records], None), label="begin write")
                     print(f'transaction begin: {time.time()-start}')
+
+                    async def setter(key: RecordKey, subkey: ValueSubkey, data: bytes):
+                        return await dht_retry(
+                            api0,
+                            lambda: transaction.set(key, subkey, data),
+                            label=f"set {key} #{subkey}",
+                        )
 
                     for i in range(SUBKEY_COUNT):
                         start = time.time()
@@ -1088,7 +1103,7 @@ async def test_dht_transaction_write_read_full_subkeys():
                         for n in range(COUNT):
                             key = records[n].key
                             subkey_data = subkey_data_list[n]
-                            init_set_futures.add(transaction.set(key, ValueSubkey(i), subkey_data))
+                            init_set_futures.add(setter(key, ValueSubkey(i), subkey_data))
 
                         # Update each subkey for each record in parallel
                         # This ensures that each record gets its own expiration update
@@ -1098,7 +1113,7 @@ async def test_dht_transaction_write_read_full_subkeys():
 
 
                     start = time.time()
-                    await transaction.commit()
+                    await dht_retry(api0, lambda: transaction.commit(), label="commit write")
                     print(f'transaction commit: {time.time()-start}')
 
                     for desc in records:
@@ -1111,11 +1126,18 @@ async def test_dht_transaction_write_read_full_subkeys():
                     print(f'reading {COUNT} records')
 
                     for desc in records:
-                        await rc0.open_dht_record(desc.key)
+                        await dht_retry(api0, lambda: rc0.open_dht_record(desc.key), label="open")
 
                     start = time.time()
-                    transaction = await api0.transact_dht_records([x.key for x in records], None)
+                    transaction = await dht_retry(api0, lambda: api0.transact_dht_records([x.key for x in records], None), label="begin read")
                     print(f'transaction begin: {time.time()-start}')
+
+                    async def getter(key: RecordKey, subkey: ValueSubkey, check_data: bytes):
+                        return (key, subkey, check_data, await dht_retry(
+                            api0,
+                            lambda: transaction.get(key, subkey),
+                            label=f"get {key} #{subkey}",
+                        ))
 
                     for i in range(SUBKEY_COUNT):
                         start = time.time()
@@ -1127,9 +1149,6 @@ async def test_dht_transaction_write_read_full_subkeys():
                             key = records[n].key
                             subkey_data = subkey_data_list[n]
 
-                            async def getter(key: RecordKey, subkey: ValueSubkey, check_data: bytes):
-                                return (key, subkey, check_data, await transaction.get(key, subkey))
-
                             init_get_futures.add(getter(key, subkey, subkey_data))
 
                         # Get each subkey for each record in parallel
@@ -1140,7 +1159,7 @@ async def test_dht_transaction_write_read_full_subkeys():
 
                         print(f'transaction get subkey {i}: {time.time()-start}')
 
-                    await transaction.rollback()
+                    await dht_retry(api0, lambda: transaction.rollback(), label="rollback")
 
                     for desc in records:
                         await rc0.close_dht_record(desc.key)
@@ -1204,7 +1223,7 @@ async def test_dht_transaction_write_read_full_records_serial():
 
                     for n in range(COUNT):
                         start = time.time()
-                        transaction = await api0.transact_dht_records([records[n].key], None)
+                        transaction = await dht_retry(api0, lambda: api0.transact_dht_records([records[n].key], None), label="begin")
                         print(f'transaction {n} begin: {time.time()-start}')
 
                         semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
@@ -1260,7 +1279,7 @@ async def test_dht_transaction_write_read_full_records_serial():
 
                     for n in range(COUNT):
                         key = records[n].key
-                        transaction = await api0.transact_dht_records([records[n].key], None)
+                        transaction = await dht_retry(api0, lambda: api0.transact_dht_records([records[n].key], None), label="begin")
                         subkey_data = subkey_data_list[n]
 
                         init_get_futures : set[Coroutine[Any, Any, tuple[RecordKey, ValueSubkey, bytes, ValueData | None]]] = set()
@@ -1349,7 +1368,7 @@ async def test_dht_transaction_write_read_full_records_parallel():
                     schema = DHTSchema.dflt(SUBKEY_COUNT)
                     print(f'writing {COUNT} records with full subkeys')
                     for n in range(COUNT):
-                        desc = await rc0.create_dht_record(kind, schema)
+                        desc = await dht_retry(api0, lambda: rc0.create_dht_record(kind, schema), label="create")
                         print(f'  {n}: {desc.key} {desc.owner}:{desc.owner_secret}')
                         records.append(desc)
 
@@ -1359,8 +1378,15 @@ async def test_dht_transaction_write_read_full_records_parallel():
                         subkey_data_list.append(subkey_data)
 
                     start = time.time()
-                    transaction = await api0.transact_dht_records([x.key for x in records], None)
+                    transaction = await dht_retry(api0, lambda: api0.transact_dht_records([x.key for x in records], None), label="begin write")
                     print(f'transaction begin: {time.time()-start}')
+
+                    async def setter(key: RecordKey, subkey: ValueSubkey, data: bytes):
+                        return await dht_retry(
+                            api0,
+                            lambda: transaction.set(key, subkey, data),
+                            label=f"set {key} #{subkey}",
+                        )
 
                     for n in range(COUNT):
                         key = records[n].key
@@ -1371,7 +1397,7 @@ async def test_dht_transaction_write_read_full_records_parallel():
                         for i in range(SUBKEY_COUNT):
                             start = time.time()
 
-                            init_set_futures.add(transaction.set(key, ValueSubkey(i), subkey_data))
+                            init_set_futures.add(setter(key, ValueSubkey(i), subkey_data))
 
                         # Update each subkey for each record serially
                         # This stress tests record keepalives
@@ -1381,7 +1407,7 @@ async def test_dht_transaction_write_read_full_records_parallel():
 
 
                     start = time.time()
-                    await transaction.commit()
+                    await dht_retry(api0, lambda: transaction.commit(), label="commit write")
                     print(f'transaction commit: {time.time()-start}')
 
                     for desc in records:
@@ -1394,11 +1420,18 @@ async def test_dht_transaction_write_read_full_records_parallel():
                     print(f'reading {COUNT} records')
 
                     for desc in records:
-                        await rc0.open_dht_record(desc.key)
+                        await dht_retry(api0, lambda: rc0.open_dht_record(desc.key), label="open")
 
                     start = time.time()
-                    transaction = await api0.transact_dht_records([x.key for x in records], None)
+                    transaction = await dht_retry(api0, lambda: api0.transact_dht_records([x.key for x in records], None), label="begin read")
                     print(f'transaction begin: {time.time()-start}')
+
+                    async def getter(key: RecordKey, subkey: ValueSubkey, check_data: bytes):
+                        return (key, subkey, check_data, await dht_retry(
+                            api0,
+                            lambda: transaction.get(key, subkey),
+                            label=f"get {key} #{subkey}",
+                        ))
 
                     for n in range(COUNT):
                         key = records[n].key
@@ -1410,9 +1443,6 @@ async def test_dht_transaction_write_read_full_records_parallel():
                             start = time.time()
                             subkey = ValueSubkey(i)
 
-                            async def getter(key: RecordKey, subkey: ValueSubkey, check_data: bytes):
-                                return (key, subkey, check_data, await transaction.get(key, subkey))
-
                             init_get_futures.add(getter(key, subkey, subkey_data))
 
                         # Get each subkey for each record serially
@@ -1423,7 +1453,7 @@ async def test_dht_transaction_write_read_full_records_parallel():
 
                         print(f'transaction get record {n}: {time.time()-start}')
 
-                    await transaction.rollback()
+                    await dht_retry(api0, lambda: transaction.rollback(), label="rollback")
 
                     for desc in records:
                         await rc0.close_dht_record(desc.key)
@@ -1488,7 +1518,7 @@ async def test_dht_transaction_write_read_full_parallel():
                         subkey_data_list.append(subkey_data)
 
                     t1start = time.time()
-                    transaction = await api0.transact_dht_records([x.key for x in records], None)
+                    transaction = await dht_retry(api0, lambda: api0.transact_dht_records([x.key for x in records], None), label="begin")
                     print(f'transaction begin: {time.time()-t1start}')
 
                     for i in range(0,SUBKEY_COUNT, SUBKEY_BATCH):
@@ -1530,7 +1560,7 @@ async def test_dht_transaction_write_read_full_parallel():
                         await rc0.open_dht_record(desc.key)
 
                     t2start = time.time()
-                    transaction = await api0.transact_dht_records([x.key for x in records], None)
+                    transaction = await dht_retry(api0, lambda: api0.transact_dht_records([x.key for x in records], None), label="begin")
                     print(f'transaction begin: {time.time()-t2start}')
 
                     for i in range(0,SUBKEY_COUNT, SUBKEY_BATCH):
@@ -1564,6 +1594,115 @@ async def test_dht_transaction_write_read_full_parallel():
                     for desc in records:
                         await rc0.close_dht_record(desc.key)
 
+
+
+@pytest.mark.skipif(os.getenv("STRESS") != "1", reason="stress test takes a long time")
+@pytest.mark.asyncio
+async def test_dht_transaction_bulk_store():
+    # Mirror of the veilid-wasm bulk store stress test, for native/wasm comparison
+
+    async def null_update_callback(update: VeilidUpdate):
+        pass
+
+    try:
+        api0 = await api_connector(null_update_callback, 0)
+    except VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 0.")
+        return
+
+    # veilid-core limits: MAX_SUBKEY_SIZE and MAX_RECORD_DATA_SIZE
+    SUBKEY_MAX_SIZE_BYTES = 32768
+    DHTKEY_MAX_SIZE_BYTES = 1048576
+
+    def chunk_bytes(data: bytes, chunk_size: int) -> list[bytes]:
+        return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
+
+    async with api0:
+        await api0.debug("record purge local")
+        await api0.debug("record purge remote")
+
+        rc0 = await api0.new_routing_context()
+        async with rc0:
+            for kind in await api0.valid_crypto_kinds():
+                print(f"kind: {kind}")
+
+                for size_mb in [1, 2, 4]:
+                    total_bytes = size_mb * 1024 * 1024
+
+                    # each subkey filled with its global ordinal for content verification
+                    data = bytearray(total_bytes)
+                    for i in range(0, total_bytes, SUBKEY_MAX_SIZE_BYTES):
+                        end = min(i + SUBKEY_MAX_SIZE_BYTES, total_bytes)
+                        data[i:end] = bytes([(i // SUBKEY_MAX_SIZE_BYTES) & 0xFF]) * (end - i)
+
+                    data_chunks = chunk_bytes(bytes(data), DHTKEY_MAX_SIZE_BYTES)
+                    sub_keys_per_chunk = [chunk_bytes(c, SUBKEY_MAX_SIZE_BYTES) for c in data_chunks]
+                    print(f"split {total_bytes} bytes across {len(data_chunks)} DHT records")
+
+                    keys: list[RecordKey] = []
+                    for sub_keys in sub_keys_per_chunk:
+                        desc = await rc0.create_dht_record(kind, DHTSchema.dflt(len(sub_keys)))
+                        keys.append(desc.key)
+
+                    start_begin = time.time()
+                    transaction = await dht_retry(api0, lambda: api0.transact_dht_records(keys, None), label="begin bulk store")
+                    print(f"begin transaction: {(time.time()-start_begin)*1000:.1f}ms")
+
+                    # Every subkey of every record in parallel; op concurrency bounds what's in flight
+                    start_set = time.time()
+                    set_futures = []
+                    for chunk_index, sub_keys in enumerate(sub_keys_per_chunk):
+                        for subkey_idx, subkey_data in enumerate(sub_keys):
+                            async def setter(
+                                key: RecordKey = keys[chunk_index],
+                                subkey: ValueSubkey = ValueSubkey(subkey_idx),
+                                d: bytes = subkey_data,
+                            ):
+                                return await dht_retry(api0, lambda: transaction.set(key, subkey, d), label=f"set {key} #{subkey}")
+                            set_futures.append(setter())
+                    set_results = await asyncio.gather(*set_futures)
+                    set_secs = time.time() - start_set
+                    print(f"set {len(set_futures)} subkeys: {set_secs*1000:.1f}ms ({total_bytes/1024/set_secs:.0f} KB/s)")
+                    for res in set_results:
+                        assert res is None
+
+                    start_commit = time.time()
+                    await dht_retry(api0, lambda: transaction.commit(), label="commit bulk store")
+                    print(f"commit transaction: {(time.time()-start_commit)*1000:.1f}ms")
+                    print(f"completed transaction: {(time.time()-start_begin)*1000:.1f}ms")
+
+                    # verify the network accepted every subkey, and spot-check content
+                    try:
+                        tx2 = await dht_retry(api0, lambda: api0.transact_dht_records(keys, None), label="begin bulk verify")
+                        try:
+                            for rec, sub_keys in enumerate(sub_keys_per_chunk):
+                                subkey_count = len(sub_keys)
+                                full_range = [(ValueSubkey(0), ValueSubkey(subkey_count - 1))]
+                                report = await dht_retry(
+                                    api0,
+                                    lambda rec=rec, r=full_range: tx2.inspect(keys[rec], r, DHTReportScope.SYNC_GET),
+                                    label=f"inspect rec{rec}",
+                                )
+                                assert report.subkeys == [(0, subkey_count - 1)]
+                                assert report.network_seqs == [0] * subkey_count
+
+                                last_subkey = subkey_count - 1
+                                vd = await dht_retry(
+                                    api0,
+                                    lambda rec=rec, sk=last_subkey: tx2.get(keys[rec], ValueSubkey(sk)),
+                                    label=f"get rec{rec} sk{last_subkey}",
+                                )
+                                assert vd is not None
+                                global_ordinal = (rec * (DHTKEY_MAX_SIZE_BYTES // SUBKEY_MAX_SIZE_BYTES) + last_subkey) & 0xFF
+                                assert vd.data[0] == global_ordinal
+                                assert len(vd.data) == SUBKEY_MAX_SIZE_BYTES
+                        finally:
+                            if not tx2.is_done():
+                                await dht_retry(api0, lambda: tx2.rollback(), label="rollback bulk verify")
+                    finally:
+                        for key in keys:
+                            await rc0.close_dht_record(key)
+                            await rc0.delete_dht_record(key)
 
 
 @pytest.mark.skipif(os.getenv("FILLDHT") is None, reason="fill disk test disabled")
@@ -1618,7 +1757,7 @@ async def test_dht_fill_dht_transact():
                         subkey_data_list.append(subkey_data)
 
                     start = time.time()
-                    transaction = await api0.transact_dht_records([x.key for x in records], None)
+                    transaction = await dht_retry(api0, lambda: api0.transact_dht_records([x.key for x in records], None), label="begin")
 
                     init_set_futures : set[Coroutine[Any, Any, ValueData | None]] = set()
 
@@ -1646,4 +1785,178 @@ async def test_dht_fill_dht_transact():
 
                     for desc in records:
                         await rc0.close_dht_record(desc.key)
+
+
+@pytest.mark.skipif(os.getenv("REHYDRATION") != "1", reason="rehydration dev-net test; opt-in via REHYDRATION=1")
+@pytest.mark.asyncio
+async def test_dht_transaction_rehydration():
+    # End-to-end transactional rehydration against the live (dev) network:
+    # write a multi-record transaction set, age it out of the network via an
+    # external deleter, then prove reopening rehydrates it back so a fresh
+    # (no-local-copy) transactional read returns every value.
+    delete_script = os.getenv("REHYDRATION_DELETE")
+    if not delete_script:
+        pytest.fail("REHYDRATION=1 requires REHYDRATION_DELETE=<path to record-deleter script>")
+    rehydration_timeout = float(os.getenv("REHYDRATION_TIMEOUT", "300"))
+
+    async def null_update_callback(update: VeilidUpdate):
+        pass
+
+    try:
+        api0 = await api_connector(null_update_callback, 0)
+    except VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 0.")
+        return
+
+    async with api0:
+        # ensure attached and online
+        if not (await api0.get_state()).attachment.public_internet_ready:
+            await api0.attach()
+        await wait_for_public_internet_ready(api0)
+
+        # start fresh
+        await api0.debug("record purge local")
+        await api0.debug("record purge remote")
+
+        rc0 = await (await api0.new_routing_context()).with_sequencing(Sequencing.ENSURE_ORDERED)
+        async with rc0:
+            kind = (await api0.valid_crypto_kinds())[0]
+            cs = await api0.get_crypto_system(kind)
+            async with cs:
+                SUBKEY_COUNT = 32
+                MAX_SUBKEY_SIZE = min(32768, 1024 * 1024 // SUBKEY_COUNT)  # ~1MB/record
+                NONCE = Nonce.from_bytes(b"A" * await cs.nonce_length())
+                SECRET = SharedSecret.from_value(
+                    await cs.kind(),
+                    BareSharedSecret.from_bytes(b"A" * await cs.shared_secret_length()),
+                )
+                schema = DHTSchema.dflt(SUBKEY_COUNT)
+
+                # Three transactions sized 1MB/2MB/4MB. A record caps at 1MB, so the
+                # tiers span 1/2/4 records; tiers 2 and 3 are multi-record transactions.
+                tiers = [1, 2, 4]
+                all_records: list[DHTRecordDescriptor] = []
+                written: dict[tuple[str, int], bytes] = {}
+
+                for tier_recs in tiers:
+                    tier_records: list[DHTRecordDescriptor] = []
+                    for _ in range(tier_recs):
+                        desc = await dht_retry(api0, lambda: rc0.create_dht_record(kind, schema), label="create")
+                        tier_records.append(desc)
+                        all_records.append(desc)
+
+                    tx = await dht_retry(
+                        api0,
+                        lambda tr=tier_records: api0.transact_dht_records([d.key for d in tr], None),
+                        label="begin write",
+                    )
+
+                    async def setter(key: RecordKey, subkey: ValueSubkey, data: bytes, t=tx):
+                        return await dht_retry(api0, lambda: t.set(key, subkey, data), label=f"set {key} #{subkey}")
+
+                    set_futures = []
+                    for ridx, desc in enumerate(tier_records):
+                        rindex = len(all_records) - len(tier_records) + ridx
+                        for sk in range(SUBKEY_COUNT):
+                            plain = bytes(chr(ord("A") + (rindex + sk) % 32) * MAX_SUBKEY_SIZE, "ascii")
+                            data = await cs.crypt_no_auth(plain, NONCE, SECRET)
+                            written[(str(desc.key), sk)] = data
+                            set_futures.append(setter(desc.key, ValueSubkey(sk), data))
+                    results = await asyncio.gather(*set_futures)
+                    assert all(r is None for r in results)
+
+                    await dht_retry(api0, lambda: tx.commit(), label="commit write")
+                    print(f"committed tier of {tier_recs} record(s)")
+
+                # keep local copies, close the opened records
+                for desc in all_records:
+                    await rc0.close_dht_record(desc.key)
+
+                record_keys = [desc.key for desc in all_records]
+                # the deleter wants the opaque (kind-less, secret-less) record key
+                opaque_keys = [str(desc.key.value().key()) for desc in all_records]
+
+                # detach so the node stops republishing while the network is purged
+                await api0.detach()
+                detach_deadline = time.time() + 30
+                while (await api0.get_state()).attachment.public_internet_ready and time.time() < detach_deadline:
+                    await asyncio.sleep(0.25)
+
+                # age out the network: delete these records from every dev node's remote store
+                print(f"deleting {len(opaque_keys)} records from the network via {delete_script}")
+                result = subprocess.run([delete_script, *opaque_keys], capture_output=True, text=True)
+                print(result.stdout)
+                if result.stderr:
+                    print(result.stderr)
+                assert result.returncode == 0, f"deleter exited {result.returncode}"
+
+                # reattach
+                await api0.attach()
+                await wait_for_public_internet_ready(api0)
+
+                # reopen each record, which enqueues rehydration since the local copy exists
+                for desc in all_records:
+                    await dht_retry(api0, lambda d=desc: rc0.open_dht_record(d.key), label="reopen")
+
+                # Poll with a NON-transactional inspect until the network has every subkey
+                # again. A transaction here would conflict with rehydration's own background
+                # transaction over the same record set ("already has a transaction open").
+                full_range = [(ValueSubkey(0), ValueSubkey(SUBKEY_COUNT - 1))]
+                deadline = time.time() + rehydration_timeout
+                rehydrated = False
+                seen_missing = False
+                while time.time() < deadline:
+                    all_present = True
+                    try:
+                        for desc in all_records:
+                            report = await rc0.inspect_dht_record(desc.key, full_range, DHTReportScope.SYNC_GET)
+                            if any(s is None for s in report.network_seqs):
+                                seen_missing = True
+                            if report.network_seqs != [0] * SUBKEY_COUNT:
+                                all_present = False
+                    except VeilidAPIError as e:
+                        # rehydration holds the set in a background transaction while it
+                        # re-pushes; inspect can transiently fail. treat as in-progress.
+                        print(f"  inspect during rehydration: {e}")
+                        all_present = False
+                    if all_present:
+                        rehydrated = True
+                        break
+                    await asyncio.sleep(3.0)
+                # the deleter already proved the network was aged out (it errors otherwise);
+                # observing the gap here too is a useful extra signal, not a hard requirement.
+                print(f"network-missing observed during poll: {seen_missing}")
+                assert rehydrated, f"rehydration did not complete within {rehydration_timeout}s"
+                print("rehydration complete; network has all subkeys again")
+
+                # delete the local copies, dropping local store + transaction membership
+                for desc in all_records:
+                    await rc0.close_dht_record(desc.key)
+                    await rc0.delete_dht_record(desc.key)
+
+                # reopen fresh from the network (no local copy, no rehydration), read transactionally
+                for desc in all_records:
+                    await dht_retry(api0, lambda d=desc: rc0.open_dht_record(d.key), label="open-from-network")
+
+                tx = await dht_retry(api0, lambda: api0.transact_dht_records(record_keys, None), label="begin read")
+                try:
+                    async def getter(key: RecordKey, subkey: ValueSubkey, expected: bytes, t=tx):
+                        vd = await dht_retry(api0, lambda: t.get(key, subkey), label=f"get {key} #{subkey}")
+                        return (key, subkey, expected, vd)
+
+                    get_futures = []
+                    for desc in all_records:
+                        for sk in range(SUBKEY_COUNT):
+                            get_futures.append(getter(desc.key, ValueSubkey(sk), written[(str(desc.key), sk)]))
+                    get_results = await asyncio.gather(*get_futures)
+                    for key, sk, expected, vd in get_results:
+                        assert vd is not None, f"missing {key} #{sk} after rehydration"
+                        assert vd.data == expected, f"data mismatch {key} #{sk}"
+                    print(f"verified {len(get_results)} subkeys read back transactionally from the network")
+                finally:
+                    if not tx.is_done():
+                        await dht_retry(api0, lambda: tx.rollback(), label="rollback read")
+                    for desc in all_records:
+                        await rc0.close_dht_record(desc.key)
+                        await rc0.delete_dht_record(desc.key)
 

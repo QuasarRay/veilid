@@ -9,6 +9,9 @@ use super::*;
 
 use eventual_base::*;
 
+/// A valueless one-shot signal. Many instance futures attach and all complete
+/// when `resolve` is called once. Each instance future may carry its own output
+/// value, supplied at attach time rather than at resolution.
 pub struct Eventual {
     inner: Arc<Mutex<EventualBaseInner<()>>>,
 }
@@ -41,6 +44,7 @@ impl Default for Eventual {
 }
 
 impl Eventual {
+    /// Create an unresolved `Eventual`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -48,6 +52,7 @@ impl Eventual {
         }
     }
 
+    /// Attach an instance future that resolves to a clone of `value`.
     pub fn instance_clone<T>(&self, value: T) -> EventualFutureClone<T>
     where
         T: Clone + Unpin,
@@ -58,6 +63,7 @@ impl Eventual {
             eventual: self.clone(),
         }
     }
+    /// Attach an instance future that resolves to `None`.
     #[must_use]
     pub fn instance_none<T>(&self) -> EventualFutureNone<T>
     where
@@ -69,6 +75,7 @@ impl Eventual {
             _marker: core::marker::PhantomData {},
         }
     }
+    /// Attach an instance future that resolves to `()`.
     #[must_use]
     pub fn instance_empty(&self) -> EventualFutureEmpty {
         EventualFutureEmpty {
@@ -77,6 +84,10 @@ impl Eventual {
         }
     }
 
+    /// Resolve the signal and wake every attached instance future. The returned
+    /// future completes once all of them have run.
+    ///
+    /// Idempotent: a second `resolve` after resolution is a no-op.
     #[must_use]
     pub fn resolve(&self) -> EventualResolvedFuture<Self> {
         self.resolve_to_value(())
@@ -85,6 +96,10 @@ impl Eventual {
 
 ///////
 
+/// Instance future from `Eventual::instance_clone`; resolves to a clone of its
+/// attached value.
+///
+/// Stays `Pending` until the owning `Eventual` is resolved.
 pub struct EventualFutureClone<T>
 where
     T: Clone + Unpin,
@@ -137,6 +152,9 @@ where
 
 ///////
 
+/// Instance future from `Eventual::instance_none`; resolves to `None`.
+///
+/// Stays `Pending` until the owning `Eventual` is resolved.
 pub struct EventualFutureNone<T>
 where
     T: Unpin,
@@ -189,6 +207,9 @@ where
 
 ///////
 
+/// Instance future from `Eventual::instance_empty`; resolves to `()`.
+///
+/// Stays `Pending` until the owning `Eventual` is resolved.
 pub struct EventualFutureEmpty {
     id: Option<usize>,
     eventual: Eventual,

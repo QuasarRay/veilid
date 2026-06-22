@@ -23,12 +23,8 @@ mod veilid_state;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm_helpers;
 
-/// No-op on non-wasm targets; the real macro lives in `wasm_helpers`.
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-#[macro_export]
-macro_rules! impl_try_from_js_value {
-    ($name:ident) => {};
-}
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+pub(crate) use wasm_helpers::*;
 
 use super::*;
 
@@ -41,6 +37,7 @@ pub use byte_count::*;
 pub use country_code::*;
 pub use dht::*;
 pub use expiration_state::*;
+pub(crate) use fourcc::*;
 pub use node_count::*;
 pub use route_blob::*;
 pub use safety::*;
@@ -52,5 +49,3 @@ pub use tunnel::*;
 pub use veilid_capability::*;
 pub use veilid_log::*;
 pub use veilid_state::*;
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-pub use wasm_helpers::*;

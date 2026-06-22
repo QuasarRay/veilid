@@ -21,18 +21,14 @@ impl FacilityEnableMap {
         self.name_map.clear();
     }
 
-    /// Removes all facility names matching this name by prefix
+    /// Removes the exact facility name and its `::`-hierarchy descendants.
+    /// Matches the `::` boundary, not a raw string prefix, so unrelated
+    /// facilities are not clobbered (e.g. `net` must not remove `network_result`).
     fn remove_name<S: AsRef<str>>(&mut self, name: S) {
         let name = name.as_ref();
-
-        let mut after = self.name_map.split_off(name);
-        while let Some(first_entry) = after.first_entry() {
-            if !first_entry.key().starts_with(name) {
-                break;
-            }
-            first_entry.remove();
-        }
-        self.name_map.append(&mut after);
+        let child_prefix = format!("{name}::");
+        self.name_map
+            .retain(|k, _| k.as_str() != name && !k.starts_with(child_prefix.as_str()));
     }
 
     /// Removes all facility tags matching this tag exactly
@@ -60,11 +56,12 @@ impl FacilityEnableMap {
 
     /// Inserts or replaces a facility tag and its enable state
     fn insert_tag<S: AsRef<str>>(&mut self, tag: S, state: FacilityEnableState) {
-        let tag = tag.as_ref();
+        let mut tag = tag.as_ref();
 
-        // Special case for `#enabled`
-        if tag == "#enabled" {
+        // Special case for `#enabled` and `#unspecified`
+        if tag == "#enabled" || tag == "#unspecified" {
             // Apply to all enabled names
+            let mut was_enabled = false;
             for (_, current_state) in self.name_map.iter_mut() {
                 match current_state.level {
                     VeilidConfigLogLevel::Off => {
@@ -76,7 +73,8 @@ impl FacilityEnableMap {
                     | VeilidConfigLogLevel::Debug
                     | VeilidConfigLogLevel::Trace => {
                         // For enabled logs, replace state
-                        *current_state = state.clone()
+                        *current_state = state.clone();
+                        was_enabled = true;
                     }
                 }
             }
@@ -93,12 +91,20 @@ impl FacilityEnableMap {
                     | VeilidConfigLogLevel::Debug
                     | VeilidConfigLogLevel::Trace => {
                         // For enabled logs, replace state
-                        *current_state = state.clone()
+                        *current_state = state.clone();
+                        was_enabled = true;
                     }
                 }
             }
 
-            return;
+            if tag == "#enabled" {
+                return;
+            }
+
+            // If unspecified and nothing was enabled, set the common tag level
+            if !was_enabled {
+                tag = "#common";
+            }
         }
 
         self.tag_map.insert(tag.to_owned(), state);
@@ -159,5 +165,41 @@ impl FacilityEnableMap {
             out.max_assign(v.level);
         }
         out.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dbg_state() -> FacilityEnableState {
+        FacilityEnableState {
+            level: VeilidConfigLogLevel::Debug,
+        }
+    }
+
+    #[test]
+    fn insert_name_does_not_clobber_string_prefix_sibling() {
+        // Regression: inserting `net` must not remove `network_result` just
+        // because the latter begins with "net" — only `::`-hierarchy descendants
+        // are superseded.
+        let mut m = FacilityEnableMap::new();
+        m.insert_name("network_result", dbg_state());
+        m.insert_name("net", dbg_state());
+        assert!(
+            m.get_name("network_result").is_some(),
+            "network_result was clobbered by net"
+        );
+        assert!(m.get_name("net").is_some());
+    }
+
+    #[test]
+    fn insert_name_supersedes_hierarchy_descendants() {
+        // Inserting a parent facility removes its `::` descendants.
+        let mut m = FacilityEnableMap::new();
+        m.insert_name("stor::record_index", dbg_state());
+        m.insert_name("stor", dbg_state());
+        assert_eq!(m.name_map.len(), 1);
+        assert!(m.name_map.contains_key("stor"));
     }
 }

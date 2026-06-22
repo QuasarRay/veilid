@@ -56,7 +56,7 @@ impl RoutingTable {
     pub(in crate::routing_table) fn get_node_relative_performance(
         &self,
         node_id: NodeId,
-        snapshot: &EntrySnapshot,
+        snapshot: &RoutingTableSnapshot,
         filter: impl Fn(&BucketEntrySnapshot) -> bool,
         metric: impl Fn(&LatencyStats) -> TimestampDuration,
     ) -> Option<NodeRelativePerformance> {
@@ -113,32 +113,18 @@ impl RoutingTable {
         let mut routing_table_health = RoutingTableHealth::default();
         for entry in entry_snapshot.entries().iter() {
             routing_table_health.total_entry_count += 1;
-            match entry.state {
-                BucketEntryState::Reliable => {
-                    routing_table_health.reliable_entry_count += 1;
-                }
-                BucketEntryState::Unreliable => {
-                    routing_table_health.unreliable_entry_count += 1;
-                }
-                BucketEntryState::Dead => {
-                    routing_table_health.dead_entry_count += 1;
-                }
-                BucketEntryState::Punished => {
-                    routing_table_health.punished_entry_count += 1;
-                }
-            }
-            // Live entries we have actually contacted (seen + latency)
-            if matches!(
-                entry.state,
-                BucketEntryState::Reliable | BucketEntryState::Unreliable
-            ) && entry.is_tested()
-            {
-                routing_table_health.tested_entry_count += 1;
-            }
+            *routing_table_health
+                .per_state_entry_count
+                .entry(entry.state)
+                .or_insert(0) += 1;
         }
 
         // Same ipv6 prefix used by route allocation to identify nodes on our own network
-        let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
+        let ip6_prefix_size = self
+            .config()
+            .internal()
+            .network
+            .max_connections_per_ip6_prefix_size as usize;
 
         // Update the entry summarie per routing domain and routing domain health
         for routing_domain in RoutingDomainSet::all() {
@@ -246,7 +232,8 @@ impl RoutingTable {
             core::mem::replace(&mut *rth_lock, routing_table_health)
         };
 
-        let mut readiness_changed = false;
+        let mut routing_domain_ready_changes =
+            BTreeMap::<RoutingDomain, (DirectionSet, DirectionSet)>::new();
         for routing_domain in RoutingDomainSet::all() {
             let last_inbound_ready = last_routing_table_health
                 .routing_domain_health
@@ -268,11 +255,33 @@ impl RoutingTable {
             if last_inbound_ready != current_inbound_ready
                 || last_outbound_ready != current_outbound_ready
             {
-                readiness_changed = true;
-
                 if let (Some(is_ready_inbound), Some(is_ready_outbound)) =
                     (current_inbound_ready, current_outbound_ready)
                 {
+                    let old_is_ready_inbound = last_inbound_ready.unwrap_or(false);
+                    let old_is_ready_outbound = last_outbound_ready.unwrap_or(false);
+
+                    let mut old_is_ready = DirectionSet::empty();
+                    if old_is_ready_inbound {
+                        old_is_ready.insert(Direction::In);
+                    }
+                    if old_is_ready_outbound {
+                        old_is_ready.insert(Direction::Out);
+                    }
+
+                    let mut new_is_ready = DirectionSet::empty();
+                    if is_ready_inbound {
+                        new_is_ready.insert(Direction::In);
+                    }
+                    if is_ready_outbound {
+                        new_is_ready.insert(Direction::Out);
+                    }
+
+                    if old_is_ready != new_is_ready {
+                        routing_domain_ready_changes
+                            .insert(routing_domain, (old_is_ready, new_is_ready));
+                    }
+
                     if let Err(e) = self.event_bus().post(RoutingDomainReadyEvent {
                         routing_domain,
                         is_ready_inbound,
@@ -284,11 +293,27 @@ impl RoutingTable {
             }
         }
 
-        if last_routing_table_health.live_entry_count()
-            != current_routing_table_health.live_entry_count()
-            || readiness_changed
+        if !routing_domain_ready_changes.is_empty() {
+            let changes = routing_domain_ready_changes
+                .iter()
+                .map(|(rd, (old_is_ready, new_is_ready))| {
+                    let old_is_ready_string = Direction::set_pretty_string(old_is_ready);
+                    let new_is_ready_string = Direction::set_pretty_string(new_is_ready);
+                    format!(
+                        "{:#}({} -> {})",
+                        rd, old_is_ready_string, new_is_ready_string
+                    )
+                })
+                .collect::<Vec<_>>();
+            veilid_log!(self debug "Ready changed: {}", changes.join(", "));
+        }
+
+        if debug_target_enabled!("rtab::health")
+            && last_routing_table_health.live_entry_count()
+                != current_routing_table_health.live_entry_count()
+            || !routing_domain_ready_changes.is_empty()
         {
-            veilid_log!(self debug "Routing Table Health:\n{}", indent_all_string(format!("{:#}", &*current_routing_table_health)));
+            veilid_log!(self debug target: "rtab::health", "Routing Table Health:\n{}", indent_all_string(format!("{:#}", &*current_routing_table_health)));
         }
     }
 }

@@ -6,6 +6,7 @@ use super::*;
     derive(Tsify),
     tsify(into_wasm_abi)
 )]
+/// Whether a DHT write may be deferred for later when the node is offline. Defaults to true.
 pub struct AllowOffline(pub bool);
 impl Default for AllowOffline {
     fn default() -> Self {

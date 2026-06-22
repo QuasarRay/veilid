@@ -131,7 +131,7 @@ impl RPCOperationSetValueA {
             .as_ref()
             .expect_or_log("SetValueA requires question context");
         let QuestionContext::SetValue(set_value_context) = question_context else {
-            panic!("Wrong context type for SetValueA");
+            return Err(RPCError::internal("Wrong context type for SetValueA"));
         };
 
         let crypto = validate_context.crypto();

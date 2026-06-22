@@ -13,6 +13,8 @@ impl_veilid_log_facility!("veilid_api");
 /// Transactional DHT operations can only be performed when the node is online, and will error with [VeilidAPIError::TryAgain] if offline.
 ///
 /// Transactions must be committed when all of their operations are registered, or rolled back if the group of operations is to be cancelled.
+///
+/// Each transaction holds a network-side resource that the caller must release by calling [DHTTransaction::commit] or [DHTTransaction::rollback]. Dropping a [DHTTransaction] without doing either logs a warning and tears the transaction down in the background.
 #[derive(Clone)]
 #[must_use]
 pub struct DHTTransaction {
@@ -55,6 +57,10 @@ impl DHTTransaction {
     }
 
     /// Extend the transaction with additional record keys
+    ///
+    /// Blocks on a network begin fanout for the added records and requires the node to be online. Idempotent for keys already in the transaction: returns `Ok(())` without network activity if no new records would be added.
+    ///
+    /// Errors with [VeilidAPIError::TransactionNotFound] if the transaction handle is already completed or unknown, [VeilidAPIError::MissingArgument] if `record_keys` contains duplicates, [VeilidAPIError::InvalidArgument] if the merged record set would exceed the per-transaction record limit, and [VeilidAPIError::TryAgain] (retry) if the node is offline or the begin fanout for the added records could not reach consensus.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
     pub async fn extend(
         &self,
@@ -86,6 +92,10 @@ impl DHTTransaction {
 
     /// Commit the transaction
     /// All write operations are performed atomically
+    ///
+    /// Consumes the transaction and releases its network-side resource (the other half is [DHTTransaction::rollback]). Blocks on the end and commit consensus barriers and requires the node to be online. Completes the transaction exactly once: a second commit or a rollback errors with `transaction_not_found`.
+    ///
+    /// Errors with [VeilidAPIError::TransactionNotFound] if the transaction was already committed, rolled back, or is unknown, and [VeilidAPIError::TryAgain] (retry) if the node is offline or the end/commit barriers could not reach consensus.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
     pub async fn commit(self) -> VeilidAPIResult<()> {
         async {
@@ -119,6 +129,10 @@ impl DHTTransaction {
 
     /// Rollback the transaction
     /// No write operations are performed,
+    ///
+    /// Consumes the transaction and releases its network-side resource (the other half is [DHTTransaction::commit]). Blocks on sending rollbacks to the network and requires the node to be online. Completes the transaction exactly once: a second rollback or a commit errors with `transaction_not_found`.
+    ///
+    /// Errors with [VeilidAPIError::TransactionNotFound] if the transaction was already committed, rolled back, or is unknown, and [VeilidAPIError::TryAgain] (retry) if the node is offline.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
     pub async fn rollback(self) -> VeilidAPIResult<()> {
         async {
@@ -159,6 +173,10 @@ impl DHTTransaction {
     ///
     /// Returns `None` if the value was successfully set.
     /// Returns `Some(data)` if the value set was older than the one available on the network.
+    ///
+    /// Blocks on the per-subkey lock (unbounded) and the set RPC to the transaction's node set, which retries non-responding nodes. Each per-node RPC is bounded by `network.rpc.timeout_ms`, but the lock wait and retry rounds are not, so the whole call has no single-timeout bound.
+    ///
+    /// Errors with [VeilidAPIError::TransactionNotFound] if the transaction handle is already completed or no longer in the Begin stage, [VeilidAPIError::InvalidArgument] if `record_key` is not open in the transaction or `subkey` is outside the schema range, [VeilidAPIError::Generic] if `record_key` is malformed (unsupported kind or bad length) or the subkey has no writer, and [VeilidAPIError::TryAgain] (retry) if the node is offline or write consensus was not reached this round. A non-responding node is retried rather than surfaced as a timeout.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle, data.len = data.len()), skip(self, data), ret))]
     pub async fn set(
         &self,
@@ -208,6 +226,10 @@ impl DHTTransaction {
     ///
     /// Returns `None` if the value subkey has not yet been set.
     /// Returns `Some(data)` if the value subkey has valid data.
+    ///
+    /// Blocks on the per-subkey lock (unbounded) and the get RPC to the transaction's node set, which retries non-responding nodes. Each per-node RPC is bounded by `network.rpc.timeout_ms`, but the lock wait and retry rounds are not, so the whole call has no single-timeout bound.
+    ///
+    /// Errors with [VeilidAPIError::TransactionNotFound] if the transaction handle is already completed or no longer in the Begin stage, [VeilidAPIError::InvalidArgument] if `record_key` is not in the transaction or `subkey` is outside the schema range, [VeilidAPIError::Generic] if `record_key` is malformed (unsupported kind or bad length), and [VeilidAPIError::TryAgain] (retry) if the node is offline or the network did not return the value that existed at begin time. A non-responding node is retried rather than surfaced as a timeout.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip(self), ret))]
     pub async fn get(
         &self,
@@ -247,6 +269,8 @@ impl DHTTransaction {
     /// For information on arguments, see [RoutingContext::inspect_dht_record]
     ///
     /// Returns a DHTRecordReport with the subkey ranges that were returned that overlapped the schema, and sequence numbers for each of the subkeys in the range.
+    ///
+    /// Errors with [VeilidAPIError::TransactionNotFound] if the transaction handle is already completed, unknown, or no longer in the Begin stage (End, Commit, Rollback, or Failed), [VeilidAPIError::InvalidArgument] if `record_key` is not in the transaction, and [VeilidAPIError::Generic] if `record_key` is malformed (unsupported kind or bad length) or the transaction has not started. Performs no network activity and cannot time out.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
     pub async fn inspect(
         &self,

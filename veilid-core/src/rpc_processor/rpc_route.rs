@@ -444,9 +444,9 @@ impl RPCProcessor {
         let route = match kind {
             RPCOperationKind::Statement(s) => match s.destructure() {
                 RPCStatementDetail::Route(s) => s,
-                _ => panic!("not a route statement"),
+                _ => return Err(RPCError::internal("not a route statement")),
             },
-            _ => panic!("not a statement"),
+            _ => return Err(RPCError::internal("not a statement")),
         };
 
         // Get crypto kind

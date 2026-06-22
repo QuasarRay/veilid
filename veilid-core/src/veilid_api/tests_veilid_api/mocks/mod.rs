@@ -35,64 +35,10 @@ pub fn fake_transfer_stats_down_up() -> TransferStatsDownUp {
 }
 
 #[must_use]
-pub fn fake_answer_stats() -> AnswerStats {
-    AnswerStats {
-        span: TimestampDuration::new_secs(10),
-        questions: 10,
-        answers: 8,
-        lost_answers: 0,
-        consecutive_answers_maximum: 1,
-        consecutive_answers_average: 2,
-        consecutive_answers_minimum: 3,
-        consecutive_lost_answers_maximum: 4,
-        consecutive_lost_answers_average: 5,
-        consecutive_lost_answers_minimum: 6,
-    }
-}
-
-#[must_use]
-pub fn fake_rpc_stats() -> RPCStats {
-    RPCStats {
-        messages_sent: 1_000_000,
-        messages_rcvd: 2_000_000,
-        questions_in_flight: 42,
-        last_question_ts: Some(Timestamp::from(1685569084280)),
-        last_seen_ts: Some(Timestamp::from(1685569101256)),
-        first_consecutive_seen_ts: Some(Timestamp::from(1685569111851)),
-        failed_to_send: 3,
-        unreachable: 1,
-    }
-}
-
-#[must_use]
-pub fn fake_state_stats() -> StateStats {
-    StateStats {
-        span: TimestampDuration::new_secs(10),
-        reliable: TimestampDuration::new_secs(5),
-        unreliable: TimestampDuration::new_secs(5),
-        dead: TimestampDuration::new_secs(0),
-        punished: TimestampDuration::new_secs(0),
-        reason: StateReasonStats {
-            can_not_send: TimestampDuration::new_secs(1),
-            too_many_lost_answers: TimestampDuration::new_secs(2),
-            no_ping_response: TimestampDuration::new_secs(3),
-            failed_to_send: TimestampDuration::new_secs(4),
-            lost_answers: TimestampDuration::new_secs(5),
-            not_seen_consecutively: TimestampDuration::new_secs(6),
-            in_unreliable_ping_span: TimestampDuration::new_secs(7),
-        },
-    }
-}
-
-#[must_use]
 pub fn fake_peer_stats() -> PeerStats {
     PeerStats {
-        time_added: Timestamp::from(1685569176894),
-        rpc_stats: fake_rpc_stats(),
         latency: Some(fake_latency_stats()),
         transfer: fake_transfer_stats_down_up(),
-        state: fake_state_stats(),
-        protected_connection_drop: None,
     }
 }
 

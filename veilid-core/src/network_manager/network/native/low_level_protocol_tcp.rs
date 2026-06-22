@@ -146,6 +146,15 @@ impl NativeNetwork {
             return;
         }
 
+        // Hold the per-remote address lock from accept time so a concurrent outbound waits and reuses
+        let Some(address_lock_guard) = connection_manager
+            .acquire_inbound_address_lock(peer_addr)
+            .await
+        else {
+            veilid_log!(self debug "timed out acquiring inbound address lock for {}", peer_addr);
+            return;
+        };
+
         let local_addr = match tcp_stream.local_addr() {
             Ok(addr) => addr,
             Err(e) => {
@@ -231,7 +240,7 @@ impl NativeNetwork {
 
         // Register the new connection in the connection manager
         if let Err(e) = connection_manager
-            .on_accepted_protocol_network_connection(conn)
+            .on_accepted_protocol_network_connection(conn, address_lock_guard)
             .await
         {
             veilid_log!(self error "failed to register new connection: {}", e);
@@ -242,7 +251,7 @@ impl NativeNetwork {
     fn spawn_socket_listener(&self, addr: SocketAddr) -> EyreResult<bool> {
         // Get config
         let config = self.config();
-        let connection_initial_timeout_ms = config.network.connection_initial_timeout_ms;
+        let connection_initial_timeout_ms = config.internal().network.connection_initial_timeout_ms;
         let tls_connection_initial_timeout_ms = config.network.tls.connection_initial_timeout_ms;
 
         // Create a shared socket and bind it once we have determined the port is free
@@ -341,7 +350,7 @@ impl NativeNetwork {
                     let ls = if let Some(ls) = self.inner.lock().listener_states.get_mut(&addr) {
                         ls.clone()
                     } else {
-                        panic!("this shouldn't happen");
+                        bail!("listener state missing for {} after binding", addr);
                     };
 
                     if is_tls {

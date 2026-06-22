@@ -25,6 +25,9 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with UiLoggy {
   String _veilidVersion = 'Unknown';
   bool _startedUp = false;
+  bool _startupChanging = false;
+  bool _attached = false;
+  bool _attachChanging = false;
   Stream<VeilidUpdate>? _updateStream;
   Future<void>? _updateProcessor;
   late final HistoryTextEditingController _historyController;
@@ -100,6 +103,11 @@ class _MyAppState extends State<MyApp> with UiLoggy {
           loggy.info('AppMessage: ${jsonEncode(update)}');
         } else if (update is VeilidAppCall) {
           loggy.info('AppCall: ${jsonEncode(update)}');
+        } else if (update is VeilidUpdateAttachment) {
+          setState(() {
+            _attached = update.state.isAttached;
+            _attachChanging = update.state.isChanging;
+          });
         } else {
           loggy.trace('Update: ${jsonEncode(update)}');
         }
@@ -107,8 +115,20 @@ class _MyAppState extends State<MyApp> with UiLoggy {
     }
   }
 
+  Future<void> toggleAttach(bool attach) async {
+    if (attach && !_attached) {
+      await Veilid.instance.attach();
+    } else if (!attach && _attached) {
+      await Veilid.instance.detach();
+    }
+  }
+
   Future<void> toggleStartup(bool startup) async {
     if (startup && !_startedUp) {
+      setState(() {
+        _startupChanging = true;
+      });
+
       var config = await getDefaultVeilidConfig(
         isWeb: kIsWeb,
         programName: 'Veilid Plugin Example',
@@ -133,12 +153,15 @@ class _MyAppState extends State<MyApp> with UiLoggy {
       }
 
       final updateStream = await Veilid.instance.startupVeilidCore(config);
+
       setState(() {
         _updateStream = updateStream;
         _updateProcessor = processUpdates();
         _startedUp = true;
+        _startupChanging = false;
+        _attached = false;
+        _attachChanging = false;
       });
-      await Veilid.instance.attach();
     } else if (!startup && _startedUp) {
       try {
         await Veilid.instance.shutdownVeilidCore();
@@ -150,6 +173,9 @@ class _MyAppState extends State<MyApp> with UiLoggy {
           _updateProcessor = null;
           _updateStream = null;
           _startedUp = false;
+          _startupChanging = false;
+          _attached = false;
+          _attachChanging = false;
         });
       }
     }
@@ -209,9 +235,23 @@ class _MyAppState extends State<MyApp> with UiLoggy {
                     const Text('Startup'),
                     Switch(
                         value: _startedUp,
-                        onChanged: (value) async {
-                          await toggleStartup(value);
-                        }),
+                        onChanged: !_startupChanging
+                            ? (value) async {
+                                await toggleStartup(value);
+                              }
+                            : null),
+                  ]),
+                ),
+                pad(
+                  Column(children: [
+                    const Text('Attach'),
+                    Switch(
+                        value: _attached,
+                        onChanged: (_startedUp && !_attachChanging)
+                            ? (value) async {
+                                await toggleAttach(value);
+                              }
+                            : null),
                   ]),
                 ),
                 pad(Column(children: [

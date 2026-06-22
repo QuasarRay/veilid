@@ -19,10 +19,12 @@ Future<T> _retryOnNetworkError<T>(Future<T> Function() fn,
       return await fn();
     } on VeilidAPIExceptionTryAgain {
       if (attempt >= maxRetries - 1) rethrow;
-      debugPrint('$label: TryAgain, retrying (attempt ${attempt + 1}/$maxRetries)');
+      debugPrint(
+          '$label: TryAgain, retrying (attempt ${attempt + 1}/$maxRetries)');
     } on VeilidAPIExceptionTimeout {
       if (attempt >= maxRetries - 1) rethrow;
-      debugPrint('$label: Timeout, retrying (attempt ${attempt + 1}/$maxRetries)');
+      debugPrint(
+          '$label: Timeout, retrying (attempt ${attempt + 1}/$maxRetries)');
     }
   }
 }
@@ -57,7 +59,7 @@ Future<void> testRoutingContexts() async {
         safetySpec: SafetySpec(
             hopCount: 2,
             stability: Stability.lowLatency,
-            sequencing: Sequencing.noPreference)));
+            sequencing: Sequencing.preferUnordered)));
     // More debuggable this way
     // ignore: cascade_invocations
     rcp.close();

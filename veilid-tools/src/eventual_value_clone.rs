@@ -2,6 +2,9 @@ use super::*;
 
 use eventual_base::*;
 
+/// A one-shot signal carrying a cloneable value. Every instance future resolves
+/// to its own clone of the resolved value; the value also stays readable via
+/// `value`.
 pub struct EventualValueClone<T: Unpin + Clone> {
     inner: Arc<Mutex<EventualBaseInner<T>>>,
 }
@@ -34,6 +37,7 @@ impl<T: Unpin + Clone> Default for EventualValueClone<T> {
 }
 
 impl<T: Unpin + Clone> EventualValueClone<T> {
+    /// Create an unresolved `EventualValueClone`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -41,6 +45,7 @@ impl<T: Unpin + Clone> EventualValueClone<T> {
         }
     }
 
+    /// Attach an instance future that resolves to a clone of the resolved value.
     #[must_use]
     pub fn instance(&self) -> EventualValueCloneFuture<T>
     where
@@ -52,10 +57,16 @@ impl<T: Unpin + Clone> EventualValueClone<T> {
         }
     }
 
+    /// Resolve to `value` and wake every attached instance future. The returned
+    /// future completes once all of them have run.
+    ///
+    /// A second `resolve` after resolution keeps the first value and drops the
+    /// new one.
     pub fn resolve(&self, value: T) -> EventualResolvedFuture<Self> {
         self.resolve_to_value(value)
     }
 
+    /// Clone the resolved value, or `None` if unresolved. Does not block.
     #[must_use]
     pub fn value(&self) -> Option<T> {
         let inner = self.inner.lock();
@@ -63,6 +74,10 @@ impl<T: Unpin + Clone> EventualValueClone<T> {
     }
 }
 
+/// Instance future from `EventualValueClone::instance`; resolves to a clone of
+/// the resolved value.
+///
+/// Stays `Pending` until the owning `EventualValueClone` is resolved.
 pub struct EventualValueCloneFuture<T: Unpin + Clone> {
     id: Option<usize>,
     eventual: EventualValueClone<T>,

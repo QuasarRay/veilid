@@ -1,3 +1,5 @@
+"""Veilid node state and update event types mirroring veilid-core's veilid_api types."""
+
 from enum import StrEnum
 from typing import Optional, Self
 
@@ -18,6 +20,8 @@ from .types import (
 
 
 class AttachmentState(StrEnum):
+    """Attachment abstraction for network 'signal strength'."""
+
     DETACHED = "Detached"
     ATTACHING = "Attaching"
     ATTACHED_WEAK = "AttachedWeak"
@@ -42,6 +46,8 @@ class AttachmentState(StrEnum):
 
 
 class VeilidStateAttachment:
+    """Attachment state of the Veilid node."""
+
     state: AttachmentState
     public_internet_ready: bool
     local_network_ready: bool
@@ -94,116 +100,12 @@ class VeilidStateAttachment:
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
-
-
-class AnswerStats:
-    span: TimestampDuration
-    questions: int
-    answers: int
-    lost_answers: int
-    consecutive_answers_maximum: int
-    consecutive_answers_average: int
-    consecutive_answers_minimum: int
-    consecutive_lost_answers_maximum: int
-    consecutive_lost_answers_average: int
-    consecutive_lost_answers_minimum: int
-
-    def __init__(
-        self,
-        span: TimestampDuration,
-        questions: int,
-        answers: int,
-        lost_answers: int,
-        consecutive_answers_maximum: int,
-        consecutive_answers_average: int,
-        consecutive_answers_minimum: int,
-        consecutive_lost_answers_maximum: int,
-        consecutive_lost_answers_average: int,
-        consecutive_lost_answers_minimum: int,
-    ):
-        self.span = span
-        self.questions = questions
-        self.answers = answers
-        self.lost_answers = lost_answers
-        self.consecutive_answers_maximum = consecutive_answers_maximum
-        self.consecutive_answers_average = consecutive_answers_average
-        self.consecutive_answers_minimum = consecutive_answers_minimum
-        self.consecutive_lost_answers_maximum = consecutive_lost_answers_maximum
-        self.consecutive_lost_answers_average = consecutive_lost_answers_average
-        self.consecutive_lost_answers_minimum = consecutive_lost_answers_minimum
-
-
-    @classmethod
-    def from_json(cls, j: dict) -> Self:
-        """JSON object hook"""
-        return cls(
-            j["span"],
-            j["questions"],
-            j["answers"],
-            j["lost_answers"],
-            j["consecutive_answers_maximum"],
-            j["consecutive_answers_average"],
-            j["consecutive_answers_minimum"],
-            j["consecutive_lost_answers_maximum"],
-            j["consecutive_lost_answers_average"],
-            j["consecutive_lost_answers_minimum"],
-        )
-
-    def to_json(self) -> dict:
-        return self.__dict__
-
-class RPCStats:
-    messages_sent: int
-    messages_rcvd: int
-    questions_in_flight: int
-    last_question_ts: Optional[Timestamp]
-    last_seen_ts: Optional[Timestamp]
-    first_consecutive_seen_ts: Optional[Timestamp]
-    failed_to_send: int
-    unreachable: int
-
-    def __init__(
-        self,
-        messages_sent: int,
-        messages_rcvd: int,
-        questions_in_flight: int,
-        last_question_ts: Optional[Timestamp],
-        last_seen_ts: Optional[Timestamp],
-        first_consecutive_seen_ts: Optional[Timestamp],
-        failed_to_send: int,
-        unreachable: int,
-    ):
-        self.messages_sent = messages_sent
-        self.messages_rcvd = messages_rcvd
-        self.questions_in_flight = questions_in_flight
-        self.last_question_ts = last_question_ts
-        self.last_seen_ts = last_seen_ts
-        self.first_consecutive_seen_ts = first_consecutive_seen_ts
-        self.failed_to_send = failed_to_send
-        self.unreachable = unreachable
-
-    @classmethod
-    def from_json(cls, j: dict) -> Self:
-        """JSON object hook"""
-        return cls(
-            j["messages_sent"],
-            j["messages_rcvd"],
-            j["questions_in_flight"],
-            None if j["last_question_ts"] is None else Timestamp(j["last_question_ts"]),
-            None if j["last_seen_ts"] is None else Timestamp(j["last_seen_ts"]),
-            None
-            if j["first_consecutive_seen_ts"] is None
-            else Timestamp(j["first_consecutive_seen_ts"]),
-            j["failed_to_send"],
-            j["unreachable"],
-        )
-
-    def to_json(self) -> dict:
-        return self.__dict__
-
 
 class LatencyStats:
+    """Communications latency to a node over all RPC questions."""
+
     fastest: TimestampDuration
     average: TimestampDuration
     slowest: TimestampDuration
@@ -244,10 +146,13 @@ class LatencyStats:
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class TransferStats:
+    """Amount of data transferred to or from a node over a time span."""
+
     total: ByteCount
     maximum: ByteCount
     average: ByteCount
@@ -277,6 +182,8 @@ class TransferStats:
 
 
 class TransferStatsDownUp:
+    """Transfer stats in both directions: node to us (down) and us to node (up)."""
+
     down: TransferStats
     up: TransferStats
 
@@ -289,120 +196,37 @@ class TransferStatsDownUp:
         """JSON object hook"""
         return cls(TransferStats.from_json(j["down"]), TransferStats.from_json(j["up"]))
 
-class StateReasonStats:
-    can_not_send: TimestampDuration
-    too_many_lost_answers: TimestampDuration
-    no_ping_response: TimestampDuration
-    failed_to_send: TimestampDuration
-    lost_answers: TimestampDuration
-    not_seen_consecutively: TimestampDuration
-    in_unreliable_ping_span: TimestampDuration
-
-    def __init__(
-        self,
-        can_not_send: TimestampDuration,
-        too_many_lost_answers: TimestampDuration,
-        no_ping_response: TimestampDuration,
-        failed_to_send: TimestampDuration,
-        lost_answers: TimestampDuration,
-        not_seen_consecutively: TimestampDuration,
-        in_unreliable_ping_span: TimestampDuration,
-    ):
-        self.can_not_send = can_not_send
-        self.too_many_lost_answers = too_many_lost_answers
-        self.no_ping_response = no_ping_response
-        self.failed_to_send = failed_to_send
-        self.lost_answers = lost_answers
-        self.not_seen_consecutively = not_seen_consecutively
-        self.in_unreliable_ping_span = in_unreliable_ping_span
-
-    @classmethod
-    def from_json(cls, j: dict) -> Self:
-        """JSON object hook"""
-        return cls(
-            j["can_not_send"],
-            j["too_many_lost_answers"],
-            j["no_ping_response"],
-            j["failed_to_send"],
-            j["lost_answers"],
-            j["not_seen_consecutively"],
-            j["in_unreliable_ping_span"],
-        )
-
-class StateStats:
-    span: TimestampDuration
-    reliable: TimestampDuration
-    unreliable: TimestampDuration
-    dead: TimestampDuration
-    punished: TimestampDuration
-    reason: StateReasonStats
-
-    def __init__(
-        self,
-        span: TimestampDuration,
-        reliable: TimestampDuration,
-        unreliable: TimestampDuration,
-        dead: TimestampDuration,
-        punished: TimestampDuration,
-        reason: StateReasonStats,
-    ):
-        self.span = span
-        self.reliable = reliable
-        self.unreliable = unreliable
-        self.dead = dead
-        self.punished = punished
-        self.reason = reason
-
-    @classmethod
-    def from_json(cls, j: dict) -> Self:
-        """JSON object hook"""
-        return cls(
-            j["span"],
-            j["reliable"],
-            j["unreliable"],
-            j["dead"],
-            j["punished"],
-            StateReasonStats.from_json(j["reason"]),
-        )
-
 
 class PeerStats:
-    time_added: Timestamp
-    rpc_stats: RPCStats
+    """Statistics for a peer in the routing table."""
+
     latency: Optional[LatencyStats]
     transfer: TransferStatsDownUp
-    state: StateStats
 
     def __init__(
         self,
-        time_added: Timestamp,
-        rpc_stats: RPCStats,
         latency: Optional[LatencyStats],
         transfer: TransferStatsDownUp,
-        state: StateStats,
     ):
-        self.time_added = time_added
-        self.rpc_stats = rpc_stats
         self.latency = latency
         self.transfer = transfer
-        self.state = state
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
         """JSON object hook"""
         return cls(
-            j["time_added"],
-            RPCStats.from_json(j["rpc_stats"]),
             None if j["latency"] is None else LatencyStats.from_json(j["latency"]),
             TransferStatsDownUp.from_json(j["transfer"]),
-            StateStats.from_json(j["state"]),
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class PeerTableData:
+    """A recently accessed peer."""
+
     node_ids: list[NodeId]
     peer_address: str
     peer_stats: PeerStats
@@ -420,10 +244,13 @@ class PeerTableData:
                    PeerStats.from_json(j["peer_stats"]))
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidStateNetwork:
+    """Current network state of the Veilid node."""
+
     started: bool
     bps_down: ByteCount
     bps_up: ByteCount
@@ -456,10 +283,13 @@ class VeilidStateNetwork:
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidStateConfig:
+    """Current Veilid node configuration."""
+
     config: VeilidConfig
 
     def __init__(self, config: VeilidConfig):
@@ -471,10 +301,13 @@ class VeilidStateConfig:
         return cls(VeilidConfig.from_json(j["config"]))
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidState:
+    """Queriable snapshot of the Veilid node internals."""
+
     attachment: VeilidStateAttachment
     network: VeilidStateNetwork
     config: VeilidStateConfig
@@ -499,10 +332,13 @@ class VeilidState:
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidLog:
+    """A VeilidCore log message with optional backtrace."""
+
     log_level: VeilidLogLevel
     message: str
     backtrace: Optional[str]
@@ -518,10 +354,13 @@ class VeilidLog:
         return cls(VeilidLogLevel(j["log_level"]), j["message"], j["backtrace"])
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidAppMessage:
+    """A one-way application message blob delivered to the host application."""
+
     sender: Optional[NodeId]
     route_id: Optional[BareRouteId]
     message: bytes
@@ -541,10 +380,13 @@ class VeilidAppMessage:
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidAppCall:
+    """An application question blob delivered to the host application, expecting an AppReply."""
+
     sender: Optional[NodeId]
     route_id: Optional[BareRouteId]
     message: bytes
@@ -567,10 +409,13 @@ class VeilidAppCall:
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidRouteChange:
+    """A private or safety route change that has happened."""
+
     dead_routes: list[BareRouteId]
     dead_remote_routes: list[BareRouteId]
 
@@ -587,10 +432,13 @@ class VeilidRouteChange:
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidValueChange:
+    """A change to the subkey values of a watched DHT record."""
+
     key: RecordKey
     subkeys: list[tuple[ValueSubkey, ValueSubkey]]
     count: int
@@ -613,10 +461,13 @@ class VeilidValueChange:
         )
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__
 
 
 class VeilidUpdateKind(StrEnum):
+    """Discriminant for the detail carried by a VeilidUpdate."""
+
     LOG = "Log"
     APP_MESSAGE = "AppMessage"
     APP_CALL = "AppCall"
@@ -641,6 +492,8 @@ VeilidUpdateDetailType = Optional[
 
 
 class VeilidUpdate:
+    """An update from veilid-core describing a change to the node's internal state."""
+
     kind: VeilidUpdateKind
     detail: VeilidUpdateDetailType
 
@@ -681,4 +534,5 @@ class VeilidUpdate:
         return cls(kind, detail)
 
     def to_json(self) -> dict:
+        """Serialize to a JSON-compatible dict."""
         return self.__dict__

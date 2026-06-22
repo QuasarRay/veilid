@@ -538,7 +538,7 @@ impl RouteSpecStore {
             // Check #1: Safety route must still exist
             let Some(arce) = cache.get_allocated_route_by_id(&safety_route_id) else {
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self error "Safety route no longer exists for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
+                veilid_log!(self debug "Safety route no longer exists for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
                 drop(cache);
                 entry.remove();
                 return RouteCompileCacheDisposition::Compile(entry);
@@ -547,7 +547,7 @@ impl RouteSpecStore {
             // Check #3a: If the route is dead for this sequencing, invalidate so we get a chance at a different route selection
             if !arce.is_live_sequencing_match(sequencing) {
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self error "Safety route dead for sequencing {} for id {} with key={}, invalidating cache entry {:?}", sequencing, safety_route_id, safety_route_key, key);
+                veilid_log!(self debug "Safety route dead for sequencing {} for id {} with key={}, invalidating cache entry {:?}", sequencing, safety_route_id, safety_route_key, key);
                 drop(cache);
                 entry.remove();
                 return RouteCompileCacheDisposition::Compile(entry);
@@ -574,7 +574,7 @@ impl RouteSpecStore {
             // Check #2: Private route must still exist if it is an allocated route
             let Some(arce) = cache.get_allocated_route_by_id(&private_route_id) else {
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self error "Private route no longer exists for id {} with key={}, invalidating cache entry {:?}", private_route_id, private_route_key, key);
+                veilid_log!(self debug "Private route no longer exists for id {} with key={}, invalidating cache entry {:?}", private_route_id, private_route_key, key);
                 drop(cache);
                 entry.remove();
                 return RouteCompileCacheDisposition::Compile(entry);
@@ -583,7 +583,7 @@ impl RouteSpecStore {
             // Check #3a: If the route is dead for this sequencing, invalidate so we get a chance at a different route selection
             if !arce.is_live_sequencing_match(sequencing) {
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self error "Private route dead for sequencing {} for id {} with key={}, invalidating cache entry {:?}", sequencing, private_route_id, private_route_key, key);
+                veilid_log!(self debug "Private route dead for sequencing {} for id {} with key={}, invalidating cache entry {:?}", sequencing, private_route_id, private_route_key, key);
                 drop(cache);
                 entry.remove();
                 return RouteCompileCacheDisposition::Compile(entry);
@@ -596,7 +596,7 @@ impl RouteSpecStore {
                 // Check #2: Private route must still exist if it is is imported
                 let Some(rrce) = cache.peek_remote_route(cur_ts, &private_route_id) else {
                     #[cfg(feature = "verbose-tracing")]
-                    veilid_log!(self error "Private route no longer exists for id {} with key={}, invalidating cache entry {:?}", private_route_id, private_route_key, key);
+                    veilid_log!(self debug "Private route no longer exists for id {} with key={}, invalidating cache entry {:?}", private_route_id, private_route_key, key);
                     drop(cache);
                     entry.remove();
                     return RouteCompileCacheDisposition::Compile(entry);
@@ -609,7 +609,7 @@ impl RouteSpecStore {
                     RouteStatsDisposition::Valid => {}
                     _ => {
                         #[cfg(feature = "verbose-tracing")]
-                        veilid_log!(self error "Private route was {:?} for id {} with key={}, invalidating cache entry {:?}", disposition, private_route_id, private_route_key, key);
+                        veilid_log!(self debug "Private route was {:?} for id {} with key={}, invalidating cache entry {:?}", disposition, private_route_id, private_route_key, key);
                         drop(cache);
                         entry.remove();
                         return RouteCompileCacheDisposition::Compile(entry);
@@ -635,12 +635,12 @@ impl RouteSpecStore {
         // If what was in the cache was unoptimized, then we can optimize it now
         if compiled_route.optimized {
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(self error "Compiled route needs recompilation for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
+            veilid_log!(self debug "Compiled route needs recompilation for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
 
             RouteCompileCacheDisposition::Compile(entry)
         } else {
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(self error "Compiled route needs optimization for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
+            veilid_log!(self debug "Compiled route needs optimization for id {} with key={}, invalidating cache entry {:?}", safety_route_id, safety_route_key, key);
 
             RouteCompileCacheDisposition::Optimize(entry)
         }

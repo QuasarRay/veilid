@@ -256,13 +256,61 @@ impl NativeNetwork {
                 .connection_manager()
                 .close_dead_connections(&valid_local_addresses);
 
-            // Mark PublicInternet offline; first successful RPC on the new network flips us back
-            self.network_manager()
-                .online_detector()
-                .network_address_change(RoutingDomain::PublicInternet);
+            // See if any of the addresses that have changed are routable
+            let last_routable_addresses: HashSet<Address> = last_interface_address_state
+                .interface_addresses
+                .iter()
+                .filter_map(|a| {
+                    let addr = Address::from_ip_addr(a.ip());
+                    if addr.is_routable() {
+                        Some(addr)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let new_routable_addresses: HashSet<Address> = interface_address_state
+                .interface_addresses
+                .iter()
+                .filter_map(|a| {
+                    let addr = Address::from_ip_addr(a.ip());
+                    if addr.is_routable() {
+                        Some(addr)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let routable_addresses_changed = last_routable_addresses != new_routable_addresses;
+
+            if routable_addresses_changed {
+                let added_addresses = new_routable_addresses
+                    .difference(&last_routable_addresses)
+                    .copied()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>();
+                let removed_addresses = last_routable_addresses
+                    .difference(&new_routable_addresses)
+                    .copied()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>();
+                if !removed_addresses.is_empty() {
+                    veilid_log!(self debug "Routable addresses removed: {}", removed_addresses.join(", "));
+                }
+                if !added_addresses.is_empty() {
+                    veilid_log!(self debug "Routable addresses added: {}", added_addresses.join(", "));
+                }
+
+                // Mark PublicInternet offline; first successful RPC on the new network flips us back
+                self.network_manager()
+                    .online_detector()
+                    .network_address_change(RoutingDomain::PublicInternet);
+            }
 
             // Cached gateway, external IP, and port mappings all reference the prior interfaces
-            self.igd_manager.clear_caches();
+            if let Some(igd_manager) = &self.igd_manager {
+                igd_manager.clear_caches();
+            }
 
             // Return the 'detect address changes' settings from when they were set up for all the other
             // post-startup calls to this routine
@@ -305,12 +353,14 @@ impl NativeNetwork {
         self.bind_outbound_source_udp_handlers();
 
         // Probe IGD off the critical path so map_any_port has a populated cache
-        let ac = &new_network_state.address_config;
-        if ac.ipv4_local || ac.ipv4_global {
-            self.igd_manager.trigger_probe(IGDAddressType::IPV4);
-        }
-        if ac.ipv6_local || ac.ipv6_global {
-            self.igd_manager.trigger_probe(IGDAddressType::IPV6);
+        if let Some(igd_manager) = &self.igd_manager {
+            let ac = &new_network_state.address_config;
+            if ac.ipv4_local || ac.ipv4_global {
+                igd_manager.trigger_probe(IGDAddressType::IPV4);
+            }
+            if ac.ipv6_local || ac.ipv6_global {
+                igd_manager.trigger_probe(IGDAddressType::IPV6);
+            }
         }
 
         Ok(Some(new_network_state))
@@ -401,6 +451,11 @@ impl NativeNetwork {
         let raw = self.interfaces.raw_address_summary();
         let ias = self.interfaces.interface_address_state();
 
+        // Restrict detected families to the address types enabled in config
+        let allowed = configured_address_type_set(&self.config());
+        let allow_v4 = allowed.contains(AddressType::IPV4);
+        let allow_v6 = allowed.contains(AddressType::IPV6);
+
         let has_v4_default_route = ias
             .gateway_addresses
             .iter()
@@ -410,10 +465,10 @@ impl NativeNetwork {
             .iter()
             .any(|g| matches!(g, IpAddr::V6(_)));
 
-        let ipv4_local = Self::can_bind_v4() && raw.has_non_loopback_ipv4;
+        let ipv4_local = allow_v4 && Self::can_bind_v4() && raw.has_non_loopback_ipv4;
         let ipv4_global = ipv4_local && has_v4_default_route;
 
-        let ipv6_local = Self::can_bind_v6() && raw.has_non_loopback_ipv6;
+        let ipv6_local = allow_v6 && Self::can_bind_v6() && raw.has_non_loopback_ipv6;
         let ipv6_global = ipv6_local && has_v6_default_route && raw.has_unicast_global_ipv6;
 
         if ipv4_local {

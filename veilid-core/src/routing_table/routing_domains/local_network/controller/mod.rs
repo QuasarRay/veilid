@@ -322,16 +322,16 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
         self.published_peer_info.lock().clone()
     }
 
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rtab", skip(self, context_sort), fields(__VEILID_LOG_KEY = self.log_key()), ret))]
-    fn get_contact_method(
-        &self,
-        peer_a: Arc<PeerInfo>,
-        _peer_a_published: bool,
-        peer_b: Arc<PeerInfo>,
-        dial_info_filter: DialInfoFilter,
-        sequencing: Sequencing,
-        context_sort: Option<&DialInfoDetailSort>,
-    ) -> ContactMethod {
+    #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rtab", skip(self), fields(__VEILID_LOG_KEY = self.log_key()), ret))]
+    fn get_contact_methods(&self, request: ContactMethodRequest) -> Vec<ContactMethod> {
+        let ContactMethodRequest {
+            peer_a,
+            peer_a_published: _,
+            peer_b,
+            dial_info_filter,
+            sequencing,
+        } = request;
+
         // Get the nodeinfos for convenience
         let node_a = peer_a.node_info();
         let node_b = peer_b.node_info();
@@ -340,29 +340,34 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
         let cck = common_crypto_kinds(&peer_a.node_ids().kinds(), &peer_b.node_ids().kinds());
         let Some(_best_ck) = cck.first().copied() else {
             // No common crypto kinds between these nodes, can't contact
-            return ContactMethod::Unreachable;
+            return vec![];
         };
 
-        if let Some(target_did) = self.best_dial_info_detail_between_nodes(
-            node_a,
-            node_b,
-            dial_info_filter,
-            sequencing,
-            context_sort,
-        ) {
+        let mut out = Vec::new();
+
+        for target_did in
+            self.get_dial_info_details_between_nodes(node_a, node_b, dial_info_filter, sequencing)
+        {
             match target_did.class {
-                DialInfoClass::Direct => return ContactMethod::Direct(target_did.dial_info),
+                DialInfoClass::Direct => {
+                    out.push(ContactMethod::Direct {
+                        target_di: target_did.dial_info,
+                    });
+                }
                 DialInfoClass::Mapped
                 | DialInfoClass::FullConeNAT
                 | DialInfoClass::Blocked
                 | DialInfoClass::AddressRestrictedNAT
                 | DialInfoClass::PortRestrictedNAT => {
                     veilid_log!(self warn "LocalNetwork dial info found with non-direct class: {}:\n{:#?}", target_did, peer_b);
-                    return ContactMethod::Unreachable;
                 }
             }
         }
 
-        ContactMethod::Unreachable
+        // Remove duplicates without sorting
+        // Should not be required, but we want to be defensive here
+        out.remove_duplicates();
+
+        out
     }
 }

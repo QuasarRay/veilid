@@ -108,11 +108,27 @@ else
     exit 1
 fi
 
-# install targets
-rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android wasm32-unknown-unknown
+# install nightly
+rustup install nightly --profile minimal
+
+# install stable targets
+rustup target add --toolchain stable \
+    x86_64-unknown-linux-gnu \
+    aarch64-unknown-linux-gnu \
+    x86_64-unknown-linux-musl \
+    aarch64-unknown-linux-musl \
+    aarch64-linux-android \
+    armv7-linux-androideabi \
+    i686-linux-android \
+    x86_64-linux-android \
+    wasm32-unknown-unknown
+
+# install nightly targets
+rustup target add --toolchain nightly \
+    x86_64-unknown-linux-gnu
 
 # install cargo packages
-cargo install wasm-bindgen-cli cargo-edit cargo-nextest
+cargo +stable install wasm-bindgen-cli cargo-edit@0.13.0 cargo-nextest cargo-public-api
 
 # install pip packages
 pip3 install --upgrade bumpversion

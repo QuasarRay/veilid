@@ -25,7 +25,7 @@ impl PublicInternetRoutingDomainController {
         let existing_node_ids = Arc::new(
             routing_table
                 .snapshot_entries(cur_ts, BucketEntryState::Unreliable)
-                .existing_node_ids(),
+                .existing_node_ids(None),
         );
 
         let mut unord = FuturesUnordered::new();
@@ -54,6 +54,12 @@ impl PublicInternetRoutingDomainController {
                     ) {
                         return false;
                     }
+
+                    // Keep only the entries that have responded to some answer consecutively
+                    if snap.rpc_stats.first_steady_answer_ts.is_none() {
+                        return false;
+                    }
+
                     true
                 },
             ) as RoutingTableEntryFilter;

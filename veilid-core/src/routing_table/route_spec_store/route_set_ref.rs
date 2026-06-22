@@ -36,7 +36,7 @@ impl AllocatedRouteSetRef {
         &self.entry
     }
 
-    pub fn set_id(&self) -> &AllocatedRouteSetId {
+    pub fn route_set_id(&self) -> &AllocatedRouteSetId {
         &self.set_id
     }
 }
@@ -107,7 +107,7 @@ impl RemoteRouteSetRef {
         &self.entry
     }
 
-    pub fn set_id(&self) -> &RemoteRouteSetId {
+    pub fn route_set_id(&self) -> &RemoteRouteSetId {
         &self.set_id
     }
 }
@@ -149,7 +149,7 @@ impl fmt::Display for RemoteRouteSetRef {
 impl RouteSpecStore {
     /// Acquire an `AllocatedRouteSetRef` by route set id. Returns None if
     /// the set is not in the cache.
-    #[expect(dead_code, reason = "set-by-id accessor for symmetry; not yet read")]
+    #[expect(dead_code)]
     pub(super) fn lock_allocated_route_set_by_id(
         &self,
         set_id: &AllocatedRouteSetId,
@@ -176,7 +176,7 @@ impl RouteSpecStore {
 
     /// Acquire a `RemoteRouteSetRef` by route set id. Returns None if the
     /// set is not in the cache (or has expired).
-    #[expect(dead_code, reason = "set-by-id accessor for symmetry; not yet read")]
+    #[expect(dead_code)]
     pub(super) fn lock_remote_route_set_by_id(
         &self,
         set_id: &RemoteRouteSetId,

@@ -3,8 +3,10 @@ use core::fmt::Debug;
 
 mod compression;
 mod get_size_helpers;
+/// serde `with`-module that (de)serializes an `Arc<T>` transparently as its inner `T`.
 pub mod serialize_arc;
 mod serialize_json;
+/// serde `with`-module that (de)serializes a `RangeSetBlaze<T>` as a sequence of inclusive `(start, end)` pairs.
 pub mod serialize_range_set_blaze;
 mod serialize_untyped_vld0;
 

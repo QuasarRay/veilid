@@ -1,5 +1,8 @@
 use rand::prelude::*;
 
+/// Cryptographically secure RNG that draws from the thread-local random source.
+///
+/// Implements [`RngCore`] and [`CryptoRng`] so it can be passed wherever a `rand` generator is expected.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VeilidRng;
 
@@ -24,17 +27,20 @@ impl RngCore for VeilidRng {
     }
 }
 
+/// Fill `dest` with cryptographically secure random bytes.
 pub fn random_bytes(dest: &mut [u8]) {
     let mut rng = rand::thread_rng();
     rng.fill_bytes(dest);
 }
 
+/// Return a cryptographically secure random `u32`.
 #[must_use]
 pub fn get_random_u32() -> u32 {
     let mut rng = rand::thread_rng();
     rng.next_u32()
 }
 
+/// Return a cryptographically secure random `u64`.
 #[must_use]
 pub fn get_random_u64() -> u64 {
     let mut rng = rand::thread_rng();

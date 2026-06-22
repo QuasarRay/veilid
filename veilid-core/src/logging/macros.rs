@@ -1,11 +1,13 @@
-#[macro_export]
+/// Sets the default log facility (tracing target) for the current module.
+/// The `veilid_log!` macros emit to this facility unless given an explicit `target:`.
 macro_rules! impl_veilid_log_facility {
     ($facility:literal) => {
         const __VEILID_LOG_FACILITY: &'static str = $facility;
     };
 }
+pub(crate) use impl_veilid_log_facility;
 
-#[macro_export]
+/// Builds a closure that logs a `VeilidAPIError` at the level reported by its `log_level()`.
 macro_rules! log_veilid_api_error {
     ($self_expr:ident) => {
         |e: &$crate::VeilidAPIError| {
@@ -29,8 +31,10 @@ macro_rules! log_veilid_api_error {
         }
     };
 }
+pub(crate) use log_veilid_api_error;
 
-#[macro_export]
+/// Builds a closure that logs its error argument at `ERROR` level, with an optional prefix message.
+/// Useful as the argument to `Result::map_err` or `inspect_err`.
 macro_rules! veilid_log_err {
     ($self_expr:expr) => {
         |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::ERROR, "{}", e)
@@ -42,8 +46,10 @@ macro_rules! veilid_log_err {
         |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::ERROR, concat!($fmt,": {}"), $($args)*, e)
     };
 }
+pub(crate) use veilid_log_err;
 
-#[macro_export]
+/// Builds a closure that logs its error argument at `DEBUG` level in alternate (`{:#}`) form,
+/// with an optional prefix message. Useful as the argument to `Result::map_err` or `inspect_err`.
 macro_rules! veilid_log_dbg {
     ($self_expr:expr) => {
         |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, "{:#}", e)
@@ -55,8 +61,11 @@ macro_rules! veilid_log_dbg {
         |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, concat!($fmt,": {:#}"), $($args)*, e)
     };
 }
+pub(crate) use veilid_log_dbg;
 
-#[macro_export]
+/// Emits a single `tracing` event, tagging it with the log key from `$self_expr.log_key()`.
+/// The facility defaults to the module's `__VEILID_LOG_FACILITY` unless a `target:` is given.
+/// Prefer the `veilid_log!` wrapper; this is its underlying expansion.
 macro_rules! veilid_log_event {
     // veilid_log_event!(self, prefix:"", level: Level::XXX, "message")
     ($self_expr:expr, prefix: $prefix:literal, level: $lvl:expr, $text:expr) => {event!(
@@ -107,6 +116,7 @@ macro_rules! veilid_log_event {
         concat!($prefix,""))
     };
 }
+pub(crate) use veilid_log_event;
 
 // Warn in debug builds so it's obvious without enabling debug logging; demote to
 // debug in release so it stays silent unless debug logging is turned on.
@@ -115,7 +125,13 @@ pub(crate) const DEBUGWARN: tracing::Level = tracing::Level::WARN;
 #[cfg(not(debug_assertions))]
 pub(crate) const DEBUGWARN: tracing::Level = tracing::Level::DEBUG;
 
-#[macro_export]
+/// Emits a Veilid log event tagged with the instance's log key.
+///
+/// The first argument is the instance providing `log_key()`, followed by a level keyword
+/// (`error`, `warn`, `info`, `debug`, `trace`, or `debugwarn`), then a message or format
+/// string with arguments. An optional `target:` selects a facility other than the module
+/// default, and a `fields:` form records structured fields. The `debugwarn` level prefixes
+/// `DEBUGWARN:` and logs at `WARN` in debug builds, `DEBUG` in release builds.
 macro_rules! veilid_log {
 
     // ERROR //////////////////////////////////////////////////////////////////////////
@@ -202,6 +218,7 @@ macro_rules! veilid_log {
     // veilid_log!(self debugwarn target: "facility", fields: field=value, ?other_field)
     ($self_ident:ident debugwarn target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "DEBUGWARN", level: $crate::DEBUGWARN, target: $target, fields: $($k).+ = $($fields)*)};
 }
+pub(crate) use veilid_log;
 
 /// If an operation returns a NetworkResult:
 ///
@@ -209,7 +226,6 @@ macro_rules! veilid_log {
 /// * If it is any other enum variant, log it and return an alternative value in the `=>` block
 ///
 /// If a `[ ]` block is also provided, an extra logging string provided in the block will be added to the log message
-#[macro_export]
 macro_rules! network_result_value_or_log {
     ($self:ident $r:expr => $f:expr) => {
         network_result_value_or_log!($self target: self::__VEILID_LOG_FACILITY, $r => [ "" ] $f )
@@ -296,3 +312,4 @@ macro_rules! network_result_value_or_log {
     } };
 
 }
+pub(crate) use network_result_value_or_log;

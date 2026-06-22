@@ -138,13 +138,38 @@ impl NativeNetwork {
 
     /////////////////////////////////////////////////////
 
+    /// Parse a listen address into a bind set, restricting bind addresses to the
+    /// address types enabled in config. Default/port-only/hostname addresses keep
+    /// only their enabled families; an explicit single-family address of a disabled
+    /// type filters to nothing and is reported as a conflict.
+    fn make_bind_set(&self, listen_address: &str) -> EyreResult<NetworkBindSet> {
+        let mut bind_set = NetworkBindSet::from_str(listen_address)?;
+        let allowed = configured_address_type_set(&self.config());
+
+        bind_set.addrs.retain(|ip| {
+            let at = if ip.is_ipv4() {
+                AddressType::IPV4
+            } else {
+                AddressType::IPV6
+            };
+            allowed.contains(at)
+        });
+        if bind_set.addrs.is_empty() {
+            bail!(
+                "listen address '{}' has no address family enabled in network.address_types",
+                listen_address
+            );
+        }
+        Ok(bind_set)
+    }
+
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(super) fn bind_udp_protocol_handlers(&self) -> EyreResult<StartupDisposition> {
         veilid_log!(self trace "UDP: binding protocol handlers");
         let listen_address = self.config().network.protocol.udp.listen_address.clone();
 
         // Get the binding parameters from the user-specified listen address
-        let bind_set = NetworkBindSet::from_str(&listen_address)?;
+        let bind_set = self.make_bind_set(&listen_address)?;
 
         // Now create udp inbound sockets for whatever interfaces we're listening on
         if bind_set.search {
@@ -230,7 +255,7 @@ impl NativeNetwork {
         let listen_address = self.config().network.protocol.ws.listen_address.clone();
 
         // Get the binding parameters from the user-specified listen address
-        let bind_set = NetworkBindSet::from_str(&listen_address)?;
+        let bind_set = self.make_bind_set(&listen_address)?;
 
         if bind_set.search {
             veilid_log!(self info
@@ -332,7 +357,7 @@ impl NativeNetwork {
         let listen_address = self.config().network.protocol.wss.listen_address.clone();
 
         // Get the binding parameters from the user-specified listen address
-        let bind_set = NetworkBindSet::from_str(&listen_address)?;
+        let bind_set = self.make_bind_set(&listen_address)?;
 
         if bind_set.search {
             veilid_log!(self info
@@ -423,7 +448,7 @@ impl NativeNetwork {
         let listen_address = self.config().network.protocol.tcp.listen_address.clone();
 
         // Get the binding parameters from the user-specified listen address
-        let bind_set = NetworkBindSet::from_str(&listen_address)?;
+        let bind_set = self.make_bind_set(&listen_address)?;
 
         if bind_set.search {
             veilid_log!(self info

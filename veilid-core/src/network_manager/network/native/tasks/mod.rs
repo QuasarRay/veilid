@@ -77,13 +77,6 @@ impl NativeNetwork {
             return Ok(());
         }
 
-        let upnp = {
-            // Configured to only use relays for inbound connections.
-            // This implicitly turns off PublicInternet address detection and upnp.
-            let config = self.config();
-            config.network.upnp && !config.network.privacy.require_inbound_relay
-        };
-
         // If we need to figure out our network class, tick the task for it
         let needs_detect_address_changes = self.routing_domains_detecting_address_changes();
 
@@ -100,8 +93,8 @@ impl NativeNetwork {
             }
         }
 
-        // If we need to tick upnp, do it
-        if upnp {
+        // Tick the upnp renewal task only when UPnP is enabled (igd manager present)
+        if self.igd_manager.is_some() {
             self.upnp_task.tick().await?;
         }
 

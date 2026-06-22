@@ -67,7 +67,7 @@ deps-base:
         Debug::Acquire::https "true";\
         ' > /etc/apt/apt.conf.d/99custom
     RUN apt-get -y update
-    RUN apt-get install -y ca-certificates iproute2 curl build-essential libssl-dev openssl file git pkg-config libdbus-1-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev checkinstall unzip libncursesw5-dev libncurses5-dev jq
+    RUN apt-get install -y ca-certificates iproute2 curl build-essential libssl-dev openssl file git pkg-config libdbus-1-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev checkinstall unzip libncursesw5-dev libncurses5-dev jq selinux-policy-dev bzip2
     IF [ $(arch) = "x86_64" ]
         RUN apt-get install -y gcc-aarch64-linux-gnu
     ELSE IF [ $(arch) = "aarch64" ]
@@ -93,6 +93,8 @@ deps-rust:
             # Linux
                 x86_64-unknown-linux-gnu \
                 aarch64-unknown-linux-gnu \
+                x86_64-unknown-linux-musl \
+                aarch64-unknown-linux-musl \
             # Windows
                 x86_64-pc-windows-gnu \
             # MacOS
@@ -104,6 +106,15 @@ deps-rust:
                 x86_64-linux-android \
             # WASM
                 wasm32-unknown-unknown \
+            && break; \
+            retry=$((retry+1)); \
+            echo "retry #$retry..."; \
+            sleep 10; \
+        done
+    RUN retry=0; until [ "$retry" -ge $RETRY_COUNT ]; do \
+        rustup target add --toolchain nightly \
+            # Linux
+                x86_64-unknown-linux-gnu \
             && break; \
             retry=$((retry+1)); \
             echo "retry #$retry..."; \
@@ -133,6 +144,9 @@ deps-rust:
     # Docs-rs tool
     RUN cargo binstall cargo-docs-rs --disable-strategies=compile --targets $DEFAULT_CARGO_MUSL_TARGET || \
         cargo install cargo-docs-rs --locked
+    # Public API checking tool
+    RUN cargo binstall cargo-public-api --disable-strategies=compile --targets $DEFAULT_CARGO_MUSL_TARGET || \
+        cargo install cargo-public-api --locked
     # Install Linux cross-platform tooling (no binstall available for zigbuild yet)
     RUN curl --retry $RETRY_COUNT --retry-connrefused -L -O https://ziglang.org/download/$ZIG_VERSION/zig-linux-$(arch)-$ZIG_VERSION.tar.xz
     RUN tar -C /usr/local -xJf zig-linux-$(arch)-$ZIG_VERSION.tar.xz
@@ -249,6 +263,11 @@ msrv:
     FROM +code-linux
     RUN ./scripts/_msrv_all.sh        
 
+# Public API only
+public-api:
+    FROM +code-linux
+    RUN ./scripts/_check_public_api.sh        
+
 # Build
 build-linux-amd64:
     FROM +code-linux
@@ -309,6 +328,9 @@ build-android:
 test-msrv-all:
     FROM +code-linux
     RUN ./scripts/_msrv_all.sh
+test-public-api:
+    FROM +code-linux
+    RUN ./scripts/_check_public_api.sh
 test-check-wasm-builds-dart:
     FROM +code-linux
     RUN ./scripts/_check_wasm_builds.sh dart
@@ -338,6 +360,7 @@ test-unit-tests-all:
     RUN ./scripts/_unit_tests_all.sh
 test-all:
     BUILD +test-msrv-all
+    BUILD +test-public-api
     BUILD +test-check-wasm-builds-dart
     BUILD +test-check-wasm-builds-js
     BUILD +test-clippy-wasm32-unknown-unknown
@@ -349,6 +372,7 @@ test-all:
     BUILD +test-unit-tests-all
 
 # Package
+# Each package compiles the SELinux .pp in-place from package/selinux (RPM on rockylinux:9, DEB on ubuntu 18.04).
 package-linux-amd64-deb:
     ARG IS_NIGHTLY="false"
     FROM +build-linux-amd64
@@ -356,6 +380,7 @@ package-linux-amd64-deb:
     ### DEBIAN DPKG .DEB FILES
     #################################
     COPY --keep-ts --dir package /veilid
+    RUN cd /veilid/package/selinux && ./build_module.sh
     # veilid-server
     RUN /veilid/package/debian/earthly_make_veilid_server_deb.sh amd64 x86_64-unknown-linux-gnu "$IS_NIGHTLY"
     SAVE ARTIFACT --keep-ts /dpkg/out/*.deb AS LOCAL ./target/packages/
@@ -367,7 +392,7 @@ package-linux-amd64-deb:
 package-linux-amd64-rpm:
     ARG IS_NIGHTLY="false"
     FROM --platform linux/amd64 rockylinux:9
-    RUN yum install -y createrepo rpm-build rpm-sign yum-utils rpmdevtools
+    RUN yum install -y createrepo rpm-build rpm-sign yum-utils rpmdevtools selinux-policy-devel bzip2 make
     RUN rpmdev-setuptree
     #################################
     ### RPMBUILD .RPM FILES
@@ -378,6 +403,8 @@ package-linux-amd64-rpm:
     COPY --keep-ts veilid-server/Cargo.toml /veilid/veilid-server
     COPY --keep-ts --dir package /veilid
     COPY --keep-ts +build-linux-amd64/x86_64-unknown-linux-gnu /veilid/target/x86_64-unknown-linux-gnu
+    # Compile the SELinux policy module here (RHEL-family .pp; forward-compatible to Fedora)
+    RUN cd /veilid/package/selinux && ./build_module.sh
     RUN mkdir -p /rpm-work-dir/veilid-server
     # veilid-server
     RUN veilid/package/rpm/veilid-server/earthly_make_veilid_server_rpm.sh x86_64 x86_64-unknown-linux-gnu "$IS_NIGHTLY"
@@ -394,6 +421,7 @@ package-linux-arm64-deb:
     ### DEBIAN DPKG .DEB FILES
     #################################
     COPY --keep-ts --dir package /veilid
+    RUN cd /veilid/package/selinux && ./build_module.sh
     # veilid-server
     RUN /veilid/package/debian/earthly_make_veilid_server_deb.sh arm64 aarch64-unknown-linux-gnu "$IS_NIGHTLY"
     SAVE ARTIFACT --keep-ts /dpkg/out/*.deb AS LOCAL ./target/packages/
@@ -405,7 +433,7 @@ package-linux-arm64-deb:
 package-linux-arm64-rpm:
     ARG IS_NIGHTLY="false"
     FROM --platform linux/arm64 rockylinux:9
-    RUN yum install -y createrepo rpm-build rpm-sign yum-utils rpmdevtools
+    RUN yum install -y createrepo rpm-build rpm-sign yum-utils rpmdevtools selinux-policy-devel bzip2 make
     RUN rpmdev-setuptree
     #################################
     ### RPMBUILD .RPM FILES
@@ -416,6 +444,8 @@ package-linux-arm64-rpm:
     COPY --keep-ts veilid-server/Cargo.toml /veilid/veilid-server
     COPY --keep-ts --dir package /veilid
     COPY --keep-ts +build-linux-arm64/aarch64-unknown-linux-gnu /veilid/target/aarch64-unknown-linux-gnu
+    # Compile the SELinux policy module here (RHEL-family .pp; forward-compatible to Fedora)
+    RUN cd /veilid/package/selinux && ./build_module.sh
     RUN mkdir -p /rpm-work-dir/veilid-server
     # veilid-server
     RUN veilid/package/rpm/veilid-server/earthly_make_veilid_server_rpm.sh aarch64 aarch64-unknown-linux-gnu "$IS_NIGHTLY"

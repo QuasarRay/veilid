@@ -7,6 +7,17 @@ const MAX_RECORDS_PER_TRANSACTION: usize = 32;
 
 impl_veilid_log_facility!("stor");
 
+/// Source for resolving each record's transaction signing keypair during begin.
+pub(super) enum TransactionSignerSource {
+    /// Derive from the opened record's writer, the options default, or anonymous.
+    OpenedRecord,
+    /// Each member's stored operation signer + Peek locks, held only until signers are extracted.
+    Stored(
+        BTreeMap<OpaqueRecordKey, KeyPair>,
+        StorageManagerPeeksLockGuard,
+    ),
+}
+
 impl StorageManager {
     /// Create a new outbound transaction over a set of records
     /// If an existing transaction exists over these records
@@ -26,6 +37,24 @@ impl StorageManager {
             apibail_not_initialized!();
         };
 
+        self.begin_transaction_shared(
+            record_keys,
+            options.unwrap_or_default(),
+            TransactionSignerSource::OpenedRecord,
+        )
+        .await
+    }
+
+    /// Shared core of begin_transaction used by both the public API and background transactions.
+    /// `signer_source` controls how each record's transaction signing keypair is resolved, and for
+    /// background transactions carries the Peek locks (released here once the TransactBegin lock is
+    /// held). The caller must hold the startup lock; background callers must have all records open.
+    pub(super) async fn begin_transaction_shared(
+        &self,
+        record_keys: Vec<RecordKey>,
+        options: TransactDHTRecordsOptions,
+        signer_source: TransactionSignerSource,
+    ) -> VeilidAPIResult<OutboundTransactionHandle> {
         // Early rejection if no records are being transacted over
         if record_keys.is_empty() {
             apibail_missing_argument!(
@@ -62,21 +91,37 @@ impl StorageManager {
             record_keys.iter().map(|x| x.opaque()).collect(),
             StorageManagerRecordLockPurpose::TransactBegin,
         ) else {
+            // DIAG: which records were contended + whether this begin is foreground
+            // (opened-record) or a background op (stored signers: rehydration/change-inspect)
+            let source = match &signer_source {
+                TransactionSignerSource::OpenedRecord => "opened",
+                TransactionSignerSource::Stored(..) => "background",
+            };
+            veilid_log!(self debug target:"network_result", "transaction begin contended on records: [{}] (source={})",
+                record_keys.iter().map(|x| x.opaque().to_string()).collect::<Vec<_>>().join(", "), source);
             apibail_try_again!("transaction begin contended");
         };
         let records_lock = Arc::new(records_lock);
+
+        // TransactBegin now covers the set; extract signers and release Stored's Peek locks here.
+        let stored_signers = match signer_source {
+            TransactionSignerSource::OpenedRecord => None,
+            TransactionSignerSource::Stored(signers, _peek_locks) => Some(signers),
+        };
 
         // Early rejection if dht is not online
         if !self.dht_is_online() {
             apibail_try_again!("dht is not online");
         }
 
-        // Resolve options
-        let options = options.unwrap_or_default();
-        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
-        let consensus_width = self.config().network.dht.consensus_width as usize;
-        let required_strict_consensus_count = self.config().network.dht.set_value_count as usize;
-        let required_get_consensus_count = self.config().network.dht.get_value_count as usize;
+        // Resolve config
+        let rpc_timeout =
+            TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
+        let consensus_width = self.config().internal().network.dht.consensus_width as usize;
+        let required_strict_consensus_count =
+            self.config().internal().network.dht.set_value_count as usize;
+        let required_get_consensus_count =
+            self.config().internal().network.dht.get_value_count as usize;
 
         // Snapshot records for begin
         let local_snapshots = self
@@ -97,7 +142,7 @@ impl StorageManager {
                 }
 
                 let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
-                    apibail_generic!("record key not open: {}", opaque_record_key);
+                    apibail_invalid_argument!("record not open", "record_key", opaque_record_key);
                 };
                 if record_key.encryption_key().map(|x| x.value()) != opened_record.encryption_key()
                 {
@@ -108,15 +153,26 @@ impl StorageManager {
                 }
 
                 // Get signing keypair for this transaction
-                let signing_keypair = opened_record
-                    .writer()
-                    .cloned()
-                    .or_else(|| options.default_signing_keypair.clone())
-                    .unwrap_or_else(|| {
-                        self.anonymous_signing_keys
-                            .get(opaque_record_key.kind())
-                            .unwrap_or_log()
-                    });
+                let signing_keypair = match &stored_signers {
+                    None => opened_record
+                        .writer()
+                        .cloned()
+                        .or_else(|| options.default_signing_keypair.clone())
+                        .unwrap_or_else(|| {
+                            self.anonymous_signing_keys
+                                .get(opaque_record_key.kind())
+                                .unwrap_or_log()
+                        }),
+                    Some(signers) => {
+                        let Some(kp) = signers.get(&opaque_record_key) else {
+                            apibail_internal!(
+                                "missing stored operation signer for background transaction: {}",
+                                opaque_record_key
+                            );
+                        };
+                        kp.clone()
+                    }
+                };
 
                 // Get safety selection for this record
                 let safety_selection = opened_record.safety_selection();
@@ -263,6 +319,158 @@ impl StorageManager {
         drop(records_lock);
 
         Ok(transaction_handle)
+    }
+
+    /// Run a closure inside a background transaction over a record's stored transaction set.
+    ///
+    /// Peek-locks the whole set (blocking open/close/delete while still allowing transaction
+    /// locks), temporarily opens any members that are not currently open (without a writer key),
+    /// begins a transaction signed with each member's stored operation signer, and runs `f` with
+    /// the transaction handle and the member record keys (in stored set order). On return the
+    /// transaction is rolled back if the closure left it active, temporarily-opened members are
+    /// closed, and the peek locks are released.
+    ///
+    /// The set is all-or-nothing: contention returns TryAgain; a member with no local record or no
+    /// stored operation signer (a broken set) returns a terminal error and runs nothing.
+    pub(super) async fn with_background_transaction<T, F, Fut>(
+        &self,
+        triggering_record_key: RecordKey,
+        membership: TransactionMembership,
+        f: F,
+    ) -> VeilidAPIResult<T>
+    where
+        F: FnOnce(OutboundTransactionHandle, Vec<RecordKey>) -> Fut,
+        Fut: Future<Output = VeilidAPIResult<T>>,
+    {
+        let Ok(_guard) = self.startup_lock.enter() else {
+            apibail_not_initialized!();
+        };
+
+        let local_record_store = self.get_local_record_store()?;
+
+        // Peek-lock the set so members can't be opened/closed/deleted while we resolve and begin;
+        // handed to begin_transaction_shared, which releases them once TransactBegin is held.
+        let Some(peek_locks) = self
+            .record_lock_table
+            .try_peek_locks(membership.record_set.clone())
+        else {
+            apibail_try_again!("background transaction set peek contended");
+        };
+
+        // Safety selection for temporarily-opened members comes from the triggering record.
+        let triggering_opaque = triggering_record_key.opaque();
+
+        // Resolve every member, temp-opening the unopened ones, all under the inner lock.
+        let (member_record_keys, signers, temp_opened) = {
+            let mut inner = self.inner.lock();
+
+            let triggering_safety_selection =
+                if let Some(or) = inner.opened_records.get(&triggering_opaque) {
+                    or.safety_selection()
+                } else {
+                    local_record_store
+                        .with_record(&triggering_opaque, |r| r.detail().safety_selection.clone())?
+                        .ok_or_else(|| {
+                            VeilidAPIError::generic(
+                                "triggering record missing for background transaction",
+                            )
+                        })?
+                };
+
+            let mut member_record_keys = vec![];
+            let mut signers = BTreeMap::<OpaqueRecordKey, KeyPair>::new();
+            let mut temp_opened = vec![];
+
+            for opaque in &membership.record_set {
+                // Disallow if any member already participates in an active transaction
+                if inner
+                    .outbound_transaction_manager
+                    .get_transaction_by_record(opaque)
+                    .is_some()
+                {
+                    apibail_try_again!(
+                        "background transaction member already in a transaction: {}",
+                        opaque
+                    );
+                }
+
+                // The member must have a local record and a stored operation signer
+                let opt_signer = local_record_store.with_record(opaque, |r| {
+                    r.detail()
+                        .transaction_membership
+                        .as_ref()
+                        .map(|m| m.operation_signer.clone())
+                })?;
+                let Some(opt_signer) = opt_signer else {
+                    apibail_generic!(
+                        "background transaction member has no local record: {}",
+                        opaque
+                    );
+                };
+                let Some(signer) = opt_signer else {
+                    apibail_generic!(
+                        "background transaction member has no stored operation signer: {}",
+                        opaque
+                    );
+                };
+                signers.insert(opaque.clone(), signer);
+
+                // Members already open keep their open state and encryption key; the rest are
+                // temporarily opened without a writer using the triggering record's safety.
+                let record_key = if let Some(or) = inner.opened_records.get(opaque) {
+                    RecordKey::from_opaque(opaque.clone(), or.encryption_key())
+                } else {
+                    inner.opened_records.insert(
+                        opaque.clone(),
+                        OpenedRecord::new(None, triggering_safety_selection.clone(), None),
+                    );
+                    temp_opened.push(opaque.clone());
+                    RecordKey::from_opaque(opaque.clone(), None)
+                };
+                member_record_keys.push(record_key);
+            }
+
+            (member_record_keys, signers, temp_opened)
+        };
+
+        // Begin, run the closure, and ensure the transaction is gone, all behind a teardown.
+        let result = async {
+            let transaction_handle = self
+                .begin_transaction_shared(
+                    member_record_keys.clone(),
+                    TransactDHTRecordsOptions::default(),
+                    TransactionSignerSource::Stored(signers, peek_locks),
+                )
+                .await?;
+
+            let r = f(transaction_handle, member_record_keys.clone()).await;
+
+            // If the closure didn't commit or roll back, roll back now so nothing persists.
+            let still_active = self
+                .inner
+                .lock()
+                .outbound_transaction_manager
+                .get_transaction_keys(transaction_handle)
+                .is_some();
+            if still_active {
+                if let Err(e) = self.rollback_transaction(transaction_handle).await {
+                    veilid_log!(self debug "background transaction teardown rollback failed: {}", e);
+                }
+            }
+
+            r
+        }
+        .await;
+
+        // Restore open state: close the members we temporarily opened.
+        {
+            let mut inner = self.inner.lock();
+            for opaque in &temp_opened {
+                inner.opened_records.remove(opaque);
+            }
+        }
+
+        result
     }
 
     /// Extend an existing outbound transaction with additional records.
@@ -519,8 +727,9 @@ impl StorageManager {
                         })?
                 };
 
-                let rpc_timeout =
-                    TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+                let rpc_timeout = TimestampDuration::new_ms(
+                    self.config().internal().network.rpc.timeout_ms.into(),
+                );
 
                 // End transactions on all records.
                 let mut unord = FuturesUnordered::new();
@@ -615,8 +824,9 @@ impl StorageManager {
                     })?
                 };
 
-                let rpc_timeout =
-                    TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+                let rpc_timeout = TimestampDuration::new_ms(
+                    self.config().internal().network.rpc.timeout_ms.into(),
+                );
 
                 // Commit transactions on all records
                 let mut unord = FuturesUnordered::new();
@@ -711,9 +921,10 @@ impl StorageManager {
                 return None;
             };
 
-            let mut keys_and_subkeys = vec![];
+            let mut record_commit_values = vec![];
             for record_state in transaction_state.get_record_states() {
                 let opaque_record_key = record_state.record_key().opaque();
+                let operation_signer = record_state.operation_signer().clone();
                 let local_commit_results = match record_state.local_commit_results() {
                     Ok(v) => v,
                     Err(e) => {
@@ -733,25 +944,29 @@ impl StorageManager {
                         veilid_log!(self debug "  subkey {} seq={}", subkey, svd.value_data().seq());
                     }
                 }
-                keys_and_subkeys.push((opaque_record_key, local_commit_results));
+                record_commit_values.push(RecordCommitValues {
+                    opaque_record_key,
+                    operation_signer,
+                    subkey_values: local_commit_results,
+                });
             }
 
             let cleanup = transaction_state.into_transaction_cleanup();
-            Some((keys_and_subkeys, cleanup))
+            Some((record_commit_values, cleanup))
         }, |name, start, dur, ret| {
             veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {})", name, start, dur, if ret.is_some() { "drained" } else { "missing" });
             ret
         });
-        let Some((keys_and_subkeys, cleanup)) = drop_result else {
+        let Some((record_commit_values, cleanup)) = drop_result else {
             return;
         };
 
         // Record the set values locally since they were successfully set online
         if let Err(e) = DurationRecorder::new("StorageManager::flush_local_set", |name, start| {
-            veilid_log!(self debug "{}[start={:#}](handle: {}, record_count: {})", name, start, transaction_handle, keys_and_subkeys.len());
+            veilid_log!(self debug "{}[start={:#}](handle: {}, record_count: {})", name, start, transaction_handle, record_commit_values.len());
         })
         .record_fut(
-            self.handle_set_local_values_with_multiple_records_lock(&records_lock, keys_and_subkeys),
+            self.handle_set_local_values_with_multiple_records_lock(&records_lock, record_commit_values),
             |name, start, dur, ret| {
                 veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
                 ret
@@ -840,7 +1055,8 @@ impl StorageManager {
                 })?
         };
 
-        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+        let rpc_timeout =
+            TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
 
         // Rollback transactions on all records
         let mut unord = FuturesUnordered::new();
@@ -906,7 +1122,8 @@ impl StorageManager {
             apibail_not_initialized!();
         };
 
-        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+        let rpc_timeout =
+            TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
 
         let _subkey_lock = self
             .record_lock_table
@@ -926,39 +1143,26 @@ impl StorageManager {
             apibail_try_again!("dht is not online");
         }
 
-        let (concurrency_semaphore, command_params) = {
+        let command_params = {
             let opaque_record_key = record_key.opaque();
 
             let mut inner = self.inner.lock();
             let otm = &mut inner.outbound_transaction_manager;
-            let concurrency_semaphore = otm
-                .get_transaction_state(transaction_handle)?
-                .get_operation_concurrency_semaphore();
 
             // Note: in theory, we could return a null value here if no sequence number existed at begin time.
             // But we are reserving the right to include transactional 'gets' in the -remote transaction state-.
             // Which means we have to send the get request to the network even if nothing should be returned.
 
             // Prepare for get value
-            let command_params = otm
-                .prepare_transact_get_params(transaction_handle, &opaque_record_key, subkey)
+            otm.prepare_transact_get_params(transaction_handle, &opaque_record_key, subkey)
                 .inspect_err(|e| {
                     veilid_log!(self debug "error in prepare_transact_get_params: {}", e);
-                })?;
-            (concurrency_semaphore, command_params)
+                })?
         };
 
-        // Wait for concurrency semaphore
-        let sem = concurrency_semaphore
-            .acquire()
-            .measure_debug(
-                rpc_timeout,
-                veilid_log_dbg!(
-                    self,
-                    "StorageManager::transaction_get concurrency semaphore"
-                ),
-            )
-            .await;
+        // Gate on concurrency + the download budget (a get pulls a full value down)
+        let gate_cost = (MAX_SUBKEY_SIZE as u64).saturating_mul(command_params.nodes.len() as u64);
+        let gate_permit = self.acquire_operation_gate(None, Some(gate_cost)).await;
 
         // Send all get commands
         let result = self
@@ -976,7 +1180,7 @@ impl StorageManager {
             })?;
 
         // Done with network access, release the semaphore
-        drop(sem);
+        drop(gate_permit);
 
         let get_signed_value_data = {
             let mut inner = self.inner.lock();
@@ -1031,19 +1235,12 @@ impl StorageManager {
         data: Vec<u8>,
         options: Option<DHTTransactionSetValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
-        #[cfg(feature = "verbose-tracing")]
-        let set_start = {
-            veilid_log!(self debug "transaction_set enter: handle={} key={} subkey={}",
-                transaction_handle, record_key.opaque(), subkey,
-            );
-            Timestamp::now()
-        };
-
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
         };
 
-        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+        let rpc_timeout =
+            TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
 
         let _subkey_lock = self
             .record_lock_table
@@ -1065,13 +1262,11 @@ impl StorageManager {
             apibail_try_again!("dht is not online");
         }
 
-        let (concurrency_semaphore, command_params) = {
-            let (concurrency_semaphore, writer, last_get_result) = {
+        // Build the signed value data for this set from the raw data and the record's writer
+        let signed_value_data = {
+            let (writer, last_get_result) = {
                 let inner = &*self.inner.lock();
                 let otm = &inner.outbound_transaction_manager;
-                let concurrency_semaphore = otm
-                    .get_transaction_state(transaction_handle)?
-                    .get_operation_concurrency_semaphore();
 
                 // Get last known value for this subkey from the transaction
                 let last_get_result = {
@@ -1087,7 +1282,11 @@ impl StorageManager {
                 // Use the specified writer, or if not specified, the default writer when the record was opened
                 let opt_writer = {
                     let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
-                        apibail_generic!("record not open");
+                        apibail_invalid_argument!(
+                            "record not open",
+                            "record_key",
+                            opaque_record_key
+                        );
                     };
                     opened_record.writer().cloned()
                 };
@@ -1100,43 +1299,73 @@ impl StorageManager {
                 let Some(writer) = opt_writer else {
                     apibail_generic!("value is not writable");
                 };
-                (concurrency_semaphore, writer, last_get_result)
+                (writer, last_get_result)
             };
 
             // Make signed value data (encrypted) and value data (unencrypted) and get descriptor for this value
             let (signed_value_data, _, _) = self
                 .prepare_set_value_data(&record_key, subkey, data, &writer, last_get_result)
                 .await?;
-
-            // Prepare for set value
-            let command_params = {
-                let inner = &mut *self.inner.lock();
-                let otm = &mut inner.outbound_transaction_manager;
-                otm.prepare_transact_set_params(
-                    transaction_handle,
-                    &opaque_record_key,
-                    subkey,
-                    signed_value_data.clone(),
-                )
-                .inspect_err(|e| {
-                    veilid_log!(self debug "error in prepare_transact_set_params: {}", e);
-                })?
-            };
-
-            (concurrency_semaphore, command_params)
+            signed_value_data
         };
 
-        // Wait for concurrency semaphore
-        let sem = concurrency_semaphore
-            .acquire()
-            .measure_debug(
-                rpc_timeout,
-                veilid_log_dbg!(
-                    self,
-                    "StorageManager::transaction_set concurrency semaphore"
-                ),
+        // Perform the set within the transaction using the prepared signed value
+        let opt_current_signed_value_data = self
+            .transaction_set_signed_value_data(
+                transaction_handle,
+                record_key.clone(),
+                subkey,
+                signed_value_data,
             )
-            .await;
+            .await?;
+
+        // Decrypt any newer value found online for return to the caller
+        match opt_current_signed_value_data {
+            Some(svd) => Ok(Some(
+                self.maybe_decrypt_value_data(&record_key, svd.value_data())
+                    .await?,
+            )),
+            None => Ok(None),
+        }
+    }
+
+    /// The second half of `transaction_set`: set an already-signed value within the transaction.
+    /// Used by `transaction_set` (freshly signed) and by rehydration (an existing SignedValueData
+    /// from the local store, pushed unchanged). The caller must hold the TransactSet subkey lock.
+    /// Returns the raw signed value found online if it was newer/different than what was set; the
+    /// caller is responsible for any decryption.
+    pub(super) async fn transaction_set_signed_value_data(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+        record_key: RecordKey,
+        subkey: ValueSubkey,
+        signed_value_data: Arc<SignedValueData>,
+    ) -> VeilidAPIResult<Option<Arc<SignedValueData>>> {
+        let opaque_record_key = record_key.opaque();
+        let rpc_timeout =
+            TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
+
+        // Uplink cost of this set: the value sent to every node in the command
+        let set_value_bytes = signed_value_data.total_size() as u64;
+
+        // Prepare for set value
+        let command_params = {
+            let inner = &mut *self.inner.lock();
+            let otm = &mut inner.outbound_transaction_manager;
+            otm.prepare_transact_set_params(
+                transaction_handle,
+                &opaque_record_key,
+                subkey,
+                signed_value_data,
+            )
+            .inspect_err(|e| {
+                veilid_log!(self debug "error in prepare_transact_set_params: {}", e);
+            })?
+        };
+
+        // Gate on concurrency + the upload budget (a set pushes the value up)
+        let gate_cost = set_value_bytes.saturating_mul(command_params.nodes.len() as u64);
+        let gate_permit = self.acquire_operation_gate(Some(gate_cost), None).await;
 
         // Send all set commands
         let result = self
@@ -1154,7 +1383,7 @@ impl StorageManager {
             })?;
 
         // Done with network access, release the semaphore
-        drop(sem);
+        drop(gate_permit);
 
         let opt_current_signed_value_data = {
             let mut inner = self.inner.lock();
@@ -1178,34 +1407,13 @@ impl StorageManager {
             // If there is an updated value, it means the set succeeded
             // If the set found a newer value online then this gets cleared for the subkey
             if let Some(updated_consensus) = record_state.updated_consensus().get(subkey) {
-                // There is an updated value after we did the set
-
                 // Ensure the updated consensus meets the strict consensus requirement.
                 let required = record_state.required_strict_consensus_count();
                 if updated_consensus.strict_consensus_count < required {
                     // Otherwise, ask the app to try the set again to continue to attempt consensus
-                    #[cfg(feature = "verbose-tracing")]
-                    {
-                        let set_elapsed = Timestamp::now().duration_since(set_start);
-                        veilid_log!(self debug "transaction_set FAILED consensus: handle={} key={} subkey={} strict_count={} required={} updated_consensus={:?} elapsed={}",
-                            transaction_handle, record_key.opaque(), subkey,
-                            updated_consensus.strict_consensus_count,
-                            required,
-                            updated_consensus,
-                            set_elapsed,
-                        );
-                    }
                     apibail_try_again!("set did not reach consensus");
                 }
-
                 // Return that the set updated with consensus successfully
-                #[cfg(feature = "verbose-tracing")]
-                {
-                    let set_elapsed = Timestamp::now().duration_since(set_start);
-                    veilid_log!(self debug "transaction_set OK: handle={} key={} subkey={} elapsed={}",
-                        transaction_handle, record_key.opaque(), subkey, set_elapsed,
-                    );
-                }
                 return Ok(None);
             };
 
@@ -1231,19 +1439,9 @@ impl StorageManager {
                 record_key.opaque()
             );
         };
-        let current_value_data = self
-            .maybe_decrypt_value_data(&record_key, current_signed_value_data.value_data())
-            .await?;
 
-        // Return that a newer or different value was found online
-        #[cfg(feature = "verbose-tracing")]
-        {
-            let set_elapsed = Timestamp::now().duration_since(set_start);
-            veilid_log!(self debug "transaction_set NEWER_VALUE: handle={} key={} subkey={} elapsed={}",
-                transaction_handle, record_key.opaque(), subkey, set_elapsed,
-            );
-        }
-        Ok(Some(current_value_data))
+        // Return the newer or different signed value that was found online (caller decrypts)
+        Ok(Some(current_signed_value_data))
     }
 
     /// Inspect a record within a transaction, does not perform any network
@@ -1306,7 +1504,8 @@ impl StorageManager {
         };
 
         // Process background rollbacks -third-
-        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+        let rpc_timeout =
+            TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
         let registry = self.registry();
         let transaction_handle_clone = transaction_handle;
         let background_rollback_fut = async move {
@@ -1466,8 +1665,10 @@ impl StorageManager {
 
     /// Failure-case counterpart to rollback_guard_locked_success.
     ///
-    /// Drops the transaction's local state synchronously, sends Rollback RPCs in the background,
-    /// then releases the records_lock so a fresh transaction on the same records can proceed.
+    /// Drops local transaction state synchronously, then runs the Rollback RPCs in the background
+    /// holding the records_lock until they finish — so a retry can't re-begin on these records
+    /// while their nodes still hold this transaction's node-transactions (which starves begin
+    /// consensus).
     fn rollback_guard_locked_failure(
         &self,
         records_lock: Arc<StorageManagerRecordsLockGuard>,
@@ -1492,7 +1693,8 @@ impl StorageManager {
             return;
         }
 
-        let rpc_timeout = TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+        let rpc_timeout =
+            TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
         let registry = self.registry();
         let background_rollback_fut = async move {
             let this = registry.storage_manager();
@@ -1517,11 +1719,16 @@ impl StorageManager {
             if let Some(cleanup) = opt_cleanup {
                 cleanup.await;
             }
+
+            // Hold the records lock until the rollback RPCs actually finish, so a
+            // retry can't re-begin on these records while their nodes still hold
+            // this transaction's node-transactions (they'd report busy and starve
+            // begin consensus).
+            drop(records_lock);
         };
 
         self.background_operation_processor
             .add_future(background_rollback_fut);
-        drop(records_lock);
     }
 
     /// Convenience function to drop transaction and wait for background tasks to complete

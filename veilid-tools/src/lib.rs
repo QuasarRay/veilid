@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! # veilid-tools
 //!
 //! A collection of baseline tools for Rust development use by Veilid and Veilid-enabled Rust applications
@@ -21,52 +22,98 @@
 //! * `rt-wasm-bindgen` - When building for the `wasm32` architecture, use this to enable `wasm-bindgen-futures` as the async runtime
 //!
 
+/// Packet fragmentation and reassembly for the sender and receiver ends.
 pub mod assembly_buffer;
+/// Debuggable async lock primitives (mutex, rwlock).
 pub mod async_locks;
+/// Stream adapter that allows peeking buffered bytes without consuming them.
 pub mod async_peek_stream;
+/// `io::Write` adapter that appends into a `BytesMut` buffer.
 pub mod bytes_writer;
+/// Broadcast stream that hands each subscriber its own clone of every item.
 pub mod clone_stream;
+/// parking_lot deadlock-detector watchdog (enabled by the `debug-locks` feature).
 #[cfg(feature = "debug-locks")]
 pub mod deadlock_detector;
+/// Runs futures to completion in the background and routes their results to a stream.
 pub mod deferred_stream_processor;
+/// Subscribe/publish event bus for type-keyed events.
 pub mod event_bus;
+/// One-shot resolvable signal with futures that wait on resolution.
 pub mod eventual;
+/// Shared base machinery behind the `Eventual` family.
 pub mod eventual_base;
+/// `Eventual` carrying a single by-value payload to one waiter.
 pub mod eventual_value;
+/// `Eventual` carrying a payload cloned to every waiter.
 pub mod eventual_value_clone;
+/// Hysteresis detector that debounces a value flapping between states.
 pub mod flap_detector;
+/// String indentation, human-readable byte counts, and formatter helpers.
 pub mod formatting;
+/// Batched, concurrency-limited processing of future queues and streams.
 pub mod future_queue;
+/// Pool that races spawned futures and optionally reports their completion.
 pub mod future_race_completion;
+/// Periodic interval timer driving an async callback.
 pub mod interval;
+/// IP address paired with a port.
 pub mod ip_addr_port;
+/// IP address classification helpers (global, loopback, multicast scope).
 pub mod ip_extra;
+/// Inter-process communication over named pipes (Windows) or unix sockets.
 pub mod ipc;
+/// `unwrap`/`expect` variants that log through `tracing` or `log` on failure.
 pub mod log_unwrap;
+/// Join handle that aborts on drop if not already joined.
 pub mod must_join_handle;
+/// Single-slot future runner that joins the prior run before starting the next.
 pub mod must_join_single_future;
+/// Enumeration of host network interfaces and their addresses.
 pub mod network_interfaces;
+/// Result type distinguishing network-level outcomes from hard errors.
 pub mod network_result;
+/// Type aliases for pinned, boxed futures.
 pub mod pin;
+/// Cryptographically secure RNG and random number helpers.
 pub mod random;
+/// Raw integer timestamps with duration parsing and human formatting.
 pub mod raw_timestamp;
+/// DNS resolution via the system resolver or hickory-resolver.
 pub mod resolver;
+/// Single-fire eventual whose resolution returns the prior pending value.
 pub mod single_shot_eventual;
+/// Async sleep for a number of milliseconds.
 pub mod sleep;
+/// UDP/TCP socket binding and connection helpers with reuse and linger options.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod socket_tools;
+/// Spawn blocking work and yield control on the async runtime.
 pub mod spawn;
+/// URL parser splitting scheme, host, port, and path into typed parts.
 pub mod split_url;
+/// Lock gating startup and shutdown against in-flight operations.
 pub mod startup_lock;
+/// Interning of borrowed strings into `&'static str`.
 pub mod static_string_table;
+/// Per-tag lock table serializing access by key.
 pub mod tag_lock;
+/// Self-rescheduling periodic task with single-instance run guarantees.
 pub mod tick_task;
+/// Run a future with a millisecond timeout.
 pub mod timeout;
+/// Timeout combinator returning either the value, a timeout, or an error.
 pub mod timeout_or;
+/// Assorted small utilities (time conversion, retry, comparison helpers).
 pub mod tools;
+/// `parking_lot::Mutex` wrapper that records the holder for debugging.
+pub mod tracked_mutex;
+/// Backtrace capture that trims runtime frames and shortens paths.
 pub mod trim_backtrace;
+/// In-process simulated network for deterministic testing.
 #[cfg(feature = "virtual-network")]
 pub mod virtual_network;
+/// Browser/WASM environment and address-family detection.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub mod wasm_tools;
 
@@ -234,6 +281,8 @@ pub use timeout_or::*;
 #[doc(inline)]
 pub use tools::*;
 #[doc(inline)]
+pub use tracked_mutex::*;
+#[doc(inline)]
 pub use trim_backtrace::*;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub use wasm_tools::*;
@@ -246,12 +295,14 @@ cfg_if! {
     if #[cfg(feature = "tracing")] {
         use tracing::*;
 
+        /// True if DEBUG-level logging is enabled for the given target.
         #[macro_export]
         macro_rules! debug_target_enabled {
             ($target:expr) => { enabled!(target: $target, Level::DEBUG) }
         }
     } else {
         use log::*;
+        /// True if DEBUG-level logging is enabled for the given target.
         #[macro_export]
         macro_rules! debug_target_enabled {
             ($target:expr) => { log_enabled!(target: $target, Level::Debug) }
@@ -271,7 +322,3 @@ pub use fn_name;
 pub use hex;
 pub use parking_lot;
 pub use shell_words;
-
-// For iOS tests
-#[no_mangle]
-pub extern "C" fn main_rs() {}

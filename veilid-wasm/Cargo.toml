@@ -24,7 +24,8 @@ enable-crypto-none = ["veilid-core/enable-crypto-none"]
 crypto-test = ["enable-crypto-vld0", "enable-crypto-none"]
 crypto-test-none = ["enable-crypto-none"]
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
-footgun = ["veilid-core/footgun"]
+footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
+footgun-config = ["veilid-core/footgun-config"]
 unstable-tunnels = ["veilid-core/unstable-tunnels"]
 unstable-blockstore = ["veilid-core/unstable-blockstore"]
 
@@ -36,13 +37,17 @@ veilid-core = { version = "0.5.3", path = "../veilid-core", default-features = f
 veilid-tracing-wasm = "0.2.0"
 tracing-subscriber = "0.3.23"
 
-js-sys = ">=0.3.83"
-wasm-bindgen = { version = ">=0.2.121", features = ["serde-serialize"] }
-wasm-bindgen-futures = ">=0.4.58"
+js-sys = "0.3.83"
+wasm-bindgen = { version = "0.2.121", features = ["serde-serialize"] }
+wasm-bindgen-futures = "0.4.58"
 
 console_error_panic_hook = "0.1.7"
 cfg-if = "1.0.0"
+pastey = "0.2.1"
 serde = "1.0.218"
+serde_bytes = { version = "0.11", default-features = false, features = [
+    "alloc",
+] }
 lazy_static = "1.5.0"
 send_wrapper = "0.6.0"
 futures-util = { version = "0.3.32" }

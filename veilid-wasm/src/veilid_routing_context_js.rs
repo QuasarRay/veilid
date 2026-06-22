@@ -1,7 +1,13 @@
 #![allow(non_snake_case)]
 use super::*;
-use veilid_core::try_from_js_option;
+use crate::ts::try_from_js_option;
 
+/// Routing contexts are the way you specify the communication preferences for Veilid.
+///
+/// By default routing contexts have 'safety routing' enabled which offers sender privacy.
+/// To disable this and send RPC operations straight from the node, use [VeilidRoutingContext::withSafety]
+/// with a [SafetySelection::Unsafe] parameter. To enable receiver privacy, send to an imported private
+/// route id rather than directly to a node id.
 #[wasm_bindgen()]
 pub struct VeilidRoutingContext {
     inner_routing_context: RoutingContext,
@@ -10,6 +16,8 @@ pub struct VeilidRoutingContext {
 #[wasm_bindgen()]
 impl VeilidRoutingContext {
     /// Create a new VeilidRoutingContext, without any privacy or sequencing settings.
+    ///
+    /// Throws `NotInitialized` if the node is not started.
     #[wasm_bindgen(constructor)]
     pub fn new() -> VeilidAPIResult<VeilidRoutingContext> {
         let veilid_api = get_veilid_api()?;
@@ -42,6 +50,8 @@ impl VeilidRoutingContext {
     /// * Sequencing default is to have no preference for ordered vs unordered message delivery
     ///
     /// To customize the safety selection in use, use [VeilidRoutingContext::withSafety].
+    ///
+    /// Throws `NotInitialized` if the node is not started.
     pub fn withDefaultSafety(&self) -> VeilidAPIResult<VeilidRoutingContext> {
         let routing_context = self.getRoutingContext()?;
         Ok(VeilidRoutingContext {
@@ -51,6 +61,8 @@ impl VeilidRoutingContext {
 
     /// Use a custom [SafetySelection]. Can be used to disable safety via [SafetySelection::Unsafe]
     /// Returns a new instance of VeilidRoutingContext - does not mutate.
+    ///
+    /// Throws `Generic` if `safety_selection` is `Unsafe` without the `footgun-nodeid-target` feature or its hop count exceeds the configured maximum, `InvalidArgument` if its `preferred_route` is not a known route id, and `NotInitialized` if the node is not started.
     pub fn withSafety(
         &self,
         safety_selection: ts::SafetySelection,
@@ -85,6 +97,10 @@ impl VeilidRoutingContext {
     ///
     /// @param {string} target - a private route id, or in 'footgun' mode, a direct node id
     /// @param {string} message - an arbitrary message blob of up to `32768` bytes.
+    ///
+    /// Awaits a network send.
+    ///
+    /// Throws the same error its core twin `RoutingContext::app_message` returns: `InvalidTarget` if `target` is a node id (only route ids are allowed without the `footgun-nodeid-target` feature), otherwise `NoConnection` if the route could not be resolved or allocated, `Timeout` if dispatch timed out, or `TryAgain` if a route is temporarily unavailable (all retryable). Throws `NotInitialized` if the node is not started, and `Generic` if `target` is malformed.
     pub async fn appMessage(&self, target: ts::Target, message: Box<[u8]>) -> VeilidAPIResult<()> {
         let routing_context = self.getRoutingContext()?;
         let target = target.try_into()?;
@@ -99,6 +115,10 @@ impl VeilidRoutingContext {
     /// @param {Target} target - a private route id, or in 'footgun' mode, a direct node id
     /// @param {Uint8Array} message - an arbitrary message blob of up to `32768` bytes.
     /// @returns {Uint8Array} an answer blob of up to `32768` bytes.
+    ///
+    /// Blocks awaiting the remote answer over the network.
+    ///
+    /// Throws the same error its core twin `RoutingContext::app_call` returns: `InvalidTarget` if `target` is a node id (only route ids are allowed without the `footgun-nodeid-target` feature), otherwise `NoConnection` if the route could not be resolved or allocated, `Timeout` if the reply deadline elapsed, or `TryAgain` if a route is temporarily unavailable (all retryable). Throws `NotInitialized` if the node is not started, and `Generic` if `target` is malformed.
     pub async fn appCall(
         &self,
         target: ts::Target,
@@ -124,6 +144,10 @@ impl VeilidRoutingContext {
     /// Returns the newly allocated DHT record's key if successful.   
     ///
     /// Note: if you pass in an owner keypair this call is a deterministic! This means that if you try to create a new record for a given owner and schema that already exists it *will* fail.
+    ///
+    /// Opens the record; the caller must later release it via [VeilidRoutingContext::closeDHTRecord] or it leaks. Local-only: builds the record in the local store without network fanout.
+    ///
+    /// Throws the same error its core twin `RoutingContext::create_dht_record` returns: `Generic` if `kind` is unsupported, `schema` has an invalid size or fourcc, or `owner` is a malformed keypair; `InvalidArgument` if `schema` has an invalid subkey/member/writer count, `owner` is the wrong crypto kind for `kind`, or this node's id would be a schema member; and `NotInitialized` if the node is not started. Also throws a parse error if `kind` or `owner` fail to deserialize, or `Generic`/`InvalidArgument` if `schema` fails to deserialize.
     pub async fn createDHTRecord(
         &self,
         #[wasm_bindgen(unchecked_param_type = "CryptoKind")] kind: JsValue,
@@ -161,6 +185,10 @@ impl VeilidRoutingContext {
     /// @returns the DHT record descriptor for the opened record if successful.
     /// @param {string} recordKey - key of the DHT record.
     /// @param {string} defaultWriter - the writer keypair to use for set value operations by default
+    ///
+    /// The open half of the open/close pair; release with [VeilidRoutingContext::closeDHTRecord] or it leaks. Re-opening an already-open record replaces its writer and routing context while keeping active watches. May await network.
+    ///
+    /// Throws the same error its core twin `RoutingContext::open_dht_record` returns: `Generic` if `recordKey` is an unsupported kind or malformed or `defaultWriter` is a malformed keypair; `TryAgain` (retryable) if the record is not yet local and the node is offline; `KeyNotFound` if the record does not exist on the network; and `NotInitialized` if the node is not started. Also throws a parse error if `defaultWriter` fails to deserialize.
     pub async fn openDHTRecord(
         &self,
         recordKey: &RecordKey,
@@ -182,6 +210,10 @@ impl VeilidRoutingContext {
     /// Closes a DHT record at a specific key that was opened with create_dht_record or open_dht_record.
     ///
     /// Closing a record allows you to re-open it with a different routing context
+    ///
+    /// The release for [VeilidRoutingContext::createDHTRecord] and [VeilidRoutingContext::openDHTRecord]. Closing a record that is local but not open is a no-op; one not in the local store errors. Blocks holding the record lock until pending writes flush to local disk.
+    ///
+    /// Throws the same error its core twin `RoutingContext::close_dht_record` returns: `KeyNotFound` if the record is not in the local store, `Generic` if `recordKey` is an unsupported kind or malformed, and `NotInitialized` if the node is not started. None are retryable.
     pub async fn closeDHTRecord(&self, recordKey: &RecordKey) -> VeilidAPIResult<()> {
         let routing_context = self.getRoutingContext()?;
         routing_context.close_dht_record(recordKey.clone()).await
@@ -192,6 +224,8 @@ impl VeilidRoutingContext {
     /// If the record is opened, it must be closed before it is deleted.
     /// Deleting a record does not delete it from the network, but will remove the storage of the record
     /// locally, and will prevent its value from being refreshed on the network by this node.
+    ///
+    /// Throws the same error its core twin `RoutingContext::delete_dht_record` returns: `Generic` if `recordKey` is an unsupported kind or malformed, `KeyNotFound` if the record is not in the local store, and `NotInitialized` if the node is not started. None are retryable.
     pub async fn deleteDHTRecord(&self, recordKey: &RecordKey) -> VeilidAPIResult<()> {
         let routing_context = self.getRoutingContext()?;
         routing_context.delete_dht_record(recordKey.clone()).await
@@ -203,6 +237,10 @@ impl VeilidRoutingContext {
     ///
     /// Returns `undefined` if the value subkey has not yet been set.
     /// Returns a Uint8Array of `data` if the value subkey has valid data.
+    ///
+    /// Returns the local value without network access unless `forceRefresh` is set, which awaits a network get fanout.
+    ///
+    /// Throws the same error its core twin `RoutingContext::get_dht_value` returns: `InvalidArgument` if the record is not open or `recordKey` is malformed, `Generic` if `recordKey` is an unsupported kind, `TryAgain` (retryable) if a network refresh is needed and the node is offline, `KeyNotFound` if the record no longer exists, and `NotInitialized` if the node is not started.
     pub async fn getDHTValue(
         &self,
         recordKey: &RecordKey,
@@ -223,6 +261,10 @@ impl VeilidRoutingContext {
     ///
     /// Returns `undefined` if the value was successfully put.
     /// Returns a Uint8Array of `data` if the value put was older than the one available on the network.
+    ///
+    /// Blocks on a network set fanout; when offline or the fanout fails, queues the write for later flush (if offline writes are allowed) and returns `undefined`.
+    ///
+    /// Throws the same error its core twin `RoutingContext::set_dht_value` returns: `InvalidArgument` if the record is not open; `Generic` if `recordKey` is an unsupported kind, the record is not writable, or the value fails schema validation (subkey out of range, `data` over the per-subkey limit, or wrong writer); `TryAgain` (retryable) if the record is currently in a transaction; `KeyNotFound` if the record no longer exists; and `NotInitialized` if the node is not started. A failed network fanout does not throw; the write is deferred. Also throws `Generic` if `options` fails to deserialize.
     pub async fn setDHTValue(
         &self,
         recordKey: &RecordKey,
@@ -272,17 +314,20 @@ impl VeilidRoutingContext {
     /// * If a member (either the owner or a SMPL schema member) has opened the key for writing (even if no writing is performed) then the watch will be signed and guaranteed network.dht.member_watch_limit per writer.
     ///
     /// Members can be specified via the SMPL schema and do not need to allocate writable subkeys in order to offer a member watch capability.
+    ///
+    /// Re-watching the same record replaces the prior watch's parameters in place. Records the desired watch state and returns without a network round-trip; a background task reconciles it with a remote node.
+    ///
+    /// Throws the same error its core twin `RoutingContext::watch_dht_values` returns: `InvalidArgument` if the record is not open, `recordKey` is malformed, or a non-zero `expiration` is sooner than `network.rpc.timeout_ms` in the future; `Generic` if `recordKey` is an unsupported kind or no local record is found; and `NotInitialized` if the node is not started. None are retryable; no network errors surface here since reconciliation is deferred to a background task.
     pub async fn watchDhtValues(
         &self,
         recordKey: &RecordKey,
         subkeys: Option<ValueSubkeyRangeSet>,
         expiration: Option<Timestamp>,
         count: Option<u32>,
-        transactional: Option<bool>,
     ) -> VeilidAPIResult<bool> {
         let routing_context = self.getRoutingContext()?;
         let res = routing_context
-            .watch_dht_values(recordKey.clone(), subkeys, expiration, count, transactional)
+            .watch_dht_values(recordKey.clone(), subkeys, expiration, count)
             .await?;
         VeilidAPIResult::Ok(res)
     }
@@ -297,6 +342,10 @@ impl VeilidRoutingContext {
     ///
     /// Returns Ok(true) if a watch is active for this record.
     /// Returns Ok(false) if the entire watch has been cancelled.
+    ///
+    /// A no-op returning `Ok(false)` when no watch is active. Records the reduced watch state and returns without a network round-trip; a background task sends the cancel.
+    ///
+    /// Throws the same error its core twin `RoutingContext::cancel_dht_watch` returns: `InvalidArgument` if the record is not open, `Generic` if `recordKey` is an unsupported kind or malformed, and `NotInitialized` if the node is not started.
     pub async fn cancelDHTWatch(
         &self,
         recordKey: &RecordKey,
@@ -347,6 +396,10 @@ impl VeilidRoutingContext {
     ///     Useful for determine which subkeys would change with an SetValue operation
     ///
     /// Returns a DHTRecordReport with the subkey ranges that were returned that overlapped the schema, and sequence numbers for each of the subkeys in the range.
+    ///
+    /// `DHTReportScope::Local` (the default) is local-only and non-blocking; the Sync/Update scopes block on a network inspect fanout and return `TryAgain` if offline.
+    ///
+    /// Throws the same error its core twin `RoutingContext::inspect_dht_record` returns: `InvalidArgument` if the record is not open, `Generic` if `recordKey` is an unsupported kind or malformed, `TryAgain` (retryable) if a Sync/Update scope is used while offline, and `NotInitialized` if the node is not started.
     pub async fn inspectDHTRecord(
         &self,
         recordKey: &RecordKey,
@@ -364,6 +417,10 @@ impl VeilidRoutingContext {
     /// Waits for any pending offline subkey writes for a DHT record to be flushed to the network.
     /// `timeoutMs` is the maximum time to wait in milliseconds, or `undefined` to wait indefinitely.
     /// Returns `true` if all pending writes were flushed, `false` if the timeout elapsed first.
+    ///
+    /// Blocks until the queued offline writes drain to the network or `timeoutMs` elapses.
+    ///
+    /// Throws the same error its core twin `RoutingContext::flush_dht_record` returns: `Generic` if `recordKey` is an unsupported kind or malformed, and `NotInitialized` if the node shuts down while waiting or is not started.
     pub async fn flushDHTRecord(
         &self,
         recordKey: &RecordKey,

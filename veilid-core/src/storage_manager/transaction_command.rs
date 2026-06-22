@@ -8,8 +8,6 @@ pub(in crate::storage_manager) struct OutboundTransactCommandNode {
     pub lnxid: LocalNodeTransactionId,
     pub rnxid: RemoteNodeTransactionId,
     pub node_ref: NodeRef,
-    /// Most recent RTT for this node, used to bound the pre-consensus per-RPC timeout
-    pub opt_last_rtt: Option<TimestampDuration>,
 }
 
 pub(in crate::storage_manager) type OutboundTransactCommandNodes = Vec<OutboundTransactCommandNode>;
@@ -230,13 +228,14 @@ impl StorageManager {
             #[cfg(feature = "verbose-tracing")]
             let attempt_node_count = nodes_to_send.len();
 
-            // Bound each per-node RPC by 3x its recent RTT (capped at rpc.timeout_ms,
-            // falling back to the cap when no RTT is known). A node that doesn't answer
-            // within its bound is treated as no-response and the loop moves on without
-            // waiting the full rpc timeout for consensus.
+            // Wait the full rpc timeout per node; consensus early-exit below ends the
+            // wait sooner, and a shorter bound drops in-flight answers under load
             let rpc_timeout =
-                TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+                TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
 
+            // Best-effort cleanup (rollback, required==0): fire RPCs in the background so
+            // the records lock isn't held on a dead node's full timeout.
+            let fire_and_forget = params.required_strict_consensus_count == 0;
             let mut unord = FuturesUnordered::new();
 
             for n in &nodes_to_send {
@@ -249,13 +248,7 @@ impl StorageManager {
                 #[cfg(feature = "instrument")]
                 let command = params.command;
                 let node_start = Timestamp::now();
-                let per_node_timeout = n
-                    .opt_last_rtt
-                    .map(|rtt| {
-                        rtt.saturating_mul(PRE_CONSENSUS_RTT_FACTOR)
-                            .min(rpc_timeout)
-                    })
-                    .unwrap_or(rpc_timeout);
+                let per_node_timeout = rpc_timeout;
 
                 let fut = async move {
                     let rpc_processor = registry.rpc_processor();
@@ -371,7 +364,17 @@ impl StorageManager {
                         Err(_) => VeilidAPIResult::Ok(None),
                     }
                 };
-                unord.push(Box::pin(fut));
+                if fire_and_forget {
+                    self.background_operation_processor.add_future(async move {
+                        let _ = fut.await;
+                    });
+                } else {
+                    unord.push(Box::pin(fut));
+                }
+            }
+            if fire_and_forget {
+                // RPCs fired in the background; no consensus to await.
+                break;
             }
 
             // Collect results. Once consensus is reached, keep collecting up to
@@ -383,7 +386,7 @@ impl StorageManager {
             let mut attempt_responded_xids = HashSet::new();
             let mut consensus_reached = false;
             let mut post_consensus_deadline: Option<Timestamp> = None;
-            let rpc_timeout_us = ms_to_us(self.config().network.rpc.timeout_ms);
+            let rpc_timeout_us = ms_to_us(self.config().internal().network.rpc.timeout_ms);
 
             loop {
                 let result = match post_consensus_deadline {

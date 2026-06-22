@@ -5,9 +5,9 @@ static PROTOCOL_TYPE_ORDERING: LazyLock<BTreeMap<(Sequencing, ProtocolType), usi
     LazyLock::new(|| {
         let mut out = BTreeMap::<(Sequencing, ProtocolType), usize>::new();
 
-        // Sequencing::NoPreference
+        // Sequencing::PreferUnordered
         {
-            let pref = Sequencing::NoPreference;
+            let pref = Sequencing::PreferUnordered;
 
             let mut order = 0;
             out.insert((pref, ProtocolType::UDP), order);
@@ -58,23 +58,11 @@ static PROTOCOL_TYPE_ALL_ORDERED_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(
     out
 });
 
-static PROTOCOL_TYPE_LOW_LEVEL_UDP_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(|| {
+static PROTOCOL_TYPE_ALL_CONNECTION_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(|| {
     let mut out = ProtocolTypeSet::new();
 
     for pt in ProtocolTypeSet::all() {
-        if pt.low_level_protocol_type() == LowLevelProtocolType::UDP {
-            out.insert(pt);
-        }
-    }
-
-    out
-});
-
-static PROTOCOL_TYPE_LOW_LEVEL_TCP_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(|| {
-    let mut out = ProtocolTypeSet::new();
-
-    for pt in ProtocolTypeSet::all() {
-        if pt.low_level_protocol_type() == LowLevelProtocolType::TCP {
+        if pt.framing_type() == FramingType::Connection {
             out.insert(pt);
         }
     }
@@ -136,13 +124,22 @@ impl ProtocolType {
     pub fn all_ordered_set() -> ProtocolTypeSet {
         *PROTOCOL_TYPE_ALL_ORDERED_SET
     }
-    pub fn low_level_udp_set() -> ProtocolTypeSet {
-        *PROTOCOL_TYPE_LOW_LEVEL_UDP_SET
+
+    pub fn all_connection_set() -> ProtocolTypeSet {
+        *PROTOCOL_TYPE_ALL_CONNECTION_SET
     }
-    #[expect(dead_code)]
-    pub fn low_level_tcp_set() -> ProtocolTypeSet {
-        *PROTOCOL_TYPE_LOW_LEVEL_TCP_SET
+
+    /// All protocol types matching a specific sequence ordering
+    pub fn all_sequence_ordering_set(ordering: SequenceOrdering) -> ProtocolTypeSet {
+        let mut out = ProtocolTypeSet::empty();
+        for pt in ProtocolTypeSet::all() {
+            if pt.sequence_ordering() == ordering {
+                out.insert(pt);
+            }
+        }
+        out
     }
+
     pub fn get_ordering_sort(ordering: SequenceOrdering) -> Option<Box<ProtocolTypeSort<'static>>> {
         match ordering {
             SequenceOrdering::Unordered => None,

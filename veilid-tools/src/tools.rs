@@ -5,6 +5,7 @@ use std::path::Path;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// Assert that an expression evaluates to `Err(..)`, panicking with the `Ok` value otherwise.
 #[macro_export]
 macro_rules! assert_err {
     ($ex:expr) => {
@@ -14,6 +15,7 @@ macro_rules! assert_err {
     };
 }
 
+/// Build an `io::Error` of kind `Other` from anything `ToString`.
 #[macro_export]
 macro_rules! io_error_other {
     ($msg:expr) => {
@@ -21,10 +23,12 @@ macro_rules! io_error_other {
     };
 }
 
+/// Wrap any error in an `io::Error` of kind `Other`.
 pub fn to_io_error_other<E: std::error::Error + Send + Sync + 'static>(x: E) -> io::Error {
     io::Error::other(x)
 }
 
+/// Return early with an `io::Error` of kind `Other` built from anything `ToString`.
 #[macro_export]
 macro_rules! bail_io_error_other {
     ($msg:expr) => {
@@ -36,6 +40,7 @@ macro_rules! bail_io_error_other {
 
 cfg_if! {
     if #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))] {
+        /// Number of available hardware threads, falling back to 1 if it cannot be determined.
         #[must_use]
         pub fn get_concurrency() -> u32 {
             std::thread::available_parallelism()
@@ -50,6 +55,7 @@ cfg_if! {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// Convert a microsecond duration to seconds as `f64`, shedding least-significant bits if the value is too large to represent exactly.
 #[must_use]
 pub fn timestamp_duration_to_secs(dur: u64) -> f64 {
     // Downshift precision until it fits, lose least significant bits
@@ -62,21 +68,29 @@ pub fn timestamp_duration_to_secs(dur: u64) -> f64 {
     f64::from(usec as u32) * mul
 }
 
+/// Convert seconds as `f64` to a microsecond duration.
 #[must_use]
 pub fn secs_to_timestamp_duration(secs: f64) -> u64 {
     (secs * 1000000.0f64) as u64
 }
 
+/// Convert milliseconds to microseconds.
 #[must_use]
 pub fn ms_to_us(ms: u32) -> u64 {
     (ms as u64) * 1000u64
 }
 
+/// Convert microseconds to milliseconds, erroring if the result overflows `u32`.
+///
+/// Errors with a `String` describing the conversion failure if the millisecond count exceeds `u32::MAX`.
 pub fn us_to_ms(us: u64) -> Result<u32, String> {
     u32::try_from(us / 1000u64).map_err(|e| format!("could not convert microseconds: {}", e))
 }
 
-// Calculate retry attempt with logarhythmic falloff
+/// Decide whether a retry is due, with logarithmic falloff between `interval_start_us` and `interval_max_us`.
+///
+/// Returns `false` before `interval_start_us` of the reliable period has elapsed, `true` once `interval_max_us`
+/// has passed since `last_us`, and otherwise spaces retries out exponentially by `interval_multiplier_us`.
 #[must_use]
 pub fn retry_falloff_log(
     last_us: u64,
@@ -101,6 +115,9 @@ pub fn retry_falloff_log(
     }
 }
 
+/// Apply `closure` to items in order until one returns `Some`, giving up after `max` failures.
+///
+/// Synchronous; blocks only as far as `closure` does.
 pub fn try_at_most_n_things<T, I, C, R>(max: usize, things: I, closure: C) -> Option<R>
 where
     I: IntoIterator<Item = T>,
@@ -119,6 +136,9 @@ where
     None
 }
 
+/// Await `closure` on items in order until one returns `Some`, giving up after `max` failures.
+///
+/// Awaits each `closure` future sequentially, not concurrently; total wait is the sum.
 pub async fn async_try_at_most_n_things<T, I, C, R, F>(
     max: usize,
     things: I,
@@ -142,8 +162,11 @@ where
     None
 }
 
+/// In-place `min`/`max` assignment for ordered types.
 pub trait CmpAssign {
+    /// Replace `self` with `other` if `other` is smaller.
     fn min_assign(&mut self, other: Self);
+    /// Replace `self` with `other` if `other` is larger.
     fn max_assign(&mut self, other: Self);
 }
 
@@ -163,6 +186,7 @@ where
     }
 }
 
+/// Unspecified address and port zero matching the address family of `socket_addr`.
 #[must_use]
 pub fn compatible_unspecified_socket_addr(socket_addr: &SocketAddr) -> SocketAddr {
     match socket_addr {
@@ -177,6 +201,7 @@ cfg_if! {
 
         static IPV6_IS_SUPPORTED: Mutex<Option<bool>> = Mutex::new(None);
 
+        /// Whether IPv6 is usable locally, tested once by binding a loopback UDP socket and cached.
         pub fn is_ipv6_supported() -> bool {
             let mut opt_supp = IPV6_IS_SUPPORTED.lock();
             if let Some(supp) = *opt_supp {
@@ -190,6 +215,7 @@ cfg_if! {
 
         static IPV4_IS_SUPPORTED: Mutex<Option<bool>> = Mutex::new(None);
 
+        /// Whether IPv4 is usable locally, tested once by binding a loopback UDP socket and cached.
         pub fn is_ipv4_supported() -> bool {
             let mut opt_supp = IPV4_IS_SUPPORTED.lock();
             if let Some(supp) = *opt_supp {
@@ -204,6 +230,7 @@ cfg_if! {
     }
 }
 
+/// Unspecified addresses for every locally supported IP family (IPv4 always, IPv6 if available).
 #[must_use]
 pub fn available_unspecified_addresses() -> Vec<IpAddr> {
     if is_ipv6_supported() {
@@ -216,6 +243,13 @@ pub fn available_unspecified_addresses() -> Vec<IpAddr> {
     }
 }
 
+/// Resolve a listen-address string to socket addresses.
+///
+/// A bare port (`:8080` or `8080`) expands to every supported unspecified address; a host or host:port is parsed
+/// or resolved directly and only the given port is used.
+///
+/// Errors with a `String` if a bare port does not parse as a `u16`, or if the host:port form fails
+/// to parse (wasm32) or to resolve via DNS (native).
 pub fn listen_address_to_socket_addrs(listen_address: &str) -> Result<Vec<SocketAddr>, String> {
     // If no address is specified, but the port is, use ipv4 and ipv6 unspecified
     // If the address is specified, only use the specified port and fail otherwise
@@ -250,27 +284,40 @@ pub fn listen_address_to_socket_addrs(listen_address: &str) -> Result<Vec<Socket
 }
 
 /// Dedup, but doesn't require a sorted vec, and keeps the element order
-pub trait RemoveDuplicates<T: PartialEq + Clone> {
+pub trait RemoveDuplicates<T: PartialEq> {
+    /// Remove duplicate elements in place, keeping the first occurrence of each.
     fn remove_duplicates(&mut self);
 }
 
-impl<T: PartialEq + Ord + Clone> RemoveDuplicates<T> for Vec<T> {
+impl<T: PartialEq + Ord> RemoveDuplicates<T> for Vec<T> {
     fn remove_duplicates(&mut self) {
-        let mut already_seen = BTreeSet::new();
-        self.retain(move |item| already_seen.insert(item.clone()))
+        let mut firsts = Vec::<bool>::with_capacity(self.len());
+        {
+            let mut seen = BTreeSet::<&T>::new();
+            for item in self.iter() {
+                firsts.push(seen.insert(item));
+            }
+        }
+        let mut index = 0;
+        self.retain(|_| {
+            let first = firsts[index];
+            index += 1;
+            first
+        });
     }
 }
 
 /// Check for duplicates but doesn't require a sorted vec
-pub trait HasDuplicates<T: PartialEq + Clone> {
+pub trait HasDuplicates<T: PartialEq> {
+    /// Whether any element appears more than once.
     fn has_duplicates(&self) -> bool;
 }
 
-impl<T: PartialEq + Ord + Clone> HasDuplicates<T> for Vec<T> {
+impl<T: PartialEq + Ord> HasDuplicates<T> for Vec<T> {
     fn has_duplicates(&self) -> bool {
-        let mut already_seen = BTreeSet::new();
+        let mut seen = BTreeSet::<&T>::new();
         for item in self.iter() {
-            if !already_seen.insert(item) {
+            if !seen.insert(item) {
                 return true;
             }
         }
@@ -283,6 +330,10 @@ cfg_if::cfg_if! {
         use std::os::unix::fs::MetadataExt;
         use std::os::unix::prelude::PermissionsExt;
 
+        /// Ensure `path`, if it exists as a file, is mode 0o600 and owned by the current user and group.
+        ///
+        /// Errors with a `String` if the metadata read or the `chmod` to 0o600 fails (io error wrapped in the
+        /// message), or if the file's owner/group does not match the current user. A path that is not a file is Ok.
         pub fn ensure_file_private_owner<P:AsRef<Path>>(path: P) -> Result<(), String>
         {
             let path = path.as_ref();
@@ -303,6 +354,10 @@ cfg_if::cfg_if! {
             Ok(())
         }
 
+        /// Ensure `path`, if it exists as a directory, is mode 0o700 (or 0o750 when `group_read`) and owned by the current user and group.
+        ///
+        /// Errors with a `String` if the metadata read or the `chmod` fails (io error wrapped in the message),
+        /// or if the directory's owner/group does not match the current user. A path that is not a directory is Ok.
         pub fn ensure_directory_private_owner<P:AsRef<Path>>(path: P, group_read: bool) -> Result<(), String>
         {
             let path = path.as_ref();
@@ -332,6 +387,7 @@ cfg_if::cfg_if! {
         //use std::os::windows::fs::MetadataExt;
         //use windows_permissions::*;
 
+        /// Ensure `path`, if it exists as a file, has private ownership. No-op on this platform.
         pub fn ensure_file_private_owner<P:AsRef<Path>>(path: P) -> Result<(), String>
         {
             let path = path.as_ref();
@@ -342,6 +398,7 @@ cfg_if::cfg_if! {
             Ok(())
         }
 
+        /// Ensure `path`, if it exists as a directory, has private ownership. No-op on this platform.
         pub fn ensure_directory_private_owner<P:AsRef<Path>>(path: P, _group_read: bool) -> Result<(), String>
         {
             let path = path.as_ref();
@@ -353,6 +410,7 @@ cfg_if::cfg_if! {
         }
 
     } else {
+        /// Ensure `path`, if it exists as a file, has private ownership. No-op on this platform.
         pub fn ensure_file_private_owner<P:AsRef<Path>>(path: P) -> Result<(), String>
         {
             let path = path.as_ref();
@@ -363,6 +421,7 @@ cfg_if::cfg_if! {
             Ok(())
         }
 
+        /// Ensure `path`, if it exists as a directory, has private ownership. No-op on this platform.
         pub fn ensure_directory_private_owner<P:AsRef<Path>>(path: P, _group_read: bool) -> Result<(), String>
         {
             let path = path.as_ref();
@@ -406,18 +465,21 @@ pub unsafe fn unaligned_u8_vec_uninit(n_bytes: usize) -> Vec<u8> {
     Vec::from_raw_parts(ptr, n_bytes, n_bytes)
 }
 
+/// Type name of a value as a string, without needing to name the type.
 pub fn type_name_of_val<T: ?Sized>(_val: &T) -> &'static str {
     std::any::type_name::<T>()
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// Scope guard that prints to stderr and bumps a shared counter on entry, then decrements and prints on drop.
 pub struct DebugGuard {
     name: &'static str,
     counter: &'static AtomicUsize,
 }
 
 impl DebugGuard {
+    /// Increment `counter`, print the entry count, and return a guard that prints the exit count when dropped.
     pub fn new(name: &'static str, counter: &'static AtomicUsize) -> Self {
         let c = counter.fetch_add(1, Ordering::SeqCst);
         eprintln!("{} entered: {}", name, c + 1);

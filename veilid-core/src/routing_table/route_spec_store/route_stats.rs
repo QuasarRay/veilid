@@ -10,7 +10,7 @@ pub enum RouteStatsDisposition {
     /// Invalid because it has failed to send too many times
     InvalidSendFailure,
     /// Invalid because it has lost too many answers
-    InvalidLostAnswers,
+    InvalidLostQuestions,
 }
 
 impl RouteStatsDisposition {
@@ -18,7 +18,7 @@ impl RouteStatsDisposition {
     pub fn is_invalid(&self) -> bool {
         matches!(
             self,
-            RouteStatsDisposition::InvalidSendFailure | RouteStatsDisposition::InvalidLostAnswers
+            RouteStatsDisposition::InvalidSendFailure | RouteStatsDisposition::InvalidLostQuestions
         )
     }
 }
@@ -32,8 +32,8 @@ impl RouteStatsDisposition {
 pub struct RouteOrderingStats {
     /// Consecutive failed-to-send count (loopback test failures count here too)
     pub failed_to_send: usize,
-    /// Per-destination lost answer tracking: destination pubkey -> lost count
-    pub lost_answer_destinations: HashMap<PublicKey, usize>,
+    /// Per-destination lost question tracking: destination pubkey -> lost count
+    pub lost_question_destinations: HashMap<PublicKey, usize>,
     /// When this ordering was last known valid (loopback pass / rcvd traffic)
     pub last_known_valid_ts: Option<Timestamp>,
     /// When this ordering was last sent to
@@ -55,10 +55,10 @@ impl RouteOrderingStats {
     pub fn disposition(&self) -> RouteStatsDisposition {
         if self.failed_to_send >= ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD {
             RouteStatsDisposition::InvalidSendFailure
-        } else if self.lost_answer_destinations.len()
+        } else if self.lost_question_destinations.len()
             >= ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD
         {
-            RouteStatsDisposition::InvalidLostAnswers
+            RouteStatsDisposition::InvalidLostQuestions
         } else {
             RouteStatsDisposition::Valid
         }
@@ -66,7 +66,7 @@ impl RouteOrderingStats {
 
     /// Does this ordering need (re)testing?
     pub fn needs_testing(&self, cur_ts: Timestamp) -> bool {
-        if !self.lost_answer_destinations.is_empty() || self.failed_to_send > 0 {
+        if !self.lost_question_destinations.is_empty() || self.failed_to_send > 0 {
             return true;
         }
         if let Some(last_tested_ts) = self.last_known_valid_ts {
@@ -90,7 +90,7 @@ pub struct RouteStats {
     /// Latency stats (route-level for now; same reservation as transfer).
     pub latency: LatencyStats,
     /// Per-local-route stats keyed by local-route pubkey on our side.
-    pub routed_stats: LruCache<PublicKey, PerLocalRouteStats>,
+    pub routed_stats: LruCache<PublicKey, PerRouteStats>,
     /// Accounting mechanism for this route's RPC latency (route-level)
     latency_stats_accounting: LatencyStatsAccounting,
     /// Accounting mechanism for the bandwidth across this route (route-level)
@@ -104,7 +104,7 @@ impl Default for RouteStats {
             per_ordering: BTreeMap::new(),
             transfer: TransferStatsDownUp::default(),
             latency: LatencyStats::default(),
-            routed_stats: LruCache::new(ROUTED_STATS_LRU_SIZE),
+            routed_stats: LruCache::new(PER_ROUTE_STATS_LRU_SIZE),
             latency_stats_accounting: LatencyStatsAccounting::default(),
             transfer_stats_accounting: TransferStatsAccounting::default(),
         }
@@ -124,6 +124,11 @@ impl fmt::Display for RouteStats {
             "last_sent:          {}",
             f.to_string_opt(self.last_sent_ts())
         )?;
+        writeln!(
+            f,
+            "last_rcvd_answer:   {}",
+            f.to_string_opt(self.last_rcvd_answer_ts())
+        )?;
         for (ordering, os) in self.per_ordering.iter() {
             writeln!(
                 f,
@@ -133,7 +138,7 @@ impl fmt::Display for RouteStats {
                 f.to_string_opt(os.last_sent_ts),
                 f.to_string_opt(os.last_rcvd_question_ts),
                 f.to_string_opt(os.last_rcvd_answer_ts),
-                os.lost_answer_destinations.len(),
+                os.lost_question_destinations.len(),
                 os.failed_to_send,
                 f.to_string(&os.answer),
             )?;
@@ -211,10 +216,6 @@ impl RouteStats {
     }
 
     /// Most recent "received answer" timestamp across all orderings.
-    #[expect(
-        dead_code,
-        reason = "aggregate view for symmetry / future debug command"
-    )]
     pub fn last_rcvd_answer_ts(&self) -> Option<Timestamp> {
         self.per_ordering
             .values()
@@ -270,15 +271,15 @@ impl RouteStats {
     }
 
     /// Mark a route as having lost an answer for a destination at the given ordering
-    pub fn record_lost_answer(&mut self, ordering: SequenceOrdering, destination: &Destination) {
+    pub fn record_lost_question(&mut self, ordering: SequenceOrdering, destination: &Destination) {
         let cur_ts = Timestamp::now();
         let os = self.ordering_mut(ordering);
-        os.answer_stats_accounting.record_lost_answer(cur_ts);
+        os.answer_stats_accounting.record_lost_question(cur_ts);
 
         let Ok(dest_key) = destination.destination_key() else {
             return;
         };
-        *os.lost_answer_destinations.entry(dest_key).or_insert(0) += 1;
+        *os.lost_question_destinations.entry(dest_key).or_insert(0) += 1;
     }
 
     /// Mark a route as having received a question or statement at the given ordering
@@ -308,7 +309,7 @@ impl RouteStats {
         os.last_known_valid_ts = Some(cur_ts);
         os.answer_stats_accounting.record_answer(cur_ts);
         // Receiving any answer at this ordering means the ordering is functional.
-        os.lost_answer_destinations.clear();
+        os.lost_question_destinations.clear();
         self.transfer_stats_accounting.add_down(bytes);
     }
 
@@ -335,7 +336,7 @@ impl RouteStats {
         if ok {
             os.last_known_valid_ts = Some(cur_ts);
             os.failed_to_send = 0;
-            os.lost_answer_destinations.clear();
+            os.lost_question_destinations.clear();
         } else {
             os.failed_to_send += 1;
         }
@@ -354,13 +355,13 @@ impl RouteStats {
     pub fn record_routed_up(&mut self, key: &PublicKey, bytes: ByteCount) {
         self.routed_stats
             .entry(key.clone())
-            .or_insert_with(PerLocalRouteStats::default)
+            .or_insert_with(PerRouteStats::default)
             .add_up(bytes);
     }
     pub fn record_routed_down(&mut self, key: &PublicKey, bytes: ByteCount) {
         self.routed_stats
             .entry(key.clone())
-            .or_insert_with(PerLocalRouteStats::default)
+            .or_insert_with(PerRouteStats::default)
             .add_down(bytes);
     }
     pub fn record_routed_round_trip(
@@ -372,17 +373,9 @@ impl RouteStats {
         let entry = self
             .routed_stats
             .entry(key.clone())
-            .or_insert_with(PerLocalRouteStats::default);
+            .or_insert_with(PerRouteStats::default);
         entry.record_round_trip(sample);
         entry.add_down(bytes);
-    }
-
-    #[expect(
-        dead_code,
-        reason = "expose via routing_table debug command when needed"
-    )]
-    pub fn routed_stats(&self, key: &PublicKey) -> Option<PerLocalRouteStats> {
-        self.routed_stats.peek(key).cloned()
     }
 
     /// Roll transfers for these route stats (route-level)

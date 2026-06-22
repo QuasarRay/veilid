@@ -39,7 +39,12 @@ impl PeerAddress {
 
 impl fmt::Display for PeerAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.protocol_type, self.socket_address)
+        write!(
+            f,
+            "{}:{}",
+            f.to_string(self.protocol_type),
+            f.to_string(self.socket_address)
+        )
     }
 }
 

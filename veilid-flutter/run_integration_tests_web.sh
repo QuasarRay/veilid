@@ -59,9 +59,8 @@ DEFINES=()
 if [ "$DEBUG" -eq 1 ]; then
     DEFINES+=(--dart-define=LOG_LEVEL=debug)
 fi
-if [ -n "${LOG_DIRECTIVES:-}" ]; then
-    DEFINES+=(--dart-define=LOG_DIRECTIVES="$LOG_DIRECTIVES")
-fi
+# Default to the #common=debug log tag group unless LOG_DIRECTIVES is set in the env
+DEFINES+=(--dart-define=LOG_DIRECTIVES="${LOG_DIRECTIVES:-#common=debug}")
 
 if [ "${SKIP_WASM_BUILD:-0}" != "1" ]; then
     "$SCRIPTDIR/wasm_build.sh" "${WASM_BUILD_ARGS[@]}"
@@ -76,16 +75,19 @@ start_chromedriver
 start_chromedriver_log_poller
 
 pushd "$SCRIPTDIR/example" >/dev/null
-# -d chrome (NOT -d web-server): integration_test's FlutterDriver protocol
-# requires the dart VM service which `-d chrome` exposes; `-d web-server` mode
-# silently no-ops test bodies. chromedriver is still needed for the webdriver
-# bridge. A Chrome window pops up; `--web-run-headless` would suppress it but
-# triggers a Chrome 132+ port-mismatch bug — see flutter#160434 — so leave it
-# visible for now. Browser console is forwarded by start_chromedriver_log_poller.
+# Web Flutter Driver tests require `-d web-server` in `--release` (or --profile):
+# debug is not yet supported (flutter/docs Running-Flutter-Driver-tests-with-Web.md).
+# `-d chrome` uses a dwds VM-service debug connection that fails on web ("The
+# stream `Timer` is not supported on web devices") and hangs; `-d web-server` in
+# debug mode silently no-ops the test bodies. In release, web-server drives the
+# app through chromedriver's WebDriver bridge and reads results via JS — no VM
+# service. Browser console is forwarded by start_chromedriver_log_poller.
 run_flutter_drive_for_web_tests \
     --driver=test_driver/integration_test.dart \
     --target=integration_test/app_test.dart \
-    -d chrome \
+    -d web-server \
+    --browser-name=chrome \
+    --release \
     --verbose \
     "${DEFINES[@]}" \
     "${PASSTHROUGH[@]}"

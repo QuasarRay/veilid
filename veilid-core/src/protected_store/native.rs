@@ -5,6 +5,7 @@ use std::path::Path;
 
 impl_veilid_log_facility!("pstore");
 
+/// Mutable interior of the `ProtectedStore`, holding the open keyring backend.
 pub struct ProtectedStoreInner {
     keyring_manager: Option<KeyringManager>,
 }
@@ -14,6 +15,8 @@ impl fmt::Debug for ProtectedStoreInner {
     }
 }
 
+/// Secure key-value storage for user secrets, backed by the platform's secure keyring
+/// when available and falling back to an on-disk insecure keyring when permitted by config.
 #[derive(Debug)]
 #[must_use]
 pub struct ProtectedStore {
@@ -38,6 +41,9 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Remove every known Veilid-managed protected store key, logging any failures.
+    ///
+    /// Idempotent: keys already absent are skipped. Blocks on the keyring backend (OS keyring or disk) once per key.
     pub fn delete_all(&self) {
         for kpsk in &KNOWN_PROTECTED_STORE_KEYS {
             if let Err(e) = self.remove_user_secret(kpsk) {
@@ -143,6 +149,11 @@ impl ProtectedStore {
         feature = "instrument",
         instrument(level = "trace", skip(self, value), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    /// Store a string secret under a key. Returns true if a value already existed for that key.
+    ///
+    /// Overwrites any prior value, so re-saving the same key/value is idempotent. Holds the inner lock and blocks on the keyring backend (OS keyring or disk).
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the store has no open keyring, or [VeilidAPIError::Generic] if the keyring backend rejects the write.
     pub fn save_user_secret_string<K: AsRef<str> + fmt::Debug, V: AsRef<str> + fmt::Debug>(
         &self,
         key: K,
@@ -162,6 +173,11 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Load a string secret by key, or `None` if no value is stored for it.
+    ///
+    /// Holds the inner lock and blocks on the keyring backend (OS keyring or disk).
+    ///
+    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::NotInitialized] if the store has no open keyring, or [VeilidAPIError::Generic] if the keyring backend fails the read.
     pub fn load_user_secret_string<K: AsRef<str> + fmt::Debug>(
         &self,
         key: K,
@@ -183,6 +199,11 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self, value), fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Serialize a value to JSON and store it as a secret. Returns true if a value already existed for that key.
+    ///
+    /// Overwrites any prior value. Blocks on the keyring backend (OS keyring or disk).
+    ///
+    /// Errors with [VeilidAPIError::Generic] if `value` fails to serialize, if the keyring backend rejects the write, or [VeilidAPIError::NotInitialized] if the store has no open keyring.
     pub fn save_user_secret_json<K, T>(&self, key: K, value: &T) -> VeilidAPIResult<bool>
     where
         K: AsRef<str> + fmt::Debug,
@@ -193,6 +214,11 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Load a secret by key and deserialize it from JSON, or `None` if no value is stored for it.
+    ///
+    /// Blocks on the keyring backend (OS keyring or disk).
+    ///
+    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::Generic] if the stored bytes fail to deserialize or are not a valid buffer, or [VeilidAPIError::NotInitialized] if the store has no open keyring.
     pub fn load_user_secret_json<K, T>(&self, key: K) -> VeilidAPIResult<Option<T>>
     where
         K: AsRef<str> + fmt::Debug,
@@ -214,6 +240,11 @@ impl ProtectedStore {
         feature = "instrument",
         instrument(level = "trace", skip(self, value), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    /// Store a byte buffer as a secret. Returns true if a value already existed for that key.
+    ///
+    /// Overwrites any prior value. Blocks on the keyring backend (OS keyring or disk).
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the store has no open keyring, or [VeilidAPIError::Generic] if the keyring backend rejects the write.
     pub fn save_user_secret<K: AsRef<str> + fmt::Debug>(
         &self,
         key: K,
@@ -226,6 +257,11 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Load a byte buffer secret by key, or `None` if no value is stored for it.
+    ///
+    /// Blocks on the keyring backend (OS keyring or disk).
+    ///
+    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::Generic] if the stored value lacks the buffer marker or fails base64 decode, or [VeilidAPIError::NotInitialized] if the store has no open keyring.
     pub fn load_user_secret<K: AsRef<str> + fmt::Debug>(
         &self,
         key: K,
@@ -263,6 +299,11 @@ impl ProtectedStore {
         feature = "instrument",
         instrument(level = "trace", skip(self), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    /// Remove a secret by key. Returns true if a value was present and deleted.
+    ///
+    /// No-op returning false when the key is absent, so repeated removes are idempotent. Holds the inner lock and blocks on the keyring backend (OS keyring or disk).
+    ///
+    /// An absent key returns `Ok(false)`. Errors with [VeilidAPIError::NotInitialized] if the store has no open keyring, or [VeilidAPIError::Generic] if the keyring backend fails the delete.
     pub fn remove_user_secret<K: AsRef<str> + fmt::Debug>(&self, key: K) -> VeilidAPIResult<bool> {
         let inner = self.inner.lock();
         match inner

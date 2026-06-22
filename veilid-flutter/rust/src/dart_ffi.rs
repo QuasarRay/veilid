@@ -843,7 +843,6 @@ pub extern "C" fn routing_context_watch_dht_values(
     subkeys: FfiStr,
     expiration: u64,
     count: u32,
-    transactional: bool,
 ) {
     let key: RecordKey = deserialize_opt_json(key.into_opt_string()).unwrap_or_log();
     let subkeys: Option<ValueSubkeyRangeSet> = subkeys
@@ -856,13 +855,7 @@ pub extern "C" fn routing_context_watch_dht_values(
             let routing_context = get_routing_context(id, "routing_context_watch_dht_values")?;
 
             let res = routing_context
-                .watch_dht_values(
-                    key,
-                    subkeys,
-                    Some(expiration),
-                    Some(count),
-                    Some(transactional),
-                )
+                .watch_dht_values(key, subkeys, Some(expiration), Some(count))
                 .await?;
             VeilidAPIResult::Ok(res)
         }

@@ -132,13 +132,13 @@ impl PublicInternetRoutingDomainController {
         let mut needs_peer_minimum_refresh = Vec::new();
         let mut needs_more_tested_nodes = Vec::new();
 
-        let min_peer_count = self.config().network.dht.min_peer_count as usize;
+        let min_peer_count = self.config().internal().network.dht.min_peer_count as usize;
         for ck in VALID_CRYPTO_KINDS {
             // See if we need bootstrap or peer minimum refresh
             let cnt = entry_summary
                 .per_crypto_kind
                 .get(&ck)
-                .map(|x| x.live.connectivity_capabilities)
+                .map(|x| x.maybe_live.connectivity_capabilities)
                 .unwrap_or_default();
             if cnt < MIN_BOOTSTRAP_CONNECTIVITY_PEERS {
                 needs_bootstrap.push(ck);
@@ -153,10 +153,10 @@ impl PublicInternetRoutingDomainController {
                 .get(&ck)
                 .map(|x| x.live_external)
                 .unwrap_or_default();
-            let tested_count = entry_summary
+            let responsive_count = entry_summary
                 .per_crypto_kind
                 .get(&ck)
-                .map(|x| x.tested)
+                .map(|x| x.responsive)
                 .unwrap_or_default();
             let low_water_mark_count = low_water_mark
                 .per_crypto_kind
@@ -173,7 +173,7 @@ impl PublicInternetRoutingDomainController {
                 required_tested_connectivity_nodes,
                 required_tested_low_water_mark_connectivity_nodes,
             );
-            if tested_count.connectivity_capabilities < required_tested_connectivity_nodes {
+            if responsive_count.connectivity_capabilities < required_tested_connectivity_nodes {
                 needs_more_tested_nodes.push(ck);
             }
         }

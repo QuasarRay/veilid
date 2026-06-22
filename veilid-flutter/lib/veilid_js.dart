@@ -1,3 +1,6 @@
+// ignore_for_file: public_member_api_docs
+// Low-level platform binding to veilid-core; not part of the documented public API.
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:js_interop';
@@ -341,12 +344,10 @@ class VeilidRoutingContextJS extends VeilidRoutingContext {
     List<ValueSubkeyRange>? subkeys,
     Timestamp? expiration,
     int? count,
-    bool? transactional,
   }) {
     subkeys ??= [];
     expiration ??= Timestamp.zero();
     count ??= 0xFFFFFFFF;
-    transactional ??= false;
 
     final id = _ctx.requireId();
     return _wasmPromiseBool('routing_context_watch_dht_values', [
@@ -355,7 +356,6 @@ class VeilidRoutingContextJS extends VeilidRoutingContext {
       jsonEncode(subkeys).toJS,
       expiration.toString().toJS,
       count.toJS,
-      transactional.toJS,
     ]);
   }
 

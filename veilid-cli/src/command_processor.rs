@@ -12,9 +12,9 @@ use veilid_tools::*;
 pub enum ConnectionState {
     Disconnected,
     ConnectedTCP(SocketAddr, SystemTime),
-    RetryingTCP(SocketAddr, SystemTime),
+    ConnectingTCP(SocketAddr, SystemTime),
     ConnectedIPC(PathBuf, SystemTime),
-    RetryingIPC(PathBuf, SystemTime),
+    ConnectingIPC(PathBuf, SystemTime),
 }
 impl ConnectionState {
     pub fn is_disconnected(&self) -> bool {
@@ -24,7 +24,29 @@ impl ConnectionState {
         matches!(*self, Self::ConnectedTCP(_, _) | Self::ConnectedIPC(_, _))
     }
     pub fn is_retrying(&self) -> bool {
-        matches!(*self, Self::RetryingTCP(_, _) | Self::RetryingIPC(_, _))
+        matches!(*self, Self::ConnectingTCP(_, _) | Self::ConnectingIPC(_, _))
+    }
+    pub fn changed(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ConnectionState::Disconnected, ConnectionState::Disconnected) => false,
+            (
+                ConnectionState::ConnectingTCP(self_socket_addr, _),
+                ConnectionState::ConnectingTCP(other_socket_addr, _),
+            ) => self_socket_addr != other_socket_addr,
+            (
+                ConnectionState::ConnectedTCP(self_socket_addr, _),
+                ConnectionState::ConnectedTCP(other_socket_addr, _),
+            ) => self_socket_addr != other_socket_addr,
+            (
+                ConnectionState::ConnectingIPC(self_path_buf, _),
+                ConnectionState::ConnectingIPC(other_path_buf, _),
+            ) => self_path_buf != other_path_buf,
+            (
+                ConnectionState::ConnectedIPC(self_path_buf, _),
+                ConnectionState::ConnectedIPC(other_path_buf, _),
+            ) => self_path_buf != other_path_buf,
+            _ => true,
+        }
     }
 }
 
@@ -83,7 +105,7 @@ impl CommandProcessor {
         self.inner.lock().capi.as_ref().unwrap_or_log().clone()
     }
 
-    fn word_split(line: &str) -> (String, Option<String>) {
+    pub fn word_split(line: &str) -> (String, Option<String>) {
         let trimmed = line.trim();
         if let Some(p) = trimmed.find(char::is_whitespace) {
             let first = trimmed[0..p].to_owned();
@@ -113,41 +135,160 @@ impl CommandProcessor {
             .as_deref()
             .map(|s| format!("help {}", s))
             .unwrap_or_else(|| "help".to_owned());
+
+        let default_ipc_path = self
+            .settings
+            .ipc_path
+            .as_ref()
+            .map(|x| x.to_string_lossy().to_string())
+            .unwrap_or_else(|| "[not set]".to_string());
+        let default_address = self
+            .settings
+            .address
+            .as_ref()
+            .map(|x| x.name.clone())
+            .unwrap_or_else(|| "[not set]".to_string());
+
         spawn_detached_local("cmd help", async move {
-            let out = match capi.server_debug(help_command).await {
-                Err(e) => {
-                    error!("Server command 'debug help' failed: {}", e);
+            if let Some(opt_rest) = help_args.as_deref() {
+                let opt_help_out = match opt_rest {
+                    "exit" | "quit" => Some(
+                        r#"Exit the client (quit is also accepted)
+                    
+Usage: exit
+       quit
+
+Exit the client. Does not shut down the server.
+'quit' is an alias for 'exit'."#.to_string(),
+                    ),
+                    "connect" => Some(format!(
+                        r#"Connect to a Veilid node
+
+Usage: connect [location]
+                        
+Arguments:
+    [no argument]
+        Connect to the default IPC path or network address specified in the configuration file
+    [subnode_index]
+        IPC path subnode index to connect to.
+        The default subnode index is 0. 
+    [ipc_path]
+        A path to the IPC socket spawned by veilid-server, including the subnode index filename.
+    [address][:port]
+        An IP address or hostname and port number for the veilid-server,
+        This is NOT used to connect to the veilid-server protocol port.
+    
+    The default IPC path is: {}/0
+    The default network address is: {}
+
+Examples:
+    connect 0
+    connect /var/run/veilid-server/ipc/0
+    connect 127.0.0.1:5959
+    connect [::1]:5959
+"#,
+                        default_ipc_path, default_address
+                    )),
+                    "disconnect" => Some(
+                        r#"Disconnect the client from the Veilid node
+
+Usage: disconnect
+
+Does not shut down the server or quit the client.
+"#.to_string(),
+                    ),
+                    "shutdown" => Some(
+                        r#"Shut the server down
+
+Usage: shutdown
+
+The client will disconnect automatically.
+Does not quit the client.
+"#.to_string(),
+                    ),
+                    "log" => Some(
+                        r#"Change the log level for a tracing layer
+
+Usage: log [layer] <directives>
+
+Arguments:
+    <layer>
+        One of: 'all', 'terminal', 'system', 'api', 'file', 'otlp'
+        Default is 'api'
+    <directives> 
+        Directives are in RUST_LOG format and can use facility names or tags (groups) starting with '#'.
+        The directives list may not have spaces in it.
+        Common tags include:
+            #veilid - all veilid log facility
+            #common - the most commonly used debugging facilities
+            #verbose - extra verbose logging facilities
+            #enabled - the set of currently enabled log facilities
+        Refer to the veilid-core source code for the full list of facilities and tags.
+        If a log level is specifed without a full directive, the default facility of #enabled will be used.
+Examples: 
+    log debug
+        - set the log level for all enabled log facilities on the api layer to 'debug'
+    log all rpc=trace,#common=debug
+        - sets the log level for the 'rpc' facility to 'trace', and
+    log api #veilid=off
+    log terminal #verbose=debug
+    log #enabled=debug
+"#.to_string(),
+                    ),
+                    "enable" | "disable" => Some(
+                        r#"Set or unset a flag
+
+Usage: enable [flag]
+       disable [flag]
+
+Arguments:
+    [flag]
+        Flag name for which to set the boolean value.
+        Flags include: 
+            app_messages
+                Displays ALL app messages received by the server in the client output pane.
+                This is off by default to avoid unauthenticated spam from remote nodes.
+"#.to_string(),
+                    ),
+                    _ => None,
+                };
+
+                if let Some(help_out) = opt_help_out {
+                    ui.add_node_event(Level::Info, &help_out);
                     ui.send_callback(callback);
                     return;
                 }
-                Ok(v) => v,
+            }
+
+            let client_help = r#"Client Commands:
+  exit        Exit the client (quit is also accepted)
+  connect     Connect to a Veilid node
+  disconnect  Disconnect the client from the Veilid node
+  shutdown    Shut the server down
+  log         Change the log level for a tracing layer
+  enable      Set a flag
+  disable     Unset a flag"#
+                .to_string();
+
+            let (out, level) = match capi.server_debug(help_command).await {
+                Err(ServerDebugError::NotConnected) => (
+                    format!("{}\nServer is not connected", client_help),
+                    Level::Info,
+                ),
+                Err(ServerDebugError::Error(e)) => {
+                    (format!("Error getting server help: {}", e), Level::Error)
+                }
+                Ok(v) => (
+                    if help_args.is_some() {
+                        v
+                    } else {
+                        format!("{}\nServer Commands:\n{}", client_help, indent_all_by(2, v))
+                    },
+                    Level::Info,
+                ),
             };
 
-            if help_args.is_some() {
-                ui.add_node_event(Level::Info, &out);
-            } else {
-                ui.add_node_event(
-                    Level::Info,
-                    &format!(
-                        r#"Client Commands:
-    exit/quit                           exit the client
-    disconnect                          disconnect the client from the Veilid node
-    shutdown                            shut the server down
-    change_log_level <layer> <directive>    change the log level for a tracing layer
-                                        layers include:
-                                            all, terminal, system, api, file, otlp
-                                        directives are in RUST_LOG format and can use target names or tags (groups) starting with '#':
-                                            rpc=trace,#common=debug
-    enable [flag]                       set a flag
-    disable [flag]                      unset a flag
-                                        valid flags in include:
-                                            app_messages
-Core Debug Commands:
-  {}"#,
-                        indent_all_by(2, out)
-                    ),
-                );
-            }
+            ui.add_node_event(level, &out);
             ui.send_callback(callback);
         });
         Ok(())
@@ -194,36 +335,45 @@ Core Debug Commands:
         spawn_detached_local("cmd connect", async move {
             capi.disconnect();
 
-            if let Some(rest) = rest {
-                if let Ok(subnode_index) = u16::from_str(&rest) {
-                    let ipc_path = this
-                        .settings
-                        .resolve_ipc_path(this.settings.ipc_path.clone(), subnode_index);
-                    this.set_ipc_path(ipc_path);
-                    this.set_network_address(None);
-                } else if let Some(ipc_path) =
-                    this.settings.resolve_ipc_path(Some(rest.clone().into()), 0)
+            if let Some(Ok(subnode_index)) = rest.as_ref().map(|r| u16::from_str(r.as_str())) {
+                match this
+                    .settings
+                    .resolve_ipc_path(this.get_ipc_path(), Some(subnode_index))
                 {
-                    this.set_ipc_path(Some(ipc_path));
-                    this.set_network_address(None);
-                } else if let Ok(Some(network_address)) =
-                    this.settings.resolve_network_address(Some(rest.clone()))
-                {
-                    if let Some(addr) = network_address.first() {
-                        this.set_network_address(Some(*addr));
-                        this.set_ipc_path(None);
-                    } else {
-                        ui.add_node_event(
-                            Level::Error,
-                            &format!("Invalid network address: {}", rest),
-                        );
+                    Ok(Some(ipc_path)) => {
+                        this.set_ipc_path(ipc_path);
                     }
-                } else {
-                    ui.add_node_event(
-                        Level::Error,
-                        &format!("Invalid connection string: {}", rest),
-                    );
+                    Ok(None) => {
+                        if let Some(r) = rest {
+                            ui.add_node_event(
+                                Level::Error,
+                                &format!("No IPC path found for {}", r),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        ui.add_node_event(Level::Error, &e);
+                    }
                 }
+            } else if let Ok(ipc_path) = this
+                .settings
+                .resolve_ipc_path(rest.clone().map(|r| r.into()), None)
+            {
+                if let Some(ipc_path) = ipc_path {
+                    this.set_ipc_path(ipc_path);
+                } else if let Some(r) = rest {
+                    ui.add_node_event(Level::Error, &format!("No IPC path found for {}", r));
+                }
+            } else if let Ok(network_address) =
+                this.settings.resolve_network_address(rest.clone(), 0)
+            {
+                if let Some(addr) = network_address {
+                    this.set_network_address(addr);
+                } else if let Some(r) = rest {
+                    ui.add_node_event(Level::Error, &format!("Invalid network address: {}", r));
+                }
+            } else if let Some(r) = rest {
+                ui.add_node_event(Level::Error, &format!("Invalid connection string: {}", r));
             }
 
             this.start_connection();
@@ -243,7 +393,11 @@ Core Debug Commands:
                     ui.add_node_event(Level::Info, &output);
                     ui.send_callback(callback);
                 }
-                Err(e) => {
+                Err(ServerDebugError::NotConnected) => {
+                    ui.add_node_event(Level::Warn, "Server is not connected");
+                    ui.send_callback(callback);
+                }
+                Err(ServerDebugError::Error(e)) => {
                     ui.add_node_event(Level::Error, &e);
                     ui.send_callback(callback);
                 }
@@ -261,26 +415,34 @@ Core Debug Commands:
         let capi = self.capi();
         let ui = self.ui_sender();
         spawn_detached_local("cmd change_log_level", async move {
-            let (layer, rest) = Self::word_split(&rest.unwrap_or_default());
-            let directives = &rest.unwrap_or_default();
+            let (first, rest) = Self::word_split(&rest.unwrap_or_default());
 
-            match capi
-                .server_change_log_level(layer, directives.clone())
-                .await
-            {
+            // Apply default layer if not specified
+            let (layer, directives) = if let Some(rest) = rest {
+                (first, rest)
+            } else {
+                ("api".to_string(), first)
+            };
+
+            // Apply directive shortcuts
+            let directives = match directives.to_ascii_lowercase().as_str() {
+                "off" => "#enabled=off".to_string(),
+                "trace" => "#unspecified=trace".to_string(),
+                "debug" => "#unspecified=debug".to_string(),
+                "info" => "#unspecified=info".to_string(),
+                "warn" => "#unspecified=warn".to_string(),
+                "error" => "#unspecified=error".to_string(),
+                d => d.to_string(),
+            };
+
+            match capi.server_change_log_level(layer, directives).await {
                 Ok(()) => {
-                    ui.display_string_dialog(
-                        "Log level changed",
-                        "Applied log direcetives",
-                        callback,
-                    );
+                    ui.add_node_event(Level::Info, "Applied log directives");
+                    ui.send_callback(callback);
                 }
                 Err(e) => {
-                    ui.display_string_dialog(
-                        "Server command 'change_log_level' failed",
-                        &e,
-                        callback,
-                    );
+                    ui.add_node_event(Level::Error, &e);
+                    ui.send_callback(callback);
                 }
             }
         });
@@ -304,18 +466,12 @@ Core Debug Commands:
                 .await
             {
                 Ok(()) => {
-                    ui.display_string_dialog(
-                        "Log ignore changed",
-                        &format!("Log ignore changed '{}'", log_ignore),
-                        callback,
-                    );
+                    ui.add_node_event(Level::Info, "Applied log ignore");
+                    ui.send_callback(callback);
                 }
                 Err(e) => {
-                    ui.display_string_dialog(
-                        "Server command 'change_log_ignore' failed",
-                        &e,
-                        callback,
-                    );
+                    ui.add_node_event(Level::Error, &e);
+                    ui.send_callback(callback);
                 }
             }
         });
@@ -376,12 +532,101 @@ Core Debug Commands:
             "disconnect" => self.cmd_disconnect(callback),
             "connect" => self.cmd_connect(rest, callback),
             "shutdown" => self.cmd_shutdown(callback),
-            "change_log_level" => self.cmd_change_log_level(rest, callback),
+            "log" | "change_log_level" => self.cmd_change_log_level(rest, callback),
             "change_log_ignore" => self.cmd_change_log_ignore(rest, callback),
             "enable" => self.cmd_enable(rest, callback),
             "disable" => self.cmd_disable(rest, callback),
             _ => self.cmd_debug(command_line.to_owned(), callback),
         }
+    }
+
+    async fn connect_ipc_and_run(&self, first: bool, ipc_path: PathBuf) -> bool {
+        // IPC
+        if first {
+            info!("Connecting to server at {}", ipc_path.to_string_lossy());
+            self.set_connection_state(ConnectionState::ConnectingIPC(
+                ipc_path.clone(),
+                SystemTime::now(),
+            ));
+        } else {
+            debug!("Retrying connection to {}", ipc_path.to_string_lossy());
+        }
+        let capi = self.capi();
+
+        // Connect to the Client API IPC socket and run the connection if successsful
+        let res = capi.handle_ipc_connection(ipc_path.clone()).await;
+
+        // Connection finished
+        match res {
+            Ok(()) => {
+                info!(
+                    "Connection to server at {} terminated normally",
+                    ipc_path.to_string_lossy()
+                );
+                return false;
+            }
+            Err(ClientApiConnectionError::ConnectionLost(e)) => {
+                info!("Connection to server lost: {}", e);
+                if !self.inner().autoreconnect {
+                    return false;
+                }
+            }
+            Err(ClientApiConnectionError::ConnectionFailed(e)) => {
+                info!("Connection to server failed: {}", e);
+                if !self.inner().autoreconnect {
+                    return false;
+                }
+            }
+        }
+
+        self.set_connection_state(ConnectionState::ConnectingIPC(ipc_path, SystemTime::now()));
+
+        true
+    }
+
+    async fn connect_network_and_run(&self, first: bool, network_addr: SocketAddr) -> bool {
+        // TCP
+        if first {
+            info!("Connecting to server at {}", network_addr);
+            self.set_connection_state(ConnectionState::ConnectingTCP(
+                network_addr,
+                SystemTime::now(),
+            ));
+        } else {
+            debug!("Retrying connection to {}", network_addr);
+        }
+        let capi = self.capi();
+
+        // Connect to the Client API TCP socket and run the connection if successsful
+        let res = capi.handle_tcp_connection(network_addr).await;
+
+        // Connection finished
+        match res {
+            Ok(()) => {
+                info!(
+                    "Connection to server at {} terminated normally",
+                    network_addr
+                );
+                return false;
+            }
+            Err(ClientApiConnectionError::ConnectionLost(e)) => {
+                if !self.inner().autoreconnect {
+                    info!("Connection to server lost: {}", e);
+                    return false;
+                }
+            }
+            Err(ClientApiConnectionError::ConnectionFailed(e)) => {
+                info!("Connection to server failed: {}", e);
+                return false;
+            }
+        }
+
+        self.set_connection_state(ConnectionState::ConnectingTCP(
+            network_addr,
+            SystemTime::now(),
+        ));
+
+        true
     }
 
     pub async fn connection_manager(&self) {
@@ -398,68 +643,24 @@ Core Debug Commands:
             // Loop while we want to keep the connection
             let mut first = true;
             while self.inner().reconnect {
-                // IPC
-                let ipc_path_opt = self.inner_mut().ipc_path.clone();
+                let (ipc_path_opt, network_addr_opt) = {
+                    let inner = self.inner();
+                    (inner.ipc_path.clone(), inner.network_addr)
+                };
+
                 if let Some(ipc_path) = ipc_path_opt {
-                    if first {
-                        info!("Connecting to server at {}", ipc_path.to_string_lossy());
-                        self.set_connection_state(ConnectionState::RetryingIPC(
-                            ipc_path.clone(),
-                            SystemTime::now(),
-                        ));
-                    } else {
-                        debug!("Retrying connection to {}", ipc_path.to_string_lossy());
-                    }
-                    let capi = self.capi();
-                    let res = capi.ipc_connect(ipc_path.clone()).await;
-                    if res.is_ok() {
-                        info!(
-                            "Connection to server at {} terminated normally",
-                            ipc_path.to_string_lossy()
-                        );
+                    // Try the IPC socket if enabled
+                    if !self.connect_ipc_and_run(first, ipc_path).await {
                         break;
                     }
-                    if !self.inner().autoreconnect {
-                        info!("Connection to server lost.");
+                } else if let Some(network_addr) = network_addr_opt {
+                    // Try the TCP socket if enabled
+                    if !self.connect_network_and_run(first, network_addr).await {
                         break;
                     }
-
-                    self.set_connection_state(ConnectionState::RetryingIPC(
-                        ipc_path,
-                        SystemTime::now(),
-                    ));
-                }
-
-                // TCP
-                let network_addr_opt = self.inner_mut().network_addr;
-                if let Some(network_addr) = network_addr_opt {
-                    if first {
-                        info!("Connecting to server at {}", network_addr);
-                        self.set_connection_state(ConnectionState::RetryingTCP(
-                            network_addr,
-                            SystemTime::now(),
-                        ));
-                    } else {
-                        debug!("Retrying connection to {}", network_addr);
-                    }
-                    let capi = self.capi();
-                    let res = capi.tcp_connect(network_addr).await;
-                    if res.is_ok() {
-                        info!(
-                            "Connection to server at {} terminated normally",
-                            network_addr
-                        );
-                        break;
-                    }
-                    if !self.inner().autoreconnect {
-                        info!("Connection to server lost.");
-                        break;
-                    }
-
-                    self.set_connection_state(ConnectionState::RetryingTCP(
-                        network_addr,
-                        SystemTime::now(),
-                    ));
+                } else {
+                    // No connection to try, just bail out of this for now
+                    break;
                 }
 
                 debug!("Connection lost, retrying in 2 seconds");
@@ -478,18 +679,23 @@ Core Debug Commands:
 
     // called by ui
     ////////////////////////////////////////////
-    pub fn set_ipc_path(&self, ipc_path: Option<PathBuf>) {
-        self.inner_mut().ipc_path = ipc_path;
+    pub fn set_ipc_path(&self, ipc_path: PathBuf) {
+        let mut inner = self.inner_mut();
+        inner.ipc_path = Some(ipc_path);
+        inner.network_addr = None;
+    }
+    pub fn set_network_address(&self, network_addr: SocketAddr) {
+        let mut inner = self.inner_mut();
+        inner.ipc_path = None;
+        inner.network_addr = Some(network_addr);
     }
     pub fn get_ipc_path(&self) -> Option<PathBuf> {
         self.inner().ipc_path.clone()
     }
-    pub fn set_network_address(&self, network_addr: Option<SocketAddr>) {
-        self.inner_mut().network_addr = network_addr;
-    }
     pub fn get_network_address(&self) -> Option<SocketAddr> {
         self.inner().network_addr
     }
+
     // called by client_api_connection
     // calls into ui
     ////////////////////////////////////////////

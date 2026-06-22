@@ -25,6 +25,7 @@ pub fn indent_all_string<S: AsRef<str>>(s: S) -> String {
 
 /// Strip a trailing `\n` or `\r\n` from a string-like value.
 pub trait StripTrailingNewline {
+    /// Return the string with a single trailing `\n` or `\r\n` removed.
     fn strip_trailing_newline(&self) -> &str;
 }
 
@@ -40,6 +41,7 @@ impl<T: AsRef<str>> StripTrailingNewline for T {
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Human display formatting
 
+/// Format a byte count as a human-readable string with binary (1024-based) GB/MB/KB/B units.
 #[must_use]
 pub fn human_byte_count<T: Into<u64>>(count: T) -> String {
     let count = count.into();
@@ -54,6 +56,8 @@ pub fn human_byte_count<T: Into<u64>>(count: T) -> String {
     }
 }
 
+/// Format a byte slice for display: ASCII-printable data is shown as text, otherwise as shell-quoted
+/// text or hex (whichever is shorter). Truncated to `truncate_len` bytes with a trailing `...` when set.
 #[must_use]
 pub fn human_byte_data<T: AsRef<[u8]>>(data: T, truncate_len: Option<usize>) -> String {
     let data = data.as_ref();
@@ -149,10 +153,13 @@ pub trait FormatterToString {
         out.join("\n")
     }
 
+    /// Format items as a bracketed table with default layout (32 columns, 4-space indent).
     fn to_table_string<T: fmt::Display>(&self, items: &[T]) -> String {
         self.to_table_string_custom(items, 32, 4, true, true)
     }
 
+    /// Format items as a comma-separated table. `columns` items per row (0 disables wrapping),
+    /// each row indented by `indent` spaces, optionally wrapped in `[]` and split across lines.
     fn to_table_string_custom<T: fmt::Display, I: IntoIterator<Item = T>>(
         &self,
         items: I,
@@ -244,7 +251,9 @@ impl FormatterToString for AlternateDisplayFormat {
 
 /// Generate multiline human-readable output
 pub trait ToMultilineString {
+    /// One item per line.
     fn to_multiline_string(&self) -> String;
+    /// One item per line, each prefixed with its index.
     fn to_multiline_indexed_string(&self) -> String;
 }
 
@@ -263,9 +272,11 @@ where
 
 /// Trait for printing values in a human-readable table format
 pub trait ToTableString {
+    /// Format with default layout (32 columns, 4-space indent, brackets, newlines).
     fn to_table_string(&self) -> String {
         self.to_table_string_custom(32, 4, true, true)
     }
+    /// Format with explicit column count, indent, bracketing, and line-wrapping.
     fn to_table_string_custom(
         &self,
         columns: usize,
@@ -290,7 +301,9 @@ where
     }
 }
 
+/// Substitute a placeholder for an empty string.
 pub trait StringIfEmpty<X: ToString> {
+    /// Return `empty_string` if this is empty, otherwise the value itself.
     fn string_if_empty(&self, empty_string: X) -> String;
 }
 
@@ -308,6 +321,9 @@ impl<S: AsRef<str>, X: ToString> StringIfEmpty<X> for S {
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Misc string tools
 
+/// Split a `host:port` string into host and optional port at the last `:`.
+///
+/// Errors with a `String` if a `:` is present but the trailing portion does not parse as a `u16`.
 pub fn split_port(name: &str) -> Result<(String, Option<u16>), String> {
     if let Some(split) = name.rfind(':') {
         let hoststr = &name[0..split];
@@ -322,6 +338,7 @@ pub fn split_port(name: &str) -> Result<(String, Option<u16>), String> {
     }
 }
 
+/// Prepend a `/` unless the string already starts with one.
 #[must_use]
 pub fn prepend_slash(s: String) -> String {
     if s.starts_with('/') {
@@ -332,6 +349,7 @@ pub fn prepend_slash(s: String) -> String {
     out
 }
 
+/// Call [`ToString::to_string`], for use as a `.map()` argument.
 pub fn map_to_string<X: ToString>(arg: X) -> String {
     arg.to_string()
 }

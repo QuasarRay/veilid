@@ -13,7 +13,7 @@ Veilid Network Plugin
   s.license          = 'LGPL-2.0-or-later OR MPL-2.0 OR (MIT AND BSD-3-Clause)'
   s.author           = { 'John Smith' => 'jsmith@example.com' }
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
+  s.source_files     = 'veilid-flutter/Sources/veilid/**/*'
   s.dependency 'FlutterMacOS'
 
   s.platform = :osx, '10.15.0'

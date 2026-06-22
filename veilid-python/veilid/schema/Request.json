@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Request",
+  "description": "A single remote API request: an operation paired with a correlation id.",
   "type": "object",
   "properties": {
     "id": {
@@ -13,9 +14,11 @@
   },
   "oneOf": [
     {
+      "description": "Host-application control command, handled outside veilid-core.",
       "type": "object",
       "properties": {
         "args": {
+          "description": "Control command arguments.",
           "type": "array",
           "items": {
             "type": "string"
@@ -32,6 +35,7 @@
       ]
     },
     {
+      "description": "Get a full copy of the current node state.",
       "type": "object",
       "properties": {
         "op": {
@@ -44,6 +48,7 @@
       ]
     },
     {
+      "description": "Check whether the node has shut down.",
       "type": "object",
       "properties": {
         "op": {
@@ -56,6 +61,7 @@
       ]
     },
     {
+      "description": "Connect to the network.",
       "type": "object",
       "properties": {
         "op": {
@@ -68,6 +74,7 @@
       ]
     },
     {
+      "description": "Disconnect from the network.",
       "type": "object",
       "properties": {
         "op": {
@@ -80,6 +87,7 @@
       ]
     },
     {
+      "description": "Create a new `MemberId` for use in building `DHTSchema`s.",
       "type": "object",
       "properties": {
         "op": {
@@ -87,6 +95,7 @@
           "const": "GenerateMemberId"
         },
         "writer_key": {
+          "description": "Writer public key the member id is derived from.",
           "type": "string"
         }
       },
@@ -96,9 +105,11 @@
       ]
     },
     {
+      "description": "Deterministically build the record key for a schema and owner.",
       "type": "object",
       "properties": {
         "encryption_key": {
+          "description": "Optional record encryption key.",
           "type": [
             "string",
             "null"
@@ -109,9 +120,11 @@
           "const": "GetDhtRecordKey"
         },
         "owner": {
+          "description": "Owner public key, whose crypto kind selects the record key kind.",
           "type": "string"
         },
         "schema": {
+          "description": "Schema the record uses.",
           "$ref": "#/$defs/DHTSchema"
         }
       },
@@ -122,6 +135,7 @@
       ]
     },
     {
+      "description": "Allocate a new private route with default options.",
       "type": "object",
       "properties": {
         "op": {
@@ -134,6 +148,7 @@
       ]
     },
     {
+      "description": "Allocate a new private route with a specified cryptosystem, stability, and sequencing.",
       "type": "object",
       "properties": {
         "op": {
@@ -141,6 +156,7 @@
           "const": "NewCustomPrivateRoute"
         },
         "private_spec": {
+          "description": "Route specification: crypto kinds, hop count, stability, sequencing.",
           "$ref": "#/$defs/PrivateSpec",
           "default": {
             "crypto_kinds": [],
@@ -155,9 +171,11 @@
       ]
     },
     {
+      "description": "Import a private route blob as a remote private route.",
       "type": "object",
       "properties": {
         "blob": {
+          "description": "Published route blob to import.",
           "type": "string"
         },
         "op": {
@@ -171,6 +189,7 @@
       ]
     },
     {
+      "description": "Release a locally allocated or remotely imported private route.",
       "type": "object",
       "properties": {
         "op": {
@@ -178,6 +197,7 @@
           "const": "ReleasePrivateRoute"
         },
         "route_id": {
+          "description": "Route to release.",
           "type": "string"
         }
       },
@@ -187,12 +207,15 @@
       ]
     },
     {
+      "description": "Reply to an `AppCall` received over a [VeilidUpdate::AppCall].",
       "type": "object",
       "properties": {
         "call_id": {
+          "description": "Identifies which call to answer.",
           "type": "string"
         },
         "message": {
+          "description": "Answer blob returned to the caller.",
           "type": "string"
         },
         "op": {
@@ -207,6 +230,7 @@
       ]
     },
     {
+      "description": "Allocate a new routing context with default safety, sequencing, and stability.",
       "type": "object",
       "properties": {
         "op": {
@@ -219,6 +243,7 @@
       ]
     },
     {
+      "description": "Operation on an existing routing context.",
       "type": "object",
       "properties": {
         "op": {
@@ -232,6 +257,7 @@
       ]
     },
     {
+      "description": "Begin a transaction over a set of opened DHT records.",
       "type": "object",
       "properties": {
         "op": {
@@ -239,6 +265,7 @@
           "const": "TransactDhtRecords"
         },
         "options": {
+          "description": "Optional transaction options, including a default signing keypair.",
           "anyOf": [
             {
               "$ref": "#/$defs/TransactDHTRecordsOptions"
@@ -249,6 +276,7 @@
           ]
         },
         "record_keys": {
+          "description": "Records to enroll in the transaction.",
           "type": "array",
           "items": {
             "type": "string"
@@ -261,6 +289,7 @@
       ]
     },
     {
+      "description": "Operation on an existing DHT transaction.",
       "type": "object",
       "properties": {
         "op": {
@@ -274,14 +303,17 @@
       ]
     },
     {
+      "description": "Open (creating if absent) a named table store database.",
       "type": "object",
       "properties": {
         "column_count": {
+          "description": "Number of columns.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "name": {
+          "description": "Database name.",
           "type": "string"
         },
         "op": {
@@ -296,9 +328,11 @@
       ]
     },
     {
+      "description": "Delete a named table store database.",
       "type": "object",
       "properties": {
         "name": {
+          "description": "Database name.",
           "type": "string"
         },
         "op": {
@@ -312,6 +346,7 @@
       ]
     },
     {
+      "description": "Operation on an open table store database.",
       "type": "object",
       "properties": {
         "op": {
@@ -325,6 +360,7 @@
       ]
     },
     {
+      "description": "Operation on a table store database transaction.",
       "type": "object",
       "properties": {
         "op": {
@@ -338,9 +374,11 @@
       ]
     },
     {
+      "description": "Get the cryptosystem for a crypto kind.",
       "type": "object",
       "properties": {
         "kind": {
+          "description": "Crypto kind to look up.",
           "type": "string"
         },
         "op": {
@@ -354,6 +392,7 @@
       ]
     },
     {
+      "description": "Operation on a cryptosystem.",
       "type": "object",
       "properties": {
         "op": {
@@ -367,12 +406,15 @@
       ]
     },
     {
+      "description": "Verify a set of signatures against node ids over data.",
       "type": "object",
       "properties": {
         "data": {
+          "description": "Signed data.",
           "type": "string"
         },
         "node_ids": {
+          "description": "Node ids whose signatures to check.",
           "type": "array",
           "items": {
             "type": "string"
@@ -383,6 +425,7 @@
           "const": "VerifySignatures"
         },
         "signatures": {
+          "description": "Signatures to verify, parallel to `node_ids`.",
           "type": "array",
           "items": {
             "type": "string"
@@ -397,12 +440,15 @@
       ]
     },
     {
+      "description": "Generate signatures over data with a set of keypairs.",
       "type": "object",
       "properties": {
         "data": {
+          "description": "Data to sign.",
           "type": "string"
         },
         "key_pairs": {
+          "description": "Keypairs to sign with.",
           "type": "array",
           "items": {
             "type": "string"
@@ -420,9 +466,11 @@
       ]
     },
     {
+      "description": "Generate a new keypair of a given crypto kind.",
       "type": "object",
       "properties": {
         "kind": {
+          "description": "Crypto kind for the keypair.",
           "type": "string"
         },
         "op": {
@@ -436,6 +484,7 @@
       ]
     },
     {
+      "description": "Get the current timestamp.",
       "type": "object",
       "properties": {
         "op": {
@@ -448,6 +497,7 @@
       ]
     },
     {
+      "description": "Get a non-decreasing timestamp.",
       "type": "object",
       "properties": {
         "op": {
@@ -460,6 +510,7 @@
       ]
     },
     {
+      "description": "Get a strictly increasing timestamp.",
       "type": "object",
       "properties": {
         "op": {
@@ -472,9 +523,11 @@
       ]
     },
     {
+      "description": "Run a debug command.",
       "type": "object",
       "properties": {
         "command": {
+          "description": "Debug command string.",
           "type": "string"
         },
         "op": {
@@ -488,6 +541,7 @@
       ]
     },
     {
+      "description": "Get the Veilid version as a string.",
       "type": "object",
       "properties": {
         "op": {
@@ -500,6 +554,7 @@
       ]
     },
     {
+      "description": "Get the Veilid version as major/minor/patch numbers.",
       "type": "object",
       "properties": {
         "op": {
@@ -512,6 +567,7 @@
       ]
     },
     {
+      "description": "Get the list of compiled-in feature flags.",
       "type": "object",
       "properties": {
         "op": {
@@ -524,6 +580,7 @@
       ]
     },
     {
+      "description": "Get the default node configuration.",
       "type": "object",
       "properties": {
         "op": {
@@ -536,6 +593,7 @@
       ]
     },
     {
+      "description": "Get the set of supported crypto kinds.",
       "type": "object",
       "properties": {
         "op": {
@@ -550,6 +608,7 @@
   ],
   "$defs": {
     "AllowOffline": {
+      "description": "Whether a DHT write may be deferred for later when the node is offline. Defaults to true.",
       "type": "boolean"
     },
     "CryptoKind": {
@@ -557,9 +616,11 @@
       "type": "string"
     },
     "CryptoSystemRequest": {
+      "description": "A remote crypto operation request, naming the target cryptosystem handle.",
       "type": "object",
       "properties": {
         "cs_id": {
+          "description": "Handle identifying the cryptosystem instance to operate on.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -567,6 +628,7 @@
       },
       "oneOf": [
         {
+          "description": "Release the cryptosystem handle.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -579,6 +641,7 @@
           ]
         },
         {
+          "description": "Get the [`CryptoKind`] fourcc identifying this cryptosystem.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -591,6 +654,7 @@
           ]
         },
         {
+          "description": "Diffie-Hellman shared secret for the key pair, served from the DH cache.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -598,9 +662,11 @@
               "const": "CachedDh"
             },
             "key": {
+              "description": "Peer public key.",
               "type": "string"
             },
             "secret": {
+              "description": "Own secret key.",
               "type": "string"
             }
           },
@@ -611,6 +677,7 @@
           ]
         },
         {
+          "description": "Raw Diffie-Hellman shared secret for the key pair, with no caching.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -618,9 +685,11 @@
               "const": "ComputeDh"
             },
             "key": {
+              "description": "Peer public key.",
               "type": "string"
             },
             "secret": {
+              "description": "Own secret key.",
               "type": "string"
             }
           },
@@ -631,6 +700,7 @@
           ]
         },
         {
+          "description": "Domain-separated shared secret derived from a key exchange and `domain`.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -638,12 +708,15 @@
               "const": "GenerateSharedSecret"
             },
             "domain": {
+              "description": "Domain separation tag; distinct values yield independent secrets.",
               "type": "string"
             },
             "key": {
+              "description": "Peer public key.",
               "type": "string"
             },
             "secret": {
+              "description": "Own secret key.",
               "type": "string"
             }
           },
@@ -655,6 +728,7 @@
           ]
         },
         {
+          "description": "Fill `len` bytes from the cryptographic RNG.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -662,6 +736,7 @@
               "const": "RandomBytes"
             },
             "len": {
+              "description": "Number of bytes to generate.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -673,6 +748,7 @@
           ]
         },
         {
+          "description": "Byte length of a shared secret.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -685,6 +761,7 @@
           ]
         },
         {
+          "description": "Byte length of a nonce.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -697,6 +774,7 @@
           ]
         },
         {
+          "description": "Byte length of a hash digest.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -709,6 +787,7 @@
           ]
         },
         {
+          "description": "Byte length of a public key.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -721,6 +800,7 @@
           ]
         },
         {
+          "description": "Byte length of a secret key.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -733,6 +813,7 @@
           ]
         },
         {
+          "description": "Byte length of a signature.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -745,6 +826,7 @@
           ]
         },
         {
+          "description": "Default salt length for password hashing and KDF operations.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -757,6 +839,7 @@
           ]
         },
         {
+          "description": "Bytes an AEAD operation adds to the ciphertext (the tag length).",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -769,6 +852,7 @@
           ]
         },
         {
+          "description": "Verify a shared secret carries this cryptosystem's kind and length.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -776,6 +860,7 @@
               "const": "CheckSharedSecret"
             },
             "secret": {
+              "description": "Shared secret to check.",
               "type": "string"
             }
           },
@@ -785,6 +870,7 @@
           ]
         },
         {
+          "description": "Verify a nonce has the correct length.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -792,6 +878,7 @@
               "const": "CheckNonce"
             },
             "nonce": {
+              "description": "Nonce to check.",
               "type": "string"
             }
           },
@@ -801,6 +888,7 @@
           ]
         },
         {
+          "description": "Verify a hash digest carries this cryptosystem's kind and length.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -808,6 +896,7 @@
               "const": "CheckHashDigest"
             },
             "digest": {
+              "description": "Hash digest to check.",
               "type": "string"
             }
           },
@@ -817,6 +906,7 @@
           ]
         },
         {
+          "description": "Verify a public key carries this cryptosystem's kind and length.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -824,6 +914,7 @@
               "const": "CheckPublicKey"
             },
             "key": {
+              "description": "Public key to check.",
               "type": "string"
             }
           },
@@ -833,6 +924,7 @@
           ]
         },
         {
+          "description": "Verify a secret key carries this cryptosystem's kind and length.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -840,6 +932,7 @@
               "const": "CheckSecretKey"
             },
             "key": {
+              "description": "Secret key to check.",
               "type": "string"
             }
           },
@@ -849,6 +942,7 @@
           ]
         },
         {
+          "description": "Verify a signature carries this cryptosystem's kind and length.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -856,6 +950,7 @@
               "const": "CheckSignature"
             },
             "signature": {
+              "description": "Signature to check.",
               "type": "string"
             }
           },
@@ -865,6 +960,7 @@
           ]
         },
         {
+          "description": "Hash a password with a salt, returning a PHC hash string.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -872,9 +968,11 @@
               "const": "HashPassword"
             },
             "password": {
+              "description": "Password bytes.",
               "type": "string"
             },
             "salt": {
+              "description": "Salt bytes.",
               "type": "string"
             }
           },
@@ -885,6 +983,7 @@
           ]
         },
         {
+          "description": "Check a password against a PHC hash string.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -892,9 +991,11 @@
               "const": "VerifyPassword"
             },
             "password": {
+              "description": "Password bytes.",
               "type": "string"
             },
             "password_hash": {
+              "description": "PHC hash string to check against.",
               "type": "string"
             }
           },
@@ -905,6 +1006,7 @@
           ]
         },
         {
+          "description": "Derive a deterministic shared secret from a password and salt via KDF.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -912,9 +1014,11 @@
               "const": "DeriveSharedSecret"
             },
             "password": {
+              "description": "Password bytes.",
               "type": "string"
             },
             "salt": {
+              "description": "Salt bytes.",
               "type": "string"
             }
           },
@@ -925,6 +1029,7 @@
           ]
         },
         {
+          "description": "A fresh random nonce.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -937,6 +1042,7 @@
           ]
         },
         {
+          "description": "A fresh random shared secret.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -949,6 +1055,7 @@
           ]
         },
         {
+          "description": "Generate a fresh random signing key pair.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -961,6 +1068,7 @@
           ]
         },
         {
+          "description": "Hash a byte slice, returning a digest tagged with this kind.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -968,6 +1076,7 @@
               "const": "GenerateHash"
             },
             "data": {
+              "description": "Data to hash.",
               "type": "string"
             }
           },
@@ -977,6 +1086,7 @@
           ]
         },
         {
+          "description": "Check that a public and secret key form a usable signing pair.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -984,9 +1094,11 @@
               "const": "ValidateKeyPair"
             },
             "key": {
+              "description": "Public key.",
               "type": "string"
             },
             "secret": {
+              "description": "Secret key.",
               "type": "string"
             }
           },
@@ -997,6 +1109,7 @@
           ]
         },
         {
+          "description": "Recompute the hash of `data` and compare it against `hash_digest`.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -1004,9 +1117,11 @@
               "const": "ValidateHash"
             },
             "data": {
+              "description": "Data to hash.",
               "type": "string"
             },
             "hash_digest": {
+              "description": "Expected digest.",
               "type": "string"
             }
           },
@@ -1017,6 +1132,7 @@
           ]
         },
         {
+          "description": "Sign `data` with the key pair, returning a detached signature.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -1024,12 +1140,15 @@
               "const": "Sign"
             },
             "data": {
+              "description": "Data to sign.",
               "type": "string"
             },
             "key": {
+              "description": "Public key.",
               "type": "string"
             },
             "secret": {
+              "description": "Secret key.",
               "type": "string"
             }
           },
@@ -1041,6 +1160,7 @@
           ]
         },
         {
+          "description": "Verify a detached `signature` over `data` for `key`.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -1048,12 +1168,15 @@
               "const": "Verify"
             },
             "data": {
+              "description": "Signed data.",
               "type": "string"
             },
             "key": {
+              "description": "Public key.",
               "type": "string"
             },
             "signature": {
+              "description": "Detached signature to verify.",
               "type": "string"
             }
           },
@@ -1065,15 +1188,18 @@
           ]
         },
         {
+          "description": "Decrypt and authenticate `body`, returning the plaintext.",
           "type": "object",
           "properties": {
             "associated_data": {
+              "description": "Associated data; must match what was supplied at encryption.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "body": {
+              "description": "Ciphertext with appended authentication tag.",
               "type": "string"
             },
             "cs_op": {
@@ -1081,9 +1207,11 @@
               "const": "DecryptAead"
             },
             "nonce": {
+              "description": "Nonce.",
               "type": "string"
             },
             "shared_secret": {
+              "description": "Shared secret.",
               "type": "string"
             }
           },
@@ -1095,15 +1223,18 @@
           ]
         },
         {
+          "description": "Encrypt and authenticate `body`, returning the ciphertext with tag.",
           "type": "object",
           "properties": {
             "associated_data": {
+              "description": "Associated data; authenticated but not encrypted.",
               "type": [
                 "string",
                 "null"
               ]
             },
             "body": {
+              "description": "Plaintext to encrypt.",
               "type": "string"
             },
             "cs_op": {
@@ -1111,9 +1242,11 @@
               "const": "EncryptAead"
             },
             "nonce": {
+              "description": "Nonce; never reuse the same nonce with the same shared secret.",
               "type": "string"
             },
             "shared_secret": {
+              "description": "Shared secret.",
               "type": "string"
             }
           },
@@ -1125,9 +1258,11 @@
           ]
         },
         {
+          "description": "Stream-cipher `body`, without authentication (confidentiality only).",
           "type": "object",
           "properties": {
             "body": {
+              "description": "Data to encrypt or decrypt.",
               "type": "string"
             },
             "cs_op": {
@@ -1135,9 +1270,11 @@
               "const": "CryptNoAuth"
             },
             "nonce": {
+              "description": "Nonce.",
               "type": "string"
             },
             "shared_secret": {
+              "description": "Shared secret.",
               "type": "string"
             }
           },
@@ -1187,6 +1324,7 @@
       "description": "Enum over all the supported DHT Schemas",
       "oneOf": [
         {
+          "description": "Default schema: a fixed number of owner-writable subkeys.",
           "type": "object",
           "properties": {
             "kind": {
@@ -1200,6 +1338,7 @@
           ]
         },
         {
+          "description": "Simple schema: owner subkeys plus per-member writable subkeys.",
           "type": "object",
           "properties": {
             "kind": {
@@ -1280,6 +1419,7 @@
       "type": "object",
       "properties": {
         "writer": {
+          "description": "Override writer key pair for this operation",
           "type": [
             "string",
             "null"
@@ -1288,9 +1428,11 @@
       }
     },
     "DhtTransactionRequest": {
+      "description": "Request to operate on a DHT transaction held by the remote node.",
       "type": "object",
       "properties": {
         "dhttx_id": {
+          "description": "Id of the DHT transaction the operation applies to.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -1298,6 +1440,7 @@
       },
       "oneOf": [
         {
+          "description": "Release the transaction handle, rolling back if not yet committed.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1310,6 +1453,7 @@
           ]
         },
         {
+          "description": "Commit the transaction, applying all write operations atomically.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1322,6 +1466,7 @@
           ]
         },
         {
+          "description": "Roll back the transaction, performing no write operations.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1334,6 +1479,7 @@
           ]
         },
         {
+          "description": "Extend the transaction with additional record keys.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1341,6 +1487,7 @@
               "const": "Extend"
             },
             "options": {
+              "description": "Options for extending the transaction over the records.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/TransactDHTRecordsOptions"
@@ -1351,6 +1498,7 @@
               ]
             },
             "record_keys": {
+              "description": "Record keys to add to the transaction.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -1363,6 +1511,7 @@
           ]
         },
         {
+          "description": "Get a record subkey value inside the transaction, pulling the latest from the network.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1370,9 +1519,11 @@
               "const": "Get"
             },
             "key": {
+              "description": "Record key to read.",
               "type": "string"
             },
             "subkey": {
+              "description": "Subkey to read.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -1385,9 +1536,11 @@
           ]
         },
         {
+          "description": "Set a record subkey value inside the transaction.",
           "type": "object",
           "properties": {
             "data": {
+              "description": "Data to write to the subkey.",
               "type": "string"
             },
             "dhttx_op": {
@@ -1395,9 +1548,11 @@
               "const": "Set"
             },
             "key": {
+              "description": "Record key to write.",
               "type": "string"
             },
             "options": {
+              "description": "Options for setting the value, including an overriding writer.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/DHTTransactionSetValueOptions"
@@ -1408,6 +1563,7 @@
               ]
             },
             "subkey": {
+              "description": "Subkey to write.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -1421,6 +1577,7 @@
           ]
         },
         {
+          "description": "Inspect record subkey state inside the transaction, without network activity.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1428,13 +1585,16 @@
               "const": "Inspect"
             },
             "key": {
+              "description": "Record key to inspect.",
               "type": "string"
             },
             "scope": {
+              "description": "Scope of the subkey state to report.",
               "$ref": "#/$defs/DHTReportScope",
               "default": "Local"
             },
             "subkeys": {
+              "description": "Subkey range to inspect, or all subkeys if omitted.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/ValueSubkeyRangeSet"
@@ -1487,9 +1647,11 @@
       }
     },
     "RoutingContextRequest": {
+      "description": "A request to invoke an operation on a remote node's routing context.",
       "type": "object",
       "properties": {
         "rc_id": {
+          "description": "Id of the routing context to operate on.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -1497,6 +1659,7 @@
       },
       "oneOf": [
         {
+          "description": "Release the routing context, freeing its id.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -1509,6 +1672,7 @@
           ]
         },
         {
+          "description": "Turn on sender privacy with default hop count, stability, and sequencing.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -1521,6 +1685,7 @@
           ]
         },
         {
+          "description": "Use a custom safety selection, returning a new routing context.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -1528,6 +1693,7 @@
               "const": "WithSafety"
             },
             "safety_selection": {
+              "description": "Safety routing requirements to apply.",
               "$ref": "#/$defs/SafetySelection"
             }
           },
@@ -1537,6 +1703,7 @@
           ]
         },
         {
+          "description": "Use a specified sequencing preference, returning a new routing context.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -1544,6 +1711,7 @@
               "const": "WithSequencing"
             },
             "sequencing": {
+              "description": "Ordered vs unordered message delivery preference.",
               "$ref": "#/$defs/Sequencing"
             }
           },
@@ -1553,6 +1721,7 @@
           ]
         },
         {
+          "description": "Get the safety selection in use on this routing context.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -1565,9 +1734,11 @@
           ]
         },
         {
+          "description": "App-level bidirectional call that expects a response to be returned.",
           "type": "object",
           "properties": {
             "message": {
+              "description": "Message blob of up to 32768 bytes.",
               "type": "string"
             },
             "rc_op": {
@@ -1575,6 +1746,7 @@
               "const": "AppCall"
             },
             "target": {
+              "description": "Destination node id or private route.",
               "$ref": "#/$defs/Target"
             }
           },
@@ -1585,9 +1757,11 @@
           ]
         },
         {
+          "description": "App-level unidirectional message that does not expect a response.",
           "type": "object",
           "properties": {
             "message": {
+              "description": "Message blob of up to 32768 bytes.",
               "type": "string"
             },
             "rc_op": {
@@ -1595,6 +1769,7 @@
               "const": "AppMessage"
             },
             "target": {
+              "description": "Destination node id or private route.",
               "$ref": "#/$defs/Target"
             }
           },
@@ -1605,12 +1780,15 @@
           ]
         },
         {
+          "description": "Create a new DHT record, leaving it open.",
           "type": "object",
           "properties": {
             "kind": {
+              "description": "Cryptosystem kind to use.",
               "type": "string"
             },
             "owner": {
+              "description": "Owner keypair to use, or a random one if None.",
               "type": [
                 "string",
                 "null"
@@ -1621,6 +1799,7 @@
               "const": "CreateDhtRecord"
             },
             "schema": {
+              "description": "Schema to use when creating the record.",
               "$ref": "#/$defs/DHTSchema"
             }
           },
@@ -1631,9 +1810,11 @@
           ]
         },
         {
+          "description": "Open a DHT record at a specific key.",
           "type": "object",
           "properties": {
             "key": {
+              "description": "Record key to open.",
               "type": "string"
             },
             "rc_op": {
@@ -1641,6 +1822,7 @@
               "const": "OpenDhtRecord"
             },
             "writer": {
+              "description": "Default writer keypair to associate for writer capability.",
               "type": [
                 "string",
                 "null"
@@ -1653,9 +1835,11 @@
           ]
         },
         {
+          "description": "Close an opened DHT record, allowing it to be re-opened.",
           "type": "object",
           "properties": {
             "key": {
+              "description": "Record key to close.",
               "type": "string"
             },
             "rc_op": {
@@ -1669,9 +1853,11 @@
           ]
         },
         {
+          "description": "Delete a DHT record from local storage.",
           "type": "object",
           "properties": {
             "key": {
+              "description": "Record key to delete.",
               "type": "string"
             },
             "rc_op": {
@@ -1685,12 +1871,15 @@
           ]
         },
         {
+          "description": "Get the latest value of a subkey.",
           "type": "object",
           "properties": {
             "force_refresh": {
+              "description": "Force a network data refresh rather than using the local copy.",
               "type": "boolean"
             },
             "key": {
+              "description": "Record key to read.",
               "type": "string"
             },
             "rc_op": {
@@ -1698,6 +1887,7 @@
               "const": "GetDhtValue"
             },
             "subkey": {
+              "description": "Subkey to read.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -1711,15 +1901,19 @@
           ]
         },
         {
+          "description": "Push a changed subkey value to the network.",
           "type": "object",
           "properties": {
             "data": {
+              "description": "Value data to set.",
               "type": "string"
             },
             "key": {
+              "description": "Record key to write.",
               "type": "string"
             },
             "options": {
+              "description": "Optional writer override and other set options.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/SetDHTValueOptions"
@@ -1734,6 +1928,7 @@
               "const": "SetDhtValue"
             },
             "subkey": {
+              "description": "Subkey to write.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -1747,9 +1942,11 @@
           ]
         },
         {
+          "description": "Add or update a watch on a DHT record's subkeys.",
           "type": "object",
           "properties": {
             "count": {
+              "description": "Maximum number of change reports, or u32::MAX if None.",
               "type": [
                 "integer",
                 "null"
@@ -1758,6 +1955,7 @@
               "minimum": 0
             },
             "expiration": {
+              "description": "Desired expiration timestamp, or no expiration if None.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/Timestamp"
@@ -1768,6 +1966,7 @@
               ]
             },
             "key": {
+              "description": "Record key to watch.",
               "type": "string"
             },
             "rc_op": {
@@ -1775,6 +1974,7 @@
               "const": "WatchDhtValues"
             },
             "subkeys": {
+              "description": "Subkey range to watch, or the entire range if None.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/ValueSubkeyRangeSet"
@@ -1791,9 +1991,11 @@
           ]
         },
         {
+          "description": "Cancel a watch on a range of subkeys.",
           "type": "object",
           "properties": {
             "key": {
+              "description": "Record key whose watch to modify.",
               "type": "string"
             },
             "rc_op": {
@@ -1801,6 +2003,7 @@
               "const": "CancelDhtWatch"
             },
             "subkeys": {
+              "description": "Subkey range to stop watching, or the entire range if None.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/ValueSubkeyRangeSet"
@@ -1817,9 +2020,11 @@
           ]
         },
         {
+          "description": "Inspect a DHT record for subkey state.",
           "type": "object",
           "properties": {
             "key": {
+              "description": "Record key to inspect.",
               "type": "string"
             },
             "rc_op": {
@@ -1827,10 +2032,12 @@
               "const": "InspectDhtRecord"
             },
             "scope": {
+              "description": "Kind of range the inspection covers.",
               "$ref": "#/$defs/DHTReportScope",
               "default": "Local"
             },
             "subkeys": {
+              "description": "Subkey range to inspect, or the entire range if None.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/ValueSubkeyRangeSet"
@@ -1847,9 +2054,11 @@
           ]
         },
         {
+          "description": "Wait for pending offline subkey writes to flush to the network.",
           "type": "object",
           "properties": {
             "key": {
+              "description": "Record key to flush.",
               "type": "string"
             },
             "rc_op": {
@@ -1857,6 +2066,7 @@
               "const": "FlushDhtRecord"
             },
             "timeout_ms": {
+              "description": "Timeout in milliseconds, or wait indefinitely if None.",
               "type": [
                 "integer",
                 "null"
@@ -1876,7 +2086,7 @@
       ]
     },
     "SafetySelection": {
-      "description": "The choice of safety route to include in compiled routes.",
+      "description": "The choice of safety route to include in compiled routes.\n* `SafetySelection::Unsafe`: don't use a safety route, only specify the sequencing preference\n* `SafetySelection::Safe`: use a safety route and parameters specified by a SafetySpec.",
       "oneOf": [
         {
           "description": "Don't use a safety route, only specify the sequencing preference.",
@@ -1938,11 +2148,23 @@
       }
     },
     "Sequencing": {
-      "type": "string",
-      "enum": [
-        "NoPreference",
-        "PreferOrdered",
-        "EnsureOrdered"
+      "description": "Preferred ordering of RPC message delivery over a route or for RPC messages sent to a target\n  * `Sequencing::PreferUnordered`: any `SequenceOrdering` is acceptable, but `SequenceOrdering::Unordered` will be chosen if available\n  * `Sequencing::PreferOrdered`: any `SequenceOrdering` is acceptable, but `SequenceOrdering::Ordered` will be chosen if available\n  * `Sequencing::EnsureOrdered`: only `SequenceOrdering::Ordered` is acceptable, and if not available, the route will not be created or the message will not be sent\n\nNo sequencing preference guarantees delivery under all conditions, as there is no queuing/buffering in the network",
+      "oneOf": [
+        {
+          "description": "Any `SequenceOrdering` is acceptable, but `SequenceOrdering::Unordered` will be chosen if available",
+          "type": "string",
+          "const": "PreferUnordered"
+        },
+        {
+          "description": "Any `SequenceOrdering` is acceptable, but `SequenceOrdering::Ordered` will be chosen if available",
+          "type": "string",
+          "const": "PreferOrdered"
+        },
+        {
+          "description": "Only `SequenceOrdering::Ordered` is acceptable, and if not available, the route will not be created or the message will not be sent",
+          "type": "string",
+          "const": "EnsureOrdered"
+        }
       ]
     },
     "SetDHTValueOptions": {
@@ -1970,16 +2192,26 @@
       }
     },
     "Stability": {
-      "type": "string",
-      "enum": [
-        "LowLatency",
-        "Reliable"
+      "description": "Choice of nodes to include in allocated routes\n* `Stability::LowLatency`: prefer nodes with low latency, but may be unreliable and require route reallocation\n* `Stability::Reliable`: prefer nodes with reliable uptime, but may have higher latency",
+      "oneOf": [
+        {
+          "description": "Prefer nodes with low latency, but may be unreliable and require route reallocation",
+          "type": "string",
+          "const": "LowLatency"
+        },
+        {
+          "description": "Prefer nodes with reliable uptime, but may have higher latency",
+          "type": "string",
+          "const": "Reliable"
+        }
       ]
     },
     "TableDbRequest": {
+      "description": "Request addressed to an opened `TableDB` handle.",
       "type": "object",
       "properties": {
         "db_id": {
+          "description": "Id of the opened `TableDB` handle to operate on.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -1987,6 +2219,7 @@
       },
       "oneOf": [
         {
+          "description": "Release the handle, dropping its reference to the table.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -1999,6 +2232,7 @@
           ]
         },
         {
+          "description": "Get the total number of columns in the table.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -2011,9 +2245,11 @@
           ]
         },
         {
+          "description": "Get the list of keys in a column.",
           "type": "object",
           "properties": {
             "col": {
+              "description": "Column to enumerate.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -2029,6 +2265,7 @@
           ]
         },
         {
+          "description": "Start a write transaction on the table.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -2041,9 +2278,11 @@
           ]
         },
         {
+          "description": "Store a value at a key in a column, as a single immediate transaction.",
           "type": "object",
           "properties": {
             "col": {
+              "description": "Column to write to.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -2053,9 +2292,11 @@
               "const": "Store"
             },
             "key": {
+              "description": "Key to write.",
               "type": "string"
             },
             "value": {
+              "description": "Value to store.",
               "type": "string"
             }
           },
@@ -2067,9 +2308,11 @@
           ]
         },
         {
+          "description": "Read the value at a key in a column.",
           "type": "object",
           "properties": {
             "col": {
+              "description": "Column to read from.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -2079,6 +2322,7 @@
               "const": "Load"
             },
             "key": {
+              "description": "Key to read.",
               "type": "string"
             }
           },
@@ -2089,9 +2333,11 @@
           ]
         },
         {
+          "description": "Delete a key from a column, returning its prior value if present.",
           "type": "object",
           "properties": {
             "col": {
+              "description": "Column to delete from.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -2101,6 +2347,7 @@
               "const": "Delete"
             },
             "key": {
+              "description": "Key to delete.",
               "type": "string"
             }
           },
@@ -2116,9 +2363,11 @@
       ]
     },
     "TableDbTransactionRequest": {
+      "description": "Request addressed to an open `TableDB` write transaction.",
       "type": "object",
       "properties": {
         "tx_id": {
+          "description": "Id of the transaction to operate on.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -2126,6 +2375,7 @@
       },
       "oneOf": [
         {
+          "description": "Commit the transaction's writes atomically and release it.",
           "type": "object",
           "properties": {
             "tx_op": {
@@ -2138,6 +2388,7 @@
           ]
         },
         {
+          "description": "Discard the transaction's writes and release it.",
           "type": "object",
           "properties": {
             "tx_op": {
@@ -2150,14 +2401,17 @@
           ]
         },
         {
+          "description": "Queue a store of a value at a key in a column.",
           "type": "object",
           "properties": {
             "col": {
+              "description": "Column to write to.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
             },
             "key": {
+              "description": "Key to write.",
               "type": "string"
             },
             "tx_op": {
@@ -2165,6 +2419,7 @@
               "const": "Store"
             },
             "value": {
+              "description": "Value to store.",
               "type": "string"
             }
           },
@@ -2176,14 +2431,17 @@
           ]
         },
         {
+          "description": "Queue a delete of a key in a column.",
           "type": "object",
           "properties": {
             "col": {
+              "description": "Column to delete from.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
             },
             "key": {
+              "description": "Key to delete.",
               "type": "string"
             },
             "tx_op": {
@@ -2234,6 +2492,7 @@
       ]
     },
     "Timestamp": {
+      "description": "8-byte-aligned `u64` newtype that serializes as a string for JSON safety.",
       "type": "string"
     },
     "TransactDHTRecordsOptions": {
@@ -2250,6 +2509,7 @@
       }
     },
     "ValueSubkeyRangeSet": {
+      "description": "A set of DHT subkeys stored as inclusive ranges of [ValueSubkey]",
       "type": "array",
       "items": {
         "type": "array",

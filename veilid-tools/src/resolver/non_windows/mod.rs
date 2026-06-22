@@ -59,9 +59,16 @@ async fn with_resolvers<R, F: FnOnce(Arc<Resolvers>) -> PinBoxFutureStatic<R>>(c
     closure(resolvers).await
 }
 
+/// Cross-platform DNS resolver. This backend uses hickory-resolver, trying the
+/// system configuration first and falling back to a default resolver.
 pub struct Resolver {}
 
 impl Resolver {
+    /// Resolve the TXT records for `host`, returning each record's text.
+    ///
+    /// Blocks on a DNS query; the first call also builds and caches the process-wide resolvers.
+    ///
+    /// Errors with [`ResolverError::Generic`] when the default resolver's lookup fails (no such name, network/DNS failure); a system-resolver failure is logged and falls through to the default.
     pub async fn txt_lookup<S: AsRef<str>>(host: S) -> Result<Vec<String>, ResolverError> {
         let host = host.as_ref().to_string();
         let txt_result = with_resolvers(|resolvers| {
@@ -102,6 +109,11 @@ impl Resolver {
         Ok(out)
     }
 
+    /// Reverse-resolve `ip_addr` to a hostname via its PTR record.
+    ///
+    /// Blocks on a DNS query; the first call also builds and caches the process-wide resolvers.
+    ///
+    /// Errors with [`ResolverError::Generic`] when the default resolver's lookup fails or returns no records; a system-resolver failure is logged and falls through to the default.
     pub async fn ptr_lookup(ip_addr: IpAddr) -> Result<String, ResolverError> {
         let ptr_result = with_resolvers(|resolvers| {
             Box::pin(async move {

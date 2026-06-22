@@ -17,7 +17,9 @@ impl From<CountryCode> for String {
 impl TryFrom<&[u8]> for CountryCode {
     type Error = VeilidAPIError;
     fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
-        let cc: [u8; 2] = b.try_into().map_err(VeilidAPIError::generic)?;
+        let cc: [u8; 2] = b
+            .try_into()
+            .map_err(|_| VeilidAPIError::generic("country code must be exactly 2 bytes"))?;
 
         if !cc[0].is_ascii_alphabetic() || !cc[1].is_ascii_alphabetic() {
             return Err(VeilidAPIError::generic(

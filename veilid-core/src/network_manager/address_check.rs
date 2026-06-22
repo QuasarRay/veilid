@@ -91,7 +91,10 @@ impl AddressCheck {
 
         let config = registry.config();
         let routing_domain_detect_address_changes = net.routing_domains_detecting_address_changes();
-        let ip6_prefix_size = config.network.max_connections_per_ip6_prefix_size as usize;
+        let ip6_prefix_size = config
+            .internal()
+            .network
+            .max_connections_per_ip6_prefix_size as usize;
 
         let config = AddressCheckConfig {
             routing_domain_detect_address_changes,

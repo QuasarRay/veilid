@@ -116,16 +116,14 @@ impl RoutingTable {
         };
 
         let since_last_question = e
-            .peer_stats()
-            .rpc_stats
+            .rpc_stats()
             .last_question_ts
             .as_ref()
             .map(|l| format!("{:#}", cur_ts.duration_since(*l)))
             .unwrap_or_else(|| "???".to_string());
 
         let since_last_seen = e
-            .peer_stats()
-            .rpc_stats
+            .rpc_stats()
             .last_seen_ts
             .as_ref()
             .map(|l| format!("{:#}", cur_ts.duration_since(*l)))
@@ -224,10 +222,7 @@ impl RoutingTable {
             let our_node_id = self.node_id(*ck);
 
             let mut filtered_total = 0;
-            let mut reliable_count = 0usize;
-            let mut unreliable_count = 0usize;
-            let mut dead_count = 0usize;
-            let mut punished_count = 0usize;
+            let mut state_counts = BTreeMap::new();
             let mut b = 0;
             let blen = inner.buckets[ck].len();
             while b < blen {
@@ -248,12 +243,8 @@ impl RoutingTable {
                         let node = e.0.clone();
 
                         // Count states
-                        match e.1.with(|e| e.state(cur_ts)) {
-                            BucketEntryState::Reliable => reliable_count += 1,
-                            BucketEntryState::Unreliable => unreliable_count += 1,
-                            BucketEntryState::Dead => dead_count += 1,
-                            BucketEntryState::Punished => punished_count += 1,
-                        }
+                        let state = e.1.with(|e| e.state(cur_ts));
+                        *state_counts.entry(state).or_insert(0usize) += 1;
 
                         let entry_snap = e.1.snapshot(self.registry(), cur_ts);
                         let can_be_relay = public_internet_relay_node_filter(&entry_snap);
@@ -298,32 +289,12 @@ impl RoutingTable {
             }
             out += &format!("{} Filtered Total: {}\n", ck, filtered_total);
             if filtered_total > 0 {
-                if reliable_count > 0 {
+                for (state, count) in state_counts {
                     out += &format!(
-                        "  Reliable: {} ({:.1}%)\n",
-                        reliable_count,
-                        (reliable_count as f64) * 100.0 / (filtered_total as f64)
-                    );
-                }
-                if unreliable_count > 0 {
-                    out += &format!(
-                        "  Unreliable: {} ({:.1}%)\n",
-                        unreliable_count,
-                        (unreliable_count as f64) * 100.0 / (filtered_total as f64)
-                    );
-                }
-                if dead_count > 0 {
-                    out += &format!(
-                        "  Dead: {} ({:.1}%)\n",
-                        dead_count,
-                        (dead_count as f64) * 100.0 / (filtered_total as f64)
-                    );
-                }
-                if punished_count > 0 {
-                    out += &format!(
-                        "  Punished: {} ({:.1}%)\n",
-                        punished_count,
-                        (punished_count as f64) * 100.0 / (filtered_total as f64)
+                        "  {:#}: {} ({:.1}%)\n",
+                        state,
+                        count,
+                        (count as f64) * 100.0 / (filtered_total as f64)
                     );
                 }
             }
@@ -357,10 +328,7 @@ impl RoutingTable {
         let our_node_ids = self.node_ids();
         let mut relay_count = 0usize;
         let mut relaying_count = 0usize;
-        let mut reliable_count = 0usize;
-        let mut unreliable_count = 0usize;
-        let mut dead_count = 0usize;
-        let mut punished_count = 0usize;
+        let mut state_counts = BTreeMap::new();
 
         let mut filters = VecDeque::new();
         filters.push_front(Box::new(
@@ -419,12 +387,9 @@ impl RoutingTable {
                 relaying_count += 1;
             }
 
-            match node.operate(|e| e.state(cur_ts)) {
-                BucketEntryState::Reliable => reliable_count += 1,
-                BucketEntryState::Unreliable => unreliable_count += 1,
-                BucketEntryState::Dead => dead_count += 1,
-                BucketEntryState::Punished => punished_count += 1,
-            }
+            // Count states
+            let state = node.operate(|e| e.state(cur_ts));
+            *state_counts.entry(state).or_insert(0usize) += 1;
 
             let node_id_str = node.to_string();
 
@@ -440,32 +405,12 @@ impl RoutingTable {
             relaying_count,
         );
         if entry_count > 0 {
-            if reliable_count > 0 {
+            for (state, count) in state_counts {
                 out += &format!(
-                    "Reliable: {} ({:.1}%)\n",
-                    reliable_count,
-                    (reliable_count as f64) * 100.0 / (entry_count as f64)
-                );
-            }
-            if unreliable_count > 0 {
-                out += &format!(
-                    "Unreliable: {} ({:.1}%)\n",
-                    unreliable_count,
-                    (unreliable_count as f64) * 100.0 / (entry_count as f64)
-                );
-            }
-            if dead_count > 0 {
-                out += &format!(
-                    "Dead: {} ({:.1}%)\n",
-                    dead_count,
-                    (dead_count as f64) * 100.0 / (entry_count as f64)
-                );
-            }
-            if punished_count > 0 {
-                out += &format!(
-                    "Punished: {} ({:.1}%)\n",
-                    punished_count,
-                    (punished_count as f64) * 100.0 / (entry_count as f64)
+                    "  {:#}: {} ({:.1}%)\n",
+                    state,
+                    count,
+                    (count as f64) * 100.0 / (entry_count as f64)
                 );
             }
         }
@@ -474,14 +419,22 @@ impl RoutingTable {
     }
 
     pub fn debug_info_entry(&self, node_ref: NodeRef) -> String {
-        let cur_ts = Timestamp::now();
+        let ref_count = node_ref.entry().ref_count.load(Ordering::Acquire);
 
-        let mut out = String::new();
-        out += &node_ref.operate(|e| {
-            let state_reason = e.state_reason(cur_ts);
-            format!("{:#}\nstate: {:#}\n", e, state_reason)
-        });
-        out
+        #[cfg(feature = "tracking")]
+        let _tracking = {
+            let mut tracking = format!("\nNodeRef Tracking:\n\n");
+            for (id, bt) in &mut node_ref.entry().node_ref_tracks.lock().iter_mut() {
+                bt.resolve();
+                tracking += &format!("Id: {}\n----------------\n{:#?}", id, bt);
+            }
+            tracking
+        };
+
+        #[cfg(not(feature = "tracking"))]
+        let _tracking = "";
+
+        node_ref.operate(|e| format!("{:#}\nref_count: {}{}", e, ref_count, _tracking))
     }
 
     pub fn debug_info_buckets(&self, min_state: BucketEntryState) -> String {

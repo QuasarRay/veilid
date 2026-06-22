@@ -22,13 +22,16 @@ impl FilteredNodeRef {
     ) -> Self {
         entry.ref_count.fetch_add(1u32, Ordering::AcqRel);
 
+        #[cfg(feature = "tracking")]
+        let track_id = entry.track();
+
         Self {
             registry,
             entry,
             filter,
             sequencing,
             #[cfg(feature = "tracking")]
-            track_id: entry.track(),
+            track_id,
         }
     }
 
@@ -50,6 +53,7 @@ impl FilteredNodeRef {
             sequencing,
         )
     }
+
     pub fn with_routing_domain<R: Into<RoutingDomainSet>>(
         &self,
         routing_domain_set: R,
@@ -63,34 +67,20 @@ impl FilteredNodeRef {
         )
     }
 
-    pub fn single_transport(&self) -> Option<TransportType> {
-        let mut dif = self.filter.dial_info_filter();
-        if matches!(self.sequencing, Sequencing::EnsureOrdered) {
-            (_, dif) = dif.apply_sequencing(self.sequencing);
+    /// Make a noderef that meets the sequencing requirements, but is not
+    /// protocol-specific, or address-family-specific, or routing domain-specific
+    /// Useful for when a signalled node gets to choose its own dial info for the reverse connection,
+    /// and when a relay node gets to forward an rpc over an existing connection
+    /// and it just has to have the same guarantees.
+    pub fn sequencing_only(&self) -> FilteredNodeRef {
+        let (_sorted, seq_dif) = self.dial_info_filter().apply_sequencing(self.sequencing());
+        if seq_dif.is_ordered_only() {
+            self.unfiltered()
+                .sequencing_filtered(Sequencing::EnsureOrdered)
+        } else {
+            self.unfiltered()
+                .sequencing_filtered(Sequencing::PreferUnordered)
         }
-        let pts = dif.protocol_type_set();
-        let ats = dif.address_type_set();
-        if pts.len() != 1 || ats.len() != 1 {
-            return None;
-        }
-        Some(TransportType::new(pts.iter().next()?, ats.iter().next()?))
-    }
-
-    pub fn single_routing_domain(&self) -> Option<RoutingDomain> {
-        let rds = self.filter.routing_domain_set();
-        if rds.len() != 1 {
-            return None;
-        }
-        rds.iter().next()
-    }
-
-    /// Recover a TransportNodeRef from this filtered ref if the filter+sequencing
-    /// narrows to exactly one (routing_domain, transport).
-    #[expect(dead_code)]
-    pub fn try_into_transport(self) -> Option<TransportNodeRef> {
-        let transport = self.single_transport()?;
-        let routing_domain = self.single_routing_domain()?;
-        Some(self.unfiltered().with_transport(routing_domain, transport))
     }
 
     pub fn set_filter(&mut self, filter: NodeRefFilter) {
@@ -156,7 +146,7 @@ impl FilteredNodeRef {
         let nrf = if let Some(filter) = filter {
             nr.custom_filtered(filter)
         } else {
-            nr.sequencing_filtered(Sequencing::NoPreference)
+            nr.sequencing_filtered(Sequencing::PreferUnordered)
         };
         let opt_nrf = if let Some(seq) = seq {
             Some(nrf.with_sequencing(seq))
@@ -223,24 +213,24 @@ impl Clone for FilteredNodeRef {
             filter: self.filter,
             sequencing: self.sequencing,
             #[cfg(feature = "tracking")]
-            track_id: self.entry.write().track(),
+            track_id: self.entry.track(),
         }
     }
 }
 
 impl fmt::Display for FilteredNodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let node_id_str = self.entry.with(|e| e.best_node_id()).to_string();
+        let node_id_str = f.to_string(self.entry.with(|e| e.best_node_id()));
 
         let mut out = node_id_str;
 
-        let sstr = self.sequencing.to_string();
+        let sstr = f.to_string(self.sequencing);
         if !sstr.is_empty() {
             out += "+";
             out += &sstr;
         }
 
-        let fstr = self.filter.to_string();
+        let fstr = f.to_string(self.filter);
         if !fstr.is_empty() {
             out += "/";
             out += &fstr;
@@ -263,7 +253,7 @@ impl fmt::Debug for FilteredNodeRef {
 impl Drop for FilteredNodeRef {
     fn drop(&mut self) {
         #[cfg(feature = "tracking")]
-        self.entry.write().untrack(self.track_id);
+        self.entry.untrack(self.track_id);
 
         // drop the noderef and queue a bucket kick if it was the last one
         let new_ref_count = self.entry.ref_count.fetch_sub(1u32, Ordering::AcqRel) - 1;

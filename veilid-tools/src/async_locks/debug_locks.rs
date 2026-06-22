@@ -39,17 +39,31 @@ impl LockIdContainer {
                 .collect()
         };
 
-        eprintln!(
+        use core::fmt::Write as _;
+        let mut r = String::new();
+        let _ = writeln!(
+            r,
             "Deadlock detected! ({})\n\nLock creation backtrace:\n{}\n\nActive guard backtraces:\n",
             desc,
             self.inner.create_backtrace.trim(),
         );
         for (n, agb) in active_guard_backtraces.iter().enumerate() {
-            eprintln!("{}:\n{}\n", n, indent::indent_all_by(4, agb));
+            let _ = writeln!(r, "{}:\n{}\n", n, indent::indent_all_by(4, agb));
         }
 
         let report_backtrace = backtrace::Backtrace::new_unresolved().trim();
-        eprintln!("Panic backtrace:\n{}", report_backtrace);
+        let _ = writeln!(r, "Panic backtrace:\n{}", report_backtrace);
+
+        eprintln!("{r}");
+        // Native stderr isn't always captured by the harness (e.g. flutter test), so
+        // also drop the report to a well-known file where a filesystem exists.
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        {
+            let _ = std::fs::write(
+                std::env::temp_dir().join("veilid_async_lock_deadlock.txt"),
+                r.as_bytes(),
+            );
+        }
 
         std::process::exit(1);
     }

@@ -600,11 +600,11 @@ impl AttachmentManager {
             local_network_ready: health.routing_domain_ready(RoutingDomain::LocalNetwork),
             uptime,
             attached_uptime,
-            reliable_peer_count: inputs.reliable_count,
-            live_peer_count: inputs.live_count,
-            estimated_network_size: inputs.estimated_network_size,
+            reliable_peer_count: NodeCount::from(inputs.reliable_count as u64),
+            live_peer_count: NodeCount::from(inputs.live_count as u64),
+            estimated_network_size: NodeCount::from(inputs.estimated_network_size),
             median_latency: inputs.median_latency,
-            over_attached_nodes: inputs.excess_kickable,
+            over_attached_nodes: NodeCount::from(inputs.excess_kickable as u64),
         });
 
         self.update_veilid_state_attachment(inner, veilid_state_attachment, opt_callback);
@@ -637,7 +637,8 @@ impl AttachmentManager {
             | AttachmentState::AttachedGood
             | AttachmentState::AttachedStrong
             | AttachmentState::AttachedFull => {
-                unreachable!("don't use this for attached states, use update_attached_state()");
+                veilid_log!(self error "don't use this for attached states, use update_attached_state()");
+                return;
             }
         }
         let uptime = now.duration_since(inner.started_ts);

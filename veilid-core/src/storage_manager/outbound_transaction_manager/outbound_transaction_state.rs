@@ -37,17 +37,9 @@ pub(in crate::storage_manager) struct OutboundTransactionState {
     /// Background operations to join at drop
     #[serde(skip)]
     background_tokens: Vec<MaybeDone<StopToken>>,
-    /// Operations in-flight semaphore
-    #[serde(skip)]
-    #[serde(default = "default_operation_concurrency")]
-    operation_concurrency: Arc<AsyncSemaphore>,
     /// Refs to routes used during this transaction, held to keep them locked
     #[serde(skip)]
     route_refs: Vec<AllocatedRouteRef>,
-}
-
-fn default_operation_concurrency() -> Arc<AsyncSemaphore> {
-    Arc::new(AsyncSemaphore::new(PER_TRANSACTION_OPERATION_CONCURRENCY))
 }
 
 impl fmt::Display for OutboundTransactionState {
@@ -106,9 +98,6 @@ impl OutboundTransactionState {
             created_ts: Timestamp::now(),
             record_states: vec![],
             background_tokens: vec![],
-            operation_concurrency: Arc::new(AsyncSemaphore::new(
-                PER_TRANSACTION_OPERATION_CONCURRENCY,
-            )),
             route_refs: Vec::new(),
         }
     }
@@ -135,9 +124,6 @@ impl OutboundTransactionState {
         self.record_states.append(&mut other.record_states);
         self.background_tokens.append(&mut other.background_tokens);
         self.route_refs.append(&mut other.route_refs);
-        // Note: skips self.operation_concurrency merge because both transactions have all records locked
-        // for TransactExtend, so there should be no background operations on the semaphore
-        // There is no safe way to check for this currently
     }
 
     #[expect(dead_code)]
@@ -316,10 +302,6 @@ impl OutboundTransactionState {
         drop(std::mem::take(&mut self.route_refs));
 
         TransactionCleanup::new(background_tokens)
-    }
-
-    pub fn get_operation_concurrency_semaphore(&self) -> Arc<AsyncSemaphore> {
-        self.operation_concurrency.clone()
     }
 
     pub(super) fn add_route_refs(&mut self, route_refs: Vec<AllocatedRouteRef>) {

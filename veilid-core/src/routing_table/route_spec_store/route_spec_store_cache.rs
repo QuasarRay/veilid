@@ -43,8 +43,8 @@ pub(super) struct RouteSpecStoreCache {
     used_nodes: HashMap<UsedNodesKey, usize>,
     /// How many times nodes have been used at the terminal point of a route
     used_end_nodes: HashMap<UsedNodesKey, usize>,
-    /// Route spec hop cache, used to quickly disqualify routes
-    hop_cache: HashSet<RouteHopCacheKey>,
+    /// How many allocated routes use each hop set
+    hop_cache: HashMap<RouteHopCacheKey, usize>,
 
     /// Allocated route info by route id
     allocated_route_set_cache: HashMap<AllocatedRouteSetId, Arc<AllocatedRouteCacheEntry>>,
@@ -105,13 +105,21 @@ impl RouteSpecStoreCache {
             apibail_internal!("hop node refs should not be empty: id={}", id);
         }
 
+        // Same public key is never permitted; duplicate hop sets are
+        for key in route_set_keys.iter() {
+            if self.allocated_routes_by_key.contains_key(key) {
+                apibail_internal!("route with duplicate public key: key={}, id={}", key, id);
+            }
+        }
+
         let hop_count = hop_node_refs.len();
 
         let best_crypto_kind = route_set_keys.first().unwrap_or_log().kind();
         let hop_cache_key = RouteHopCacheKey::from_hop_node_refs(best_crypto_kind, &hop_node_refs);
-        if !self.hop_cache.insert(hop_cache_key.clone()) {
-            apibail_internal!("route should never be inserted twice: id={}", id);
-        }
+        self.hop_cache
+            .entry(hop_cache_key.clone())
+            .and_modify(|e| *e += 1)
+            .or_insert(1);
 
         let arce = AllocatedRouteCacheEntry::new(
             route_set_keys,
@@ -158,7 +166,7 @@ impl RouteSpecStoreCache {
 
     /// Checks if an allocated route is in our cache
     pub fn contains_allocated_route_with_hops(&self, cache_key: &RouteHopCacheKey) -> bool {
-        self.hop_cache.contains(cache_key)
+        self.hop_cache.contains_key(cache_key)
     }
 
     /// Removes an allocated route set from our cache
@@ -176,8 +184,16 @@ impl RouteSpecStoreCache {
 
         // Remove from hop cache table
         let cache_key = arce.hop_cache_key();
-        if !self.hop_cache.remove(&cache_key) {
-            veilid_log!(self error "hop cache should have contained cache key: id={}", id);
+        match self.hop_cache.entry(cache_key) {
+            std::collections::hash_map::Entry::Occupied(mut o) => {
+                *o.get_mut() -= 1;
+                if *o.get() == 0 {
+                    o.remove();
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(_) => {
+                veilid_log!(self error "hop cache should have contained cache key: id={}", id);
+            }
         }
 
         // Remove from used nodes caches
@@ -257,18 +273,6 @@ impl RouteSpecStoreCache {
                 hop_count,
             };
             acc + self.used_nodes.get(&key).cloned().unwrap_or_default()
-        })
-    }
-
-    /// Calculate how many times a node with a particular node id set has been used at the end of the path of our allocated routes
-    #[expect(dead_code)]
-    pub fn get_used_end_node_count(&self, node_ids: &NodeIdGroup, hop_count: usize) -> usize {
-        node_ids.iter().fold(0usize, |acc, k| {
-            let key = UsedNodesKey {
-                node_id: k.clone(),
-                hop_count,
-            };
-            acc + self.used_end_nodes.get(&key).cloned().unwrap_or_default()
         })
     }
 

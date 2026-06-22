@@ -44,50 +44,6 @@ class UpdateProcessorFixture implements VeilidProcessorInterface {
 
   UpdateProcessorFixture({required this.veilidFixture});
 
-  /// Test-side implementation of [VeilidProcessorInterface.retry]. Mirrors
-  /// veilidchat's `processorRetry`: blocks until the harness sees
-  /// publicInternetReady, then runs [closure], retrying on transient
-  /// DHT failures (`notAvailable` / `tryAgain`).
-  @override
-  Future<T> retry<T>(
-    Future<T> Function() closure, {
-    Duration? timeout,
-  }) async {
-    final deadline = timeout == null ? null : DateTime.now().add(timeout);
-    while (true) {
-      if (deadline != null && DateTime.now().isAfter(deadline)) {
-        throw TimeoutException('UpdateProcessorFixture.retry timeout');
-      }
-      if (!processorConnectionState.isPublicInternetReady) {
-        var stream = veilidFixture.updateStream
-            .where(
-              (u) => u is VeilidUpdateAttachment && u.publicInternetReady,
-            );
-        if (deadline != null) {
-          stream = stream.timeout(deadline.difference(DateTime.now()));
-        }
-        try {
-          await stream.first;
-        } on TimeoutException {
-          throw TimeoutException(
-            'UpdateProcessorFixture.retry timeout while '
-            'waiting for publicInternetReady',
-          );
-        }
-      }
-      try {
-        return await closure();
-      } on VeilidAPIExceptionTryAgain {
-        // veilid_support's DHTExceptionNotAvailable lives outside the
-        // veilid package, so we can't catch it explicitly here without a
-        // dependency cycle. The inner dhtRetryLoop already absorbs
-        // short-term notAvailable failures, so anything that escapes is
-        // a genuine signal — let it propagate so the test fails loudly.
-        await Future<void>.delayed(const Duration(milliseconds: 250));
-      }
-    }
-  }
-
   Future<void> setUp() async {
     await _fixtureMutex.acquire();
     _updateSubscription = veilidFixture.updateStream.listen((update) {

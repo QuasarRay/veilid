@@ -9,6 +9,8 @@ part 'veilid_config.g.dart';
 
 //////////////////////////////////////////////////////////
 // FFI Platform-specific config
+
+/// Native terminal (stdout) logging configuration.
 @freezed
 sealed class VeilidFFIConfigLoggingTerminal
     with _$VeilidFFIConfigLoggingTerminal {
@@ -25,6 +27,7 @@ sealed class VeilidFFIConfigLoggingTerminal
       _$VeilidFFIConfigLoggingTerminalFromJson(json as Map<String, dynamic>);
 }
 
+/// Native OpenTelemetry (OTLP/gRPC) logging configuration.
 @freezed
 sealed class VeilidFFIConfigLoggingOtlp with _$VeilidFFIConfigLoggingOtlp {
   const factory VeilidFFIConfigLoggingOtlp({
@@ -42,6 +45,7 @@ sealed class VeilidFFIConfigLoggingOtlp with _$VeilidFFIConfigLoggingOtlp {
       _$VeilidFFIConfigLoggingOtlpFromJson(json as Map<String, dynamic>);
 }
 
+/// Native API logging configuration; routes logs to [VeilidUpdate] events.
 @freezed
 sealed class VeilidFFIConfigLoggingApi with _$VeilidFFIConfigLoggingApi {
   const factory VeilidFFIConfigLoggingApi({
@@ -57,6 +61,7 @@ sealed class VeilidFFIConfigLoggingApi with _$VeilidFFIConfigLoggingApi {
       _$VeilidFFIConfigLoggingApiFromJson(json as Map<String, dynamic>);
 }
 
+/// Native flamegraph logging configuration; writes timing data to [path].
 @freezed
 sealed class VeilidFFIConfigLoggingFlame with _$VeilidFFIConfigLoggingFlame {
   const factory VeilidFFIConfigLoggingFlame({
@@ -68,6 +73,7 @@ sealed class VeilidFFIConfigLoggingFlame with _$VeilidFFIConfigLoggingFlame {
       _$VeilidFFIConfigLoggingFlameFromJson(json as Map<String, dynamic>);
 }
 
+/// Native logging configuration across all sinks.
 @freezed
 sealed class VeilidFFIConfigLogging with _$VeilidFFIConfigLogging {
   const factory VeilidFFIConfigLogging({
@@ -91,6 +97,7 @@ sealed class VeilidFFIConfigLogging with _$VeilidFFIConfigLogging {
       _$VeilidFFIConfigLoggingFromJson(json as Map<String, dynamic>);
 }
 
+/// Platform-specific configuration for the native (FFI) backend.
 @freezed
 sealed class VeilidFFIConfig with _$VeilidFFIConfig {
   const factory VeilidFFIConfig({required VeilidFFIConfigLogging logging}) =
@@ -103,6 +110,7 @@ sealed class VeilidFFIConfig with _$VeilidFFIConfig {
 //////////////////////////////////////////////////////////
 // WASM Platform-specific config
 
+/// Browser console sink for the WASM performance logger.
 @freezed
 sealed class VeilidWASMConfigLoggingPerformanceConsole
     with _$VeilidWASMConfigLoggingPerformanceConsole {
@@ -119,6 +127,7 @@ sealed class VeilidWASMConfigLoggingPerformanceConsole
       );
 }
 
+/// WASM performance-timeline logging configuration.
 @freezed
 sealed class VeilidWASMConfigLoggingPerformance
     with _$VeilidWASMConfigLoggingPerformance {
@@ -140,6 +149,7 @@ sealed class VeilidWASMConfigLoggingPerformance
       );
 }
 
+/// WASM API logging configuration; routes logs to [VeilidUpdate] events.
 @freezed
 sealed class VeilidWASMConfigLoggingApi with _$VeilidWASMConfigLoggingApi {
   const factory VeilidWASMConfigLoggingApi({
@@ -155,6 +165,7 @@ sealed class VeilidWASMConfigLoggingApi with _$VeilidWASMConfigLoggingApi {
       _$VeilidWASMConfigLoggingApiFromJson(json as Map<String, dynamic>);
 }
 
+/// WASM logging configuration across all sinks.
 @freezed
 sealed class VeilidWASMConfigLogging with _$VeilidWASMConfigLogging {
   const factory VeilidWASMConfigLogging({
@@ -168,6 +179,7 @@ sealed class VeilidWASMConfigLogging with _$VeilidWASMConfigLogging {
       _$VeilidWASMConfigLoggingFromJson(json as Map<String, dynamic>);
 }
 
+/// Platform-specific configuration for the WASM (browser) backend.
 @freezed
 sealed class VeilidWASMConfig with _$VeilidWASMConfig {
   const factory VeilidWASMConfig({
@@ -181,25 +193,40 @@ sealed class VeilidWASMConfig with _$VeilidWASMConfig {
 //////////////////////////////////////
 /// VeilidConfigLogLevel
 
+/// Logging level threshold; [off] disables logging.
 enum VeilidConfigLogLevel {
+  /// Logging disabled.
   off,
+
+  /// Errors only.
   error,
+
+  /// Errors and warnings.
   warn,
+
+  /// Errors, warnings, and informational messages.
   info,
+
+  /// Adds debug-level messages.
   debug,
+
+  /// Adds trace-level messages (most verbose).
   trace;
 
+  /// Parse from its JSON (PascalCase) name.
   factory VeilidConfigLogLevel.fromJson(dynamic j) =>
       VeilidConfigLogLevel.values.byName((j as String).toCamelCase());
+
+  /// The PascalCase JSON name.
   String toJson() => name.toPascalCase();
 }
 
 ////////////
+/// Enable and configure the UDP protocol.
 @freezed
 sealed class VeilidConfigUDP with _$VeilidConfigUDP {
   const factory VeilidConfigUDP({
     required bool enabled,
-    required int socketPoolSize,
     required String listenAddress,
     String? publicAddress,
   }) = _VeilidConfigUDP;
@@ -209,12 +236,12 @@ sealed class VeilidConfigUDP with _$VeilidConfigUDP {
 }
 
 ////////////
+/// Enable and configure the TCP protocol.
 @freezed
 sealed class VeilidConfigTCP with _$VeilidConfigTCP {
   const factory VeilidConfigTCP({
     required bool connect,
     required bool listen,
-    required int maxConnections,
     required String listenAddress,
     String? publicAddress,
   }) = _VeilidConfigTCP;
@@ -224,12 +251,12 @@ sealed class VeilidConfigTCP with _$VeilidConfigTCP {
 }
 
 ////////////
+/// Enable and configure the WebSocket protocol.
 @freezed
 sealed class VeilidConfigWS with _$VeilidConfigWS {
   const factory VeilidConfigWS({
     required bool connect,
     required bool listen,
-    required int maxConnections,
     required String listenAddress,
     required String path,
     String? url,
@@ -260,6 +287,8 @@ sealed class VeilidConfigWS with _$VeilidConfigWS {
 
 ////////////
 
+/// Per-protocol (UDP/TCP/WebSocket) network configuration. All protocols are
+/// available by default; the node selects which to use per peer.
 @freezed
 sealed class VeilidConfigProtocol with _$VeilidConfigProtocol {
   const factory VeilidConfigProtocol({
@@ -275,6 +304,7 @@ sealed class VeilidConfigProtocol with _$VeilidConfigProtocol {
 
 ////////////
 
+/// Privacy and relay preferences for routes.
 @freezed
 sealed class VeilidConfigPrivacy with _$VeilidConfigPrivacy {
   const factory VeilidConfigPrivacy({required bool requireInboundRelay}) =
@@ -286,6 +316,7 @@ sealed class VeilidConfigPrivacy with _$VeilidConfigPrivacy {
 
 ////////////
 
+/// TLS configuration for inbound secure protocols.
 @freezed
 sealed class VeilidConfigTLS with _$VeilidConfigTLS {
   const factory VeilidConfigTLS({
@@ -299,34 +330,19 @@ sealed class VeilidConfigTLS with _$VeilidConfigTLS {
 }
 
 ////////////
+/// Distributed Hash Table (DHT) cache and storage configuration. Use the
+/// defaults unless you are sure; bad count/fanout/timeout values can render a
+/// node inoperable for DHT operations.
 @freezed
 sealed class VeilidConfigDHT with _$VeilidConfigDHT {
   const factory VeilidConfigDHT({
-    required int resolveNodeTimeoutMs,
-    required int resolveNodeCount,
-    required int resolveNodeFanout,
-    required int maxFindNodeCount,
-    required int getValueTimeoutMs,
-    required int getValueCount,
-    required int getValueFanout,
-    required int setValueTimeoutMs,
-    required int setValueCount,
-    required int setValueFanout,
-    required int consensusWidth,
-    required int minPeerCount,
-    required int minPeerRefreshTimeMs,
-    required int validateDialInfoReceiptTimeMs,
     required int localSubkeyCacheSize,
     required int localMaxSubkeyCacheMemoryMb,
     required int remoteSubkeyCacheSize,
     required int remoteMaxRecords,
     required int remoteMaxSubkeyCacheMemoryMb,
     required int remoteMaxStorageSpaceMb,
-    required int publicWatchLimit,
-    required int memberWatchLimit,
-    required int maxWatchExpirationMs,
-    required int publicTransactionLimit,
-    required int memberTransactionLimit,
+    required int maxConcurrentOperations,
   }) = _VeilidConfigDHT;
 
   factory VeilidConfigDHT.fromJson(dynamic json) =>
@@ -335,16 +351,11 @@ sealed class VeilidConfigDHT with _$VeilidConfigDHT {
 
 ////////////
 
+/// RPC configuration.
 @freezed
 sealed class VeilidConfigRPC with _$VeilidConfigRPC {
   const factory VeilidConfigRPC({
-    required int concurrency,
-    required int queueSize,
-    required int timeoutMs,
-    required int maxRouteHopCount,
     required int defaultRouteHopCount,
-    int? maxTimestampBehindMs,
-    int? maxTimestampAheadMs,
   }) = _VeilidConfigRPC;
 
   factory VeilidConfigRPC.fromJson(dynamic json) =>
@@ -353,6 +364,7 @@ sealed class VeilidConfigRPC with _$VeilidConfigRPC {
 
 ////////////
 
+/// Routing table identity and bootstrap configuration.
 @freezed
 sealed class VeilidConfigRoutingTable with _$VeilidConfigRoutingTable {
   const factory VeilidConfigRoutingTable({
@@ -368,24 +380,47 @@ sealed class VeilidConfigRoutingTable with _$VeilidConfigRoutingTable {
 
 ////////////
 
+//////////////////////////////////////
+/// VeilidConfigAddressType
+
+/// An IP address family the node may use.
+enum VeilidConfigAddressType {
+  /// IPv4 (32-bit) addresses.
+  ipv4,
+
+  /// IPv6 (128-bit) addresses.
+  ipv6;
+
+  /// Parse from its JSON name (`IPV4`/`IPV6`).
+  factory VeilidConfigAddressType.fromJson(dynamic j) => switch (j as String) {
+        'IPV4' => VeilidConfigAddressType.ipv4,
+        'IPV6' => VeilidConfigAddressType.ipv6,
+        _ =>
+          throw ArgumentError.value(j, 'j', 'invalid VeilidConfigAddressType'),
+      };
+
+  /// The JSON name (`IPV4`/`IPV6`).
+  String toJson() => switch (this) {
+        VeilidConfigAddressType.ipv4 => 'IPV4',
+        VeilidConfigAddressType.ipv6 => 'IPV6',
+      };
+}
+
+////////////
+
+/// Network subsystem configuration: connections, routing table, RPC, DHT,
+/// transports, and privacy.
 @freezed
 sealed class VeilidConfigNetwork with _$VeilidConfigNetwork {
   const factory VeilidConfigNetwork({
-    required int connectionInitialTimeoutMs,
-    required int connectionInactivityTimeoutMs,
-    required int maxConnectionsPerIp4,
-    required int maxConnectionsPerIp6Prefix,
-    required int maxConnectionsPerIp6PrefixSize,
-    required int maxConnectionFrequencyPerMin,
-    required int clientAllowlistTimeoutMs,
-    required int reverseConnectionReceiptTimeMs,
-    required int holePunchReceiptTimeMs,
+    required int maxConnections,
     required VeilidConfigRoutingTable routingTable,
     required VeilidConfigRPC rpc,
     required VeilidConfigDHT dht,
+    @Default(<VeilidConfigAddressType>[])
+    List<VeilidConfigAddressType> addressTypes,
     required bool upnp,
     required bool? detectAddressChanges,
-    required int restrictedNatRetries,
     required VeilidConfigTLS tls,
     required VeilidConfigProtocol protocol,
     required VeilidConfigPrivacy privacy,
@@ -398,6 +433,8 @@ sealed class VeilidConfigNetwork with _$VeilidConfigNetwork {
 
 ////////////
 
+/// Table store configuration: the encrypted key-value database backing node
+/// state.
 @freezed
 sealed class VeilidConfigTableStore with _$VeilidConfigTableStore {
   const factory VeilidConfigTableStore({
@@ -413,6 +450,7 @@ sealed class VeilidConfigTableStore with _$VeilidConfigTableStore {
 
 ////////////
 
+/// Block store configuration: content-addressed block storage.
 @freezed
 sealed class VeilidConfigBlockStore with _$VeilidConfigBlockStore {
   const factory VeilidConfigBlockStore({
@@ -426,6 +464,8 @@ sealed class VeilidConfigBlockStore with _$VeilidConfigBlockStore {
 
 ////////////
 
+/// Protected store configuration: where secrets such as the device encryption
+/// key are kept (keychain/keyring/etc).
 @freezed
 sealed class VeilidConfigProtectedStore with _$VeilidConfigProtectedStore {
   const factory VeilidConfigProtectedStore({
@@ -443,6 +483,7 @@ sealed class VeilidConfigProtectedStore with _$VeilidConfigProtectedStore {
 
 ////////////
 
+/// Capabilities advertised by this node.
 @freezed
 sealed class VeilidConfigCapabilities with _$VeilidConfigCapabilities {
   const factory VeilidConfigCapabilities({required List<String> disable}) =
@@ -453,7 +494,122 @@ sealed class VeilidConfigCapabilities with _$VeilidConfigCapabilities {
 }
 
 ////////////
+// "Footgun" internal tuning tree, parallel to the main config. Only honored when
+// veilid-core is built with the `footgun-config` feature; otherwise ignored.
 
+/// Internal "footgun" UDP tuning. See [VeilidConfigInternal].
+@freezed
+sealed class VeilidConfigInternalUDP with _$VeilidConfigInternalUDP {
+  const factory VeilidConfigInternalUDP({
+    required int socketPoolSize,
+  }) = _VeilidConfigInternalUDP;
+
+  factory VeilidConfigInternalUDP.fromJson(dynamic json) =>
+      _$VeilidConfigInternalUDPFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+/// Internal "footgun" per-protocol tuning. See [VeilidConfigInternal].
+@freezed
+sealed class VeilidConfigInternalProtocol with _$VeilidConfigInternalProtocol {
+  const factory VeilidConfigInternalProtocol({
+    required VeilidConfigInternalUDP udp,
+  }) = _VeilidConfigInternalProtocol;
+
+  factory VeilidConfigInternalProtocol.fromJson(dynamic json) =>
+      _$VeilidConfigInternalProtocolFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+/// Internal "footgun" RPC tuning. See [VeilidConfigInternal].
+@freezed
+sealed class VeilidConfigInternalRPC with _$VeilidConfigInternalRPC {
+  const factory VeilidConfigInternalRPC({
+    required int concurrency,
+    required int queueSize,
+    required int timeoutMs,
+    required int maxRouteHopCount,
+    int? maxTimestampBehindMs,
+    int? maxTimestampAheadMs,
+  }) = _VeilidConfigInternalRPC;
+
+  factory VeilidConfigInternalRPC.fromJson(dynamic json) =>
+      _$VeilidConfigInternalRPCFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+/// Internal "footgun" DHT tuning. See [VeilidConfigInternal]. Changing the
+/// count/fanout/timeout fields may render a node inoperable for DHT operations.
+@freezed
+sealed class VeilidConfigInternalDHT with _$VeilidConfigInternalDHT {
+  const factory VeilidConfigInternalDHT({
+    required int maxFindNodeCount,
+    required int resolveNodeTimeoutMs,
+    required int resolveNodeCount,
+    required int resolveNodeFanout,
+    required int getValueTimeoutMs,
+    required int getValueCount,
+    required int getValueFanout,
+    required int setValueTimeoutMs,
+    required int setValueCount,
+    required int setValueFanout,
+    required int consensusWidth,
+    required int minPeerCount,
+    required int minPeerRefreshTimeMs,
+    required int validateDialInfoReceiptTimeMs,
+    required int maxWatchExpirationMs,
+    required int publicWatchLimit,
+    required int memberWatchLimit,
+    required int publicTransactionLimit,
+    required int memberTransactionLimit,
+  }) = _VeilidConfigInternalDHT;
+
+  factory VeilidConfigInternalDHT.fromJson(dynamic json) =>
+      _$VeilidConfigInternalDHTFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+/// Internal "footgun" network tuning. See [VeilidConfigInternal].
+@freezed
+sealed class VeilidConfigInternalNetwork with _$VeilidConfigInternalNetwork {
+  const factory VeilidConfigInternalNetwork({
+    required int connectionInitialTimeoutMs,
+    required int connectionInactivityTimeoutMs,
+    required int maxConnectionsPerIp4,
+    required int maxConnectionsPerIp6Prefix,
+    required int maxConnectionsPerIp6PrefixSize,
+    required int maxConnectionFrequencyPerMin,
+    required int clientAllowlistTimeoutMs,
+    required int reverseConnectionReceiptTimeMs,
+    required int holePunchReceiptTimeMs,
+    required int restrictedNatRetries,
+    required VeilidConfigInternalRPC rpc,
+    required VeilidConfigInternalDHT dht,
+    required VeilidConfigInternalProtocol protocol,
+  }) = _VeilidConfigInternalNetwork;
+
+  factory VeilidConfigInternalNetwork.fromJson(dynamic json) =>
+      _$VeilidConfigInternalNetworkFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+/// Internal "footgun" tuning tree, parallel to the main config. Tunes low-level
+/// network/DHT timing, fanout, consensus, and connection limits. Only honored
+/// when veilid-core is built with the `footgun-config` feature; otherwise any
+/// non-default values are reset at startup (with a warning).
+@freezed
+sealed class VeilidConfigInternal with _$VeilidConfigInternal {
+  const factory VeilidConfigInternal({
+    required VeilidConfigInternalNetwork network,
+  }) = _VeilidConfigInternal;
+
+  factory VeilidConfigInternal.fromJson(dynamic json) =>
+      _$VeilidConfigInternalFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+
+/// Top level of the Veilid configuration tree, passed to startup.
 @freezed
 sealed class VeilidConfig with _$VeilidConfig {
   const factory VeilidConfig({
@@ -464,6 +620,7 @@ sealed class VeilidConfig with _$VeilidConfig {
     required VeilidConfigTableStore tableStore,
     required VeilidConfigBlockStore blockStore,
     required VeilidConfigNetwork network,
+    VeilidConfigInternal? internal,
   }) = _VeilidConfig;
 
   factory VeilidConfig.fromJson(dynamic json) =>

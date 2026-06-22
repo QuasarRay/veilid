@@ -212,7 +212,7 @@ impl SafetyRoute {
     pub fn new_stub(public_key: PublicKey, private_route: Arc<PrivateRoute>) -> Self {
         // First hop should have already been popped off for stubbed safety routes since
         // we are sending directly to the first hop
-        assert!(matches!(private_route.hops, PrivateRouteHops::Data(_)));
+        debug_assert!(matches!(private_route.hops, PrivateRouteHops::Data(_)));
         Self {
             public_key,
             hops: SafetyRouteHops::Private(private_route),

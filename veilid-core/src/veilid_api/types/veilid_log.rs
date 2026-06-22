@@ -11,10 +11,15 @@ use super::*;
 )]
 #[must_use]
 pub enum VeilidLogLevel {
+    /// Errors.
     Error = 1,
+    /// Warnings.
     Warn = 2,
+    /// Informational messages.
     Info = 3,
+    /// Debugging messages.
     Debug = 4,
+    /// Tracing messages, the most verbose level.
     Trace = 5,
 }
 
@@ -145,8 +150,11 @@ impl fmt::Display for VeilidLogLevel {
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 pub struct VeilidLog {
+    /// Severity of the message.
     pub log_level: VeilidLogLevel,
+    /// The log message text.
     pub message: String,
+    /// Backtrace, present for errors when available.
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
     pub backtrace: Option<String>,
 }

@@ -6,8 +6,10 @@ use super::*;
 )]
 #[must_use]
 pub enum ExpirationState {
+    /// Not expired.
     #[default]
     Live,
+    /// Expired.
     Dead,
 }
 

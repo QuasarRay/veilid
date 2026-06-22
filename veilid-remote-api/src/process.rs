@@ -1,5 +1,6 @@
 use super::*;
 
+/// Convert a `VeilidAPIResult` into its JSON `ApiResult` ok/err form.
 pub fn to_json_api_result<T: Clone + fmt::Debug + JsonSchema>(
     r: VeilidAPIResult<T>,
 ) -> super::ApiResult<T> {
@@ -9,7 +10,8 @@ pub fn to_json_api_result<T: Clone + fmt::Debug + JsonSchema>(
     }
 }
 
-pub fn to_json_api_result_with_string<T: Clone + fmt::Debug>(
+/// Convert a `VeilidAPIResult` into a JSON `ApiResult` whose ok value serializes as a string.
+pub(crate) fn to_json_api_result_with_string<T: Clone + fmt::Debug>(
     r: VeilidAPIResult<T>,
 ) -> super::ApiResultWithString<T> {
     match r {
@@ -18,7 +20,8 @@ pub fn to_json_api_result_with_string<T: Clone + fmt::Debug>(
     }
 }
 
-pub fn to_json_api_result_with_vec_string<T: Clone + fmt::Debug>(
+/// Convert a `VeilidAPIResult` into a JSON `ApiResult` whose ok value serializes as a vector of strings.
+pub(crate) fn to_json_api_result_with_vec_string<T: Clone + fmt::Debug>(
     r: VeilidAPIResult<T>,
 ) -> super::ApiResultWithVecString<T> {
     match r {
@@ -27,7 +30,8 @@ pub fn to_json_api_result_with_vec_string<T: Clone + fmt::Debug>(
     }
 }
 
-pub fn to_json_api_result_with_opt_vec_string<T: Clone + fmt::Debug>(
+/// Convert a `VeilidAPIResult` into a JSON `ApiResult` whose ok value serializes as an optional vector of strings.
+pub(crate) fn to_json_api_result_with_opt_vec_string<T: Clone + fmt::Debug>(
     r: VeilidAPIResult<T>,
 ) -> super::ApiResultWithOptVecString<T> {
     match r {
@@ -36,16 +40,20 @@ pub fn to_json_api_result_with_opt_vec_string<T: Clone + fmt::Debug>(
     }
 }
 
+/// Convert a `VeilidAPIResult<Vec<u8>>` into a JSON `ApiResult` whose ok value serializes as a base64 string.
 #[must_use]
-pub fn to_json_api_result_with_vec_u8(r: VeilidAPIResult<Vec<u8>>) -> super::ApiResultWithVecU8 {
+pub(crate) fn to_json_api_result_with_vec_u8(
+    r: VeilidAPIResult<Vec<u8>>,
+) -> super::ApiResultWithVecU8 {
     match r {
         Err(e) => super::ApiResultWithVecU8::Err { error: e },
         Ok(v) => super::ApiResultWithVecU8::Ok { value: v },
     }
 }
 
+/// Convert a `VeilidAPIResult<Vec<Vec<u8>>>` into a JSON `ApiResult` whose ok value serializes as a vector of base64 strings.
 #[must_use]
-pub fn to_json_api_result_with_vec_vec_u8(
+pub(crate) fn to_json_api_result_with_vec_vec_u8(
     r: VeilidAPIResult<Vec<Vec<u8>>>,
 ) -> super::ApiResultWithVecVecU8 {
     match r {
@@ -64,6 +72,9 @@ struct JsonRequestProcessorInner {
     crypto_kinds: BTreeMap<u32, CryptoKind>,
 }
 
+/// Dispatches JSON API requests to a `VeilidAPI` and tracks the handle ids for
+/// routing contexts, table DBs and their transactions, crypto systems, and DHT
+/// transactions opened over the protocol.
 #[derive(Clone)]
 pub struct JsonRequestProcessor {
     api: VeilidAPI,
@@ -71,6 +82,7 @@ pub struct JsonRequestProcessor {
 }
 
 impl JsonRequestProcessor {
+    /// Create a processor that dispatches requests to `api`.
     #[must_use]
     pub fn new(api: VeilidAPI) -> Self {
         Self {
@@ -247,7 +259,18 @@ impl JsonRequestProcessor {
     //////////////////////////////////////////////////////////////////////////////////////
 
     #[instrument(level = "trace", target = "json_api", skip_all)]
-    pub async fn process_routing_context_request(
+    /// Handle a request addressed to a previously looked-up routing context.
+    ///
+    /// `Release` frees the routing-context handle; releasing an already-released id is a no-op.
+    /// `WithDefaultSafety`/`WithSafety`/`WithSequencing` return a new routing-context handle id the
+    /// caller must `Release`, or it leaks. DHT-record and app-call ops await the network.
+    ///
+    /// Each fallible op's response carries the `VeilidAPIError` from the underlying `RoutingContext`
+    /// call verbatim in its `result` (e.g. `WithSafety` `::InvalidArgument` for a malformed
+    /// `preferred_route` route id, `::Generic` for a hop count over the configured max; DHT/app-call
+    /// ops `::TryAgain`/`::Timeout`/`::NoConnection` are retryable, `::NotInitialized` if shut down).
+    /// Infallible ops (`Safety`, `WithSequencing`) cannot error.
+    pub(crate) async fn process_routing_context_request(
         &self,
         routing_context: RoutingContext,
         rcr: RoutingContextRequest,
@@ -360,11 +383,10 @@ impl JsonRequestProcessor {
                 subkeys,
                 expiration,
                 count,
-                transactional,
             } => RoutingContextResponseOp::WatchDhtValues {
                 result: to_json_api_result(
                     routing_context
-                        .watch_dht_values(key, subkeys, expiration, count, transactional)
+                        .watch_dht_values(key, subkeys, expiration, count)
                         .await,
                 ),
             },
@@ -404,7 +426,17 @@ impl JsonRequestProcessor {
     }
 
     #[instrument(level = "trace", target = "json_api", skip_all)]
-    pub async fn process_table_db_request(
+    /// Handle a request addressed to a previously looked-up table DB handle.
+    ///
+    /// `Release` frees the table-DB handle; releasing an already-released id is a no-op.
+    /// `Transact` returns a new transaction handle id the caller must `Commit` or `Rollback`, or it
+    /// leaks. `GetKeys`/`Store`/`Load`/`Delete` await the backing store.
+    ///
+    /// Each fallible op's response carries the `VeilidAPIError` from the underlying `TableDB` call
+    /// verbatim in its `result`: `::Generic` if `col` is at or above the opened column count, or on a
+    /// backing-store read/write or decrypt failure (`::Internal` if the store reports out of memory).
+    /// `Release` and `Transact` cannot error.
+    pub(crate) async fn process_table_db_request(
         &self,
         table_db: TableDB,
         tdr: TableDbRequest,
@@ -450,7 +482,17 @@ impl JsonRequestProcessor {
     }
 
     #[instrument(level = "trace", target = "json_api", skip_all)]
-    pub async fn process_table_db_transaction_request(
+    /// Handle a request addressed to a previously looked-up table DB transaction.
+    ///
+    /// `Rollback`, and a successful `Commit`, release the transaction handle; either ends the
+    /// `Transact` pair. `Store`/`Delete` only buffer into the transaction; `Commit` blocks on the
+    /// on-disk write.
+    ///
+    /// `Commit`/`Store`/`Delete` responses carry the `VeilidAPIError` from the underlying
+    /// `TableDBTransaction` call verbatim in their `result`, always `::Generic` (transaction already
+    /// completed, `col` at or above the opened column count, or the commit write failing); a failed
+    /// `Commit` does not release the handle. `Rollback` is infallible.
+    pub(crate) async fn process_table_db_transaction_request(
         &self,
         table_db_transaction: TableDBTransaction,
         tdtr: TableDbTransactionRequest,
@@ -485,7 +527,17 @@ impl JsonRequestProcessor {
     }
 
     #[instrument(level = "trace", target = "json_api", skip_all)]
-    pub async fn process_crypto_system_request(
+    /// Handle a request addressed to a previously looked-up crypto system.
+    ///
+    /// `Release` frees the crypto-system handle; releasing an already-released id is a no-op. The
+    /// remaining crypto ops are local and do not block.
+    ///
+    /// Fallible ops carry the `VeilidAPIError` from the underlying `CryptoSystem` call verbatim in
+    /// their `result`: `::Generic` for an argument of the wrong crypto kind or length (the
+    /// `Check*`/`CachedDh`/`Sign`/`Verify`/AEAD/password ops), `::ParseError` for a malformed key or
+    /// hash string, `::Internal` for a key that is not a valid curve point or a signing failure.
+    /// Length/kind getters and the random/generate ops cannot error.
+    pub(crate) async fn process_crypto_system_request(
         &self,
         csv: &CryptoSystemGuard<'_>,
         csr: CryptoSystemRequest,
@@ -666,7 +718,19 @@ impl JsonRequestProcessor {
     }
 
     #[instrument(level = "trace", target = "json_api", skip_all)]
-    pub async fn process_dht_transaction_request(
+    /// Handle a request addressed to a previously looked-up DHT transaction.
+    ///
+    /// `Release`, and a successful `Commit` or `Rollback`, free the transaction handle; releasing an
+    /// already-released id is a no-op. `Commit`/`Rollback`/`Extend`/`Get`/`Set` await the network;
+    /// `Inspect` reads local transaction state.
+    ///
+    /// Each fallible op's response carries the `VeilidAPIError` from the underlying `DHTTransaction`
+    /// call verbatim in its `result`: `::TransactionNotFound` if the transaction was already
+    /// completed or is no longer in the expected stage, `::TryAgain` (retryable) if the node is
+    /// offline or consensus was not reached, `::InvalidArgument` for a `record_key` not open in the
+    /// transaction or an out-of-range `subkey`, `::Generic` for a malformed `record_key`. A failed
+    /// `Commit`/`Rollback` does not release the handle. `Release` is infallible.
+    pub(crate) async fn process_dht_transaction_request(
         &self,
         dht_transaction: DHTTransaction,
         dhttr: DhtTransactionRequest,
@@ -723,6 +787,23 @@ impl JsonRequestProcessor {
     }
 
     #[instrument(level = "trace", target = "json_api", skip_all)]
+    /// Dispatch a top-level request, looking up any referenced handle and
+    /// routing the operation to the matching `VeilidAPI` call.
+    ///
+    /// `NewRoutingContext`, `OpenTableDb`, `GetCryptoSystem`, and `TransactDhtRecords` return a new
+    /// handle id the caller must release (`RoutingContext`/`TableDb`/`CryptoSystem` `Release`, or DHT
+    /// `Commit`/`Rollback`), or it leaks. `IsShutdown`, `Now*`, version/features/config, and
+    /// `ValidCryptoKinds` are local and do not block; the rest await the network or backing store.
+    ///
+    /// A request that references a handle id not in the table dispatches no call and returns the
+    /// matching `InvalidId` sub-response (`RoutingContext`/`TableDb`/`TableDbTransaction`/
+    /// `CryptoSystem`/`DhtTransaction`). `Control` always returns `VeilidAPIError::Unimplemented`;
+    /// `GetCryptoSystem` with an unsupported `kind` returns `::InvalidArgument`. The
+    /// `OpenTableDb`/`DeleteTableDb`/`GetCryptoSystem`/`VerifySignatures`/`GenerateSignatures` ops
+    /// surface `::NotInitialized` in their `result` when the API has been shut down. Every other
+    /// fallible op carries the underlying `VeilidAPI` call's `VeilidAPIError` verbatim in its
+    /// `result`. Local ops (`IsShutdown`, `Now*`, version/features/config, `ValidCryptoKinds`) cannot
+    /// error.
     pub async fn process_request(self, request: Request) -> Response {
         let id = request.id;
 

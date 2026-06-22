@@ -17,7 +17,6 @@ pub trait RoutingDomainEditor {
     fn set_network_config(&mut self, network_config: RoutingDomainNetworkConfig);
     fn set_confirmed(&mut self, confirmed: bool);
     fn commit(&mut self);
-    #[expect(dead_code)]
     fn reset(&mut self);
 }
 

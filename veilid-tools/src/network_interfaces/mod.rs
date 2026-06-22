@@ -27,13 +27,17 @@ cfg_if::cfg_if! {
     }
 }
 
+/// An interface address that is either IPv4 or IPv6, with its netmask and broadcast address.
 #[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Hash, Clone, Serialize, Deserialize)]
 pub enum IfAddr {
+    /// An IPv4 interface address.
     V4(Ifv4Addr),
+    /// An IPv6 interface address.
     V6(Ifv6Addr),
 }
 
 impl IfAddr {
+    /// The IP address.
     #[must_use]
     pub fn ip(&self) -> IpAddr {
         match *self {
@@ -41,6 +45,7 @@ impl IfAddr {
             IfAddr::V6(ref ifv6_addr) => IpAddr::V6(ifv6_addr.ip),
         }
     }
+    /// The netmask.
     #[must_use]
     pub fn netmask(&self) -> IpAddr {
         match *self {
@@ -48,6 +53,7 @@ impl IfAddr {
             IfAddr::V6(ref ifv6_addr) => IpAddr::V6(ifv6_addr.netmask),
         }
     }
+    /// The broadcast address, if one is set.
     pub fn broadcast(&self) -> Option<IpAddr> {
         match *self {
             IfAddr::V4(ref ifv4_addr) => ifv4_addr.broadcast.map(IpAddr::V4),
@@ -55,6 +61,7 @@ impl IfAddr {
         }
     }
 
+    /// The network address, with the host bits masked off by the netmask.
     #[must_use]
     pub fn network(&self) -> IfAddr {
         match *self {
@@ -63,6 +70,7 @@ impl IfAddr {
         }
     }
 
+    /// Whether `addr` is in the same subnet as this address. False across address families.
     #[must_use]
     pub fn contains_address(&self, addr: IpAddr) -> bool {
         match *self {
@@ -144,6 +152,7 @@ impl Ifv4Addr {
         }
     }
 
+    /// Whether `addr` is in this address's subnet.
     #[must_use]
     pub fn contains_address(&self, addr: Ipv4Addr) -> bool {
         let v4mask = self.netmask.octets();
@@ -167,6 +176,7 @@ impl Ifv4Addr {
         self_ip == addr_ip
     }
 
+    /// CIDR prefix length of the netmask, or `None` if the netmask is not contiguous.
     #[must_use]
     pub fn prefix_len(&self) -> Option<u8> {
         ipv4_netmask_to_prefix_len(self.netmask)
@@ -222,6 +232,7 @@ impl Ifv6Addr {
         }
     }
 
+    /// Whether `addr` is in this address's subnet.
     #[must_use]
     pub fn contains_address(&self, addr: Ipv6Addr) -> bool {
         let v6mask = self.netmask.segments();
@@ -253,6 +264,7 @@ impl Ifv6Addr {
         self_ip == addr_ip
     }
 
+    /// CIDR prefix length of the netmask, or `None` if the netmask is not contiguous.
     #[must_use]
     pub fn prefix_len(&self) -> Option<u8> {
         ipv6_netmask_to_prefix_len(self.netmask)
@@ -303,9 +315,12 @@ pub struct AddressFlags {
     pub expiration_secs: Option<u64>,
 }
 
+/// An address bound to an interface, with its flags. Ordered by reachability preference.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct InterfaceAddress {
+    /// The IPv4 or IPv6 address with its netmask and broadcast.
     pub if_addr: IfAddr,
+    /// Scope and lifetime flags for the address.
     pub flags: AddressFlags,
 }
 
@@ -411,6 +426,7 @@ impl PartialOrd for InterfaceAddress {
 }
 
 impl InterfaceAddress {
+    /// Make an `InterfaceAddress` from an address and its flags.
     #[must_use]
     pub fn new(if_addr: IfAddr, flags: AddressFlags) -> Self {
         Self { if_addr, flags }
@@ -478,11 +494,16 @@ impl InterfaceAddress {
 //     Wired,      // Wired is usually free or cheap and high speed
 // }
 
+/// A single network interface on this host, with its flags, gateways, and addresses.
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct NetworkInterface {
+    /// OS interface name (e.g. `en0`, `eth0`).
     pub name: String,
+    /// Interface-level flags.
     pub flags: InterfaceFlags,
+    /// Default-route gateways reachable through this interface, sorted and deduplicated.
     pub gateways: Vec<IpAddr>,
+    /// Addresses bound to this interface, sorted by preference and deduplicated.
     pub addrs: Vec<InterfaceAddress>,
 }
 
@@ -502,6 +523,7 @@ impl fmt::Debug for NetworkInterface {
     }
 }
 impl NetworkInterface {
+    /// Make an empty `NetworkInterface` with the given name and flags.
     #[must_use]
     pub fn new(name: String, flags: InterfaceFlags) -> Self {
         Self {
@@ -593,25 +615,34 @@ impl NetworkInterface {
     }
 }
 
+/// The best routable gateway and interface addresses distilled from all interfaces.
 #[derive(Clone, Default, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NetworkInterfaceAddressState {
+    /// Gateway addresses across all interfaces, sorted and deduplicated.
     pub gateway_addresses: Vec<IpAddr>,
+    /// Best routable interface addresses, sorted by preference and deduplicated.
     pub interface_addresses: Vec<IfAddr>,
 }
 
+/// Which address families are present across the running non-loopback interfaces.
 #[derive(Clone, Copy, Default, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RawAddressSummary {
+    /// At least one non-loopback IPv4 address is present.
     pub has_non_loopback_ipv4: bool,
+    /// At least one non-loopback IPv6 address is present.
     pub has_non_loopback_ipv6: bool,
+    /// At least one globally-routable unicast IPv6 address is present.
     pub has_unicast_global_ipv6: bool,
 }
 
+/// Mutex-guarded interior state of `NetworkInterfaces`.
 pub struct NetworkInterfacesInner {
     valid: bool,
     interfaces: BTreeMap<String, NetworkInterface>,
     interface_address_state_cache: Arc<NetworkInterfaceAddressState>,
 }
 
+/// Cross-platform enumeration of this host's network interfaces and their addresses.
 #[derive(Clone)]
 pub struct NetworkInterfaces {
     inner: Arc<Mutex<NetworkInterfacesInner>>,
@@ -643,6 +674,7 @@ impl Default for NetworkInterfaces {
 }
 
 impl NetworkInterfaces {
+    /// Make an empty `NetworkInterfaces`; call `refresh` to populate it.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -654,11 +686,13 @@ impl NetworkInterfaces {
         }
     }
 
+    /// Whether a successful `refresh` has populated the interface set.
     #[must_use]
     pub fn is_valid(&self) -> bool {
         let inner = self.inner.lock();
         inner.valid
     }
+    /// Drop all interfaces and the cached address state, marking the set invalid.
     pub fn clear(&self) {
         let mut inner = self.inner.lock();
 
@@ -666,6 +700,10 @@ impl NetworkInterfaces {
         inner.interface_address_state_cache = Arc::new(NetworkInterfaceAddressState::default());
         inner.valid = false;
     }
+    /// Re-enumerate the platform's interfaces. Returns `true` if the best-address cache changed.
+    ///
+    /// Errors with an `io::Error` if the platform's interface enumeration fails; the interface set is
+    /// left unchanged in that case.
     // returns false if refresh had no changes, true if changes were present
     pub async fn refresh(&self) -> std::io::Result<bool> {
         let mut last_interfaces = {
@@ -703,6 +741,7 @@ impl NetworkInterfaces {
         }
         Ok(false)
     }
+    /// Call `f` with the interface map held under the lock, returning its result.
     pub fn with_interfaces<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&BTreeMap<String, NetworkInterface>) -> R,
@@ -711,6 +750,7 @@ impl NetworkInterfaces {
         f(&inner.interfaces)
     }
 
+    /// The cached best-address state from the last `refresh`.
     #[must_use]
     pub fn interface_address_state(&self) -> Arc<NetworkInterfaceAddressState> {
         let inner = self.inner.lock();

@@ -4,6 +4,9 @@ cfg_if! {
     if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
         use futures_util::future::{select, Either};
 
+        /// Await `f`, failing with [`TimeoutError`] if it does not complete within `dur_ms` milliseconds.
+        ///
+        /// Abstracts over the async runtime (tokio, async-std, wasm).
         pub async fn timeout<F, T>(dur_ms: u32, f: F) -> Result<T, TimeoutError>
         where
             F: Future<Output = T>,
@@ -18,6 +21,9 @@ cfg_if! {
 
     } else {
 
+        /// Await `f`, failing with [`TimeoutError`] if it does not complete within `dur_ms` milliseconds.
+        ///
+        /// Abstracts over the async runtime (tokio, async-std, wasm).
         pub async fn timeout<F, T>(dur_ms: u32, f: F) -> Result<T, TimeoutError>
         where
             F: Future<Output = T>,

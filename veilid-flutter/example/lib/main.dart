@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show BrowserContextMenu;
 
 import 'app.dart';
 import 'log.dart';
@@ -14,6 +16,11 @@ void main() {
 
   // Initialize Veilid
   veilidInit();
+
+  // Disable context menu
+  if (kIsWeb) {
+    BrowserContextMenu.disableContextMenu();
+  }
 
   // Run the app
   runApp(MaterialApp(

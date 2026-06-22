@@ -100,7 +100,7 @@ where
                     url.to_string(),
                 )?,
                 _ => {
-                    unreachable!("Invalid dial info url scheme")
+                    apibail_parse_error!("Invalid dial info url scheme", split_url.scheme);
                 }
             });
         }

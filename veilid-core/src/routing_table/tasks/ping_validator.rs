@@ -37,6 +37,17 @@ pub enum PingValidationKey {
         ping_index: usize,
     },
 }
+impl fmt::Display for PingValidationKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Destination(dest) => write!(f, "Ping({})", f.to_string(dest)),
+            Self::RouteTest {
+                route_id,
+                ping_index,
+            } => write!(f, "Route({} #{})", f.to_string(route_id), ping_index),
+        }
+    }
+}
 
 /// Callback invoked when a ping completes.
 /// Receives the registry and the StatusResult (which carries the SendDataResult so
@@ -54,6 +65,12 @@ pub struct PingValidationEntry {
     pub key: PingValidationKey,
     pub dest: Destination,
     pub on_complete: Option<PingCompletionCallback>,
+}
+
+/// A batch of ping validations to enqueue, labeled by purpose for logging
+pub(crate) struct PingValidationBatch {
+    pub purpose: String,
+    pub entries: Vec<PingValidationEntry>,
 }
 
 /////////////////////////////////////
@@ -96,6 +113,18 @@ impl PingValidationProcessorState {
             .or_default()
             .push_back(entry);
         true
+    }
+
+    /// Enqueue a batch, returning how many were newly added (not deduplicated away)
+    fn enqueue_all(&mut self, entries: Vec<PingValidationEntry>) -> Vec<PingValidationKey> {
+        let mut added = vec![];
+        for entry in entries {
+            let key = entry.key.clone();
+            if self.enqueue(entry) {
+                added.push(key);
+            }
+        }
+        added
     }
 
     /// Start as much pending work as possible, respecting per-group parallelism limits
@@ -219,7 +248,7 @@ impl RoutingTable {
     pub(crate) async fn ping_validation_processor(
         registry: VeilidComponentRegistry,
         stop_token: StopToken,
-        rx: flume::Receiver<Vec<PingValidationEntry>>,
+        rx: flume::Receiver<PingValidationBatch>,
     ) {
         let mut state = PingValidationProcessorState::new();
         let mut in_flight = FuturesUnordered::<PinBoxFutureStatic<PingCompletionResult>>::new();
@@ -231,9 +260,10 @@ impl RoutingTable {
             if in_flight.is_empty() {
                 // Nothing in-flight: block on channel recv
                 match rx.recv_async().timeout_at(stop_token.clone()).await {
-                    Ok(Ok(entries)) => {
-                        for entry in entries {
-                            state.enqueue(entry);
+                    Ok(Ok(batch)) => {
+                        let added = state.enqueue_all(batch.entries);
+                        if !added.is_empty() && debug_target_enabled!("rtab::state::ping") {
+                            veilid_log!(registry debug target: "rtab::state::ping", "Enqueued {} pings for {}:\n{}", added.len(), batch.purpose, indent_all_string(added.to_multiline_string()));
                         }
                     }
                     _ => break, // channel closed or stop token
@@ -249,10 +279,11 @@ impl RoutingTable {
                     .timeout_at(stop_token.clone())
                     .await
                 {
-                    Ok(Either::Left((Ok(entries), _))) => {
+                    Ok(Either::Left((Ok(batch), _))) => {
                         // New entries received from channel
-                        for entry in entries {
-                            state.enqueue(entry);
+                        let added = state.enqueue_all(batch.entries);
+                        if !added.is_empty() && debug_target_enabled!("rtab::state::ping") {
+                            veilid_log!(registry debug target: "rtab::state::ping", "Enqueued {} pings for {}:\n{}", added.len(), batch.purpose, indent_all_string(added.to_multiline_string()));
                         }
                     }
                     Ok(Either::Left((Err(_), _))) => {
@@ -282,13 +313,22 @@ impl RoutingTable {
     /////////////////////////////////////
     // Enqueue APIs
 
-    /// Enqueue ping validation entries with full control (callbacks, groups, priorities)
-    pub fn enqueue_ping_validation_entries(&self, entries: Vec<PingValidationEntry>) {
+    /// Enqueue ping validation entries with full control (callbacks, groups, priorities).
+    /// `purpose` labels the batch for the "Enqueued N pings" processor-side log.
+    pub fn enqueue_ping_validation_entries(
+        &self,
+        purpose: String,
+        entries: Vec<PingValidationEntry>,
+    ) {
         if entries.is_empty() {
             return;
         }
-        if let Err(e) = self.ping_validation_sender.lock().send(entries) {
-            veilid_log!(self warn "Failed to enqueue ping validations: channel closed ({} entries dropped)", e.into_inner().len());
+        if let Err(e) = self
+            .ping_validation_sender
+            .lock()
+            .send(PingValidationBatch { purpose, entries })
+        {
+            veilid_log!(self warn "Failed to enqueue ping validations: channel closed ({} entries dropped)", e.into_inner().entries.len());
         }
     }
 
@@ -313,17 +353,13 @@ impl RoutingTable {
                 on_complete: None,
             })
             .collect();
-        let count = entries.len();
-        veilid_log!(self debug "[{}]: Enqueuing {} pings (group={:?}, priority={})", purpose, count, group, priority);
-        self.enqueue_ping_validation_entries(entries);
+        self.enqueue_ping_validation_entries(purpose, entries);
     }
 
     /////////////////////////////////////
     // Reliability Ping Validations
 
     /// Ping each node in the routing table if they need to be pinged to determine their reliability.
-    /// For priority-100 entries with a specific transport, pin the dial info filter to that transport
-    /// so the ping actually exercises (and updates stats for) the targeted protocol/address pair.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err))]
     pub fn add_reliability_ping_validations(
         &self,
@@ -332,7 +368,7 @@ impl RoutingTable {
     ) -> EyreResult<()> {
         let priority_nodes = self.get_relability_ping_nodes(routing_domain, cur_ts);
 
-        let name = format!("Reliability({})", routing_domain);
+        let name = format!("Reliability({:#})", routing_domain);
         for (priority, node_refs) in priority_nodes {
             let validations = node_refs
                 .into_iter()
@@ -372,13 +408,13 @@ impl RoutingTable {
                 match Self::build_remote_route_test_entry(rss, &rrid, priority) {
                     Some(entry) => entries.push(entry),
                     None => {
-                        veilid_log!(self debug "Could not build remote route test for {}", route_id);
+                        veilid_log!(self debug "Could not build remote route test for {:#}", route_id);
                     }
                 }
             } else {
                 let arsid = AllocatedRouteSetId::from_route_id(route_id);
                 let Some(info) = rss.get_allocated_route_test_info(&arsid) else {
-                    veilid_log!(self debug "Could not build allocated route test for {}", arsid);
+                    veilid_log!(self debug "Could not build allocated route test for {:#}", arsid);
                     continue;
                 };
                 let req = RouteKeepaliveRequest {
@@ -392,7 +428,7 @@ impl RoutingTable {
         }
 
         if !entries.is_empty() {
-            self.enqueue_ping_validation_entries(entries);
+            self.enqueue_ping_validation_entries("RouteTest".to_owned(), entries);
         }
     }
 
@@ -414,7 +450,7 @@ impl RoutingTable {
         }
 
         if !entries.is_empty() {
-            self.enqueue_ping_validation_entries(entries);
+            self.enqueue_ping_validation_entries("RouteKeepalive".to_owned(), entries);
         }
     }
 
@@ -428,13 +464,13 @@ impl RoutingTable {
         let private_route = match rss.assemble_single_private_route(&info.key, None).await {
             Ok(v) => v,
             Err(VeilidAPIError::InvalidTarget { message: _ }) => {
-                veilid_log!(rss debug "Route {} is dead (invalid target), releasing", route_id);
+                veilid_log!(rss debug "Route {:#} is dead (invalid target), releasing", route_id);
                 rss.release_route(route_id.clone().into());
                 return None;
             }
             Err(VeilidAPIError::TryAgain { message: _ }) => return None,
             Err(e) => {
-                veilid_log!(rss debug "Error assembling route {}: {}", route_id, e);
+                veilid_log!(rss debug "Error assembling route {:#}: {}", route_id, e);
                 return None;
             }
         };
@@ -551,7 +587,8 @@ impl RoutingTable {
                       -> Vec<PingValidationEntry> {
                     match result {
                         Ok(StatusResult::Answer { .. }) => {
-                            veilid_log!(registry trace "Remote route test PASSED: {}", route_id_clone);
+                            #[cfg(feature = "verbose-tracing")]
+                            veilid_log!(registry trace "Remote route test PASSED: {:#}", route_id_clone);
                         }
                         Ok(StatusResult::Failed(_)) => {
                             let routing_table = registry.routing_table();
@@ -561,19 +598,20 @@ impl RoutingTable {
                                 .online_state(RoutingDomain::PublicInternet)
                                 == OnlineState::Offline
                             {
-                                veilid_log!(registry debug "Deferring remote route release (offline detected): {}", route_id_clone);
+                                #[cfg(feature = "verbose-tracing")]
+                                veilid_log!(registry debug "Deferring remote route release (offline detected): {:#}", route_id_clone);
                             } else {
-                                veilid_log!(registry debug "Remote route test failed (no response): {}", route_id_clone);
+                                veilid_log!(registry debug "Remote route test failed (no response): {:#}", route_id_clone);
                                 routing_table
                                     .route_spec_store()
                                     .release_route(route_id_clone);
                             }
                         }
                         Ok(StatusResult::NotSent(nr)) => {
-                            veilid_log!(registry debug "Remote route test not sent: {} - {:?}", route_id_clone, nr);
+                            veilid_log!(registry debug "Remote route test not sent: {:#} - {:?}", route_id_clone, nr);
                         }
                         Err(e) => {
-                            veilid_log!(registry debug "Remote route test error: {} - {}", route_id_clone, e);
+                            veilid_log!(registry debug "Remote route test error: {:#} - {}", route_id_clone, e);
                         }
                     }
                     Vec::new()
@@ -600,10 +638,13 @@ impl RoutingTable {
                 let routing_table = registry.routing_table();
                 let rss = routing_table.route_spec_store();
                 let sdr = match result {
-                    Ok(StatusResult::Answer { answer, .. }) => {
+                    Ok(StatusResult::Answer {
+                        answer: _answer, ..
+                    }) => {
                         // End-to-end route round-trip (includes inter-hop legs), not a per-node RTT.
-                        let rtt = answer.answer_context.latency;
-                        veilid_log!(registry debug "Route loopback rtt: route={} ord={} rtt={} hops={}", route_key, ordering, rtt, hops.len());
+                        #[cfg(feature = "verbose-tracing")]
+                        veilid_log!(registry debug "Route loopback rtt: route={:#} ord={:#} rtt={:#} hops={}", route_key, ordering, _answer.answer_context.latency, hops.len());
+
                         let cur_ts = Timestamp::now();
                         rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
                             s.record_loopback_result(ordering, true, cur_ts);
@@ -613,11 +654,11 @@ impl RoutingTable {
                     }
                     Ok(StatusResult::Failed(sdr)) => sdr,
                     Ok(StatusResult::NotSent(nr)) => {
-                        veilid_log!(registry debug "Route loopback not sent: {} ({}) - {:?}", route_id, ordering, nr);
+                        veilid_log!(registry debug "Route loopback not sent: {:#} ({:#}) - {:?}", route_id, ordering, nr);
                         return Vec::new();
                     }
                     Err(e) => {
-                        veilid_log!(registry debug "Deferring route loopback failure (RPC error): {} ({}) - {}", route_id, ordering, e);
+                        veilid_log!(registry debug "Deferring route loopback failure (RPC error): {:#} ({:#}) - {}", route_id, ordering, e);
                         return Vec::new();
                     }
                 };
@@ -628,7 +669,8 @@ impl RoutingTable {
                     .online_state(RoutingDomain::PublicInternet)
                     == OnlineState::Offline
                 {
-                    veilid_log!(registry debug "Deferring route loopback failure (offline): {} ({})", route_id, ordering);
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(registry debug "Deferring route loopback failure (offline): {:#} ({:#})", route_id, ordering);
                     return Vec::new();
                 }
 
@@ -644,10 +686,10 @@ impl RoutingTable {
                 rss.mark_allocated_route_for_release_if_dead(&route_key);
 
                 let Some(transport) = sdr.opt_transport_type() else {
-                    veilid_log!(registry debug "Route loopback FAILED with no transport recorded: {} ({})", route_id, ordering);
+                    veilid_log!(registry debug "Route loopback FAILED with no transport recorded: {:#} ({:#})", route_id, ordering);
                     return Vec::new();
                 };
-                veilid_log!(registry debug "Route loopback FAILED: {} ({} via {})", route_id, ordering, transport);
+                veilid_log!(registry debug "Route loopback FAILED: {:#} ({:#} via {:#})", route_id, ordering, transport);
                 for hop in &hops {
                     hop.report_failed_route_test(transport);
                 }

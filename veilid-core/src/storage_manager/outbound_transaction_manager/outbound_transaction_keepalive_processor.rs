@@ -76,8 +76,9 @@ impl fmt::Debug for OutboundTransactionKeepaliveProcessor {
 impl OutboundTransactionKeepaliveProcessor {
     /// Create a new processor. Call `init` to start the background loop.
     pub fn new(registry: VeilidComponentRegistry) -> Self {
-        let ttl = TimestampDuration::new_ms(registry.config().network.rpc.timeout_ms as u64)
-            .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER);
+        let ttl =
+            TimestampDuration::new_ms(registry.config().internal().network.rpc.timeout_ms as u64)
+                .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER);
         let (sender, receiver) = flume::unbounded();
         Self {
             deadlines: Arc::new(Mutex::new(OutboundTransactionKeepaliveDeadlines::new(

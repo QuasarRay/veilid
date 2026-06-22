@@ -19,17 +19,12 @@ impl AllocatedRouteRef {
         self.set_ref.entry()
     }
 
-    pub fn set_id(&self) -> &AllocatedRouteSetId {
-        self.set_ref.set_id()
+    pub fn route_set_id(&self) -> &AllocatedRouteSetId {
+        self.set_ref.route_set_id()
     }
 
     pub fn route_key(&self) -> &PublicKey {
         &self.route_key
-    }
-
-    #[expect(dead_code, reason = "ref accessor for symmetry; not yet read")]
-    pub fn set_ref(&self) -> &AllocatedRouteSetRef {
-        &self.set_ref
     }
 
     /// The deduplicated node ids of this route's hops (read directly from the
@@ -67,7 +62,7 @@ impl Drop for AllocatedRouteRef {
 impl fmt::Debug for AllocatedRouteRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AllocatedRouteRef")
-            .field("set_id", self.set_ref.set_id())
+            .field("set_id", self.set_ref.route_set_id())
             .field("route_key", &self.route_key)
             .finish()
     }
@@ -80,7 +75,7 @@ impl fmt::Display for AllocatedRouteRef {
             write!(
                 f,
                 "{}:{}",
-                f.to_string(self.set_ref.set_id()),
+                f.to_string(self.set_ref.route_set_id()),
                 f.to_string(&self.route_key)
             )
         } else {
@@ -106,18 +101,8 @@ impl RemoteRouteRef {
         self.set_ref.entry()
     }
 
-    #[expect(dead_code, reason = "ref accessor for symmetry; not yet read")]
-    pub fn set_id(&self) -> &RemoteRouteSetId {
-        self.set_ref.set_id()
-    }
-
     pub fn route_key(&self) -> &PublicKey {
         &self.route_key
-    }
-
-    #[expect(dead_code, reason = "ref accessor for symmetry; not yet read")]
-    pub fn set_ref(&self) -> &RemoteRouteSetRef {
-        &self.set_ref
     }
 
     /// The first hop node id of this remote private route (the remaining hops
@@ -173,7 +158,7 @@ impl Drop for RemoteRouteRef {
 impl fmt::Debug for RemoteRouteRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RemoteRouteRef")
-            .field("set_id", self.set_ref.set_id())
+            .field("set_id", self.set_ref.route_set_id())
             .field("route_key", &self.route_key)
             .finish()
     }
@@ -186,7 +171,7 @@ impl fmt::Display for RemoteRouteRef {
             write!(
                 f,
                 "{}:{}",
-                f.to_string(self.set_ref.set_id()),
+                f.to_string(self.set_ref.route_set_id()),
                 f.to_string(&self.route_key)
             )
         } else {

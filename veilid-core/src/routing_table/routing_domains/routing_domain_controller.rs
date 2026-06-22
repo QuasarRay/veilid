@@ -53,29 +53,26 @@ pub trait RoutingDomainController:
     /// Get the published peer info for this routing domain
     fn get_published_peer_info(&self) -> Option<Arc<PeerInfo>>;
 
-    /// Get the contact method required for node A to reach node B in this routing domain
-    fn get_contact_method(
-        &self,
-        peer_a: Arc<PeerInfo>,
-        peer_a_published: bool,
-        peer_b: Arc<PeerInfo>,
-        dial_info_filter: DialInfoFilter,
-        sequencing: Sequencing,
-        context_sort: Option<&DialInfoDetailSort>,
-    ) -> ContactMethod;
+    /// Get the contact methods that node A can use to reach node B in this routing domain
+    /// Sorted by preference order, leveraging recent failure inforation, and the optional dial info sort in the request
+    fn get_contact_methods(&self, request: ContactMethodRequest) -> Vec<ContactMethod>;
 
-    /// Gets the best dial info details, in preference order, to attempt a connection between two nodes
+    /// Get the best/first contact method that node A can use to reach node B in this routing domain
+    /// If no contact method exists, returns None
+    fn get_best_contact_method(&self, request: ContactMethodRequest) -> Option<ContactMethod> {
+        self.get_contact_methods(request).into_iter().next()
+    }
+
+    /// Gets the dial info details, in preference order, to attempt a connection between two nodes
     /// The best available ordering mode is selected from the sequencing constraint,
-    /// then the dial info filter is applied, and the available
-    /// dial info are then sorted by the context_sort.
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rtab", skip(self, context_sort), fields(__VEILID_LOG_KEY = self.log_key()), ret))]
-    fn best_dial_info_details_between_nodes(
+    /// then the dial info filter is applied, and self-dialing is filtered out.
+    #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rtab", skip(self), fields(__VEILID_LOG_KEY = self.log_key()), ret))]
+    fn get_dial_info_details_between_nodes(
         &self,
         from_node: &NodeInfo,
         to_node: &dyn HasDialInfoDetailList,
         dial_info_filter: DialInfoFilter,
         sequencing: Sequencing,
-        context_sort: Option<&DialInfoDetailSort>,
     ) -> Vec<DialInfoDetail> {
         // Consider outbound capabilities
         let (ordering, outbound_dial_info_filter) = DialInfoFilter::all()
@@ -92,9 +89,19 @@ pub trait RoutingDomainController:
         let ordering_sort: Option<Box<DialInfoDetailSort>> =
             DialInfoDetail::get_ordering_sort(ordering);
 
+        // Get node A's dial info socket addresses so we can check for self-dialing
+        let node_a_socket_addresses = from_node
+            .dial_info_detail_list()
+            .iter()
+            .map(|did| did.dial_info.socket_address())
+            .collect::<BTreeSet<_>>();
+
         // Get all dial info we could possibly connect to for node B with the selected sequencing
-        let filter =
-            Box::new(|did: &DialInfoDetail| did.matches_filter(&outbound_dial_info_filter));
+        // and ensure we don't direct-dial one of our own addresses (would loop back)
+        let filter = Box::new(|did: &DialInfoDetail| {
+            did.matches_filter(&outbound_dial_info_filter)
+                && !node_a_socket_addresses.contains(&did.dial_info.socket_address())
+        });
         let mut all_reachable_dial_info =
             to_node.filtered_dial_info_details(ordering_sort.as_deref(), &filter);
 
@@ -109,39 +116,13 @@ pub trait RoutingDomainController:
 
         // Retain only the dial info with the best sequence ordering and matching the dial info filter
         all_reachable_dial_info.retain(|x| {
-            (matches!(sequencing, Sequencing::NoPreference)
+            (matches!(sequencing, Sequencing::PreferUnordered)
                 || x.dial_info.protocol_type().sequence_ordering() == best_sequence_ordering)
                 && x.matches_filter(&dial_info_filter)
         });
 
-        // Of the remaining candidates, apply the context sort to allow for reordering based on
-        // recent dial info failures and any other environmental conditions
-        if let Some(context_sort) = context_sort {
-            all_reachable_dial_info.sort_by(context_sort);
-        }
-
         // Now return the first dial info detail in the list
         all_reachable_dial_info
-    }
-
-    /// Gets the single best dial info detail to attempt a connection between two nodes
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rtab", skip(self, context_sort), fields(__VEILID_LOG_KEY = self.log_key()), ret))]
-    fn best_dial_info_detail_between_nodes(
-        &self,
-        from_node: &NodeInfo,
-        to_node: &dyn HasDialInfoDetailList,
-        dial_info_filter: DialInfoFilter,
-        sequencing: Sequencing,
-        context_sort: Option<&DialInfoDetailSort>,
-    ) -> Option<DialInfoDetail> {
-        let dids = self.best_dial_info_details_between_nodes(
-            from_node,
-            to_node,
-            dial_info_filter,
-            sequencing,
-            context_sort,
-        );
-        dids.into_iter().next()
     }
 }
 

@@ -25,7 +25,7 @@ rt-tokio = ["veilid-core/rt-tokio", "tokio"]
 debug-load = ["dep:ctor", "dep:libc-print", "dep:android_log-sys"]
 debug-locks = ["veilid-core/debug-locks"]
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
-footgun = ["veilid-core/footgun"]
+footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
 opentelemetry = [
     "rt-tokio",
     "dep:opentelemetry",

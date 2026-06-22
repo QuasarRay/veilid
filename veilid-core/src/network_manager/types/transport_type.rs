@@ -24,11 +24,11 @@ impl TransportType {
         self.address_type
     }
 
-    #[expect(dead_code)]
     pub fn framing_type(&self) -> FramingType {
         self.protocol_type.framing_type()
     }
 
+    #[expect(dead_code)]
     pub fn socket_type(&self) -> SocketType {
         self.protocol_type.low_level_protocol_type().socket_type()
     }

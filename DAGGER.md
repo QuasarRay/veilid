@@ -202,8 +202,10 @@ podman machine ssh podman-machine-default sudo modprobe iptable_nat
 podman machine ssh podman-machine-default sudo setenforce Permissive
 ```
 
-A script in `.dagger/podman_setup.sh` exists to make this process easier as it may need to happen
-whenever you start the podman machine. Build failures can result if these configurations are not met.
+A script in `scripts/podman_setup.sh` exists to make this process easier as it may need to happen
+whenever you start the podman machine. It is idempotent — run it any time to create the machine if
+missing, start it if stopped, and (re)apply the configuration. Build failures can result if these
+configurations are not met.
 
 ### Development on the Dagger build itself
 

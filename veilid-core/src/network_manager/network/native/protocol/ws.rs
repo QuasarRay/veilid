@@ -122,7 +122,11 @@ where
         instrument(level = "trace", target = "protocol", err, skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub async fn close(&self) -> io::Result<NetworkResult<()>> {
-        let timeout_ms = self.config().network.connection_initial_timeout_ms;
+        let timeout_ms = self
+            .config()
+            .internal()
+            .network
+            .connection_initial_timeout_ms;
 
         // Make an attempt to close the stream normally
         let mut stream = self.stream.clone();
@@ -231,7 +235,7 @@ impl WebsocketProtocolHandler {
         let connection_initial_timeout_ms = if tls {
             config.network.tls.connection_initial_timeout_ms
         } else {
-            config.network.connection_initial_timeout_ms
+            config.internal().network.connection_initial_timeout_ms
         };
 
         Self {
@@ -355,7 +359,7 @@ impl WebsocketProtocolHandler {
             DialInfo::WS(_) => (false, "ws"),
             #[cfg(feature = "enable-protocol-wss")]
             DialInfo::WSS(_) => (true, "wss"),
-            _ => panic!("invalid dialinfo for websocket protocol"),
+            _ => bail_io_error_other!("invalid dialinfo for websocket protocol"),
         };
         let request = dial_info.request().unwrap_or_log();
         let split_url = SplitUrl::from_str(&request).map_err(to_io_error_other)?;
@@ -410,7 +414,7 @@ impl WebsocketProtocolHandler {
                         WebsocketNetworkConnection::new(registry, flow, ws_stream),
                     ))))
                 } else {
-                    unreachable!("no tls support for websockets enabled");
+                    bail_io_error_other!("no tls support for websockets enabled");
                 }
             }
         } else {

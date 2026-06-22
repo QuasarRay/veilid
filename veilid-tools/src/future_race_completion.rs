@@ -30,6 +30,7 @@ pub struct FutureRaceCompletionPool {
 }
 
 impl FutureRaceCompletionPool {
+    /// Creates an empty pool; `name` labels spawned tasks for diagnostics.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             inner: Arc::new(AsyncRwLock::new(())),

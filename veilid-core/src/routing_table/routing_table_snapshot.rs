@@ -22,12 +22,12 @@ impl fmt::Debug for EntrySnapshotInner {
 /// Intentionally !Send and !Sync to prevent holding across await points,
 /// since it contains NodeRefs that hold refcounts on BucketEntry.
 #[derive(Debug)]
-pub(crate) struct EntrySnapshot {
+pub(crate) struct RoutingTableSnapshot {
     inner: Arc<EntrySnapshotInner>,
     _not_send: PhantomData<*const ()>,
 }
 
-impl Clone for EntrySnapshot {
+impl Clone for RoutingTableSnapshot {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -36,13 +36,13 @@ impl Clone for EntrySnapshot {
     }
 }
 
-impl VeilidComponentRegistryAccessor for EntrySnapshot {
+impl VeilidComponentRegistryAccessor for RoutingTableSnapshot {
     fn registry(&self) -> VeilidComponentRegistry {
         self.inner.registry.clone()
     }
 }
 
-impl EntrySnapshot {
+impl RoutingTableSnapshot {
     pub fn new(
         registry: VeilidComponentRegistry,
         cur_ts: Timestamp,
@@ -67,11 +67,13 @@ impl EntrySnapshot {
         &self.inner.entries
     }
 
-    /// Build a set of all node ids across all entries, for filtering against known nodes
-    pub fn existing_node_ids(&self) -> HashSet<NodeId> {
+    /// Build a set of all node ids for filtering against known nodes. With `min_state`, includes
+    /// only entries at or above that state; with `None`, includes every captured entry.
+    pub fn existing_node_ids(&self, min_state: Option<BucketEntryState>) -> HashSet<NodeId> {
         self.inner
             .entries
             .iter()
+            .filter(|snap| min_state.is_none_or(|ms| snap.state >= ms))
             .flat_map(|snap| snap.node_ids.iter().cloned())
             .collect()
     }

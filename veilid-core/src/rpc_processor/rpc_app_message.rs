@@ -59,9 +59,9 @@ impl RPCProcessor {
         let app_message = match kind {
             RPCOperationKind::Statement(s) => match s.destructure() {
                 RPCStatementDetail::AppMessage(s) => s,
-                _ => panic!("not an app message"),
+                _ => return Err(RPCError::internal("not an app message")),
             },
-            _ => panic!("not a statement"),
+            _ => return Err(RPCError::internal("not a statement")),
         };
 
         // Get the crypto kind used to send this question
@@ -73,7 +73,7 @@ impl RPCProcessor {
             .as_ref()
             .map(|nr| nr.node_ids().get(crypto_kind).unwrap_or_log());
 
-        #[cfg(not(feature = "footgun"))]
+        #[cfg(not(feature = "footgun-nodeid-target"))]
         {
             if sender.is_some() {
                 return Ok(NetworkResult::invalid_message(

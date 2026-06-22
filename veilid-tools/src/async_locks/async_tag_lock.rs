@@ -1,8 +1,13 @@
+//! AsyncTagLock
+//!
+//! A keyed lock: each distinct tag has its own mutex, created on first use and
+//! removed once no guards for it remain. Locking one tag never blocks another.
 use super::*;
 
 use core::fmt::Debug;
 use core::hash::Hash;
 
+/// A guard holding the lock for one tag; releases it on drop.
 #[derive(Clone, Debug)]
 pub struct AsyncTagLockGuard<T>
 where
@@ -15,6 +20,7 @@ impl<T> AsyncTagLockGuard<T>
 where
     T: Hash + Eq + Clone + Debug,
 {
+    /// The tag this guard holds.
     #[must_use]
     pub fn tag(&self) -> T {
         self.inner.tag()
@@ -78,6 +84,7 @@ struct AsyncTagLockTableEntry {
     guards: usize,
 }
 
+#[derive(Debug)]
 struct AsyncTagLockTableInner<T>
 where
     T: Hash + Eq + Clone + Debug,
@@ -85,7 +92,8 @@ where
     table: HashMap<T, AsyncTagLockTableEntry>,
 }
 
-#[derive(Clone)]
+/// A table of per-tag async locks, sharable across tasks.
+#[derive(Clone, Debug)]
 pub struct AsyncTagLockTable<T>
 where
     T: Hash + Eq + Clone + Debug,
@@ -93,19 +101,11 @@ where
     inner: Arc<Mutex<AsyncTagLockTableInner<T>>>,
 }
 
-impl<T> fmt::Debug for AsyncTagLockTable<T>
-where
-    T: Hash + Eq + Clone + Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AsyncTagLockTable").finish()
-    }
-}
-
 impl<T> AsyncTagLockTable<T>
 where
     T: Hash + Eq + Clone + Debug,
 {
+    /// Create an empty tag lock table.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -115,18 +115,25 @@ where
         }
     }
 
+    /// Whether no tags are currently locked.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         let inner = self.inner.lock();
         inner.table.is_empty()
     }
 
+    /// The number of tags currently locked.
     #[must_use]
     pub fn len(&self) -> usize {
         let inner = self.inner.lock();
         inner.table.len()
     }
 
+    /// Acquire the lock for `tag`, waiting until it is free.
+    ///
+    /// Blocks until this tag's lock is free; other tags never block this one. The returned
+    /// guard holds the tag until dropped, at which point the tag's entry is removed if no
+    /// guards remain.
     pub async fn lock_tag(&self, tag: T) -> AsyncTagLockGuard<T> {
         // Get or create a tag lock entry
         let mutex = {
@@ -160,6 +167,9 @@ where
         }
     }
 
+    /// Try to acquire the lock for `tag` without waiting, or `None` if it is already held.
+    ///
+    /// Never blocks. On success the guard holds the tag until dropped.
     pub fn try_lock_tag(&self, tag: T) -> Option<AsyncTagLockGuard<T>> {
         // Get or create a tag lock entry
         let mut inner = self.inner.lock();

@@ -1,18 +1,39 @@
 **UNRELEASED**
+
 - Breaking API Changes:
   - `AttachmentState` enum values have changed to eliminate `OverAttached` state
   - `VeilidUpdate::Attachment` now includes much more visibility into actual attachment conditions and network size estimations
-  - All RPCStats referring to 'Unordered' and 'Ordered' traffic have been removed. Internally these are now being tracked on a per-transport basis, and have little utility in the API anyway.
+  - Internal per-node RPC statistics removed from `PeerStats` due to excessive verbosity and lack of utility at the API level
+  - `footgun` feature renamed to `footgun-nodeid-target`
+  - Many `VeilidConfig` settings moved behind the new `footgun-config` option to new `VeilidConfigInternal` struct
+  - `Sequencing::NoPreference` is now called `Sequencing::PreferUnordered` in preparation for eventually adding `Sequencing::EnsureUnordered`
+  - Many internal API surface reductions for functions that people shouldn't have been using anyway, excessive internal-only macros, and other noise
+
 - Global API Additions:
   - `TransactionNotFound` added to `VeilidAPIError`
-  - `transactional` parameter to `watch_dht_records` refuses to add value change notifications to the local record store until a transaction is performed to fetch them
 
+- All `VeilidConfig` (and veilid-server `Settings`) structs and fields documented
 - Minimum Supported Rust Version (MSRV) is now 1.89.0
+- `cargo public-api` support for API stability, via script in `scripts/update_public_api.sh` and `scripts/_check_public_api.sh`
+  makes changing the public API require a conscious check to accept diffs and rejects API changes in CI otherwise
+- Doc comments added for entire public API surface for `veilid-core`, `veilid-tools`, `veilid-wasm`, and `veilid-remote-api` crates, 
+  as well as the `veilid-flutter` Dart bindings and `veilid-python` Python bindings
+- `panic` surface reduction
+
+- veilid-cli:
+  - veilid-cli now can start when no server is running and connect to it later with the 'connect' command
+  - 'change_log_level' command is now just 'log' for simplicity, but both are accepted
+
+- veilid-server:
+  - `footgun-settings` feature flag added to simplify configuration, moves dangerous-to-use settings into `core.internal`
+  - Removed `--ignore-log-targets` command line option in favor of `-l`/`--log-directives` that uses the new logging `RUST_LOG`-style format
+  - added `core.network.address_types` configuration field to enable only specific address types, for example: `["ipv4"]` will only enable IPv4 support in veilid-server. Leaving this blank enables all address types supported by the operating system.
 
 - veilid-core:
   - SECURITY: Reject invalid DHT schema and value signatures on inbound set value and value change notifications, not just at get_dht_value time.
     - Credit to Mr. JDH for the security report (https://github.com/Evelynkaz)
   - Added record flush on DHT record close to ensure closed records are fully flushed to the TableStore
+  - Rehydration, change inspection, and watch value notifications are now transaction-aware
   - Formatting functions moved to veilid-tools, gets garbage nobody cares about out of the public API
   - Routing domain publication improvements, better logic for dial info confirmation
   - `NetworkManager`'s `Network` abstraction is now a `PlatformNetwork` trait, implemented as `NativeNetwork` and `WasmNetwork`
@@ -31,6 +52,15 @@
   - `NodeCount` aligned u64 type added
   - implemented TransportType and transport-level stats for nodes
   - Simplified route testing, eliminated route exhaustion problems
+  - Loopback addresses added to local network routing domain to permit proxy use (such as proxychains4 + tor)
+    - If you want to put a proxy in your proxy so you can proxy while you proxy:
+      * Set up proxychains4 (`brew install proxychains4` and turn off DNS proxying) 
+      * `proxychains4 veilid-server --set-config core.network.privacy.require_inbound_relay=true`
+  - Connection table now LRUs across all protocols. Connection count maximum now applies across all connection-oriented protocols.
+  - Fixed bug where `api_startup` did not remove its `ApiTracingLayer` callback upon failure.
+  - Added `max_concurrent_operations` to VeilidConfigDHT to offer a simple way to cap concurrent DHT operations for automatic throttling.
+  - Proper IPv6 support for `wasm32-unknown-unknown` target.
+  - Added `record purge <scope> --keys <list>` debug command option to allow purging local or remote comma-delimited lists of record keys from the record store. Bypasses the normal `record delete` mechanism that only deletes local records.
 
 - veilid-tools:
   - Formatting cleanup across the board, primarily for debugging purposes
@@ -43,6 +73,7 @@
   - Add `LogFixture` to `veilid_test` package
   - Dart/WASM now lives here next to Dart/FFI
   - Improved unit tests
+  - Consolidation of retry logic for VeilidAPI-level operations
 
 - veilid-wasm:
   - Dart WASM implementation moved to veilid-flutter, this now only has the Javascript/Typescript bindings
@@ -86,7 +117,7 @@
   - Storage manager improvements
     - Early consensus exit optimization for transactions
     - Transaction management tuning
-  - NetworkManger improvements
+  - NetworkManager improvements
     - ConnectionTable fix for connection inactivity timeout
 
 - veilid-tools:
@@ -348,7 +379,7 @@
   - Relays were being picked before we had good stats on their performance. Relays are now optimized to be within the top 25% of p90 latencies
   - LatencyStats now have median 80% average, p90, p75, and p50 latency numbers
   - RPC Answer stats now are split by 'ordered' and 'unordered' protocols
-  - Unordered protocols are given a higher tolerance for lost answers before being marked 'unreliable'
+  - Unordered protocols are given a higher tolerance for lost questions before being marked 'unreliable'
   - Fix race condition in TTL code for udp hole punching
   - Correct use of IPV6_UNICAST_HOPS socket option instead of IP_TTL for ipv6 sockets
   - Move relaying to a relay worker pool

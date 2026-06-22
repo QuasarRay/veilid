@@ -12,6 +12,8 @@ cfg_if! {
     }
 }
 
+/// Whether `path` refers to an existing IPC endpoint: a named pipe on Windows,
+/// a unix domain socket elsewhere. Always `false` on unsupported platforms.
 #[allow(unused_variables)]
 pub fn is_ipc_socket_path<P: AsRef<Path>>(path: P) -> bool {
     cfg_if! {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::storage_manager::MEMBER_ID_LENGTH;
+pub use crate::storage_manager::MEMBER_ID_LENGTH;
 
 /// Simple DHT Schema (SMPL) Member
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
@@ -25,11 +25,16 @@ pub struct DHTSchemaSMPL {
 }
 
 impl DHTSchemaSMPL {
+    /// Four-character code identifying this schema in its compiled form.
     pub const FCC: [u8; 4] = *b"SMPL";
+    /// Byte length of the compiled header (fourcc plus owner count), before member entries.
     pub const FIXED_SIZE: usize = 6;
+    /// Maximum number of members a schema may have.
     pub const MAX_MEMBER_COUNT: usize = 256;
 
     /// Make a schema
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if validation fails (see [DHTSchemaSMPL::validate]).
     pub fn new(o_cnt: u16, members: Vec<DHTSchemaSMPLMember>) -> VeilidAPIResult<Self> {
         let out = Self { o_cnt, members };
         out.validate()?;
@@ -37,6 +42,11 @@ impl DHTSchemaSMPL {
     }
 
     /// Validate the data representation
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if any member key is not [MEMBER_ID_LENGTH] bytes,
+    /// the member count exceeds [DHTSchemaSMPL::MAX_MEMBER_COUNT], the writer count exceeds
+    /// [DHTSchema::MAX_WRITER_COUNT], or the total subkey count is 0 or exceeds
+    /// [DHTSchema::MAX_SUBKEY_COUNT].
     pub fn validate(&self) -> VeilidAPIResult<()> {
         let mut subkey_count = self.o_cnt as usize;
         let mut writer_count = 0;
@@ -149,6 +159,9 @@ impl DHTSchemaSMPL {
 
 impl TryFrom<&[u8]> for DHTSchemaSMPL {
     type Error = VeilidAPIError;
+    /// Errors with `VeilidAPIError::Generic` if `b` is shorter than [DHTSchemaSMPL::FIXED_SIZE], has
+    /// the wrong fourcc, or has a member region that is not a whole number of member entries, or
+    /// `VeilidAPIError::InvalidArgument` if the decoded schema fails validation.
     fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
         if b.len() < Self::FIXED_SIZE {
             apibail_generic!("invalid size");

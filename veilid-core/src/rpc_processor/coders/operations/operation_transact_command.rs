@@ -332,7 +332,9 @@ impl RPCOperationTransactCommandA {
             .as_ref()
             .expect_or_log("TransactCommandA requires question context");
         let QuestionContext::TransactCommand(transact_command_context) = question_context else {
-            panic!("Wrong context type for TransactCommandA");
+            return Err(RPCError::internal(
+                "Wrong context type for TransactCommandA",
+            ));
         };
 
         // No validation necessary if the transaction was not valid

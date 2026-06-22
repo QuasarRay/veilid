@@ -1,6 +1,11 @@
 use super::*;
 
-// Ordering here matters, >= is used to check strength of sequencing requirement
+/// Preferred ordering of RPC message delivery over a route or for RPC messages sent to a target
+///   * `Sequencing::PreferUnordered`: any `SequenceOrdering` is acceptable, but `SequenceOrdering::Unordered` will be chosen if available
+///   * `Sequencing::PreferOrdered`: any `SequenceOrdering` is acceptable, but `SequenceOrdering::Ordered` will be chosen if available
+///   * `Sequencing::EnsureOrdered`: only `SequenceOrdering::Ordered` is acceptable, and if not available, the route will not be created or the message will not be sent
+///
+/// No sequencing preference guarantees delivery under all conditions, as there is no queuing/buffering in the network
 #[derive(
     Copy,
     Clone,
@@ -22,18 +27,23 @@ use super::*;
     tsify(from_wasm_abi, into_wasm_abi, namespace)
 )]
 #[must_use]
+// Ordering here matters, >= is used to check strength of sequencing requirement
 pub enum Sequencing {
-    NoPreference = 0,
+    /// Any `SequenceOrdering` is acceptable, but `SequenceOrdering::Unordered` will be chosen if available
+    PreferUnordered = 0,
+    /// Any `SequenceOrdering` is acceptable, but `SequenceOrdering::Ordered` will be chosen if available
     #[default]
     PreferOrdered = 1,
+    /// Only `SequenceOrdering::Ordered` is acceptable, and if not available, the route will not be created or the message will not be sent
     EnsureOrdered = 2,
 }
 
 impl Sequencing {
+    /// Returns true if the given ordering satisfies this sequencing requirement.
     #[must_use]
     pub fn matches_ordering(&self, ordering: SequenceOrdering) -> bool {
         match self {
-            Sequencing::NoPreference => true,
+            Sequencing::PreferUnordered => true,
             Sequencing::PreferOrdered => true,
             Sequencing::EnsureOrdered => match ordering {
                 SequenceOrdering::Unordered => false,
@@ -45,13 +55,23 @@ impl Sequencing {
 
 impl fmt::Display for Sequencing {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Sequencing::NoPreference => "nop",
-            Sequencing::PreferOrdered => "pre",
-            Sequencing::EnsureOrdered => "ens",
-        };
-
-        write!(f, "{}", s)
+        if f.alternate() {
+            let s = match self {
+                // Sequencing::EnsureUnordered => "ENU",
+                Sequencing::PreferUnordered => "PRU",
+                Sequencing::PreferOrdered => "PRO",
+                Sequencing::EnsureOrdered => "ENO",
+            };
+            write!(f, "{}", s)
+        } else {
+            let s = match self {
+                // Sequencing::EnsureUnordered => "EnsureUnordered",
+                Sequencing::PreferUnordered => "PreferUnordered",
+                Sequencing::PreferOrdered => "PreferOrdered",
+                Sequencing::EnsureOrdered => "EnsureOrdered",
+            };
+            write!(f, "{}", s)
+        }
     }
 }
 
@@ -60,11 +80,14 @@ impl FromStr for Sequencing {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_ascii_lowercase();
-        if "nopreference".starts_with(&s) || s.is_empty() {
-            Ok(Self::NoPreference)
-        } else if "preferordered".starts_with(&s) || s == "ord" {
+        // if s == "ensureunordered" || s.is_empty() || s == "enu" {
+        //     Ok(Self::PreferUnordered)
+        // } else
+        if s == "preferunordered" || s.is_empty() || s == "pru" {
+            Ok(Self::PreferUnordered)
+        } else if s == "preferordered" || s == "pro" {
             Ok(Self::PreferOrdered)
-        } else if "ensureordered".starts_with(&s) || s == "*ord" {
+        } else if s == "ensureordered" || s == "eno" {
             Ok(Self::EnsureOrdered)
         } else {
             Err(VeilidAPIError::parse_error("invalid sequencing str", s))
@@ -72,7 +95,11 @@ impl FromStr for Sequencing {
     }
 }
 
-// Ordering here matters, >= is used to check strength of sequencing requirement
+/// Ordering of RPC message delivery over a route or for RPC messages sent to a target
+///   * `SequencingOrdering::Unordered`: unordered delivery, messages may be received in any order, and may be dropped unreliably
+///   * `SequencingOrdering::Ordered`: ordered delivery, messages will be received in the order they were sent, and delivered reliably
+///
+/// Neither SequenceOrdering guarantees delivery under all conditions, as there is no queuing/buffering in the network
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(
     Debug, Default, PartialOrd, Ord, EnumSetType, Hash, Serialize, Deserialize, JsonSchema,
@@ -84,8 +111,11 @@ impl FromStr for Sequencing {
 )]
 #[must_use]
 #[enumset(repr = "u8")]
+// Ordering here matters, >= is used to check strength of sequencing requirement
 pub enum SequenceOrdering {
+    /// Unordered delivery, messages may be received in any order, and may be dropped unreliably
     Unordered = 0,
+    /// Ordered delivery, messages will be received in the order they were sent, and delivered reliably
     #[default]
     Ordered = 1,
 }
@@ -94,14 +124,14 @@ impl SequenceOrdering {
     /// The sequencing requirement that guarantees this ordering
     pub fn strict_sequencing(&self) -> Sequencing {
         match self {
-            SequenceOrdering::Unordered => Sequencing::NoPreference,
+            SequenceOrdering::Unordered => Sequencing::PreferUnordered,
             SequenceOrdering::Ordered => Sequencing::EnsureOrdered,
         }
     }
     /// The lowest sequencing requirement that matches this ordering
     pub fn minimum_sequencing(&self) -> Sequencing {
         match self {
-            SequenceOrdering::Unordered => Sequencing::NoPreference,
+            SequenceOrdering::Unordered => Sequencing::PreferUnordered,
             SequenceOrdering::Ordered => Sequencing::PreferOrdered,
         }
     }
@@ -116,14 +146,19 @@ impl SequenceOrdering {
 
 impl fmt::Display for SequenceOrdering {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                SequenceOrdering::Unordered => "unord",
+        if f.alternate() {
+            let s = match self {
+                SequenceOrdering::Unordered => "uno",
                 SequenceOrdering::Ordered => "ord",
-            }
-        )
+            };
+            write!(f, "{}", s)
+        } else {
+            let s = match self {
+                SequenceOrdering::Unordered => "Unordered",
+                SequenceOrdering::Ordered => "Ordered",
+            };
+            write!(f, "{}", s)
+        }
     }
 }
 
@@ -144,9 +179,12 @@ impl FromStr for SequenceOrdering {
     }
 }
 
+/// A set of `SequenceOrdering` values.
 pub type SequenceOrderingSet = EnumSet<SequenceOrdering>;
 
-// Ordering here matters, >= is used to check strength of stability requirement
+/// Choice of nodes to include in allocated routes
+/// * `Stability::LowLatency`: prefer nodes with low latency, but may be unreliable and require route reallocation
+/// * `Stability::Reliable`: prefer nodes with reliable uptime, but may have higher latency
 #[derive(
     Copy,
     Clone,
@@ -168,20 +206,30 @@ pub type SequenceOrderingSet = EnumSet<SequenceOrdering>;
     tsify(from_wasm_abi, into_wasm_abi, namespace)
 )]
 #[must_use]
+// Ordering here matters, >= is used to check strength of stability requirement
 pub enum Stability {
+    /// Prefer nodes with low latency, but may be unreliable and require route reallocation
     LowLatency = 0,
+    /// Prefer nodes with reliable uptime, but may have higher latency
     #[default]
     Reliable = 1,
 }
 
 impl fmt::Display for Stability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Stability::LowLatency => "low",
-            Stability::Reliable => "rel",
-        };
-
-        write!(f, "{}", s)
+        if f.alternate() {
+            let s = match self {
+                Stability::LowLatency => "low",
+                Stability::Reliable => "rel",
+            };
+            write!(f, "{}", s)
+        } else {
+            let s = match self {
+                Stability::LowLatency => "LowLatency",
+                Stability::Reliable => "Reliable",
+            };
+            write!(f, "{}", s)
+        }
     }
 }
 
@@ -201,6 +249,8 @@ impl FromStr for Stability {
 }
 
 /// The choice of safety route to include in compiled routes.
+/// * `SafetySelection::Unsafe`: don't use a safety route, only specify the sequencing preference
+/// * `SafetySelection::Safe`: use a safety route and parameters specified by a SafetySpec.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, GetSize,
 )]
@@ -213,12 +263,14 @@ pub enum SafetySelection {
 }
 
 impl SafetySelection {
+    /// The sequencing preference for this selection.
     pub fn get_sequencing(&self) -> Sequencing {
         match self {
             SafetySelection::Unsafe(seq) => *seq,
             SafetySelection::Safe(ss) => ss.sequencing,
         }
     }
+    /// The safety route hop count, or zero when unsafe.
     pub fn get_hop_count(&self) -> usize {
         match self {
             SafetySelection::Unsafe(_) => 0,

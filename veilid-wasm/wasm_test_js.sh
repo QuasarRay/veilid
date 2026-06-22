@@ -1,5 +1,7 @@
 #!/bin/bash
-set -eo pipefail
+# pipefail so `cmd | tee` returns cmd's code; no `set -e` — exit codes are
+# handled explicitly so the wdio test result is what this script returns.
+set -o pipefail
 
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 pushd "$SCRIPTDIR" &> /dev/null
@@ -69,11 +71,11 @@ for arg in "$@"; do
 done
 
 # Build wasm into an npm package, output into ./pkg
-./wasm_build_js.sh $BUILD_MODE $CARGO_FEATURES $CARGO_OPTIONS
+./wasm_build_js.sh $BUILD_MODE $CARGO_FEATURES $CARGO_OPTIONS || { echo "wasm build failed" >&2; exit 1; }
 
 # Install test deps and run test suite
-cd tests
-npm install
+cd tests || exit 1
+npm install || { echo "npm install failed" >&2; exit 1; }
 original_tmpdir=$TMPDIR
 mkdir -p ~/tmp
 export TMPDIR=~/tmp
@@ -140,7 +142,9 @@ if [[ "$(uname)" == "Darwin" ]] && command -v chromedriver >/dev/null; then
 fi
 
 WDIO_HEADLESS=true npx wdio run ./wdio.conf.ts "${WDIO_ARGS[@]}" $@
+status=$?
 
 export TMPDIR=$original_tmpdir
 
 popd &> /dev/null
+exit $status

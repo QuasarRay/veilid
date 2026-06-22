@@ -27,6 +27,7 @@ const RESERVED_LOG_FACILITY_TAGS: &[&[u8]] = &[
     b"#info",
     b"#debug",
     b"#trace",
+    b"#unspecified",
 ];
 
 /// A single log facility as registered by a `VeilidComponent`

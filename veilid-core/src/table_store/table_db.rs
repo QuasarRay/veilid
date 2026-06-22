@@ -23,8 +23,9 @@ impl CryptInfo {
     }
 }
 
+/// Shared state behind a `TableDB`: the open database, commit serialization lock, and encryption keys.
 #[must_use]
-pub struct TableDBUnlockedInner {
+pub(super) struct TableDBUnlockedInner {
     registry: VeilidComponentRegistry,
     table: String,
     database: Database,
@@ -41,6 +42,7 @@ impl fmt::Debug for TableDBUnlockedInner {
     }
 }
 
+/// A handle to an opened encrypted key-value table. Cheap to clone; clones share the same underlying database.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct TableDB {
@@ -122,6 +124,10 @@ impl TableDB {
     }
 
     /// Cleanup the database
+    ///
+    /// Blocks on on-disk database maintenance (vacuum).
+    ///
+    /// Errors with `VeilidAPIError::Internal` if the backing-store vacuum fails.
     pub async fn cleanup(&self) -> VeilidAPIResult<()> {
         self.unlocked_inner
             .database
@@ -136,6 +142,8 @@ impl TableDB {
 
     /// Get the total number of columns in the TableDB.
     /// Not the number of columns that were opened, rather the total number that could be opened.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if the backing store fails to report its column count.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -148,6 +156,8 @@ impl TableDB {
     /// Estimate the storage size for a table entry
     /// Overestimates size on disk because records are compressed in the tabledb
     /// Rough guess for sqlite based on their file format. Other databases may vary.
+    ///
+    /// Infallible on all supported targets (the `usize`→`u64` conversion only widens).
     pub fn estimate_storage_size(
         &self,
         _col: u32,
@@ -174,6 +184,8 @@ impl TableDB {
     }
 
     /// Estimate the storage size for a table entry if it is json encoded
+    ///
+    /// Errors with `VeilidAPIError::Internal` if `value` fails to JSON-serialize.
     pub fn estimate_storage_size_json<T>(
         &self,
         col: u32,
@@ -254,7 +266,10 @@ impl TableDB {
 
         let crypto = self.crypto();
         let vcrypto = crypto.get_async(di.secret.kind()).unwrap_or_log();
-        assert!(data.len() >= vcrypto.nonce_length());
+        if data.len() < vcrypto.nonce_length() {
+            veilid_log!(self error "maybe_decrypt: data too short for nonce: {} < {}", data.len(), vcrypto.nonce_length());
+            return Err(std::io::Error::other("data too short for nonce"));
+        }
         if data.len() == vcrypto.nonce_length() {
             return Ok(Bytes::new());
         }
@@ -272,6 +287,10 @@ impl TableDB {
     }
 
     /// Get the list of keys in a column of the TableDB
+    ///
+    /// Blocks on on-disk reads.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store read fails, or if a stored key fails to decompress (wrong device encryption key or corrupt data).
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -295,6 +314,7 @@ impl TableDB {
             .await
             .map_err(VeilidAPIError::from)?;
 
+        #[cfg(feature = "verbose-tracing")]
         veilid_log!(self debug "TableDB::get_keys({}) col={}: read {} raw keys", self.unlocked_inner.table, col, out.len());
 
         let max_value_size = self.config().table_store.max_value_size_mb as usize * 1024 * 1024;
@@ -317,6 +337,10 @@ impl TableDB {
     }
 
     /// Get the number of keys in a column of the TableDB
+    ///
+    /// Blocks on on-disk reads.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count or the backing-store read fails.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -335,6 +359,8 @@ impl TableDB {
     }
 
     /// Start a TableDB write transaction. The transaction object must be committed or rolled back before dropping.
+    ///
+    /// Returns a handle whose `commit` or `rollback` the caller must call; dropping it uncompleted logs an error and silently discards the writes.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -346,6 +372,10 @@ impl TableDB {
     }
 
     /// Store a key with a value in a column in the TableDB. Performs a single transaction immediately.
+    ///
+    /// Blocks on the on-disk write.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count or the backing-store write fails.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -372,6 +402,10 @@ impl TableDB {
     }
 
     /// Store a key in json format with a value in a column in the TableDB. Performs a single transaction immediately.
+    ///
+    /// Blocks on the on-disk write.
+    ///
+    /// Errors with `VeilidAPIError::Internal` if `value` fails to JSON-serialize, otherwise the same errors as `store`.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -385,6 +419,10 @@ impl TableDB {
     }
 
     /// Read a key from a column in the TableDB immediately.
+    ///
+    /// Blocks on the on-disk read.
+    ///
+    /// Returns `Ok(None)` if the key is absent. Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store read fails, or if the stored value fails to decompress (wrong device encryption key or corrupt data).
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -413,6 +451,10 @@ impl TableDB {
     }
 
     /// Read an serde-json key from a column in the TableDB immediately
+    ///
+    /// Blocks on the on-disk read.
+    ///
+    /// Errors with `VeilidAPIError::Internal` if the stored value fails to JSON-deserialize into `T`, otherwise the same errors as `load`.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -429,6 +471,10 @@ impl TableDB {
     }
 
     /// Delete key with from a column in the TableDB
+    ///
+    /// Blocks on the on-disk write.
+    ///
+    /// Returns `Ok(None)` if the key was absent. Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store delete fails, or if the prior value fails to decompress (wrong device encryption key or corrupt data).
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -459,6 +505,10 @@ impl TableDB {
     }
 
     /// Delete serde-json key with from a column in the TableDB
+    ///
+    /// Blocks on the on-disk write.
+    ///
+    /// Errors with `VeilidAPIError::Internal` if the prior value fails to JSON-deserialize into `T`, otherwise the same errors as `delete`.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -531,6 +581,10 @@ impl TableDBTransaction {
     }
 
     /// Commit the transaction. Performs all actions atomically.
+    ///
+    /// Consumes the transaction handle; committing an already-completed clone errors with "transaction already completed". An empty transaction commits as a no-op. Blocks on the serialized commit lock and the on-disk write.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if this transaction (or a clone) was already committed or rolled back, or if the atomic backing-store write fails (the buffered writes are then lost).
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -571,6 +625,8 @@ impl TableDBTransaction {
     }
 
     /// Rollback the transaction. Does nothing to the TableDB.
+    ///
+    /// Consumes the transaction handle and discards the buffered writes locally without blocking.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -581,6 +637,10 @@ impl TableDBTransaction {
     }
 
     /// Store a key with a value in a column in the TableDB
+    ///
+    /// Buffers the write into the transaction without touching disk; errors if the transaction is already committed or rolled back.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, or if this transaction (or a clone) was already committed or rolled back.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -612,6 +672,10 @@ impl TableDBTransaction {
     }
 
     /// Store a key in json format with a value in a column in the TableDB
+    ///
+    /// Buffers the write into the transaction without touching disk; errors if the transaction is already committed or rolled back.
+    ///
+    /// Errors with `VeilidAPIError::Internal` if `value` fails to JSON-serialize, otherwise the same errors as `store`.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -625,6 +689,10 @@ impl TableDBTransaction {
     }
 
     /// Delete key with from a column in the TableDB
+    ///
+    /// Buffers the delete into the transaction without touching disk; errors if the transaction is already committed or rolled back.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, or if this transaction (or a clone) was already committed or rolled back.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)

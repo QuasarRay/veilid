@@ -4,6 +4,7 @@ cfg_if! {
     if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
         use js_sys::Date;
 
+        /// Current wall-clock time as microseconds since the Unix epoch.
         #[must_use]
         pub fn get_raw_timestamp() -> u64 {
             if is_browser() {
@@ -13,6 +14,7 @@ cfg_if! {
             }
         }
 
+        /// Format a microsecond Unix timestamp as a UTC string, omitting date fields that match the current time.
         #[must_use]
         pub fn human_timestamp(ts: u64) -> String {
             if is_browser() {
@@ -61,6 +63,7 @@ cfg_if! {
         use std::time::{SystemTime, UNIX_EPOCH};
         use chrono::{Datelike, Timelike};
 
+        /// Current wall-clock time as microseconds since the Unix epoch.
         #[must_use]
         pub fn get_raw_timestamp() -> u64 {
             match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -69,6 +72,7 @@ cfg_if! {
             }
         }
 
+        /// Format a microsecond Unix timestamp as a UTC string, omitting date fields that match the current time.
         #[must_use]
         pub fn human_timestamp(ts: u64) -> String {
             let now = chrono::DateTime::<chrono::Utc>::from(SystemTime::now());
@@ -114,6 +118,7 @@ const MIN: u64 = 1_000_000u64 * 60;
 const SEC: u64 = 1_000_000u64;
 const MSEC: u64 = 1_000u64;
 
+/// Format a microsecond duration as a human-readable string, e.g. `1d2h3m4.005s` or `1.005ms`.
 #[must_use]
 pub fn human_duration(dur: u64) -> String {
     let days = dur / DAY;
@@ -154,6 +159,7 @@ pub fn human_duration(dur: u64) -> String {
     }
 }
 
+/// Parse a duration string with `h`/`m`/`s` suffixes into microseconds; returns `None` on any unexpected character.
 #[must_use]
 pub fn parse_duration(s: &str) -> Option<u64> {
     let mut dur_total: u64 = 0;

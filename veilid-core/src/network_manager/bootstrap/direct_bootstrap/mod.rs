@@ -40,7 +40,7 @@ impl NetworkManager {
         instrument(level = "trace", target = "net", err, skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     async fn direct_bootstrap_v0(&self, dial_info: DialInfo) -> EyreResult<Vec<Arc<PeerInfo>>> {
-        let timeout_ms = self.config().network.rpc.timeout_ms;
+        let timeout_ms = self.config().internal().network.rpc.timeout_ms;
         // Send boot magic to requested peer address
         let data = Bytes::copy_from_slice(BOOT_MAGIC);
 
@@ -72,7 +72,7 @@ impl NetworkManager {
         instrument(level = "trace", target = "net", err, skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     async fn direct_bootstrap_v1(&self, dial_info: DialInfo) -> EyreResult<Vec<Arc<PeerInfo>>> {
-        let timeout_ms = self.config().network.rpc.timeout_ms;
+        let timeout_ms = self.config().internal().network.rpc.timeout_ms;
 
         // Send boot magic to requested peer address
         let data = Bytes::copy_from_slice(B01T_MAGIC);

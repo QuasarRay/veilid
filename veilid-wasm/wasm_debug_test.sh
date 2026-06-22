@@ -80,6 +80,8 @@ fi
 
 # Run wasm_test_js.sh and tee output to the output file
 ./wasm_test_js.sh --debug --verbose-tracing -- $SPEC_COMMAND "$SPEC_FILE" $TEST_COMMAND "$TEST_NAME" 2>&1 | tee "$OUTFILE"
+status=${PIPESTATUS[0]}
 echo "Output written to $OUTFILE"
 
 popd &> /dev/null
+exit $status

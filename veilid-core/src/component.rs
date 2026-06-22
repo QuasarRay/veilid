@@ -43,6 +43,7 @@ pub(crate) trait VeilidComponentRegistryAccessor {
     }
 }
 
+/// Borrow guard holding a shared reference to a registered component for the duration of `'a`.
 pub struct VeilidComponentGuard<'a, T: Send + Sync + 'static> {
     component: Arc<T>,
     _phantom: core::marker::PhantomData<&'a T>,
@@ -149,13 +150,14 @@ impl VeilidComponentRegistry {
 
         // Add to type map and initialization order
         let mut inner = self.unlocked_inner.inner.lock();
-        assert!(
-            inner
-                .type_map
-                .insert(component_type_id, component)
-                .is_none(),
-            "should not register same component twice"
-        );
+        if inner
+            .type_map
+            .insert(component_type_id, component)
+            .is_some()
+        {
+            veilid_log!(self error "should not register same component twice");
+            return;
+        }
         inner.init_order.push(component_type_id);
     }
 
@@ -173,13 +175,14 @@ impl VeilidComponentRegistry {
 
         // Add to type map and initialization order
         let mut inner = self.unlocked_inner.inner.lock();
-        assert!(
-            inner
-                .type_map
-                .insert(component_type_id, component)
-                .is_none(),
-            "should not register same component twice"
-        );
+        if inner
+            .type_map
+            .insert(component_type_id, component)
+            .is_some()
+        {
+            veilid_log!(self error "should not register same component twice");
+            return;
+        }
         inner.init_order.push(component_type_id);
     }
 
@@ -241,10 +244,12 @@ impl VeilidComponentRegistry {
 
     pub async fn pre_terminate(&self) {
         let Some(mut _init_guard) = self.unlocked_inner.init_lock.try_lock() else {
-            panic!("terminate should only happen one at a time");
+            veilid_log!(self error "terminate should only happen one at a time");
+            return;
         };
         if !*_init_guard {
-            panic!("not initialized");
+            veilid_log!(self error "not initialized");
+            return;
         }
 
         let init_order = self.get_init_order();
@@ -253,10 +258,12 @@ impl VeilidComponentRegistry {
 
     pub async fn terminate(&self) {
         let Some(mut _init_guard) = self.unlocked_inner.init_lock.try_lock() else {
-            panic!("terminate should only happen one at a time");
+            veilid_log!(self error "terminate should only happen one at a time");
+            return;
         };
         if !*_init_guard {
-            panic!("not initialized");
+            veilid_log!(self error "not initialized");
+            return;
         }
 
         // Terminate components in reverse initialization order

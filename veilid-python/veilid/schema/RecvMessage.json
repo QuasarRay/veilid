@@ -1,8 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "RecvMessage",
+  "description": "A message received from the remote API: either a reply to a request or an unsolicited update.",
   "oneOf": [
     {
+      "description": "A reply correlated to a prior [Request].",
       "type": "object",
       "properties": {
         "type": {
@@ -16,6 +18,7 @@
       ]
     },
     {
+      "description": "An unsolicited node update pushed by the API.",
       "type": "object",
       "properties": {
         "type": {
@@ -32,25 +35,59 @@
   "$defs": {
     "AttachmentState": {
       "description": "Attachment abstraction for network 'signal strength'.",
-      "type": "string",
-      "enum": [
-        "Detached",
-        "Attaching",
-        "AttachedWeak",
-        "AttachedFair",
-        "AttachedGood",
-        "AttachedStrong",
-        "AttachedFull",
-        "Detaching"
+      "oneOf": [
+        {
+          "description": "Not attached to the network.",
+          "type": "string",
+          "const": "Detached"
+        },
+        {
+          "description": "Attaching, but not yet able to perform network operations.",
+          "type": "string",
+          "const": "Attaching"
+        },
+        {
+          "description": "Attached with the weakest signal strength.",
+          "type": "string",
+          "const": "AttachedWeak"
+        },
+        {
+          "description": "Attached with fair signal strength.",
+          "type": "string",
+          "const": "AttachedFair"
+        },
+        {
+          "description": "Attached with good signal strength.",
+          "type": "string",
+          "const": "AttachedGood"
+        },
+        {
+          "description": "Attached with strong signal strength.",
+          "type": "string",
+          "const": "AttachedStrong"
+        },
+        {
+          "description": "Attached with the strongest signal strength.",
+          "type": "string",
+          "const": "AttachedFull"
+        },
+        {
+          "description": "Detaching from the network and shutting down connections.",
+          "type": "string",
+          "const": "Detaching"
+        }
       ]
     },
     "ByteCount": {
+      "description": "8-byte-aligned `u64` newtype that serializes as a string for JSON safety.",
       "type": "string"
     },
     "CryptoSystemResponse": {
+      "description": "A response to a [`CryptoSystemRequest`], echoing the cryptosystem handle.",
       "type": "object",
       "properties": {
         "cs_id": {
+          "description": "Handle of the cryptosystem instance the request operated on.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -58,6 +95,7 @@
       },
       "oneOf": [
         {
+          "description": "The request named a cryptosystem handle that does not exist.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -70,6 +108,7 @@
           ]
         },
         {
+          "description": "The handle was released.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -82,6 +121,7 @@
           ]
         },
         {
+          "description": "The [`CryptoKind`] fourcc identifying this cryptosystem.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -89,6 +129,7 @@
               "const": "Kind"
             },
             "value": {
+              "description": "Cryptosystem kind.",
               "type": "string"
             }
           },
@@ -98,6 +139,7 @@
           ]
         },
         {
+          "description": "Cached Diffie-Hellman shared secret.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -107,9 +149,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -118,9 +162,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -134,6 +180,7 @@
           ]
         },
         {
+          "description": "Raw Diffie-Hellman shared secret.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -143,9 +190,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -154,9 +203,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -170,6 +221,7 @@
           ]
         },
         {
+          "description": "Domain-separated shared secret.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -179,9 +231,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -190,9 +244,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -206,6 +262,7 @@
           ]
         },
         {
+          "description": "Random bytes.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -213,6 +270,7 @@
               "const": "RandomBytes"
             },
             "value": {
+              "description": "Generated bytes.",
               "type": "string"
             }
           },
@@ -222,6 +280,7 @@
           ]
         },
         {
+          "description": "Byte length of a shared secret.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -229,6 +288,7 @@
               "const": "SharedSecretLength"
             },
             "value": {
+              "description": "Length in bytes.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -240,6 +300,7 @@
           ]
         },
         {
+          "description": "Byte length of a nonce.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -247,6 +308,7 @@
               "const": "NonceLength"
             },
             "value": {
+              "description": "Length in bytes.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -258,6 +320,7 @@
           ]
         },
         {
+          "description": "Byte length of a hash digest.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -265,6 +328,7 @@
               "const": "HashDigestLength"
             },
             "value": {
+              "description": "Length in bytes.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -276,6 +340,7 @@
           ]
         },
         {
+          "description": "Byte length of a public key.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -283,6 +348,7 @@
               "const": "PublicKeyLength"
             },
             "value": {
+              "description": "Length in bytes.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -294,6 +360,7 @@
           ]
         },
         {
+          "description": "Byte length of a secret key.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -301,6 +368,7 @@
               "const": "SecretKeyLength"
             },
             "value": {
+              "description": "Length in bytes.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -312,6 +380,7 @@
           ]
         },
         {
+          "description": "Byte length of a signature.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -319,6 +388,7 @@
               "const": "SignatureLength"
             },
             "value": {
+              "description": "Length in bytes.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -330,6 +400,7 @@
           ]
         },
         {
+          "description": "Default salt length for password hashing and KDF operations.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -337,6 +408,7 @@
               "const": "DefaultSaltLength"
             },
             "value": {
+              "description": "Length in bytes.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -348,6 +420,7 @@
           ]
         },
         {
+          "description": "Bytes an AEAD operation adds to the ciphertext.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -355,6 +428,7 @@
               "const": "AeadOverhead"
             },
             "value": {
+              "description": "Length in bytes.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -366,6 +440,7 @@
           ]
         },
         {
+          "description": "Shared secret kind and length check.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -375,9 +450,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -386,9 +463,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -402,6 +481,7 @@
           ]
         },
         {
+          "description": "Nonce length check.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -411,9 +491,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -422,9 +504,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -438,6 +522,7 @@
           ]
         },
         {
+          "description": "Hash digest kind and length check.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -447,9 +532,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -458,9 +545,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -474,6 +563,7 @@
           ]
         },
         {
+          "description": "Public key kind and length check.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -483,9 +573,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -494,9 +586,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -510,6 +604,7 @@
           ]
         },
         {
+          "description": "Secret key kind and length check.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -519,9 +614,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -530,9 +627,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -546,6 +645,7 @@
           ]
         },
         {
+          "description": "Signature kind and length check.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -555,9 +655,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -566,9 +668,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -582,6 +686,7 @@
           ]
         },
         {
+          "description": "Password hash result.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -591,9 +696,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -602,9 +709,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -618,6 +727,7 @@
           ]
         },
         {
+          "description": "Password verification result.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -627,9 +737,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "boolean"
                 }
               },
@@ -638,9 +750,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -654,6 +768,7 @@
           ]
         },
         {
+          "description": "KDF-derived shared secret.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -663,9 +778,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -674,9 +791,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -690,6 +809,7 @@
           ]
         },
         {
+          "description": "Random nonce.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -697,6 +817,7 @@
               "const": "RandomNonce"
             },
             "value": {
+              "description": "Generated nonce.",
               "type": "string"
             }
           },
@@ -706,6 +827,7 @@
           ]
         },
         {
+          "description": "Random shared secret.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -713,6 +835,7 @@
               "const": "RandomSharedSecret"
             },
             "value": {
+              "description": "Generated shared secret.",
               "type": "string"
             }
           },
@@ -722,6 +845,7 @@
           ]
         },
         {
+          "description": "Generated signing key pair.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -729,6 +853,7 @@
               "const": "GenerateKeyPair"
             },
             "value": {
+              "description": "Generated key pair.",
               "type": "string"
             }
           },
@@ -738,6 +863,7 @@
           ]
         },
         {
+          "description": "Hash digest of the data.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -745,6 +871,7 @@
               "const": "GenerateHash"
             },
             "value": {
+              "description": "Digest tagged with this cryptosystem's kind.",
               "type": "string"
             }
           },
@@ -754,6 +881,7 @@
           ]
         },
         {
+          "description": "Key pair validation result.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -763,9 +891,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "boolean"
                 }
               },
@@ -774,9 +904,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -790,6 +922,7 @@
           ]
         },
         {
+          "description": "Hash validation result.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -799,9 +932,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "boolean"
                 }
               },
@@ -810,9 +945,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -826,6 +963,7 @@
           ]
         },
         {
+          "description": "Detached signature over the data.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -835,9 +973,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -846,9 +986,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -862,6 +1004,7 @@
           ]
         },
         {
+          "description": "Signature verification result.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -871,9 +1014,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "boolean"
                 }
               },
@@ -882,9 +1027,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -898,6 +1045,7 @@
           ]
         },
         {
+          "description": "AEAD-decrypted plaintext.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -907,9 +1055,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -918,9 +1068,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -934,6 +1086,7 @@
           ]
         },
         {
+          "description": "AEAD-encrypted ciphertext with appended tag.",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -943,9 +1096,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -954,9 +1109,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -970,6 +1127,7 @@
           ]
         },
         {
+          "description": "Stream-cipher output (unauthenticated).",
           "type": "object",
           "properties": {
             "cs_op": {
@@ -979,9 +1137,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -990,9 +1150,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1078,6 +1240,7 @@
       "description": "Enum over all the supported DHT Schemas",
       "oneOf": [
         {
+          "description": "Default schema: a fixed number of owner-writable subkeys.",
           "type": "object",
           "properties": {
             "kind": {
@@ -1091,6 +1254,7 @@
           ]
         },
         {
+          "description": "Simple schema: owner subkeys plus per-member writable subkeys.",
           "type": "object",
           "properties": {
             "kind": {
@@ -1167,9 +1331,11 @@
       ]
     },
     "DhtTransactionResponse": {
+      "description": "Response to a DHT transaction request.",
       "type": "object",
       "properties": {
         "dhttx_id": {
+          "description": "Id of the DHT transaction the operation applied to.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -1177,6 +1343,7 @@
       },
       "oneOf": [
         {
+          "description": "The transaction id did not refer to an open transaction.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1189,6 +1356,7 @@
           ]
         },
         {
+          "description": "The transaction handle was released.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1201,6 +1369,7 @@
           ]
         },
         {
+          "description": "Result of committing the transaction.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1210,9 +1379,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -1221,9 +1392,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1237,6 +1410,7 @@
           ]
         },
         {
+          "description": "Result of rolling back the transaction.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1246,9 +1420,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -1257,9 +1433,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1273,6 +1451,7 @@
           ]
         },
         {
+          "description": "Result of extending the transaction with additional record keys.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1282,9 +1461,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -1293,9 +1474,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1309,6 +1492,7 @@
           ]
         },
         {
+          "description": "Result of a get operation inside the transaction.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1318,9 +1502,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "anyOf": [
                     {
                       "$ref": "#/$defs/ValueData"
@@ -1333,9 +1519,11 @@
               }
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1349,6 +1537,7 @@
           ]
         },
         {
+          "description": "Result of a set operation inside the transaction.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1358,9 +1547,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "anyOf": [
                     {
                       "$ref": "#/$defs/ValueData"
@@ -1373,9 +1564,11 @@
               }
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1389,6 +1582,7 @@
           ]
         },
         {
+          "description": "Result of an inspect operation inside the transaction.",
           "type": "object",
           "properties": {
             "dhttx_op": {
@@ -1398,9 +1592,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "$ref": "#/$defs/DHTRecordReport"
                 }
               },
@@ -1409,9 +1605,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1473,10 +1671,11 @@
       ]
     },
     "NodeCount": {
+      "description": "8-byte-aligned `u64` newtype that serializes as a string for JSON safety.",
       "type": "string"
     },
     "PeerStats": {
-      "description": "Statistics for a peer in the routing table",
+      "description": "API-visible statistics for a peer in the routing table",
       "type": "object",
       "properties": {
         "latency": {
@@ -1490,56 +1689,6 @@
             }
           ],
           "default": null
-        },
-        "protected_connection_drop": {
-          "description": "how long protected connections to this peer survived before being closed\nby the remote side; longer is better. None = no remote-closed protected\ndrops yet observed.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LatencyStats"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "rpc_stats": {
-          "description": "information about RPCs",
-          "$ref": "#/$defs/RPCStats",
-          "default": {
-            "failed_to_send": 0,
-            "first_consecutive_seen_ts": null,
-            "last_question_ts": null,
-            "last_seen_ts": null,
-            "messages_rcvd": 0,
-            "messages_sent": 0,
-            "questions_in_flight": 0,
-            "unreachable": 0
-          }
-        },
-        "state": {
-          "description": "state stats for this peer",
-          "$ref": "#/$defs/StateStats",
-          "default": {
-            "dead": "0",
-            "punished": "0",
-            "reason": {
-              "can_not_send": "0",
-              "failed_to_send": "0",
-              "in_unreliable_ping_span": "0",
-              "lost_answers": "0",
-              "no_ping_response": "0",
-              "not_seen_consecutively": "0",
-              "too_many_lost_answers": "0"
-            },
-            "reliable": "0",
-            "span": "0",
-            "unreliable": "0"
-          }
-        },
-        "time_added": {
-          "description": "when the peer was added to the routing table",
-          "$ref": "#/$defs/Timestamp"
         },
         "transfer": {
           "description": "transfer stats for this peer",
@@ -1559,10 +1708,7 @@
             }
           }
         }
-      },
-      "required": [
-        "time_added"
-      ]
+      }
     },
     "PeerTableData": {
       "description": "Describe a recently accessed peer",
@@ -1590,83 +1736,8 @@
         "peer_stats"
       ]
     },
-    "RPCStats": {
-      "description": "Statistics for RPC operations performed on a node",
-      "type": "object",
-      "properties": {
-        "failed_to_send": {
-          "description": "number of messages that have failed to send or connections dropped since we last successfully sent one",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "first_consecutive_seen_ts": {
-          "description": "the timestamp of the first consecutive proof-of-life for this node (an answer or received question)",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "last_question_ts": {
-          "description": "when the peer was last questioned (either successfully or not) and we wanted an answer",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "last_seen_ts": {
-          "description": "when the peer was last seen for any reason, including when we first attempted to reach out to it",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "messages_rcvd": {
-          "description": "number of rpcs that have been received in the total entry time range",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "messages_sent": {
-          "description": "number of rpcs that have been sent in the total entry time range",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "questions_in_flight": {
-          "description": "number of questions issued that have yet to be answered",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "unreachable": {
-          "description": "number of attempts where no transport could be chosen (no routing domain, no peer info, no contact method)",
-          "type": "integer",
-          "format": "uint32",
-          "default": 0,
-          "minimum": 0
-        }
-      },
-      "required": [
-        "messages_sent",
-        "messages_rcvd",
-        "questions_in_flight",
-        "failed_to_send"
-      ]
-    },
     "Response": {
+      "description": "A single remote API response: an operation result paired with a correlation id.",
       "type": "object",
       "properties": {
         "id": {
@@ -1679,6 +1750,7 @@
       },
       "oneOf": [
         {
+          "description": "Result of a `Control` command.",
           "type": "object",
           "properties": {
             "op": {
@@ -1688,9 +1760,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -1699,9 +1773,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1715,6 +1791,7 @@
           ]
         },
         {
+          "description": "Result of `GetState`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1724,9 +1801,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "$ref": "#/$defs/VeilidState"
                 }
               },
@@ -1735,9 +1814,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1751,6 +1832,7 @@
           ]
         },
         {
+          "description": "Result of `IsShutdown`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1758,6 +1840,7 @@
               "const": "IsShutdown"
             },
             "value": {
+              "description": "True if the node has shut down.",
               "type": "boolean"
             }
           },
@@ -1767,6 +1850,7 @@
           ]
         },
         {
+          "description": "Result of `Attach`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1776,9 +1860,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -1787,9 +1873,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1803,6 +1891,7 @@
           ]
         },
         {
+          "description": "Result of `Detach`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1812,9 +1901,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -1823,9 +1914,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1839,6 +1932,7 @@
           ]
         },
         {
+          "description": "Result of `GenerateMemberId`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1848,9 +1942,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -1859,9 +1955,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1875,6 +1973,7 @@
           ]
         },
         {
+          "description": "Result of `GetDhtRecordKey`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1884,9 +1983,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -1895,9 +1996,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1911,6 +2014,7 @@
           ]
         },
         {
+          "description": "Result of `NewPrivateRoute`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1920,9 +2024,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "$ref": "#/$defs/RouteBlob"
                 }
               },
@@ -1931,9 +2037,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1947,6 +2055,7 @@
           ]
         },
         {
+          "description": "Result of `NewCustomPrivateRoute`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1956,9 +2065,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "$ref": "#/$defs/RouteBlob"
                 }
               },
@@ -1967,9 +2078,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -1983,6 +2096,7 @@
           ]
         },
         {
+          "description": "Result of `ImportRemotePrivateRoute`.",
           "type": "object",
           "properties": {
             "op": {
@@ -1992,9 +2106,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -2003,9 +2119,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2019,6 +2137,7 @@
           ]
         },
         {
+          "description": "Result of `ReleasePrivateRoute`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2028,9 +2147,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -2039,9 +2160,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2055,6 +2178,7 @@
           ]
         },
         {
+          "description": "Result of `AppCallReply`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2064,9 +2188,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -2075,9 +2201,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2091,6 +2219,7 @@
           ]
         },
         {
+          "description": "Result of `NewRoutingContext`: a handle to the new routing context.",
           "type": "object",
           "properties": {
             "op": {
@@ -2100,9 +2229,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0
@@ -2113,9 +2244,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2129,6 +2262,7 @@
           ]
         },
         {
+          "description": "Result of a routing context operation.",
           "type": "object",
           "properties": {
             "op": {
@@ -2142,6 +2276,7 @@
           ]
         },
         {
+          "description": "Result of `TransactDhtRecords`: a handle to the new transaction.",
           "type": "object",
           "properties": {
             "op": {
@@ -2151,9 +2286,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0
@@ -2164,9 +2301,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2180,6 +2319,7 @@
           ]
         },
         {
+          "description": "Result of a DHT transaction operation.",
           "type": "object",
           "properties": {
             "op": {
@@ -2193,6 +2333,7 @@
           ]
         },
         {
+          "description": "Result of `OpenTableDb`: a handle to the open database.",
           "type": "object",
           "properties": {
             "op": {
@@ -2202,9 +2343,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0
@@ -2215,9 +2358,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2231,6 +2376,7 @@
           ]
         },
         {
+          "description": "Result of `DeleteTableDb`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2240,9 +2386,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "boolean"
                 }
               },
@@ -2251,9 +2399,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2267,6 +2417,7 @@
           ]
         },
         {
+          "description": "Result of a table database operation.",
           "type": "object",
           "properties": {
             "op": {
@@ -2280,6 +2431,7 @@
           ]
         },
         {
+          "description": "Result of a table database transaction operation.",
           "type": "object",
           "properties": {
             "op": {
@@ -2293,6 +2445,7 @@
           ]
         },
         {
+          "description": "Result of `GetCryptoSystem`: a handle to the cryptosystem.",
           "type": "object",
           "properties": {
             "op": {
@@ -2302,9 +2455,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0
@@ -2315,9 +2470,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2331,6 +2488,7 @@
           ]
         },
         {
+          "description": "Result of selecting the best available cryptosystem: a handle to it.",
           "type": "object",
           "properties": {
             "op": {
@@ -2340,9 +2498,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0
@@ -2353,9 +2513,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2369,6 +2531,7 @@
           ]
         },
         {
+          "description": "Result of a cryptosystem operation.",
           "type": "object",
           "properties": {
             "op": {
@@ -2382,6 +2545,7 @@
           ]
         },
         {
+          "description": "Result of `VerifySignatures`: the verified subset of keys, or `None` if any failed.",
           "type": "object",
           "properties": {
             "op": {
@@ -2391,9 +2555,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": [
                     "array",
                     "null"
@@ -2405,9 +2571,11 @@
               }
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2421,6 +2589,7 @@
           ]
         },
         {
+          "description": "Result of `GenerateSignatures`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2430,9 +2599,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -2444,9 +2615,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2460,6 +2633,7 @@
           ]
         },
         {
+          "description": "Result of `GenerateKeyPair`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2469,9 +2643,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -2480,9 +2656,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2496,6 +2674,7 @@
           ]
         },
         {
+          "description": "Result of `Now`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2503,6 +2682,7 @@
               "const": "Now"
             },
             "value": {
+              "description": "Current timestamp.",
               "type": "string"
             }
           },
@@ -2512,6 +2692,7 @@
           ]
         },
         {
+          "description": "Result of `NowNonDecreasing`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2519,6 +2700,7 @@
               "const": "NowNonDecreasing"
             },
             "value": {
+              "description": "Non-decreasing timestamp.",
               "type": "string"
             }
           },
@@ -2528,6 +2710,7 @@
           ]
         },
         {
+          "description": "Result of `NowIncreasing`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2535,6 +2718,7 @@
               "const": "NowIncreasing"
             },
             "value": {
+              "description": "Strictly increasing timestamp.",
               "type": "string"
             }
           },
@@ -2544,6 +2728,7 @@
           ]
         },
         {
+          "description": "Result of `Debug`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2553,9 +2738,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -2564,9 +2751,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2580,6 +2769,7 @@
           ]
         },
         {
+          "description": "Result of `VeilidVersionString`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2587,6 +2777,7 @@
               "const": "VeilidVersionString"
             },
             "value": {
+              "description": "Version string.",
               "type": "string"
             }
           },
@@ -2596,14 +2787,17 @@
           ]
         },
         {
+          "description": "Result of `VeilidVersion`.",
           "type": "object",
           "properties": {
             "major": {
+              "description": "Major version.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
             },
             "minor": {
+              "description": "Minor version.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -2613,6 +2807,7 @@
               "const": "VeilidVersion"
             },
             "patch": {
+              "description": "Patch version.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -2626,6 +2821,7 @@
           ]
         },
         {
+          "description": "Result of `DefaultVeilidConfig`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2633,6 +2829,7 @@
               "const": "DefaultVeilidConfig"
             },
             "value": {
+              "description": "Default configuration as a string.",
               "type": "string"
             }
           },
@@ -2642,6 +2839,7 @@
           ]
         },
         {
+          "description": "Result of `VeilidFeatures`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2649,6 +2847,7 @@
               "const": "VeilidFeatures"
             },
             "value": {
+              "description": "Compiled-in feature flags.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -2661,6 +2860,7 @@
           ]
         },
         {
+          "description": "Result of `ValidCryptoKinds`.",
           "type": "object",
           "properties": {
             "op": {
@@ -2668,6 +2868,7 @@
               "const": "ValidCryptoKinds"
             },
             "value": {
+              "description": "Supported crypto kinds.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -2682,12 +2883,15 @@
       ]
     },
     "RouteBlob": {
+      "description": "An allocated route's id paired with its encoded blob for import by another node.",
       "type": "object",
       "properties": {
         "blob": {
+          "description": "The encoded route blob to import as a remote private route.",
           "type": "string"
         },
         "route_id": {
+          "description": "The id of the allocated route.",
           "type": "string"
         }
       },
@@ -2697,9 +2901,11 @@
       ]
     },
     "RoutingContextResponse": {
+      "description": "A response to a [RoutingContextRequest].",
       "type": "object",
       "properties": {
         "rc_id": {
+          "description": "Id of the routing context the operation ran on.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -2707,6 +2913,7 @@
       },
       "oneOf": [
         {
+          "description": "The requested routing context id did not exist.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2719,6 +2926,7 @@
           ]
         },
         {
+          "description": "The routing context was released.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2731,6 +2939,7 @@
           ]
         },
         {
+          "description": "Id of the new routing context with default safety applied.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2740,9 +2949,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0
@@ -2753,9 +2964,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2769,6 +2982,7 @@
           ]
         },
         {
+          "description": "Id of the new routing context with the custom safety selection applied.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2778,9 +2992,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0
@@ -2791,9 +3007,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2807,6 +3025,7 @@
           ]
         },
         {
+          "description": "Id of the new routing context with the sequencing preference applied.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2814,6 +3033,7 @@
               "const": "WithSequencing"
             },
             "value": {
+              "description": "New routing context id.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -2825,6 +3045,7 @@
           ]
         },
         {
+          "description": "The safety selection in use on this routing context.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2832,6 +3053,7 @@
               "const": "Safety"
             },
             "value": {
+              "description": "Current safety selection.",
               "$ref": "#/$defs/SafetySelection"
             }
           },
@@ -2841,6 +3063,7 @@
           ]
         },
         {
+          "description": "Answer blob of up to 32768 bytes returned by the call.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2850,9 +3073,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "string"
                 }
               },
@@ -2861,9 +3086,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2877,6 +3104,7 @@
           ]
         },
         {
+          "description": "Result of sending an app message.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2886,9 +3114,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -2897,9 +3127,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2913,6 +3145,7 @@
           ]
         },
         {
+          "description": "Descriptor of the newly created DHT record.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2922,9 +3155,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "$ref": "#/$defs/DHTRecordDescriptor"
                 }
               },
@@ -2933,9 +3168,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2949,6 +3186,7 @@
           ]
         },
         {
+          "description": "Descriptor of the opened DHT record.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2958,9 +3196,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "$ref": "#/$defs/DHTRecordDescriptor"
                 }
               },
@@ -2969,9 +3209,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -2985,6 +3227,7 @@
           ]
         },
         {
+          "description": "Result of closing a DHT record.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -2994,9 +3237,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -3005,9 +3250,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3021,6 +3268,7 @@
           ]
         },
         {
+          "description": "Result of deleting a DHT record.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -3030,9 +3278,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -3041,9 +3291,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3057,6 +3309,7 @@
           ]
         },
         {
+          "description": "Latest value of the subkey, or None if it has not been set.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -3066,9 +3319,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "anyOf": [
                     {
                       "$ref": "#/$defs/ValueData"
@@ -3081,9 +3336,11 @@
               }
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3097,6 +3354,7 @@
           ]
         },
         {
+          "description": "None if the value was set, or the newer network value if the set was stale.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -3106,9 +3364,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "anyOf": [
                     {
                       "$ref": "#/$defs/ValueData"
@@ -3121,9 +3381,11 @@
               }
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3137,6 +3399,7 @@
           ]
         },
         {
+          "description": "True if a watch is active for the record, false if fully cancelled.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -3146,9 +3409,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "boolean"
                 }
               },
@@ -3157,9 +3422,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3173,6 +3440,7 @@
           ]
         },
         {
+          "description": "True if a watch is still active, false if fully cancelled.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -3182,9 +3450,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "boolean"
                 }
               },
@@ -3193,9 +3463,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3209,6 +3481,7 @@
           ]
         },
         {
+          "description": "Subkey ranges and sequence numbers reported by the inspection.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -3218,9 +3491,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "$ref": "#/$defs/DHTRecordReport"
                 }
               },
@@ -3229,9 +3504,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3245,6 +3522,7 @@
           ]
         },
         {
+          "description": "True if all pending writes flushed, false if the timeout elapsed.",
           "type": "object",
           "properties": {
             "rc_op": {
@@ -3254,9 +3532,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "boolean"
                 }
               },
@@ -3265,9 +3545,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3286,7 +3568,7 @@
       ]
     },
     "SafetySelection": {
-      "description": "The choice of safety route to include in compiled routes.",
+      "description": "The choice of safety route to include in compiled routes.\n* `SafetySelection::Unsafe`: don't use a safety route, only specify the sequencing preference\n* `SafetySelection::Safe`: use a safety route and parameters specified by a SafetySpec.",
       "oneOf": [
         {
           "description": "Don't use a safety route, only specify the sequencing preference.",
@@ -3348,113 +3630,46 @@
       }
     },
     "Sequencing": {
-      "type": "string",
-      "enum": [
-        "NoPreference",
-        "PreferOrdered",
-        "EnsureOrdered"
+      "description": "Preferred ordering of RPC message delivery over a route or for RPC messages sent to a target\n  * `Sequencing::PreferUnordered`: any `SequenceOrdering` is acceptable, but `SequenceOrdering::Unordered` will be chosen if available\n  * `Sequencing::PreferOrdered`: any `SequenceOrdering` is acceptable, but `SequenceOrdering::Ordered` will be chosen if available\n  * `Sequencing::EnsureOrdered`: only `SequenceOrdering::Ordered` is acceptable, and if not available, the route will not be created or the message will not be sent\n\nNo sequencing preference guarantees delivery under all conditions, as there is no queuing/buffering in the network",
+      "oneOf": [
+        {
+          "description": "Any `SequenceOrdering` is acceptable, but `SequenceOrdering::Unordered` will be chosen if available",
+          "type": "string",
+          "const": "PreferUnordered"
+        },
+        {
+          "description": "Any `SequenceOrdering` is acceptable, but `SequenceOrdering::Ordered` will be chosen if available",
+          "type": "string",
+          "const": "PreferOrdered"
+        },
+        {
+          "description": "Only `SequenceOrdering::Ordered` is acceptable, and if not available, the route will not be created or the message will not be sent",
+          "type": "string",
+          "const": "EnsureOrdered"
+        }
       ]
     },
     "Stability": {
-      "type": "string",
-      "enum": [
-        "LowLatency",
-        "Reliable"
-      ]
-    },
-    "StateReasonStats": {
-      "description": "Measurement of what state reasons the node has been in over a time span",
-      "type": "object",
-      "properties": {
-        "can_not_send": {
-          "description": "time spent dead due to being unable to send",
-          "$ref": "#/$defs/TimestampDuration"
+      "description": "Choice of nodes to include in allocated routes\n* `Stability::LowLatency`: prefer nodes with low latency, but may be unreliable and require route reallocation\n* `Stability::Reliable`: prefer nodes with reliable uptime, but may have higher latency",
+      "oneOf": [
+        {
+          "description": "Prefer nodes with low latency, but may be unreliable and require route reallocation",
+          "type": "string",
+          "const": "LowLatency"
         },
-        "failed_to_send": {
-          "description": "time spent unreliable because of failures to send",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "in_unreliable_ping_span": {
-          "description": "time spent unreliable because we are in the unreliable ping span",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "lost_answers": {
-          "description": "time spent unreliable because of lost answers",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "no_ping_response": {
-          "description": "time spent dead because of no ping response",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "not_seen_consecutively": {
-          "description": "time spent unreliable because of not being seen consecutively",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "too_many_lost_answers": {
-          "description": "time spent dead because of too many lost answers",
-          "$ref": "#/$defs/TimestampDuration"
+        {
+          "description": "Prefer nodes with reliable uptime, but may have higher latency",
+          "type": "string",
+          "const": "Reliable"
         }
-      },
-      "required": [
-        "can_not_send",
-        "too_many_lost_answers",
-        "no_ping_response",
-        "failed_to_send",
-        "lost_answers",
-        "not_seen_consecutively",
-        "in_unreliable_ping_span"
-      ]
-    },
-    "StateStats": {
-      "description": "Measurement of what states the node has been in over a time span",
-      "type": "object",
-      "properties": {
-        "dead": {
-          "description": "amount of time spent in a dead state",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "punished": {
-          "description": "amount of time spent in a punished state",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "reason": {
-          "description": "state reason stats for this peer",
-          "$ref": "#/$defs/StateReasonStats",
-          "default": {
-            "can_not_send": "0",
-            "failed_to_send": "0",
-            "in_unreliable_ping_span": "0",
-            "lost_answers": "0",
-            "no_ping_response": "0",
-            "not_seen_consecutively": "0",
-            "too_many_lost_answers": "0"
-          }
-        },
-        "reliable": {
-          "description": "amount of time spent in a reliable state",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "span": {
-          "description": "total amount of time measured",
-          "$ref": "#/$defs/TimestampDuration"
-        },
-        "unreliable": {
-          "description": "amount of time spent in an unreliable state",
-          "$ref": "#/$defs/TimestampDuration"
-        }
-      },
-      "required": [
-        "span",
-        "reliable",
-        "unreliable",
-        "dead",
-        "punished"
       ]
     },
     "TableDbResponse": {
+      "description": "Response to a `TableDbRequest`.",
       "type": "object",
       "properties": {
         "db_id": {
+          "description": "Id of the `TableDB` handle the request addressed.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -3462,6 +3677,7 @@
       },
       "oneOf": [
         {
+          "description": "The `db_id` did not name an open handle.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -3474,6 +3690,7 @@
           ]
         },
         {
+          "description": "The handle was released.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -3486,6 +3703,7 @@
           ]
         },
         {
+          "description": "The total number of columns in the table.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -3495,9 +3713,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0
@@ -3508,9 +3728,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3524,6 +3746,7 @@
           ]
         },
         {
+          "description": "The keys in the requested column.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -3533,9 +3756,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -3547,9 +3772,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3563,6 +3790,7 @@
           ]
         },
         {
+          "description": "A new transaction was started.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -3570,6 +3798,7 @@
               "const": "Transact"
             },
             "value": {
+              "description": "Id of the started transaction.",
               "type": "integer",
               "format": "uint32",
               "minimum": 0
@@ -3581,6 +3810,7 @@
           ]
         },
         {
+          "description": "The store completed.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -3590,9 +3820,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -3601,9 +3833,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3617,6 +3851,7 @@
           ]
         },
         {
+          "description": "The value read for the key, or `None` if absent.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -3626,9 +3861,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": [
                     "string",
                     "null"
@@ -3637,9 +3874,11 @@
               }
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3653,6 +3892,7 @@
           ]
         },
         {
+          "description": "The prior value of the deleted key, or `None` if absent.",
           "type": "object",
           "properties": {
             "db_op": {
@@ -3662,9 +3902,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": [
                     "string",
                     "null"
@@ -3673,9 +3915,11 @@
               }
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3694,9 +3938,11 @@
       ]
     },
     "TableDbTransactionResponse": {
+      "description": "Response to a `TableDbTransactionRequest`.",
       "type": "object",
       "properties": {
         "tx_id": {
+          "description": "Id of the transaction the request addressed.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -3704,6 +3950,7 @@
       },
       "oneOf": [
         {
+          "description": "The `tx_id` did not name an open transaction.",
           "type": "object",
           "properties": {
             "tx_op": {
@@ -3716,6 +3963,7 @@
           ]
         },
         {
+          "description": "The commit completed.",
           "type": "object",
           "properties": {
             "tx_op": {
@@ -3725,9 +3973,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -3736,9 +3986,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3752,6 +4004,7 @@
           ]
         },
         {
+          "description": "The transaction was rolled back.",
           "type": "object",
           "properties": {
             "tx_op": {
@@ -3764,6 +4017,7 @@
           ]
         },
         {
+          "description": "The store was queued.",
           "type": "object",
           "properties": {
             "tx_op": {
@@ -3773,9 +4027,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -3784,9 +4040,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3800,6 +4058,7 @@
           ]
         },
         {
+          "description": "The delete was queued.",
           "type": "object",
           "properties": {
             "tx_op": {
@@ -3809,9 +4068,11 @@
           },
           "anyOf": [
             {
+              "description": "Success value.",
               "type": "object",
               "properties": {
                 "value": {
+                  "description": "The returned value.",
                   "type": "null"
                 }
               },
@@ -3820,9 +4081,11 @@
               ]
             },
             {
+              "description": "Failure.",
               "type": "object",
               "properties": {
                 "error": {
+                  "description": "The error.",
                   "$ref": "#/$defs/VeilidAPIError"
                 }
               },
@@ -3840,10 +4103,8 @@
         "tx_id"
       ]
     },
-    "Timestamp": {
-      "type": "string"
-    },
     "TimestampDuration": {
+      "description": "8-byte-aligned `u64` newtype that serializes as a string for JSON safety.",
       "type": "string"
     },
     "TransferStats": {
@@ -3875,13 +4136,15 @@
       ]
     },
     "TransferStatsDownUp": {
-      "description": "Transfer statistics from a node to our own (down) and",
+      "description": "Transfer statistics in both directions: from a node to us (down) and from us\nto the node (up).",
       "type": "object",
       "properties": {
         "down": {
+          "description": "Transfer from the node to us.",
           "$ref": "#/$defs/TransferStats"
         },
         "up": {
+          "description": "Transfer from us to the node.",
           "$ref": "#/$defs/TransferStats"
         }
       },
@@ -3923,6 +4186,7 @@
       "minimum": 0
     },
     "ValueSubkeyRangeSet": {
+      "description": "A set of DHT subkeys stored as inclusive ranges of [ValueSubkey]",
       "type": "array",
       "items": {
         "type": "array",
@@ -3943,8 +4207,10 @@
       }
     },
     "VeilidAPIError": {
+      "description": "Error type returned by all fallible Veilid API operations.",
       "oneOf": [
         {
+          "description": "The API was used before [VeilidAPI](crate::VeilidAPI) was attached, or after it was detached.",
           "type": "object",
           "properties": {
             "kind": {
@@ -3957,6 +4223,7 @@
           ]
         },
         {
+          "description": "An attempt was made to initialize Veilid while it was already running.",
           "type": "object",
           "properties": {
             "kind": {
@@ -3969,6 +4236,7 @@
           ]
         },
         {
+          "description": "The operation did not complete within its time budget.",
           "type": "object",
           "properties": {
             "kind": {
@@ -3981,6 +4249,7 @@
           ]
         },
         {
+          "description": "The operation could not be completed yet and should be retried later.",
           "type": "object",
           "properties": {
             "kind": {
@@ -3988,6 +4257,7 @@
               "const": "TryAgain"
             },
             "message": {
+              "description": "Why the operation could not complete this time.",
               "type": "string"
             }
           },
@@ -3997,6 +4267,7 @@
           ]
         },
         {
+          "description": "The destination for an operation could not be reached or is malformed.",
           "type": "object",
           "properties": {
             "kind": {
@@ -4004,6 +4275,7 @@
               "const": "InvalidTarget"
             },
             "message": {
+              "description": "Details about the unreachable or malformed target.",
               "type": "string"
             }
           },
@@ -4013,6 +4285,7 @@
           ]
         },
         {
+          "description": "No network connection could be established to carry out the operation.",
           "type": "object",
           "properties": {
             "kind": {
@@ -4020,6 +4293,7 @@
               "const": "NoConnection"
             },
             "message": {
+              "description": "Details about the connection failure.",
               "type": "string"
             }
           },
@@ -4029,6 +4303,7 @@
           ]
         },
         {
+          "description": "The API is shutting down and can no longer service requests.",
           "type": "object",
           "properties": {
             "kind": {
@@ -4041,9 +4316,11 @@
           ]
         },
         {
+          "description": "The requested DHT record key is not present in local storage.",
           "type": "object",
           "properties": {
             "key": {
+              "description": "The record key that was not found.",
               "type": "string"
             },
             "kind": {
@@ -4057,6 +4334,7 @@
           ]
         },
         {
+          "description": "An internal invariant was violated; indicates a bug in Veilid itself.",
           "type": "object",
           "properties": {
             "kind": {
@@ -4064,6 +4342,7 @@
               "const": "Internal"
             },
             "message": {
+              "description": "Details about the internal failure.",
               "type": "string"
             }
           },
@@ -4073,6 +4352,7 @@
           ]
         },
         {
+          "description": "The requested feature exists in the API surface but is not yet implemented on this platform or build.",
           "type": "object",
           "properties": {
             "kind": {
@@ -4080,6 +4360,7 @@
               "const": "Unimplemented"
             },
             "message": {
+              "description": "Which functionality is unimplemented.",
               "type": "string"
             }
           },
@@ -4089,6 +4370,7 @@
           ]
         },
         {
+          "description": "A value could not be parsed into its expected form.",
           "type": "object",
           "properties": {
             "kind": {
@@ -4096,9 +4378,11 @@
               "const": "ParseError"
             },
             "message": {
+              "description": "What went wrong while parsing.",
               "type": "string"
             },
             "value": {
+              "description": "The input value that failed to parse.",
               "type": "string"
             }
           },
@@ -4109,12 +4393,15 @@
           ]
         },
         {
+          "description": "An argument was supplied but its value was rejected.",
           "type": "object",
           "properties": {
             "argument": {
+              "description": "The name of the offending argument.",
               "type": "string"
             },
             "context": {
+              "description": "The calling context that rejected the argument.",
               "type": "string"
             },
             "kind": {
@@ -4122,6 +4409,7 @@
               "const": "InvalidArgument"
             },
             "value": {
+              "description": "The rejected value.",
               "type": "string"
             }
           },
@@ -4133,12 +4421,15 @@
           ]
         },
         {
+          "description": "A required argument was not supplied.",
           "type": "object",
           "properties": {
             "argument": {
+              "description": "The name of the missing argument.",
               "type": "string"
             },
             "context": {
+              "description": "The calling context that required the argument.",
               "type": "string"
             },
             "kind": {
@@ -4153,6 +4444,7 @@
           ]
         },
         {
+          "description": "A failure that does not fit any more specific category.",
           "type": "object",
           "properties": {
             "kind": {
@@ -4160,6 +4452,7 @@
               "const": "Generic"
             },
             "message": {
+              "description": "Details about the failure.",
               "type": "string"
             }
           },
@@ -4169,6 +4462,7 @@
           ]
         },
         {
+          "description": "The referenced DHT transaction does not exist, having expired or never been opened.",
           "type": "object",
           "properties": {
             "kind": {
@@ -4176,6 +4470,7 @@
               "const": "TransactionNotFound"
             },
             "message": {
+              "description": "Details about the missing transaction.",
               "type": "string"
             }
           },
@@ -4254,6 +4549,17 @@
           "description": "Capabilities to enable for your application/node",
           "$ref": "#/$defs/VeilidConfigCapabilities"
         },
+        "internal": {
+          "description": "Internal \"footgun\" tuning. `None` uses safe defaults. Only honored with the\n`footgun-config` feature; otherwise ignored (a warning is logged at startup).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VeilidConfigInternal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "namespace": {
           "description": "To run multiple Veilid nodes within the same application, either through a single process running\napi_startup/api_startup_json multiple times, or your application running mulitple times side-by-side\nthere needs to be a key used to partition the application's storage (in the TableStore, ProtectedStore, etc).\nAn empty value here is the default, but if you run multiple veilid nodes concurrently, you should set this\nto a string that uniquely identifies this -instance- within the same 'program_name'.\nMust be a valid filename for all Veilid-capable systems, which means no backslashes or forward slashes\nin the name. Stick to a-z,0-9,_ and space and you should be fine.",
           "type": "string"
@@ -4285,13 +4591,31 @@
         "network"
       ]
     },
+    "VeilidConfigAddressType": {
+      "description": "An IP address family (IP version) the node may use.",
+      "oneOf": [
+        {
+          "description": "IPv4 (32-bit) addresses.",
+          "type": "string",
+          "const": "IPV4"
+        },
+        {
+          "description": "IPv6 (128-bit) addresses.",
+          "type": "string",
+          "const": "IPV6"
+        }
+      ]
+    },
     "VeilidConfigBlockStore": {
+      "description": "Block store configuration: content-addressed block storage.",
       "type": "object",
       "properties": {
         "delete": {
+          "description": "Delete the block store on startup.",
           "type": "boolean"
         },
         "directory": {
+          "description": "Directory holding the block store (empty = platform default).",
           "type": "string"
         }
       },
@@ -4301,9 +4625,11 @@
       ]
     },
     "VeilidConfigCapabilities": {
+      "description": "Capabilities advertised by this node.",
       "type": "object",
       "properties": {
         "disable": {
+          "description": "Capabilities to disable (advertised as unavailable).",
           "type": "array",
           "items": {
             "$ref": "#/$defs/VeilidCapability"
@@ -4318,127 +4644,186 @@
       "description": "Configure the Distributed Hash Table (DHT).\nDefaults should be used here unless you are absolutely sure you know what you're doing.\nIf you change the count/fanout/timeout parameters, you may render your node inoperable\nfor correct DHT operations.",
       "type": "object",
       "properties": {
-        "consensus_width": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "get_value_count": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "get_value_fanout": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "get_value_timeout_ms": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
         "local_max_subkey_cache_memory_mb": {
+          "description": "Memory cap for the local subkey cache, in megabytes.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "local_subkey_cache_size": {
+          "description": "Number of subkeys cached for locally-created DHT records.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
-        "max_find_node_count": {
+        "max_concurrent_operations": {
+          "description": "Max concurrent DHT network operations in flight (local-only ops exempt).",
           "type": "integer",
           "format": "uint32",
-          "minimum": 0
-        },
-        "max_watch_expiration_ms": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "member_transaction_limit": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "member_watch_limit": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "min_peer_count": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "min_peer_refresh_time_ms": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "public_transaction_limit": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "public_watch_limit": {
-          "type": "integer",
-          "format": "uint32",
+          "default": 16,
           "minimum": 0
         },
         "remote_max_records": {
+          "description": "Maximum number of remote DHT records stored on behalf of others.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "remote_max_storage_space_mb": {
+          "description": "Disk cap for remote DHT record storage, in megabytes.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "remote_max_subkey_cache_memory_mb": {
+          "description": "Memory cap for the remote subkey cache, in megabytes.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "remote_subkey_cache_size": {
+          "description": "Number of subkeys cached for DHT records stored on behalf of others.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "local_subkey_cache_size",
+        "local_max_subkey_cache_memory_mb",
+        "remote_subkey_cache_size",
+        "remote_max_records",
+        "remote_max_subkey_cache_memory_mb",
+        "remote_max_storage_space_mb"
+      ]
+    },
+    "VeilidConfigInternal": {
+      "description": "Internal \"footgun\" configuration tree, parallel to the main config.\n\nThese fields tune low-level network/DHT timing, fanout, consensus and connection limits.\nChanging them from the defaults can render a node inoperable. They are only honored when\nveilid-core is built with the `footgun-config` feature; without it, any non-default values\nhere are reset to defaults at startup (with a warning).",
+      "type": "object",
+      "properties": {
+        "network": {
+          "description": "Internal network tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalNetwork"
+        }
+      },
+      "required": [
+        "network"
+      ]
+    },
+    "VeilidConfigInternalDHT": {
+      "description": "Internal \"footgun\" DHT configuration. See [VeilidConfigInternal].\nChanging the count/fanout/timeout parameters may render your node inoperable for\ncorrect DHT operations.",
+      "type": "object",
+      "properties": {
+        "consensus_width": {
+          "description": "Maximum number of nodes considered 'close to a record key' for storing a record.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "get_value_count": {
+          "description": "Number of matching values sought for GetValue consensus.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "get_value_fanout": {
+          "description": "Parallel fanout width for GetValue.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "get_value_timeout_ms": {
+          "description": "Timeout for a GetValue operation, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_find_node_count": {
+          "description": "Maximum number of nodes returned by a FindNode query.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_watch_expiration_ms": {
+          "description": "Maximum lifetime of a DHT watch, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "member_transaction_limit": {
+          "description": "Reserved transaction slots for signers who are schema members of the record.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "member_watch_limit": {
+          "description": "Reserved watch slots for watchers whose signer is a schema member of the record.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_peer_count": {
+          "description": "Minimum number of peers to keep in the routing table.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_peer_refresh_time_ms": {
+          "description": "Minimum interval between peer-refresh rounds, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "public_transaction_limit": {
+          "description": "Maximum concurrent transactions by anonymous signers (not a schema member).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "public_watch_limit": {
+          "description": "Maximum concurrent watches by anonymous watchers (signer not a schema member).",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "resolve_node_count": {
+          "description": "Number of nodes sought when resolving a node.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "resolve_node_fanout": {
+          "description": "Parallel fanout width when resolving a node.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "resolve_node_timeout_ms": {
+          "description": "Timeout for resolving a node, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "set_value_count": {
+          "description": "Number of nodes that must accept a SetValue for consensus.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "set_value_fanout": {
+          "description": "Parallel fanout width for SetValue.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "set_value_timeout_ms": {
+          "description": "Timeout for a SetValue operation, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "validate_dial_info_receipt_time_ms": {
+          "description": "Time allowed to receive a dial-info validation receipt, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -4459,104 +4844,88 @@
         "min_peer_count",
         "min_peer_refresh_time_ms",
         "validate_dial_info_receipt_time_ms",
-        "local_subkey_cache_size",
-        "local_max_subkey_cache_memory_mb",
-        "remote_subkey_cache_size",
-        "remote_max_records",
-        "remote_max_subkey_cache_memory_mb",
-        "remote_max_storage_space_mb",
+        "max_watch_expiration_ms",
         "public_watch_limit",
         "member_watch_limit",
-        "max_watch_expiration_ms",
         "public_transaction_limit",
         "member_transaction_limit"
       ]
     },
-    "VeilidConfigNetwork": {
+    "VeilidConfigInternalNetwork": {
+      "description": "Internal \"footgun\" network configuration. See [VeilidConfigInternal].",
       "type": "object",
       "properties": {
         "client_allowlist_timeout_ms": {
+          "description": "Time a client stays on the allowlist after connecting, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "connection_inactivity_timeout_ms": {
+          "description": "Idle time before an inactive connection is dropped, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "connection_initial_timeout_ms": {
+          "description": "Timeout to establish a new connection, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
-        "detect_address_changes": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "dht": {
-          "$ref": "#/$defs/VeilidConfigDHT"
+          "description": "Internal DHT tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalDHT"
         },
         "hole_punch_receipt_time_ms": {
+          "description": "Time allowed to receive a hole-punch receipt, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "max_connection_frequency_per_min": {
+          "description": "Maximum new connections accepted per minute from one source.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "max_connections_per_ip4": {
+          "description": "Maximum simultaneous connections from a single IPv4 address.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "max_connections_per_ip6_prefix": {
+          "description": "Maximum simultaneous connections from a single IPv6 prefix.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "max_connections_per_ip6_prefix_size": {
+          "description": "IPv6 prefix length (bits) used to group connections for the per-prefix limit.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
-        "network_key_password": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "privacy": {
-          "$ref": "#/$defs/VeilidConfigPrivacy"
-        },
         "protocol": {
-          "$ref": "#/$defs/VeilidConfigProtocol"
+          "description": "Internal per-protocol tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalProtocol"
         },
         "restricted_nat_retries": {
+          "description": "NAT-detection retries during dial-info confirmation for port/address-restricted NAT\n(some NATs open to full-cone after a few attempts; off by default).",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "reverse_connection_receipt_time_ms": {
+          "description": "Time allowed to receive a reverse-connection receipt, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
-        "routing_table": {
-          "$ref": "#/$defs/VeilidConfigRoutingTable"
-        },
         "rpc": {
-          "$ref": "#/$defs/VeilidConfigRPC"
-        },
-        "tls": {
-          "$ref": "#/$defs/VeilidConfigTLS"
-        },
-        "upnp": {
-          "type": "boolean"
+          "description": "Internal RPC tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalRPC"
         }
       },
       "required": [
@@ -4569,11 +4938,162 @@
         "client_allowlist_timeout_ms",
         "reverse_connection_receipt_time_ms",
         "hole_punch_receipt_time_ms",
+        "restricted_nat_retries",
+        "rpc",
+        "dht",
+        "protocol"
+      ]
+    },
+    "VeilidConfigInternalProtocol": {
+      "description": "Internal \"footgun\" per-protocol configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "udp": {
+          "description": "Internal UDP tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalUDP"
+        }
+      },
+      "required": [
+        "udp"
+      ]
+    },
+    "VeilidConfigInternalRPC": {
+      "description": "Internal \"footgun\" RPC configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "concurrency": {
+          "description": "Number of concurrent RPC worker tasks (0 = automatic).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_route_hop_count": {
+          "description": "Maximum number of hops allowed in a route.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "max_timestamp_ahead_ms": {
+          "description": "Reject messages timestamped more than this many ms in the future (`None` = no limit).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_timestamp_behind_ms": {
+          "description": "Reject messages timestamped more than this many ms in the past (`None` = no limit).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "queue_size": {
+          "description": "Maximum number of queued RPC operations.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "timeout_ms": {
+          "description": "Timeout for an RPC round-trip, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "concurrency",
+        "queue_size",
+        "timeout_ms",
+        "max_route_hop_count"
+      ]
+    },
+    "VeilidConfigInternalUDP": {
+      "description": "Internal \"footgun\" UDP configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "socket_pool_size": {
+          "description": "Number of UDP sockets in the send/receive pool (0 = automatic).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "socket_pool_size"
+      ]
+    },
+    "VeilidConfigNetwork": {
+      "description": "Network subsystem configuration: connections, routing table, RPC, DHT, transports, and privacy.",
+      "type": "object",
+      "properties": {
+        "address_types": {
+          "description": "Enabled IP address families (empty = all available).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VeilidConfigAddressType"
+          }
+        },
+        "detect_address_changes": {
+          "description": "Watch for and react to local address changes (`None` = auto-detect).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "dht": {
+          "description": "DHT cache and storage configuration.",
+          "$ref": "#/$defs/VeilidConfigDHT"
+        },
+        "max_connections": {
+          "description": "Maximum total simultaneous connections across all protocols.\nRange: native 32-512, wasm32/browser 16-64.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "network_key_password": {
+          "description": "Optional password; its presence joins a private network with a derived network key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privacy": {
+          "description": "Privacy and relay preferences.",
+          "$ref": "#/$defs/VeilidConfigPrivacy"
+        },
+        "protocol": {
+          "description": "Per-protocol (UDP/TCP/WS/WSS) configuration.",
+          "$ref": "#/$defs/VeilidConfigProtocol"
+        },
+        "routing_table": {
+          "description": "Routing table identity and bootstrap configuration.",
+          "$ref": "#/$defs/VeilidConfigRoutingTable"
+        },
+        "rpc": {
+          "description": "RPC configuration.",
+          "$ref": "#/$defs/VeilidConfigRPC"
+        },
+        "tls": {
+          "description": "TLS configuration for inbound secure protocols.",
+          "$ref": "#/$defs/VeilidConfigTLS"
+        },
+        "upnp": {
+          "description": "Use UPnP to map ports on the local gateway.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "max_connections",
         "routing_table",
         "rpc",
         "dht",
         "upnp",
-        "restricted_nat_retries",
         "tls",
         "protocol",
         "privacy"
@@ -4584,6 +5104,7 @@
       "type": "object",
       "properties": {
         "require_inbound_relay": {
+          "description": "Always use an inbound relay; never accept direct inbound connections.",
           "type": "boolean"
         }
       },
@@ -4592,24 +5113,31 @@
       ]
     },
     "VeilidConfigProtectedStore": {
+      "description": "Protected store configuration: where secrets such as the device encryption key are kept.",
       "type": "object",
       "properties": {
         "allow_insecure_fallback": {
+          "description": "Fall back to insecure file storage if no OS keychain/keyring is available.",
           "type": "boolean"
         },
         "always_use_insecure_storage": {
+          "description": "Always use insecure file storage, ignoring any OS keychain/keyring.",
           "type": "boolean"
         },
         "delete": {
+          "description": "Delete the protected store on startup.",
           "type": "boolean"
         },
         "device_encryption_key_password": {
+          "description": "Password used to encrypt the device encryption key.",
           "type": "string"
         },
         "directory": {
+          "description": "Directory for insecure-fallback storage (empty = platform default).",
           "type": "string"
         },
         "new_device_encryption_key_password": {
+          "description": "New password to re-encrypt the device encryption key with, triggering a rotation.",
           "type": [
             "string",
             "null"
@@ -4629,12 +5157,15 @@
       "type": "object",
       "properties": {
         "tcp": {
+          "description": "TCP protocol configuration.",
           "$ref": "#/$defs/VeilidConfigTCP"
         },
         "udp": {
+          "description": "UDP protocol configuration.",
           "$ref": "#/$defs/VeilidConfigUDP"
         },
         "ws": {
+          "description": "WebSocket protocol configuration.",
           "$ref": "#/$defs/VeilidConfigWS"
         }
       },
@@ -4648,55 +5179,15 @@
       "description": "Configure RPC.",
       "type": "object",
       "properties": {
-        "concurrency": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
         "default_route_hop_count": {
+          "description": "Default number of hops used when allocating private routes.",
           "type": "integer",
           "format": "uint8",
           "maximum": 255,
-          "minimum": 0
-        },
-        "max_route_hop_count": {
-          "type": "integer",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0
-        },
-        "max_timestamp_ahead_ms": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0
-        },
-        "max_timestamp_behind_ms": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0
-        },
-        "queue_size": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "timeout_ms": {
-          "type": "integer",
-          "format": "uint32",
           "minimum": 0
         }
       },
       "required": [
-        "concurrency",
-        "queue_size",
-        "timeout_ms",
-        "max_route_hop_count",
         "default_route_hop_count"
       ]
     },
@@ -4705,24 +5196,28 @@
       "type": "object",
       "properties": {
         "bootstrap": {
+          "description": "Bootstrap server hostnames/URLs used to join the network.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "bootstrap_keys": {
+          "description": "Public keys trusted to sign bootstrap records.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "public_keys": {
+          "description": "This node's identity public keys, by crypto kind (empty = generate fresh).",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "secret_keys": {
+          "description": "Node identity secret keys matching `public_keys` (empty = generate fresh).",
           "type": "array",
           "items": {
             "type": "string"
@@ -4737,24 +5232,23 @@
       ]
     },
     "VeilidConfigTCP": {
-      "description": "Enable and configure TCP.\n\n```yaml\ntcp:\n    connect: true\n    listen: true\n    max_connections: 32\n    listen_address: ':5150'\n    public_address: ''",
+      "description": "Enable and configure TCP.\n\n```yaml\ntcp:\n    connect: true\n    listen: true\n    listen_address: ':5150'\n    public_address: ''",
       "type": "object",
       "properties": {
         "connect": {
+          "description": "Allow outbound TCP connections.",
           "type": "boolean"
         },
         "listen": {
+          "description": "Accept inbound TCP connections.",
           "type": "boolean"
         },
         "listen_address": {
+          "description": "Local address to bind, as `ip:port` (empty binds the default port).",
           "type": "string"
         },
-        "max_connections": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
         "public_address": {
+          "description": "Externally-reachable `ip:port` to advertise, if behind NAT/port mapping.",
           "type": [
             "string",
             "null"
@@ -4764,7 +5258,6 @@
       "required": [
         "connect",
         "listen",
-        "max_connections",
         "listen_address"
       ]
     },
@@ -4773,14 +5266,17 @@
       "type": "object",
       "properties": {
         "certificate_path": {
+          "description": "Path to the TLS certificate (PEM) for inbound TLS protocols.",
           "type": "string"
         },
         "connection_initial_timeout_ms": {
+          "description": "Timeout for completing a TLS handshake, in milliseconds.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "private_key_path": {
+          "description": "Path to the TLS private key (PEM) for inbound TLS protocols.",
           "type": "string"
         }
       },
@@ -4791,20 +5287,25 @@
       ]
     },
     "VeilidConfigTableStore": {
+      "description": "Table store configuration: the encrypted key-value database backing node state.",
       "type": "object",
       "properties": {
         "delete": {
+          "description": "Delete the table store on startup.",
           "type": "boolean"
         },
         "directory": {
+          "description": "Directory holding the table store database (empty = platform default).",
           "type": "string"
         },
         "max_value_size_mb": {
+          "description": "Maximum size of a single stored value, in megabytes.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "wipe_on_invalid_device_encryption_key": {
+          "description": "Wipe the table store on an invalid device encryption key, rather than failing.",
           "type": "boolean"
         }
       },
@@ -4820,51 +5321,48 @@
       "type": "object",
       "properties": {
         "enabled": {
+          "description": "Enable the UDP protocol.",
           "type": "boolean"
         },
         "listen_address": {
+          "description": "Local address to bind, as `ip:port` (empty binds the default port).",
           "type": "string"
         },
         "public_address": {
+          "description": "Externally-reachable `ip:port` to advertise, if behind NAT/port mapping.",
           "type": [
             "string",
             "null"
           ]
-        },
-        "socket_pool_size": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
         }
       },
       "required": [
         "enabled",
-        "socket_pool_size",
         "listen_address"
       ]
     },
     "VeilidConfigWS": {
-      "description": "Enable and configure Web Sockets.\n\n```yaml\nws:\n    connect: true\n    listen: true\n    max_connections: 32\n    listen_address: ':5150'\n    path: 'ws'\n    url: 'ws://localhost:5150/ws'",
+      "description": "Enable and configure Web Sockets.\n\n```yaml\nws:\n    connect: true\n    listen: true\n    listen_address: ':5150'\n    path: 'ws'\n    url: 'ws://localhost:5150/ws'",
       "type": "object",
       "properties": {
         "connect": {
+          "description": "Allow outbound WebSocket connections.",
           "type": "boolean"
         },
         "listen": {
+          "description": "Accept inbound WebSocket connections.",
           "type": "boolean"
         },
         "listen_address": {
+          "description": "Local address to bind, as `ip:port` (empty binds the default port).",
           "type": "string"
         },
-        "max_connections": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
         "path": {
+          "description": "URL path served by the WebSocket listener.",
           "type": "string"
         },
         "url": {
+          "description": "Externally-reachable URL to advertise, if behind NAT/proxy.",
           "type": [
             "string",
             "null"
@@ -4874,7 +5372,6 @@
       "required": [
         "connect",
         "listen",
-        "max_connections",
         "listen_address",
         "path"
       ]
@@ -4884,15 +5381,18 @@
       "type": "object",
       "properties": {
         "backtrace": {
+          "description": "Backtrace, present for errors when available.",
           "type": [
             "string",
             "null"
           ]
         },
         "log_level": {
+          "description": "Severity of the message.",
           "$ref": "#/$defs/VeilidLogLevel"
         },
         "message": {
+          "description": "The log message text.",
           "type": "string"
         }
       },
@@ -4903,13 +5403,32 @@
     },
     "VeilidLogLevel": {
       "description": "Log level for VeilidCore.",
-      "type": "string",
-      "enum": [
-        "Error",
-        "Warn",
-        "Info",
-        "Debug",
-        "Trace"
+      "oneOf": [
+        {
+          "description": "Errors.",
+          "type": "string",
+          "const": "Error"
+        },
+        {
+          "description": "Warnings.",
+          "type": "string",
+          "const": "Warn"
+        },
+        {
+          "description": "Informational messages.",
+          "type": "string",
+          "const": "Info"
+        },
+        {
+          "description": "Debugging messages.",
+          "type": "string",
+          "const": "Debug"
+        },
+        {
+          "description": "Tracing messages, the most verbose level.",
+          "type": "string",
+          "const": "Trace"
+        }
       ]
     },
     "VeilidRouteChange": {
@@ -4941,12 +5460,15 @@
       "type": "object",
       "properties": {
         "attachment": {
+          "description": "The current attachment state.",
           "$ref": "#/$defs/VeilidStateAttachment"
         },
         "config": {
+          "description": "The current node configuration.",
           "$ref": "#/$defs/VeilidStateConfig"
         },
         "network": {
+          "description": "The current network state.",
           "$ref": "#/$defs/VeilidStateNetwork"
         }
       },
@@ -4976,7 +5498,7 @@
           "$ref": "#/$defs/NodeCount"
         },
         "live_peer_count": {
-          "description": "Live peers (reliable + unreliable) in the routing table.",
+          "description": "Live peers (reliable, unreliable, and newly added) in the routing table.",
           "$ref": "#/$defs/NodeCount"
         },
         "local_network_ready": {
@@ -5082,6 +5604,7 @@
       "description": "An update from the veilid-core to the host application describing a change\nto the internal state of the Veilid node.",
       "oneOf": [
         {
+          "description": "A log message emitted by veilid-core.",
           "type": "object",
           "properties": {
             "kind": {
@@ -5095,6 +5618,7 @@
           ]
         },
         {
+          "description": "A one-way application message delivered over the network.",
           "type": "object",
           "properties": {
             "kind": {
@@ -5108,6 +5632,7 @@
           ]
         },
         {
+          "description": "An application call expecting a reply from the host application.",
           "type": "object",
           "properties": {
             "kind": {
@@ -5121,6 +5646,7 @@
           ]
         },
         {
+          "description": "The node's attachment state has changed.",
           "type": "object",
           "properties": {
             "kind": {
@@ -5134,6 +5660,7 @@
           ]
         },
         {
+          "description": "The node's network state has changed.",
           "type": "object",
           "properties": {
             "kind": {
@@ -5147,6 +5674,7 @@
           ]
         },
         {
+          "description": "The node's configuration has changed.",
           "type": "object",
           "properties": {
             "kind": {
@@ -5160,6 +5688,7 @@
           ]
         },
         {
+          "description": "An allocated or imported route has died or been released.",
           "type": "object",
           "properties": {
             "kind": {
@@ -5173,6 +5702,7 @@
           ]
         },
         {
+          "description": "A watched DHT record has changed subkey values.",
           "type": "object",
           "properties": {
             "kind": {
@@ -5186,6 +5716,7 @@
           ]
         },
         {
+          "description": "The node is shutting down; no further updates will follow.",
           "type": "object",
           "properties": {
             "kind": {

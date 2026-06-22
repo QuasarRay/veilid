@@ -8,7 +8,8 @@ use super::*;
 #[derive(Debug)]
 pub(super) enum RelayWorkerRequestKind {
     Relay {
-        relay_nr: FilteredNodeRef,
+        relay_nr: NodeRef,
+        sequencing: Sequencing,
         data: Bytes,
         relay_kind: RelayKind,
     },
@@ -80,6 +81,7 @@ impl NetworkManager {
             match request.kind {
                 RelayWorkerRequestKind::Relay {
                     relay_nr,
+                    sequencing,
                     data,
                     relay_kind,
                 } => {
@@ -87,8 +89,10 @@ impl NetworkManager {
                         RelayKind::Inbound => {
                             // Inbound relay the packet to the desired destination
                             veilid_log!(self trace "inbound relaying {} bytes to {}", data.len(), relay_nr);
-                            if let Err(e) =
-                                pin_future!(self.send_inbound_relay_data(relay_nr, data)).await
+                            if let Err(e) = pin_future!(
+                                self.send_inbound_relay_data(relay_nr, sequencing, data)
+                            )
+                            .await
                             {
                                 veilid_log!(self debug "failed to inbound relay envelope: {}" ,e);
                             }
@@ -97,8 +101,9 @@ impl NetworkManager {
                             // Outbound relay the packet to the desired destination
                             // Because the source was in the client allowlist, this node has opted in
                             // to making new flows and connections for the purposes of relaying
-                            veilid_log!(self trace "outbound relaying {} bytes to {}", data.len(), relay_nr);
-                            if let Err(e) = pin_future!(self.send_data(relay_nr, data)).await {
+                            let seq_relay_nr = relay_nr.sequencing_filtered(sequencing);
+                            veilid_log!(self trace "outbound relaying {} bytes to {}", data.len(), seq_relay_nr);
+                            if let Err(e) = pin_future!(self.send_data(seq_relay_nr, data)).await {
                                 veilid_log!(self debug "failed to outbound relay envelope: {}" ,e);
                             }
                         }
@@ -121,7 +126,8 @@ impl NetworkManager {
     )]
     pub(super) fn enqueue_relay(
         &self,
-        relay_nr: FilteredNodeRef,
+        relay_nr: NodeRef,
+        sequencing: Sequencing,
         data: Bytes,
         relay_kind: RelayKind,
     ) -> EyreResult<()> {
@@ -144,6 +150,7 @@ impl NetworkManager {
                 span: Span::current(),
                 kind: RelayWorkerRequestKind::Relay {
                     relay_nr,
+                    sequencing,
                     data,
                     relay_kind,
                 },

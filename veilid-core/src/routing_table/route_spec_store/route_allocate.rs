@@ -7,33 +7,25 @@ type PermFunc<'t> = Box<dyn FnMut(&[usize]) -> Option<PermReturnType> + Send + '
 
 const ALLOCATION_HIGH_PASS_FILTER_FACTOR: f32 = 0.8;
 
-/// number of route permutations is the number of unique orderings
-/// for a set of nodes, given that the first node is fixed
-#[expect(dead_code)]
-fn get_route_permutation_count(hop_count: usize) -> usize {
-    if hop_count == 0 {
-        unreachable!();
-    }
-    // a single node or two nodes is always fixed
-    if hop_count == 1 || hop_count == 2 {
-        return 1;
-    }
-    // more than two nodes has factorial permutation
-    // hop_count = 3 -> 2! -> 2
-    // hop_count = 4 -> 3! -> 6
-    (3..hop_count).fold(2usize, |acc, x| acc * x)
+/// Progressive relaxation for route allocation: drop ipblock diversity first
+/// (small networks can't satisfy it), then allow duplicate hop sets as a last resort
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum RouteAllocationPass {
+    UniqueIpblockDiverse,
+    Unique,
+    AllowDuplicateHops,
 }
 
 /// get the route permutation at particular 'perm' index, starting at the 'start' index
 /// for a set of 'hop_count' nodes. the first node is always fixed, and the maximum
-/// number of permutations is given by get_route_permutation_count()
+/// number of permutations is (hop_count-1)! (the orderings with the first node fixed)
 fn with_route_permutations(
     hop_count: usize,
     start: usize,
     f: &mut PermFunc,
 ) -> Option<PermReturnType> {
     if hop_count == 0 {
-        unreachable!();
+        return None;
     }
     // initial permutation
     let mut permutation: Vec<usize> = Vec::with_capacity(hop_count);
@@ -200,16 +192,15 @@ impl RouteSpecStore {
             // Number of contiguous hop-count windows we can start a route at.
             let window_count = nodes.len() - params.hop_count + 1;
 
-            // First pass requires a route we haven't allocated before, scanning
-            // windows in order. Small networks can exhaust all unique
-            // permutations, so if every relay tier comes up empty, make a second
-            // pass with the uniqueness requirement dropped, accepting a duplicate
-            // rather than failing. On that pass scan from a random window offset
-            // so repeated duplicate allocations spread across windows instead of
-            // returning the same route every time.
-            let mut require_unique = true;
+            // Relax in stages when windows come up empty: drop ipblock diversity,
+            // then allow duplicate hop sets. Relaxed passes start at a random
+            // window so repeated duplicates spread out.
             let mut start_offset = 0usize;
-            loop {
+            for pass in [
+                RouteAllocationPass::UniqueIpblockDiverse,
+                RouteAllocationPass::Unique,
+                RouteAllocationPass::AllowDuplicateHops,
+            ] {
                 for policy in [
                     RelayPolicy::AllHops,
                     RelayPolicy::LastHopOnly,
@@ -221,7 +212,7 @@ impl RouteSpecStore {
                         &params,
                         published_peer_info.clone(),
                         policy,
-                        require_unique,
+                        pass,
                     );
                     for w in 0..window_count {
                         let start = (w + start_offset) % window_count;
@@ -237,10 +228,9 @@ impl RouteSpecStore {
                         break;
                     }
                 }
-                if !route_nodes.is_empty() || !require_unique {
+                if !route_nodes.is_empty() {
                     break;
                 }
-                require_unique = false;
                 start_offset = get_random_u32() as usize % window_count;
             }
 
@@ -287,15 +277,16 @@ impl RouteSpecStore {
                         } else {
                             hop_pis[i - 1].clone()
                         };
-                        Some(routing_table.get_contact_method(
+                        routing_table.get_best_contact_method(
                             RoutingDomain::PublicInternet,
-                            prev_pi,
-                            true,
-                            hop_pi.clone(),
-                            DialInfoFilter::all(),
-                            params.sequencing,
-                            None,
-                        ))
+                            ContactMethodRequest {
+                                peer_a: prev_pi,
+                                peer_a_published: true,
+                                peer_b: hop_pi.clone(),
+                                dial_info_filter: DialInfoFilter::all(),
+                                sequencing: params.sequencing,
+                            },
+                        )
                     } else {
                         None
                     };
@@ -305,15 +296,16 @@ impl RouteSpecStore {
                         } else {
                             published_peer_info.clone()
                         };
-                        Some(routing_table.get_contact_method(
+                        routing_table.get_best_contact_method(
                             RoutingDomain::PublicInternet,
-                            next_pi,
-                            true,
-                            hop_pi.clone(),
-                            DialInfoFilter::all(),
-                            params.sequencing,
-                            None,
-                        ))
+                            ContactMethodRequest {
+                                peer_a: next_pi,
+                                peer_a_published: true,
+                                peer_b: hop_pi.clone(),
+                                dial_info_filter: DialInfoFilter::all(),
+                                sequencing: params.sequencing,
+                            },
+                        )
                     } else {
                         None
                     };
@@ -491,6 +483,11 @@ impl RouteSpecStore {
                     return false;
                 };
 
+                // Defensively exclude nodes that aren't responsive
+                if !snap.state.is_responsive() {
+                    return false;
+                }
+
                 // Exclude our relay if we have one
                 if own_relay_nrs.contains(&snap.node_ref) {
                     return false;
@@ -533,17 +530,6 @@ impl RouteSpecStore {
 
                 // Exclude nodes that have don't advertise route capability
                 if !their_ni.has_capability(VEILID_CAPABILITY_ROUTE) {
-                    return false;
-                }
-
-                // Exclude nodes that haven't been tested for reachability
-                if snap
-                    .peer_stats
-                    .rpc_stats
-                    .first_consecutive_seen_ts
-                    .is_none()
-                    || snap.peer_stats.latency.is_none()
-                {
                     return false;
                 }
 
@@ -633,7 +619,11 @@ impl RouteSpecStore {
         params: &'t AllocateRouteParams,
         published_peer_info: Arc<PeerInfo>,
     ) -> RoutingTableEntrySort<'t> {
-        let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
+        let ip6_prefix_size = self
+            .config()
+            .internal()
+            .network
+            .max_connections_per_ip6_prefix_size as usize;
 
         Box::new(
             move |entry1: &Option<BucketEntrySnapshot>,
@@ -675,7 +665,7 @@ impl RouteSpecStore {
 
                 // apply sequencing preference
                 // ensureordered will be taken care of by filter
-                // and nopreference doesn't care
+                // and preferunordered doesn't care
                 if matches!(params.sequencing, Sequencing::PreferOrdered) {
                     let e1_can_do_ordered =
                         entry1_node_info.has_sequencing_matched_dial_info(params.sequencing);
@@ -753,7 +743,7 @@ impl RouteSpecStore {
         params: &'t AllocateRouteParams,
         published_peer_info: Arc<PeerInfo>,
         relay_policy: RelayPolicy,
-        require_unique: bool,
+        pass: RouteAllocationPass,
     ) -> PermFunc<'t> {
         // Get peer info for everything
         let nodes_pi: Vec<Arc<PeerInfo>> = nodes
@@ -767,7 +757,11 @@ impl RouteSpecStore {
         let registry = self.registry();
         let routing_table = self.routing_table();
 
-        let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
+        let ip6_prefix_size = self
+            .config()
+            .internal()
+            .network
+            .max_connections_per_ip6_prefix_size as usize;
 
         let relay_node_filter = {
             let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
@@ -784,9 +778,8 @@ impl RouteSpecStore {
         Box::new(move |permutation: &[usize]| {
             let routing_table = registry.routing_table();
 
-            // Skip routes we have already seen, unless we're allowing duplicates because
-            // no unique route could be found (small networks can exhaust unique routes).
-            if require_unique {
+            // Skip already-allocated hop sets except on the last-resort pass
+            if pass != RouteAllocationPass::AllowDuplicateHops {
                 let cache_key =
                     Self::route_permutation_to_hop_cache_key(best_crypto_kind, nodes, permutation);
                 if cache.contains_allocated_route_with_hops(&cache_key) {
@@ -795,23 +788,25 @@ impl RouteSpecStore {
             }
 
             // Ensure the route doesn't contain two nodes on the same ipblock or with relays on the same ipblock
-            let mut seen_ipblocks: HashSet<IpAddr> = HashSet::new();
-            for n in permutation {
-                let node = nodes.get(*n).unwrap_or_log();
-                let peer_info = node.get_peer_info(RoutingDomain::PublicInternet)?;
-                let node_info = peer_info.node_info();
+            if pass == RouteAllocationPass::UniqueIpblockDiverse {
+                let mut seen_ipblocks: HashSet<IpAddr> = HashSet::new();
+                for n in permutation {
+                    let node = nodes.get(*n).unwrap_or_log();
+                    let peer_info = node.get_peer_info(RoutingDomain::PublicInternet)?;
+                    let node_info = peer_info.node_info();
 
-                let ipblocks = node_info.get_ipblocks(ip6_prefix_size);
-                for ipblock in ipblocks {
-                    if !seen_ipblocks.insert(ipblock) {
-                        return None;
-                    }
-                }
-                for relay_info in node_info.relay_info_list() {
-                    let ipblocks = relay_info.get_ipblocks(ip6_prefix_size);
+                    let ipblocks = node_info.get_ipblocks(ip6_prefix_size);
                     for ipblock in ipblocks {
                         if !seen_ipblocks.insert(ipblock) {
                             return None;
+                        }
+                    }
+                    for relay_info in node_info.relay_info_list() {
+                        let ipblocks = relay_info.get_ipblocks(ip6_prefix_size);
+                        for ipblock in ipblocks {
+                            if !seen_ipblocks.insert(ipblock) {
+                                return None;
+                            }
                         }
                     }
                 }
@@ -845,32 +840,34 @@ impl RouteSpecStore {
                 let mut reachable = true;
                 for n in permutation {
                     let current_node = nodes_pi.get(*n).cloned().unwrap_or_log();
-                    let cm = routing_table.get_contact_method(
+                    let cm = routing_table.get_best_contact_method(
                         RoutingDomain::PublicInternet,
-                        previous_node.clone(),
-                        true,
-                        current_node.clone(),
-                        DialInfoFilter::all(),
-                        params.sequencing,
-                        None,
+                        ContactMethodRequest {
+                            peer_a: previous_node.clone(),
+                            peer_a_published: true,
+                            peer_b: current_node.clone(),
+                            dial_info_filter: DialInfoFilter::all(),
+                            sequencing: params.sequencing,
+                        },
                     );
-                    if matches!(cm, ContactMethod::Unreachable) {
+                    if cm.is_none() {
                         reachable = false;
                         break;
                     }
 
                     // Check if we can do each ordering strictly
                     for ordering in orderings {
-                        let cm = routing_table.get_contact_method(
+                        let cm = routing_table.get_best_contact_method(
                             RoutingDomain::PublicInternet,
-                            previous_node.clone(),
-                            true,
-                            current_node.clone(),
-                            DialInfoFilter::all(),
-                            ordering.strict_sequencing(),
-                            None,
+                            ContactMethodRequest {
+                                peer_a: previous_node.clone(),
+                                peer_a_published: true,
+                                peer_b: current_node.clone(),
+                                dial_info_filter: DialInfoFilter::all(),
+                                sequencing: ordering.strict_sequencing(),
+                            },
                         );
-                        if matches!(cm, ContactMethod::Unreachable) {
+                        if cm.is_none() {
                             orderings.remove(ordering);
                         }
                     }
@@ -886,32 +883,34 @@ impl RouteSpecStore {
                 let mut reachable = true;
                 for n in permutation.iter().rev() {
                     let current_node = nodes_pi.get(*n).cloned().unwrap_or_log();
-                    let cm = routing_table.get_contact_method(
+                    let cm = routing_table.get_best_contact_method(
                         RoutingDomain::PublicInternet,
-                        next_node.clone(),
-                        true,
-                        current_node.clone(),
-                        DialInfoFilter::all(),
-                        params.sequencing,
-                        None,
+                        ContactMethodRequest {
+                            peer_a: next_node.clone(),
+                            peer_a_published: true,
+                            peer_b: current_node.clone(),
+                            dial_info_filter: DialInfoFilter::all(),
+                            sequencing: params.sequencing,
+                        },
                     );
-                    if matches!(cm, ContactMethod::Unreachable) {
+                    if cm.is_none() {
                         reachable = false;
                         break;
                     }
 
                     // Check if we can do each ordering strictly
                     for ordering in orderings {
-                        let cm = routing_table.get_contact_method(
+                        let cm = routing_table.get_best_contact_method(
                             RoutingDomain::PublicInternet,
-                            next_node.clone(),
-                            true,
-                            current_node.clone(),
-                            DialInfoFilter::all(),
-                            ordering.strict_sequencing(),
-                            None,
+                            ContactMethodRequest {
+                                peer_a: next_node.clone(),
+                                peer_a_published: true,
+                                peer_b: current_node.clone(),
+                                dial_info_filter: DialInfoFilter::all(),
+                                sequencing: ordering.strict_sequencing(),
+                            },
                         );
-                        if matches!(cm, ContactMethod::Unreachable) {
+                        if cm.is_none() {
                             orderings.remove(ordering);
                         }
                     }

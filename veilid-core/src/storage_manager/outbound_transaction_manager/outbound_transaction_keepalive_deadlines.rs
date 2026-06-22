@@ -1,12 +1,5 @@
 use super::*;
 
-/// Floor of the keepalive interval as a fraction (1/N) of the server-side TTL.
-const KEEPALIVE_INTERVAL_FLOOR_TTL_FRACTION: u64 = 10;
-/// Ceiling of the keepalive interval as a fraction (1/N) of the server-side TTL.
-const KEEPALIVE_INTERVAL_CEILING_TTL_FRACTION: u64 = 3;
-/// Number of RTTs of safety the next reply should land before server expiration.
-const KEEPALIVE_SAFETY_RTT_FACTOR: u64 = 3;
-
 /// Per-train mutable state, shared by every queued and in-flight keepalive for that train.
 #[derive(Debug, Default)]
 pub(super) struct OutboundTransactionKeepaliveState {

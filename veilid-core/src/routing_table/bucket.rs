@@ -83,10 +83,10 @@ impl Bucket {
         veilid_log!(self trace "Node added: {}:{}", self.kind, node_id_key);
 
         // Add new entry
-        let entry = Arc::new(BucketEntry::new(NodeId::new(
-            self.kind,
-            node_id_key.clone(),
-        )));
+        let entry = Arc::new(BucketEntry::new(
+            self.registry(),
+            NodeId::new(self.kind, node_id_key.clone()),
+        ));
         self.entries.insert(node_id_key, entry.clone());
 
         // Return the new entry
@@ -157,23 +157,20 @@ impl Bucket {
                     true
                 })
                 .map(|(k, v)| {
-                    let (state, time_added) =
-                        v.with(|e| (e.state(cur_ts), e.peer_stats().time_added));
+                    let (state, time_added) = v.with(|e| (e.state(cur_ts), e.time_added()));
                     (k.clone(), v.clone(), state, time_added)
                 })
                 .collect();
         sorted_entries.sort_by(|a, b| -> core::cmp::Ordering {
+            // If node ids are equal, they are equal
             if a.0 == b.0 {
                 return core::cmp::Ordering::Equal;
             }
-            let astate = a.2.ordering();
-            let bstate = b.2.ordering();
-            // first kick punished nodes, then dead nodes, then unreliable nodes
-            if astate < bstate {
-                return core::cmp::Ordering::Less;
-            }
-            if astate > bstate {
-                return core::cmp::Ordering::Greater;
+            // first kick punished nodes, then dead nodes, then missing nodes,
+            // then initial nodes, then unreliable nodes, then reliable nodes
+            let st_cmp = a.2.cmp(&b.2);
+            if st_cmp != core::cmp::Ordering::Equal {
+                return st_cmp;
             }
             // then kick by time added, most recent nodes are kicked first
             b.3.cmp(&a.3)

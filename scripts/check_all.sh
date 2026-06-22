@@ -13,6 +13,7 @@ fi
 
 echo "Running all tests..."
 
+./scripts/_check_public_api.sh
 ./scripts/_msrv_all.sh
 ./scripts/_check_wasm_builds.sh dart # skip cleanup here because WASM is done first in the clippy script and will clean up there
 ./scripts/_check_wasm_builds.sh js # skip cleanup here because WASM is done first in the clippy script and will clean up there

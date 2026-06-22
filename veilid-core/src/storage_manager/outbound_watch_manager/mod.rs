@@ -19,6 +19,9 @@ impl_veilid_log_facility!("stor");
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundWatchManager {
+    // Registry for logging
+    #[serde(skip)]
+    opt_registry: Option<VeilidComponentRegistry>,
     /// Each watch per record key
     #[serde(skip)]
     pub outbound_watches: HashMap<OpaqueRecordKey, OutboundWatch>,
@@ -83,9 +86,16 @@ impl Default for OutboundWatchManager {
     }
 }
 
+impl VeilidComponentRegistryAccessor for OutboundWatchManager {
+    fn registry(&self) -> VeilidComponentRegistry {
+        self.opt_registry.clone().unwrap_or_log()
+    }
+}
+
 impl OutboundWatchManager {
     pub fn new() -> Self {
         Self {
+            opt_registry: None,
             outbound_watches: HashMap::new(),
             per_node_states: HashMap::new(),
             needs_change_inspection: HashMap::new(),
@@ -93,11 +103,14 @@ impl OutboundWatchManager {
     }
 
     pub fn prepare(&mut self, routing_table: &RoutingTable) {
+        let registry = routing_table.registry();
+        self.opt_registry = Some(registry.clone());
+
         for (pnk, pns) in &mut self.per_node_states {
             pns.watch_node_ref = match routing_table.lookup_node_id(pnk.node_id.clone()) {
                 Ok(v) => v,
                 Err(e) => {
-                    veilid_log!(routing_table debug "Error looking up outbound watch node ref: {}", e);
+                    veilid_log!(registry debug "Error looking up outbound watch node ref: {}", e);
                     None
                 }
             };
@@ -176,9 +189,9 @@ impl OutboundWatchManager {
                 .as_ref()
                 .unwrap_or_log()
                 .state(cur_ts)
-                .is_alive()
+                .is_responsive()
             {
-                // If node is unreachable add to dead list
+                // If node is not responsive add to dead list
                 dead_pnks.insert(pnk.clone());
             } else if cur_ts >= pns.expiration {
                 // If per-node watch has expired add to expired list
@@ -211,13 +224,8 @@ impl OutboundWatchManager {
     }
 
     /// Set a record up to be inspected for changed subkeys
-    pub fn enqueue_change_inspect(
-        &mut self,
-        storage_manager: &StorageManager,
-        record_key: RecordKey,
-        subkeys: ValueSubkeyRangeSet,
-    ) {
-        veilid_log!(storage_manager debug "change inspect: record_key={} subkeys={}", record_key, subkeys);
+    pub fn enqueue_change_inspect(&mut self, record_key: RecordKey, subkeys: ValueSubkeyRangeSet) {
+        veilid_log!(self debug "change inspect: record_key={} subkeys={}", record_key, subkeys);
 
         let opaque_record_key = record_key.opaque();
 

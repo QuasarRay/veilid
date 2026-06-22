@@ -52,7 +52,11 @@ impl WebsocketNetworkConnection {
         instrument(level = "trace", err, skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub async fn close(&self) -> io::Result<NetworkResult<()>> {
-        let timeout_ms = self.config().network.connection_initial_timeout_ms;
+        let timeout_ms = self
+            .config()
+            .internal()
+            .network
+            .connection_initial_timeout_ms;
 
         #[allow(unused_variables)]
         let x = match timeout(timeout_ms, self.inner.ws_meta.close()).await {
@@ -129,7 +133,7 @@ impl WebsocketProtocolHandler {
             DialInfo::WS(_) => (false, "ws"),
             #[cfg(feature = "enable-protocol-wss")]
             DialInfo::WSS(_) => (true, "wss"),
-            _ => panic!("invalid dialinfo for WS/WSS protocol"),
+            _ => bail_io_error_other!("invalid dialinfo for WS/WSS protocol"),
         };
         let request = dial_info.request().unwrap_or_log();
         let split_url = SplitUrl::from_str(&request).map_err(to_io_error_other)?;

@@ -182,7 +182,7 @@ impl RPCOperationTransactBeginA {
             .as_ref()
             .expect_or_log("TransactBeginA requires question context");
         let QuestionContext::TransactBegin(transact_begin_context) = question_context else {
-            panic!("Wrong context type for TransactBeginA");
+            return Err(RPCError::internal("Wrong context type for TransactBeginA"));
         };
 
         let crypto = validate_context.crypto();

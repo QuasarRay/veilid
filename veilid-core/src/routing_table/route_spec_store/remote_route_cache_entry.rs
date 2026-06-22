@@ -83,26 +83,6 @@ impl RemoteRouteCacheEntry {
     }
 
     /// Whether any in-flight operation currently holds this set or any of its routes
-    #[expect(
-        dead_code,
-        reason = "consumed by RouteSetRef / RouteRef in upcoming phase"
-    )]
-    #[must_use]
-    pub fn is_locked(&self) -> bool {
-        self.lock_count.load(Ordering::Acquire) > 0
-            || self
-                .per_route_lock_counts
-                .values()
-                .any(|c| c.load(Ordering::Acquire) > 0)
-    }
-    /// Whether any in-flight operation currently holds a specific route within the set
-    #[expect(dead_code, reason = "consumed by RemoteRouteRef in upcoming phase")]
-    #[must_use]
-    pub fn is_route_locked(&self, key: &PublicKey) -> bool {
-        self.per_route_lock_counts
-            .get(key)
-            .is_some_and(|c| c.load(Ordering::Acquire) > 0)
-    }
     pub fn get_private_routes(&self) -> &[Arc<PrivateRoute>] {
         &self.private_routes
     }

@@ -10,11 +10,17 @@ use std::{io, path::Path};
 
 /////////////////////////////////////////////////////////////
 
+/// A bidirectional IPC connection over a unix domain socket (async-std backend).
 pub struct IpcStream {
     internal: UnixStream,
 }
 
 impl IpcStream {
+    /// Connect to an IPC endpoint at the given socket path.
+    ///
+    /// Blocks until the unix socket connect completes.
+    ///
+    /// Errors with the underlying connect failure: `NotFound` if no socket exists at `path`, `ConnectionRefused` if nothing is listening, `PermissionDenied` if the socket is not accessible.
     pub async fn connect<P: AsRef<Path>>(path: P) -> io::Result<IpcStream> {
         Ok(IpcStream {
             internal: UnixStream::connect(path.as_ref()).await?,
@@ -58,6 +64,8 @@ impl FuturesAsyncWrite for IpcStream {
 
 /////////////////////////////////////////////////////////////
 
+/// A stream of incoming IPC connections, yielding an [IpcStream] per accept.
+/// Removes the socket file on drop.
 pub struct IpcIncoming<'a> {
     path: PathBuf,
     internal: Incoming<'a>,
@@ -90,6 +98,8 @@ impl Stream for IpcIncoming<'_> {
 
 /////////////////////////////////////////////////////////////
 
+/// Listens for incoming IPC connections on a unix domain socket, removing the
+/// socket file on drop.
 pub struct IpcListener {
     path: Option<PathBuf>,
     internal: Option<Arc<UnixListener>>,
@@ -97,6 +107,10 @@ pub struct IpcListener {
 
 impl IpcListener {
     /// Creates a new `IpcListener` bound to the specified path.
+    ///
+    /// The returned listener (or the [`IpcIncoming`] taken from it) removes the socket file when dropped.
+    ///
+    /// Errors with the underlying bind failure: `AddrInUse` if a socket already exists at `path` (stale sockets are not cleaned up), `PermissionDenied` if the directory is not writable.
     pub async fn bind<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         Ok(Self {
             path: Some(path.as_ref().to_path_buf()),
@@ -105,6 +119,8 @@ impl IpcListener {
     }
 
     /// Accepts a new incoming connection to this listener.
+    ///
+    /// The returned future blocks until a peer connects. Errors `NotConnected` once [`IpcListener::incoming`] has consumed the listener, otherwise propagates the io error from the underlying socket accept.
     #[must_use]
     pub fn accept(&self) -> PinBoxFuture<'_, io::Result<IpcStream>> {
         if self.path.is_none() {
@@ -124,6 +140,8 @@ impl IpcListener {
     }
 
     /// Returns a stream of incoming connections.
+    ///
+    /// Moves the socket-file cleanup to the returned [`IpcIncoming`]; a second call errors `NotConnected`.
     pub fn incoming(&mut self) -> io::Result<IpcIncoming<'_>> {
         if self.path.is_none() {
             return Err(io::Error::from(io::ErrorKind::NotConnected));

@@ -36,6 +36,7 @@ pub struct VeilidAppMessage {
 }
 
 impl VeilidAppMessage {
+    /// Construct an app message from its sender, optional route id, and payload.
     pub fn new(sender: Option<NodeId>, route_id: Option<RouteId>, message: Vec<u8>) -> Self {
         Self {
             sender,
@@ -112,6 +113,7 @@ pub struct VeilidAppCall {
 }
 
 impl VeilidAppCall {
+    /// Construct an app call from its sender, optional route id, payload, and call id.
     pub fn new(
         sender: Option<NodeId>,
         route_id: Option<RouteId>,

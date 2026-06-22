@@ -409,6 +409,10 @@ impl OutboundTransactionRecordState {
         &self.record_params.record_key
     }
 
+    pub fn operation_signer(&self) -> &KeyPair {
+        &self.record_params.signing_keypair
+    }
+
     pub fn safety_selection(&self) -> &SafetySelection {
         &self.record_params.safety_selection
     }
@@ -609,7 +613,6 @@ impl OutboundTransactionRecordState {
                 lnxid: *lnxid,
                 rnxid: nt.rnxid().clone(),
                 node_ref: nt.node_ref(),
-                opt_last_rtt: nt.opt_last_rtt(),
             })
             .collect::<Vec<_>>();
 

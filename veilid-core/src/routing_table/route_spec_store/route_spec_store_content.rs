@@ -62,7 +62,9 @@ impl RouteSpecStoreContent {
 
     /// Add a route set spec detail to the persistent content
     pub fn add_detail(&mut self, id: AllocatedRouteSetId, detail: RouteSetSpecDetail) {
-        assert!(!self.data.details.contains_key(&id));
+        if self.data.details.contains_key(&id) {
+            veilid_log!(self error "route set detail already exists, overwriting: {}", id);
+        }
 
         // also store in id by key table
         for (pk, _) in detail.iter_route_set() {

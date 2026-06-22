@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use super::*;
-use veilid_core::{try_from_js_array, try_from_js_option};
+use crate::ts::try_from_js_option;
 use veilid_crypto_js::VeilidCrypto;
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -10,9 +10,11 @@ export type UpdateVeilidFunction = (event: VeilidUpdate) => void;
 
 #[wasm_bindgen]
 extern "C" {
+    /// JS callback invoked for each `VeilidUpdate` produced by the node.
     #[wasm_bindgen(extends = Function, typescript_type = "UpdateVeilidFunction")]
     pub type UpdateVeilidFunction;
 
+    /// Log a message to the JS `console.log`.
     // Use `js_namespace` here to bind `console.log(..)` instead of just
     // `log(..)`
     #[wasm_bindgen(js_namespace = console, js_name = log)]
@@ -21,6 +23,7 @@ extern "C" {
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+/// Namespace of node-level Veilid operations: startup, shutdown, state, crypto, routes, and config.
 #[wasm_bindgen(js_name = veilidClient)]
 pub struct VeilidClient {}
 
@@ -118,6 +121,9 @@ impl VeilidClient {
 
     ///////////////////////////////////////////////////////////////////////////////////////////
 
+    /// Initialize the WASM platform: panic hook and tracing layers from the platform config.
+    ///
+    /// Idempotent; only the first call has any effect. Must run before `startupCore`.
     #[allow(clippy::unused_async)]
     pub async fn initializeCore(platformConfig: VeilidWASMConfig) {
         if INITIALIZED.swap(true, Ordering::AcqRel) {
@@ -193,6 +199,10 @@ impl VeilidClient {
     ///
     /// @param {UpdateVeilidFunction} updateCallbackJS - called when internal state of the Veilid node changes, for example, when app-level messages are received, when private routes die and need to be reallocated, or when routing table states change
     /// @param {VeilidConfig} config - the configuration object to use for the instance
+    ///
+    /// The open half of the startup/shutdown pair; release with [VeilidClient::shutdownCore]. Errors with `AlreadyInitialized` if a node is already running. Blocks bringing the core up.
+    ///
+    /// Throws `AlreadyInitialized` if a node is already running, otherwise the error from core startup (`Generic` on a bad config or a failure bringing the core up).
     pub async fn startupCore(
         updateCallbackJS: UpdateVeilidFunction,
         config: VeilidConfig,
@@ -202,7 +212,7 @@ impl VeilidClient {
             let _ret = match Function::call1(
                 &update_callback_js,
                 &JsValue::UNDEFINED,
-                &to_jsvalue(update),
+                &JsValue::from(update),
             ) {
                 Ok(v) => v,
                 Err(e) => {
@@ -221,6 +231,9 @@ impl VeilidClient {
         Ok(())
     }
 
+    /// Apply tracing directives to a logging layer by name, or to all layers when `layer` is "all".
+    ///
+    /// Throws a parse error if `directive` is not a valid log directive string. An unknown `layer` name is a no-op, not an error.
     // TODO: can we refine the TS type of `layer`?
     pub fn changeLogLevel(layer: String, directive: String) -> VeilidAPIResult<()> {
         let layer = if layer == "all" { "".to_owned() } else { layer };
@@ -239,6 +252,7 @@ impl VeilidClient {
         Ok(())
     }
 
+    /// Apply ignore-list changes to a logging layer by name, or to all layers when `layer` is "all".
     // TODO: can we refine the TS type of `layer`?
     pub fn changeLogIgnore(layer: String, changes: Vec<String>) {
         let layer = if layer == "all" { "".to_owned() } else { layer };
@@ -258,6 +272,10 @@ impl VeilidClient {
         }
     }
     /// Shut down Veilid and terminate the API.
+    ///
+    /// The release for [VeilidClient::startupCore]. Blocks until the core finishes shutting down. A second call after shutdown errors with `NotInitialized`.
+    ///
+    /// Throws `NotInitialized` if the node is not running.
     pub async fn shutdownCore() -> VeilidAPIResult<()> {
         let veilid_api = take_veilid_api()?;
         veilid_api.shutdown().await;
@@ -276,24 +294,36 @@ impl VeilidClient {
     }
 
     /// Get a full copy of the current state of Veilid.
+    ///
+    /// Throws `NotInitialized` if the node is not started.
     pub async fn getState() -> VeilidAPIResult<VeilidState> {
         let veilid_api = get_veilid_api()?;
         veilid_api.get_state().await
     }
 
     /// Connect to the network.
+    ///
+    /// Sets the maintain-peers flag and returns; the network connect proceeds in the background tick loop. Errors if already attached.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::attach` returns: `Generic` if already attached, and `NotInitialized` if the node is not started.
     pub async fn attach() -> VeilidAPIResult<()> {
         let veilid_api = get_veilid_api()?;
         veilid_api.attach().await
     }
 
     /// Disconnect from the network.
+    ///
+    /// Clears the maintain-peers flag and returns; the network teardown proceeds in the background tick loop. Errors if already detached.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::detach` returns: `Generic` if already detached, and `NotInitialized` if the node is not started.
     pub async fn detach() -> VeilidAPIResult<()> {
         let veilid_api = get_veilid_api()?;
         veilid_api.detach().await
     }
 
     /// Get a cryptosystem by its kind
+    ///
+    /// Throws `InvalidArgument` if `kind` is not a cryptosystem this build supports, `NotInitialized` if the node is not started, and a parse error if `kind` fails to deserialize.
     pub fn getCrypto(
         #[wasm_bindgen(unchecked_param_type = "CryptoKind")] kind: JsValue,
     ) -> VeilidAPIResult<VeilidCrypto> {
@@ -307,6 +337,8 @@ impl VeilidClient {
     }
 
     /// Verify multiple signatures with multiple cryptosystems
+    ///
+    /// Returns `undefined` if any supported signature fails to validate; otherwise the set of public keys that did validate. Throws `Generic` if a public key or signature has the wrong kind or length or if `publicKeys` or `signatures` fail to deserialize, `ParseError` if a matching public key is not a valid ed25519 point, and `NotInitialized` if the node is not started.
     pub fn verifySignatures(
         #[wasm_bindgen(unchecked_param_type = "PublicKey[]")] publicKeys: JsValue,
         data: Box<[u8]>,
@@ -324,6 +356,8 @@ impl VeilidClient {
     }
 
     /// Generate multiple signatures with multiple cryptosystems
+    ///
+    /// Unsupported crypto kinds in `keyPairs` are silently dropped. Throws `Generic` if a keypair has the wrong kind or length or if `keyPairs` fails to deserialize, `ParseError` or `Internal` if a keypair does not form a valid signing pair, and `NotInitialized` if the node is not started.
     pub fn generateSignatures(
         data: Box<[u8]>,
         #[wasm_bindgen(unchecked_param_type = "KeyPair[]")] keyPairs: JsValue,
@@ -335,6 +369,8 @@ impl VeilidClient {
     }
 
     /// Create a new MemberId for use with in creating `DHTSchema`s.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::generate_member_id` returns: `Generic` if `writer_key` is an unsupported crypto kind, and `NotInitialized` if the node is not started.
     pub fn generateMemberId(writer_key: &PublicKey) -> VeilidAPIResult<MemberId> {
         let veilid_api = get_veilid_api()?;
         veilid_api.generate_member_id(writer_key)
@@ -343,6 +379,10 @@ impl VeilidClient {
     /// Start a transaction on a set of DHT records
     /// Record keys must have been opened via a routing context already when passed to this function
     /// Options can be specified that supply a default signing keypair for records that are not opened for writing
+    ///
+    /// Blocks on a network Begin fanout across the record nodes (online-only). The returned [VeilidDHTTransaction] holds a network-side resource the caller must release via [VeilidDHTTransaction::commit] or [VeilidDHTTransaction::rollback]; dropping it without either tears the transaction down in the background.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::transact_dht_records` returns: `InvalidArgument` if a record is not open or more than 32 records are passed, `MissingArgument` if `recordKeys` is empty or has duplicates, `Generic` if a record key is malformed or its encryption key does not match the opened record, `TryAgain` (retryable) if the DHT is offline, the records are contended, or Begin consensus was not reached, and `NotInitialized` if the node is not started. Network failures surface as `Timeout` or `NoConnection`. Also throws `Generic` if `recordKeys` or `options` fail to deserialize.
     pub async fn transactDHTRecords(
         #[wasm_bindgen(unchecked_param_type = "RecordKey[]")] recordKeys: JsValue,
         options: Option<ts::TransactDHTRecordsOptions>,
@@ -369,6 +409,10 @@ impl VeilidClient {
 
     /// Deterministicly builds the record key for a given schema and owner public key.
     /// The crypto kind of the record key will be that of the `owner` public key
+    ///
+    /// Local crypto computation only; despite being `async` it makes no network round-trip. The same inputs always yield the same key.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::get_dht_record_key` returns: `InvalidArgument` or `Generic` if `schema` is malformed, `Generic` if `owner` or `encryptionKey` is an unsupported crypto kind, and `NotInitialized` if the node is not started. Also throws `Generic` (or `InvalidArgument` for `schema`) if `schema` or `encryptionKey` fail to deserialize.
     #[allow(clippy::unused_async)]
     pub async fn getDHTRecordKey(
         schema: ts::DHTSchema,
@@ -395,6 +439,10 @@ impl VeilidClient {
     /// Those nodes importing the blob will have their choice of which crypto kind to use.
     ///
     /// Returns a route id and 'blob' that can be published over some means (DHT or otherwise) to be imported by another Veilid node.
+    ///
+    /// Blocks on the network to allocate and test the route. The returned route id holds an allocated route the caller must free with [VeilidClient::releasePrivateRoute] or it leaks.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::new_private_route` returns: `TryAgain` (retryable) if there is no valid PublicInternet network class yet, not enough nodes are known to build the route, or the route failed its reachability test, and `NotInitialized` if the node is not started.
     pub async fn newPrivateRoute() -> VeilidAPIResult<ts::RouteBlob> {
         let veilid_api = get_veilid_api()?;
 
@@ -405,6 +453,10 @@ impl VeilidClient {
     /// Import a private route blob as a remote private route.
     ///
     /// Returns a route id that can be used to send private messages to the node creating this route.
+    ///
+    /// Local import, no network round-trip. The returned route id holds an imported route the caller must free with [VeilidClient::releasePrivateRoute] or it leaks.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::import_remote_private_route` returns: `InvalidArgument` if `blob` is empty or names too many crypto kinds, `ParseError` if it is malformed, `Generic` if the decoded route has no first hop, and `NotInitialized` if the node is not started.
     #[allow(clippy::boxed_local)]
     pub fn importRemotePrivateRoute(blob: Box<[u8]>) -> VeilidAPIResult<RouteId> {
         let veilid_api = get_veilid_api()?;
@@ -416,6 +468,10 @@ impl VeilidClient {
     /// Those nodes importing the blob will have their choice of which crypto kind to use.
     ///
     /// Returns a route id and 'blob' that can be published over some means (DHT or otherwise) to be imported by another Veilid node.
+    ///
+    /// Blocks on the network to allocate and test the route. The returned route id holds an allocated route the caller must free with [VeilidClient::releasePrivateRoute] or it leaks.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::new_custom_private_route` returns: `Generic` if `private_spec` names an invalid crypto kind, `InvalidArgument` if its hop count exceeds the configured maximum, `TryAgain` (retryable) if there is no valid PublicInternet network class yet, not enough nodes are known, or the route failed its reachability test, and `NotInitialized` if the node is not started.
     pub async fn newCustomPrivateRoute(
         private_spec: ts::PrivateSpec,
     ) -> VeilidAPIResult<ts::RouteBlob> {
@@ -429,6 +485,8 @@ impl VeilidClient {
     /// Release either a locally allocated or remotely imported private route.
     ///
     /// This will deactivate the route and free its resources and it can no longer be sent to or received from.
+    ///
+    /// The release for [VeilidClient::newPrivateRoute], [VeilidClient::newCustomPrivateRoute], and [VeilidClient::importRemotePrivateRoute]. Local, no network round-trip. Releasing a route id that is unknown, already released, or malformed errors with `InvalidArgument`; throws `NotInitialized` if the node is not started.
     pub fn releasePrivateRoute(route_id: &RouteId) -> VeilidAPIResult<()> {
         let veilid_api = get_veilid_api()?;
         veilid_api.release_private_route(route_id.clone())
@@ -438,6 +496,10 @@ impl VeilidClient {
     ///
     /// * `call_id` - specifies which call to reply to, and it comes from a VeilidUpdate::AppCall, specifically the VeilidAppCall::id() value.
     /// * `message` - is an answer blob to be returned by the remote node's RoutingContext::app_call() function, and may be up to 32768 bytes
+    ///
+    /// Awaits a network send of the answer.
+    ///
+    /// Throws a parse error if `callId` is not a valid operation id. Otherwise throws the same error its core twin `VeilidAPI::app_call_reply` returns: `Generic` if the `callId` is unknown or already answered, `TryAgain` if the node is mid-shutdown, and `NotInitialized` if the node is not started.
     pub async fn appCallReply(callId: String, message: Box<[u8]>) -> VeilidAPIResult<()> {
         let message = message.to_vec();
         let call_id = match callId.parse() {
@@ -476,6 +538,8 @@ impl VeilidClient {
     }
 
     /// Execute an 'internal debug command'.
+    ///
+    /// Throws a parse error if `command` cannot be tokenized, `Generic` if it is an unknown command, `InvalidArgument` if a known command's arguments are invalid, and `NotInitialized` if the node is not started. Individual commands may throw their own errors.
     pub async fn debug(command: String) -> VeilidAPIResult<String> {
         let veilid_api = get_veilid_api()?;
         veilid_api.debug(command).await
@@ -512,6 +576,7 @@ impl VeilidClient {
 
 /////////////////////////////////////////////////////////////////////////////////
 
+/// A transaction over a set of DHT records, allowing atomic get/set across them.
 #[wasm_bindgen]
 pub struct VeilidDHTTransaction {
     inner_transaction: Option<DHTTransaction>,
@@ -529,12 +594,20 @@ impl VeilidDHTTransaction {
     }
 
     /// Commit the transaction. Performs all actions atomically.
+    ///
+    /// The release for [VeilidClient::transactDHTRecords] (the other half is [VeilidDHTTransaction::rollback]). Blocks on the end and commit consensus barriers and requires the node to be online. Completes exactly once: a second commit or a rollback errors with `transaction_not_found`.
+    ///
+    /// Throws the same error its core twin `DHTTransaction::commit` returns: `TransactionNotFound` if the transaction was already committed, rolled back, or is unknown, and `TryAgain` (retryable) if the node is offline or the end/commit barriers could not reach consensus. Throws `NotInitialized` if the node is not started.
     pub async fn commit(&self) -> VeilidAPIResult<()> {
         let transaction = self.getTransaction()?;
         transaction.commit().await
     }
 
     /// Rollback the transaction. Does nothing to the DHT.
+    ///
+    /// The release for [VeilidClient::transactDHTRecords] (the other half is [VeilidDHTTransaction::commit]). Blocks sending rollbacks to the network and requires the node to be online. Completes exactly once: a second rollback or a commit errors with `transaction_not_found`.
+    ///
+    /// Throws the same error its core twin `DHTTransaction::rollback` returns: `TransactionNotFound` if the transaction was already committed, rolled back, or is unknown, and `TryAgain` (retryable) if the node is offline. Throws `NotInitialized` if the node is not started.
     pub async fn rollback(&self) -> VeilidAPIResult<()> {
         let transaction = self.getTransaction()?;
         transaction.rollback().await
@@ -544,6 +617,10 @@ impl VeilidDHTTransaction {
     ///
     /// Records already in the transaction are skipped. Idempotent if no
     /// new records are supplied. May return `TryAgain` on Begin contention.
+    ///
+    /// Blocks on a network Begin fanout for the new records (online-only).
+    ///
+    /// Throws the same error its core twin `DHTTransaction::extend` returns: `TransactionNotFound` if the transaction handle is already completed or unknown, `MissingArgument` if `recordKeys` contains duplicates, `InvalidArgument` if the merged record set would exceed the per-transaction record limit, and `TryAgain` (retryable) if the node is offline or the Begin fanout for the added records could not reach consensus. Throws `NotInitialized` if the node is not started, and `Generic` if `recordKeys` or `options` fail to deserialize.
     pub async fn extend(
         &self,
         #[wasm_bindgen(unchecked_param_type = "RecordKey[]")] recordKeys: JsValue,
@@ -572,6 +649,10 @@ impl VeilidDHTTransaction {
     ///
     /// Returns `None` if the value was successfully set.
     /// Returns `Some(data)` if the value set was older than the one available on the network.
+    ///
+    /// Blocks on the per-subkey lock (unbounded) and the set RPC to the transaction's node set. Each per-node RPC is bounded by `network.rpc.timeout_ms`, but the lock wait and retry rounds are not, so the whole call has no single-timeout bound.
+    ///
+    /// Throws the same error its core twin `DHTTransaction::set` returns: `TransactionNotFound` if the transaction handle is already completed or no longer in the Begin stage, `InvalidArgument` if `recordKey` is not open in the transaction or `subkey` is outside the schema range, `Generic` if `recordKey` is malformed (unsupported kind or bad length) or the subkey has no writer, and `TryAgain` (retryable) if the node is offline or write consensus was not reached this round. A non-responding node is retried rather than surfaced as a timeout. Throws `NotInitialized` if the node is not started, and `Generic` if `options` fails to deserialize.
     pub async fn set(
         &self,
         recordKey: &RecordKey,
@@ -603,6 +684,10 @@ impl VeilidDHTTransaction {
     ///
     /// Returns `None` if the value subkey has not yet been set.
     /// Returns `Some(data)` if the value subkey has valid data.
+    ///
+    /// Blocks on the per-subkey lock (unbounded) and the get RPC to the transaction's node set. Each per-node RPC is bounded by `network.rpc.timeout_ms`, but the lock wait and retry rounds are not, so the whole call has no single-timeout bound.
+    ///
+    /// Throws the same error its core twin `DHTTransaction::get` returns: `TransactionNotFound` if the transaction handle is already completed or no longer in the Begin stage, `InvalidArgument` if `recordKey` is not in the transaction or `subkey` is outside the schema range, `Generic` if `recordKey` is malformed (unsupported kind or bad length), and `TryAgain` (retryable) if the node is offline or the network did not return the value that existed at begin time. A non-responding node is retried rather than surfaced as a timeout. Throws `NotInitialized` if the node is not started.
     pub async fn get(
         &self,
         recordKey: &RecordKey,
@@ -623,6 +708,8 @@ impl VeilidDHTTransaction {
     /// For information on arguments, see [RoutingContext::inspect_dht_record]
     ///
     /// Returns a DHTRecordReport with the subkey ranges that were returned that overlapped the schema, and sequence numbers for each of the subkeys in the range.
+    ///
+    /// Throws the same error its core twin `DHTTransaction::inspect` returns: `TransactionNotFound` if the transaction handle is already completed, unknown, or no longer in the Begin stage, `InvalidArgument` if `recordKey` is not in the transaction (a malformed or wrong-kind key is not found), and `Generic` if the transaction has not started. Performs no network activity and cannot time out. Throws `NotInitialized` if the node is not started.
     pub async fn inspect(
         &self,
         recordKey: &RecordKey,

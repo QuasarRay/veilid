@@ -68,20 +68,25 @@ impl DHTRecordReport {
         })
     }
 
+    /// The subkey range the report covers, possibly trimmed from the requested range to fit schema limits
     pub fn subkeys(&self) -> &ValueSubkeyRangeSet {
         &self.subkeys
     }
+    /// The subkeys written offline that still need to be flushed to the network
     pub fn offline_subkeys(&self) -> &ValueSubkeyRangeSet {
         &self.offline_subkeys
     }
+    /// The local sequence number of each subkey in [DHTRecordReport::subkeys], in ascending subkey order
     #[must_use]
     pub fn local_seqs(&self) -> &[ValueSeqNum] {
         &self.local_seqs
     }
+    /// The network sequence number of each subkey in [DHTRecordReport::subkeys], in ascending subkey order
     #[must_use]
     pub fn network_seqs(&self) -> &[ValueSeqNum] {
         &self.network_seqs
     }
+    /// The subkeys whose network sequence number is newer than the local copy
     pub fn newer_online_subkeys(&self) -> ValueSubkeyRangeSet {
         let mut newer_online = ValueSubkeyRangeSet::new();
         for ((sk, lseq), nseq) in self

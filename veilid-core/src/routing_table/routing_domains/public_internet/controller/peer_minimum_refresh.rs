@@ -29,9 +29,15 @@ impl PublicInternetRoutingDomainController {
         let crypto_kinds = nodes_needed.needs_peer_minimum_refresh;
 
         let routing_table = self.routing_table();
-        let min_peer_count = self.config().network.dht.min_peer_count as usize;
-        let min_peer_refresh_time =
-            TimestampDuration::new_ms(self.config().network.dht.min_peer_refresh_time_ms.into());
+        let min_peer_count = self.config().internal().network.dht.min_peer_count as usize;
+        let min_peer_refresh_time = TimestampDuration::new_ms(
+            self.config()
+                .internal()
+                .network
+                .dht
+                .min_peer_refresh_time_ms
+                .into(),
+        );
 
         // For the PublicInternet routing domain, get list of all peers we know about
         // even the unreliable ones, and ask them to find nodes close to our node too
@@ -45,9 +51,13 @@ impl PublicInternetRoutingDomainController {
 
         // Snapshot once for all crypto kinds, extract what we need, then drop
         // We don't use the cached snapshot summary here because we need the noderefs themselves
-        let (existing_node_ids, noderefs_per_kind) = {
-            let snapshot = routing_table.snapshot_entries(cur_ts, BucketEntryState::Unreliable);
-            let existing_node_ids = Arc::new(snapshot.existing_node_ids());
+        let (existing_node_ids, all_known_node_ids, noderefs_per_kind) = {
+            // Snapshot down to Dead so the summary log can distinguish brand-new nodes from dead
+            // nodes the wide search re-finds. Find and candidate selection still use only alive nodes.
+            let snapshot = routing_table.snapshot_entries(cur_ts, BucketEntryState::Dead);
+            let existing_node_ids =
+                Arc::new(snapshot.existing_node_ids(Some(BucketEntryState::Missing)));
+            let all_known_node_ids = Arc::new(snapshot.existing_node_ids(None));
 
             let mut noderefs_per_kind = Vec::new();
             for crypto_kind in &crypto_kinds {
@@ -56,6 +66,10 @@ impl PublicInternetRoutingDomainController {
                     .entries()
                     .iter()
                     .filter(|snap| {
+                        // Only alive nodes are refresh targets
+                        if snap.state.is_live() {
+                            return false;
+                        }
                         // Keep only the entries that contain the crypto kind we're looking for
                         if !snap.node_ids.kinds().contains(crypto_kind) {
                             return false;
@@ -68,11 +82,16 @@ impl PublicInternetRoutingDomainController {
                             return false;
                         }
                         // Keep only the entries we haven't talked to in the min_peer_refresh_time
-                        if let Some(last_q_ts) = snap.peer_stats.rpc_stats.last_question_ts {
+                        if let Some(last_q_ts) = snap.rpc_stats.last_question_ts {
                             if cur_ts.duration_since(last_q_ts) < min_peer_refresh_time {
                                 return false;
                             }
                         }
+                        // Keep only the entries that have responded to some answer consecutively
+                        if snap.rpc_stats.first_steady_answer_ts.is_none() {
+                            return false;
+                        }
+
                         true
                     })
                     .collect();
@@ -92,7 +111,7 @@ impl PublicInternetRoutingDomainController {
                 noderefs_per_kind.push((*crypto_kind, noderefs));
             }
 
-            (existing_node_ids, noderefs_per_kind)
+            (existing_node_ids, all_known_node_ids, noderefs_per_kind)
         };
 
         for (crypto_kind, noderefs) in noderefs_per_kind {
@@ -148,12 +167,17 @@ impl PublicInternetRoutingDomainController {
         // Reset the low water mark for this routing domain
         routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
 
-        // Log what we found
+        // Log only the nodes that were not already known (in any non-punished state) at the start,
+        // so dead nodes the wide search re-finds don't show up as new discoveries.
+        let is_new = |nr: &NodeRef| {
+            !nr.node_ids()
+                .contains_any_from_iter(all_known_node_ids.iter())
+        };
         for (crypto_kind, nodes_found) in nodes_found_per_crypto_kind.lock().iter() {
-            let close_nodes_count = nodes_found.0.len();
-            let wide_nodes_count = nodes_found.1.len();
+            let close_nodes_count = nodes_found.0.iter().filter(|nr| is_new(nr)).count();
+            let wide_nodes_count = nodes_found.1.iter().filter(|nr| is_new(nr)).count();
             if close_nodes_count > 0 || wide_nodes_count > 0 {
-                veilid_log!(self info "Peer minimum refresh found {} close nodes and {} wide nodes for {}", close_nodes_count, wide_nodes_count, crypto_kind);
+                veilid_log!(self info "Peer minimum refresh found {} new close nodes and {} new wide nodes for {}", close_nodes_count, wide_nodes_count, crypto_kind);
             }
         }
 

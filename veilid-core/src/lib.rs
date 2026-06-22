@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! # The Veilid Framework
 //!
 //! This is the core library used to create a Veilid node and operate it as part of an application.
@@ -155,8 +156,10 @@ use self::component::*;
 use self::core_context::RegisteredComponents;
 #[allow(unused_imports)]
 use self::logging::{
-    debug_duration, record_duration, record_duration_fut, DurationRecorder, MeasureDebugFuture,
-    MeasureFuture, VeilidComponentLogFacilities, VeilidComponentLogFacility, DEBUGWARN,
+    debug_duration, impl_veilid_log_facility, log_veilid_api_error, network_result_value_or_log,
+    record_duration, record_duration_fut, veilid_log, veilid_log_dbg, veilid_log_err,
+    veilid_log_event, DurationRecorder, MeasureDebugFuture, MeasureFuture,
+    VeilidComponentLogFacilities, VeilidComponentLogFacility, DEBUGWARN,
 };
 use self::stats_accounting::*;
 

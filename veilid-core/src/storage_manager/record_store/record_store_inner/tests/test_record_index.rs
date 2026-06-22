@@ -265,7 +265,7 @@ pub async fn test_subkey_access_range(
                 Record::<LocalRecordDetail>::new(
                     Timestamp::now(),
                     desc.clone(),
-                    LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::NoPreference)),
+                    LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferUnordered)),
                 )
                 .expect("should create record data"),
             )
@@ -532,9 +532,9 @@ pub async fn test_create_read_write_delete_loop(
         let descriptor = random_signed_value_descriptor(vcrypto, None);
         let max_subkey = descriptor.schema().unwrap().max_subkey();
         let detail = LocalRecordDetail {
-            safety_selection: SafetySelection::Unsafe(Sequencing::NoPreference),
+            safety_selection: SafetySelection::Unsafe(Sequencing::PreferUnordered),
             nodes: HashMap::new(),
-            transaction_record_set: None,
+            transaction_membership: None,
         };
         record_index
             .create_record(

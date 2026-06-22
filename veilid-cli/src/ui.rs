@@ -18,6 +18,7 @@ pub trait UISender: Send {
     fn clone_uisender(&self) -> Box<dyn UISender>;
     fn as_logwriter(&self) -> Option<Box<dyn LogWriter>>;
 
+    #[expect(dead_code)]
     fn display_string_dialog(&self, title: &str, text: &str, close_cb: UICallback);
     fn quit(&self);
     fn send_callback(&self, callback: UICallback);

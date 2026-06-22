@@ -1,59 +1,16 @@
 mod state;
-mod transport_state;
-
-pub(crate) use state::*;
-pub(crate) use transport_state::*;
+mod state_reason;
 
 use super::*;
+#[cfg(feature = "tracking")]
+use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::{AtomicU32, Ordering};
 use hashlink::LruCache;
 
-fn default_routed_stats() -> LruCache<PublicKey, PerLocalRouteStats> {
-    LruCache::new(ROUTED_STATS_LRU_SIZE)
-}
+pub(crate) use state::*;
+pub(crate) use state_reason::*;
 
 impl_veilid_log_facility!("rtab");
-
-/// Reliable pings are done with increased spacing between pings
-///
-/// - Start secs is the number of seconds between the first two pings
-pub(crate) const RELIABLE_PING_INTERVAL_START_SECS: u32 = 10;
-/// - Max secs is the maximum number of seconds between consecutive pings
-pub(crate) const RELIABLE_PING_INTERVAL_MAX_SECS: u32 = 10 * 60;
-/// - Multiplier changes the number of seconds between pings over time
-///   making it longer as the node becomes more reliable
-pub(crate) const RELIABLE_PING_INTERVAL_MULTIPLIER: f64 = 2.0;
-
-/// Unreliable pings are done for a fixed amount of time while the
-/// node is given a chance to come back online before it is made dead
-/// If a node misses a single ping, it is marked unreliable and must
-/// return reliable pings for the duration of the span before being
-/// marked reliable again
-///
-/// - Span is the number of seconds total to attempt to validate the node
-pub(crate) const UNRELIABLE_PING_SPAN_SECS: u32 = 60;
-/// - Interval is the number of seconds between each ping
-pub(crate) const UNRELIABLE_PING_INTERVAL_SECS: u32 = 5;
-/// - Number of consecutive lost answers on a datagram socket we will
-///   tolerate before we call something unreliable
-pub(crate) const UNRELIABLE_LOST_ANSWERS_DATAGRAM: u32 = 2;
-/// - Number of consecutive lost answers on a stream socket we will
-///   tolerate before we call something unreliable
-pub(crate) const UNRELIABLE_LOST_ANSWERS_STREAM: u32 = 0;
-
-/// Default unreliable lost-answers threshold per low-level transport.
-/// Will become adaptive later (per-network baseline).
-pub(crate) fn default_unreliable_lost_answers_threshold(transport: LowLevelTransportType) -> u32 {
-    match transport.socket_type() {
-        SocketType::Stream => UNRELIABLE_LOST_ANSWERS_STREAM,
-        SocketType::Datagram => UNRELIABLE_LOST_ANSWERS_DATAGRAM,
-    }
-}
-
-/// Dead nodes are unreachable nodes, not 'never reached' nodes
-///
-/// How many times do we try to ping a never-reached node before we call it dead
-pub(crate) const NEVER_SEEN_PING_COUNT: u32 = 3;
 
 // Connectionless protocols like UDP are dependent on a NAT translation timeout
 // We ping relays to maintain our UDP NAT state with a RELAY_KEEPALIVE_PING_INTERVAL_SECS=10 frequency
@@ -122,7 +79,7 @@ impl fmt::Display for BucketEntryPublicInternet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(pi) = &self.peer_info {
             writeln!(f, "peer_info:")?;
-            write!(f, "    {}", indent_string(f.to_string(&**pi)))?;
+            writeln!(f, "    {}", indent_string(f.to_string(&**pi)))?;
         } else {
             writeln!(f, "peer_info: None")?;
         }
@@ -151,7 +108,7 @@ impl fmt::Display for BucketEntryLocalNetwork {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(pi) = &self.peer_info {
             writeln!(f, "peer_info:")?;
-            write!(f, "    {}", indent_string(f.to_string(&**pi)))?;
+            writeln!(f, "    {}", indent_string(f.to_string(&**pi)))?;
         } else {
             writeln!(f, "peer_info: None")?;
         }
@@ -168,15 +125,21 @@ impl fmt::Display for BucketEntryLocalNetwork {
 /// The data associated with each bucket entry
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct BucketEntryInner {
+    /// Registry for logging
+    #[serde(skip)]
+    opt_registry: Option<VeilidComponentRegistry>,
     /// The node ids matching this bucket entry
     node_ids: NodeIdGroup,
-    /// The set of envelope versions supported by the node inclusive of the requirements of any relay the node may be using
+    /// when the peer was added to the routing table
+    time_added: Timestamp,
+    /// The set of envelope versions supported by the node
+    /// inclusive of the requirements of any relay the node may be using
     envelope_support: Vec<EnvelopeVersion>,
-    /// If this node has updated it's SignedNodeInfo since our network
-    /// and dial info has last changed, for example when our IP address changes
+    /// If this node has updated its SignedNodeInfo since our network and dial info has last changed, for example when our IP address changes.
     /// Used to determine if we should make this entry 'live' again when we receive a signednodeinfo update that
-    /// has the same timestamp, because if we change our own IP address or network class it may be possible for nodes that were
-    /// unreachable may now be reachable with the same SignedNodeInfo/DialInfo
+    /// has the same timestamp, because if we change our own IP address or
+    /// network class it may be possible for nodes that were unreachable may now
+    /// be reachable with the same SignedNodeInfo/DialInfo
     updated_since_last_network_change: bool,
     /// The last flows used to contact this node, per protocol type
     #[serde(skip)]
@@ -188,46 +151,75 @@ pub(crate) struct BucketEntryInner {
     public_internet: BucketEntryPublicInternet,
     /// The node info for this entry on the localnetwork routing domain
     local_network: BucketEntryLocalNetwork,
-    /// Statistics gathered for the peer
+    /// API-visible statistics gathered for the peer
+    #[serde(default)]
     peer_stats: PeerStats,
+
+    ////////////////////////////////////////////////////////////////////////
+    // State Calculation Statistics
+    ////////////////////////////////////////////////////////////////////////
+    /// Node-level information about RPCs used to calculate state
+    #[serde(default)]
+    rpc_stats: RPCStats,
+    /// Statistics gathered per SequenceOrdering used to calculate state
+    #[serde(skip)]
+    per_sequence_ordering_stats: BTreeMap<SequenceOrdering, RPCStats>,
+    /// Per-transport reliability stats used to calculate state
+    #[serde(skip)]
+    per_transport_stats: BTreeMap<TransportType, RPCStats>,
+    /// Per-local-route stats keyed by local-route pubkey (our outbound SR for outbound,
+    /// our inbound reply-PR for inbound answers). Only populated for routed exchanges.
+    #[serde(skip, default = "default_per_route_stats")]
+    per_route_stats: LruCache<PublicKey, PerRouteStats>,
+    /// Stats for connection-oriented protocols
+    #[serde(skip)]
+    connection_stats: ConnectionStats,
+    /// If the entry is being punished and should be considered dead
+    #[serde(skip)]
+    punishment: Option<PunishmentReason>,
+    /// Contact method failures cache for assisting with contact method selection
+    #[serde(skip)]
+    contact_method_failures: HashMap<ContactMethod, Timestamp>,
+
+    /// Verbose stats: Recorded states for this peer over time for debugging purposes
+    #[serde(skip)]
+    state_stats: StateStats,
+    /// Verbose stats: Answer stats for this node over time for debugging purposes
+    #[serde(skip)]
+    answer_stats: AnswerStats,
+
+    ////////////////////////////////////////////////////////////////////////
+    // Stats Accounting
+    ////////////////////////////////////////////////////////////////////////
     /// The accounting for the latency statistics
     #[serde(skip)]
     latency_stats_accounting: LatencyStatsAccounting,
     /// The accounting for protected-connection drop durations
     #[serde(skip)]
-    protected_connection_drop_accounting: LatencyStatsAccounting,
+    protected_drop_span_accounting: LatencyStatsAccounting,
     /// The accounting for the transfer statistics
     #[serde(skip)]
     transfer_stats_accounting: TransferStatsAccounting,
     /// The account for the state and reason statistics
     #[serde(skip)]
     state_stats_accounting: Mutex<StateStatsAccounting>,
-    /// Per-transport reliability stats. Source of truth for per-transport state.
+    /// The accounting for the answer statistics
     #[serde(skip)]
-    per_transport_stats: BTreeMap<LowLevelTransportType, BucketEntryTransportStats>,
-    /// Per-local-route stats keyed by local-route pubkey (our outbound SR for outbound,
-    /// our inbound reply-PR for inbound answers). Only populated for routed exchanges.
-    #[serde(skip, default = "default_routed_stats")]
-    routed_stats: LruCache<PublicKey, PerLocalRouteStats>,
-    /// If the entry is being punished and should be considered dead
-    #[serde(skip)]
-    punishment: Option<PunishmentReason>,
+    answer_stats_accounting: AnswerStatsAccounting,
+
+    ////////////////////////////////////////////////////////////////////////
+    // Geolocation Feature
+    ////////////////////////////////////////////////////////////////////////
     /// Node location
     #[cfg(feature = "geolocation")]
     #[serde(skip)]
     geolocation_info: GeolocationInfo,
-    /// Tracking identifier for NodeRef debugging
-    #[cfg(feature = "tracking")]
-    #[serde(skip)]
-    next_track_id: usize,
-    /// Backtraces for NodeRef debugging
-    #[cfg(feature = "tracking")]
-    #[serde(skip)]
-    node_ref_tracks: HashMap<usize, backtrace::Backtrace>,
 }
 
 impl fmt::Display for BucketEntryInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let cur_ts = Timestamp::now();
+
         writeln!(f, "node_ids: {}", self.node_ids)?;
         writeln!(f, "envelope_support: {:?}", self.envelope_support)?;
         writeln!(
@@ -258,9 +250,32 @@ impl fmt::Display for BucketEntryInner {
         write!(f, "{}", indent_all_string(f.to_string(&self.local_network)))?;
         writeln!(f, "peer_stats:")?;
         write!(f, "{}", indent_all_string(f.to_string(&self.peer_stats)))?;
-        if !self.routed_stats.is_empty() {
-            writeln!(f, "routed_stats:")?;
-            for (key, entry) in self.routed_stats.iter() {
+        writeln!(f, "rpc_stats:")?;
+        write!(f, "{}", indent_all_string(f.to_string(&self.rpc_stats)))?;
+        writeln!(f, "state_stats:")?;
+        write!(f, "{}", indent_all_string(f.to_string(&self.state_stats)))?;
+        writeln!(f, "answer_stats:")?;
+        write!(f, "{}", indent_all_string(f.to_string(&self.answer_stats)))?;
+        writeln!(f, "connection_stats:")?;
+        write!(
+            f,
+            "{}",
+            indent_all_string(f.to_string(&self.connection_stats))
+        )?;
+        writeln!(f, "per_sequence_ordering_stats:")?;
+        for (key, entry) in &self.per_sequence_ordering_stats {
+            writeln!(f, "  {}:", key)?;
+            write!(f, "{}", indent_all_string(f.to_string(entry)))?;
+        }
+        writeln!(f, "per_transport_stats:")?;
+        for (key, entry) in &self.per_transport_stats {
+            writeln!(f, "  {}:", key)?;
+            write!(f, "{}", indent_all_string(f.to_string(entry)))?;
+        }
+        // Per route stats
+        if !self.per_route_stats.is_empty() {
+            writeln!(f, "per_route_stats:")?;
+            for (key, entry) in self.per_route_stats.iter() {
                 writeln!(f, "  {}:", key)?;
                 write!(
                     f,
@@ -272,23 +287,57 @@ impl fmt::Display for BucketEntryInner {
         }
         writeln!(f, "punishment: {}", f.to_string_opt(self.punishment))?;
 
+        let mut contact_method_map = BTreeMap::<Timestamp, Vec<ContactMethod>>::new();
+        for (cm, ts) in &self.contact_method_failures {
+            contact_method_map.entry(*ts).or_default().push(cm.clone());
+        }
+        writeln!(
+            f,
+            "contact_method_failures:\n{}\n",
+            indent_all_string(if contact_method_map.is_empty() {
+                "None".to_string()
+            } else {
+                contact_method_map
+                    .iter()
+                    .map(|(ts, cms)| {
+                        format!(
+                            "{}: [{}]",
+                            f.to_string(ts),
+                            cms.iter()
+                                .map(|cm| f.to_string(cm))
+                                .collect::<Vec<String>>()
+                                .join(", ")
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .to_multiline_string()
+            })
+        )?;
+        let state_reason = self.compute_state_reason(cur_ts);
+        writeln!(f, "state_reason: {}", f.to_string(state_reason))?;
+
         Ok(())
     }
 }
 
+impl VeilidComponentRegistryAccessor for BucketEntryInner {
+    fn registry(&self) -> VeilidComponentRegistry {
+        self.opt_registry.clone().unwrap_or_log()
+    }
+}
+
+fn default_per_route_stats() -> LruCache<PublicKey, PerRouteStats> {
+    LruCache::new(PER_ROUTE_STATS_LRU_SIZE)
+}
+
 impl BucketEntryInner {
-    #[cfg(feature = "tracking")]
-    pub fn track(&mut self) -> usize {
-        let track_id = self.next_track_id;
-        self.next_track_id += 1;
-        self.node_ref_tracks
-            .insert(track_id, backtrace::Backtrace::new_unresolved());
-        track_id
+    pub fn prepare(&mut self, registry: VeilidComponentRegistry) {
+        self.opt_registry = Some(registry);
     }
 
-    #[cfg(feature = "tracking")]
-    pub fn untrack(&mut self, track_id: usize) {
-        self.node_ref_tracks.remove(&track_id);
+    /// Get time added
+    pub fn time_added(&self) -> Timestamp {
+        self.time_added
     }
 
     /// Get all node ids
@@ -421,7 +470,7 @@ impl BucketEntryInner {
                         // No need to update the signednodeinfo though since the timestamp is the same
                         // Let the node try to live again but don't mark it as seen yet
                         self.updated_since_last_network_change = true;
-                        self.make_not_dead(Timestamp::now());
+                        self.revive(Timestamp::now());
                     }
                     return false;
                 }
@@ -441,7 +490,7 @@ impl BucketEntryInner {
         *opt_current_pi = Some(peer_info.clone());
         self.set_envelope_support(envelope_support);
         self.updated_since_last_network_change = true;
-        self.make_not_dead(Timestamp::now());
+        self.revive(Timestamp::now());
 
         // Update geolocation info
         #[cfg(feature = "geolocation")]
@@ -456,6 +505,7 @@ impl BucketEntryInner {
         // over so that connection is still valid.
         if node_info_changed {
             self.clear_last_flows_except_latest();
+            self.contact_method_failures.clear();
         }
 
         node_info_changed
@@ -469,21 +519,6 @@ impl BucketEntryInner {
                 .get_geolocation_info(RoutingDomain::PublicInternet);
         }
     }
-
-    // pub fn exists_in_routing_domain(
-    //     &self,
-    //     rti: &RoutingTableInner,
-    //     routing_domain: RoutingDomain,
-    // ) -> bool {
-    //     // Check node info
-    //     if self.has_node_info(routing_domain.into()) {
-    //         return true;
-    //     }
-
-    //     // Check connections
-    //     let last_flows = self.last_flows(rti, true, NodeRefFilter::from(routing_domain));
-    //     !last_flows.is_empty()
-    // }
 
     pub fn node_info(&self, routing_domain: RoutingDomain) -> Option<&NodeInfo> {
         let opt_peer_info = match routing_domain {
@@ -634,8 +669,8 @@ impl BucketEntryInner {
                 }
 
                 let alive = if matches!(
-                    entry.flow.protocol_type().sequence_ordering(),
-                    SequenceOrdering::Ordered
+                    entry.flow.protocol_type().framing_type(),
+                    FramingType::Connection
                 ) {
                     // Connection-oriented: must still be in the connection table
                     opt_connection_manager
@@ -661,7 +696,10 @@ impl BucketEntryInner {
     }
 
     pub(super) fn add_envelope_version(&mut self, envelope_version: EnvelopeVersion) {
-        assert!(VALID_ENVELOPE_VERSIONS.contains(&envelope_version));
+        if !VALID_ENVELOPE_VERSIONS.contains(&envelope_version) {
+            veilid_log!(self error "attempt to add invalid envelope version: {}", envelope_version);
+            return;
+        }
         if self.envelope_support.contains(&envelope_version) {
             return;
         }
@@ -692,45 +730,6 @@ impl BucketEntryInner {
             .copied()
     }
 
-    /// Node-level rollup of per-transport states. Cold start is Unreliable.
-    pub fn state_reason(&self, cur_ts: Timestamp) -> BucketEntryStateReason {
-        let reason = if let Some(p) = self.punishment {
-            BucketEntryStateReason::Punished(p)
-        } else if self.per_transport_stats.is_empty() {
-            BucketEntryStateReason::Unreliable(
-                BucketEntryTransportUnreliableReason::NotSeenConsecutively,
-            )
-        } else {
-            let mut any_reliable = false;
-            let mut last_unreliable: Option<BucketEntryTransportUnreliableReason> = None;
-            let mut last_dead: Option<BucketEntryTransportDeadReason> = None;
-            for r in self.iter_transport_state_reasons(cur_ts) {
-                match r {
-                    BucketEntryTransportStateReason::Reliable => any_reliable = true,
-                    BucketEntryTransportStateReason::Unreliable(u) => last_unreliable = Some(u),
-                    BucketEntryTransportStateReason::Dead(d) => last_dead = Some(d),
-                }
-            }
-            if any_reliable {
-                BucketEntryStateReason::Reliable
-            } else if let Some(u) = last_unreliable {
-                BucketEntryStateReason::Unreliable(u)
-            } else {
-                BucketEntryStateReason::Dead(last_dead.unwrap_or_log())
-            }
-        };
-
-        self.state_stats_accounting
-            .lock()
-            .record_state_reason(cur_ts, reason);
-
-        reason
-    }
-
-    pub fn state(&self, cur_ts: Timestamp) -> BucketEntryState {
-        self.state_reason(cur_ts).into()
-    }
-
     /// Create a point-in-time snapshot of mutable fields for sort stability
     pub(super) fn make_snapshot(
         &self,
@@ -738,11 +737,11 @@ impl BucketEntryInner {
         entry: Arc<BucketEntry>,
         cur_ts: Timestamp,
     ) -> BucketEntrySnapshot {
-        let mut routing_domain_snapshots = BTreeMap::new();
+        let mut per_routing_domain = BTreeMap::new();
         if let Some(peer_info) = self.public_internet.peer_info.clone() {
-            routing_domain_snapshots.insert(
+            per_routing_domain.insert(
                 RoutingDomain::PublicInternet,
-                BucketEntryRoutingDomainSnapshotInner {
+                PerRoutingDomainSnapshot {
                     peer_info,
                     node_status: self.public_internet.node_status.clone(),
                     last_seen_our_node_info_ts: self.public_internet.last_seen_our_node_info_ts,
@@ -750,45 +749,33 @@ impl BucketEntryInner {
             );
         }
         if let Some(peer_info) = self.local_network.peer_info.clone() {
-            routing_domain_snapshots.insert(
+            per_routing_domain.insert(
                 RoutingDomain::LocalNetwork,
-                BucketEntryRoutingDomainSnapshotInner {
+                PerRoutingDomainSnapshot {
                     peer_info,
                     node_status: self.local_network.node_status.clone(),
                     last_seen_our_node_info_ts: self.local_network.last_seen_our_node_info_ts,
                 },
             );
         }
-        let per_transport = self
-            .per_transport_stats
-            .iter()
-            .map(|(t, s)| {
-                let threshold = default_unreliable_lost_answers_threshold(*t);
-                (
-                    *t,
-                    PerTransportSnapshot {
-                        state: s.state(cur_ts, threshold),
-                        last_question_ts: s.last_question_ts,
-                        first_consecutive_seen_ts: s.first_consecutive_seen_ts,
-                        failed_to_send: s.failed_to_send,
-                    },
-                )
-            })
-            .collect();
-        BucketEntrySnapshot::new(
-            cur_ts,
-            NodeRef::new(registry, entry),
-            self.peer_stats.clone(),
-            self.state(cur_ts),
-            self.node_ids.clone(),
-            routing_domain_snapshots,
-            per_transport,
-        )
-    }
+        let per_sequence_ordering = self.per_sequence_ordering_stats.clone();
+        let per_transport = self.per_transport_stats.clone();
 
-    #[cfg(feature = "geolocation")]
-    pub fn geolocation_info(&self) -> &GeolocationInfo {
-        &self.geolocation_info
+        let inner = BucketEntrySnapshotInner {
+            cur_ts,
+            node_ref: NodeRef::new(registry, entry),
+            time_added: self.time_added,
+            peer_stats: self.peer_stats.clone(),
+            rpc_stats: self.rpc_stats.clone(),
+            connection_stats: self.connection_stats.clone(),
+            state: self.state(cur_ts),
+            node_ids: self.node_ids.clone(),
+            per_routing_domain,
+            per_sequence_ordering,
+            per_transport,
+        };
+
+        BucketEntrySnapshot::new(inner)
     }
 
     pub fn set_punished(&mut self, punished: Option<PunishmentReason>) {
@@ -800,6 +787,14 @@ impl BucketEntryInner {
 
     pub fn peer_stats(&self) -> &PeerStats {
         &self.peer_stats
+    }
+
+    pub fn rpc_stats(&self) -> &RPCStats {
+        &self.rpc_stats
+    }
+
+    pub fn connection_stats(&self) -> &ConnectionStats {
+        &self.connection_stats
     }
 
     pub fn update_node_status(&mut self, routing_domain: RoutingDomain, status: NodeStatus) {
@@ -867,15 +862,15 @@ impl BucketEntryInner {
             cur_ts,
             &mut self.peer_stats.transfer,
         );
-        for (_key, entry) in self.routed_stats.iter_mut() {
-            entry.roll_transfers(last_ts, cur_ts);
+        for (_key, prs) in self.per_route_stats.iter_mut() {
+            prs.roll_transfers(last_ts, cur_ts);
         }
     }
 
     pub(super) fn record_routed_up(&mut self, key: PublicKey, bytes: ByteCount) {
-        self.routed_stats
+        self.per_route_stats
             .entry(key)
-            .or_insert_with(PerLocalRouteStats::default)
+            .or_insert_with(PerRouteStats::default)
             .add_up(bytes);
     }
     pub(super) fn record_routed_round_trip(
@@ -886,9 +881,9 @@ impl BucketEntryInner {
         bytes: ByteCount,
     ) {
         let entry = self
-            .routed_stats
+            .per_route_stats
             .entry(key)
-            .or_insert_with(PerLocalRouteStats::default);
+            .or_insert_with(PerRouteStats::default);
         entry.record_round_trip(recv_ts.duration_since(send_ts));
         entry.add_down(bytes);
     }
@@ -897,119 +892,40 @@ impl BucketEntryInner {
         dead_code,
         reason = "expose via routing_table debug command when needed"
     )]
-    pub fn routed_stats(&self, key: &PublicKey) -> Option<PerLocalRouteStats> {
-        self.routed_stats.peek(key).cloned()
-    }
-
-    // Called for every round trip packet we receive
-    fn record_latency(&mut self, latency: TimestampDuration) {
-        self.peer_stats.latency = Some(self.latency_stats_accounting.record_latency(latency));
+    pub fn routed_stats(&self, key: &PublicKey) -> Option<PerRouteStats> {
+        self.per_route_stats.peek(key).cloned()
     }
 
     // Called when a protected connection to this peer is closed by the remote
     // side. Longer durations = more reliable peer.
     pub(super) fn record_protected_connection_drop(&mut self, duration: TimestampDuration) {
-        self.peer_stats.protected_connection_drop = Some(
-            self.protected_connection_drop_accounting
-                .record_latency(duration),
-        );
+        self.connection_stats.protected_drop_span =
+            Some(self.protected_drop_span_accounting.record_latency(duration));
     }
 
     // Called every UPDATE_STATE_STATS_SECS seconds
     pub(super) fn update_state_stats(&mut self) {
         if let Some(state_stats) = self.state_stats_accounting.lock().take_stats() {
-            self.peer_stats.state = state_stats;
+            self.state_stats = state_stats;
         }
     }
 
     // called every ROLLING_ANSWERS_INTERVAL_SECS seconds
     pub(super) fn roll_answer_stats(&mut self, cur_ts: Timestamp) {
-        for ts_stats in self.per_transport_stats.values_mut() {
-            ts_stats.answer_stats = ts_stats.answer_stats_accounting.roll_answers(cur_ts);
-        }
+        self.answer_stats = self.answer_stats_accounting.roll_answers(cur_ts);
     }
 
-    // Aggregate state is a rollup of per-transport states; Punished is node-level.
-
-    /// All transports Dead (every entry in per_transport_stats has a Dead state
-    /// reason). Empty per_transport_stats (cold start) is not Dead. Use for
-    /// bucket-kick candidacy.
-    pub fn is_dead(&self, cur_ts: Timestamp) -> bool {
-        if self.per_transport_stats.is_empty() {
-            return false;
-        }
-        self.iter_transport_state_reasons(cur_ts)
-            .all(|r| matches!(r, BucketEntryTransportStateReason::Dead(_)))
+    fn transport_stats_mut(&mut self, transport: TransportType) -> &mut RPCStats {
+        self.per_transport_stats.entry(transport).or_default()
     }
 
-    fn iter_transport_state_reasons<'a>(
-        &'a self,
-        cur_ts: Timestamp,
-    ) -> impl Iterator<Item = BucketEntryTransportStateReason> + 'a {
-        self.per_transport_stats.iter().map(move |(t, stats)| {
-            let threshold = default_unreliable_lost_answers_threshold(*t);
-            stats.state_reason(cur_ts, threshold)
-        })
-    }
-
-    fn transport_stats_mut(&mut self, transport: TransportType) -> &mut BucketEntryTransportStats {
-        self.per_transport_stats
-            .entry(transport.into())
+    fn sequence_ordering_stats_mut(
+        &mut self,
+        sequence_ordering: SequenceOrdering,
+    ) -> &mut RPCStats {
+        self.per_sequence_ordering_stats
+            .entry(sequence_ordering)
             .or_default()
-    }
-
-    pub(super) fn touch_last_seen(&mut self, transport: TransportType, ts: Timestamp) {
-        // Per-transport tracking
-        let ts_stats = self.transport_stats_mut(transport);
-        if ts_stats.first_consecutive_seen_ts.is_none() {
-            ts_stats.first_consecutive_seen_ts = Some(ts);
-        }
-        ts_stats.last_seen_ts = Some(ts);
-
-        // Legacy node-level view
-        if self
-            .peer_stats
-            .rpc_stats
-            .first_consecutive_seen_ts
-            .is_none()
-        {
-            self.peer_stats.rpc_stats.first_consecutive_seen_ts = Some(ts);
-        }
-        self.peer_stats.rpc_stats.last_seen_ts = Some(ts);
-    }
-
-    pub(super) fn make_not_dead(&mut self, cur_ts: Timestamp) {
-        if self.is_dead(cur_ts) {
-            self.peer_stats.rpc_stats.last_seen_ts = None;
-            self.peer_stats.rpc_stats.first_consecutive_seen_ts = None;
-            self.peer_stats.rpc_stats.failed_to_send = 0;
-            // Drop per-transport stats so each transport re-validates from
-            // scratch on its next ping.
-            self.per_transport_stats.clear();
-            assert!(!self.is_dead(cur_ts));
-        }
-    }
-
-    pub(super) fn _state_debug_info(&self, cur_ts: Timestamp) -> String {
-        let first_consecutive_seen_ts = if let Some(first_consecutive_seen_ts) =
-            self.peer_stats.rpc_stats.first_consecutive_seen_ts
-        {
-            format!("{} ago", cur_ts.duration_since(first_consecutive_seen_ts))
-        } else {
-            "never".to_owned()
-        };
-        let last_seen_ts_str = if let Some(last_seen_ts) = self.peer_stats.rpc_stats.last_seen_ts {
-            format!("{} ago", cur_ts.duration_since(last_seen_ts))
-        } else {
-            "never".to_owned()
-        };
-
-        format!(
-            "state: {:?}, first_consecutive_seen_ts: {}, last_seen_ts: {}",
-            self.state_reason(cur_ts),
-            first_consecutive_seen_ts,
-            last_seen_ts_str
-        )
     }
 
     ////////////////////////////////////////////////////////////////
@@ -1022,43 +938,61 @@ impl BucketEntryInner {
         expects_answer: bool,
         transport: TransportType,
     ) {
-        self.transfer_stats_accounting.add_up(bytes);
-
+        // Update transport stats
         let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.answer_stats_accounting.record_question(ts);
-        ts_stats.failed_to_send = 0;
-        if expects_answer {
-            ts_stats.last_question_ts = Some(ts);
-        }
+        ts_stats.question_sent(ts, expects_answer);
 
-        // Legacy node-level view
-        self.peer_stats.rpc_stats.messages_sent += 1;
-        self.peer_stats.rpc_stats.failed_to_send = 0;
-        if expects_answer {
-            self.peer_stats.rpc_stats.questions_in_flight += 1;
-            self.peer_stats.rpc_stats.last_question_ts = Some(ts);
-        }
+        // Update sequence ordering stats
+        let sequence_ordering = transport.sequence_ordering();
+        let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
+        so_stats.question_sent(ts, expects_answer);
+
+        // Update node-level rpc stats
+        self.rpc_stats.question_sent(ts, expects_answer);
+
+        // Update transfer accounting
+        self.transfer_stats_accounting.add_up(bytes);
     }
+
     pub(super) fn question_rcvd(
         &mut self,
         ts: Timestamp,
         bytes: ByteCount,
         transport: TransportType,
     ) {
-        self.transfer_stats_accounting.add_down(bytes);
-        self.peer_stats.rpc_stats.messages_rcvd += 1;
-        self.touch_last_seen(transport, ts);
-    }
-    pub(super) fn answer_sent(&mut self, bytes: ByteCount, transport: TransportType) {
-        self.transfer_stats_accounting.add_up(bytes);
-
+        // Update transport stats
         let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.failed_to_send = 0;
+        ts_stats.question_rcvd(ts);
 
-        // Legacy node-level view
-        self.peer_stats.rpc_stats.messages_sent += 1;
-        self.peer_stats.rpc_stats.failed_to_send = 0;
+        // Update sequence ordering stats
+        let sequence_ordering = transport.sequence_ordering();
+        let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
+        so_stats.question_rcvd(ts);
+
+        // Update node-level rpc stats
+        self.rpc_stats.question_rcvd(ts);
+
+        // Update transfer accounting
+        self.transfer_stats_accounting.add_down(bytes);
     }
+
+    pub(super) fn answer_sent(&mut self, bytes: ByteCount, transport: TransportType) {
+        // Update transport stats
+        let ts_stats = self.transport_stats_mut(transport);
+        ts_stats.answer_sent();
+
+        // Update sequence ordering stats
+        let sequence_ordering = transport.sequence_ordering();
+        let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
+        so_stats.answer_sent();
+
+        // Update node-level rpc stats
+        self.rpc_stats.answer_sent();
+
+        // Update transfer accounting
+        self.transfer_stats_accounting.add_up(bytes);
+    }
+
     pub(super) fn answer_rcvd(
         &mut self,
         send_ts: Timestamp,
@@ -1066,57 +1000,71 @@ impl BucketEntryInner {
         bytes: ByteCount,
         transport: TransportType,
     ) {
+        // Update transfer accounting
         self.transfer_stats_accounting.add_down(bytes);
 
-        let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.answer_stats_accounting.record_answer(recv_ts);
-        ts_stats.recent_lost_answers = 0;
+        // Update latency accounting
+        self.peer_stats.latency = Some(
+            self.latency_stats_accounting
+                .record_latency(recv_ts.duration_since(send_ts)),
+        );
 
-        self.peer_stats.rpc_stats.messages_rcvd += 1;
-        self.peer_stats.rpc_stats.questions_in_flight -= 1;
-        self.record_latency(recv_ts.duration_since(send_ts));
-        self.touch_last_seen(transport, recv_ts);
-    }
-    pub(super) fn lost_answer(&mut self, transport: TransportType) {
-        let cur_ts = Timestamp::now();
-
-        let llt: LowLevelTransportType = transport.into();
-        let threshold = default_unreliable_lost_answers_threshold(llt);
+        // Update transport stats
         let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.answer_stats_accounting.record_lost_answer(cur_ts);
-        ts_stats.recent_lost_answers += 1;
-        if ts_stats.recent_lost_answers > threshold {
-            ts_stats.first_consecutive_seen_ts = None;
-        }
-        self.peer_stats.rpc_stats.questions_in_flight -= 1;
+        ts_stats.answer_rcvd(recv_ts);
+
+        // Update sequence ordering stats
+        let sequence_ordering = transport.sequence_ordering();
+        let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
+        so_stats.answer_rcvd(recv_ts);
+
+        // Update node-level rpc stats
+        self.rpc_stats.answer_rcvd(recv_ts);
     }
+
+    pub(super) fn lost_question(&mut self, transport: TransportType) {
+        let lost_ts = Timestamp::now();
+
+        // Update transport stats
+        let ts_stats = self.transport_stats_mut(transport);
+        ts_stats.lost_question(lost_ts);
+
+        // Update sequence ordering stats
+        let sequence_ordering = transport.sequence_ordering();
+        let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
+        so_stats.lost_question(lost_ts);
+
+        // Update node-level rpc stats
+        self.rpc_stats.lost_question(lost_ts);
+    }
+
     pub(super) fn failed_to_send(
         &mut self,
-        ts: Timestamp,
+        fail_ts: Timestamp,
         expects_answer: bool,
         transport: TransportType,
     ) {
+        // Update transport stats
         let ts_stats = self.transport_stats_mut(transport);
-        if expects_answer {
-            ts_stats.last_question_ts = Some(ts);
-        }
-        ts_stats.failed_to_send += 1;
-        ts_stats.first_consecutive_seen_ts = None;
+        ts_stats.failed_to_send(fail_ts, expects_answer);
 
-        // Legacy node-level view
-        if expects_answer {
-            self.peer_stats.rpc_stats.last_question_ts = Some(ts);
-        }
-        self.peer_stats.rpc_stats.failed_to_send += 1;
-        self.peer_stats.rpc_stats.first_consecutive_seen_ts = None;
+        // Update sequence ordering stats
+        let sequence_ordering = transport.sequence_ordering();
+        let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
+        so_stats.failed_to_send(fail_ts, expects_answer);
+
+        // Update node-level rpc stats
+        self.rpc_stats.failed_to_send(fail_ts, expects_answer);
     }
 
     /// Send attempt aborted because no transport could be chosen (no routing domain,
     /// no peer info, no contact method). No transport was attempted so this doesn't
-    /// feed per-transport stats. Not called for Punished, where we already chose not to talk.
+    /// feed per-transport or per-sequence-ordering stats.
+    /// Not called for Punished, where we already chose not to talk.
     pub(super) fn unreachable(&mut self) {
-        self.peer_stats.rpc_stats.unreachable += 1;
+        self.rpc_stats.unreachable();
     }
+
     pub(super) fn report_sender_info(
         &mut self,
         key: LastSenderInfoKey,
@@ -1130,22 +1078,63 @@ impl BucketEntryInner {
             None
         }
     }
+
+    pub fn report_contact_method_result(&mut self, cm: &ContactMethod, success: bool) {
+        if success {
+            self.contact_method_failures.remove(cm);
+        } else {
+            let now = Timestamp::now();
+            self.contact_method_failures.insert(cm.clone(), now);
+        }
+    }
+
+    pub fn get_contact_method_failure_ts(&self, cm: &ContactMethod) -> Option<Timestamp> {
+        self.contact_method_failures.get(cm).copied()
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    // Geolocation
+    ////////////////////////////////////////////////////////////////////////
+
+    #[cfg(feature = "geolocation")]
+    pub fn geolocation_info(&self) -> &GeolocationInfo {
+        &self.geolocation_info
+    }
 }
 
-#[derive(Debug)]
 pub(crate) struct BucketEntry {
     pub(super) ref_count: AtomicU32,
     inner: RwLock<BucketEntryInner>,
+    // NodeRef tracking lives outside `inner` so track()/untrack() never re-lock it
+    // (NodeRefs are constructed/dropped while `inner` is held, e.g. during snapshot).
+    // The registry copy lets the leak report log without locking `inner`.
+    #[cfg(feature = "tracking")]
+    registry: VeilidComponentRegistry,
+    #[cfg(feature = "tracking")]
+    next_track_id: AtomicUsize,
+    #[cfg(feature = "tracking")]
+    pub(super) node_ref_tracks: Mutex<HashMap<usize, backtrace::Backtrace>>,
+}
+
+impl fmt::Debug for BucketEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BucketEntry")
+            .field("ref_count", &self.ref_count)
+            .field("inner", &self.inner)
+            .finish()
+    }
 }
 
 impl BucketEntry {
-    pub(super) fn new(first_node_id: NodeId) -> Self {
+    pub(super) fn new(registry: VeilidComponentRegistry, first_node_id: NodeId) -> Self {
         // First node id should always be one we support since TypedKeySets are sorted and we must have at least one supported key
-        assert!(VALID_CRYPTO_KINDS.contains(&first_node_id.kind()));
+        debug_assert!(VALID_CRYPTO_KINDS.contains(&first_node_id.kind()));
 
         let now = Timestamp::now();
         let inner = BucketEntryInner {
+            opt_registry: Some(registry),
             node_ids: NodeIdGroup::from(first_node_id),
+            time_added: now,
             envelope_support: Vec::new(),
             updated_since_last_network_change: false,
             last_flows: BTreeMap::new(),
@@ -1163,24 +1152,23 @@ impl BucketEntry {
             #[cfg(feature = "geolocation")]
             geolocation_info: Default::default(),
             peer_stats: PeerStats {
-                time_added: now,
-                rpc_stats: RPCStats::default(),
                 latency: None,
                 transfer: TransferStatsDownUp::default(),
-                state: StateStats::default(),
-                protected_connection_drop: None,
             },
+            rpc_stats: RPCStats::default(),
+            state_stats: StateStats::default(),
+            answer_stats: AnswerStats::default(),
+            connection_stats: ConnectionStats::default(),
+            per_sequence_ordering_stats: BTreeMap::new(),
+            per_transport_stats: BTreeMap::new(),
+            per_route_stats: LruCache::new(PER_ROUTE_STATS_LRU_SIZE),
+            punishment: None,
+            contact_method_failures: HashMap::new(),
             latency_stats_accounting: LatencyStatsAccounting::new(),
-            protected_connection_drop_accounting: LatencyStatsAccounting::new(),
+            protected_drop_span_accounting: LatencyStatsAccounting::new(),
             transfer_stats_accounting: TransferStatsAccounting::new(),
             state_stats_accounting: Mutex::new(StateStatsAccounting::new()),
-            per_transport_stats: BTreeMap::new(),
-            routed_stats: LruCache::new(ROUTED_STATS_LRU_SIZE),
-            punishment: None,
-            #[cfg(feature = "tracking")]
-            next_track_id: 0,
-            #[cfg(feature = "tracking")]
-            node_ref_tracks: HashMap::new(),
+            answer_stats_accounting: AnswerStatsAccounting::default(),
         };
 
         Self::new_with_inner(inner)
@@ -1189,8 +1177,30 @@ impl BucketEntry {
     pub(super) fn new_with_inner(inner: BucketEntryInner) -> Self {
         Self {
             ref_count: AtomicU32::new(0),
+            #[cfg(feature = "tracking")]
+            registry: inner.registry(),
             inner: RwLock::new(inner),
+            #[cfg(feature = "tracking")]
+            next_track_id: AtomicUsize::new(0),
+            #[cfg(feature = "tracking")]
+            node_ref_tracks: Mutex::new(HashMap::new()),
         }
+    }
+
+    // NodeRef tracking uses interior mutability and must NOT lock `inner`, since it is
+    // called while `inner` is already held (NodeRef construction during snapshot, etc.)
+    #[cfg(feature = "tracking")]
+    pub fn track(&self) -> usize {
+        let track_id = self.next_track_id.fetch_add(1, Ordering::AcqRel);
+        self.node_ref_tracks
+            .lock()
+            .insert(track_id, backtrace::Backtrace::new_unresolved());
+        track_id
+    }
+
+    #[cfg(feature = "tracking")]
+    pub fn untrack(&self, track_id: usize) {
+        self.node_ref_tracks.lock().remove(&track_id);
     }
 
     /// Create a point-in-time snapshot of mutable fields for sort stability
@@ -1225,17 +1235,26 @@ impl Drop for BucketEntry {
         if self.ref_count.load(Ordering::Acquire) != 0 {
             #[cfg(feature = "tracking")]
             {
-                veilid_log!(self info "NodeRef Tracking");
-                for (id, bt) in &mut self.node_ref_tracks {
+                let registry = &self.registry;
+                veilid_log!(registry info "NodeRef Tracking");
+                for (id, bt) in self.node_ref_tracks.lock().iter() {
+                    let mut bt = bt.clone();
                     bt.resolve();
-                    veilid_log!(self info "Id: {}\n----------------\n{:#?}", id, bt);
+                    veilid_log!(registry info "Id: {}\n----------------\n{:#?}", id, bt);
                 }
             }
 
+            #[cfg(debug_assertions)]
             panic!(
                 "bucket entry dropped with non-zero refcount: {:#?}",
                 &*self.inner.read()
-            )
+            );
+            #[cfg(not(debug_assertions))]
+            {
+                let inner = self.inner.read();
+                let registry = inner.registry();
+                veilid_log!(registry error "bucket entry dropped with non-zero refcount: {:#?}", &*inner);
+            }
         }
     }
 }

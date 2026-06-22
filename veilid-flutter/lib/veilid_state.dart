@@ -11,20 +11,73 @@ part 'veilid_state.g.dart';
 //////////////////////////////////////
 /// AttachmentState
 
+/// Network attachment level, expressed as a 'signal strength'.
 enum AttachmentState {
+  /// Not attached to the network.
   detached,
+
+  /// Attaching, but not yet able to perform network operations.
   attaching,
+
+  /// Attached with the weakest signal strength.
   attachedWeak,
+
+  /// Attached with fair signal strength.
   attachedFair,
+
+  /// Attached with good signal strength.
   attachedGood,
+
+  /// Attached with strong signal strength.
   attachedStrong,
+
+  /// Attached with the strongest signal strength.
   attachedFull,
+
+  /// Detaching from the network and shutting down connections.
   detaching;
 
+  /// Decode from its serialized PascalCase name.
   factory AttachmentState.fromJson(dynamic j) =>
       AttachmentState.values.byName((j as String).toCamelCase());
 
+  /// Encode to its serialized PascalCase name.
   String toJson() => name.toPascalCase();
+
+  /// Check if attachment is changing
+  bool get isChanging => !isAttached && !isDetached;
+
+  /// Check if attached
+  bool get isAttached {
+    switch (this) {
+      case AttachmentState.detached:
+      case AttachmentState.detaching:
+      case AttachmentState.attaching:
+        return false;
+      case AttachmentState.attachedWeak:
+      case AttachmentState.attachedFair:
+      case AttachmentState.attachedGood:
+      case AttachmentState.attachedStrong:
+      case AttachmentState.attachedFull:
+        return true;
+    }
+  }
+
+  /// Check if detached
+  bool get isDetached {
+    switch (this) {
+      case AttachmentState.detached:
+        return true;
+      case AttachmentState.detaching:
+      case AttachmentState.attaching:
+      case AttachmentState.attachedWeak:
+      case AttachmentState.attachedFair:
+      case AttachmentState.attachedGood:
+      case AttachmentState.attachedStrong:
+      case AttachmentState.attachedFull:
+        return true;
+    }
+  }
 
   /// Signal-strength bars (0..=5).
   int get barCount {
@@ -50,16 +103,28 @@ enum AttachmentState {
 //////////////////////////////////////
 /// VeilidLogLevel
 
+/// Severity level of a log message emitted by veilid-core.
 enum VeilidLogLevel {
+  /// A fatal or unrecoverable condition.
   error,
+
+  /// A recoverable problem worth surfacing.
   warn,
+
+  /// Normal operational information.
   info,
+
+  /// Diagnostic detail useful when debugging.
   debug,
+
+  /// Fine-grained tracing detail.
   trace;
 
+  /// Decode from its serialized PascalCase name.
   factory VeilidLogLevel.fromJson(dynamic j) =>
       VeilidLogLevel.values.byName((j as String).toCamelCase());
 
+  /// Encode to its serialized PascalCase name.
   String toJson() => name.toPascalCase();
 }
 
@@ -112,87 +177,9 @@ sealed class TransferStatsDownUp with _$TransferStatsDownUp {
 ////////////
 
 @freezed
-sealed class StateStats with _$StateStats {
-  const factory StateStats({
-    required TimestampDuration span,
-    required TimestampDuration reliable,
-    required TimestampDuration unreliable,
-    required TimestampDuration dead,
-    required TimestampDuration punished,
-    required StateReasonStats reason,
-  }) = _StateStats;
-
-  factory StateStats.fromJson(dynamic json) =>
-      _$StateStatsFromJson(json as Map<String, dynamic>);
-}
-
-////////////
-
-@freezed
-sealed class StateReasonStats with _$StateReasonStats {
-  const factory StateReasonStats({
-    required TimestampDuration canNotSend,
-    required TimestampDuration tooManyLostAnswers,
-    required TimestampDuration noPingResponse,
-    required TimestampDuration failedToSend,
-    required TimestampDuration lostAnswers,
-    required TimestampDuration notSeenConsecutively,
-    required TimestampDuration inUnreliablePingSpan,
-  }) = _StateReasonStats;
-
-  factory StateReasonStats.fromJson(dynamic json) =>
-      _$StateReasonStatsFromJson(json as Map<String, dynamic>);
-}
-
-////////////
-
-@freezed
-sealed class AnswerStats with _$AnswerStats {
-  const factory AnswerStats({
-    required TimestampDuration span,
-    required int questions,
-    required int answers,
-    required int lostAnswers,
-    required int consecutiveAnswersMaximum,
-    required int consecutiveAnswersAverage,
-    required int consecutiveAnswersMinimum,
-    required int consecutiveLostAnswersMaximum,
-    required int consecutiveLostAnswersAverage,
-    required int consecutiveLostAnswersMinimum,
-  }) = _AnswerStats;
-
-  factory AnswerStats.fromJson(dynamic json) =>
-      _$AnswerStatsFromJson(json as Map<String, dynamic>);
-}
-
-////////////
-
-@freezed
-sealed class RPCStats with _$RPCStats {
-  const factory RPCStats({
-    required int messagesSent,
-    required int messagesRcvd,
-    required int questionsInFlight,
-    required Timestamp? lastQuestionTs,
-    required Timestamp? lastSeenTs,
-    required Timestamp? firstConsecutiveSeenTs,
-    required int failedToSend,
-    required int unreachable,
-  }) = _RPCStats;
-
-  factory RPCStats.fromJson(dynamic json) =>
-      _$RPCStatsFromJson(json as Map<String, dynamic>);
-}
-
-////////////
-
-@freezed
 sealed class PeerStats with _$PeerStats {
   const factory PeerStats({
-    required Timestamp timeAdded,
-    required RPCStats rpcStats,
     required TransferStatsDownUp transfer,
-    required StateStats state,
     LatencyStats? latency,
   }) = _PeerStats;
 

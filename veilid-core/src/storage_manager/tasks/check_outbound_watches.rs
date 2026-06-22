@@ -5,7 +5,11 @@ impl StorageManager {
     /// If no ValueChanged has arrived within WATCH_FALLBACK_INSPECT_INTERVAL,
     /// enqueue a change inspection. If that inspection finds changes,
     /// it will set needs_forced_reconcile to re-establish the watch.
-    fn check_fallback_inspections(&self, inner: &mut StorageManagerInner, cur_ts: Timestamp) {
+    fn check_fallback_inspections_inner(
+        registry: VeilidComponentRegistry,
+        inner: &mut StorageManagerInner,
+        cur_ts: Timestamp,
+    ) {
         // Collect watches needing fallback inspection
         let inspections: Vec<_> = inner
             .outbound_watch_manager
@@ -27,13 +31,13 @@ impl StorageManager {
 
         // Enqueue inspections and update timestamps
         for (record_key, subkeys) in inspections {
-            veilid_log!(self debug target: "watch",
+            veilid_log!(registry debug target: "watch",
                 "Fallback inspection triggered for watch: {}",
                 record_key
             );
             inner
                 .outbound_watch_manager
-                .enqueue_change_inspect(self, record_key.clone(), subkeys);
+                .enqueue_change_inspect(record_key.clone(), subkeys);
 
             let owm = &mut inner.outbound_watch_manager;
             if let Some(ow) = owm.outbound_watches.get_mut(&record_key.opaque()) {
@@ -54,30 +58,47 @@ impl StorageManager {
         cur_ts: Timestamp,
     ) -> EyreResult<()> {
         let mut inner = self.inner.lock();
+        let Some(local_record_store) = inner.local_record_store.as_ref().cloned() else {
+            // No local record store, so no watches to check
+            return Ok(());
+        };
 
         // Update per-node watch states
         // Desired state updates are performed by get_next_outbound_watch_operation
         inner.outbound_watch_manager.update_per_node_states(cur_ts);
 
         // Check for watches that need fallback inspection
-        self.check_fallback_inspections(&mut inner, cur_ts);
+        Self::check_fallback_inspections_inner(self.registry(), &mut inner, cur_ts);
 
         // Iterate all outbound watches and determine what work needs doing if any
         for outbound_watch in inner.outbound_watch_manager.outbound_watches.values_mut() {
-            // Get next work on watch and queue it if we have something to do
-            if let Some(op_fut) = self.get_next_outbound_watch_operation(
-                outbound_watch.record_key(),
-                cur_ts,
-                outbound_watch,
+            // Operate on this watch only if it isn't already being operated on.
+            // Watch mode (lifetime.read + watch_lock) is concurrent with reads/sets/transactions.
+            if let Some(record_lock) = self.record_lock_table.try_lock_record(
+                outbound_watch.record_key().opaque(),
+                StorageManagerRecordLockPurpose::Watch,
             ) {
-                self.background_operation_processor.add_future(op_fut);
-            };
+                // Get next work on watch and queue it if we have something to do
+                if let Some(op_fut) = Self::get_next_outbound_watch_operation_inner(
+                    self.registry(),
+                    record_lock,
+                    cur_ts,
+                    outbound_watch,
+                ) {
+                    self.background_operation_processor.add_future(op_fut);
+                };
+            }
         }
 
         // Iterate all queued change inspections and do them
         for (k, v) in inner.outbound_watch_manager.needs_change_inspection.drain() {
             // Get next work on watch and queue it if we have something to do
-            let op_fut = self.get_change_inspection_operation(k, v);
+            let op_fut = Self::get_change_inspection_operation_inner(
+                self.registry(),
+                local_record_store.clone(),
+                k,
+                v,
+            );
             self.background_operation_processor.add_future(op_fut);
         }
 

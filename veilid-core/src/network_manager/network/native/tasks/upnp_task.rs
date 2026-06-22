@@ -10,7 +10,11 @@ impl NativeNetwork {
         _l: Timestamp,
         _t: Timestamp,
     ) -> EyreResult<()> {
-        if !self.igd_manager.tick().await? {
+        // Only present when UPnP is enabled
+        let Some(igd_manager) = &self.igd_manager else {
+            return Ok(());
+        };
+        if !igd_manager.tick().await? {
             veilid_log!(self info "upnp port mapping renew failed, triggering network restart");
             let mut inner = self.inner.lock();
             inner.network_needs_restart = true;

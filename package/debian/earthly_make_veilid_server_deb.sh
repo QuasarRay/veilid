@@ -27,6 +27,9 @@ cp -f /veilid/package/linux/veilid-server.conf /dpkg/veilid-server/etc/veilid-se
 # veilid-server systemd unit file
 mkdir -p /dpkg/veilid-server/etc/systemd/system
 cp -f /veilid/package/systemd/veilid-server.service /dpkg/veilid-server/etc/systemd/system
+# veilid-server SELinux policy module (loaded by postinst when SELinux is enabled)
+mkdir -p /dpkg/veilid-server/usr/share/selinux/packages
+cp -f /veilid/package/selinux/veilid_server.pp.bz2 /dpkg/veilid-server/usr/share/selinux/packages/veilid_server.pp.bz2
 # veilid-server executable
 mkdir -p /dpkg/veilid-server/usr/bin
 cp -f /veilid/target/$CARGO_ARCH/release/veilid-server /dpkg/veilid-server/usr/bin

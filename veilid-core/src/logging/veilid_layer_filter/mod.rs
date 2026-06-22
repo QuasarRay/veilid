@@ -37,6 +37,8 @@ struct VeilidLayerFilterInner {
     default_log_level: LevelFilter,
 }
 
+/// A `tracing` layer filter that gates events and spans by Veilid log facility,
+/// level, and log key. Its configuration can be changed at runtime.
 #[derive(Clone)]
 #[must_use]
 pub struct VeilidLayerFilter {
@@ -140,6 +142,8 @@ impl VeilidLayerFilter {
         Self::simplify_config(inner);
     }
 
+    /// Builds the log key for a `VeilidAPI` instance from its program name and namespace.
+    /// An empty namespace yields just the program name; otherwise the two are joined with `|`.
     #[must_use]
     pub fn make_veilid_log_key(program_name: &str, namespace: &str) -> VeilidLogKey {
         if namespace.is_empty() {
@@ -154,6 +158,7 @@ impl VeilidLayerFilter {
         Arc::new(move |log_key| log_key == filter_log_key)
     }
 
+    /// Restricts this layer to the log keys accepted by `filter`.
     pub fn set_log_key_filter(&self, filter: VeilidLayerLogKeyFilter) {
         self.inner.rcu(|inner| {
             let mut inner = Arc::as_ref(inner).clone();
@@ -162,6 +167,7 @@ impl VeilidLayerFilter {
         });
     }
 
+    /// Restricts this layer to events whose log key matches `log_key` exactly.
     pub fn set_log_key(&self, log_key: String) {
         self.inner.rcu(|inner| {
             let mut inner = Arc::as_ref(inner).clone();
@@ -242,6 +248,7 @@ impl VeilidLayerFilter {
         ])
     }
 
+    /// Applies a comma-separated list of legacy `ignore` facility changes.
     #[deprecated(
         since = "0.5.2",
         note = "'ignore' syntax was confusing, migrate to apply_log_change_string"
@@ -255,6 +262,9 @@ impl VeilidLayerFilter {
         self.apply_ignore_change_list(&target_change);
     }
 
+    /// Applies a list of legacy `ignore` facility changes. Recognizes `all`, `none`,
+    /// `default`, a `-`-prefixed facility (re-enable at the `#common` level), and a bare
+    /// facility name (turn off).
     #[deprecated(
         since = "0.5.2",
         note = "'ignore' syntax was confusing, migrate to apply_log_change_list"

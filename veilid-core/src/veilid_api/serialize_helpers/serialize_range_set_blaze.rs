@@ -6,6 +6,7 @@ use serde::{
     de::SeqAccess, de::Visitor, ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer,
 };
 
+/// Serializes the set as a sequence of inclusive `(start, end)` range pairs.
 pub fn serialize<T: Integer + Serialize, S: Serializer>(
     v: &RangeSetBlaze<T>,
     s: S,
@@ -18,6 +19,7 @@ pub fn serialize<T: Integer + Serialize, S: Serializer>(
     seq.end()
 }
 
+/// Deserializes a sequence of inclusive `(start, end)` range pairs back into the set.
 pub fn deserialize<'de, T: Integer + Deserialize<'de>, D: Deserializer<'de>>(
     d: D,
 ) -> Result<RangeSetBlaze<T>, D::Error> {

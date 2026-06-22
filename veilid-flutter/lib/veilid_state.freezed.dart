@@ -850,1136 +850,9 @@ $TransferStatsCopyWith<$Res> get up {
 
 
 /// @nodoc
-mixin _$StateStats {
-
- TimestampDuration get span; TimestampDuration get reliable; TimestampDuration get unreliable; TimestampDuration get dead; TimestampDuration get punished; StateReasonStats get reason;
-/// Create a copy of StateStats
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$StateStatsCopyWith<StateStats> get copyWith => _$StateStatsCopyWithImpl<StateStats>(this as StateStats, _$identity);
-
-  /// Serializes this StateStats to a JSON map.
-  Map<String, dynamic> toJson();
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is StateStats&&(identical(other.span, span) || other.span == span)&&(identical(other.reliable, reliable) || other.reliable == reliable)&&(identical(other.unreliable, unreliable) || other.unreliable == unreliable)&&(identical(other.dead, dead) || other.dead == dead)&&(identical(other.punished, punished) || other.punished == punished)&&(identical(other.reason, reason) || other.reason == reason));
-}
-
-@JsonKey(includeFromJson: false, includeToJson: false)
-@override
-int get hashCode => Object.hash(runtimeType,span,reliable,unreliable,dead,punished,reason);
-
-@override
-String toString() {
-  return 'StateStats(span: $span, reliable: $reliable, unreliable: $unreliable, dead: $dead, punished: $punished, reason: $reason)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $StateStatsCopyWith<$Res>  {
-  factory $StateStatsCopyWith(StateStats value, $Res Function(StateStats) _then) = _$StateStatsCopyWithImpl;
-@useResult
-$Res call({
- TimestampDuration span, TimestampDuration reliable, TimestampDuration unreliable, TimestampDuration dead, TimestampDuration punished, StateReasonStats reason
-});
-
-
-$StateReasonStatsCopyWith<$Res> get reason;
-
-}
-/// @nodoc
-class _$StateStatsCopyWithImpl<$Res>
-    implements $StateStatsCopyWith<$Res> {
-  _$StateStatsCopyWithImpl(this._self, this._then);
-
-  final StateStats _self;
-  final $Res Function(StateStats) _then;
-
-/// Create a copy of StateStats
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? span = null,Object? reliable = null,Object? unreliable = null,Object? dead = null,Object? punished = null,Object? reason = null,}) {
-  return _then(_self.copyWith(
-span: null == span ? _self.span : span // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,reliable: null == reliable ? _self.reliable : reliable // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,unreliable: null == unreliable ? _self.unreliable : unreliable // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,dead: null == dead ? _self.dead : dead // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,punished: null == punished ? _self.punished : punished // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,reason: null == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
-as StateReasonStats,
-  ));
-}
-/// Create a copy of StateStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$StateReasonStatsCopyWith<$Res> get reason {
-  
-  return $StateReasonStatsCopyWith<$Res>(_self.reason, (value) {
-    return _then(_self.copyWith(reason: value));
-  });
-}
-}
-
-
-/// Adds pattern-matching-related methods to [StateStats].
-extension StateStatsPatterns on StateStats {
-/// A variant of `map` that fallback to returning `orElse`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _StateStats value)?  $default,{required TResult orElse(),}){
-final _that = this;
-switch (_that) {
-case _StateStats() when $default != null:
-return $default(_that);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// Callbacks receives the raw object, upcasted.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case final Subclass2 value:
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _StateStats value)  $default,){
-final _that = this;
-switch (_that) {
-case _StateStats():
-return $default(_that);}
-}
-/// A variant of `map` that fallback to returning `null`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _StateStats value)?  $default,){
-final _that = this;
-switch (_that) {
-case _StateStats() when $default != null:
-return $default(_that);case _:
-  return null;
-
-}
-}
-/// A variant of `when` that fallback to an `orElse` callback.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( TimestampDuration span,  TimestampDuration reliable,  TimestampDuration unreliable,  TimestampDuration dead,  TimestampDuration punished,  StateReasonStats reason)?  $default,{required TResult orElse(),}) {final _that = this;
-switch (_that) {
-case _StateStats() when $default != null:
-return $default(_that.span,_that.reliable,_that.unreliable,_that.dead,_that.punished,_that.reason);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// As opposed to `map`, this offers destructuring.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case Subclass2(:final field2):
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( TimestampDuration span,  TimestampDuration reliable,  TimestampDuration unreliable,  TimestampDuration dead,  TimestampDuration punished,  StateReasonStats reason)  $default,) {final _that = this;
-switch (_that) {
-case _StateStats():
-return $default(_that.span,_that.reliable,_that.unreliable,_that.dead,_that.punished,_that.reason);}
-}
-/// A variant of `when` that fallback to returning `null`
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( TimestampDuration span,  TimestampDuration reliable,  TimestampDuration unreliable,  TimestampDuration dead,  TimestampDuration punished,  StateReasonStats reason)?  $default,) {final _that = this;
-switch (_that) {
-case _StateStats() when $default != null:
-return $default(_that.span,_that.reliable,_that.unreliable,_that.dead,_that.punished,_that.reason);case _:
-  return null;
-
-}
-}
-
-}
-
-/// @nodoc
-@JsonSerializable()
-
-class _StateStats implements StateStats {
-  const _StateStats({required this.span, required this.reliable, required this.unreliable, required this.dead, required this.punished, required this.reason});
-  factory _StateStats.fromJson(Map<String, dynamic> json) => _$StateStatsFromJson(json);
-
-@override final  TimestampDuration span;
-@override final  TimestampDuration reliable;
-@override final  TimestampDuration unreliable;
-@override final  TimestampDuration dead;
-@override final  TimestampDuration punished;
-@override final  StateReasonStats reason;
-
-/// Create a copy of StateStats
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-_$StateStatsCopyWith<_StateStats> get copyWith => __$StateStatsCopyWithImpl<_StateStats>(this, _$identity);
-
-@override
-Map<String, dynamic> toJson() {
-  return _$StateStatsToJson(this, );
-}
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _StateStats&&(identical(other.span, span) || other.span == span)&&(identical(other.reliable, reliable) || other.reliable == reliable)&&(identical(other.unreliable, unreliable) || other.unreliable == unreliable)&&(identical(other.dead, dead) || other.dead == dead)&&(identical(other.punished, punished) || other.punished == punished)&&(identical(other.reason, reason) || other.reason == reason));
-}
-
-@JsonKey(includeFromJson: false, includeToJson: false)
-@override
-int get hashCode => Object.hash(runtimeType,span,reliable,unreliable,dead,punished,reason);
-
-@override
-String toString() {
-  return 'StateStats(span: $span, reliable: $reliable, unreliable: $unreliable, dead: $dead, punished: $punished, reason: $reason)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class _$StateStatsCopyWith<$Res> implements $StateStatsCopyWith<$Res> {
-  factory _$StateStatsCopyWith(_StateStats value, $Res Function(_StateStats) _then) = __$StateStatsCopyWithImpl;
-@override @useResult
-$Res call({
- TimestampDuration span, TimestampDuration reliable, TimestampDuration unreliable, TimestampDuration dead, TimestampDuration punished, StateReasonStats reason
-});
-
-
-@override $StateReasonStatsCopyWith<$Res> get reason;
-
-}
-/// @nodoc
-class __$StateStatsCopyWithImpl<$Res>
-    implements _$StateStatsCopyWith<$Res> {
-  __$StateStatsCopyWithImpl(this._self, this._then);
-
-  final _StateStats _self;
-  final $Res Function(_StateStats) _then;
-
-/// Create a copy of StateStats
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? span = null,Object? reliable = null,Object? unreliable = null,Object? dead = null,Object? punished = null,Object? reason = null,}) {
-  return _then(_StateStats(
-span: null == span ? _self.span : span // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,reliable: null == reliable ? _self.reliable : reliable // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,unreliable: null == unreliable ? _self.unreliable : unreliable // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,dead: null == dead ? _self.dead : dead // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,punished: null == punished ? _self.punished : punished // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,reason: null == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
-as StateReasonStats,
-  ));
-}
-
-/// Create a copy of StateStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$StateReasonStatsCopyWith<$Res> get reason {
-  
-  return $StateReasonStatsCopyWith<$Res>(_self.reason, (value) {
-    return _then(_self.copyWith(reason: value));
-  });
-}
-}
-
-
-/// @nodoc
-mixin _$StateReasonStats {
-
- TimestampDuration get canNotSend; TimestampDuration get tooManyLostAnswers; TimestampDuration get noPingResponse; TimestampDuration get failedToSend; TimestampDuration get lostAnswers; TimestampDuration get notSeenConsecutively; TimestampDuration get inUnreliablePingSpan;
-/// Create a copy of StateReasonStats
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$StateReasonStatsCopyWith<StateReasonStats> get copyWith => _$StateReasonStatsCopyWithImpl<StateReasonStats>(this as StateReasonStats, _$identity);
-
-  /// Serializes this StateReasonStats to a JSON map.
-  Map<String, dynamic> toJson();
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is StateReasonStats&&(identical(other.canNotSend, canNotSend) || other.canNotSend == canNotSend)&&(identical(other.tooManyLostAnswers, tooManyLostAnswers) || other.tooManyLostAnswers == tooManyLostAnswers)&&(identical(other.noPingResponse, noPingResponse) || other.noPingResponse == noPingResponse)&&(identical(other.failedToSend, failedToSend) || other.failedToSend == failedToSend)&&(identical(other.lostAnswers, lostAnswers) || other.lostAnswers == lostAnswers)&&(identical(other.notSeenConsecutively, notSeenConsecutively) || other.notSeenConsecutively == notSeenConsecutively)&&(identical(other.inUnreliablePingSpan, inUnreliablePingSpan) || other.inUnreliablePingSpan == inUnreliablePingSpan));
-}
-
-@JsonKey(includeFromJson: false, includeToJson: false)
-@override
-int get hashCode => Object.hash(runtimeType,canNotSend,tooManyLostAnswers,noPingResponse,failedToSend,lostAnswers,notSeenConsecutively,inUnreliablePingSpan);
-
-@override
-String toString() {
-  return 'StateReasonStats(canNotSend: $canNotSend, tooManyLostAnswers: $tooManyLostAnswers, noPingResponse: $noPingResponse, failedToSend: $failedToSend, lostAnswers: $lostAnswers, notSeenConsecutively: $notSeenConsecutively, inUnreliablePingSpan: $inUnreliablePingSpan)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $StateReasonStatsCopyWith<$Res>  {
-  factory $StateReasonStatsCopyWith(StateReasonStats value, $Res Function(StateReasonStats) _then) = _$StateReasonStatsCopyWithImpl;
-@useResult
-$Res call({
- TimestampDuration canNotSend, TimestampDuration tooManyLostAnswers, TimestampDuration noPingResponse, TimestampDuration failedToSend, TimestampDuration lostAnswers, TimestampDuration notSeenConsecutively, TimestampDuration inUnreliablePingSpan
-});
-
-
-
-
-}
-/// @nodoc
-class _$StateReasonStatsCopyWithImpl<$Res>
-    implements $StateReasonStatsCopyWith<$Res> {
-  _$StateReasonStatsCopyWithImpl(this._self, this._then);
-
-  final StateReasonStats _self;
-  final $Res Function(StateReasonStats) _then;
-
-/// Create a copy of StateReasonStats
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? canNotSend = null,Object? tooManyLostAnswers = null,Object? noPingResponse = null,Object? failedToSend = null,Object? lostAnswers = null,Object? notSeenConsecutively = null,Object? inUnreliablePingSpan = null,}) {
-  return _then(_self.copyWith(
-canNotSend: null == canNotSend ? _self.canNotSend : canNotSend // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,tooManyLostAnswers: null == tooManyLostAnswers ? _self.tooManyLostAnswers : tooManyLostAnswers // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,noPingResponse: null == noPingResponse ? _self.noPingResponse : noPingResponse // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,failedToSend: null == failedToSend ? _self.failedToSend : failedToSend // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,lostAnswers: null == lostAnswers ? _self.lostAnswers : lostAnswers // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,notSeenConsecutively: null == notSeenConsecutively ? _self.notSeenConsecutively : notSeenConsecutively // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,inUnreliablePingSpan: null == inUnreliablePingSpan ? _self.inUnreliablePingSpan : inUnreliablePingSpan // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,
-  ));
-}
-
-}
-
-
-/// Adds pattern-matching-related methods to [StateReasonStats].
-extension StateReasonStatsPatterns on StateReasonStats {
-/// A variant of `map` that fallback to returning `orElse`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _StateReasonStats value)?  $default,{required TResult orElse(),}){
-final _that = this;
-switch (_that) {
-case _StateReasonStats() when $default != null:
-return $default(_that);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// Callbacks receives the raw object, upcasted.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case final Subclass2 value:
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _StateReasonStats value)  $default,){
-final _that = this;
-switch (_that) {
-case _StateReasonStats():
-return $default(_that);}
-}
-/// A variant of `map` that fallback to returning `null`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _StateReasonStats value)?  $default,){
-final _that = this;
-switch (_that) {
-case _StateReasonStats() when $default != null:
-return $default(_that);case _:
-  return null;
-
-}
-}
-/// A variant of `when` that fallback to an `orElse` callback.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( TimestampDuration canNotSend,  TimestampDuration tooManyLostAnswers,  TimestampDuration noPingResponse,  TimestampDuration failedToSend,  TimestampDuration lostAnswers,  TimestampDuration notSeenConsecutively,  TimestampDuration inUnreliablePingSpan)?  $default,{required TResult orElse(),}) {final _that = this;
-switch (_that) {
-case _StateReasonStats() when $default != null:
-return $default(_that.canNotSend,_that.tooManyLostAnswers,_that.noPingResponse,_that.failedToSend,_that.lostAnswers,_that.notSeenConsecutively,_that.inUnreliablePingSpan);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// As opposed to `map`, this offers destructuring.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case Subclass2(:final field2):
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( TimestampDuration canNotSend,  TimestampDuration tooManyLostAnswers,  TimestampDuration noPingResponse,  TimestampDuration failedToSend,  TimestampDuration lostAnswers,  TimestampDuration notSeenConsecutively,  TimestampDuration inUnreliablePingSpan)  $default,) {final _that = this;
-switch (_that) {
-case _StateReasonStats():
-return $default(_that.canNotSend,_that.tooManyLostAnswers,_that.noPingResponse,_that.failedToSend,_that.lostAnswers,_that.notSeenConsecutively,_that.inUnreliablePingSpan);}
-}
-/// A variant of `when` that fallback to returning `null`
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( TimestampDuration canNotSend,  TimestampDuration tooManyLostAnswers,  TimestampDuration noPingResponse,  TimestampDuration failedToSend,  TimestampDuration lostAnswers,  TimestampDuration notSeenConsecutively,  TimestampDuration inUnreliablePingSpan)?  $default,) {final _that = this;
-switch (_that) {
-case _StateReasonStats() when $default != null:
-return $default(_that.canNotSend,_that.tooManyLostAnswers,_that.noPingResponse,_that.failedToSend,_that.lostAnswers,_that.notSeenConsecutively,_that.inUnreliablePingSpan);case _:
-  return null;
-
-}
-}
-
-}
-
-/// @nodoc
-@JsonSerializable()
-
-class _StateReasonStats implements StateReasonStats {
-  const _StateReasonStats({required this.canNotSend, required this.tooManyLostAnswers, required this.noPingResponse, required this.failedToSend, required this.lostAnswers, required this.notSeenConsecutively, required this.inUnreliablePingSpan});
-  factory _StateReasonStats.fromJson(Map<String, dynamic> json) => _$StateReasonStatsFromJson(json);
-
-@override final  TimestampDuration canNotSend;
-@override final  TimestampDuration tooManyLostAnswers;
-@override final  TimestampDuration noPingResponse;
-@override final  TimestampDuration failedToSend;
-@override final  TimestampDuration lostAnswers;
-@override final  TimestampDuration notSeenConsecutively;
-@override final  TimestampDuration inUnreliablePingSpan;
-
-/// Create a copy of StateReasonStats
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-_$StateReasonStatsCopyWith<_StateReasonStats> get copyWith => __$StateReasonStatsCopyWithImpl<_StateReasonStats>(this, _$identity);
-
-@override
-Map<String, dynamic> toJson() {
-  return _$StateReasonStatsToJson(this, );
-}
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _StateReasonStats&&(identical(other.canNotSend, canNotSend) || other.canNotSend == canNotSend)&&(identical(other.tooManyLostAnswers, tooManyLostAnswers) || other.tooManyLostAnswers == tooManyLostAnswers)&&(identical(other.noPingResponse, noPingResponse) || other.noPingResponse == noPingResponse)&&(identical(other.failedToSend, failedToSend) || other.failedToSend == failedToSend)&&(identical(other.lostAnswers, lostAnswers) || other.lostAnswers == lostAnswers)&&(identical(other.notSeenConsecutively, notSeenConsecutively) || other.notSeenConsecutively == notSeenConsecutively)&&(identical(other.inUnreliablePingSpan, inUnreliablePingSpan) || other.inUnreliablePingSpan == inUnreliablePingSpan));
-}
-
-@JsonKey(includeFromJson: false, includeToJson: false)
-@override
-int get hashCode => Object.hash(runtimeType,canNotSend,tooManyLostAnswers,noPingResponse,failedToSend,lostAnswers,notSeenConsecutively,inUnreliablePingSpan);
-
-@override
-String toString() {
-  return 'StateReasonStats(canNotSend: $canNotSend, tooManyLostAnswers: $tooManyLostAnswers, noPingResponse: $noPingResponse, failedToSend: $failedToSend, lostAnswers: $lostAnswers, notSeenConsecutively: $notSeenConsecutively, inUnreliablePingSpan: $inUnreliablePingSpan)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class _$StateReasonStatsCopyWith<$Res> implements $StateReasonStatsCopyWith<$Res> {
-  factory _$StateReasonStatsCopyWith(_StateReasonStats value, $Res Function(_StateReasonStats) _then) = __$StateReasonStatsCopyWithImpl;
-@override @useResult
-$Res call({
- TimestampDuration canNotSend, TimestampDuration tooManyLostAnswers, TimestampDuration noPingResponse, TimestampDuration failedToSend, TimestampDuration lostAnswers, TimestampDuration notSeenConsecutively, TimestampDuration inUnreliablePingSpan
-});
-
-
-
-
-}
-/// @nodoc
-class __$StateReasonStatsCopyWithImpl<$Res>
-    implements _$StateReasonStatsCopyWith<$Res> {
-  __$StateReasonStatsCopyWithImpl(this._self, this._then);
-
-  final _StateReasonStats _self;
-  final $Res Function(_StateReasonStats) _then;
-
-/// Create a copy of StateReasonStats
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? canNotSend = null,Object? tooManyLostAnswers = null,Object? noPingResponse = null,Object? failedToSend = null,Object? lostAnswers = null,Object? notSeenConsecutively = null,Object? inUnreliablePingSpan = null,}) {
-  return _then(_StateReasonStats(
-canNotSend: null == canNotSend ? _self.canNotSend : canNotSend // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,tooManyLostAnswers: null == tooManyLostAnswers ? _self.tooManyLostAnswers : tooManyLostAnswers // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,noPingResponse: null == noPingResponse ? _self.noPingResponse : noPingResponse // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,failedToSend: null == failedToSend ? _self.failedToSend : failedToSend // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,lostAnswers: null == lostAnswers ? _self.lostAnswers : lostAnswers // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,notSeenConsecutively: null == notSeenConsecutively ? _self.notSeenConsecutively : notSeenConsecutively // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,inUnreliablePingSpan: null == inUnreliablePingSpan ? _self.inUnreliablePingSpan : inUnreliablePingSpan // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,
-  ));
-}
-
-
-}
-
-
-/// @nodoc
-mixin _$AnswerStats {
-
- TimestampDuration get span; int get questions; int get answers; int get lostAnswers; int get consecutiveAnswersMaximum; int get consecutiveAnswersAverage; int get consecutiveAnswersMinimum; int get consecutiveLostAnswersMaximum; int get consecutiveLostAnswersAverage; int get consecutiveLostAnswersMinimum;
-/// Create a copy of AnswerStats
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$AnswerStatsCopyWith<AnswerStats> get copyWith => _$AnswerStatsCopyWithImpl<AnswerStats>(this as AnswerStats, _$identity);
-
-  /// Serializes this AnswerStats to a JSON map.
-  Map<String, dynamic> toJson();
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AnswerStats&&(identical(other.span, span) || other.span == span)&&(identical(other.questions, questions) || other.questions == questions)&&(identical(other.answers, answers) || other.answers == answers)&&(identical(other.lostAnswers, lostAnswers) || other.lostAnswers == lostAnswers)&&(identical(other.consecutiveAnswersMaximum, consecutiveAnswersMaximum) || other.consecutiveAnswersMaximum == consecutiveAnswersMaximum)&&(identical(other.consecutiveAnswersAverage, consecutiveAnswersAverage) || other.consecutiveAnswersAverage == consecutiveAnswersAverage)&&(identical(other.consecutiveAnswersMinimum, consecutiveAnswersMinimum) || other.consecutiveAnswersMinimum == consecutiveAnswersMinimum)&&(identical(other.consecutiveLostAnswersMaximum, consecutiveLostAnswersMaximum) || other.consecutiveLostAnswersMaximum == consecutiveLostAnswersMaximum)&&(identical(other.consecutiveLostAnswersAverage, consecutiveLostAnswersAverage) || other.consecutiveLostAnswersAverage == consecutiveLostAnswersAverage)&&(identical(other.consecutiveLostAnswersMinimum, consecutiveLostAnswersMinimum) || other.consecutiveLostAnswersMinimum == consecutiveLostAnswersMinimum));
-}
-
-@JsonKey(includeFromJson: false, includeToJson: false)
-@override
-int get hashCode => Object.hash(runtimeType,span,questions,answers,lostAnswers,consecutiveAnswersMaximum,consecutiveAnswersAverage,consecutiveAnswersMinimum,consecutiveLostAnswersMaximum,consecutiveLostAnswersAverage,consecutiveLostAnswersMinimum);
-
-@override
-String toString() {
-  return 'AnswerStats(span: $span, questions: $questions, answers: $answers, lostAnswers: $lostAnswers, consecutiveAnswersMaximum: $consecutiveAnswersMaximum, consecutiveAnswersAverage: $consecutiveAnswersAverage, consecutiveAnswersMinimum: $consecutiveAnswersMinimum, consecutiveLostAnswersMaximum: $consecutiveLostAnswersMaximum, consecutiveLostAnswersAverage: $consecutiveLostAnswersAverage, consecutiveLostAnswersMinimum: $consecutiveLostAnswersMinimum)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $AnswerStatsCopyWith<$Res>  {
-  factory $AnswerStatsCopyWith(AnswerStats value, $Res Function(AnswerStats) _then) = _$AnswerStatsCopyWithImpl;
-@useResult
-$Res call({
- TimestampDuration span, int questions, int answers, int lostAnswers, int consecutiveAnswersMaximum, int consecutiveAnswersAverage, int consecutiveAnswersMinimum, int consecutiveLostAnswersMaximum, int consecutiveLostAnswersAverage, int consecutiveLostAnswersMinimum
-});
-
-
-
-
-}
-/// @nodoc
-class _$AnswerStatsCopyWithImpl<$Res>
-    implements $AnswerStatsCopyWith<$Res> {
-  _$AnswerStatsCopyWithImpl(this._self, this._then);
-
-  final AnswerStats _self;
-  final $Res Function(AnswerStats) _then;
-
-/// Create a copy of AnswerStats
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? span = null,Object? questions = null,Object? answers = null,Object? lostAnswers = null,Object? consecutiveAnswersMaximum = null,Object? consecutiveAnswersAverage = null,Object? consecutiveAnswersMinimum = null,Object? consecutiveLostAnswersMaximum = null,Object? consecutiveLostAnswersAverage = null,Object? consecutiveLostAnswersMinimum = null,}) {
-  return _then(_self.copyWith(
-span: null == span ? _self.span : span // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,questions: null == questions ? _self.questions : questions // ignore: cast_nullable_to_non_nullable
-as int,answers: null == answers ? _self.answers : answers // ignore: cast_nullable_to_non_nullable
-as int,lostAnswers: null == lostAnswers ? _self.lostAnswers : lostAnswers // ignore: cast_nullable_to_non_nullable
-as int,consecutiveAnswersMaximum: null == consecutiveAnswersMaximum ? _self.consecutiveAnswersMaximum : consecutiveAnswersMaximum // ignore: cast_nullable_to_non_nullable
-as int,consecutiveAnswersAverage: null == consecutiveAnswersAverage ? _self.consecutiveAnswersAverage : consecutiveAnswersAverage // ignore: cast_nullable_to_non_nullable
-as int,consecutiveAnswersMinimum: null == consecutiveAnswersMinimum ? _self.consecutiveAnswersMinimum : consecutiveAnswersMinimum // ignore: cast_nullable_to_non_nullable
-as int,consecutiveLostAnswersMaximum: null == consecutiveLostAnswersMaximum ? _self.consecutiveLostAnswersMaximum : consecutiveLostAnswersMaximum // ignore: cast_nullable_to_non_nullable
-as int,consecutiveLostAnswersAverage: null == consecutiveLostAnswersAverage ? _self.consecutiveLostAnswersAverage : consecutiveLostAnswersAverage // ignore: cast_nullable_to_non_nullable
-as int,consecutiveLostAnswersMinimum: null == consecutiveLostAnswersMinimum ? _self.consecutiveLostAnswersMinimum : consecutiveLostAnswersMinimum // ignore: cast_nullable_to_non_nullable
-as int,
-  ));
-}
-
-}
-
-
-/// Adds pattern-matching-related methods to [AnswerStats].
-extension AnswerStatsPatterns on AnswerStats {
-/// A variant of `map` that fallback to returning `orElse`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _AnswerStats value)?  $default,{required TResult orElse(),}){
-final _that = this;
-switch (_that) {
-case _AnswerStats() when $default != null:
-return $default(_that);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// Callbacks receives the raw object, upcasted.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case final Subclass2 value:
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _AnswerStats value)  $default,){
-final _that = this;
-switch (_that) {
-case _AnswerStats():
-return $default(_that);}
-}
-/// A variant of `map` that fallback to returning `null`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _AnswerStats value)?  $default,){
-final _that = this;
-switch (_that) {
-case _AnswerStats() when $default != null:
-return $default(_that);case _:
-  return null;
-
-}
-}
-/// A variant of `when` that fallback to an `orElse` callback.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( TimestampDuration span,  int questions,  int answers,  int lostAnswers,  int consecutiveAnswersMaximum,  int consecutiveAnswersAverage,  int consecutiveAnswersMinimum,  int consecutiveLostAnswersMaximum,  int consecutiveLostAnswersAverage,  int consecutiveLostAnswersMinimum)?  $default,{required TResult orElse(),}) {final _that = this;
-switch (_that) {
-case _AnswerStats() when $default != null:
-return $default(_that.span,_that.questions,_that.answers,_that.lostAnswers,_that.consecutiveAnswersMaximum,_that.consecutiveAnswersAverage,_that.consecutiveAnswersMinimum,_that.consecutiveLostAnswersMaximum,_that.consecutiveLostAnswersAverage,_that.consecutiveLostAnswersMinimum);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// As opposed to `map`, this offers destructuring.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case Subclass2(:final field2):
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( TimestampDuration span,  int questions,  int answers,  int lostAnswers,  int consecutiveAnswersMaximum,  int consecutiveAnswersAverage,  int consecutiveAnswersMinimum,  int consecutiveLostAnswersMaximum,  int consecutiveLostAnswersAverage,  int consecutiveLostAnswersMinimum)  $default,) {final _that = this;
-switch (_that) {
-case _AnswerStats():
-return $default(_that.span,_that.questions,_that.answers,_that.lostAnswers,_that.consecutiveAnswersMaximum,_that.consecutiveAnswersAverage,_that.consecutiveAnswersMinimum,_that.consecutiveLostAnswersMaximum,_that.consecutiveLostAnswersAverage,_that.consecutiveLostAnswersMinimum);}
-}
-/// A variant of `when` that fallback to returning `null`
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( TimestampDuration span,  int questions,  int answers,  int lostAnswers,  int consecutiveAnswersMaximum,  int consecutiveAnswersAverage,  int consecutiveAnswersMinimum,  int consecutiveLostAnswersMaximum,  int consecutiveLostAnswersAverage,  int consecutiveLostAnswersMinimum)?  $default,) {final _that = this;
-switch (_that) {
-case _AnswerStats() when $default != null:
-return $default(_that.span,_that.questions,_that.answers,_that.lostAnswers,_that.consecutiveAnswersMaximum,_that.consecutiveAnswersAverage,_that.consecutiveAnswersMinimum,_that.consecutiveLostAnswersMaximum,_that.consecutiveLostAnswersAverage,_that.consecutiveLostAnswersMinimum);case _:
-  return null;
-
-}
-}
-
-}
-
-/// @nodoc
-@JsonSerializable()
-
-class _AnswerStats implements AnswerStats {
-  const _AnswerStats({required this.span, required this.questions, required this.answers, required this.lostAnswers, required this.consecutiveAnswersMaximum, required this.consecutiveAnswersAverage, required this.consecutiveAnswersMinimum, required this.consecutiveLostAnswersMaximum, required this.consecutiveLostAnswersAverage, required this.consecutiveLostAnswersMinimum});
-  factory _AnswerStats.fromJson(Map<String, dynamic> json) => _$AnswerStatsFromJson(json);
-
-@override final  TimestampDuration span;
-@override final  int questions;
-@override final  int answers;
-@override final  int lostAnswers;
-@override final  int consecutiveAnswersMaximum;
-@override final  int consecutiveAnswersAverage;
-@override final  int consecutiveAnswersMinimum;
-@override final  int consecutiveLostAnswersMaximum;
-@override final  int consecutiveLostAnswersAverage;
-@override final  int consecutiveLostAnswersMinimum;
-
-/// Create a copy of AnswerStats
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-_$AnswerStatsCopyWith<_AnswerStats> get copyWith => __$AnswerStatsCopyWithImpl<_AnswerStats>(this, _$identity);
-
-@override
-Map<String, dynamic> toJson() {
-  return _$AnswerStatsToJson(this, );
-}
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _AnswerStats&&(identical(other.span, span) || other.span == span)&&(identical(other.questions, questions) || other.questions == questions)&&(identical(other.answers, answers) || other.answers == answers)&&(identical(other.lostAnswers, lostAnswers) || other.lostAnswers == lostAnswers)&&(identical(other.consecutiveAnswersMaximum, consecutiveAnswersMaximum) || other.consecutiveAnswersMaximum == consecutiveAnswersMaximum)&&(identical(other.consecutiveAnswersAverage, consecutiveAnswersAverage) || other.consecutiveAnswersAverage == consecutiveAnswersAverage)&&(identical(other.consecutiveAnswersMinimum, consecutiveAnswersMinimum) || other.consecutiveAnswersMinimum == consecutiveAnswersMinimum)&&(identical(other.consecutiveLostAnswersMaximum, consecutiveLostAnswersMaximum) || other.consecutiveLostAnswersMaximum == consecutiveLostAnswersMaximum)&&(identical(other.consecutiveLostAnswersAverage, consecutiveLostAnswersAverage) || other.consecutiveLostAnswersAverage == consecutiveLostAnswersAverage)&&(identical(other.consecutiveLostAnswersMinimum, consecutiveLostAnswersMinimum) || other.consecutiveLostAnswersMinimum == consecutiveLostAnswersMinimum));
-}
-
-@JsonKey(includeFromJson: false, includeToJson: false)
-@override
-int get hashCode => Object.hash(runtimeType,span,questions,answers,lostAnswers,consecutiveAnswersMaximum,consecutiveAnswersAverage,consecutiveAnswersMinimum,consecutiveLostAnswersMaximum,consecutiveLostAnswersAverage,consecutiveLostAnswersMinimum);
-
-@override
-String toString() {
-  return 'AnswerStats(span: $span, questions: $questions, answers: $answers, lostAnswers: $lostAnswers, consecutiveAnswersMaximum: $consecutiveAnswersMaximum, consecutiveAnswersAverage: $consecutiveAnswersAverage, consecutiveAnswersMinimum: $consecutiveAnswersMinimum, consecutiveLostAnswersMaximum: $consecutiveLostAnswersMaximum, consecutiveLostAnswersAverage: $consecutiveLostAnswersAverage, consecutiveLostAnswersMinimum: $consecutiveLostAnswersMinimum)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class _$AnswerStatsCopyWith<$Res> implements $AnswerStatsCopyWith<$Res> {
-  factory _$AnswerStatsCopyWith(_AnswerStats value, $Res Function(_AnswerStats) _then) = __$AnswerStatsCopyWithImpl;
-@override @useResult
-$Res call({
- TimestampDuration span, int questions, int answers, int lostAnswers, int consecutiveAnswersMaximum, int consecutiveAnswersAverage, int consecutiveAnswersMinimum, int consecutiveLostAnswersMaximum, int consecutiveLostAnswersAverage, int consecutiveLostAnswersMinimum
-});
-
-
-
-
-}
-/// @nodoc
-class __$AnswerStatsCopyWithImpl<$Res>
-    implements _$AnswerStatsCopyWith<$Res> {
-  __$AnswerStatsCopyWithImpl(this._self, this._then);
-
-  final _AnswerStats _self;
-  final $Res Function(_AnswerStats) _then;
-
-/// Create a copy of AnswerStats
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? span = null,Object? questions = null,Object? answers = null,Object? lostAnswers = null,Object? consecutiveAnswersMaximum = null,Object? consecutiveAnswersAverage = null,Object? consecutiveAnswersMinimum = null,Object? consecutiveLostAnswersMaximum = null,Object? consecutiveLostAnswersAverage = null,Object? consecutiveLostAnswersMinimum = null,}) {
-  return _then(_AnswerStats(
-span: null == span ? _self.span : span // ignore: cast_nullable_to_non_nullable
-as TimestampDuration,questions: null == questions ? _self.questions : questions // ignore: cast_nullable_to_non_nullable
-as int,answers: null == answers ? _self.answers : answers // ignore: cast_nullable_to_non_nullable
-as int,lostAnswers: null == lostAnswers ? _self.lostAnswers : lostAnswers // ignore: cast_nullable_to_non_nullable
-as int,consecutiveAnswersMaximum: null == consecutiveAnswersMaximum ? _self.consecutiveAnswersMaximum : consecutiveAnswersMaximum // ignore: cast_nullable_to_non_nullable
-as int,consecutiveAnswersAverage: null == consecutiveAnswersAverage ? _self.consecutiveAnswersAverage : consecutiveAnswersAverage // ignore: cast_nullable_to_non_nullable
-as int,consecutiveAnswersMinimum: null == consecutiveAnswersMinimum ? _self.consecutiveAnswersMinimum : consecutiveAnswersMinimum // ignore: cast_nullable_to_non_nullable
-as int,consecutiveLostAnswersMaximum: null == consecutiveLostAnswersMaximum ? _self.consecutiveLostAnswersMaximum : consecutiveLostAnswersMaximum // ignore: cast_nullable_to_non_nullable
-as int,consecutiveLostAnswersAverage: null == consecutiveLostAnswersAverage ? _self.consecutiveLostAnswersAverage : consecutiveLostAnswersAverage // ignore: cast_nullable_to_non_nullable
-as int,consecutiveLostAnswersMinimum: null == consecutiveLostAnswersMinimum ? _self.consecutiveLostAnswersMinimum : consecutiveLostAnswersMinimum // ignore: cast_nullable_to_non_nullable
-as int,
-  ));
-}
-
-
-}
-
-
-/// @nodoc
-mixin _$RPCStats {
-
- int get messagesSent; int get messagesRcvd; int get questionsInFlight; Timestamp? get lastQuestionTs; Timestamp? get lastSeenTs; Timestamp? get firstConsecutiveSeenTs; int get failedToSend; int get unreachable;
-/// Create a copy of RPCStats
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$RPCStatsCopyWith<RPCStats> get copyWith => _$RPCStatsCopyWithImpl<RPCStats>(this as RPCStats, _$identity);
-
-  /// Serializes this RPCStats to a JSON map.
-  Map<String, dynamic> toJson();
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is RPCStats&&(identical(other.messagesSent, messagesSent) || other.messagesSent == messagesSent)&&(identical(other.messagesRcvd, messagesRcvd) || other.messagesRcvd == messagesRcvd)&&(identical(other.questionsInFlight, questionsInFlight) || other.questionsInFlight == questionsInFlight)&&(identical(other.lastQuestionTs, lastQuestionTs) || other.lastQuestionTs == lastQuestionTs)&&(identical(other.lastSeenTs, lastSeenTs) || other.lastSeenTs == lastSeenTs)&&(identical(other.firstConsecutiveSeenTs, firstConsecutiveSeenTs) || other.firstConsecutiveSeenTs == firstConsecutiveSeenTs)&&(identical(other.failedToSend, failedToSend) || other.failedToSend == failedToSend)&&(identical(other.unreachable, unreachable) || other.unreachable == unreachable));
-}
-
-@JsonKey(includeFromJson: false, includeToJson: false)
-@override
-int get hashCode => Object.hash(runtimeType,messagesSent,messagesRcvd,questionsInFlight,lastQuestionTs,lastSeenTs,firstConsecutiveSeenTs,failedToSend,unreachable);
-
-@override
-String toString() {
-  return 'RPCStats(messagesSent: $messagesSent, messagesRcvd: $messagesRcvd, questionsInFlight: $questionsInFlight, lastQuestionTs: $lastQuestionTs, lastSeenTs: $lastSeenTs, firstConsecutiveSeenTs: $firstConsecutiveSeenTs, failedToSend: $failedToSend, unreachable: $unreachable)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $RPCStatsCopyWith<$Res>  {
-  factory $RPCStatsCopyWith(RPCStats value, $Res Function(RPCStats) _then) = _$RPCStatsCopyWithImpl;
-@useResult
-$Res call({
- int messagesSent, int messagesRcvd, int questionsInFlight, Timestamp? lastQuestionTs, Timestamp? lastSeenTs, Timestamp? firstConsecutiveSeenTs, int failedToSend, int unreachable
-});
-
-
-
-
-}
-/// @nodoc
-class _$RPCStatsCopyWithImpl<$Res>
-    implements $RPCStatsCopyWith<$Res> {
-  _$RPCStatsCopyWithImpl(this._self, this._then);
-
-  final RPCStats _self;
-  final $Res Function(RPCStats) _then;
-
-/// Create a copy of RPCStats
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? messagesSent = null,Object? messagesRcvd = null,Object? questionsInFlight = null,Object? lastQuestionTs = freezed,Object? lastSeenTs = freezed,Object? firstConsecutiveSeenTs = freezed,Object? failedToSend = null,Object? unreachable = null,}) {
-  return _then(_self.copyWith(
-messagesSent: null == messagesSent ? _self.messagesSent : messagesSent // ignore: cast_nullable_to_non_nullable
-as int,messagesRcvd: null == messagesRcvd ? _self.messagesRcvd : messagesRcvd // ignore: cast_nullable_to_non_nullable
-as int,questionsInFlight: null == questionsInFlight ? _self.questionsInFlight : questionsInFlight // ignore: cast_nullable_to_non_nullable
-as int,lastQuestionTs: freezed == lastQuestionTs ? _self.lastQuestionTs : lastQuestionTs // ignore: cast_nullable_to_non_nullable
-as Timestamp?,lastSeenTs: freezed == lastSeenTs ? _self.lastSeenTs : lastSeenTs // ignore: cast_nullable_to_non_nullable
-as Timestamp?,firstConsecutiveSeenTs: freezed == firstConsecutiveSeenTs ? _self.firstConsecutiveSeenTs : firstConsecutiveSeenTs // ignore: cast_nullable_to_non_nullable
-as Timestamp?,failedToSend: null == failedToSend ? _self.failedToSend : failedToSend // ignore: cast_nullable_to_non_nullable
-as int,unreachable: null == unreachable ? _self.unreachable : unreachable // ignore: cast_nullable_to_non_nullable
-as int,
-  ));
-}
-
-}
-
-
-/// Adds pattern-matching-related methods to [RPCStats].
-extension RPCStatsPatterns on RPCStats {
-/// A variant of `map` that fallback to returning `orElse`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _RPCStats value)?  $default,{required TResult orElse(),}){
-final _that = this;
-switch (_that) {
-case _RPCStats() when $default != null:
-return $default(_that);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// Callbacks receives the raw object, upcasted.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case final Subclass2 value:
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _RPCStats value)  $default,){
-final _that = this;
-switch (_that) {
-case _RPCStats():
-return $default(_that);}
-}
-/// A variant of `map` that fallback to returning `null`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _RPCStats value)?  $default,){
-final _that = this;
-switch (_that) {
-case _RPCStats() when $default != null:
-return $default(_that);case _:
-  return null;
-
-}
-}
-/// A variant of `when` that fallback to an `orElse` callback.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int failedToSend,  int unreachable)?  $default,{required TResult orElse(),}) {final _that = this;
-switch (_that) {
-case _RPCStats() when $default != null:
-return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.failedToSend,_that.unreachable);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// As opposed to `map`, this offers destructuring.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case Subclass2(:final field2):
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int failedToSend,  int unreachable)  $default,) {final _that = this;
-switch (_that) {
-case _RPCStats():
-return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.failedToSend,_that.unreachable);}
-}
-/// A variant of `when` that fallback to returning `null`
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int messagesSent,  int messagesRcvd,  int questionsInFlight,  Timestamp? lastQuestionTs,  Timestamp? lastSeenTs,  Timestamp? firstConsecutiveSeenTs,  int failedToSend,  int unreachable)?  $default,) {final _that = this;
-switch (_that) {
-case _RPCStats() when $default != null:
-return $default(_that.messagesSent,_that.messagesRcvd,_that.questionsInFlight,_that.lastQuestionTs,_that.lastSeenTs,_that.firstConsecutiveSeenTs,_that.failedToSend,_that.unreachable);case _:
-  return null;
-
-}
-}
-
-}
-
-/// @nodoc
-@JsonSerializable()
-
-class _RPCStats implements RPCStats {
-  const _RPCStats({required this.messagesSent, required this.messagesRcvd, required this.questionsInFlight, required this.lastQuestionTs, required this.lastSeenTs, required this.firstConsecutiveSeenTs, required this.failedToSend, required this.unreachable});
-  factory _RPCStats.fromJson(Map<String, dynamic> json) => _$RPCStatsFromJson(json);
-
-@override final  int messagesSent;
-@override final  int messagesRcvd;
-@override final  int questionsInFlight;
-@override final  Timestamp? lastQuestionTs;
-@override final  Timestamp? lastSeenTs;
-@override final  Timestamp? firstConsecutiveSeenTs;
-@override final  int failedToSend;
-@override final  int unreachable;
-
-/// Create a copy of RPCStats
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-_$RPCStatsCopyWith<_RPCStats> get copyWith => __$RPCStatsCopyWithImpl<_RPCStats>(this, _$identity);
-
-@override
-Map<String, dynamic> toJson() {
-  return _$RPCStatsToJson(this, );
-}
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _RPCStats&&(identical(other.messagesSent, messagesSent) || other.messagesSent == messagesSent)&&(identical(other.messagesRcvd, messagesRcvd) || other.messagesRcvd == messagesRcvd)&&(identical(other.questionsInFlight, questionsInFlight) || other.questionsInFlight == questionsInFlight)&&(identical(other.lastQuestionTs, lastQuestionTs) || other.lastQuestionTs == lastQuestionTs)&&(identical(other.lastSeenTs, lastSeenTs) || other.lastSeenTs == lastSeenTs)&&(identical(other.firstConsecutiveSeenTs, firstConsecutiveSeenTs) || other.firstConsecutiveSeenTs == firstConsecutiveSeenTs)&&(identical(other.failedToSend, failedToSend) || other.failedToSend == failedToSend)&&(identical(other.unreachable, unreachable) || other.unreachable == unreachable));
-}
-
-@JsonKey(includeFromJson: false, includeToJson: false)
-@override
-int get hashCode => Object.hash(runtimeType,messagesSent,messagesRcvd,questionsInFlight,lastQuestionTs,lastSeenTs,firstConsecutiveSeenTs,failedToSend,unreachable);
-
-@override
-String toString() {
-  return 'RPCStats(messagesSent: $messagesSent, messagesRcvd: $messagesRcvd, questionsInFlight: $questionsInFlight, lastQuestionTs: $lastQuestionTs, lastSeenTs: $lastSeenTs, firstConsecutiveSeenTs: $firstConsecutiveSeenTs, failedToSend: $failedToSend, unreachable: $unreachable)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class _$RPCStatsCopyWith<$Res> implements $RPCStatsCopyWith<$Res> {
-  factory _$RPCStatsCopyWith(_RPCStats value, $Res Function(_RPCStats) _then) = __$RPCStatsCopyWithImpl;
-@override @useResult
-$Res call({
- int messagesSent, int messagesRcvd, int questionsInFlight, Timestamp? lastQuestionTs, Timestamp? lastSeenTs, Timestamp? firstConsecutiveSeenTs, int failedToSend, int unreachable
-});
-
-
-
-
-}
-/// @nodoc
-class __$RPCStatsCopyWithImpl<$Res>
-    implements _$RPCStatsCopyWith<$Res> {
-  __$RPCStatsCopyWithImpl(this._self, this._then);
-
-  final _RPCStats _self;
-  final $Res Function(_RPCStats) _then;
-
-/// Create a copy of RPCStats
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? messagesSent = null,Object? messagesRcvd = null,Object? questionsInFlight = null,Object? lastQuestionTs = freezed,Object? lastSeenTs = freezed,Object? firstConsecutiveSeenTs = freezed,Object? failedToSend = null,Object? unreachable = null,}) {
-  return _then(_RPCStats(
-messagesSent: null == messagesSent ? _self.messagesSent : messagesSent // ignore: cast_nullable_to_non_nullable
-as int,messagesRcvd: null == messagesRcvd ? _self.messagesRcvd : messagesRcvd // ignore: cast_nullable_to_non_nullable
-as int,questionsInFlight: null == questionsInFlight ? _self.questionsInFlight : questionsInFlight // ignore: cast_nullable_to_non_nullable
-as int,lastQuestionTs: freezed == lastQuestionTs ? _self.lastQuestionTs : lastQuestionTs // ignore: cast_nullable_to_non_nullable
-as Timestamp?,lastSeenTs: freezed == lastSeenTs ? _self.lastSeenTs : lastSeenTs // ignore: cast_nullable_to_non_nullable
-as Timestamp?,firstConsecutiveSeenTs: freezed == firstConsecutiveSeenTs ? _self.firstConsecutiveSeenTs : firstConsecutiveSeenTs // ignore: cast_nullable_to_non_nullable
-as Timestamp?,failedToSend: null == failedToSend ? _self.failedToSend : failedToSend // ignore: cast_nullable_to_non_nullable
-as int,unreachable: null == unreachable ? _self.unreachable : unreachable // ignore: cast_nullable_to_non_nullable
-as int,
-  ));
-}
-
-
-}
-
-
-/// @nodoc
 mixin _$PeerStats {
 
- Timestamp get timeAdded; RPCStats get rpcStats; TransferStatsDownUp get transfer; StateStats get state; LatencyStats? get latency;
+ TransferStatsDownUp get transfer; LatencyStats? get latency;
 /// Create a copy of PeerStats
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -1992,16 +865,16 @@ $PeerStatsCopyWith<PeerStats> get copyWith => _$PeerStatsCopyWithImpl<PeerStats>
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is PeerStats&&(identical(other.timeAdded, timeAdded) || other.timeAdded == timeAdded)&&(identical(other.rpcStats, rpcStats) || other.rpcStats == rpcStats)&&(identical(other.transfer, transfer) || other.transfer == transfer)&&(identical(other.state, state) || other.state == state)&&(identical(other.latency, latency) || other.latency == latency));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PeerStats&&(identical(other.transfer, transfer) || other.transfer == transfer)&&(identical(other.latency, latency) || other.latency == latency));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,timeAdded,rpcStats,transfer,state,latency);
+int get hashCode => Object.hash(runtimeType,transfer,latency);
 
 @override
 String toString() {
-  return 'PeerStats(timeAdded: $timeAdded, rpcStats: $rpcStats, transfer: $transfer, state: $state, latency: $latency)';
+  return 'PeerStats(transfer: $transfer, latency: $latency)';
 }
 
 
@@ -2012,11 +885,11 @@ abstract mixin class $PeerStatsCopyWith<$Res>  {
   factory $PeerStatsCopyWith(PeerStats value, $Res Function(PeerStats) _then) = _$PeerStatsCopyWithImpl;
 @useResult
 $Res call({
- Timestamp timeAdded, RPCStats rpcStats, TransferStatsDownUp transfer, StateStats state, LatencyStats? latency
+ TransferStatsDownUp transfer, LatencyStats? latency
 });
 
 
-$RPCStatsCopyWith<$Res> get rpcStats;$TransferStatsDownUpCopyWith<$Res> get transfer;$StateStatsCopyWith<$Res> get state;$LatencyStatsCopyWith<$Res>? get latency;
+$TransferStatsDownUpCopyWith<$Res> get transfer;$LatencyStatsCopyWith<$Res>? get latency;
 
 }
 /// @nodoc
@@ -2029,13 +902,10 @@ class _$PeerStatsCopyWithImpl<$Res>
 
 /// Create a copy of PeerStats
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? timeAdded = null,Object? rpcStats = null,Object? transfer = null,Object? state = null,Object? latency = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? transfer = null,Object? latency = freezed,}) {
   return _then(_self.copyWith(
-timeAdded: null == timeAdded ? _self.timeAdded : timeAdded // ignore: cast_nullable_to_non_nullable
-as Timestamp,rpcStats: null == rpcStats ? _self.rpcStats : rpcStats // ignore: cast_nullable_to_non_nullable
-as RPCStats,transfer: null == transfer ? _self.transfer : transfer // ignore: cast_nullable_to_non_nullable
-as TransferStatsDownUp,state: null == state ? _self.state : state // ignore: cast_nullable_to_non_nullable
-as StateStats,latency: freezed == latency ? _self.latency : latency // ignore: cast_nullable_to_non_nullable
+transfer: null == transfer ? _self.transfer : transfer // ignore: cast_nullable_to_non_nullable
+as TransferStatsDownUp,latency: freezed == latency ? _self.latency : latency // ignore: cast_nullable_to_non_nullable
 as LatencyStats?,
   ));
 }
@@ -2043,28 +913,10 @@ as LatencyStats?,
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$RPCStatsCopyWith<$Res> get rpcStats {
-  
-  return $RPCStatsCopyWith<$Res>(_self.rpcStats, (value) {
-    return _then(_self.copyWith(rpcStats: value));
-  });
-}/// Create a copy of PeerStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
 $TransferStatsDownUpCopyWith<$Res> get transfer {
   
   return $TransferStatsDownUpCopyWith<$Res>(_self.transfer, (value) {
     return _then(_self.copyWith(transfer: value));
-  });
-}/// Create a copy of PeerStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$StateStatsCopyWith<$Res> get state {
-  
-  return $StateStatsCopyWith<$Res>(_self.state, (value) {
-    return _then(_self.copyWith(state: value));
   });
 }/// Create a copy of PeerStats
 /// with the given fields replaced by the non-null parameter values.
@@ -2157,10 +1009,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( Timestamp timeAdded,  RPCStats rpcStats,  TransferStatsDownUp transfer,  StateStats state,  LatencyStats? latency)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( TransferStatsDownUp transfer,  LatencyStats? latency)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _PeerStats() when $default != null:
-return $default(_that.timeAdded,_that.rpcStats,_that.transfer,_that.state,_that.latency);case _:
+return $default(_that.transfer,_that.latency);case _:
   return orElse();
 
 }
@@ -2178,10 +1030,10 @@ return $default(_that.timeAdded,_that.rpcStats,_that.transfer,_that.state,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( Timestamp timeAdded,  RPCStats rpcStats,  TransferStatsDownUp transfer,  StateStats state,  LatencyStats? latency)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( TransferStatsDownUp transfer,  LatencyStats? latency)  $default,) {final _that = this;
 switch (_that) {
 case _PeerStats():
-return $default(_that.timeAdded,_that.rpcStats,_that.transfer,_that.state,_that.latency);}
+return $default(_that.transfer,_that.latency);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -2195,10 +1047,10 @@ return $default(_that.timeAdded,_that.rpcStats,_that.transfer,_that.state,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( Timestamp timeAdded,  RPCStats rpcStats,  TransferStatsDownUp transfer,  StateStats state,  LatencyStats? latency)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( TransferStatsDownUp transfer,  LatencyStats? latency)?  $default,) {final _that = this;
 switch (_that) {
 case _PeerStats() when $default != null:
-return $default(_that.timeAdded,_that.rpcStats,_that.transfer,_that.state,_that.latency);case _:
+return $default(_that.transfer,_that.latency);case _:
   return null;
 
 }
@@ -2210,13 +1062,10 @@ return $default(_that.timeAdded,_that.rpcStats,_that.transfer,_that.state,_that.
 @JsonSerializable()
 
 class _PeerStats implements PeerStats {
-  const _PeerStats({required this.timeAdded, required this.rpcStats, required this.transfer, required this.state, this.latency});
+  const _PeerStats({required this.transfer, this.latency});
   factory _PeerStats.fromJson(Map<String, dynamic> json) => _$PeerStatsFromJson(json);
 
-@override final  Timestamp timeAdded;
-@override final  RPCStats rpcStats;
 @override final  TransferStatsDownUp transfer;
-@override final  StateStats state;
 @override final  LatencyStats? latency;
 
 /// Create a copy of PeerStats
@@ -2232,16 +1081,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PeerStats&&(identical(other.timeAdded, timeAdded) || other.timeAdded == timeAdded)&&(identical(other.rpcStats, rpcStats) || other.rpcStats == rpcStats)&&(identical(other.transfer, transfer) || other.transfer == transfer)&&(identical(other.state, state) || other.state == state)&&(identical(other.latency, latency) || other.latency == latency));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PeerStats&&(identical(other.transfer, transfer) || other.transfer == transfer)&&(identical(other.latency, latency) || other.latency == latency));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,timeAdded,rpcStats,transfer,state,latency);
+int get hashCode => Object.hash(runtimeType,transfer,latency);
 
 @override
 String toString() {
-  return 'PeerStats(timeAdded: $timeAdded, rpcStats: $rpcStats, transfer: $transfer, state: $state, latency: $latency)';
+  return 'PeerStats(transfer: $transfer, latency: $latency)';
 }
 
 
@@ -2252,11 +1101,11 @@ abstract mixin class _$PeerStatsCopyWith<$Res> implements $PeerStatsCopyWith<$Re
   factory _$PeerStatsCopyWith(_PeerStats value, $Res Function(_PeerStats) _then) = __$PeerStatsCopyWithImpl;
 @override @useResult
 $Res call({
- Timestamp timeAdded, RPCStats rpcStats, TransferStatsDownUp transfer, StateStats state, LatencyStats? latency
+ TransferStatsDownUp transfer, LatencyStats? latency
 });
 
 
-@override $RPCStatsCopyWith<$Res> get rpcStats;@override $TransferStatsDownUpCopyWith<$Res> get transfer;@override $StateStatsCopyWith<$Res> get state;@override $LatencyStatsCopyWith<$Res>? get latency;
+@override $TransferStatsDownUpCopyWith<$Res> get transfer;@override $LatencyStatsCopyWith<$Res>? get latency;
 
 }
 /// @nodoc
@@ -2269,13 +1118,10 @@ class __$PeerStatsCopyWithImpl<$Res>
 
 /// Create a copy of PeerStats
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? timeAdded = null,Object? rpcStats = null,Object? transfer = null,Object? state = null,Object? latency = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? transfer = null,Object? latency = freezed,}) {
   return _then(_PeerStats(
-timeAdded: null == timeAdded ? _self.timeAdded : timeAdded // ignore: cast_nullable_to_non_nullable
-as Timestamp,rpcStats: null == rpcStats ? _self.rpcStats : rpcStats // ignore: cast_nullable_to_non_nullable
-as RPCStats,transfer: null == transfer ? _self.transfer : transfer // ignore: cast_nullable_to_non_nullable
-as TransferStatsDownUp,state: null == state ? _self.state : state // ignore: cast_nullable_to_non_nullable
-as StateStats,latency: freezed == latency ? _self.latency : latency // ignore: cast_nullable_to_non_nullable
+transfer: null == transfer ? _self.transfer : transfer // ignore: cast_nullable_to_non_nullable
+as TransferStatsDownUp,latency: freezed == latency ? _self.latency : latency // ignore: cast_nullable_to_non_nullable
 as LatencyStats?,
   ));
 }
@@ -2284,28 +1130,10 @@ as LatencyStats?,
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$RPCStatsCopyWith<$Res> get rpcStats {
-  
-  return $RPCStatsCopyWith<$Res>(_self.rpcStats, (value) {
-    return _then(_self.copyWith(rpcStats: value));
-  });
-}/// Create a copy of PeerStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
 $TransferStatsDownUpCopyWith<$Res> get transfer {
   
   return $TransferStatsDownUpCopyWith<$Res>(_self.transfer, (value) {
     return _then(_self.copyWith(transfer: value));
-  });
-}/// Create a copy of PeerStats
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$StateStatsCopyWith<$Res> get state {
-  
-  return $StateStatsCopyWith<$Res>(_self.state, (value) {
-    return _then(_self.copyWith(state: value));
   });
 }/// Create a copy of PeerStats
 /// with the given fields replaced by the non-null parameter values.

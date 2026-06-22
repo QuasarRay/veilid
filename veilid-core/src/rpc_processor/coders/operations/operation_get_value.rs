@@ -107,7 +107,7 @@ impl RPCOperationGetValueA {
             .as_ref()
             .expect_or_log("GetValueA requires question context");
         let QuestionContext::GetValue(get_value_context) = question_context else {
-            panic!("Wrong context type for GetValueA");
+            return Err(RPCError::internal("Wrong context type for GetValueA"));
         };
 
         let crypto = validate_context.crypto();

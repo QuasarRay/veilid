@@ -5,6 +5,7 @@ use web_sys::*;
 
 impl_veilid_log_facility!("pstore");
 
+/// Secure key-value storage for user secrets, backed by the browser's `localStorage`.
 #[derive(Debug)]
 #[must_use]
 pub struct ProtectedStore {
@@ -13,10 +14,12 @@ pub struct ProtectedStore {
 
 impl_veilid_component!(ProtectedStore);
 
+/// Wraps the string description of a failed JavaScript `JsValue` operation.
 #[derive(ThisError, Debug, Clone, Eq, PartialEq)]
 #[error("JsValue error")]
 pub struct JsValueError(String);
 
+/// Convert a JavaScript `JsValue` into a `JsValueError`, using its string form when present.
 #[must_use]
 pub fn map_jsvalue_error(x: JsValue) -> JsValueError {
     JsValueError(x.as_string().unwrap_or_default())
@@ -32,6 +35,9 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Remove every known Veilid-managed protected store key, logging any failures.
+    ///
+    /// Idempotent: keys already absent are skipped.
     pub fn delete_all(&self) {
         for kpsk in &KNOWN_PROTECTED_STORE_KEYS {
             if let Err(e) = self.remove_user_secret(kpsk) {
@@ -85,6 +91,11 @@ impl ProtectedStore {
         feature = "instrument",
         instrument(level = "trace", skip(self, key, value), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    /// Store a string secret under a key. Returns true if a value already existed for that key.
+    ///
+    /// Overwrites any prior value via `localStorage.setItem`, so re-saving the same key/value is idempotent.
+    ///
+    /// Errors with [VeilidAPIError::Generic] if the window or `localStorage` is unavailable, or if `setItem` throws (e.g. storage quota exceeded). Panics if called outside a browser.
     pub fn save_user_secret_string<K: AsRef<str> + fmt::Debug, V: AsRef<str> + fmt::Debug>(
         &self,
         key: K,
@@ -125,6 +136,9 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self, key), fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Load a string secret by key, or `None` if no value is stored for it.
+    ///
+    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::Generic] if the window or `localStorage` is unavailable, or if `getItem` throws. Panics if called outside a browser.
     pub fn load_user_secret_string<K: AsRef<str> + fmt::Debug>(
         &self,
         key: K,
@@ -156,6 +170,11 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self, value), fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Serialize a value to JSON and store it as a secret. Returns true if a value already existed for that key.
+    ///
+    /// Overwrites any prior value.
+    ///
+    /// Errors with [VeilidAPIError::Generic] if `value` fails to serialize, if the window or `localStorage` is unavailable, or if `setItem` throws. Panics if called outside a browser.
     pub fn save_user_secret_json<K, T>(&self, key: K, value: &T) -> VeilidAPIResult<bool>
     where
         K: AsRef<str> + fmt::Debug,
@@ -166,6 +185,9 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Load a secret by key and deserialize it from JSON, or `None` if no value is stored for it.
+    ///
+    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::Generic] if the stored bytes fail to deserialize or are not a valid buffer, or if `localStorage` access throws. Panics if called outside a browser.
     pub fn load_user_secret_json<K, T>(&self, key: K) -> VeilidAPIResult<Option<T>>
     where
         K: AsRef<str> + fmt::Debug,
@@ -187,6 +209,11 @@ impl ProtectedStore {
         feature = "instrument",
         instrument(level = "trace", skip(self, value), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    /// Store a byte buffer as a secret. Returns true if a value already existed for that key.
+    ///
+    /// Overwrites any prior value.
+    ///
+    /// Errors with [VeilidAPIError::Generic] if the window or `localStorage` is unavailable, or if `setItem` throws. Panics if called outside a browser.
     pub fn save_user_secret<K: AsRef<str> + fmt::Debug>(
         &self,
         key: K,
@@ -199,6 +226,9 @@ impl ProtectedStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    /// Load a byte buffer secret by key, or `None` if no value is stored for it.
+    ///
+    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::Generic] if the stored value lacks the buffer marker, fails base64 decode, or if `localStorage` access throws. Panics if called outside a browser.
     pub fn load_user_secret<K: AsRef<str> + fmt::Debug>(
         &self,
         key: K,
@@ -236,6 +266,11 @@ impl ProtectedStore {
         feature = "instrument",
         instrument(level = "trace", skip(self), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    /// Remove a secret by key. Returns true if a value was present and deleted.
+    ///
+    /// No-op returning false when the key is absent, so repeated removes are idempotent.
+    ///
+    /// An absent key returns `Ok(false)`. Errors with [VeilidAPIError::Generic] if the window or `localStorage` is unavailable, or if `getItem`/`removeItem` throws. Panics if called outside a browser.
     pub fn remove_user_secret<K: AsRef<str> + fmt::Debug>(&self, key: K) -> VeilidAPIResult<bool> {
         if is_browser() {
             let win = match window() {

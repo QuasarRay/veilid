@@ -26,6 +26,17 @@ impl Direction {
         }
         Ok(dset)
     }
+
+    pub fn set_pretty_string(dset: &DirectionSet) -> String {
+        if dset.is_empty() {
+            "NONE".to_string()
+        } else {
+            dset.iter()
+                .map(|d| d.to_string().to_uppercase())
+                .collect::<Vec<_>>()
+                .join("|")
+        }
+    }
 }
 
 pub type DirectionSet = EnumSet<Direction>;

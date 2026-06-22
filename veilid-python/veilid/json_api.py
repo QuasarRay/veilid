@@ -1,3 +1,5 @@
+"""Veilid API client speaking the newline-delimited JSON protocol over TCP or IPC."""
+
 import asyncio
 import importlib.resources as importlib_resources
 import json
@@ -555,6 +557,12 @@ class _JsonVeilidAPI(VeilidAPI):
 
 
 def validate_rc_op(request: dict, response: dict):
+    """Raise if the response's routing-context op does not match the request's.
+
+    Raises ValueError when `response["rc_op"]` differs from the request's, signaling a
+    desynchronized or misrouted reply. This guard does not surface server-reported
+    VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
+    """
     if response["rc_op"] != request["rc_op"]:
         raise ValueError(f"Response rc_op does not match request rc_op: {response["rc_op"]} != {request["rc_op"]}")
 
@@ -803,7 +811,6 @@ class _JsonRoutingContext(RoutingContext):
         subkeys: list[tuple[ValueSubkey, ValueSubkey]] = [],
         expiration: Timestamp = Timestamp(0),
         count: int = 0xFFFFFFFF,
-        transactional: bool = False,
     ) -> bool:
         assert isinstance(key, RecordKey)
         assert isinstance(subkeys, list)
@@ -813,7 +820,6 @@ class _JsonRoutingContext(RoutingContext):
             assert isinstance(s[1], ValueSubkey)
         assert isinstance(expiration, Timestamp)
         assert isinstance(count, int)
-        assert isinstance(transactional, bool)
 
         return raise_api_result(
             await self.api.send_ndjson_request(
@@ -825,7 +831,6 @@ class _JsonRoutingContext(RoutingContext):
                 subkeys=subkeys,
                 expiration=str(expiration),
                 count=count,
-                transactional=transactional,
             )
         )
 
@@ -905,6 +910,12 @@ class _JsonRoutingContext(RoutingContext):
 
 
 def validate_tx_op(request: dict, response: dict):
+    """Raise if the response's table-db transaction op does not match the request's.
+
+    Raises ValueError when `response["tx_op"]` differs from the request's, signaling a
+    desynchronized or misrouted reply. This guard does not surface server-reported
+    VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
+    """
     if response["tx_op"] != request["tx_op"]:
         raise ValueError(f"Response tx_op does not match request tx_op: {response['tx_op']} != {request['tx_op']}")
 
@@ -997,6 +1008,12 @@ class _JsonTableDbTransaction(TableDbTransaction):
 
 
 def validate_dhttx_op(request: dict, response: dict):
+    """Raise if the response's DHT transaction op does not match the request's.
+
+    Raises ValueError when `response["dhttx_op"]` differs from the request's, signaling a
+    desynchronized or misrouted reply. This guard does not surface server-reported
+    VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
+    """
     if response["dhttx_op"] != request["dhttx_op"]:
         raise ValueError(f"Response dhttx_op does not match request dhttx_op: {response['dhttx_op']} != {request['dhttx_op']}")
 
@@ -1149,6 +1166,12 @@ class _JsonDHTTransaction(DHTTransaction):
 
 
 def validate_db_op(request: dict, response: dict):
+    """Raise if the response's table-db op does not match the request's.
+
+    Raises ValueError when `response["db_op"]` differs from the request's, signaling a
+    desynchronized or misrouted reply. This guard does not surface server-reported
+    VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
+    """
     if response["db_op"] != request["db_op"]:
         raise ValueError(f"Response db_op does not match request db_op: {response['db_op']} != {request['db_op']}")
 
@@ -1282,6 +1305,12 @@ class _JsonTableDb(TableDb):
 
 
 def validate_cs_op(request: dict, response: dict):
+    """Raise if the response's crypto-system op does not match the request's.
+
+    Raises ValueError when `response["cs_op"]` differs from the request's, signaling a
+    desynchronized or misrouted reply. This guard does not surface server-reported
+    VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
+    """
     if response["cs_op"] != request["cs_op"]:
         raise ValueError(f"Response cs_op does not match request cs_op: {response['cs_op']} != {request['cs_op']}")
 
@@ -1803,9 +1832,31 @@ class _JsonCryptoSystem(CryptoSystem):
 async def json_api_connect(
     host: str, port: int, update_callback: Callable[[VeilidUpdate], Awaitable]
 ) -> _JsonVeilidAPI:
+    """Connect to a Veilid server over TCP, routing updates to `update_callback`.
+
+    Awaits on opening the TCP connection. The returned API spawns a background
+    receive task; release() it (or use it as an async context manager) or the
+    task and socket leak.
+
+    Raises the OSError from `asyncio.open_connection` if the TCP connect fails
+    (refused, unreachable, or name resolution failure); no VeilidAPIError is
+    produced at connect time. Use `api_connector` to map a refused connect to
+    VeilidConnectionError.
+    """
     return await _JsonVeilidAPI.connect(host, port, update_callback)
 
 async def json_api_connect_ipc(
     ipc_path: str, update_callback: Callable[[VeilidUpdate], Awaitable]
 ) -> _JsonVeilidAPI:
+    """Connect to a Veilid server over an IPC socket, routing updates to `update_callback`.
+
+    Awaits on opening the IPC socket. The returned API spawns a background
+    receive task; release() it (or use it as an async context manager) or the
+    task and socket leak.
+
+    Raises the OSError from the underlying socket/named-pipe connect if it fails
+    (e.g. the socket does not exist or is refused); no VeilidAPIError is produced
+    at connect time. Use `api_connector` to map a refused connect to
+    VeilidConnectionError.
+    """
     return await _JsonVeilidAPI.connect_ipc(ipc_path, update_callback)

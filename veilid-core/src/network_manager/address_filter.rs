@@ -5,8 +5,6 @@ impl_veilid_log_facility!("net");
 
 const PUNISHMENT_DURATION_MIN: usize = 60;
 const MAX_PUNISHMENTS_BY_NODE_ID: usize = 65536;
-const TRANSPORT_FAILURE_DURATION_MIN: usize = 10;
-const MAX_TRANSPORT_FAILURES: usize = 65536;
 const MAX_ENVELOPE_INFO_BY_NODE_ID: usize = 16384;
 const DEFAULT_OLDEST_TIMESTAMP_DURATION: TimestampDuration = TimestampDuration::new_secs(10);
 
@@ -50,34 +48,6 @@ pub(crate) enum TimestampError {
 #[error("Address not in table")]
 pub struct AddressNotInTableError {}
 
-/// AddressFilter failure key. Failures share an entry when the underlying
-/// kernel socket would be shared (TCP and WS to the same addr+port).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct LowLevelTransportTarget {
-    socket_address: SocketAddress,
-    low_level_protocol: LowLevelProtocolType,
-}
-
-impl LowLevelTransportTarget {
-    fn from_dial_info(dial_info: &DialInfo) -> Self {
-        Self {
-            socket_address: dial_info.socket_address(),
-            low_level_protocol: dial_info.protocol_type().low_level_protocol_type(),
-        }
-    }
-}
-
-impl fmt::Display for LowLevelTransportTarget {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}|{}",
-            f.to_string(self.low_level_protocol),
-            self.socket_address
-        )
-    }
-}
-
 struct AddressFilterInner {
     conn_count_by_ip4: BTreeMap<Ipv4Addr, usize>,
     conn_count_by_ip6_prefix: BTreeMap<Ipv6Addr, usize>,
@@ -87,7 +57,6 @@ struct AddressFilterInner {
     punishments_by_ip6_prefix: BTreeMap<Ipv6Addr, Punishment>,
     punishments_by_node_id: BTreeMap<NodeId, Punishment>,
     envelope_info_by_node_id: hashlink::LruCache<NodeId, EnvelopeInfo>,
-    transport_failures: BTreeMap<LowLevelTransportTarget, Timestamp>,
 }
 
 impl fmt::Debug for AddressFilterInner {
@@ -124,7 +93,6 @@ impl fmt::Debug for AddressFilterInner {
             .field("punishments_by_ip6_prefix", &self.punishments_by_ip6_prefix)
             .field("punishments_by_node_id", &self.punishments_by_node_id)
             .field(&envelope_info_by_node_id_name, &envelope_by_node_id)
-            .field("transport_failures", &self.transport_failures)
             .finish()
     }
 }
@@ -137,7 +105,6 @@ pub(crate) struct AddressFilter {
     max_connections_per_ip6_prefix_size: usize,
     max_connection_frequency_per_min: usize,
     punishment_duration_min: usize,
-    transport_failure_duration_min: usize,
     opt_max_timestamp_ahead: Option<TimestampDuration>,
     opt_max_timestamp_behind: Option<TimestampDuration>,
 }
@@ -161,10 +128,6 @@ impl fmt::Debug for AddressFilter {
                 &self.max_connection_frequency_per_min,
             )
             .field("punishment_duration_min", &self.punishment_duration_min)
-            .field(
-                "transport_failure_duration_min",
-                &self.transport_failure_duration_min,
-            )
             .field("opt_max_timestamp_ahead", &self.opt_max_timestamp_ahead)
             .field("opt_max_timestamp_behind", &self.opt_max_timestamp_behind)
             .finish()
@@ -178,12 +141,14 @@ impl AddressFilter {
         let config = registry.config();
 
         let opt_max_timestamp_behind = config
+            .internal()
             .network
             .rpc
             .max_timestamp_behind_ms
             .map(ms_to_us)
             .map(TimestampDuration::new);
         let opt_max_timestamp_ahead = config
+            .internal()
             .network
             .rpc
             .max_timestamp_ahead_ms
@@ -201,16 +166,21 @@ impl AddressFilter {
                 punishments_by_ip6_prefix: BTreeMap::new(),
                 punishments_by_node_id: BTreeMap::new(),
                 envelope_info_by_node_id: hashlink::LruCache::new(MAX_ENVELOPE_INFO_BY_NODE_ID),
-                transport_failures: BTreeMap::new(),
             }),
-            max_connections_per_ip4: config.network.max_connections_per_ip4 as usize,
-            max_connections_per_ip6_prefix: config.network.max_connections_per_ip6_prefix as usize,
-            max_connections_per_ip6_prefix_size: config.network.max_connections_per_ip6_prefix_size
+            max_connections_per_ip4: config.internal().network.max_connections_per_ip4 as usize,
+            max_connections_per_ip6_prefix: config.internal().network.max_connections_per_ip6_prefix
                 as usize,
-            max_connection_frequency_per_min: config.network.max_connection_frequency_per_min
+            max_connections_per_ip6_prefix_size: config
+                .internal()
+                .network
+                .max_connections_per_ip6_prefix_size
+                as usize,
+            max_connection_frequency_per_min: config
+                .internal()
+                .network
+                .max_connection_frequency_per_min
                 as usize,
             punishment_duration_min: PUNISHMENT_DURATION_MIN,
-            transport_failure_duration_min: TRANSPORT_FAILURE_DURATION_MIN,
             opt_max_timestamp_ahead,
             opt_max_timestamp_behind,
         }
@@ -221,7 +191,6 @@ impl AddressFilter {
         let mut inner = self.inner.lock();
         inner.conn_count_by_ip4.clear();
         inner.conn_count_by_ip6_prefix.clear();
-        inner.transport_failures.clear();
     }
 
     fn purge_old_connection_timestamps_inner(
@@ -309,22 +278,6 @@ impl AddressFilter {
                 self.forgive_node_id_inner(inner, key);
             }
         }
-        // transport failures
-        {
-            let mut dead_keys = Vec::<LowLevelTransportTarget>::new();
-            for (key, value) in &mut inner.transport_failures {
-                // Drop failures older than the failure duration
-                if cur_ts.as_u64().saturating_sub(value.as_u64())
-                    > self.transport_failure_duration_min as u64 * 60_000_000u64
-                {
-                    dead_keys.push(*key);
-                }
-            }
-            for key in dead_keys {
-                veilid_log!(self debug "Transport Permit: {}", key);
-                inner.transport_failures.remove(&key);
-            }
-        }
     }
 
     fn is_ip_addr_punished_inner(&self, inner: &AddressFilterInner, ipblock: IpAddr) -> bool {
@@ -343,44 +296,10 @@ impl AddressFilter {
         false
     }
 
-    fn get_transport_failed_ts_inner(
-        &self,
-        inner: &AddressFilterInner,
-        dial_info: &DialInfo,
-    ) -> Option<Timestamp> {
-        inner
-            .transport_failures
-            .get(&LowLevelTransportTarget::from_dial_info(dial_info))
-            .copied()
-    }
-
     pub fn is_ip_addr_punished(&self, addr: IpAddr) -> bool {
         let inner = self.inner.lock();
         let ipblock = ip_to_ipblock(self.max_connections_per_ip6_prefix_size, addr);
         self.is_ip_addr_punished_inner(&inner, ipblock)
-    }
-
-    pub fn get_transport_failed_ts(&self, dial_info: &DialInfo) -> Option<Timestamp> {
-        let inner = self.inner.lock();
-        self.get_transport_failed_ts_inner(&inner, dial_info)
-    }
-
-    pub fn set_transport_failed(&self, dial_info: DialInfo) {
-        let ts = Timestamp::now();
-        let key = LowLevelTransportTarget::from_dial_info(&dial_info);
-
-        let mut inner = self.inner.lock();
-        if inner.transport_failures.len() >= MAX_TRANSPORT_FAILURES {
-            veilid_log!(self warn "Transport failure table full: {}", key);
-            return;
-        }
-        #[cfg(feature = "verbose-tracing")]
-        veilid_log!(self debug "Transport failure: {} (from {:?})", key, dial_info);
-        inner
-            .transport_failures
-            .entry(key)
-            .and_modify(|v| *v = ts)
-            .or_insert(ts);
     }
 
     pub fn clear_punishments(&self) {
@@ -388,7 +307,6 @@ impl AddressFilter {
         inner.punishments_by_ip4.clear();
         inner.punishments_by_ip6_prefix.clear();
         inner.punishments_by_node_id.clear();
-        inner.transport_failures.clear();
 
         self.routing_table().clear_punishments();
     }
@@ -508,8 +426,10 @@ impl AddressFilter {
             IpAddr::V4(v4) => {
                 // See if we have too many connections from this ip block
                 let cnt = inner.conn_count_by_ip4.entry(v4).or_default();
-                assert!(*cnt <= self.max_connections_per_ip4);
-                if *cnt == self.max_connections_per_ip4 {
+                if *cnt > self.max_connections_per_ip4 {
+                    veilid_log!(self error "Address filter count overflow: {:?}", v4);
+                }
+                if *cnt >= self.max_connections_per_ip4 {
                     veilid_log!(self warn "Address filter count exceeded: {:?}", v4);
                     return Err(AddConnectionError::CountExceeded);
                 }
@@ -519,8 +439,10 @@ impl AddressFilter {
                     // keep timestamps that are less than a minute away
                     ts.duration_since(*v) < TimestampDuration::new_secs(60)
                 });
-                assert!(tstamps.len() <= self.max_connection_frequency_per_min);
-                if tstamps.len() == self.max_connection_frequency_per_min {
+                if tstamps.len() > self.max_connection_frequency_per_min {
+                    veilid_log!(self error "Address filter rate overflow: {:?}", v4);
+                }
+                if tstamps.len() >= self.max_connection_frequency_per_min {
                     veilid_log!(self warn "Address filter rate exceeded: {:?}", v4);
                     return Err(AddConnectionError::RateExceeded);
                 }
@@ -532,15 +454,19 @@ impl AddressFilter {
             IpAddr::V6(v6) => {
                 // See if we have too many connections from this ip block
                 let cnt = inner.conn_count_by_ip6_prefix.entry(v6).or_default();
-                assert!(*cnt <= self.max_connections_per_ip6_prefix);
-                if *cnt == self.max_connections_per_ip6_prefix {
+                if *cnt > self.max_connections_per_ip6_prefix {
+                    veilid_log!(self error "Address filter count overflow: {:?}", v6);
+                }
+                if *cnt >= self.max_connections_per_ip6_prefix {
                     veilid_log!(self warn "Address filter count exceeded: {:?}", v6);
                     return Err(AddConnectionError::CountExceeded);
                 }
                 // See if this ip block has connected too frequently
                 let tstamps = inner.conn_timestamps_by_ip6_prefix.entry(v6).or_default();
-                assert!(tstamps.len() <= self.max_connection_frequency_per_min);
-                if tstamps.len() == self.max_connection_frequency_per_min {
+                if tstamps.len() > self.max_connection_frequency_per_min {
+                    veilid_log!(self error "Address filter rate overflow: {:?}", v6);
+                }
+                if tstamps.len() >= self.max_connection_frequency_per_min {
                     veilid_log!(self warn "Address filter rate exceeded: {:?}", v6);
                     return Err(AddConnectionError::RateExceeded);
                 }
@@ -569,7 +495,11 @@ impl AddressFilter {
                     }
                     Entry::Occupied(mut o) => {
                         let cnt = o.get_mut();
-                        assert!(*cnt > 0);
+                        if *cnt == 0 {
+                            veilid_log!(self error "Address filter count underflow: {:?}", v4);
+                            inner.conn_count_by_ip4.remove(&v4);
+                            return Err(AddressNotInTableError {});
+                        }
                         if *cnt == 1 {
                             inner.conn_count_by_ip4.remove(&v4);
                         } else {
@@ -585,7 +515,11 @@ impl AddressFilter {
                     }
                     Entry::Occupied(mut o) => {
                         let cnt = o.get_mut();
-                        assert!(*cnt > 0);
+                        if *cnt == 0 {
+                            veilid_log!(self error "Address filter count underflow: {:?}", v6);
+                            inner.conn_count_by_ip6_prefix.remove(&v6);
+                            return Err(AddressNotInTableError {});
+                        }
                         if *cnt == 1 {
                             inner.conn_count_by_ip6_prefix.remove(&v6);
                         } else {

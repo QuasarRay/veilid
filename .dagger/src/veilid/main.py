@@ -7,6 +7,8 @@ import dagger
 from dagger import Ignore, dag, function, object_type
 import platform
 
+from .ignore_patterns import DIRECTORY_IGNORE_PATTERNS
+
 VEILID_REPO = "registry.gitlab.com/veilid/veilid"
 ZIG_VERSION = "0.13.0"
 CMAKE_VERSION_MINOR = "4.0"
@@ -26,13 +28,6 @@ CARGO_PROFILE_TEST_DEBUGINFO = "1"
 # Limit parallel jobs to match medium runner resources (2 vCPU, 8GB RAM)
 CARGO_BUILD_JOBS = "1"
 
-
-# Contains ignore patterns that are not included in the .gitignore file
-DIRECTORY_IGNORE_PATTERNS = [
-    ".dagger/",
-    "dagger.gen.go",
-    "dagger.json",
-]
 
 # Validate host architecture
 ARCH = platform.machine()
@@ -95,7 +90,8 @@ class Veilid:
             "libssl-dev", "openssl", "file", "git", "pkg-config",
             "libdbus-1-dev", "libdbus-glib-1-dev", "libgirepository1.0-dev",
             "libcairo2-dev", "checkinstall", "unzip", "zip", "libncursesw5-dev",
-            "libncurses5-dev", "gcc-mingw-w64-x86-64", "mingw-w64", "jq"
+            "libncurses5-dev", "gcc-mingw-w64-x86-64", "mingw-w64", "jq",
+            "selinux-policy-dev", "bzip2"
         ]
         container = container.with_exec(base_packages)
 
@@ -153,10 +149,12 @@ class Veilid:
             "rustc", "--version"
         ])
 
-        # Install Rust targets with retry logic
-        rust_targets = [
+        # Install Rust targets
+        rust_stable_targets = [
             "x86_64-unknown-linux-gnu",
             "aarch64-unknown-linux-gnu",
+            "x86_64-unknown-linux-musl",
+            "aarch64-unknown-linux-musl",
             "x86_64-pc-windows-gnu",
             # "aarch64-pc-windows-gnullvm",
             "aarch64-apple-darwin",
@@ -166,13 +164,19 @@ class Veilid:
             "x86_64-linux-android",
             "wasm32-unknown-unknown"
         ]
-
-        # Add targets (simplified without complex retry logic for now)
-        for target in rust_targets:
-            container = container.with_exec(["rustup", "target", "add", target])
+        rust_nightly_targets = [
+            "x86_64-unknown-linux-gnu",
+        ]
 
         # Add a single default-target nightly toolchain for some tests
         container = container.with_exec(["rustup", "toolchain", "install", f"{RUST_UNIT_TESTS_NIGHTLY_VERSION}", "-c", "miri,rust-src"])
+
+        # Add targets
+        container = container.with_exec(["rustup", "target", "add", "--toolchain", "stable", *rust_stable_targets])
+
+        # Add nightly targets
+        container = container.with_exec(["rustup", "target", "add", "--toolchain", "nightly", *rust_nightly_targets])
+
 
         # Install cargo tools (try binstall of musl targets first, then fallback to regular install)
         # (Doing it this way so we don't have to install the musl rust targets, which binstall will default to building with)
@@ -191,6 +195,9 @@ class Veilid:
         ]).with_exec([
             "sh", "-c",
             f"cargo binstall cargo-docs-rs --disable-strategies=compile --targets {DEFAULT_CARGO_MUSL_TARGET} || cargo install cargo-docs-rs --locked"
+        ]).with_exec([
+            "sh", "-c",
+            f"cargo binstall cargo-public-api --disable-strategies=compile --targets {DEFAULT_CARGO_MUSL_TARGET} || cargo install cargo-public-api --locked"
         ])
 
         # Install Zig for cross-compilation (no binstall available for zigbuild yet)
@@ -372,6 +379,15 @@ class Veilid:
         return f"MSRV check completed:\n{result}"
 
     @function
+    async def public_api(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run public API checks for all crates"""
+        container = self.code_linux(source, base, ci_registry_image)
+
+        result = await container.with_exec(["./scripts/_check_public_api.sh"]).combined_output()
+
+        return f"Public API check completed:\n{result}"
+
+    @function
     def build_windows_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
         """Build Windows AMD64 binaries and return the target directory"""
         container = self.code_linux(source, base, ci_registry_image)
@@ -476,6 +492,13 @@ class Veilid:
         return f"MSRV check completed:\n{result}"
 
     @function
+    async def test_public_api(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run public API checks for all crates"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_check_public_api.sh"]).combined_output()
+        return f"Public API check completed:\n{result}"
+
+    @function
     async def test_check_wasm_builds_dart(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
         """Check WASM builds for Dart"""
         container = self.code_linux(source, base, ci_registry_image)
@@ -543,6 +566,7 @@ class Veilid:
         """Run all tests (serially! for desktop, not CI use!)"""
         results = []
         results.append(await self.test_msrv_all(source, base, ci_registry_image))
+        results.append(await self.test_public_api(source, base, ci_registry_image))
         results.append(await self.test_check_wasm_builds_dart(source, base, ci_registry_image))
         results.append(await self.test_check_wasm_builds_js(source, base, ci_registry_image))
         results.append(await self.test_clippy_wasm32_unknown_unknown(source, base, ci_registry_image))
@@ -596,6 +620,9 @@ class Veilid:
             .with_file(f"/veilid/target/{rust_target}/release/veilid-cli", build_dir.file("veilid-cli"))
         )
 
+        # Compile the SELinux policy module in-place (Debian refpolicy; deps in deps_base)
+        container = container.with_exec(["bash", "-c", "cd /veilid/package/selinux && ./build_module.sh"])
+
         # Set nightly flag
         nightly_flag = "true" if is_nightly else "false"
 
@@ -634,7 +661,7 @@ class Veilid:
         container = (
             dag.container(platform=dagger.Platform(platform))
             .from_("rockylinux:9")
-            .with_exec(["yum", "install", "-y", "createrepo", "rpm-build", "rpm-sign", "yum-utils", "rpmdevtools"])
+            .with_exec(["yum", "install", "-y", "createrepo", "rpm-build", "rpm-sign", "yum-utils", "rpmdevtools", "selinux-policy-devel", "bzip2", "make"])
             .with_exec(["rpmdev-setuptree"])
         )
 
@@ -655,6 +682,9 @@ class Veilid:
             .with_file(f"/veilid/target/{rust_target}/release/veilid-server", build_dir.file("veilid-server"))
             .with_file(f"/veilid/target/{rust_target}/release/veilid-cli", build_dir.file("veilid-cli"))
         )
+
+        # Compile the SELinux policy module in-place (RHEL-family refpolicy)
+        container = container.with_exec(["bash", "-c", "cd /veilid/package/selinux && ./build_module.sh"])
 
         # Set nightly flag
         nightly_flag = "true" if is_nightly else "false"

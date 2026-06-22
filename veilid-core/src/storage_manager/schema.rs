@@ -16,11 +16,12 @@ impl StorageManager {
         };
 
         let idhash = vcrypto.generate_hash(writer_key.ref_value());
-        assert!(
-            idhash.ref_value().len() >= MEMBER_ID_LENGTH,
-            "generate_hash needs to produce at least {} bytes",
-            MEMBER_ID_LENGTH
-        );
+        if idhash.ref_value().len() < MEMBER_ID_LENGTH {
+            apibail_internal!(format!(
+                "generate_hash needs to produce at least {} bytes",
+                MEMBER_ID_LENGTH
+            ));
+        }
         Ok(MemberId::new(
             writer_key.kind(),
             BareMemberId::new(&idhash.ref_value()[0..MEMBER_ID_LENGTH]),

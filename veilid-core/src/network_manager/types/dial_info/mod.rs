@@ -54,7 +54,7 @@ impl fmt::Display for DialInfo {
                         if di.socket_address.ip_addr() == a {
                             write!(f, "ws|{}", di.request)
                         } else {
-                            panic!("resolved address does not match url: {}", di.request);
+                            write!(f, "ws|{}|{}", di.socket_address.ip_addr(), di.request)
                         }
                     }
                 }
@@ -71,7 +71,7 @@ impl fmt::Display for DialInfo {
                         if di.socket_address.ip_addr() == a {
                             write!(f, "wss|{}", di.request)
                         } else {
-                            panic!("resolved address does not match url: {}", di.request);
+                            write!(f, "wss|{}|{}", di.socket_address.ip_addr(), di.request)
                         }
                     }
                 }
@@ -242,7 +242,6 @@ impl DialInfo {
     pub fn address_type(&self) -> AddressType {
         self.socket_address().address_type()
     }
-    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     pub fn transport_type(&self) -> TransportType {
         TransportType::new(self.protocol_type(), self.address_type())
     }
@@ -351,7 +350,15 @@ impl DialInfo {
             (DialInfo::WS(a), DialInfo::WS(b)) => a.cmp(b),
             #[cfg(feature = "enable-protocol-wss")]
             (DialInfo::WSS(a), DialInfo::WSS(b)) => a.cmp(b),
-            _ => unreachable!(),
+            _ => {
+                #[cfg(debug_assertions)]
+                unreachable!("mismatched DialInfo variants after equal protocol_type");
+                #[cfg(not(debug_assertions))]
+                {
+                    tracing::error!("mismatched DialInfo variants after equal protocol_type sort");
+                    core::cmp::Ordering::Equal
+                }
+            }
         }
     }
 }

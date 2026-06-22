@@ -1,7 +1,6 @@
 mod filtered_node_ref;
 mod node_ref_filter;
 mod traits;
-mod transport_node_ref;
 
 impl_veilid_log_facility!("rtab");
 
@@ -10,7 +9,6 @@ use super::*;
 pub(crate) use filtered_node_ref::*;
 pub(crate) use node_ref_filter::*;
 pub(crate) use traits::*;
-pub(crate) use transport_node_ref::*;
 
 ///////////////////////////////////////////////////////////////////////////
 // Default NodeRef
@@ -28,11 +26,14 @@ impl NodeRef {
     pub fn new(registry: VeilidComponentRegistry, entry: Arc<BucketEntry>) -> Self {
         entry.ref_count.fetch_add(1u32, Ordering::AcqRel);
 
+        #[cfg(feature = "tracking")]
+        let track_id = entry.track();
+
         Self {
             registry,
             entry,
             #[cfg(feature = "tracking")]
-            track_id: entry.track(),
+            track_id,
         }
     }
 
@@ -53,22 +54,7 @@ impl NodeRef {
             self.registry.clone(),
             self.entry.clone(),
             NodeRefFilter::new().with_routing_domain_set(routing_domain_set.into()),
-            Sequencing::NoPreference,
-        )
-    }
-
-    /// Construct a TransportNodeRef pinned to a single (routing_domain, transport).
-    /// Use this anywhere an RPC must be sent over exactly one specific transport.
-    pub fn with_transport(
-        &self,
-        routing_domain: RoutingDomain,
-        transport: TransportType,
-    ) -> TransportNodeRef {
-        TransportNodeRef::new(
-            self.registry.clone(),
-            self.entry.clone(),
-            transport,
-            routing_domain,
+            Sequencing::PreferUnordered,
         )
     }
 
@@ -77,7 +63,7 @@ impl NodeRef {
             self.registry.clone(),
             self.entry.clone(),
             filter,
-            Sequencing::NoPreference,
+            Sequencing::PreferUnordered,
         )
     }
 }
@@ -88,7 +74,7 @@ impl NodeRefAccessorsTrait for NodeRef {
     }
 
     fn sequencing(&self) -> Sequencing {
-        Sequencing::NoPreference
+        Sequencing::PreferUnordered
     }
 
     fn routing_domain_set(&self) -> RoutingDomainSet {
@@ -134,7 +120,7 @@ impl Clone for NodeRef {
             registry: self.registry.clone(),
             entry: self.entry.clone(),
             #[cfg(feature = "tracking")]
-            track_id: self.entry.write().track(),
+            track_id: self.entry.track(),
         }
     }
 }
@@ -157,7 +143,7 @@ impl fmt::Debug for NodeRef {
 impl Drop for NodeRef {
     fn drop(&mut self) {
         #[cfg(feature = "tracking")]
-        self.entry.write().untrack(self.track_id);
+        self.entry.untrack(self.track_id);
 
         // drop the noderef and queue a bucket kick if it was the last one
         let new_ref_count = self.entry.ref_count.fetch_sub(1u32, Ordering::AcqRel) - 1;

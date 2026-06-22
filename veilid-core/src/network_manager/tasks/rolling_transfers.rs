@@ -12,26 +12,26 @@ impl NetworkManager {
     ) -> EyreResult<()> {
         // veilid_log!(self trace "--- network manager rolling_transfers task");
         {
-            let inner = &mut *self.inner.lock();
+            let stats = &mut *self.stats.write();
 
             // Roll the low level network transfer stats for our address
-            inner
-                .stats
-                .self_stats
-                .transfer_stats_accounting
-                .roll_transfers(last_ts, cur_ts, &mut inner.stats.self_stats.transfer_stats);
+            stats.self_stats.transfer_stats_accounting.roll_transfers(
+                last_ts,
+                cur_ts,
+                &mut stats.self_stats.transfer_stats,
+            );
 
             // Roll all per-address transfers
             let mut dead_addrs: HashSet<PerAddressStatsKey> = HashSet::new();
-            for (addr, stats) in &mut inner.stats.per_address_stats {
-                stats.transfer_stats_accounting.roll_transfers(
+            for (addr, pa_stats) in &mut stats.per_address_stats {
+                pa_stats.transfer_stats_accounting.roll_transfers(
                     last_ts,
                     cur_ts,
-                    &mut stats.transfer_stats,
+                    &mut pa_stats.transfer_stats,
                 );
 
                 // While we're here, lets see if this address has timed out
-                if cur_ts.duration_since(stats.last_seen_ts) >= IPADDR_MAX_INACTIVE_DURATION {
+                if cur_ts.duration_since(pa_stats.last_seen_ts) >= IPADDR_MAX_INACTIVE_DURATION {
                     // it's dead, put it in the dead list
                     dead_addrs.insert(*addr);
                 }
@@ -39,8 +39,16 @@ impl NetworkManager {
 
             // Remove the dead addresses from our tables
             for da in &dead_addrs {
-                inner.stats.per_address_stats.remove(da);
+                stats.per_address_stats.remove(da);
             }
+        }
+
+        // Broadcast network stats (cheap shared handle) so other components can react,
+        // e.g. the storage manager's operation bandwidth gate
+        if let Err(e) = self.event_bus().post(NetworkManagerStatsChangeEvent {
+            stats: self.stats.clone(),
+        }) {
+            veilid_log!(self debug "failed to post network stats change event: {}", e);
         }
 
         // Send update

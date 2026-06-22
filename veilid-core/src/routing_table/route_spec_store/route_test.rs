@@ -164,16 +164,17 @@ impl RouteSpecStore {
             let Some(cand_pi) = candidate.get_peer_info(RoutingDomain::PublicInternet) else {
                 continue;
             };
-            let cm = routing_table.get_contact_method(
+            let cm = routing_table.get_best_contact_method(
                 RoutingDomain::PublicInternet,
-                last_hop_pi.clone(),
-                true,
-                cand_pi,
-                DialInfoFilter::all(),
-                Sequencing::PreferOrdered,
-                None,
+                ContactMethodRequest {
+                    peer_a: last_hop_pi.clone(),
+                    peer_a_published: true,
+                    peer_b: cand_pi.clone(),
+                    dial_info_filter: DialInfoFilter::all(),
+                    sequencing: Sequencing::PreferOrdered,
+                },
             );
-            if matches!(cm, ContactMethod::Unreachable) {
+            if cm.is_none() {
                 continue;
             }
 

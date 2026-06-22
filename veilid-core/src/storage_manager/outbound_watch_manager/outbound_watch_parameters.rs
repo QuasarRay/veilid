@@ -16,15 +16,13 @@ pub struct OutboundWatchParameters {
     pub opt_watcher: Option<KeyPair>,
     /// What safety selection to use on the network
     pub safety_selection: SafetySelection,
-    /// Suppress local-store auto-update on ValueChanged; report subkey range only.
-    pub transactional: bool,
 }
 
 impl fmt::Display for OutboundWatchParameters {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{{ expiration={:#}, count={}, subkeys={}, opt_watcher={}, safety_selection={:#}, transactional={} }}",
+            "{{ expiration={:#}, count={}, subkeys={}, opt_watcher={}, safety_selection={:#} }}",
             self.expiration,
             self.count,
             self.subkeys,
@@ -34,7 +32,6 @@ impl fmt::Display for OutboundWatchParameters {
                 "None".to_owned()
             },
             self.safety_selection,
-            self.transactional
         )
     }
 }

@@ -43,9 +43,10 @@ impl DialInfoDetail {
 }
 
 pub trait HasDialInfoDetailList: fmt::Debug {
+    /// Returns the dial info detail list, exclusive of relays
     fn dial_info_detail_list(&self) -> &[DialInfoDetail];
 
-    // Default implementations
+    /// The first dial info detail from the list in sorted order that matches the filter
     fn first_filtered_dial_info_detail(
         &self,
         sort: Option<&DialInfoDetailSort>,
@@ -69,6 +70,7 @@ pub trait HasDialInfoDetailList: fmt::Debug {
         None
     }
 
+    /// The list of dial info details in sorted order that match the filter
     fn filtered_dial_info_details(
         &self,
         sort: Option<&DialInfoDetailSort>,
@@ -112,10 +114,8 @@ pub trait HasDialInfoDetailList: fmt::Debug {
 
     /// Does this appear on the same network within the routing domain?
     /// The notion of 'ipblock' is a single external IP address for ipv4, and a fixed prefix for ipv6.
-    /// If a NAT is present, this detects if two public peerinfo would share the same router and be
-    /// subject to hairpin NAT (for ipv4 typically). This is also overloaded for the concept
-    /// of rate-limiting the number of nodes coming from the same ip 'block' within a specific amount of
-    /// time for the address filter.
+    /// This is used to rate-limiting the number of nodes coming from the same ip 'block' within a
+    /// specific amount of time for the address filter, and to improve network diversity for route allocation.
     fn is_on_same_ipblock(
         &self,
         other: &dyn HasDialInfoDetailList,
@@ -136,7 +136,7 @@ pub trait HasDialInfoDetailList: fmt::Debug {
         false
     }
 
-    // Get set of ipblocks for this node
+    /// Get set of ipblocks for this node
     fn get_ipblocks(&self, ip6_prefix_size: usize) -> HashSet<IpAddr> {
         self.dial_info_detail_list()
             .iter()

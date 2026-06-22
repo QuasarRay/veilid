@@ -141,7 +141,11 @@ impl_veilid_component_accessors!(RawTcpProtocolHandler);
 
 impl RawTcpProtocolHandler {
     pub fn new(registry: VeilidComponentRegistry) -> Self {
-        let connection_initial_timeout_ms = registry.config().network.connection_initial_timeout_ms;
+        let connection_initial_timeout_ms = registry
+            .config()
+            .internal()
+            .network
+            .connection_initial_timeout_ms;
         Self {
             registry,
             connection_initial_timeout_ms,

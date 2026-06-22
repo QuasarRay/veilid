@@ -84,9 +84,9 @@ impl StorageManager {
         // Get the DHT parameters for 'TransactBegin'
         let config = self.config();
         let (node_count, consensus_width, fanout_tasks) = (
-            config.network.dht.max_find_node_count as usize,
-            config.network.dht.consensus_width as usize,
-            config.network.dht.set_value_fanout as usize,
+            config.internal().network.dht.max_find_node_count as usize,
+            config.internal().network.dht.consensus_width as usize,
+            config.internal().network.dht.set_value_fanout as usize,
         );
         let required_strict_consensus_count = params.record_params.required_strict_consensus_count;
 
@@ -95,7 +95,7 @@ impl StorageManager {
             .get_safety_selection_timeout(&params.record_params.safety_selection);
 
         // Get the nodes we know are caching this value to seed the fanout
-        let init_fanout_queue = self
+        let init_fanout_queue: Vec<NodeRef> = self
             .get_value_nodes(&opaque_record_key)?
             .unwrap_or_default()
             .into_iter()
@@ -105,6 +105,13 @@ impl StorageManager {
                     .unwrap_or_default()
             })
             .collect();
+
+        // DIAG: seed value-nodes are the only tx1/tx2 difference across delete+reopen
+        veilid_log!(self debug target:"network_result",
+            "TransactBegin[{}] seed value-nodes ({}): [{}]",
+            opaque_record_key,
+            init_fanout_queue.len(),
+            init_fanout_queue.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "));
 
         // Get the descriptor for this record if we have it
         let opt_descriptor = {
@@ -397,7 +404,8 @@ impl StorageManager {
         // consensus_count RTTs)` (capped at `rpc.timeout_ms`). Using only the
         // fastest consensus_count keeps a single slow accepter from inflating
         // the deadline up to the rpc-timeout cap.
-        let rpc_timeout = TimestampDuration::new_ms(config.network.rpc.timeout_ms.into());
+        let rpc_timeout =
+            TimestampDuration::new_ms(config.internal().network.rpc.timeout_ms.into());
         let post_consensus_timeout_callback: FanoutPostConsensusTimeoutCallback = {
             let context = context.clone();
             Arc::new(move |result: &FanoutResult| -> TimestampDuration {
@@ -433,7 +441,11 @@ impl StorageManager {
         let fanout_call = FanoutCall::new(
             &routing_table,
             FanoutCallParams {
-                name: format!("outbound_transact_begin({})", Timestamp::now_increasing()),
+                name: format!(
+                    "transact_begin({} @ {})",
+                    opaque_record_key,
+                    Timestamp::now_increasing()
+                ),
                 hash_coordinate,
                 node_count,
                 fanout_tasks,
@@ -462,7 +474,11 @@ impl StorageManager {
 
         let mut ctx = context.lock();
 
-        veilid_log!(self debug target: "network_result", "TransactBegin Fanout: {:#}", fanout_result);
+        veilid_log!(self debug target: "network_result",
+            "TransactBegin[{}] Fanout result: {:#} value_nodes=[{}]",
+            opaque_record_key,
+            fanout_result,
+            fanout_result.value_nodes.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "));
 
         let descriptor = ctx.opt_descriptor.clone().unwrap_or_log();
         let seqs = if fanout_result.value_nodes.is_empty() {

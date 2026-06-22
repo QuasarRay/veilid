@@ -15,6 +15,9 @@ impl TableStore {
     }
 
     #[cfg_attr(feature = "instrument", instrument(parent = None, level = "trace", target = "tstore", name = "TableStore::tick", skip_all, err))]
+    /// Run the periodic flush and cleanup table maintenance tasks.
+    ///
+    /// No-op before init or after shutdown. Each subtask only runs once its interval has elapsed (60s flush, 600s cleanup), so calling more often is cheap; an actual flush or cleanup run blocks on disk.
     pub async fn tick(&self, _lag: Option<TimestampDuration>) -> EyreResult<()> {
         let Ok(_startup_guard) = self.startup_lock.enter() else {
             return Ok(());

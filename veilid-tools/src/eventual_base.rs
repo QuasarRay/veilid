@@ -1,11 +1,15 @@
 use super::*;
 
+/// Errors returned by the fallible `Eventual` operations.
 #[derive(ThisError, Debug, Clone, PartialEq, Eq)]
 pub enum EventualError {
+    /// A `try_*` operation could not proceed because futures were still attached.
     #[error("Try failed: {0}")]
     TryFailed(String),
 }
 
+/// Shared state behind every `Eventual` variant: the resolved value plus the
+/// waker tables for both the instance futures and the resolved futures.
 pub struct EventualBaseInner<T> {
     resolved: Option<T>,
     wakers: BTreeMap<usize, task::Waker>,
@@ -91,8 +95,8 @@ impl<T> EventualBaseInner<T> {
     }
 
     pub(super) fn reset(&mut self) {
-        assert_eq!(self.wakers.len(), 0);
-        assert_eq!(self.resolved_wakers.len(), 0);
+        debug_assert_eq!(self.wakers.len(), 0);
+        debug_assert_eq!(self.resolved_wakers.len(), 0);
         self.resolved = None;
         self.freelist.clear();
         self.resolved_freelist.clear();
@@ -155,11 +159,18 @@ impl<T> EventualBaseInner<T> {
 }
 
 // xxx: this would love to be 'pub(super)' instead of pub, to ensure nobody else touches resolve_to_value directly
+/// Common machinery shared by all `Eventual` variants: access to the inner state
+/// and the one-shot resolution that wakes every attached instance future.
 pub trait EventualBase: Clone + Unpin {
+    /// The value an instance future resolves to.
     type ResolvedType;
 
+    /// Lock and return the shared inner state.
     fn base_inner(&self) -> MutexGuard<'_, EventualBaseInner<Self::ResolvedType>>;
 
+    /// Resolve to `value` and wake every attached instance future. A second call
+    /// after resolution keeps the first value and drops `value`. Returns a future
+    /// that completes once all instance futures have been polled to completion.
     fn resolve_to_value(&self, value: Self::ResolvedType) -> EventualResolvedFuture<Self> {
         let wakers = {
             let mut inner = self.base_inner();
@@ -177,6 +188,10 @@ pub trait EventualBase: Clone + Unpin {
     }
 }
 
+/// Future returned by `resolve`; completes once every instance future of the
+/// resolved `Eventual` has been polled and dropped.
+///
+/// Stays `Pending` while any instance future is still attached.
 pub struct EventualResolvedFuture<B: EventualBase> {
     id: Option<usize>,
     eventual: B,
@@ -200,15 +215,22 @@ impl<B: EventualBase> Drop for EventualResolvedFuture<B> {
     }
 }
 
+/// Operations available on every `Eventual` variant. Blanket-implemented for all
+/// `EventualBase` types.
 pub trait EventualCommon: EventualBase {
+    /// Whether a value has been resolved.
     fn is_resolved(&self) -> bool {
         self.base_inner().is_resolved()
     }
 
+    /// Clear the resolved value so the `Eventual` can be reused. Panics if any
+    /// futures are still attached.
     fn reset(&self) {
         self.base_inner().reset()
     }
 
+    /// Like `reset`, but returns an error instead of panicking when futures are
+    /// still attached. Does not block.
     fn try_reset(&self) -> Result<(), EventualError> {
         self.base_inner().try_reset()
     }

@@ -34,9 +34,9 @@ impl RPCProcessor {
         let receipt = match kind {
             RPCOperationKind::Statement(s) => match s.destructure() {
                 RPCStatementDetail::ReturnReceipt(s) => s.destructure(),
-                _ => panic!("not a return receipt"),
+                _ => return Err(RPCError::internal("not a return receipt")),
             },
-            _ => panic!("not a statement"),
+            _ => return Err(RPCError::internal("not a statement")),
         };
 
         // Handle it

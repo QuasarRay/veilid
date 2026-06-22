@@ -123,3 +123,107 @@ pub async fn test_add_get_remove() {
 
     mock_registry::terminate(registry).await;
 }
+
+// Unique flow per id; distinct remote IP keeps each connection separate and well
+// under the per-ip connection limit.
+fn flow_n(n: u64, protocol_type: ProtocolType) -> Flow {
+    Flow::new_no_local(PeerAddress::new(
+        SocketAddress::new(
+            Address::IPV4(Ipv4Addr::new(10, 0, (n >> 8) as u8, (n & 0xff) as u8)),
+            8080,
+        ),
+        protocol_type,
+    ))
+}
+
+fn add_dummy(
+    table: &ConnectionTable,
+    registry: &VeilidComponentRegistry,
+    id: u64,
+    protocol_type: ProtocolType,
+) -> Option<NetworkConnection> {
+    table
+        .add_connection(NetworkConnection::dummy(
+            registry.clone(),
+            id.into(),
+            flow_n(id, protocol_type),
+        ))
+        .unwrap()
+}
+
+pub async fn test_eviction() {
+    let registry = mock_registry::init("conn_evict").await;
+
+    // Discover the config-driven capacity: fill unique connections until one overflows.
+    let cap = {
+        let table = ConnectionTable::new(registry.clone());
+        let mut id = 0u64;
+        loop {
+            id += 1;
+            if add_dummy(&table, &registry, id, ProtocolType::TCP).is_some() {
+                break table.connection_count();
+            }
+            assert!(id < 100_000, "table never overflowed");
+        }
+    };
+    assert!(cap >= 2, "capacity too small to test eviction");
+
+    // Global LRU + cross-protocol fairness: the oldest connection (id 1, a WS) is the
+    // eviction victim even though the newcomer and the rest of the table are TCP.
+    // Eviction is by global recency, not partitioned per protocol.
+    {
+        let table = ConnectionTable::new(registry.clone());
+        for id in 1..=cap as u64 {
+            let protocol_type = if id == 1 {
+                ProtocolType::WS
+            } else {
+                ProtocolType::TCP
+            };
+            assert!(add_dummy(&table, &registry, id, protocol_type).is_none());
+        }
+        let evicted = add_dummy(&table, &registry, cap as u64 + 1, ProtocolType::TCP)
+            .expect("overflow should evict");
+        assert_eq!(evicted.connection_id(), 1u64.into(), "global LRU victim");
+        assert_eq!(table.connection_count(), cap);
+    }
+
+    // Recency: touching the oldest connection spares it; the next-oldest is evicted.
+    {
+        let table = ConnectionTable::new(registry.clone());
+        for id in 1..=cap as u64 {
+            assert!(add_dummy(&table, &registry, id, ProtocolType::TCP).is_none());
+        }
+        table.touch_connection_by_id(1u64.into());
+        let evicted = add_dummy(&table, &registry, cap as u64 + 1, ProtocolType::TCP)
+            .expect("overflow should evict");
+        assert_eq!(
+            evicted.connection_id(),
+            2u64.into(),
+            "LRU victim after touch"
+        );
+    }
+
+    // Priority flows are protected from eviction (same skip-branch as protected
+    // connections): the oldest survives and the next-oldest is evicted instead.
+    {
+        let table = ConnectionTable::new(registry.clone());
+        let f1 = flow_n(1, ProtocolType::TCP);
+        for id in 1..=cap as u64 {
+            assert!(add_dummy(&table, &registry, id, ProtocolType::TCP).is_none());
+        }
+        table.add_priority_flow(f1);
+        let evicted = add_dummy(&table, &registry, cap as u64 + 1, ProtocolType::TCP)
+            .expect("overflow should evict");
+        assert_eq!(
+            evicted.connection_id(),
+            2u64.into(),
+            "priority flow id 1 must survive"
+        );
+        assert!(
+            table.peek_connection_by_flow(f1).is_some(),
+            "priority flow still present"
+        );
+    }
+
+    mock_registry::terminate(registry).await;
+}

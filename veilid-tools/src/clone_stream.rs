@@ -8,6 +8,11 @@ use futures_util::Sink;
 use futures_util::Stream;
 use std::io;
 
+/// A cloneable wrapper that shares one stream behind an `Arc<Mutex<_>>`.
+///
+/// Clones reference the same underlying `T`, so every clone reads from and writes to the
+/// shared inner stream. Forwards [`AsyncRead`],
+/// [`AsyncWrite`], [`Stream`], and [`Sink`] when `T` implements them.
 pub struct CloneStream<T>
 where
     T: Unpin,
@@ -30,6 +35,7 @@ impl<T> CloneStream<T>
 where
     T: Unpin,
 {
+    /// Wrap `t` so it can be cloned and shared.
     pub fn new(t: T) -> Self {
         Self {
             inner: Arc::new(Mutex::new(t)),

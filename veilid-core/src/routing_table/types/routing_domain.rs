@@ -40,13 +40,13 @@ impl fmt::Display for RoutingDomain {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if f.alternate() {
             match self {
-                RoutingDomain::LocalNetwork => write!(f, "LocalNetwork"),
-                RoutingDomain::PublicInternet => write!(f, "PublicInternet"),
+                RoutingDomain::LocalNetwork => write!(f, "LOC"),
+                RoutingDomain::PublicInternet => write!(f, "PUB"),
             }
         } else {
             match self {
-                RoutingDomain::LocalNetwork => write!(f, "loc"),
-                RoutingDomain::PublicInternet => write!(f, "pub"),
+                RoutingDomain::LocalNetwork => write!(f, "LocalNetwork"),
+                RoutingDomain::PublicInternet => write!(f, "PublicInternet"),
             }
         }
     }

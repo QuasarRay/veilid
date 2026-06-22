@@ -48,6 +48,19 @@ where
             key,
         }
     }
+
+    /// Clear the cache entries if the cache is not in use
+    /// Returns true if the cache was cleared
+    /// Returns false if the cache was not cleared because it is in use
+    #[must_use]
+    pub fn purge(&self) -> bool {
+        let mut cache = self.cache.lock();
+        if !self.lock_table.is_empty() {
+            return false;
+        }
+        cache.clear();
+        true
+    }
 }
 
 /// A locked handle to one key's slot in an [`AsyncKeyedCache`].

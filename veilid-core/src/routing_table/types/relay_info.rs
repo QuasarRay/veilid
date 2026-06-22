@@ -40,6 +40,9 @@ impl RelayInfo {
     ) -> Self {
         dial_info_detail_list.sort();
 
+        // Defensively strip any dial info that requires a signal
+        dial_info_detail_list.retain(|did| !did.class.requires_signal());
+
         Self {
             timestamp,
             node_ids,
@@ -92,6 +95,19 @@ impl RelayInfo {
         }
 
         false
+    }
+
+    pub fn supported_sequence_orderings(
+        &self,
+        outbound_dif: &DialInfoFilter,
+    ) -> SequenceOrderingSet {
+        let mut out = SequenceOrderingSet::empty();
+        for did in self.dial_info_detail_list() {
+            if did.dial_info.matches_filter(outbound_dif) {
+                out |= did.dial_info.protocol_type().sequence_ordering();
+            }
+        }
+        out
     }
 }
 

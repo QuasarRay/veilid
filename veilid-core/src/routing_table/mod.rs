@@ -2,7 +2,6 @@ mod bucket;
 mod bucket_entry;
 mod bucket_entry_snapshot;
 mod debug;
-mod entry_snapshot;
 mod find_nodes;
 #[cfg(feature = "geolocation")]
 mod geolocation;
@@ -14,6 +13,7 @@ mod privacy;
 mod route_spec_store;
 mod routing_domains;
 mod routing_table_inner;
+mod routing_table_snapshot;
 mod stats_accounting;
 mod tasks;
 mod types;
@@ -24,12 +24,12 @@ pub mod tests_routing_table;
 
 pub(crate) use bucket_entry::*;
 pub(crate) use bucket_entry_snapshot::*;
-pub(crate) use entry_snapshot::*;
 pub(crate) use node_ref::*;
 pub(crate) use privacy::*;
 pub(crate) use route_spec_store::*;
 pub(crate) use routing_domains::*;
 pub(crate) use routing_table_inner::*;
+pub(crate) use routing_table_snapshot::*;
 pub(crate) use stats_accounting::*;
 pub use types::*;
 
@@ -42,7 +42,7 @@ use crate::rpc_processor::*;
 use bucket::*;
 use hashlink::LruCache;
 use network_estimator::*;
-use tasks::ping_validator::PingValidationEntry;
+use tasks::ping_validator::PingValidationBatch;
 
 impl_veilid_log_facility!("rtab");
 
@@ -74,6 +74,7 @@ pub type RoutingTableEntrySort<'t> = Box<
         + Send
         + 't,
 >;
+pub type CreateNodeRefUpdateFunc<'t> = Box<dyn FnOnce(&mut BucketEntryInner) + 't>;
 
 type SerializedBuckets = Vec<Vec<u8>>;
 type SerializedBucketMap = BTreeMap<CryptoKind, SerializedBuckets>;
@@ -116,9 +117,9 @@ pub(crate) struct RoutingTable {
     routing_domains: Mutex<HashMap<RoutingDomain, Arc<dyn RoutingDomainController>>>,
 
     // Ping validation channel sender (recreated on each startup/shutdown cycle)
-    ping_validation_sender: Mutex<flume::Sender<Vec<PingValidationEntry>>>,
+    ping_validation_sender: Mutex<flume::Sender<PingValidationBatch>>,
     // Ping validation channel receiver (taken during startup, recreated during shutdown)
-    ping_validation_receiver: Mutex<Option<flume::Receiver<Vec<PingValidationEntry>>>>,
+    ping_validation_receiver: Mutex<Option<flume::Receiver<PingValidationBatch>>>,
     // Ping validation processor join handle
     ping_validation_processor_jh: Mutex<Option<MustJoinHandle<()>>>,
     // Ping validation processor stop source
@@ -238,6 +239,31 @@ impl RoutingTable {
 
         facilities = facilities.with_facility(
             VeilidComponentLogFacility::try_new_with_tags("rtab::route", ["#common"]).unwrap(),
+        );
+
+        facilities = facilities.with_facility(
+            VeilidComponentLogFacility::try_new_with_tags("rtab::state", ["#verbose", "#state"])
+                .unwrap(),
+        );
+
+        facilities = facilities.with_facility(
+            VeilidComponentLogFacility::try_new_with_tags(
+                "rtab::state::node",
+                ["#verbose", "#state"],
+            )
+            .unwrap(),
+        );
+
+        facilities = facilities.with_facility(
+            VeilidComponentLogFacility::try_new_with_tags("rtab::health", ["#verbose"]).unwrap(),
+        );
+
+        facilities = facilities.with_facility(
+            VeilidComponentLogFacility::try_new_with_tags(
+                "rtab::state::ping",
+                ["#verbose", "#state"],
+            )
+            .unwrap(),
         );
 
         facilities = facilities.with_facility(
@@ -405,7 +431,7 @@ impl RoutingTable {
     #[expect(clippy::unused_async)]
     async fn pre_terminate_async(&self) {
         // Ensure things have shut down
-        assert!(
+        debug_assert!(
             self.startup_context.startup_lock.is_shut_down(),
             "should have shut down by now"
         );
@@ -450,10 +476,10 @@ impl RoutingTable {
         &self,
         cur_ts: Timestamp,
         min_state: BucketEntryState,
-    ) -> EntrySnapshot {
+    ) -> RoutingTableSnapshot {
         self.inner
             .read()
-            .snapshot_entries(self.registry(), cur_ts, min_state)
+            .snapshot(self.registry(), cur_ts, min_state)
     }
 
     /// Max entries kept in the bucket at position `pos`.
@@ -464,20 +490,20 @@ impl RoutingTable {
 
     /// Expected routing-table fill size for a network of `n` reachable nodes.
     #[cfg(any(test, feature = "test-util"))]
-    pub fn practical_max_size(n: NodeCount) -> NodeCount {
+    pub fn practical_max_size(n: NodeCount) -> usize {
         let n = n.as_u64();
-        let mut total: u64 = 0;
+        let mut total: usize = 0;
         for k in 0..BUCKET_COUNT {
             let depth = RoutingTableInner::bucket_depth(k) as u64;
             let expected = if k + 1 >= 64 { 0u64 } else { n >> (k + 1) };
-            total = total.saturating_add(expected.min(depth));
+            total = total.saturating_add(expected.min(depth) as usize);
         }
-        NodeCount::from(total)
+        total
     }
 
     /// Count of entries beyond per-bucket capacity, awaiting lazy kick.
-    pub fn excess_kickable_count(&self) -> NodeCount {
-        NodeCount::from(self.inner.read().excess_kickable_count() as u64)
+    pub fn excess_kickable_count(&self) -> usize {
+        self.inner.read().excess_kickable_count()
     }
 
     /// Per-bucket entry counts for a crypto kind, indexed by position.
@@ -487,13 +513,13 @@ impl RoutingTable {
 
     /// Estimated number of reachable nodes in the network for a single crypto kind.
     #[expect(dead_code)]
-    pub fn estimate_network_size(&self, ck: CryptoKind) -> NodeCount {
-        NodeCount::from(self.network_estimator.lock().estimate(ck))
+    pub fn estimate_network_size(&self, ck: CryptoKind) -> u64 {
+        self.network_estimator.lock().estimate(ck)
     }
 
     /// Estimated number of reachable nodes in the network across all crypto kinds.
-    pub fn estimate_network_size_combined(&self) -> NodeCount {
-        NodeCount::from(self.network_estimator.lock().estimate_combined())
+    pub fn estimate_network_size_combined(&self) -> u64 {
+        self.network_estimator.lock().estimate_combined()
     }
 
     pub fn node_id(&self, kind: CryptoKind) -> NodeId {
@@ -728,11 +754,11 @@ impl RoutingTable {
         };
 
         let idhash = vcrypto.generate_hash(public_key.ref_value());
-        assert!(
-            idhash.ref_value().len() >= HASH_COORDINATE_LENGTH,
-            "generate_hash needs to produce at least {} bytes",
-            HASH_COORDINATE_LENGTH
-        );
+        if idhash.ref_value().len() < HASH_COORDINATE_LENGTH {
+            apibail_internal!(format!(
+                "generate_hash needs to produce at least {HASH_COORDINATE_LENGTH} bytes"
+            ));
+        }
         Ok(NodeId::new(
             public_key.kind(),
             BareNodeId::new(&idhash.ref_value()[0..HASH_COORDINATE_LENGTH]),
@@ -931,9 +957,9 @@ impl RoutingTable {
     ) -> EyreResult<()> {
         let mut all_entries: Vec<Arc<BucketEntry>> = Vec::with_capacity(all_entry_bytes.len());
         for entry_bytes in all_entry_bytes {
-            #[allow(unused_mut)]
             let mut entryinner: BucketEntryInner = deserialize_json_bytes(&entry_bytes)
                 .wrap_err("failed to deserialize bucket entry")?;
+            entryinner.prepare(inner.registry());
 
             #[cfg(feature = "geolocation")]
             {
@@ -996,8 +1022,27 @@ impl RoutingTable {
 
     /// Attempt to empty the routing table
     /// May not empty buckets completely if there are existing node_refs
-    pub fn purge_buckets(&self) {
+    pub async fn purge_buckets(&self) -> EyreResult<()> {
+        // Purge route spec store too because it refers to noderefs
+        self.route_spec_store().purge().await?;
+
+        // Clear out relays since they refer to noderefs
+        for rd in RoutingDomainSet::all() {
+            let rdc = self.get_routing_domain_controller(rd);
+            {
+                let rdd = rdc.write_dyn();
+                rdd.clear_bootstrap_peers();
+            }
+            let mut edit = rdc.edit_dyn();
+            edit.reset();
+        }
+
+        // Purge buckets
         self.inner.write().purge_buckets();
+
+        self.refresh_summaries(RoutingDomainSet::all());
+
+        Ok(())
     }
 
     /// Attempt to remove last_connections from entries
@@ -1193,9 +1238,13 @@ impl RoutingTable {
 
                 // adding a node id should never change what routing domains peers are in
                 // so we should have a 1:1 ordered mapping here to update with the new nodeids
-                assert_eq!(old_peer_infos.len(), new_peer_infos.len());
+                if old_peer_infos.len() != new_peer_infos.len() {
+                    bail!("adding a node id should not change peer info routing domain count");
+                }
                 for (old_pi, new_pi) in old_peer_infos.into_iter().zip(new_peer_infos) {
-                    assert_eq!(old_pi.routing_domain(), new_pi.routing_domain());
+                    if old_pi.routing_domain() != new_pi.routing_domain() {
+                        bail!("adding a node id should not change a peer's routing domain");
+                    }
                     self.on_entry_peer_info_updated(Some(old_pi), Some(new_pi));
                 }
             }
@@ -1207,10 +1256,11 @@ impl RoutingTable {
     /// the 'update_func' closure is called on the node, and, if created,
     /// in a locked fashion as to ensure the bucket entry state is always valid
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    fn create_node_ref<F>(&self, node_ids: &NodeIdGroup, update_func: F) -> EyreResult<NodeRef>
-    where
-        F: FnOnce(&mut BucketEntryInner),
-    {
+    fn create_node_ref(
+        &self,
+        node_ids: &NodeIdGroup,
+        opt_update_func: Option<CreateNodeRefUpdateFunc<'_>>,
+    ) -> EyreResult<NodeRef> {
         if node_ids.is_empty() {
             bail!("Can't create node with no node id");
         }
@@ -1293,7 +1343,9 @@ impl RoutingTable {
         let nr = NodeRef::new(self.registry(), entry.clone());
 
         // Update the entry with the update func
-        entry.with_mut(|e| update_func(e));
+        if let Some(update_func) = opt_update_func {
+            entry.with_mut(|e| update_func(e));
+        }
 
         Ok(nr)
     }
@@ -1326,24 +1378,6 @@ impl RoutingTable {
             bucket.entry(node_id.ref_value())
         };
         Ok(opt_entry.map(|e| NodeRef::new(self.registry(), e)))
-    }
-
-    /// Resolve an existing routing table entry and return a filtered reference to it
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub fn lookup_node_id_with_filter(
-        &self,
-        node_id: NodeId,
-        routing_domain_set: RoutingDomainSet,
-        dial_info_filter: DialInfoFilter,
-    ) -> EyreResult<Option<FilteredNodeRef>> {
-        let nr = self.lookup_node_id(node_id)?;
-        Ok(nr.map(|nr| {
-            nr.custom_filtered(
-                NodeRefFilter::new()
-                    .with_dial_info_filter(dial_info_filter)
-                    .with_routing_domain_set(routing_domain_set),
-            )
-        }))
     }
 
     /// Our own published direct dial-info socket addresses for a routing domain.
@@ -1431,10 +1465,13 @@ impl RoutingTable {
 
         let mut updated = false;
         let mut old_peer_info = None;
-        let nr = self.create_node_ref(&node_ids, |e| {
-            old_peer_info = e.get_peer_info(routing_domain);
-            updated = e.update_peer_info(routing_domain, peer_info.clone());
-        })?;
+        let nr = self.create_node_ref(
+            &node_ids,
+            Some(Box::new(|e| {
+                old_peer_info = e.get_peer_info(routing_domain);
+                updated = e.update_peer_info(routing_domain, peer_info.clone());
+            })),
+        )?;
 
         // Process any new or updated PeerInfo
         if old_peer_info.is_none() || updated {
@@ -1452,12 +1489,8 @@ impl RoutingTable {
         &self,
         routing_domain: RoutingDomain,
         node_id: NodeId,
-        transport: TransportType,
-        timestamp: Timestamp,
     ) -> EyreResult<FilteredNodeRef> {
-        let nr = self.create_node_ref(&NodeIdGroup::from(node_id), |e| {
-            e.touch_last_seen(transport, timestamp);
-        })?;
+        let nr = self.create_node_ref(&NodeIdGroup::from(node_id), None)?;
 
         // Enforce routing domain
         let nr = nr.custom_filtered(NodeRefFilter::new().with_routing_domain(routing_domain));
@@ -1486,11 +1519,10 @@ impl RoutingTable {
             (None, Some(new_pi)) => (new_pi.routing_domain(), new_pi.node_ids().clone()),
             (Some(old_pi), None) => (old_pi.routing_domain(), old_pi.node_ids().clone()),
             (Some(old_pi), Some(new_pi)) => {
-                assert_eq!(
-                    old_pi.routing_domain(),
-                    new_pi.routing_domain(),
-                    "routing domains should be the same here",
-                );
+                if old_pi.routing_domain() != new_pi.routing_domain() {
+                    veilid_log!(self error "routing domains should be the same here");
+                    return;
+                }
                 let mut node_ids = old_pi.node_ids().clone();
                 node_ids.add_all_from_iter(new_pi.node_ids().iter());
                 (new_pi.routing_domain(), node_ids)

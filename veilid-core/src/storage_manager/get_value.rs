@@ -64,7 +64,7 @@ impl StorageManager {
         let safety_selection = {
             let inner = self.inner.lock();
             let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
-                apibail_generic!("record not open");
+                apibail_invalid_argument!("record not open", "record_key", opaque_record_key);
             };
             opened_record.safety_selection()
         };
@@ -98,6 +98,15 @@ impl StorageManager {
             .as_ref()
             .map(|v| v.value_data().seq())
             .unwrap_or_default();
+
+        // Gate on concurrency + the download budget (a get pulls a full value down)
+        let get_value_fanout = self.config().internal().network.dht.get_value_fanout as u64;
+        let _gate_permit = self
+            .acquire_operation_gate(
+                None,
+                Some((MAX_SUBKEY_SIZE as u64).saturating_mul(get_value_fanout)),
+            )
+            .await;
         let result = self
             .outbound_get_value(
                 opaque_record_key.clone(),
@@ -233,11 +242,12 @@ impl StorageManager {
         let config = self.config();
 
         // Get the DHT parameters for 'GetValue'
-        let node_count = config.network.dht.max_find_node_count as usize;
-        let consensus_count = config.network.dht.get_value_count as usize;
-        let consensus_width = config.network.dht.consensus_width as usize;
-        let fanout_tasks = config.network.dht.get_value_fanout as usize;
-        let timeout = TimestampDuration::from(ms_to_us(config.network.dht.get_value_timeout_ms));
+        let node_count = config.internal().network.dht.max_find_node_count as usize;
+        let consensus_count = config.internal().network.dht.get_value_count as usize;
+        let consensus_width = config.internal().network.dht.consensus_width as usize;
+        let fanout_tasks = config.internal().network.dht.get_value_fanout as usize;
+        let timeout =
+            TimestampDuration::from(ms_to_us(config.internal().network.dht.get_value_timeout_ms));
 
         // Get the nodes we know are caching this value to seed the fanout
         let init_fanout_queue = self
@@ -456,7 +466,7 @@ impl StorageManager {
                             FanoutDoneDisposition::DoneEarly
                         }
                         FanoutResultKind::Consensus => {
-                            assert!(
+                            debug_assert!(
                                 ctx.value.is_some() && ctx.descriptor_mode.is_have(),
                                 "should have gotten a value if we got consensus"
                             );
@@ -538,7 +548,7 @@ impl StorageManager {
             opaque_record_key.clone(),
             core::iter::once((ValueSubkeyRangeSet::single(subkey), result.fanout_result)),
             false,
-            self.config().network.dht.consensus_width as usize,
+            self.config().internal().network.dht.consensus_width as usize,
         )?;
 
         // Check if the record still exists before setting it locally

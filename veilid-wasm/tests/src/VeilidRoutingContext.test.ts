@@ -873,6 +873,172 @@ describe('VeilidRoutingContext', () => {
             console.log(`rollback transaction 2: ${performance.now() - startRollback}ms`)
           });
         });
+
+        describe(`DHT transactions bulk store tests for ${cryptoKind as string}`, () => {
+          // veilid-core limits: MAX_SUBKEY_SIZE and MAX_RECORD_DATA_SIZE
+          const SUBKEY_MAX_SIZE_BYTES = 32768;
+          const DHTKEY_MAX_SIZE_BYTES = 1048576;
+
+          const chunkBytes = (bytes: Uint8Array, chunkSize: number): Uint8Array[] => {
+            const chunks: Uint8Array[] = [];
+            for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+              chunks.push(bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+            }
+            return chunks;
+          };
+
+          // Store a blob across however many records/subkeys it needs, in one transaction.
+          const storeBytesIntoKeys = async (bytes: Uint8Array): Promise<RecordKey[]> => {
+            const dataChunks = chunkBytes(bytes, DHTKEY_MAX_SIZE_BYTES);
+            const subKeysPerChunk = dataChunks.map((data) => chunkBytes(data, SUBKEY_MAX_SIZE_BYTES));
+            console.log(`split ${bytes.length} bytes across ${dataChunks.length} DHT records`);
+
+            const keys = await Promise.all(
+              subKeysPerChunk.map(async (subKeys) => {
+                const record = await routingContext.createDHTRecord(
+                  cryptoKind,
+                  { 'DFLT': { oCnt: subKeys.length } },
+                );
+                return record.key;
+              }),
+            );
+
+            const startBegin = performance.now();
+            const tx = await dhtRetry(() => veilidClient.transactDHTRecords(keys), { label: 'begin bulk store' });
+            console.log(`begin transaction: ${performance.now() - startBegin}ms`);
+
+            // Every subkey of every record in parallel; op concurrency bounds what's in flight
+            const startSet = performance.now();
+            const sets: Promise<ValueData | undefined>[] = [];
+            for (let chunkIndex = 0; chunkIndex < subKeysPerChunk.length; chunkIndex++) {
+              const subKeys = subKeysPerChunk[chunkIndex];
+              for (let subKeyIdx = 0; subKeyIdx < subKeys.length; subKeyIdx++) {
+                sets.push(dhtRetry(
+                  () => tx.set(keys[chunkIndex], subKeyIdx, subKeys[subKeyIdx]),
+                  { label: `set chunk${chunkIndex} sk${subKeyIdx}` },
+                ));
+              }
+            }
+            const setResults = await Promise.all(sets);
+            const setMs = performance.now() - startSet;
+            console.log(`set ${sets.length} subkeys: ${setMs}ms (${(bytes.length / 1024 / (setMs / 1000)).toFixed(0)} KB/s)`);
+            for (const res of setResults) {
+              await expect(res).toBeUndefined();
+            }
+
+            const startCommit = performance.now();
+            await dhtRetry(() => tx.commit(), { label: 'commit bulk store' });
+            console.log(`commit transaction: ${performance.now() - startCommit}ms`);
+            console.log(`completed transaction: ${performance.now() - startBegin}ms`);
+
+            return keys;
+          };
+
+          for (const sizeMB of [1, 2, 4]) {
+            it(`should bulk store ${sizeMB}MB across records in one transaction`, async () => {
+              const totalBytes = sizeMB * 1024 * 1024;
+              // each subkey filled with its global ordinal for content verification
+              const bytes = new Uint8Array(totalBytes);
+              for (let i = 0; i < totalBytes; i += SUBKEY_MAX_SIZE_BYTES) {
+                bytes.fill((i / SUBKEY_MAX_SIZE_BYTES) & 0xff, i, Math.min(i + SUBKEY_MAX_SIZE_BYTES, totalBytes));
+              }
+
+              const keys = await storeBytesIntoKeys(bytes);
+              await expect(keys.length).toEqual(Math.ceil(totalBytes / DHTKEY_MAX_SIZE_BYTES));
+
+              try {
+                // verify the network accepted every subkey, and spot-check content
+                const tx = await dhtRetry(() => veilidClient.transactDHTRecords(keys), { label: 'begin bulk verify' });
+                for (let rec = 0; rec < keys.length; rec++) {
+                  const report = await dhtRetry(() => tx.inspect(keys[rec], null, 'SyncGet'), { label: `inspect rec${rec}` });
+                  const subkeyCount = report.networkSeqs.length;
+                  await expect(report.subkeys).toEqual([[0, subkeyCount - 1]]);
+                  await expect(report.networkSeqs).toEqual(Array(subkeyCount).fill(0));
+
+                  const lastSubkey = subkeyCount - 1;
+                  const val = await dhtRetry(() => tx.get(keys[rec], lastSubkey), { label: `get rec${rec} sk${lastSubkey}` });
+                  await expect(val).toBeDefined();
+                  const globalOrdinal = (rec * (DHTKEY_MAX_SIZE_BYTES / SUBKEY_MAX_SIZE_BYTES) + lastSubkey) & 0xff;
+                  await expect(val!.data[0]).toEqual(globalOrdinal);
+                  await expect(val!.data.length).toEqual(SUBKEY_MAX_SIZE_BYTES);
+                }
+                await dhtRetry(() => tx.rollback(), { label: 'rollback bulk verify' });
+              } finally {
+                for (const key of keys) {
+                  await routingContext.deleteDHTRecord(key);
+                }
+              }
+            });
+          }
+
+          // One transaction per record, all run concurrently. Same total work as the
+          // all-in-one-transaction tests above, but many transactions on unrelated
+          // records — stresses the global operation gate, which must bound total
+          // in-flight bytes regardless of transaction count.
+          const PER_TX_RECORD_BYTES = 8 * SUBKEY_MAX_SIZE_BYTES;
+
+          const storeBytesOneRecordPerTx = async (bytes: Uint8Array): Promise<RecordKey[]> => {
+            const recordChunks = chunkBytes(bytes, PER_TX_RECORD_BYTES);
+            const subKeysPerRecord = recordChunks.map((data) => chunkBytes(data, SUBKEY_MAX_SIZE_BYTES));
+            console.log(`split ${bytes.length} bytes across ${recordChunks.length} records, one transaction each`);
+
+            const keys = await Promise.all(
+              subKeysPerRecord.map(async (subKeys) => {
+                const record = await routingContext.createDHTRecord(
+                  cryptoKind,
+                  { 'DFLT': { oCnt: subKeys.length } },
+                );
+                return record.key;
+              }),
+            );
+
+            const startAll = performance.now();
+            await Promise.all(
+              keys.map(async (key, recIdx) => {
+                const subKeys = subKeysPerRecord[recIdx];
+                const tx = await dhtRetry(() => veilidClient.transactDHTRecords([key]), { label: `begin rec${recIdx}` });
+                const sets = subKeys.map((sk, subKeyIdx) =>
+                  dhtRetry(() => tx.set(key, subKeyIdx, sk), { label: `set rec${recIdx} sk${subKeyIdx}` }));
+                for (const res of await Promise.all(sets)) {
+                  await expect(res).toBeUndefined();
+                }
+                await dhtRetry(() => tx.commit(), { label: `commit rec${recIdx}` });
+              }),
+            );
+            const allMs = performance.now() - startAll;
+            console.log(`stored ${keys.length} records in ${keys.length} concurrent transactions: ${allMs}ms (${(bytes.length / 1024 / (allMs / 1000)).toFixed(0)} KB/s)`);
+
+            return keys;
+          };
+
+          for (const sizeMB of [1, 2, 4]) {
+            it(`should bulk store ${sizeMB}MB one record per transaction (concurrent)`, async () => {
+              const totalBytes = sizeMB * 1024 * 1024;
+              const bytes = new Uint8Array(totalBytes);
+              for (let i = 0; i < totalBytes; i += SUBKEY_MAX_SIZE_BYTES) {
+                bytes.fill((i / SUBKEY_MAX_SIZE_BYTES) & 0xff, i, Math.min(i + SUBKEY_MAX_SIZE_BYTES, totalBytes));
+              }
+
+              const keys = await storeBytesOneRecordPerTx(bytes);
+              await expect(keys.length).toEqual(Math.ceil(totalBytes / PER_TX_RECORD_BYTES));
+
+              try {
+                // verify each record's subkeys landed (one verify transaction per record)
+                for (let rec = 0; rec < keys.length; rec++) {
+                  const tx = await dhtRetry(() => veilidClient.transactDHTRecords([keys[rec]]), { label: `begin verify rec${rec}` });
+                  const report = await dhtRetry(() => tx.inspect(keys[rec], null, 'SyncGet'), { label: `inspect rec${rec}` });
+                  const subkeyCount = report.networkSeqs.length;
+                  await expect(report.networkSeqs).toEqual(Array(subkeyCount).fill(0));
+                  await dhtRetry(() => tx.rollback(), { label: `rollback verify rec${rec}` });
+                }
+              } finally {
+                for (const key of keys) {
+                  await routingContext.deleteDHTRecord(key);
+                }
+              }
+            });
+          }
+        });
       }
     }
   });

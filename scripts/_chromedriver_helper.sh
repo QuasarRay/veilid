@@ -199,7 +199,12 @@ except KeyError:
 # Strip macOS Gatekeeper quarantine so a cask/$CHROMEDRIVER-supplied binary can launch
 # (curl+unzip downloads aren't quarantined, so this is a no-op there). No-op off macOS.
 _chromedriver_unquarantine() {
-    [ "$(_chromedriver_os)" = macos ] && [ -n "$1" ] && xattr -d com.apple.quarantine "$1" 2>/dev/null
+    # Best-effort: removing a missing quarantine xattr returns non-zero, which under
+    # the caller's `set -e` would abort the whole script before `return 0` — so guard
+    # the fallible xattr with `|| true`.
+    if [ "$(_chromedriver_os)" = macos ] && [ -n "$1" ]; then
+        xattr -d com.apple.quarantine "$1" 2>/dev/null || true
+    fi
     return 0
 }
 
@@ -457,8 +462,10 @@ run_flutter_drive_for_web_tests() {
     local result=2 line
     while IFS= read -r line <&5; do
         printf '%s\n' "$line"
+        # Punctuation varies by mode: flutter prints "All tests passed!" in
+        # debug and "All tests passed." in release/web-server — match either.
         case "$line" in
-            *"All tests passed!"*) result=0; break ;;
+            *"All tests passed"*) result=0; break ;;
             *"Some tests failed"*) result=1; break ;;
         esac
     done

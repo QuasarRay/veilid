@@ -1,6 +1,6 @@
 use super::*;
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::NotInitialized] error.
 #[macro_export]
 macro_rules! apibail_not_initialized {
     () => {
@@ -8,7 +8,7 @@ macro_rules! apibail_not_initialized {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::Timeout] error.
 #[macro_export]
 macro_rules! apibail_timeout {
     () => {
@@ -16,7 +16,7 @@ macro_rules! apibail_timeout {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::TryAgain] error carrying the given message.
 #[macro_export]
 macro_rules! apibail_try_again {
     ($x:expr) => {
@@ -27,7 +27,7 @@ macro_rules! apibail_try_again {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::Generic] error carrying the given message.
 #[macro_export]
 macro_rules! apibail_generic {
     ($x:expr) => {
@@ -38,7 +38,7 @@ macro_rules! apibail_generic {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::Internal] error carrying the given message.
 #[macro_export]
 macro_rules! apibail_internal {
     ($x:expr) => {
@@ -49,7 +49,7 @@ macro_rules! apibail_internal {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::ParseError] error carrying the given message and value.
 #[macro_export]
 macro_rules! apibail_parse_error {
     ($x:expr, $y:expr) => {
@@ -57,7 +57,7 @@ macro_rules! apibail_parse_error {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::MissingArgument] error naming the calling context and the missing argument.
 #[macro_export]
 macro_rules! apibail_missing_argument {
     ($x:expr, $y:expr) => {
@@ -65,7 +65,7 @@ macro_rules! apibail_missing_argument {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::InvalidArgument] error naming the calling context, the argument, and its rejected value.
 #[macro_export]
 macro_rules! apibail_invalid_argument {
     ($x:expr, $y:expr, $z:expr) => {
@@ -73,7 +73,7 @@ macro_rules! apibail_invalid_argument {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::NoConnection] error carrying the given message.
 #[macro_export]
 macro_rules! apibail_no_connection {
     ($x:expr) => {
@@ -85,7 +85,7 @@ macro_rules! apibail_no_connection {
 
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::KeyNotFound] error carrying the missing record key.
 #[macro_export]
 macro_rules! apibail_key_not_found {
     ($x:expr) => {
@@ -93,7 +93,7 @@ macro_rules! apibail_key_not_found {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::InvalidTarget] error carrying the given message.
 #[macro_export]
 macro_rules! apibail_invalid_target {
     ($x:expr) => {
@@ -101,15 +101,7 @@ macro_rules! apibail_invalid_target {
     };
 }
 
-#[allow(unused_macros)]
-#[macro_export]
-macro_rules! apibail_route_not_found {
-    ($x:expr) => {
-        return Err(VeilidAPIError::route_not_found($x))
-    };
-}
-
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::TransactionNotFound] error carrying the given message.
 #[macro_export]
 macro_rules! apibail_transaction_not_found {
     ($x:expr) => {
@@ -120,7 +112,7 @@ macro_rules! apibail_transaction_not_found {
     };
 }
 
-#[allow(unused_macros)]
+/// Return early with a [VeilidAPIError::AlreadyInitialized] error.
 #[macro_export]
 macro_rules! apibail_already_initialized {
     () => {
@@ -136,79 +128,139 @@ macro_rules! apibail_already_initialized {
     derive(Tsify),
     tsify(into_wasm_abi)
 )]
+/// Error type returned by all fallible Veilid API operations.
 #[serde(tag = "kind")]
 #[must_use]
 pub enum VeilidAPIError {
+    /// The API was used before [VeilidAPI](crate::VeilidAPI) was attached, or after it was detached.
     #[error("Not initialized")]
     NotInitialized,
+    /// An attempt was made to initialize Veilid while it was already running.
     #[error("Already initialized")]
     AlreadyInitialized,
+    /// The operation did not complete within its time budget.
     #[error("Timeout")]
     Timeout,
+    /// The operation could not be completed yet and should be retried later.
     #[error("TryAgain: {message}")]
-    TryAgain { message: String },
+    TryAgain {
+        /// Why the operation could not complete this time.
+        message: String,
+    },
+    /// The destination for an operation could not be reached or is malformed.
     #[error("Invalid target: {message}")]
-    InvalidTarget { message: String },
+    InvalidTarget {
+        /// Details about the unreachable or malformed target.
+        message: String,
+    },
+    /// No network connection could be established to carry out the operation.
     #[error("No connection: {message}")]
-    NoConnection { message: String },
+    NoConnection {
+        /// Details about the connection failure.
+        message: String,
+    },
+    /// The API is shutting down and can no longer service requests.
     #[error("Shutdown")]
     Shutdown,
+    /// The requested DHT record key is not present in local storage.
     #[error("Key not found: {key}")]
     KeyNotFound {
+        /// The record key that was not found.
         #[schemars(with = "String")]
         key: OpaqueRecordKey,
     },
+    /// An internal invariant was violated; indicates a bug in Veilid itself.
     #[error("Internal: {message}")]
-    Internal { message: String },
+    Internal {
+        /// Details about the internal failure.
+        message: String,
+    },
+    /// The requested feature exists in the API surface but is not yet implemented on this platform or build.
     #[error("Unimplemented: {message}")]
-    Unimplemented { message: String },
+    Unimplemented {
+        /// Which functionality is unimplemented.
+        message: String,
+    },
+    /// A value could not be parsed into its expected form.
     #[error("Parse error: '{message}' with value '{value}'")]
-    ParseError { message: String, value: String },
-    #[error("Invalid argument: '{context}' for '{argument}' with value '{value}'")]
-    InvalidArgument {
-        context: String,
-        argument: String,
+    ParseError {
+        /// What went wrong while parsing.
+        message: String,
+        /// The input value that failed to parse.
         value: String,
     },
+    /// An argument was supplied but its value was rejected.
+    #[error("Invalid argument: '{context}' for '{argument}' with value '{value}'")]
+    InvalidArgument {
+        /// The calling context that rejected the argument.
+        context: String,
+        /// The name of the offending argument.
+        argument: String,
+        /// The rejected value.
+        value: String,
+    },
+    /// A required argument was not supplied.
     #[error("Missing argument: '{context}' for '{argument}'")]
-    MissingArgument { context: String, argument: String },
+    MissingArgument {
+        /// The calling context that required the argument.
+        context: String,
+        /// The name of the missing argument.
+        argument: String,
+    },
+    /// A failure that does not fit any more specific category.
     #[error("Generic: {message}")]
-    Generic { message: String },
+    Generic {
+        /// Details about the failure.
+        message: String,
+    },
+    /// The referenced DHT transaction does not exist, having expired or never been opened.
     #[error("Transaction not found: {message}")]
-    TransactionNotFound { message: String },
+    TransactionNotFound {
+        /// Details about the missing transaction.
+        message: String,
+    },
 }
 
 impl VeilidAPIError {
+    /// Construct a [VeilidAPIError::NotInitialized] error.
     pub fn not_initialized() -> Self {
         Self::NotInitialized
     }
+    /// Construct a [VeilidAPIError::AlreadyInitialized] error.
     pub fn already_initialized() -> Self {
         Self::AlreadyInitialized
     }
+    /// Construct a [VeilidAPIError::Timeout] error.
     pub fn timeout() -> Self {
         Self::Timeout
     }
+    /// Construct a [VeilidAPIError::TryAgain] error with the given message.
     pub fn try_again<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::TryAgain {
             message: msg.to_veilid_api_error_argument(),
         }
     }
+    /// Construct a [VeilidAPIError::Shutdown] error.
     pub fn shutdown() -> Self {
         Self::Shutdown
     }
+    /// Construct a [VeilidAPIError::InvalidTarget] error with the given message.
     pub fn invalid_target<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::InvalidTarget {
             message: msg.to_veilid_api_error_argument(),
         }
     }
+    /// Construct a [VeilidAPIError::NoConnection] error with the given message.
     pub fn no_connection<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::NoConnection {
             message: msg.to_veilid_api_error_argument(),
         }
     }
+    /// Construct a [VeilidAPIError::KeyNotFound] error for the given record key.
     pub fn key_not_found(key: OpaqueRecordKey) -> Self {
         Self::KeyNotFound { key }
     }
+    /// Construct a [VeilidAPIError::ParseError] error with the given message and offending value.
     pub fn parse_error<T: ToVeilidAPIErrorArgument, S: ToVeilidAPIErrorArgument>(
         msg: T,
         value: S,
@@ -218,6 +270,7 @@ impl VeilidAPIError {
             value: value.to_veilid_api_error_argument(),
         }
     }
+    /// Construct a [VeilidAPIError::InvalidArgument] error naming the context, argument, and rejected value.
     pub fn invalid_argument<
         T: ToVeilidAPIErrorArgument,
         S: ToVeilidAPIErrorArgument,
@@ -233,6 +286,7 @@ impl VeilidAPIError {
             value: value.to_veilid_api_error_argument(),
         }
     }
+    /// Construct a [VeilidAPIError::MissingArgument] error naming the context and the missing argument.
     pub fn missing_argument<T: ToVeilidAPIErrorArgument, S: ToVeilidAPIErrorArgument>(
         context: T,
         argument: S,
@@ -242,6 +296,7 @@ impl VeilidAPIError {
             argument: argument.to_veilid_api_error_argument(),
         }
     }
+    /// Construct a [VeilidAPIError::Generic] error with the given message.
     pub fn generic<T: ToVeilidAPIErrorArgument>(msg: T) -> Self {
         Self::Generic {
             message: msg.to_veilid_api_error_argument(),
@@ -253,6 +308,7 @@ impl VeilidAPIError {
         }
     }
 
+    /// Convert a [NetworkResult] into a [VeilidAPIResult], mapping each non-value outcome to the matching error variant.
     pub fn from_network_result<T>(nr: NetworkResult<T>) -> Result<T, Self> {
         match nr {
             NetworkResult::Timeout => Err(VeilidAPIError::timeout()),
@@ -269,6 +325,7 @@ impl VeilidAPIError {
         }
     }
 
+    /// The [tracing] log level at which this error should be reported.
     pub fn log_level(&self) -> Level {
         match self {
             VeilidAPIError::NotInitialized
@@ -301,12 +358,14 @@ impl VeilidAPIError {
         }
     }
 
+    /// Construct a [VeilidAPIError::Internal] error with the given message. Constructing one signals a bug in Veilid.
     pub fn internal<T: ToString>(msg: T) -> Self {
         let message = msg.to_string();
         // Constructing an internal error should get logged because it must be a programming error on our part
         // veilid_log!(acc error "Internal error: {}", &message);
         Self::Internal { message }
     }
+    /// Construct a [VeilidAPIError::Unimplemented] error with the given message.
     pub fn unimplemented<T: ToString>(msg: T) -> Self {
         let message = msg.to_string();
         // Constructing an unimplemented error should get logged because it must be a programming error on our part
@@ -319,6 +378,7 @@ impl VeilidAPIError {
 
 /// Trait for types that can be directly converted into parameters for VeilidAPIError
 pub trait ToVeilidAPIErrorArgument {
+    /// Render this value as a string for inclusion in a [VeilidAPIError] message field.
     fn to_veilid_api_error_argument(&self) -> String;
 }
 
@@ -601,8 +661,11 @@ impl<T: ToVeilidAPIErrorArgument + ?Sized> ToVeilidAPIErrorArgument for &T {
 /// Result type for public Veilid API errors
 pub type VeilidAPIResult<T> = Result<T, VeilidAPIError>;
 
+/// Extension methods for turning recoverable [VeilidAPIError] outcomes into `Ok(None)`.
 pub trait OkVeilidAPIResult<T> {
+    /// Map a [VeilidAPIError::TryAgain] error to `Ok(None)`, passing through other results unchanged.
     fn ok_try_again(self) -> VeilidAPIResult<Option<T>>;
+    /// Map a [VeilidAPIError::TryAgain] or [VeilidAPIError::Timeout] error to `Ok(None)`, passing through other results unchanged.
     fn ok_try_again_timeout(self) -> VeilidAPIResult<Option<T>>;
 }
 

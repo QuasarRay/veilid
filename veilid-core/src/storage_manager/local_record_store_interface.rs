@@ -9,14 +9,14 @@ impl StorageManager {
         let local_record_store = self.get_local_record_store()?;
         let is_transactional = local_record_store
             .with_record(opaque_record_key, |r| {
-                r.detail().transaction_record_set.is_some()
+                r.detail().transaction_membership.is_some()
             })?
             .unwrap_or(false);
         if is_transactional {
             local_record_store.with_record_detail_mut(
                 opaque_record_key,
                 |_descriptor, detail| {
-                    detail.transaction_record_set = None;
+                    detail.transaction_membership = None;
                 },
             )?;
         }
@@ -193,11 +193,11 @@ impl StorageManager {
     pub(super) async fn handle_set_local_values_with_multiple_records_lock(
         &self,
         records_lock: &StorageManagerRecordsLockGuard,
-        keys_and_subkeys: RecordSubkeyValueList,
+        record_commit_values: Vec<RecordCommitValues>,
     ) -> VeilidAPIResult<()> {
         let records = records_lock.records().into_iter().collect::<BTreeSet<_>>();
-        for x in keys_and_subkeys.iter() {
-            if !records.contains(&x.0) {
+        for rcv in record_commit_values.iter() {
+            if !records.contains(&rcv.opaque_record_key) {
                 apibail_internal!("invalid records lock")
             }
         }
@@ -205,31 +205,44 @@ impl StorageManager {
         // See if this new data supercedes any offline subkey writes
         {
             let mut inner = self.inner.lock();
-            for (opaque_record_key, subkey_values) in keys_and_subkeys.iter() {
-                for subkey in subkey_values.iter().map(|x| x.0) {
-                    self.remove_offline_subkey_write_inner(&mut inner, opaque_record_key, subkey);
+            for rcv in record_commit_values.iter() {
+                for subkey in rcv.subkey_values.iter().map(|x| x.0) {
+                    self.remove_offline_subkey_write_inner(
+                        &mut inner,
+                        &rcv.opaque_record_key,
+                        subkey,
+                    );
                 }
             }
         }
 
-        // Write subkey to local store
+        // Write subkeys to local store
+        let record_subkey_values: RecordSubkeyValueList = record_commit_values
+            .iter()
+            .map(|rcv| (rcv.opaque_record_key.clone(), rcv.subkey_values.clone()))
+            .collect();
         let local_record_store = self.get_local_record_store()?;
         local_record_store
             .set_subkeys_multiple_records(
-                &keys_and_subkeys,
+                &record_subkey_values,
                 InboundWatchUpdateMode::NoUpdate,
                 CommitActionFlushMode::Immediate,
             )
             .await?;
 
-        // Stamp transaction membership (the full committed set) onto each participating record
-        let transaction_record_set: Vec<OpaqueRecordKey> =
-            keys_and_subkeys.iter().map(|(k, _)| k.clone()).collect();
-        for opaque_record_key in &transaction_record_set {
+        // Stamp transaction membership (the full committed set + each record's operation signer)
+        let record_set: Vec<OpaqueRecordKey> = record_commit_values
+            .iter()
+            .map(|rcv| rcv.opaque_record_key.clone())
+            .collect();
+        for rcv in &record_commit_values {
             local_record_store.with_record_detail_mut(
-                opaque_record_key,
+                &rcv.opaque_record_key,
                 |_descriptor, detail| {
-                    detail.transaction_record_set = Some(transaction_record_set.clone());
+                    detail.transaction_membership = Some(TransactionMembership {
+                        record_set: record_set.clone(),
+                        operation_signer: rcv.operation_signer.clone(),
+                    });
                 },
             )?;
         }

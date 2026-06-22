@@ -35,8 +35,10 @@ cfg_if! {
 
 }
 
+/// Error returned by DNS resolution operations.
 #[derive(Debug, Clone, Eq, PartialEq, ThisError)]
 pub enum ResolverError {
+    /// Resolution failed; the string carries a backend-specific description.
     #[error("Generic resolver error")]
     Generic(String),
 }

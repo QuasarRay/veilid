@@ -163,9 +163,9 @@ pub struct CmdlineArgs {
     #[arg(long)]
     console: bool,
 
-    /// Change targets to ignore for logging
-    #[arg(long)]
-    ignore_log_targets: Option<String>,
+    /// Enable terminal logging directives. Directives are in RUST_LOG format and can use target names or tags (groups) starting with '#': rpc=trace,#common=debug
+    #[arg(short('l'), long, value_name = "LOG_DIRECTIVES")]
+    log_directives: Option<String>,
 
     /// Override all network listen addresses with ':port'
     #[arg(long)]
@@ -428,12 +428,10 @@ fn main() -> EyreResult<()> {
         settingsrw.logging.console.enabled = true;
     }
 
-    if let Some(ignore_log_targets) = args.ignore_log_targets {
-        println!("Changing ignored log targets: {:?}", ignore_log_targets);
-        settingsrw.logging.terminal.ignore_log_targets = ignore_log_targets
-            .split(',')
-            .map(|x| x.to_owned())
-            .collect();
+    if let Some(log_directives) = args.log_directives {
+        println!("Setting terminal log directives: {:?}", log_directives);
+        settingsrw.logging.terminal.enabled = true;
+        settingsrw.logging.terminal.directives = log_directives;
     }
 
     if let Some(port) = args.port {
@@ -455,14 +453,8 @@ fn main() -> EyreResult<()> {
         if let Some((k, v)) = set_config.split_once('=') {
             let k = k.trim();
             let v = v.trim();
-            if let Err(e) = settings.set(k, v) {
-                // Try again with value quoted as string, since that is a common thing to do
-                let strv = json::stringify(v);
-                if settings.set(k, &strv).is_err() {
-                    // Return original error
-                    return Err(e);
-                }
-            }
+            // `set` parses leniently: bare scalars, quoted strings, and JSON arrays all work
+            settings.set(k, v)?;
         }
     }
 
@@ -551,9 +543,17 @@ fn main() -> EyreResult<()> {
     set_panic_on_shutdown(args.panic);
 
     // Run the server loop
+    let mut exit_code = 0;
     block_on(async {
         // Init combined console/file logger
-        let veilid_logs = Logs::setup(settings.clone())?;
+        let veilid_logs = match Logs::setup(settings.clone()) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to initialize logging: {}", e);
+                exit_code = 1;
+                return Ok(());
+            }
+        };
 
         cfg_if! {
             if #[cfg(windows)] {
@@ -562,5 +562,7 @@ fn main() -> EyreResult<()> {
                 unix::run_veilid_server_with_signals(settings, server_mode, veilid_logs).await
             }
         }
-    })
+    })?;
+
+    std::process::exit(exit_code);
 }

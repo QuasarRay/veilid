@@ -62,10 +62,10 @@ impl WasmProtocolNetworkConnection {
     ) -> io::Result<NetworkResult<ProtocolNetworkConnection>> {
         match dial_info.protocol_type() {
             ProtocolType::UDP => {
-                panic!("UDP dial info is not supported on WASM targets");
+                bail_io_error_other!("UDP dial info is not supported on WASM targets");
             }
             ProtocolType::TCP => {
-                panic!("TCP dial info is not supported on WASM targets");
+                bail_io_error_other!("TCP dial info is not supported on WASM targets");
             }
             ProtocolType::WS => {
                 ws::WebsocketProtocolHandler::connect(registry, dial_info, timeout_ms).await

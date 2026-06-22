@@ -136,7 +136,7 @@ impl RoutingTable {
         // Get the node we know about that is closest to each target hash coordinate
         // Uses a brief snapshot for the sync lookup, then drops it before async work
         let target_node_refs = {
-            let snapshot = self.snapshot_entries(Timestamp::now(), BucketEntryState::Unreliable);
+            let snapshot = self.snapshot_entries(Timestamp::now(), BucketEntryState::Initial);
             let closest_results = self.get_nodes_closest_to_multiple_hash_coordinates(
                 routing_domain,
                 &target_hash_coordinates,

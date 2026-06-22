@@ -103,13 +103,6 @@ pub fn test_transfer_stats_down_up() {
     assert_eq!(orig, copy);
 }
 
-pub fn test_rpc_stats() {
-    let orig = fake_rpc_stats();
-    let copy = deserialize_json(&serialize_json(&orig)).unwrap();
-
-    assert_eq!(orig, copy);
-}
-
 pub fn test_peer_stats() {
     let orig = fake_peer_stats();
     let copy = deserialize_json(&serialize_json(&orig)).unwrap();

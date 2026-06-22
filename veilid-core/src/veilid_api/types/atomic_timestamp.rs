@@ -22,28 +22,39 @@ impl fmt::Display for AtomicTimestamp {
 }
 
 impl AtomicTimestamp {
+    /// Make an atomic timestamp set to the current time.
     pub fn now() -> Self {
         Self::new(Timestamp::now())
     }
 
+    /// Make an atomic timestamp set to the current non-decreasing time.
     pub fn now_non_decreasing() -> Self {
         Self::new(Timestamp::now_non_decreasing())
     }
 
+    /// Make an atomic timestamp set to the current increasing time.
     pub fn now_increasing() -> Self {
         Self::new(Timestamp::now_increasing())
     }
 
+    /// Make an atomic timestamp set to the given timestamp.
     pub fn new(t: Timestamp) -> Self {
         Self(AtomicU64::new(t.as_u64()))
     }
 
+    /// Load the timestamp.
     pub fn get(&self) -> Timestamp {
         Timestamp::new(self.0.load(Ordering::Acquire))
     }
 
+    /// Store the timestamp.
     pub fn set(&self, t: Timestamp) {
         self.0.store(t.as_u64(), Ordering::Release);
+    }
+
+    /// Store the timestamp and return the previous value.
+    pub fn swap(&self, t: Timestamp) -> Timestamp {
+        Timestamp::new(self.0.swap(t.as_u64(), Ordering::AcqRel))
     }
 
     /// Fetch and update the timestamp atomically

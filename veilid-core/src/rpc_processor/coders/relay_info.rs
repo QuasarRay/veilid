@@ -33,6 +33,10 @@ pub fn decode_relay_info(reader: &veilid_capnp::relay_info::Reader) -> Result<Re
         let Some(dial_info_detail) = decode_dial_info_detail(&did).ignore_ok()? else {
             continue;
         };
+        // Skip relay info dial info that requires a signal
+        if dial_info_detail.class.requires_signal() {
+            continue;
+        }
         dial_info_detail_list.push(dial_info_detail)
     }
 

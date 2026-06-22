@@ -103,10 +103,12 @@ struct StorageManagerInner {
     pub outbound_transaction_manager: OutboundTransactionManager,
     /// Storage manager metadata that is persistent, including copy of offline subkey writes
     pub metadata_db: Option<TableDB>,
-    /// Peer info change subscription
-    pub peer_info_change_subscription: Option<EventBusSubscription>,
+    /// Routing domain ready subscription (drives the DHT-online gate)
+    pub routing_domain_ready_subscription: Option<EventBusSubscription>,
     /// Tick subscription
     pub tick_subscription: Option<EventBusSubscription>,
+    /// Network stats change subscription
+    pub network_stats_change_subscription: Option<EventBusSubscription>,
 }
 
 impl fmt::Debug for StorageManagerInner {
@@ -124,8 +126,8 @@ impl fmt::Debug for StorageManagerInner {
                 &self.outbound_transaction_manager,
             )
             .field(
-                "peer_info_change_subscription",
-                &self.peer_info_change_subscription,
+                "routing_domain_ready_subscription",
+                &self.routing_domain_ready_subscription,
             )
             //.field("metadata_db", &self.metadata_db)
             //.field("tick_subscription", &self.tick_subscription)
@@ -135,7 +137,7 @@ impl fmt::Debug for StorageManagerInner {
 
 pub(crate) struct StorageManager {
     registry: VeilidComponentRegistry,
-    inner: Mutex<StorageManagerInner>,
+    inner: TrackedMutex<StorageManagerInner>,
     startup_lock: Arc<StartupLock>,
 
     // Background processes
@@ -166,6 +168,13 @@ pub(crate) struct StorageManager {
 
     // Online check
     is_online: AtomicBool,
+
+    // Per-direction byte budgets + a count cap, shared by all DHT network ops.
+    // Bandwidth gates are fed from observed node throughput (raise-only); the
+    // concurrency cap is the fairness ceiling. Local-only ops acquire none.
+    upload_bandwidth_gate: Arc<AsyncWeightedSemaphore>,
+    download_bandwidth_gate: Arc<AsyncWeightedSemaphore>,
+    operation_concurrency: Arc<AsyncSemaphore>,
 }
 
 impl fmt::Debug for StorageManager {
@@ -185,6 +194,15 @@ impl fmt::Debug for StorageManager {
     }
 }
 
+/// Holds the concurrency permit + per-direction bandwidth budgets acquired for
+/// one DHT network operation; releases all on drop.
+#[allow(dead_code)]
+struct OperationGateGuard {
+    concurrency: AsyncSemaphoreGuardArc,
+    upload: Option<AsyncWeightedSemaphoreGuard>,
+    download: Option<AsyncWeightedSemaphoreGuard>,
+}
+
 impl_veilid_component!(StorageManager);
 
 impl StorageManager {
@@ -199,8 +217,16 @@ impl StorageManager {
             anonymous_signing_keys.add(kp);
         }
 
+        let upload_bandwidth_gate =
+            AsyncWeightedSemaphore::new(GLOBAL_OPERATION_UPLOAD_BANDWIDTH_DEFAULT_BYTES);
+        let download_bandwidth_gate =
+            AsyncWeightedSemaphore::new(GLOBAL_OPERATION_DOWNLOAD_BANDWIDTH_DEFAULT_BYTES);
+        let operation_concurrency = Arc::new(AsyncSemaphore::new(
+            (registry.config().network.dht.max_concurrent_operations as usize).max(1),
+        ));
+
         let this = StorageManager {
-            inner: Mutex::new(StorageManagerInner {
+            inner: TrackedMutex::new(StorageManagerInner {
                 opened_records: Default::default(),
                 local_record_store: Default::default(),
                 remote_record_store: Default::default(),
@@ -210,8 +236,9 @@ impl StorageManager {
                 outbound_watch_manager: Default::default(),
                 outbound_transaction_manager: OutboundTransactionManager::new(registry.clone()),
                 metadata_db: Default::default(),
-                peer_info_change_subscription: None,
+                routing_domain_ready_subscription: None,
                 tick_subscription: None,
+                network_stats_change_subscription: None,
             }),
             registry: registry.clone(),
             startup_lock: Arc::new(StartupLock::new()),
@@ -254,11 +281,61 @@ impl StorageManager {
             background_operation_processor: DeferredStreamProcessor::new(),
             is_online: AtomicBool::new(false),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
+            upload_bandwidth_gate,
+            download_bandwidth_gate,
+            operation_concurrency,
         };
 
         this.setup_tasks();
 
         this
+    }
+
+    /// Raise the per-direction operation bandwidth budgets from observed aggregate node throughput (raise-only)
+    pub(crate) fn update_operation_bandwidth_gates(&self, up_bps: u64, down_bps: u64) {
+        let rpc_timeout_us = ms_to_us(self.config().internal().network.rpc.timeout_ms);
+        let window_us = rpc_timeout_us / OPERATION_BANDWIDTH_QUEUE_TIME_FRACTION;
+        let budget = |bps: u64| bps.saturating_mul(window_us) / 1_000_000;
+        let up_budget = budget(up_bps);
+        let down_budget = budget(down_bps);
+        let _up_prev = self.upload_bandwidth_gate.raise_limit(up_budget);
+        let _down_prev = self.download_bandwidth_gate.raise_limit(down_budget);
+        #[cfg(feature = "verbose-tracing")]
+        veilid_log!(self debug target:"network_result", "operation bandwidth gates: up_bps={} up_limit={}{} down_bps={} down_limit={}{}",
+            up_bps, _up_prev.max(up_budget), if up_budget > _up_prev { " (raised)" } else { "" },
+            down_bps, _down_prev.max(down_budget), if down_budget > _down_prev { " (raised)" } else { "" });
+    }
+
+    /// Acquire the DHT-operation concurrency permit plus the per-direction
+    /// bandwidth budgets this op needs (upload for sets, download for gets); the
+    /// returned guard releases all on drop. Waits if the gates are full.
+    async fn acquire_operation_gate(
+        &self,
+        upload_cost: Option<u64>,
+        download_cost: Option<u64>,
+    ) -> OperationGateGuard {
+        // Budgets are bytes/window, but an op holds its bytes for ~its round trip
+        // (bounded by rpc_timeout), so amortize the per-op cost over that span to
+        // admit a realistic number of ops in flight.
+        let timeout_secs = (self.config().internal().network.rpc.timeout_ms / 1000).max(1) as u64;
+        let amortize = |c: Option<u64>| c.map(|b| (b / timeout_secs).max(1));
+        let upload_cost = amortize(upload_cost);
+        let download_cost = amortize(download_cost);
+
+        let concurrency = self.operation_concurrency.acquire_arc().await;
+        let upload = match upload_cost {
+            Some(cost) => Some(self.upload_bandwidth_gate.acquire(cost).await),
+            None => None,
+        };
+        let download = match download_cost {
+            Some(cost) => Some(self.download_bandwidth_gate.acquire(cost).await),
+            None => None,
+        };
+        OperationGateGuard {
+            concurrency,
+            upload,
+            download,
+        }
     }
 
     pub(crate) fn local_limits_from_config(c: Arc<VeilidConfig>) -> RecordStoreLimits {
@@ -271,16 +348,20 @@ impl StorageManager {
                 c.network.dht.local_max_subkey_cache_memory_mb as usize,
             ),
             max_storage_space_mb: None,
-            public_watch_limit: c.network.dht.public_watch_limit as usize,
-            member_watch_limit: c.network.dht.member_watch_limit as usize,
+            public_watch_limit: c.internal().network.dht.public_watch_limit as usize,
+            member_watch_limit: c.internal().network.dht.member_watch_limit as usize,
             max_watch_expiration: TimestampDuration::new_ms(
-                c.network.dht.max_watch_expiration_ms.into(),
+                c.internal().network.dht.max_watch_expiration_ms.into(),
             ),
-            min_watch_expiration: TimestampDuration::new_ms(c.network.rpc.timeout_ms.into()),
-            public_transaction_limit: c.network.dht.public_transaction_limit as usize,
-            member_transaction_limit: c.network.dht.member_transaction_limit as usize,
-            transaction_timeout: TimestampDuration::new_ms(c.network.rpc.timeout_ms as u64)
-                .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER),
+            min_watch_expiration: TimestampDuration::new_ms(
+                c.internal().network.rpc.timeout_ms.into(),
+            ),
+            public_transaction_limit: c.internal().network.dht.public_transaction_limit as usize,
+            member_transaction_limit: c.internal().network.dht.member_transaction_limit as usize,
+            transaction_timeout: TimestampDuration::new_ms(
+                c.internal().network.rpc.timeout_ms as u64,
+            )
+            .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER),
             pool_concurrency: 1,
         }
     }
@@ -295,16 +376,20 @@ impl StorageManager {
                 c.network.dht.remote_max_subkey_cache_memory_mb as usize,
             ),
             max_storage_space_mb: Some(c.network.dht.remote_max_storage_space_mb as usize),
-            public_watch_limit: c.network.dht.public_watch_limit as usize,
-            member_watch_limit: c.network.dht.member_watch_limit as usize,
+            public_watch_limit: c.internal().network.dht.public_watch_limit as usize,
+            member_watch_limit: c.internal().network.dht.member_watch_limit as usize,
             max_watch_expiration: TimestampDuration::new_ms(
-                c.network.dht.max_watch_expiration_ms.into(),
+                c.internal().network.dht.max_watch_expiration_ms.into(),
             ),
-            min_watch_expiration: TimestampDuration::new_ms(c.network.rpc.timeout_ms.into()),
-            public_transaction_limit: c.network.dht.public_transaction_limit as usize,
-            member_transaction_limit: c.network.dht.member_transaction_limit as usize,
-            transaction_timeout: TimestampDuration::new_ms(c.network.rpc.timeout_ms as u64)
-                .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER),
+            min_watch_expiration: TimestampDuration::new_ms(
+                c.internal().network.rpc.timeout_ms.into(),
+            ),
+            public_transaction_limit: c.internal().network.dht.public_transaction_limit as usize,
+            member_transaction_limit: c.internal().network.dht.member_transaction_limit as usize,
+            transaction_timeout: TimestampDuration::new_ms(
+                c.internal().network.rpc.timeout_ms as u64,
+            )
+            .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER),
             pool_concurrency: (get_concurrency() as usize)
                 .div_ceil(REMOTE_POOL_CONCURRENCY_DIVISOR),
         }
@@ -319,6 +404,10 @@ impl StorageManager {
             .with_facility(VeilidComponentLogFacility::try_new_with_tags("dht", ["#dht"]).unwrap())
             .with_facility(
                 VeilidComponentLogFacility::try_new_with_tags("watch", ["#dht"]).unwrap(),
+            )
+            .with_facility(
+                VeilidComponentLogFacility::try_new_with_tags("network_result", ["#verbose"])
+                    .unwrap(),
             )
     }
 
@@ -366,9 +455,11 @@ impl StorageManager {
     #[allow(clippy::unused_async)]
     async fn post_init_async(&self) -> EyreResult<()> {
         // Register event handlers
-        let peer_info_change_subscription =
-            impl_subscribe_event_bus!(self, Self, peer_info_change_event_handler);
+        let routing_domain_ready_subscription =
+            impl_subscribe_event_bus!(self, Self, routing_domain_ready_event_handler);
         let tick_subscription = impl_subscribe_event_bus_async!(self, Self, tick_event_handler);
+        let network_stats_change_subscription =
+            impl_subscribe_event_bus!(self, Self, network_stats_change_event_handler);
 
         let mut inner = self.inner.lock();
 
@@ -376,8 +467,9 @@ impl StorageManager {
         inner.outbound_watch_manager.prepare(&self.routing_table());
 
         // Schedule tick
-        inner.peer_info_change_subscription = Some(peer_info_change_subscription);
+        inner.routing_domain_ready_subscription = Some(routing_domain_ready_subscription);
         inner.tick_subscription = Some(tick_subscription);
+        inner.network_stats_change_subscription = Some(network_stats_change_subscription);
 
         Ok(())
     }
@@ -391,10 +483,13 @@ impl StorageManager {
         // Unsubscribe from tickers and shut down outbound transaction manager
         {
             let mut inner = self.inner.lock();
-            if let Some(sub) = inner.peer_info_change_subscription.take() {
+            if let Some(sub) = inner.routing_domain_ready_subscription.take() {
                 self.event_bus().unsubscribe(sub);
             }
             if let Some(sub) = inner.tick_subscription.take() {
+                self.event_bus().unsubscribe(sub);
+            }
+            if let Some(sub) = inner.network_stats_change_subscription.take() {
                 self.event_bus().unsubscribe(sub);
             }
         }
@@ -459,8 +554,9 @@ impl StorageManager {
                 flush_record_waiters: Default::default(),
                 outbound_watch_manager: Default::default(),
                 metadata_db: Default::default(),
-                peer_info_change_subscription: None,
+                routing_domain_ready_subscription: None,
                 tick_subscription: None,
+                network_stats_change_subscription: None,
             };
         }
 
@@ -623,11 +719,20 @@ impl StorageManager {
     )]
     fn update_callback_value_change(
         &self,
+        record_lock: StorageManagerRecordLockGuard,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
         count: u32,
         value: Option<ValueData>,
     ) {
+        if record_lock.record() != record_key.opaque() {
+            veilid_log!(self error "record lock record key mismatch: {} != {}", record_lock.record(), record_key.opaque());
+            return;
+        }
+
+        // Explicit lock drop to ensure lifetime of lock stops before callback is called
+        drop(record_lock);
+
         let update_callback = self.update_callback();
         update_callback(VeilidUpdate::ValueChange(Box::new(VeilidValueChange {
             key: record_key,
@@ -650,7 +755,7 @@ impl StorageManager {
         match fanout_result.kind {
             FanoutResultKind::Incomplete => false,
             FanoutResultKind::Timeout => {
-                let get_consensus = self.config().network.dht.get_value_count as usize;
+                let get_consensus = self.config().internal().network.dht.get_value_count as usize;
                 let value_node_count = fanout_result.consensus_nodes.len();
                 if value_node_count < get_consensus {
                     veilid_log!(self debug "timeout with insufficient consensus ({}<{}), adding offline subkey: {}:{}",
@@ -665,7 +770,7 @@ impl StorageManager {
                 }
             }
             FanoutResultKind::Exhausted => {
-                let get_consensus = self.config().network.dht.get_value_count as usize;
+                let get_consensus = self.config().internal().network.dht.get_value_count as usize;
                 let value_node_count = fanout_result.consensus_nodes.len();
                 if value_node_count < get_consensus {
                     veilid_log!(self debug "exhausted with insufficient consensus ({}<{}), adding offline subkey: {}:{}",
@@ -747,17 +852,18 @@ impl StorageManager {
         Ok(existed)
     }
 
-    fn peer_info_change_event_handler(&self, evt: Arc<PeerInfoChangeEvent>) {
-        // Note when we have come back online
-        if evt.routing_domain == RoutingDomain::PublicInternet {
-            if evt.opt_old_peer_info.is_none() && evt.opt_new_peer_info.is_some() {
-                self.is_online.store(true, Ordering::Release);
-
-                // Trigger online updates
-                self.change_inspect_all_watches();
-            } else if evt.opt_old_peer_info.is_some() && evt.opt_new_peer_info.is_none() {
-                self.is_online.store(false, Ordering::Release);
-            }
+    fn routing_domain_ready_event_handler(&self, evt: Arc<RoutingDomainReadyEvent>) {
+        // Gate DHT ops on the same level-based signal as public_internet_ready, so
+        // it survives a network switch (the old peer-info-edge gate stuck on a
+        // some->some republish).
+        if evt.routing_domain != RoutingDomain::PublicInternet {
+            return;
+        }
+        let now_online = evt.is_ready_inbound && evt.is_ready_outbound;
+        let was_online = self.is_online.swap(now_online, Ordering::AcqRel);
+        if now_online && !was_online {
+            // Came back online — trigger online updates
+            self.change_inspect_all_watches();
         }
     }
 
@@ -766,5 +872,19 @@ impl StorageManager {
         if let Err(e) = self.tick(lag).await {
             error!("Error in storage manager tick: {}", e);
         }
+    }
+
+    fn network_stats_change_event_handler(
+        &self,
+        evt: Arc<crate::network_manager::NetworkManagerStatsChangeEvent>,
+    ) {
+        let (up_bps, down_bps) = {
+            let stats = evt.stats.read();
+            (
+                stats.self_stats.transfer_stats.up.maximum.as_u64(),
+                stats.self_stats.transfer_stats.down.maximum.as_u64(),
+            )
+        };
+        self.update_operation_bandwidth_gates(up_bps, down_bps);
     }
 }

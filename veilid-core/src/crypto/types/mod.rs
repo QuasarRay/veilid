@@ -43,6 +43,8 @@ mod nonce;
 mod record_key;
 
 pub use byte_array_types::*;
+pub(crate) use crypto_typed::*;
+pub(crate) use crypto_typed_group::*;
 pub use keypair::*;
 pub use record_key::*;
 

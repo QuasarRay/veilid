@@ -55,6 +55,9 @@ impl VeilidAPI {
     }
 
     /// Shut down Veilid and terminate the API.
+    ///
+    /// Blocks until the core context has finished shutting down. Idempotent: a second call after the
+    /// context is already taken is a no-op.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all))]
     pub async fn shutdown(self) {
         let context = { self.inner.lock().context.take() };
@@ -86,6 +89,8 @@ impl VeilidAPI {
     // Public Accessors
 
     /// Access the configuration that Veilid was initialized with.
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
     pub fn config(&self) -> VeilidAPIResult<Arc<VeilidConfig>> {
         let inner = self.inner.lock();
         let Some(context) = &inner.context else {
@@ -95,6 +100,8 @@ impl VeilidAPI {
     }
 
     /// Get the cryptosystem component.
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
     pub fn crypto(&self) -> VeilidAPIResult<VeilidComponentGuard<'_, Crypto>> {
         let inner = self.inner.lock();
         let Some(context) = &inner.context else {
@@ -107,6 +114,8 @@ impl VeilidAPI {
     }
 
     /// Get the TableStore component.
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
     pub fn table_store(&self) -> VeilidAPIResult<VeilidComponentGuard<'_, TableStore>> {
         let inner = self.inner.lock();
         let Some(context) = &inner.context else {
@@ -119,6 +128,8 @@ impl VeilidAPI {
     }
 
     /// Get the ProtectedStore component.
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
     pub fn protected_store(&self) -> VeilidAPIResult<VeilidComponentGuard<'_, ProtectedStore>> {
         let inner = self.inner.lock();
         let Some(context) = &inner.context else {
@@ -131,6 +142,8 @@ impl VeilidAPI {
     }
 
     /// Get the BlockStore component.
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
     #[cfg(feature = "unstable-blockstore")]
     pub fn block_store(&self) -> VeilidAPIResult<VeilidComponentGuard<'_, BlockStore>> {
         let inner = self.inner.lock();
@@ -147,6 +160,8 @@ impl VeilidAPI {
     // Attach/Detach
 
     /// Get a full copy of the current state of Veilid.
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
     #[expect(clippy::unused_async)]
     pub async fn get_state(&self) -> VeilidAPIResult<VeilidState> {
         let attachment_manager = self.core_context()?.attachment_manager();
@@ -166,6 +181,12 @@ impl VeilidAPI {
     }
 
     /// Connect to the network.
+    ///
+    /// Sets the attachment to maintain peers; the network connect proceeds in the background tick loop.
+    /// Returns an error if already attached.
+    ///
+    /// Errors with [VeilidAPIError::Generic] if already attached, or [VeilidAPIError::NotInitialized]
+    /// if the API has been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
     pub async fn attach(&self) -> VeilidAPIResult<()> {
         async {
@@ -191,6 +212,12 @@ impl VeilidAPI {
     }
 
     /// Disconnect from the network.
+    ///
+    /// Clears the attachment's maintain-peers flag; the network teardown proceeds in the background tick loop.
+    /// Returns an error if already detached.
+    ///
+    /// Errors with [VeilidAPIError::Generic] if already detached, or [VeilidAPIError::NotInitialized]
+    /// if the API has been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
     pub async fn detach(&self) -> VeilidAPIResult<()> {
         async {
@@ -219,6 +246,8 @@ impl VeilidAPI {
     // Routing Context
 
     /// Get a new `RoutingContext` object to use to send messages over the Veilid network with default safety, sequencing, and stability parameters.
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
     pub fn routing_context(&self) -> VeilidAPIResult<RoutingContext> {
         record_duration(|| {
@@ -234,6 +263,12 @@ impl VeilidAPI {
 
     /// Deterministicly builds the record key for a given schema and owner public key.
     /// The crypto kind of the record key will be that of the `owner` public key
+    ///
+    /// Local crypto computation only; despite being `async` it makes no network round-trip.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] if `schema` is malformed, [VeilidAPIError::Generic]
+    /// if `owner_key` or `encryption_key` names an unsupported crypto kind, or
+    /// [VeilidAPIError::NotInitialized] if the API has been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn get_dht_record_key(
         &self,
@@ -265,6 +300,9 @@ impl VeilidAPI {
     }
 
     /// Create a new MemberId for use with in creating `DHTSchema`s.
+    ///
+    /// Errors with [VeilidAPIError::Generic] if `writer_key` names an unsupported crypto kind, or
+    /// [VeilidAPIError::NotInitialized] if the API has been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(self), fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub fn generate_member_id(&self, writer_key: &PublicKey) -> VeilidAPIResult<MemberId> {
         record_duration(move || {
@@ -282,6 +320,19 @@ impl VeilidAPI {
     /// Record keys must have been opened via a routing context already when passed to this function
     /// The maximum number of records per transaction is currently 32.
     /// Options can be specified that supply a default signing keypair for records that are not opened for writing
+    ///
+    /// Blocks on the network to begin the transaction across the record nodes (online-only).
+    /// The returned [DHTTransaction] holds a network-side resource the caller must release by calling
+    /// [DHTTransaction::commit] or [DHTTransaction::rollback]; dropping it without doing either logs a
+    /// warning and tears the transaction down in the background.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] if a record is not open or more than 32 records
+    /// are passed, [VeilidAPIError::MissingArgument] if `record_keys` is empty or has duplicates,
+    /// [VeilidAPIError::Generic] if a record key is malformed or its encryption key does not match the
+    /// opened record, [VeilidAPIError::TryAgain] if the DHT is offline, the records are contended, or
+    /// begin consensus was not reached (retry), [VeilidAPIError::NotInitialized] if the API has been
+    /// shut down. Network failures surface as [VeilidAPIError::Timeout] or
+    /// [VeilidAPIError::NoConnection].
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn transact_dht_records(
         &self,
@@ -322,18 +373,34 @@ impl VeilidAPI {
     ///
     /// Returns a route id and 'blob' that can be published over some means (DHT or otherwise) to be
     /// imported by another Veilid node.
+    ///
+    /// Blocks on the network to allocate and test the route. The returned route id holds an allocated
+    /// route the caller must free with [VeilidAPI::release_private_route].
+    ///
+    /// Errors with [VeilidAPIError::TryAgain] if there is no valid PublicInternet network class yet,
+    /// not enough nodes are known to build the route, or the route failed its reachability test
+    /// (retry), or [VeilidAPIError::NotInitialized] if the API has been shut down.
     pub async fn new_private_route(&self) -> VeilidAPIResult<RouteBlob> {
         Box::pin(self.new_custom_private_route(PrivateSpec::default())).await
     }
 
     /// Allocate a new private route and specify a specific cryptosystem, stability and sequencing preference.
-    /// Faster connections may be possible with [Stability::LowLatency], and [Sequencing::NoPreference] at the
+    /// Faster connections may be possible with [Stability::LowLatency], and [Sequencing::PreferUnordered] at the
     /// expense of some loss of messages.
     /// Returns a route id and a publishable 'blob' with the route encrypted with each crypto kind.
     /// Those nodes importing the blob will have their choice of which crypto kind to use.
     ///
     /// Returns a route id and 'blob' that can be published over some means (DHT or otherwise) to be
     /// imported by another Veilid node.
+    ///
+    /// Blocks on the network to allocate and test the route. The returned route id holds an allocated
+    /// route the caller must free with [VeilidAPI::release_private_route].
+    ///
+    /// Errors with [VeilidAPIError::Generic] if `private_spec` names an invalid crypto kind,
+    /// [VeilidAPIError::InvalidArgument] if the hop count exceeds the configured maximum,
+    /// [VeilidAPIError::TryAgain] if there is no valid PublicInternet network class yet, not enough
+    /// nodes are known to build the route, or the route failed its reachability test (retry), or
+    /// [VeilidAPIError::NotInitialized] if the API has been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip(self), ret))]
     pub async fn new_custom_private_route(
         &self,
@@ -414,6 +481,13 @@ impl VeilidAPI {
     /// Import a private route blob as a remote private route.
     ///
     /// Returns a route id that can be used to send private messages to the node creating this route.
+    ///
+    /// Local import, no network round-trip. The returned route id holds an imported route the caller
+    /// must free with [VeilidAPI::release_private_route].
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] if `blob` is empty or names too many crypto kinds,
+    /// [VeilidAPIError::ParseError] if it is malformed, [VeilidAPIError::Generic] if the decoded route
+    /// has no first hop, or [VeilidAPIError::NotInitialized] if the API has been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip(self), ret))]
     pub fn import_remote_private_route(&self, blob: Vec<u8>) -> VeilidAPIResult<RouteId> {
         record_duration(|| {
@@ -430,6 +504,12 @@ impl VeilidAPI {
     ///
     /// This will deactivate the route and free its resources and it can no longer be sent to
     /// or received from.
+    ///
+    /// This is the release for [VeilidAPI::new_private_route], [VeilidAPI::new_custom_private_route], and
+    /// [VeilidAPI::import_remote_private_route]. Local, no network round-trip. Releasing a route id that
+    /// is unknown, already released, or malformed (unsupported crypto kind or bad length) returns
+    /// [VeilidAPIError::InvalidArgument]; errors with [VeilidAPIError::NotInitialized] if the API has
+    /// been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip(self), ret))]
     pub fn release_private_route(&self, route_id: RouteId) -> VeilidAPIResult<()> {
         record_duration(|| {
@@ -455,6 +535,11 @@ impl VeilidAPI {
     ///
     /// * `call_id` - specifies which call to reply to, and it comes from a [VeilidUpdate::AppCall], specifically the [VeilidAppCall::id()] value.
     /// * `message` - is an answer blob to be returned by the remote node's [RoutingContext::app_call()] function, and may be up to 32768 bytes.
+    ///
+    /// Completes the pending call locally and does not block on the network. Each `call_id` may be
+    /// answered only once; replying to an unknown or already-answered `call_id` errors with
+    /// [VeilidAPIError::Generic]. Errors with [VeilidAPIError::TryAgain] if the node is mid-shutdown,
+    /// or [VeilidAPIError::NotInitialized] if the API has been shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip(self), ret))]
     pub async fn app_call_reply(
         &self,
@@ -493,7 +578,7 @@ impl VeilidAPI {
         _endpoint_mode: TunnelMode,
         _depth: u8,
     ) -> VeilidAPIResult<PartialTunnel> {
-        panic!("unimplemented");
+        apibail_internal!("unimplemented");
     }
 
     #[cfg(feature = "unstable-tunnels")]
@@ -504,13 +589,13 @@ impl VeilidAPI {
         _depth: u8,
         _partial_tunnel: PartialTunnel,
     ) -> VeilidAPIResult<FullTunnel> {
-        panic!("unimplemented");
+        apibail_internal!("unimplemented");
     }
 
     #[cfg(feature = "unstable-tunnels")]
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip(self), ret))]
     pub async fn cancel_tunnel(&self, _tunnel_id: TunnelId) -> VeilidAPIResult<bool> {
-        panic!("unimplemented");
+        apibail_internal!("unimplemented");
     }
 
     ////////////////////////////////////////////////////////////////

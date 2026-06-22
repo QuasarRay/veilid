@@ -8,9 +8,15 @@ use ::windows::Win32::NetworkManagement::Dns::{
 use core::ffi::c_void;
 use std::ffi::{CStr, CString};
 
+/// Cross-platform DNS resolver. This backend uses the Windows system resolver.
 pub struct Resolver {}
 
 impl Resolver {
+    /// Resolve the TXT records for `host`, returning each record's text.
+    ///
+    /// The Windows DNS query is synchronous, so this blocks the calling thread despite being `async`.
+    ///
+    /// Errors with [`ResolverError::Generic`] if `host` contains an interior NUL or the `DnsQuery_UTF8` call fails. Returns `Ok` with an empty vec when the name resolves but has no TXT records.
     #[allow(clippy::unused_async)]
     pub async fn txt_lookup<S: AsRef<str>>(host: S) -> Result<Vec<String>, ResolverError> {
         let mut out = Vec::new();
@@ -56,6 +62,11 @@ impl Resolver {
         Ok(out)
     }
 
+    /// Reverse-resolve `ip_addr` to a hostname via its PTR record.
+    ///
+    /// The Windows DNS query is synchronous, so this blocks the calling thread despite being `async`.
+    ///
+    /// Errors with [`ResolverError::Generic`] if the reverse-arpa name contains an interior NUL, the `DnsQuery_UTF8` call fails, or no PTR record is returned.
     #[allow(clippy::unused_async)]
     pub async fn ptr_lookup(ip_addr: IpAddr) -> Result<String, ResolverError> {
         let host = match ip_addr {

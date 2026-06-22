@@ -1,14 +1,12 @@
 import Flutter
 import UIKit
 
-public class SwiftVeilidPlugin: NSObject, FlutterPlugin {
+public class VeilidPlugin: NSObject, FlutterPlugin {
   public static func register(with registrar: FlutterPluginRegistrar) {
-    // No channel, FFI plugin
-    print("dummy_value");
+    // FFI plugin: no method channel
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    // Noop
     result(nil)
   }
 }

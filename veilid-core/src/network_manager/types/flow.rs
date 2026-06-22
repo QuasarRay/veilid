@@ -20,9 +20,9 @@ pub(crate) struct Flow {
 impl fmt::Display for Flow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(local) = &self.local {
-            write!(f, "{} -> {}", local, self.remote)
+            write!(f, "{} -> {}", f.to_string(local), f.to_string(self.remote))
         } else {
-            write!(f, "{}", self.remote)
+            write!(f, "{}", f.to_string(self.remote))
         }
     }
 }
@@ -30,7 +30,7 @@ impl fmt::Display for Flow {
 impl Flow {
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), allow(dead_code))]
     pub fn new(remote: PeerAddress, local: SocketAddress) -> Self {
-        assert!(
+        debug_assert!(
             !matches!(
                 remote.protocol_type().sequence_ordering(),
                 SequenceOrdering::Ordered
@@ -93,9 +93,9 @@ impl fmt::Display for UniqueFlow {
         write!(
             f,
             "{} ({})",
-            self.flow,
+            f.to_string(self.flow),
             if let Some(connection_id) = &self.connection_id {
-                format!("id={}", connection_id)
+                format!("id={}", f.to_string(connection_id))
             } else {
                 "---".to_string()
             }

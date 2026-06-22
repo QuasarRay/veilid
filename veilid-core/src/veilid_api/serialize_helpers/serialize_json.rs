@@ -6,6 +6,9 @@ use super::*;
     feature = "instrument",
     instrument(level = "trace", target = "json", skip_all)
 )]
+/// Deserializes `T` from a JSON string, mapping parse failures to `VeilidAPIError::ParseError`.
+///
+/// Errors with `VeilidAPIError::ParseError` if `arg` is not valid JSON or does not match `T`'s shape.
 pub fn deserialize_json<'a, T: de::Deserialize<'a> + Debug>(arg: &'a str) -> VeilidAPIResult<T> {
     serde_json::from_str(arg).map_err(|e| VeilidAPIError::ParseError {
         message: e.to_string(),
@@ -17,10 +20,55 @@ pub fn deserialize_json<'a, T: de::Deserialize<'a> + Debug>(arg: &'a str) -> Vei
     })
 }
 
+/// Lenient JSON deserialization for command-line / `set_config` ergonomics.
+///
+/// Tries, in order, until one parses into `T`:
+///   1. the value as strict JSON (canonical forms: `42`, `true`, `"s"`, `["a"]`)
+///   2. the bare value as a string scalar (so `ipv4` -> `"ipv4"`)
+///   3. the value parsed as JSON, wrapped in a one-element array (so `"ipv4"` -> `["ipv4"]`)
+///   4. the bare value as a string scalar, wrapped in a one-element array (so `ipv4` -> `["ipv4"]`)
+///
+/// Strict JSON is always attempted first, so any value that parses today keeps its
+/// current meaning; the fallbacks only accept inputs that strict parsing rejects.
+/// Returns the strict-parse error if every interpretation fails.
+///
+/// Errors with `VeilidAPIError::ParseError` (the strict-path error) if none of the four
+/// interpretations parse into `T`.
 #[cfg_attr(
     feature = "instrument",
     instrument(level = "trace", target = "json", skip_all)
 )]
+pub fn deserialize_json_lenient<T: de::DeserializeOwned + Debug>(arg: &str) -> VeilidAPIResult<T> {
+    // 1. Strict JSON
+    let strict_err = match deserialize_json::<T>(arg) {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    // 2. Bare value as a string scalar
+    let as_string = serde_json::Value::String(arg.to_owned());
+    if let Ok(v) = serde_json::from_value::<T>(as_string.clone()) {
+        return Ok(v);
+    }
+    // 3. Parsed JSON scalar wrapped in a one-element array
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arg) {
+        if let Ok(v) = serde_json::from_value::<T>(serde_json::Value::Array(vec![parsed])) {
+            return Ok(v);
+        }
+    }
+    // 4. Bare value as a string scalar wrapped in a one-element array
+    if let Ok(v) = serde_json::from_value::<T>(serde_json::Value::Array(vec![as_string])) {
+        return Ok(v);
+    }
+    Err(strict_err)
+}
+
+#[cfg_attr(
+    feature = "instrument",
+    instrument(level = "trace", target = "json", skip_all)
+)]
+/// Deserializes `T` from JSON bytes, mapping parse failures to `VeilidAPIError::ParseError`.
+///
+/// Errors with `VeilidAPIError::ParseError` if `arg` is not valid JSON or does not match `T`'s shape.
 pub fn deserialize_json_bytes<'a, T: de::Deserialize<'a> + Debug>(
     arg: &'a [u8],
 ) -> VeilidAPIResult<T> {
@@ -38,6 +86,9 @@ pub fn deserialize_json_bytes<'a, T: de::Deserialize<'a> + Debug>(
     feature = "instrument",
     instrument(level = "trace", target = "json", skip_all)
 )]
+/// Deserializes `T` from an optional JSON string, returning a `ParseError` when the argument is `None`.
+///
+/// Errors with `VeilidAPIError::ParseError` if `arg` is `None`, or if the string is not valid JSON for `T`.
 pub fn deserialize_opt_json<T: de::DeserializeOwned + Debug>(
     arg: Option<String>,
 ) -> VeilidAPIResult<T> {
@@ -55,6 +106,9 @@ pub fn deserialize_opt_json<T: de::DeserializeOwned + Debug>(
     feature = "instrument",
     instrument(level = "trace", target = "json", skip_all)
 )]
+/// Deserializes `T` from optional JSON bytes, returning a `ParseError` when the argument is `None`.
+///
+/// Errors with `VeilidAPIError::ParseError` if `arg` is `None`, or if the bytes are not valid JSON for `T`.
 pub fn deserialize_opt_json_bytes<T: de::DeserializeOwned + Debug>(
     arg: Option<Vec<u8>>,
 ) -> VeilidAPIResult<T> {
@@ -72,6 +126,9 @@ pub fn deserialize_opt_json_bytes<T: de::DeserializeOwned + Debug>(
     feature = "instrument",
     instrument(level = "trace", target = "json", skip_all)
 )]
+/// Serializes `val` to a JSON string, panicking if serialization fails.
+///
+/// Does not return a `Result`: panics (rather than erroring) if `val`'s `Serialize` impl fails.
 pub fn serialize_json<T: Serialize + Debug>(val: T) -> String {
     match serde_json::to_string(&val) {
         Ok(v) => v,
@@ -85,6 +142,9 @@ pub fn serialize_json<T: Serialize + Debug>(val: T) -> String {
     feature = "instrument",
     instrument(level = "trace", target = "json", skip_all)
 )]
+/// Serializes `val` to a pretty-printed JSON string, panicking if serialization fails.
+///
+/// Does not return a `Result`: panics (rather than erroring) if `val`'s `Serialize` impl fails.
 pub fn serialize_json_pretty<T: Serialize + Debug>(val: T) -> String {
     match serde_json::to_string_pretty(&val) {
         Ok(v) => v,
@@ -101,6 +161,9 @@ pub fn serialize_json_pretty<T: Serialize + Debug>(val: T) -> String {
     feature = "instrument",
     instrument(level = "trace", target = "json", skip_all)
 )]
+/// Serializes `val` to JSON bytes, panicking if serialization fails.
+///
+/// Does not return a `Result`: panics (rather than erroring) if `val`'s `Serialize` impl fails.
 pub fn serialize_json_bytes<T: Serialize + Debug>(val: T) -> Vec<u8> {
     match serde_json::to_vec(&val) {
         Ok(v) => v,
@@ -113,12 +176,14 @@ pub fn serialize_json_bytes<T: Serialize + Debug>(val: T) -> Vec<u8> {
     }
 }
 
+/// serde `with`-module for byte buffers: base64url-nopad string for human-readable formats, raw bytes otherwise.
 pub mod as_human_base64 {
     use data_encoding::BASE64URL_NOPAD;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     #[cfg(feature = "instrument")]
     use tracing::instrument;
 
+    /// Serializes the bytes as a base64url-nopad string for human-readable formats, raw otherwise.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
@@ -136,6 +201,9 @@ pub mod as_human_base64 {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
+    /// Decodes a base64url-nopad string for human-readable formats, raw bytes otherwise.
+    ///
+    /// In human-readable formats, yields a serde decode error (`D::Error`) if the string is not valid base64url-nopad.
     pub fn deserialize<'de, D: Deserializer<'de>, B: From<Vec<u8>>>(d: D) -> Result<B, D::Error> {
         if d.is_human_readable() {
             let base64 = String::deserialize(d)?;
@@ -149,12 +217,14 @@ pub mod as_human_base64 {
     }
 }
 
+/// serde `with`-module for `Option<Vec<u8>>`: base64url-nopad string for human-readable formats, raw bytes otherwise.
 pub mod as_human_opt_base64 {
     use data_encoding::BASE64URL_NOPAD;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     #[cfg(feature = "instrument")]
     use tracing::instrument;
 
+    /// Serializes the optional bytes as a base64url-nopad string for human-readable formats, raw otherwise.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
@@ -172,6 +242,9 @@ pub mod as_human_opt_base64 {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
+    /// Decodes a base64url-nopad string for human-readable formats, raw bytes otherwise.
+    ///
+    /// In human-readable formats, yields a serde decode error (`D::Error`) if a present string is not valid base64url-nopad.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
         if d.is_human_readable() {
             let base64 = Option::<String>::deserialize(d)?;
@@ -188,6 +261,7 @@ pub mod as_human_opt_base64 {
     }
 }
 
+/// serde `with`-module that uses a value's `Display`/`FromStr` for human-readable formats and its native serde impl otherwise.
 pub mod as_human_string {
     use std::fmt::Display;
     use std::str::FromStr;
@@ -196,6 +270,7 @@ pub mod as_human_string {
     #[cfg(feature = "instrument")]
     use tracing::instrument;
 
+    /// Serializes via `Display` for human-readable formats, native serde otherwise.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
@@ -216,6 +291,9 @@ pub mod as_human_string {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
+    /// Parses via `FromStr` for human-readable formats, native serde otherwise.
+    ///
+    /// In human-readable formats, yields a serde decode error (`D::Error`) if `T::from_str` rejects the string.
     pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
     where
         T: FromStr + Deserialize<'de>,
@@ -230,6 +308,7 @@ pub mod as_human_string {
     }
 }
 
+/// serde `with`-module for `Option<T>` that uses `Display`/`FromStr` for human-readable formats and native serde otherwise.
 pub mod as_human_opt_string {
     use std::fmt::Display;
     use std::str::FromStr;
@@ -238,6 +317,7 @@ pub mod as_human_opt_string {
     #[cfg(feature = "instrument")]
     use tracing::instrument;
 
+    /// Serializes via `Display` for human-readable formats, native serde otherwise.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
@@ -261,6 +341,9 @@ pub mod as_human_opt_string {
         feature = "instrument",
         instrument(level = "trace", target = "json", skip_all)
     )]
+    /// Parses via `FromStr` for human-readable formats, native serde otherwise.
+    ///
+    /// In human-readable formats, yields a serde decode error (`D::Error`) if `T::from_str` rejects a present string.
     pub fn deserialize<'de, T, D>(d: D) -> Result<Option<T>, D::Error>
     where
         T: FromStr + Deserialize<'de>,

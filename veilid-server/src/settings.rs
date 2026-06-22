@@ -34,234 +34,6 @@ lazy_static! {
 pub const PROGRAM_NAME: &str = "veilid-server";
 
 pub fn load_default_config() -> EyreResult<config::Config> {
-    #[cfg(not(feature = "geolocation"))]
-    let privacy_geolocation_section = "";
-    #[cfg(feature = "geolocation")]
-    let privacy_geolocation_section = r#"
-            country_code_denylist: []
-    "#;
-
-    #[cfg(not(feature = "virtual-network"))]
-    let virtual_network_section = "";
-    #[cfg(feature = "virtual-network")]
-    let virtual_network_section = r#"
-        virtual_network:
-            enabled: false
-            server_address: ''
-    "#;
-
-    #[cfg(not(feature = "virtual-network"))]
-    let virtual_network_server_section = "";
-    #[cfg(feature = "virtual-network")]
-    let virtual_network_server_section = r#"
-    virtual_network_server:
-        enabled: false
-        tcp:
-            listen: true
-            listen_address: 'localhost:5149'
-        ws:
-            listen: true
-            listen_address: 'localhost:5148'
-    "#;
-
-    #[cfg(not(feature = "enable-protocol-wss"))]
-    let protocol_wss_section = "";
-    #[cfg(feature = "enable-protocol-wss")]
-    let protocol_wss_section = r#"wss:
-                connect: true
-                listen: false
-                max_connections: 256
-                listen_address: ':5150'
-                path: 'ws'
-                # url: ''"#;
-
-    let mut default_config = String::from(
-        r#"---
-daemon:
-    enabled: false
-client_api:
-    ipc_enabled: true
-    ipc_directory: '%IPC_DIRECTORY%'
-    network_enabled: false
-    listen_address: 'localhost:5959'
-auto_attach: true
-logging:
-    system:
-        enabled: false
-        level: 'info'
-        ignore_log_targets: []
-    terminal:
-        enabled: true
-        level: 'info'
-        ignore_log_targets: []
-    file:
-        enabled: false
-        path: ''
-        append: true
-        level: 'info'
-        ignore_log_targets: []
-    api:
-        enabled: true
-        level: 'info'
-        ignore_log_targets: []
-    otlp:
-        enabled: false
-        level: 'trace'
-        grpc_endpoint: 'localhost:4317'
-        ignore_log_targets: []
-    flame:
-        enabled: false
-        path: ''
-    perfetto:
-        enabled: false
-        path: ''
-    console:
-        enabled: false
-testing:
-    subnode_index: 0
-    subnode_count: 1
-%VIRTUAL_NETWORK_SERVER_SECTION%
-core:
-    capabilities:
-        disable: []
-    protected_store:
-        allow_insecure_fallback: true
-        always_use_insecure_storage: true
-        directory: '%DIRECTORY%'
-        delete: false
-        device_encryption_key_password: '%DEVICE_ENCRYPTION_KEY_PASSWORD%'
-        new_device_encryption_key_password: %NEW_DEVICE_ENCRYPTION_KEY_PASSWORD%
-    table_store:
-        directory: '%TABLE_STORE_DIRECTORY%'
-        delete: false
-        wipe_on_invalid_device_encryption_key: false
-        max_value_size_mb: 64
-    block_store:
-        directory: '%BLOCK_STORE_DIRECTORY%'
-        delete: false
-    network:
-        connection_initial_timeout_ms: 2000
-        connection_inactivity_timeout_ms: 60000
-        max_connections_per_ip4: 32
-        max_connections_per_ip6_prefix: 32
-        max_connections_per_ip6_prefix_size: 56
-        max_connection_frequency_per_min: 128
-        client_allowlist_timeout_ms: 300000
-        reverse_connection_receipt_time_ms: 5000
-        hole_punch_receipt_time_ms: 5000
-        network_key_password: null
-        disable_capabilites: []
-        routing_table:
-            public_keys: null
-            secret_keys: null
-            bootstrap: ['bootstrap-v1.veilid.net']
-            bootstrap_keys: ['VLD0:Vj0lKDdUQXmQ5Ol1SZdlvXkBHUccBcQvGLN9vbLSI7k','VLD0:QeQJorqbXtC7v3OlynCZ_W3m76wGNeB5NTF81ypqHAo','VLD0:QNdcl-0OiFfYVj9331XVR6IqZ49NG-E18d5P7lwi4TA']
-        rpc:
-            concurrency: 0
-            queue_size: 1024
-            max_timestamp_behind_ms: 10000
-            max_timestamp_ahead_ms: 10000
-            timeout_ms: 5000
-            max_route_hop_count: 4
-            default_route_hop_count: 1
-        dht:
-            max_find_node_count: 20
-            resolve_node_timeout_ms: 10000
-            resolve_node_count: 1
-            resolve_node_fanout: 5
-            get_value_timeout_ms: 10000
-            get_value_count: 3
-            get_value_fanout: 5
-            set_value_timeout_ms: 10000
-            set_value_count: 5
-            set_value_fanout: 5
-            consensus_width: 10
-            min_peer_count: 20
-            min_peer_refresh_time_ms: 60000
-            validate_dial_info_receipt_time_ms: 1000
-            local_subkey_cache_size: 128
-            local_max_subkey_cache_memory_mb: 256
-            remote_subkey_cache_size: 1024
-            remote_max_records: 65536
-            remote_max_subkey_cache_memory_mb: %REMOTE_MAX_SUBKEY_CACHE_MEMORY_MB%
-            remote_max_storage_space_mb: 0
-            public_watch_limit: 32
-            member_watch_limit: 8
-            max_watch_expiration_ms: 600000
-            public_transaction_limit: 4
-            member_transaction_limit: 1
-        upnp: false
-        detect_address_changes: auto
-        restricted_nat_retries: 0
-        tls:
-            certificate_path: '%CERTIFICATE_PATH%'
-            private_key_path: '%PRIVATE_KEY_PATH%'
-            connection_initial_timeout_ms: 2000
-        protocol:
-            udp:
-                enabled: true
-                socket_pool_size: 0
-                listen_address: ':5150'
-                # public_address: ''
-            tcp:
-                connect: true
-                listen: true
-                max_connections: 256
-                listen_address: ':5150'
-                #'public_address: ''
-            ws:
-                connect: true
-                listen: true
-                max_connections: 256
-                listen_address: ':5150'
-                path: 'ws'
-                # url: 'ws://localhost:5150/ws'
-            %PROTOCOL_WSS_SECTION%
-        privacy:
-            require_inbound_relay: false
-        %PRIVACY_GEOLOCATION_SECTION%
-        %VIRTUAL_NETWORK_SECTION%
-        "#,
-    )
-    .replace(
-        "%IPC_DIRECTORY%",
-        &Settings::get_default_ipc_directory().to_string_lossy(),
-    )
-    .replace(
-        "%TABLE_STORE_DIRECTORY%",
-        &Settings::get_default_table_store_directory().to_string_lossy(),
-    )
-    .replace(
-        "%BLOCK_STORE_DIRECTORY%",
-        &Settings::get_default_block_store_directory().to_string_lossy(),
-    )
-    .replace(
-        "%DIRECTORY%",
-        &Settings::get_default_protected_store_directory().to_string_lossy(),
-    )
-    .replace(
-        "%CERTIFICATE_PATH%",
-        &Settings::get_default_tls_certificate_path().to_string_lossy(),
-    )
-    .replace(
-        "%PRIVATE_KEY_PATH%",
-        &Settings::get_default_tls_private_key_path().to_string_lossy(),
-    )
-    .replace(
-        "%REMOTE_MAX_SUBKEY_CACHE_MEMORY_MB%",
-        &Settings::get_default_remote_max_subkey_cache_memory_mb().to_string(),
-    )
-    .replace("%PRIVACY_GEOLOCATION_SECTION%", privacy_geolocation_section)
-    .replace("%VIRTUAL_NETWORK_SECTION%", virtual_network_section)
-    .replace(
-        "%VIRTUAL_NETWORK_SERVER_SECTION%",
-        virtual_network_server_section,
-    )
-    .replace(
-        "%PROTOCOL_WSS_SECTION%",
-        protocol_wss_section,
-    );
-
     let dek_password = if let Some(dek_password) = std::env::var_os("DEK_PASSWORD") {
         dek_password
             .to_str()
@@ -270,28 +42,100 @@ core:
     } else {
         "".to_owned()
     };
-    default_config = default_config.replace("%DEVICE_ENCRYPTION_KEY_PASSWORD%", &dek_password);
-
-    let new_dek_password = if let Some(new_dek_password) = std::env::var_os("NEW_DEK_PASSWORD") {
-        format!(
-            "'{}'",
-            new_dek_password
-                .to_str()
+    let new_dek_password = match std::env::var_os("NEW_DEK_PASSWORD") {
+        Some(s) => Some(
+            s.to_str()
                 .ok_or_else(|| eyre!("NEW_DEK_PASSWORD is not valid unicode"))?
-        )
-    } else {
-        "null".to_owned()
+                .to_owned(),
+        ),
+        None => None,
     };
-    default_config =
-        default_config.replace("%NEW_DEVICE_ENCRYPTION_KEY_PASSWORD%", &new_dek_password);
 
-    config::Config::builder()
-        .add_source(config::File::from_str(
-            &default_config,
-            config::FileFormat::Yaml,
-        ))
-        .build()
-        .wrap_err("failed to parse default config")
+    // Only the runtime-computed/parsed defaults are set here; every other default
+    // comes from the Settings structs' `Default` via `#[serde(default)]` at deserialize.
+    #[allow(unused_mut)]
+    let mut builder = config::Config::builder()
+        .set_default("auto_attach", true)?
+        .set_default(
+            "client_api.ipc_directory",
+            Settings::get_default_ipc_directory()
+                .to_string_lossy()
+                .to_string(),
+        )?
+        .set_default("client_api.listen_address", "localhost:5959")?
+        .set_default(
+            "core.protected_store.directory",
+            Settings::get_default_protected_store_directory()
+                .to_string_lossy()
+                .to_string(),
+        )?
+        .set_default(
+            "core.protected_store.device_encryption_key_password",
+            dek_password,
+        )?
+        .set_default(
+            "core.table_store.directory",
+            Settings::get_default_table_store_directory()
+                .to_string_lossy()
+                .to_string(),
+        )?
+        .set_default(
+            "core.block_store.directory",
+            Settings::get_default_block_store_directory()
+                .to_string_lossy()
+                .to_string(),
+        )?
+        .set_default(
+            "core.network.tls.certificate_path",
+            Settings::get_default_tls_certificate_path()
+                .to_string_lossy()
+                .to_string(),
+        )?
+        .set_default(
+            "core.network.tls.private_key_path",
+            Settings::get_default_tls_private_key_path()
+                .to_string_lossy()
+                .to_string(),
+        )?
+        .set_default(
+            "core.network.dht.remote_max_subkey_cache_memory_mb",
+            Settings::get_default_remote_max_subkey_cache_memory_mb(),
+        )?
+        .set_default("core.network.protocol.udp.listen_address", ":5150")?
+        .set_default("core.network.protocol.tcp.listen_address", ":5150")?
+        .set_default("core.network.protocol.ws.listen_address", ":5150")?;
+
+    if let Some(new_dek_password) = new_dek_password {
+        builder = builder.set_default(
+            "core.protected_store.new_device_encryption_key_password",
+            new_dek_password,
+        )?;
+    }
+
+    #[cfg(feature = "enable-protocol-wss")]
+    {
+        builder = builder.set_default("core.network.protocol.wss.listen_address", ":5150")?;
+    }
+
+    #[cfg(feature = "opentelemetry-otlp")]
+    {
+        builder = builder.set_default("logging.otlp.grpc_endpoint", "localhost:4317")?;
+    }
+
+    #[cfg(feature = "virtual-network")]
+    {
+        builder = builder
+            .set_default(
+                "testing.virtual_network_server.tcp.listen_address",
+                "localhost:5149",
+            )?
+            .set_default(
+                "testing.virtual_network_server.ws.listen_address",
+                "localhost:5148",
+            )?;
+    }
+
+    builder.build().wrap_err("failed to build default config")
 }
 
 pub fn load_config(cfg: config::Config, config_file: &Path) -> EyreResult<config::Config> {
@@ -306,11 +150,13 @@ pub fn load_config(cfg: config::Config, config_file: &Path) -> EyreResult<config
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+/// Logging level threshold (`Off` disables logging).
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum, Default)]
 pub enum LogLevel {
     Off,
     Error,
     Warn,
+    #[default]
     Info,
     Debug,
     Trace,
@@ -365,9 +211,12 @@ impl From<LogLevel> for veilid_core::VeilidConfigLogLevel {
     }
 }
 
+/// A URL paired with its original unparsed string form.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParsedUrl {
+    /// The original URL string as written in the config.
     pub urlstring: String,
+    /// The parsed URL.
     pub url: Url,
 }
 
@@ -427,9 +276,12 @@ impl serde::Serialize for ParsedUrl {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+/// A `host:port` string paired with its resolved socket addresses.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct NamedSocketAddrs {
+    /// The original `host:port` string as written in the config.
     pub name: String,
+    /// Socket addresses resolved from `name`.
     pub addrs: Vec<SocketAddr>,
 }
 
@@ -498,196 +350,438 @@ impl NamedSocketAddrs {
     }
 }
 
+/// Terminal (stdout) logging sink.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Terminal {
+    /// Enable terminal logging.
     pub enabled: bool,
+    /// Minimum log level for this sink.
     pub level: LogLevel,
+    /// Per-target log filter directives, e.g. "net=debug,rpc=trace".
+    pub directives: String,
+    /// Deprecated: use `directives` instead (a target here becomes `target=off`).
     pub ignore_log_targets: Vec<String>,
 }
+impl Default for Terminal {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            level: LogLevel::default(),
+            directives: String::new(),
+            ignore_log_targets: Vec::new(),
+        }
+    }
+}
 
+/// Flamegraph (folded-stack) profiling output sink.
 #[cfg(feature = "flame")]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Flame {
+    /// Enable flamegraph output.
     pub enabled: bool,
+    /// Output file path (empty = platform temp dir default).
     pub path: String,
 }
 
+/// Perfetto trace output sink.
 #[cfg(all(unix, feature = "perfetto"))]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Perfetto {
+    /// Enable Perfetto tracing output.
     pub enabled: bool,
+    /// Output file path (empty = platform temp dir default).
     pub path: String,
 }
 
+/// tokio-console diagnostics sink.
 #[cfg(feature = "tokio-console")]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Console {
+    /// Enable the tokio-console subscriber.
     pub enabled: bool,
 }
 
+/// File logging sink.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct File {
+    /// Enable file logging.
     pub enabled: bool,
+    /// Log file path.
     pub path: String,
+    /// Append to an existing file rather than truncating it.
     pub append: bool,
+    /// Minimum log level for this sink.
     pub level: LogLevel,
+    /// Per-target log filter directives, e.g. "net=debug,rpc=trace".
+    pub directives: String,
+    /// Deprecated: use `directives` instead (a target here becomes `target=off`).
     pub ignore_log_targets: Vec<String>,
 }
+impl Default for File {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: String::new(),
+            append: true,
+            level: LogLevel::default(),
+            directives: String::new(),
+            ignore_log_targets: Vec::new(),
+        }
+    }
+}
 
-#[derive(Debug, Deserialize, Serialize)]
+/// System logger sink (syslog/oslog/Android log, platform dependent).
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct System {
+    /// Enable system logging.
     pub enabled: bool,
+    /// Minimum log level for this sink.
     pub level: LogLevel,
+    /// Per-target log filter directives, e.g. "net=debug,rpc=trace".
+    pub directives: String,
+    /// Deprecated: use `directives` instead (a target here becomes `target=off`).
     pub ignore_log_targets: Vec<String>,
 }
 
+/// Logging sink delivered to the connected veilid-remote-api client.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Api {
+    /// Enable delivery of logs to the veilid-remote-api client.
     pub enabled: bool,
+    /// Minimum log level for this sink.
     pub level: LogLevel,
+    /// Per-target log filter directives, e.g. "net=debug,rpc=trace".
+    pub directives: String,
+    /// Deprecated: use `directives` instead (a target here becomes `target=off`).
     pub ignore_log_targets: Vec<String>,
 }
+impl Default for Api {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            level: LogLevel::default(),
+            directives: String::new(),
+            ignore_log_targets: Vec::new(),
+        }
+    }
+}
 
+/// OpenTelemetry OTLP export sink.
 #[cfg(feature = "opentelemetry-otlp")]
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Otlp {
+    /// Enable OTLP export.
     pub enabled: bool,
+    /// Minimum log level for this sink.
     pub level: LogLevel,
+    /// gRPC endpoint of the OTLP collector, as `host:port`.
     pub grpc_endpoint: NamedSocketAddrs,
+    /// Per-target log filter directives, e.g. "net=debug,rpc=trace".
+    pub directives: String,
+    /// Deprecated: use `directives` instead (a target here becomes `target=off`).
     pub ignore_log_targets: Vec<String>,
 }
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ClientApi {
-    pub ipc_enabled: bool,
-    pub ipc_directory: PathBuf,
-    pub network_enabled: bool,
-    pub listen_address: NamedSocketAddrs,
+#[cfg(feature = "opentelemetry-otlp")]
+impl Default for Otlp {
+    fn default() -> Self {
+        // grpc_endpoint is set as a runtime default in load_default_config.
+        Self {
+            enabled: false,
+            level: LogLevel::Trace,
+            grpc_endpoint: NamedSocketAddrs::default(),
+            directives: String::new(),
+            ignore_log_targets: Vec::new(),
+        }
+    }
 }
 
+/// How veilid-remote-api clients (e.g. veilid-cli) connect to this server.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ClientApi {
+    /// Accept client connections over a local IPC socket.
+    pub ipc_enabled: bool,
+    /// Directory holding the IPC socket(s).
+    pub ipc_directory: PathBuf,
+    /// Accept client connections over a TCP network socket.
+    pub network_enabled: bool,
+    /// Address to listen on for network clients, as `host:port`.
+    pub listen_address: NamedSocketAddrs,
+}
+impl Default for ClientApi {
+    fn default() -> Self {
+        // ipc_directory and listen_address are set as runtime defaults in load_default_config.
+        Self {
+            ipc_enabled: true,
+            ipc_directory: PathBuf::new(),
+            network_enabled: false,
+            listen_address: NamedSocketAddrs::default(),
+        }
+    }
+}
+
+/// Logging configuration: one section per output sink.
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Logging {
+    /// System logger sink.
     pub system: System,
+    /// Terminal (stdout) sink.
     pub terminal: Terminal,
+    /// File sink.
     pub file: File,
+    /// veilid-remote-api client sink.
     pub api: Api,
+    /// OpenTelemetry OTLP sink.
     #[cfg(feature = "opentelemetry-otlp")]
     pub otlp: Otlp,
+    /// Flamegraph sink.
     #[cfg(feature = "flame")]
     pub flame: Flame,
+    /// Perfetto sink.
     #[cfg(all(unix, feature = "perfetto"))]
     pub perfetto: Perfetto,
+    /// tokio-console sink.
     #[cfg(feature = "tokio-console")]
     pub console: Console,
 }
 
+// `core` config structs use `Default` (pulled from veilid-core's VeilidConfig*
+// where the server agrees, server-specific otherwise) as the single source of
+// defaults; `#[serde(default)]` lets the default config omit fields equal to it.
+
+/// UDP protocol configuration.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Udp {
+    /// Enable the UDP protocol.
     pub enabled: bool,
-    pub socket_pool_size: u32,
+    /// Local address to bind, as `host:port`.
     pub listen_address: NamedSocketAddrs,
+    /// Externally-reachable address to advertise, if behind NAT/port mapping.
     pub public_address: Option<NamedSocketAddrs>,
 }
+impl Default for Udp {
+    fn default() -> Self {
+        Self {
+            enabled: VeilidConfigUDP::default().enabled,
+            listen_address: NamedSocketAddrs::default(),
+            public_address: None,
+        }
+    }
+}
 
+/// TCP protocol configuration.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Tcp {
+    /// Allow outbound TCP connections.
     pub connect: bool,
+    /// Accept inbound TCP connections.
     pub listen: bool,
-    pub max_connections: u32,
+    /// Local address to bind, as `host:port`.
     pub listen_address: NamedSocketAddrs,
+    /// Externally-reachable address to advertise, if behind NAT/port mapping.
     pub public_address: Option<NamedSocketAddrs>,
 }
+impl Default for Tcp {
+    fn default() -> Self {
+        let d = VeilidConfigTCP::default();
+        Self {
+            connect: d.connect,
+            listen: d.listen,
+            listen_address: NamedSocketAddrs::default(),
+            public_address: None,
+        }
+    }
+}
 
+/// WebSocket protocol configuration.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Ws {
+    /// Allow outbound WebSocket connections.
     pub connect: bool,
+    /// Accept inbound WebSocket connections.
     pub listen: bool,
-    pub max_connections: u32,
+    /// Local address to bind, as `host:port`.
     pub listen_address: NamedSocketAddrs,
+    /// URL path served by the WebSocket listener.
     pub path: PathBuf,
+    /// Externally-reachable URL to advertise, if behind NAT/proxy.
     pub url: Option<ParsedUrl>,
 }
+impl Default for Ws {
+    fn default() -> Self {
+        let d = VeilidConfigWS::default();
+        Self {
+            connect: d.connect,
+            listen: d.listen,
+            listen_address: NamedSocketAddrs::default(),
+            path: PathBuf::from(d.path),
+            url: None,
+        }
+    }
+}
 
+/// Secure WebSocket protocol configuration.
 #[cfg(feature = "enable-protocol-wss")]
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Wss {
+    /// Allow outbound secure WebSocket connections.
     pub connect: bool,
+    /// Accept inbound secure WebSocket connections.
     pub listen: bool,
-    pub max_connections: u32,
+    /// Local address to bind, as `host:port`.
     pub listen_address: NamedSocketAddrs,
+    /// URL path served by the secure WebSocket listener.
     pub path: PathBuf,
+    /// Externally-reachable URL to advertise (required for TLS protocols).
     pub url: Option<ParsedUrl>,
 }
+#[cfg(feature = "enable-protocol-wss")]
+impl Default for Wss {
+    fn default() -> Self {
+        let d = VeilidConfigWSS::default();
+        Self {
+            connect: d.connect,
+            listen: d.listen,
+            listen_address: NamedSocketAddrs::default(),
+            path: PathBuf::from(d.path),
+            url: None,
+        }
+    }
+}
 
-#[derive(Debug, Deserialize, Serialize)]
+/// Per-protocol network configuration.
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Protocol {
+    /// UDP configuration.
     pub udp: Udp,
+    /// TCP configuration.
     pub tcp: Tcp,
+    /// WebSocket configuration.
     pub ws: Ws,
+    /// Secure WebSocket configuration.
     #[cfg(feature = "enable-protocol-wss")]
     pub wss: Wss,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+/// Privacy and relay preferences.
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Privacy {
+    /// Always use an inbound relay; never accept direct inbound connections.
     pub require_inbound_relay: bool,
+    /// Two-letter country codes to refuse routing through (requires `geolocation`).
     #[cfg(feature = "geolocation")]
     pub country_code_denylist: Vec<CountryCode>,
 }
 
+/// TLS configuration for inbound secure protocols.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Tls {
+    /// Path to the TLS certificate (PEM).
     pub certificate_path: String,
+    /// Path to the TLS private key (PEM).
     pub private_key_path: String,
+    /// Timeout for completing a TLS handshake, in milliseconds.
     pub connection_initial_timeout_ms: u32,
 }
+impl Default for Tls {
+    fn default() -> Self {
+        Self {
+            certificate_path: String::new(),
+            private_key_path: String::new(),
+            connection_initial_timeout_ms: VeilidConfigTLS::default().connection_initial_timeout_ms,
+        }
+    }
+}
 
+/// RPC configuration.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Rpc {
-    pub concurrency: u32,
-    pub queue_size: u32,
-    pub max_timestamp_behind_ms: Option<u32>,
-    pub max_timestamp_ahead_ms: Option<u32>,
-    pub timeout_ms: u32,
-    pub max_route_hop_count: u8,
+    /// Default number of hops used when allocating private routes.
     pub default_route_hop_count: u8,
 }
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Dht {
-    pub max_find_node_count: u32,
-    pub resolve_node_timeout_ms: u32,
-    pub resolve_node_count: u32,
-    pub resolve_node_fanout: u32,
-    pub get_value_timeout_ms: u32,
-    pub get_value_count: u32,
-    pub get_value_fanout: u32,
-    pub set_value_timeout_ms: u32,
-    pub set_value_count: u32,
-    pub set_value_fanout: u32,
-    pub consensus_width: u32,
-    pub min_peer_count: u32,
-    pub min_peer_refresh_time_ms: u32,
-    pub validate_dial_info_receipt_time_ms: u32,
-    pub local_subkey_cache_size: u32,
-    pub local_max_subkey_cache_memory_mb: u32,
-    pub remote_subkey_cache_size: u32,
-    pub remote_max_records: u32,
-    pub remote_max_subkey_cache_memory_mb: u32,
-    pub remote_max_storage_space_mb: u32,
-    pub public_watch_limit: u32,
-    pub member_watch_limit: u32,
-    pub max_watch_expiration_ms: u32,
-    pub public_transaction_limit: u32,
-    pub member_transaction_limit: u32,
+impl Default for Rpc {
+    fn default() -> Self {
+        Self {
+            default_route_hop_count: VeilidConfigRPC::default().default_route_hop_count,
+        }
+    }
 }
 
+/// DHT cache and storage configuration.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Dht {
+    /// Number of subkeys cached for locally-created DHT records.
+    pub local_subkey_cache_size: u32,
+    /// Memory cap for the local subkey cache, in megabytes.
+    pub local_max_subkey_cache_memory_mb: u32,
+    /// Number of subkeys cached for DHT records stored on behalf of others.
+    pub remote_subkey_cache_size: u32,
+    /// Maximum number of remote DHT records stored on behalf of others.
+    pub remote_max_records: u32,
+    /// Memory cap for the remote subkey cache, in megabytes (0 = computed at load).
+    pub remote_max_subkey_cache_memory_mb: u32,
+    /// Disk cap for remote DHT record storage, in megabytes (0 = computed at load).
+    pub remote_max_storage_space_mb: u32,
+    /// Max concurrent DHT network operations in flight (local-only ops exempt).
+    pub max_concurrent_operations: u32,
+}
+impl Default for Dht {
+    fn default() -> Self {
+        // Server-specific (heavier remote caches than core's embedded defaults).
+        // The two memory/storage sizes are computed at load (0 = placeholder).
+        Self {
+            local_subkey_cache_size: 128,
+            local_max_subkey_cache_memory_mb: 256,
+            remote_subkey_cache_size: 1024,
+            remote_max_records: 65536,
+            remote_max_subkey_cache_memory_mb: 0,
+            remote_max_storage_space_mb: 0,
+            max_concurrent_operations: 16,
+        }
+    }
+}
+
+/// Routing table identity and bootstrap configuration.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct RoutingTable {
+    /// This node's identity public keys, by crypto kind (`None` = generate fresh).
     pub public_keys: Option<veilid_core::PublicKeyGroup>,
+    /// Node identity secret keys matching `public_keys` (`None` = generate fresh).
     pub secret_keys: Option<veilid_core::SecretKeyGroup>,
+    /// Bootstrap server hostnames/URLs used to join the network.
     pub bootstrap: Vec<String>,
+    /// Public keys trusted to sign bootstrap records.
     pub bootstrap_keys: Vec<veilid_core::PublicKey>,
+}
+impl Default for RoutingTable {
+    fn default() -> Self {
+        let d = VeilidConfigRoutingTable::default();
+        Self {
+            public_keys: None,
+            secret_keys: None,
+            bootstrap: d.bootstrap,
+            bootstrap_keys: d.bootstrap_keys,
+        }
+    }
 }
 
 mod auto_bool {
@@ -797,130 +891,295 @@ mod auto_bool {
     }
 }
 
+/// Low-level network configuration.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Network {
-    pub connection_initial_timeout_ms: u32,
-    pub connection_inactivity_timeout_ms: u32,
-    pub max_connections_per_ip4: u32,
-    pub max_connections_per_ip6_prefix: u32,
-    pub max_connections_per_ip6_prefix_size: u32,
-    pub max_connection_frequency_per_min: u32,
-    pub client_allowlist_timeout_ms: u32,
-    pub reverse_connection_receipt_time_ms: u32,
-    pub hole_punch_receipt_time_ms: u32,
+    /// Maximum total simultaneous connections across all protocols.
+    pub max_connections: u32,
+    /// Optional password; its presence joins a private network with a derived network key.
     pub network_key_password: Option<String>,
+    /// Routing table identity and bootstrap configuration.
     pub routing_table: RoutingTable,
+    /// RPC configuration.
     pub rpc: Rpc,
+    /// DHT cache and storage configuration.
     pub dht: Dht,
+    /// Enabled IP address families (e.g. `['ipv4']`); empty = all available.
+    pub address_types: Vec<String>,
+    /// Use UPnP to map ports on the local gateway.
     pub upnp: bool,
+    /// React to local address changes: `'auto'`, `'true'`, or `'false'`.
     #[serde(with = "auto_bool")]
     pub detect_address_changes: Option<bool>,
-    pub restricted_nat_retries: u32,
+    /// TLS configuration for inbound secure protocols.
     pub tls: Tls,
+    /// Per-protocol configuration.
     pub protocol: Protocol,
+    /// Privacy and relay preferences.
     pub privacy: Privacy,
+    /// Virtual network client configuration (testing/simulation).
     #[cfg(feature = "virtual-network")]
     pub virtual_network: VirtualNetwork,
 }
+impl Default for Network {
+    fn default() -> Self {
+        // Server-specific: higher conn cap, upnp off, address-change detection on auto.
+        Self {
+            max_connections: 256,
+            network_key_password: None,
+            routing_table: RoutingTable::default(),
+            rpc: Rpc::default(),
+            dht: Dht::default(),
+            address_types: Vec::new(),
+            upnp: false,
+            detect_address_changes: None,
+            tls: Tls::default(),
+            protocol: Protocol::default(),
+            privacy: Privacy::default(),
+            #[cfg(feature = "virtual-network")]
+            virtual_network: VirtualNetwork::default(),
+        }
+    }
+}
 
+/// Virtual network client configuration (testing/simulation).
 #[cfg(feature = "virtual-network")]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct VirtualNetwork {
+    /// Route all networking through the virtual network server.
     pub enabled: bool,
+    /// Address of the virtual network server, as `host:port`.
     pub server_address: String,
 }
 
+/// Embedded virtual network server configuration (testing/simulation).
 #[cfg(feature = "virtual-network")]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct VirtualNetworkServer {
+    /// Run the embedded virtual network server.
     pub enabled: bool,
+    /// TCP listener for the virtual network server.
     pub tcp: VirtualNetworkServerTcp,
+    /// WebSocket listener for the virtual network server.
     pub ws: VirtualNetworkServerWs,
 }
+/// Virtual network server TCP listener.
 #[cfg(feature = "virtual-network")]
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct VirtualNetworkServerTcp {
+    /// Accept inbound TCP connections.
     pub listen: bool,
+    /// Local address to bind, as `host:port`.
     pub listen_address: NamedSocketAddrs,
 }
 #[cfg(feature = "virtual-network")]
+impl Default for VirtualNetworkServerTcp {
+    fn default() -> Self {
+        // listen_address is set as a runtime default in load_default_config.
+        Self {
+            listen: true,
+            listen_address: NamedSocketAddrs::default(),
+        }
+    }
+}
+/// Virtual network server WebSocket listener.
+#[cfg(feature = "virtual-network")]
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct VirtualNetworkServerWs {
+    /// Accept inbound WebSocket connections.
     pub listen: bool,
+    /// Local address to bind, as `host:port`.
     pub listen_address: NamedSocketAddrs,
+}
+#[cfg(feature = "virtual-network")]
+impl Default for VirtualNetworkServerWs {
+    fn default() -> Self {
+        // listen_address is set as a runtime default in load_default_config.
+        Self {
+            listen: true,
+            listen_address: NamedSocketAddrs::default(),
+        }
+    }
 }
 
+/// Testing and multi-subnode configuration.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Testing {
+    /// Index of this subnode within a multi-subnode run (offsets ports/paths).
     pub subnode_index: u16,
+    /// Number of subnodes this process runs.
     pub subnode_count: u16,
+    /// Embedded virtual network server configuration.
     #[cfg(feature = "virtual-network")]
     pub virtual_network_server: VirtualNetworkServer,
 }
+impl Default for Testing {
+    fn default() -> Self {
+        Self {
+            subnode_index: 0,
+            subnode_count: 1,
+            #[cfg(feature = "virtual-network")]
+            virtual_network_server: VirtualNetworkServer::default(),
+        }
+    }
+}
 
+/// Table store (persistent encrypted database) configuration.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
 pub struct TableStore {
+    /// Directory holding the table store database (empty = platform default).
     pub directory: String,
+    /// Delete the table store on startup.
     pub delete: bool,
+    /// Wipe the table store on an invalid device encryption key, rather than failing.
     pub wipe_on_invalid_device_encryption_key: bool,
+    /// Maximum size of a single stored value, in megabytes.
     pub max_value_size_mb: u32,
 }
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct BlockStore {
-    pub directory: String,
-    pub delete: bool,
+impl Default for TableStore {
+    fn default() -> Self {
+        let d = VeilidConfigTableStore::default();
+        // Server keeps device-key data on wipe by default (core wipes).
+        Self {
+            directory: String::new(),
+            delete: d.delete,
+            wipe_on_invalid_device_encryption_key: false,
+            max_value_size_mb: d.max_value_size_mb,
+        }
+    }
 }
 
+/// Block store (large content-addressable storage) configuration.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ProtectedStore {
-    pub allow_insecure_fallback: bool,
-    pub always_use_insecure_storage: bool,
+#[serde(default)]
+pub struct BlockStore {
+    /// Directory holding the block store (empty = platform default).
     pub directory: String,
+    /// Delete the block store on startup.
     pub delete: bool,
+}
+impl Default for BlockStore {
+    fn default() -> Self {
+        Self {
+            directory: String::new(),
+            delete: VeilidConfigBlockStore::default().delete,
+        }
+    }
+}
+
+/// Protected store (OS keychain/keyring or insecure-fallback) configuration.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ProtectedStore {
+    /// Fall back to insecure file storage if no OS keychain/keyring is available.
+    pub allow_insecure_fallback: bool,
+    /// Always use insecure file storage, ignoring any OS keychain/keyring.
+    pub always_use_insecure_storage: bool,
+    /// Directory for insecure-fallback storage (empty = platform default).
+    pub directory: String,
+    /// Delete the protected store on startup.
+    pub delete: bool,
+    /// Password used to encrypt the device encryption key.
     pub device_encryption_key_password: String,
+    /// New password to re-encrypt the device encryption key with, triggering a rotation.
     pub new_device_encryption_key_password: Option<String>,
 }
+impl Default for ProtectedStore {
+    fn default() -> Self {
+        // Server allows/uses insecure storage by default (core does not).
+        Self {
+            allow_insecure_fallback: true,
+            always_use_insecure_storage: true,
+            directory: String::new(),
+            delete: VeilidConfigProtectedStore::default().delete,
+            device_encryption_key_password: String::new(),
+            new_device_encryption_key_password: None,
+        }
+    }
+}
 
-#[derive(Debug, Deserialize, Serialize)]
+/// Capabilities advertised by this node.
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Capabilities {
+    /// Capability names to disable (advertised as unavailable).
     pub disable: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+/// The veilid-core configuration tree (mirrors `VeilidConfig`).
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Core {
+    /// Capabilities advertised by this node.
     pub capabilities: Capabilities,
+    /// Protected store configuration.
     pub protected_store: ProtectedStore,
+    /// Table store configuration.
     pub table_store: TableStore,
+    /// Block store configuration.
     pub block_store: BlockStore,
+    /// Network configuration.
     pub network: Network,
+    /// Footgun tuning tree (veilid-core's type, single source of defaults).
+    /// Only honored when veilid-core is built with `footgun-config`.
+    pub internal: VeilidConfigInternal,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+/// Background daemon (Unix) configuration.
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct Daemon {
+    /// Run veilid-server as a background daemon.
     pub enabled: bool,
+    /// Path to write the daemon's PID file.
     pub pid_file: Option<String>,
+    /// Directory to chroot into after startup.
     pub chroot: Option<String>,
+    /// Working directory to change into after startup.
     pub working_directory: Option<String>,
+    /// User to drop privileges to.
     pub user: Option<String>,
+    /// Group to drop privileges to.
     pub group: Option<String>,
+    /// File to redirect the daemon's stdout to.
     pub stdout_file: Option<String>,
+    /// File to redirect the daemon's stderr to.
     pub stderr_file: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+/// Top level of the veilid-server settings tree.
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[serde(default)]
 pub struct SettingsInner {
+    /// Background daemon configuration.
     pub daemon: Daemon,
+    /// veilid-remote-api client connection configuration.
     pub client_api: ClientApi,
+    /// Attach to the network automatically on startup.
+    // auto_attach defaults to true; set as a runtime default in load_default_config.
     pub auto_attach: bool,
+    /// Logging configuration.
     pub logging: Logging,
+    /// Testing and multi-subnode configuration.
     pub testing: Testing,
+    /// The veilid-core configuration tree.
     pub core: Core,
 }
 
+/// Loaded veilid-server settings: the parsed tree plus any unrecognized config keys.
 #[derive(Clone, Debug)]
 pub struct Settings {
+    /// The parsed settings tree, behind a lock for runtime `set()` updates.
     inner: Arc<RwLock<SettingsInner>>,
+    /// Config keys present in the file but not recognized; warned about once logging is up.
+    unknown_keys: Arc<Vec<String>>,
 }
 
 impl Settings {
@@ -935,8 +1194,13 @@ impl Settings {
             cfg = load_config(cfg, config_file_path)?;
         }
 
-        // Generate config
-        let mut inner: SettingsInner = cfg.try_deserialize()?;
+        // Generate config, collecting any keys that don't map to a known setting (likely a typo
+        // or a setting that moved under 'internal'). We warn about these once logging is up
+        // rather than erroring, so an unknown key never blocks startup.
+        let mut unknown_keys = Vec::<String>::new();
+        let mut inner: SettingsInner = serde_ignored::deserialize(cfg, |path| {
+            unknown_keys.push(path.to_string());
+        })?;
 
         // Fill in missing defaults
         if inner.core.network.dht.remote_max_storage_space_mb == 0 {
@@ -947,7 +1211,37 @@ impl Settings {
         //
         Ok(Self {
             inner: Arc::new(RwLock::new(inner)),
+            unknown_keys: Arc::new(unknown_keys),
         })
+    }
+
+    /// Warn about config keys that were present but not recognized. Call after logging is set up.
+    pub fn warn_unknown_config_keys(&self) {
+        for key in self.unknown_keys.iter() {
+            warn!("ignoring unknown veilid-server config key: '{key}'");
+        }
+    }
+
+    /// Warn about deprecated config keys still in use. Call after logging is set up.
+    pub fn warn_deprecated_config(&self) {
+        let inner = self.inner.read();
+        let check = |section: &str, list: &[String]| {
+            if !list.is_empty() {
+                warn!(
+                    "veilid-server config '{section}.ignore_log_targets' is deprecated; \
+                     use '{section}.directives' instead (e.g. 'target=off')"
+                );
+            }
+        };
+        check(
+            "logging.terminal",
+            &inner.logging.terminal.ignore_log_targets,
+        );
+        check("logging.file", &inner.logging.file.ignore_log_targets);
+        check("logging.system", &inner.logging.system.ignore_log_targets);
+        check("logging.api", &inner.logging.api.ignore_log_targets);
+        #[cfg(feature = "opentelemetry-otlp")]
+        check("logging.otlp", &inner.logging.otlp.ignore_log_targets);
     }
 
     pub fn verify(&self) -> EyreResult<()> {
@@ -1138,7 +1432,7 @@ impl Settings {
             ($innerkey:expr, $value:expr) => {{
                 let innerkeyname = &stringify!($innerkey)[6..];
                 if innerkeyname == key {
-                    match veilid_core::deserialize_json(value) {
+                    match veilid_core::deserialize_json_lenient(value) {
                         Ok(v) => {
                             $innerkey = v;
                             return Ok(());
@@ -1196,23 +1490,28 @@ impl Settings {
 
         set_config_value!(inner.logging.system.enabled, value);
         set_config_value!(inner.logging.system.level, value);
+        set_config_value!(inner.logging.system.directives, value);
         set_config_value!(inner.logging.system.ignore_log_targets, value);
         set_config_value!(inner.logging.terminal.enabled, value);
         set_config_value!(inner.logging.terminal.level, value);
+        set_config_value!(inner.logging.terminal.directives, value);
         set_config_value!(inner.logging.terminal.ignore_log_targets, value);
         set_config_value!(inner.logging.file.enabled, value);
         set_config_value!(inner.logging.file.path, value);
         set_config_value!(inner.logging.file.append, value);
         set_config_value!(inner.logging.file.level, value);
+        set_config_value!(inner.logging.file.directives, value);
         set_config_value!(inner.logging.file.ignore_log_targets, value);
         set_config_value!(inner.logging.api.enabled, value);
         set_config_value!(inner.logging.api.level, value);
+        set_config_value!(inner.logging.api.directives, value);
         set_config_value!(inner.logging.api.ignore_log_targets, value);
         #[cfg(feature = "opentelemetry-otlp")]
         {
             set_config_value!(inner.logging.otlp.enabled, value);
             set_config_value!(inner.logging.otlp.level, value);
             set_config_value!(inner.logging.otlp.grpc_endpoint, value);
+            set_config_value!(inner.logging.otlp.directives, value);
             set_config_value!(inner.logging.otlp.ignore_log_targets, value);
         }
         #[cfg(feature = "flame")]
@@ -1270,47 +1569,13 @@ impl Settings {
         set_config_value!(inner.core.table_store.max_value_size_mb, value);
         set_config_value!(inner.core.block_store.directory, value);
         set_config_value!(inner.core.block_store.delete, value);
-        set_config_value!(inner.core.network.connection_initial_timeout_ms, value);
-        set_config_value!(inner.core.network.connection_inactivity_timeout_ms, value);
-        set_config_value!(inner.core.network.max_connections_per_ip4, value);
-        set_config_value!(inner.core.network.max_connections_per_ip6_prefix, value);
-        set_config_value!(
-            inner.core.network.max_connections_per_ip6_prefix_size,
-            value
-        );
-        set_config_value!(inner.core.network.max_connection_frequency_per_min, value);
-        set_config_value!(inner.core.network.client_allowlist_timeout_ms, value);
-        set_config_value!(inner.core.network.reverse_connection_receipt_time_ms, value);
-        set_config_value!(inner.core.network.hole_punch_receipt_time_ms, value);
+        set_config_value!(inner.core.network.max_connections, value);
         set_config_value!(inner.core.network.network_key_password, value);
         set_config_value!(inner.core.network.routing_table.public_keys, value);
         set_config_value!(inner.core.network.routing_table.secret_keys, value);
         set_config_value!(inner.core.network.routing_table.bootstrap, value);
         set_config_value!(inner.core.network.routing_table.bootstrap_keys, value);
-        set_config_value!(inner.core.network.rpc.concurrency, value);
-        set_config_value!(inner.core.network.rpc.queue_size, value);
-        set_config_value!(inner.core.network.rpc.max_timestamp_behind_ms, value);
-        set_config_value!(inner.core.network.rpc.max_timestamp_ahead_ms, value);
-        set_config_value!(inner.core.network.rpc.timeout_ms, value);
-        set_config_value!(inner.core.network.rpc.max_route_hop_count, value);
         set_config_value!(inner.core.network.rpc.default_route_hop_count, value);
-        set_config_value!(inner.core.network.dht.max_find_node_count, value);
-        set_config_value!(inner.core.network.dht.resolve_node_timeout_ms, value);
-        set_config_value!(inner.core.network.dht.resolve_node_count, value);
-        set_config_value!(inner.core.network.dht.resolve_node_fanout, value);
-        set_config_value!(inner.core.network.dht.get_value_timeout_ms, value);
-        set_config_value!(inner.core.network.dht.get_value_count, value);
-        set_config_value!(inner.core.network.dht.get_value_fanout, value);
-        set_config_value!(inner.core.network.dht.set_value_timeout_ms, value);
-        set_config_value!(inner.core.network.dht.set_value_count, value);
-        set_config_value!(inner.core.network.dht.set_value_fanout, value);
-        set_config_value!(inner.core.network.dht.consensus_width, value);
-        set_config_value!(inner.core.network.dht.min_peer_count, value);
-        set_config_value!(inner.core.network.dht.min_peer_refresh_time_ms, value);
-        set_config_value!(
-            inner.core.network.dht.validate_dial_info_receipt_time_ms,
-            value
-        );
         set_config_value!(inner.core.network.dht.local_subkey_cache_size, value);
         set_config_value!(
             inner.core.network.dht.local_max_subkey_cache_memory_mb,
@@ -1323,33 +1588,126 @@ impl Settings {
             value
         );
         set_config_value!(inner.core.network.dht.remote_max_storage_space_mb, value);
-        set_config_value!(inner.core.network.dht.public_watch_limit, value);
-        set_config_value!(inner.core.network.dht.member_watch_limit, value);
-        set_config_value!(inner.core.network.dht.max_watch_expiration_ms, value);
-        set_config_value!(inner.core.network.dht.public_transaction_limit, value);
-        set_config_value!(inner.core.network.dht.member_transaction_limit, value);
+        set_config_value!(inner.core.network.dht.max_concurrent_operations, value);
+        set_config_value!(inner.core.network.address_types, value);
         set_config_value!(inner.core.network.upnp, value);
         set_config_value_custom!(
             inner.core.network.detect_address_changes,
             value,
             auto_bool::from_str
         );
-        set_config_value!(inner.core.network.restricted_nat_retries, value);
         set_config_value!(inner.core.network.tls.certificate_path, value);
         set_config_value!(inner.core.network.tls.private_key_path, value);
         set_config_value!(inner.core.network.tls.connection_initial_timeout_ms, value);
         set_config_value!(inner.core.network.protocol.udp.enabled, value);
-        set_config_value!(inner.core.network.protocol.udp.socket_pool_size, value);
         set_config_value!(inner.core.network.protocol.udp.listen_address, value);
         set_config_value!(inner.core.network.protocol.udp.public_address, value);
+        set_config_value!(
+            inner.core.internal.network.connection_initial_timeout_ms,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.connection_inactivity_timeout_ms,
+            value
+        );
+        set_config_value!(inner.core.internal.network.max_connections_per_ip4, value);
+        set_config_value!(
+            inner.core.internal.network.max_connections_per_ip6_prefix,
+            value
+        );
+        set_config_value!(
+            inner
+                .core
+                .internal
+                .network
+                .max_connections_per_ip6_prefix_size,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.max_connection_frequency_per_min,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.client_allowlist_timeout_ms,
+            value
+        );
+        set_config_value!(
+            inner
+                .core
+                .internal
+                .network
+                .reverse_connection_receipt_time_ms,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.hole_punch_receipt_time_ms,
+            value
+        );
+        set_config_value!(inner.core.internal.network.restricted_nat_retries, value);
+        set_config_value!(inner.core.internal.network.rpc.concurrency, value);
+        set_config_value!(inner.core.internal.network.rpc.queue_size, value);
+        set_config_value!(
+            inner.core.internal.network.rpc.max_timestamp_behind_ms,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.rpc.max_timestamp_ahead_ms,
+            value
+        );
+        set_config_value!(inner.core.internal.network.rpc.timeout_ms, value);
+        set_config_value!(inner.core.internal.network.rpc.max_route_hop_count, value);
+        set_config_value!(inner.core.internal.network.dht.max_find_node_count, value);
+        set_config_value!(
+            inner.core.internal.network.dht.resolve_node_timeout_ms,
+            value
+        );
+        set_config_value!(inner.core.internal.network.dht.resolve_node_count, value);
+        set_config_value!(inner.core.internal.network.dht.resolve_node_fanout, value);
+        set_config_value!(inner.core.internal.network.dht.get_value_timeout_ms, value);
+        set_config_value!(inner.core.internal.network.dht.get_value_count, value);
+        set_config_value!(inner.core.internal.network.dht.get_value_fanout, value);
+        set_config_value!(inner.core.internal.network.dht.set_value_timeout_ms, value);
+        set_config_value!(inner.core.internal.network.dht.set_value_count, value);
+        set_config_value!(inner.core.internal.network.dht.set_value_fanout, value);
+        set_config_value!(inner.core.internal.network.dht.consensus_width, value);
+        set_config_value!(inner.core.internal.network.dht.min_peer_count, value);
+        set_config_value!(
+            inner.core.internal.network.dht.min_peer_refresh_time_ms,
+            value
+        );
+        set_config_value!(
+            inner
+                .core
+                .internal
+                .network
+                .dht
+                .validate_dial_info_receipt_time_ms,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.dht.max_watch_expiration_ms,
+            value
+        );
+        set_config_value!(inner.core.internal.network.dht.public_watch_limit, value);
+        set_config_value!(inner.core.internal.network.dht.member_watch_limit, value);
+        set_config_value!(
+            inner.core.internal.network.dht.public_transaction_limit,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.dht.member_transaction_limit,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.protocol.udp.socket_pool_size,
+            value
+        );
         set_config_value!(inner.core.network.protocol.tcp.connect, value);
         set_config_value!(inner.core.network.protocol.tcp.listen, value);
-        set_config_value!(inner.core.network.protocol.tcp.max_connections, value);
         set_config_value!(inner.core.network.protocol.tcp.listen_address, value);
         set_config_value!(inner.core.network.protocol.tcp.public_address, value);
         set_config_value!(inner.core.network.protocol.ws.connect, value);
         set_config_value!(inner.core.network.protocol.ws.listen, value);
-        set_config_value!(inner.core.network.protocol.ws.max_connections, value);
         set_config_value!(inner.core.network.protocol.ws.listen_address, value);
         set_config_value!(inner.core.network.protocol.ws.path, value);
         set_config_value!(inner.core.network.protocol.ws.url, value);
@@ -1358,7 +1716,6 @@ impl Settings {
             if #[cfg(feature="enable-protocol-wss")] {
                 set_config_value!(inner.core.network.protocol.wss.connect, value);
                 set_config_value!(inner.core.network.protocol.wss.listen, value);
-                set_config_value!(inner.core.network.protocol.wss.max_connections, value);
                 set_config_value!(inner.core.network.protocol.wss.listen_address, value);
                 set_config_value!(inner.core.network.protocol.wss.path, value);
                 set_config_value!(inner.core.network.protocol.wss.url, value);
@@ -1428,27 +1785,7 @@ impl Settings {
                 delete: inner.core.block_store.delete,
             },
             network: VeilidConfigNetwork {
-                connection_initial_timeout_ms: inner.core.network.connection_initial_timeout_ms,
-                connection_inactivity_timeout_ms: inner
-                    .core
-                    .network
-                    .connection_inactivity_timeout_ms,
-                max_connections_per_ip4: inner.core.network.max_connections_per_ip4,
-                max_connections_per_ip6_prefix: inner.core.network.max_connections_per_ip6_prefix,
-                max_connections_per_ip6_prefix_size: inner
-                    .core
-                    .network
-                    .max_connections_per_ip6_prefix_size,
-                max_connection_frequency_per_min: inner
-                    .core
-                    .network
-                    .max_connection_frequency_per_min,
-                client_allowlist_timeout_ms: inner.core.network.client_allowlist_timeout_ms,
-                reverse_connection_receipt_time_ms: inner
-                    .core
-                    .network
-                    .reverse_connection_receipt_time_ms,
-                hole_punch_receipt_time_ms: inner.core.network.hole_punch_receipt_time_ms,
+                max_connections: inner.core.network.max_connections,
                 network_key_password: inner.core.network.network_key_password.clone(),
                 routing_table: VeilidConfigRoutingTable {
                     public_keys: inner
@@ -1469,33 +1806,9 @@ impl Settings {
                     bootstrap_keys: inner.core.network.routing_table.bootstrap_keys.clone(),
                 },
                 rpc: VeilidConfigRPC {
-                    concurrency: inner.core.network.rpc.concurrency,
-                    queue_size: inner.core.network.rpc.queue_size,
-                    max_timestamp_behind_ms: inner.core.network.rpc.max_timestamp_behind_ms,
-                    max_timestamp_ahead_ms: inner.core.network.rpc.max_timestamp_ahead_ms,
-                    timeout_ms: inner.core.network.rpc.timeout_ms,
-                    max_route_hop_count: inner.core.network.rpc.max_route_hop_count,
                     default_route_hop_count: inner.core.network.rpc.default_route_hop_count,
                 },
                 dht: VeilidConfigDHT {
-                    max_find_node_count: inner.core.network.dht.max_find_node_count,
-                    resolve_node_timeout_ms: inner.core.network.dht.resolve_node_timeout_ms,
-                    resolve_node_count: inner.core.network.dht.resolve_node_count,
-                    resolve_node_fanout: inner.core.network.dht.resolve_node_fanout,
-                    get_value_timeout_ms: inner.core.network.dht.get_value_timeout_ms,
-                    get_value_count: inner.core.network.dht.get_value_count,
-                    get_value_fanout: inner.core.network.dht.get_value_fanout,
-                    set_value_timeout_ms: inner.core.network.dht.set_value_timeout_ms,
-                    set_value_count: inner.core.network.dht.set_value_count,
-                    set_value_fanout: inner.core.network.dht.set_value_fanout,
-                    consensus_width: inner.core.network.dht.consensus_width,
-                    min_peer_count: inner.core.network.dht.min_peer_count,
-                    min_peer_refresh_time_ms: inner.core.network.dht.min_peer_refresh_time_ms,
-                    validate_dial_info_receipt_time_ms: inner
-                        .core
-                        .network
-                        .dht
-                        .validate_dial_info_receipt_time_ms,
                     local_subkey_cache_size: inner.core.network.dht.local_subkey_cache_size,
                     local_max_subkey_cache_memory_mb: inner
                         .core
@@ -1510,15 +1823,17 @@ impl Settings {
                         .dht
                         .remote_max_subkey_cache_memory_mb,
                     remote_max_storage_space_mb: inner.core.network.dht.remote_max_storage_space_mb,
-                    public_watch_limit: inner.core.network.dht.public_watch_limit,
-                    member_watch_limit: inner.core.network.dht.member_watch_limit,
-                    max_watch_expiration_ms: inner.core.network.dht.max_watch_expiration_ms,
-                    public_transaction_limit: inner.core.network.dht.public_transaction_limit,
-                    member_transaction_limit: inner.core.network.dht.member_transaction_limit,
+                    max_concurrent_operations: inner.core.network.dht.max_concurrent_operations,
+                },
+                address_types: {
+                    let mut ats = Vec::<veilid_core::VeilidConfigAddressType>::new();
+                    for at in &inner.core.network.address_types {
+                        ats.push(veilid_core::VeilidConfigAddressType::from_str(at.as_str())?);
+                    }
+                    ats
                 },
                 upnp: inner.core.network.upnp,
                 detect_address_changes: inner.core.network.detect_address_changes,
-                restricted_nat_retries: inner.core.network.restricted_nat_retries,
                 tls: VeilidConfigTLS {
                     certificate_path: inner.core.network.tls.certificate_path.clone(),
                     private_key_path: inner.core.network.tls.private_key_path.clone(),
@@ -1531,7 +1846,6 @@ impl Settings {
                 protocol: VeilidConfigProtocol {
                     udp: VeilidConfigUDP {
                         enabled: inner.core.network.protocol.udp.enabled,
-                        socket_pool_size: inner.core.network.protocol.udp.socket_pool_size,
                         listen_address: inner
                             .core
                             .network
@@ -1554,7 +1868,6 @@ impl Settings {
                     tcp: VeilidConfigTCP {
                         connect: inner.core.network.protocol.tcp.connect,
                         listen: inner.core.network.protocol.tcp.listen,
-                        max_connections: inner.core.network.protocol.tcp.max_connections,
                         listen_address: inner
                             .core
                             .network
@@ -1577,7 +1890,6 @@ impl Settings {
                     ws: VeilidConfigWS {
                         connect: inner.core.network.protocol.ws.connect,
                         listen: inner.core.network.protocol.ws.listen,
-                        max_connections: inner.core.network.protocol.ws.max_connections,
                         listen_address: inner
                             .core
                             .network
@@ -1609,7 +1921,6 @@ impl Settings {
                     wss: VeilidConfigWSS {
                         connect: inner.core.network.protocol.wss.connect,
                         listen: inner.core.network.protocol.wss.listen,
-                        max_connections: inner.core.network.protocol.wss.max_connections,
                         listen_address: inner
                             .core
                             .network
@@ -1649,6 +1960,9 @@ impl Settings {
                     server_address: inner.core.network.virtual_network.server_address.clone(),
                 },
             },
+            // Footgun tuning passes through unchanged; veilid-core's runtime gate
+            // ignores it (with a warning) unless built with `footgun-config`.
+            internal: Some(inner.core.internal.clone()),
         };
 
         Ok(core_config)
@@ -1677,6 +1991,14 @@ mod tests {
     #[test]
     fn test_default_config_settings() {
         let settings = Settings::new(None).unwrap_or_log();
+
+        // The default config must map exactly onto the struct for the active features
+        // (no stray keys), or every startup would warn.
+        assert!(
+            settings.unknown_keys.is_empty(),
+            "default config has unrecognized keys: {:?}",
+            settings.unknown_keys
+        );
 
         let s = settings.read();
         assert!(!s.daemon.enabled);
@@ -1774,15 +2096,37 @@ mod tests {
             None
         );
 
-        assert_eq!(s.core.network.connection_initial_timeout_ms, 2_000u32);
-        assert_eq!(s.core.network.connection_inactivity_timeout_ms, 60_000u32);
-        assert_eq!(s.core.network.max_connections_per_ip4, 32u32);
-        assert_eq!(s.core.network.max_connections_per_ip6_prefix, 32u32);
-        assert_eq!(s.core.network.max_connections_per_ip6_prefix_size, 56u32);
-        assert_eq!(s.core.network.max_connection_frequency_per_min, 128u32);
-        assert_eq!(s.core.network.client_allowlist_timeout_ms, 300_000u32);
-        assert_eq!(s.core.network.reverse_connection_receipt_time_ms, 5_000u32);
-        assert_eq!(s.core.network.hole_punch_receipt_time_ms, 5_000u32);
+        assert_eq!(
+            s.core.internal.network.connection_initial_timeout_ms,
+            2_000u32
+        );
+        assert_eq!(
+            s.core.internal.network.connection_inactivity_timeout_ms,
+            60_000u32
+        );
+        assert_eq!(s.core.internal.network.max_connections_per_ip4, 32u32);
+        assert_eq!(
+            s.core.internal.network.max_connections_per_ip6_prefix,
+            32u32
+        );
+        assert_eq!(
+            s.core.internal.network.max_connections_per_ip6_prefix_size,
+            56u32
+        );
+        assert_eq!(
+            s.core.internal.network.max_connection_frequency_per_min,
+            128u32
+        );
+        assert_eq!(
+            s.core.internal.network.client_allowlist_timeout_ms,
+            300_000u32
+        );
+        assert_eq!(
+            s.core.internal.network.reverse_connection_receipt_time_ms,
+            5_000u32
+        );
+        assert_eq!(s.core.internal.network.hole_punch_receipt_time_ms, 5_000u32);
+        assert_eq!(s.core.network.max_connections, 256);
         assert_eq!(s.core.network.network_key_password, None);
         assert_eq!(s.core.network.routing_table.public_keys, None);
         assert_eq!(s.core.network.routing_table.secret_keys, None);
@@ -1803,40 +2147,64 @@ mod tests {
             ]
         );
         //
-        assert_eq!(s.core.network.rpc.concurrency, 0);
-        assert_eq!(s.core.network.rpc.queue_size, 1024);
-        assert_eq!(s.core.network.rpc.max_timestamp_behind_ms, Some(10_000u32));
-        assert_eq!(s.core.network.rpc.max_timestamp_ahead_ms, Some(10_000u32));
-        assert_eq!(s.core.network.rpc.timeout_ms, 5_000u32);
-        assert_eq!(s.core.network.rpc.max_route_hop_count, 4);
+        assert_eq!(s.core.internal.network.rpc.concurrency, 0);
+        assert_eq!(s.core.internal.network.rpc.queue_size, 1024);
+        assert_eq!(
+            s.core.internal.network.rpc.max_timestamp_behind_ms,
+            Some(10_000u32)
+        );
+        assert_eq!(
+            s.core.internal.network.rpc.max_timestamp_ahead_ms,
+            Some(10_000u32)
+        );
+        assert_eq!(s.core.internal.network.rpc.timeout_ms, 5_000u32);
+        assert_eq!(s.core.internal.network.rpc.max_route_hop_count, 4);
         assert_eq!(s.core.network.rpc.default_route_hop_count, 1);
         //
-        assert_eq!(s.core.network.dht.max_find_node_count, 20u32);
-        assert_eq!(s.core.network.dht.resolve_node_timeout_ms, 10_000u32);
-        assert_eq!(s.core.network.dht.resolve_node_count, 1u32);
-        assert_eq!(s.core.network.dht.resolve_node_fanout, 5u32);
-        assert_eq!(s.core.network.dht.get_value_timeout_ms, 10_000u32);
-        assert_eq!(s.core.network.dht.get_value_count, 3u32);
-        assert_eq!(s.core.network.dht.get_value_fanout, 5u32);
-        assert_eq!(s.core.network.dht.set_value_timeout_ms, 10_000u32);
-        assert_eq!(s.core.network.dht.set_value_count, 5u32);
-        assert_eq!(s.core.network.dht.set_value_fanout, 5u32);
-        assert_eq!(s.core.network.dht.consensus_width, 10u32);
-        assert_eq!(s.core.network.dht.min_peer_count, 20u32);
-        assert_eq!(s.core.network.dht.min_peer_refresh_time_ms, 60_000u32);
+        assert_eq!(s.core.network.dht.local_subkey_cache_size, 128u32);
+        assert_eq!(s.core.network.dht.local_max_subkey_cache_memory_mb, 256u32);
+        assert_eq!(s.core.network.dht.remote_subkey_cache_size, 1024u32);
+        assert_eq!(s.core.network.dht.remote_max_records, 65536u32);
+        //
+        assert_eq!(s.core.internal.network.dht.max_find_node_count, 20u32);
         assert_eq!(
-            s.core.network.dht.validate_dial_info_receipt_time_ms,
+            s.core.internal.network.dht.resolve_node_timeout_ms,
+            10_000u32
+        );
+        assert_eq!(s.core.internal.network.dht.resolve_node_count, 1u32);
+        assert_eq!(s.core.internal.network.dht.resolve_node_fanout, 5u32);
+        assert_eq!(s.core.internal.network.dht.get_value_timeout_ms, 10_000u32);
+        assert_eq!(s.core.internal.network.dht.get_value_count, 3u32);
+        assert_eq!(s.core.internal.network.dht.get_value_fanout, 5u32);
+        assert_eq!(s.core.internal.network.dht.set_value_timeout_ms, 10_000u32);
+        assert_eq!(s.core.internal.network.dht.set_value_count, 5u32);
+        assert_eq!(s.core.internal.network.dht.set_value_fanout, 6u32);
+        assert_eq!(s.core.internal.network.dht.consensus_width, 10u32);
+        assert_eq!(s.core.internal.network.dht.min_peer_count, 20u32);
+        assert_eq!(
+            s.core.internal.network.dht.min_peer_refresh_time_ms,
+            60_000u32
+        );
+        assert_eq!(
+            s.core
+                .internal
+                .network
+                .dht
+                .validate_dial_info_receipt_time_ms,
             1_000u32
         );
-        assert_eq!(s.core.network.dht.public_watch_limit, 32u32);
-        assert_eq!(s.core.network.dht.member_watch_limit, 8u32);
-        assert_eq!(s.core.network.dht.max_watch_expiration_ms, 600_000u32);
-        assert_eq!(s.core.network.dht.public_transaction_limit, 4u32);
-        assert_eq!(s.core.network.dht.member_transaction_limit, 1u32);
+        assert_eq!(s.core.internal.network.dht.public_watch_limit, 32u32);
+        assert_eq!(s.core.internal.network.dht.member_watch_limit, 8u32);
+        assert_eq!(
+            s.core.internal.network.dht.max_watch_expiration_ms,
+            600_000u32
+        );
+        assert_eq!(s.core.internal.network.dht.public_transaction_limit, 4u32);
+        assert_eq!(s.core.internal.network.dht.member_transaction_limit, 1u32);
         //
         assert!(!s.core.network.upnp);
         assert_eq!(s.core.network.detect_address_changes, None);
-        assert_eq!(s.core.network.restricted_nat_retries, 0u32);
+        assert_eq!(s.core.internal.network.restricted_nat_retries, 0u32);
         //
         assert_eq!(
             s.core.network.tls.certificate_path,
@@ -1859,7 +2227,7 @@ mod tests {
         ];
 
         assert!(s.core.network.protocol.udp.enabled);
-        assert_eq!(s.core.network.protocol.udp.socket_pool_size, 0);
+        assert_eq!(s.core.internal.network.protocol.udp.socket_pool_size, 0);
         assert_eq!(s.core.network.protocol.udp.listen_address.name, ":5150");
         for addr in &s.core.network.protocol.udp.listen_address.addrs {
             assert!(valid_socket_addrs.contains(addr));
@@ -1870,7 +2238,6 @@ mod tests {
         //
         assert!(s.core.network.protocol.tcp.connect);
         assert!(s.core.network.protocol.tcp.listen);
-        assert_eq!(s.core.network.protocol.tcp.max_connections, 256);
         assert_eq!(s.core.network.protocol.tcp.listen_address.name, ":5150");
         for addr in &s.core.network.protocol.tcp.listen_address.addrs {
             assert!(valid_socket_addrs.contains(addr));
@@ -1881,7 +2248,6 @@ mod tests {
         //
         assert!(s.core.network.protocol.ws.connect);
         assert!(s.core.network.protocol.ws.listen);
-        assert_eq!(s.core.network.protocol.ws.max_connections, 256);
         assert_eq!(s.core.network.protocol.ws.listen_address.name, ":5150");
         for addr in &s.core.network.protocol.ws.listen_address.addrs {
             assert!(valid_socket_addrs.contains(addr));
@@ -1897,7 +2263,6 @@ mod tests {
             if #[cfg(feature="enable-protocol-wss")] {
                 assert!(s.core.network.protocol.wss.connect);
                 assert!(!s.core.network.protocol.wss.listen);
-                assert_eq!(s.core.network.protocol.wss.max_connections, 256);
                 assert_eq!(s.core.network.protocol.wss.listen_address.name, ":5150");
                 for addr in &s.core.network.protocol.wss.listen_address.addrs {
                     assert!(valid_socket_addrs.contains(addr));

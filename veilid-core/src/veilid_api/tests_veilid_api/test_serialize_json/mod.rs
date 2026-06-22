@@ -21,7 +21,6 @@ pub fn test_serialize_json() {
     test_latency_stats();
     test_transfer_stats();
     test_transfer_stats_down_up();
-    test_rpc_stats();
     test_peer_stats();
     #[cfg(feature = "unstable-tunnels")]
     test_tunnel_mode();

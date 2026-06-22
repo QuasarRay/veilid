@@ -436,7 +436,8 @@ impl<'a> FanoutQueue<'a> {
         let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
         let node = self.nodes.get_mut(&key).unwrap_or_log();
         if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            unreachable!("should be in progress");
+            veilid_log!(self error "timeout: node should be in progress");
+            return;
         }
         node.status.transition(FanoutNodeStage::Timeout, cur_ts);
     }
@@ -446,7 +447,8 @@ impl<'a> FanoutQueue<'a> {
         let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
         let node = self.nodes.get_mut(&key).unwrap_or_log();
         if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            unreachable!("should be in progress");
+            veilid_log!(self error "rejected: node should be in progress");
+            return;
         }
         node.status.transition(FanoutNodeStage::Rejected, cur_ts);
         self.disqualify(cur_ts);
@@ -457,7 +459,8 @@ impl<'a> FanoutQueue<'a> {
         let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
         let node = self.nodes.get_mut(&key).unwrap_or_log();
         if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            unreachable!("should be in progress");
+            veilid_log!(self error "accepted: node should be in progress");
+            return;
         }
         node.status.transition(FanoutNodeStage::Accepted, cur_ts);
     }
@@ -467,7 +470,8 @@ impl<'a> FanoutQueue<'a> {
         let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
         let node = self.nodes.get_mut(&key).unwrap_or_log();
         if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            unreachable!("should be in progress");
+            veilid_log!(self error "stale: node should be in progress");
+            return;
         }
         node.status.transition(FanoutNodeStage::Stale, cur_ts);
     }
@@ -477,7 +481,8 @@ impl<'a> FanoutQueue<'a> {
         let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
         let node = self.nodes.get_mut(&key).unwrap_or_log();
         if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
-            unreachable!("should be in progress");
+            veilid_log!(self error "disqualified: node should be in progress");
+            return;
         }
         node.status
             .transition(FanoutNodeStage::Disqualified, cur_ts);

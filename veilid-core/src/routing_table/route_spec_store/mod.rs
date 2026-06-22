@@ -87,7 +87,7 @@ impl RouteSpecStore {
     pub fn new(registry: VeilidComponentRegistry) -> Self {
         let config = registry.config();
 
-        let max_route_hop_count = config.network.rpc.max_route_hop_count as usize;
+        let max_route_hop_count = config.internal().network.rpc.max_route_hop_count as usize;
         let default_route_hop_count_safe = config.network.rpc.default_route_hop_count as usize;
         let default_route_hop_count_unsafe =
             max_route_hop_count.min(default_route_hop_count_safe * 2);
@@ -202,6 +202,13 @@ impl RouteSpecStore {
     pub async fn purge(&self) -> VeilidAPIResult<()> {
         // Careful with locking order here, we need to lock the content before the cache
         {
+            if !self.compiled_route_cache.purge() {
+                apibail_internal!(
+                    "Failed to purge route spec store cache while it is in use: {:#?}",
+                    self.compiled_route_cache
+                );
+            }
+
             let mut content = self.content.write();
             let mut cache = self.cache.write();
 
@@ -369,7 +376,6 @@ impl RouteSpecStore {
     }
 
     /// Display debugging for routes by their route id
-    #[expect(dead_code)]
     pub fn display_route_by_id(&self, id: &RouteId) -> String {
         let cache = self.cache.read();
 

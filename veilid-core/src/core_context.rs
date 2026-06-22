@@ -11,6 +11,7 @@ use crate::*;
 
 impl_veilid_log_facility!("corectx");
 
+/// Callback the application registers to receive `VeilidUpdate` events from a running node.
 pub type UpdateCallback = Arc<dyn Fn(VeilidUpdate) + Send + Sync>;
 
 type InitKey = (String, String);
@@ -93,10 +94,21 @@ impl VeilidCoreContext {
 
         #[cfg(feature = "instrument")]
         tracing::Span::current().record("__VEILID_LOG_KEY", log_key.clone());
-        ApiTracingLayer::add_callback(log_key, update_callback.clone())?;
+        ApiTracingLayer::add_callback(log_key.clone(), update_callback.clone())?;
 
         // Create component registry
         let registry = VeilidComponentRegistry::new(startup_options);
+
+        // Warn if internal "footgun" tuning was provided without the footgun-config feature
+        #[cfg(not(feature = "footgun-config"))]
+        if registry
+            .config()
+            .internal
+            .as_ref()
+            .is_some_and(|i| *i != VeilidConfigInternal::default())
+        {
+            veilid_log!(registry warn "VeilidConfig.internal footgun tuning was provided but the 'footgun-config' feature is not enabled; ignoring it and using built-in defaults");
+        }
 
         veilid_log!(registry info "Veilid API starting up");
         if let Some(target) = option_env!("TARGET") {
@@ -108,7 +120,7 @@ impl VeilidCoreContext {
         }
         veilid_log!(registry info     "Features:     {:?}", veilid_features());
         veilid_log!(registry info     "Version:      {}", veilid_version_string());
-        #[cfg(feature = "footgun")]
+        #[cfg(feature = "footgun-nodeid-target")]
         {
             veilid_log!(registry warn
                 "Footgun feature is enabled. This disables sender privacy protections and should be avoided in production.");
@@ -132,8 +144,10 @@ impl VeilidCoreContext {
 
         // Run initialization
         // This should make the majority of subsystems functional
-        registry.init().await.map_err(eyre_to_veilid_api_error)?;
-
+        if let Err(e) = registry.init().await {
+            ApiTracingLayer::remove_callback(log_key.clone())?;
+            return Err(eyre_to_veilid_api_error(e));
+        }
         // Run post-initialization
         // This should resolve any inter-subsystem dependencies
         // required for background processes that utilize multiple subsystems
@@ -142,6 +156,7 @@ impl VeilidCoreContext {
         // This is where the attachment manager starts the background tick
         if let Err(e) = registry.post_init().await {
             registry.terminate().await;
+            ApiTracingLayer::remove_callback(log_key)?;
             return Err(eyre_to_veilid_api_error(e));
         }
 
@@ -243,16 +258,51 @@ lazy_static::lazy_static! {
 /// * `update_callback` - called when internal state of the Veilid node changes, for example, when app-level messages are received, when private routes die and need to be reallocated, or when routing table states change.
 /// * `config_json` - called at startup to supply a JSON configuration object.
 ///
-/// Returns a [VeilidAPI] object that can be used to operate the node.
+/// Returns a [VeilidAPI] object that can be used to operate the node. Errors with
+/// `VeilidAPIError::AlreadyInitialized` if a node is already running for the same
+/// `program_name + namespace`; the previous [VeilidAPI] must be shut down first.
+/// Errors with `VeilidAPIError::Generic` if `config_json` is not valid JSON, or if the
+/// parsed config fails validation (empty `program_name`, a `program_name`/`namespace` that is
+/// not a valid filename, out-of-range connection caps, or invalid RPC/DHT tuning). Errors with
+/// `VeilidAPIError::Internal` if subsystem init or post-init fails (or, on Android, if the
+/// Android globals were not set up); init/post-init may also surface a more specific
+/// `VeilidAPIError` variant from the failing subsystem.
+///
+/// Blocks until subsystems are initialized (disk stores opened, background tasks started);
+/// the network is not bound until the node attaches. Startup/shutdown is serialized per
+/// `program_name + namespace`.
+/// [VeilidAPI] is reference-counted: dropping the last clone spawns a detached shutdown that
+/// releases the `program_name + namespace` slot. Call [VeilidAPI::shutdown] to shut down
+/// deterministically and wait for completion.
 pub async fn api_startup_json(
     update_callback: UpdateCallback,
     config_json: String,
 ) -> VeilidAPIResult<VeilidAPI> {
-    // Parse the JSON config
-    let config: VeilidConfig =
-        serde_json::from_str(&config_json).map_err(VeilidAPIError::generic)?;
+    // Parse the JSON config, collecting any keys that don't map to a known config field
+    // (likely a typo or a setting that moved under 'internal'). We warn about these once the
+    // node is up rather than erroring, so an unknown key never blocks startup.
+    let mut unknown_keys = Vec::<String>::new();
+    let config: VeilidConfig = {
+        let mut de = serde_json::Deserializer::from_str(&config_json);
+        let config = serde_ignored::deserialize(&mut de, |path| {
+            unknown_keys.push(path.to_string());
+        })
+        .map_err(VeilidAPIError::generic)?;
+        de.end().map_err(VeilidAPIError::generic)?;
+        config
+    };
 
-    api_startup(update_callback, config).await
+    let veilid_api = api_startup(update_callback, config).await?;
+
+    // Now that the node (and its logging) is up, surface any unrecognized config keys
+    if !unknown_keys.is_empty() {
+        let registry = veilid_api.core_context()?.registry();
+        for key in &unknown_keys {
+            veilid_log!(registry warn "ignoring unknown veilid config key: '{}'", key);
+        }
+    }
+
+    Ok(veilid_api)
 }
 
 /// Initialize a Veilid node, with the configuration object.
@@ -262,7 +312,21 @@ pub async fn api_startup_json(
 /// * `update_callback` - called when internal state of the Veilid node changes, for example, when app-level messages are received, when private routes die and need to be reallocated, or when routing table states change.
 /// * `config` - called at startup to supply a configuration object.
 ///
-/// Returns a [VeilidAPI] object that can be used to operate the node.
+/// Returns a [VeilidAPI] object that can be used to operate the node. Errors with
+/// `VeilidAPIError::AlreadyInitialized` if a node is already running for the same
+/// `program_name + namespace`; the previous [VeilidAPI] must be shut down first.
+/// Errors with `VeilidAPIError::Generic` if `config` fails validation (empty `program_name`,
+/// a `program_name`/`namespace` that is not a valid filename, out-of-range connection caps,
+/// or invalid RPC/DHT tuning). Errors with `VeilidAPIError::Internal` if subsystem init or
+/// post-init fails (or, on Android, if the Android globals were not set up); init/post-init
+/// may also surface a more specific `VeilidAPIError` variant from the failing subsystem.
+///
+/// Blocks until subsystems are initialized (disk stores opened, background tasks started);
+/// the network is not bound until the node attaches. Startup/shutdown is serialized per
+/// `program_name + namespace`.
+/// [VeilidAPI] is reference-counted: dropping the last clone spawns a detached shutdown that
+/// releases the `program_name + namespace` slot. Call [VeilidAPI::shutdown] to shut down
+/// deterministically and wait for completion.
 #[cfg_attr(
     feature = "instrument",
     instrument(

@@ -1,5 +1,8 @@
 use super::*;
 
+/// An `EventualValue` that resolves exactly once. `resolve` consumes it; if it is
+/// dropped without resolving, it resolves to the `drop_value` given at
+/// construction (if any), so awaiters never hang.
 pub struct SingleShotEventual<T>
 where
     T: Unpin,
@@ -23,6 +26,7 @@ impl<T> SingleShotEventual<T>
 where
     T: Unpin,
 {
+    /// Create one that resolves to `drop_value` if dropped before `resolve`.
     pub fn new(drop_value: Option<T>) -> Self {
         Self {
             eventual: EventualValue::new(),
@@ -30,6 +34,11 @@ where
         }
     }
 
+    /// Resolve to `value`, consuming the eventual. The returned future completes
+    /// once all attached instance futures have run.
+    ///
+    /// Resolves exactly once; consuming `self` prevents a second call and
+    /// suppresses the drop-value resolution.
     // Can only call this once, it consumes the eventual
     pub fn resolve(mut self, value: T) -> EventualResolvedFuture<EventualValue<T>> {
         // If we resolve, we don't want to resolve again to the drop value
@@ -38,6 +47,8 @@ where
         self.eventual.resolve(value)
     }
 
+    /// Attach an instance future that completes on resolution. The future stays
+    /// `Pending` until `resolve` or drop.
     pub fn instance(&self) -> EventualValueFuture<T> {
         self.eventual.instance()
     }

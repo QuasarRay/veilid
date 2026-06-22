@@ -7,6 +7,10 @@ use async_lock::RwLockReadGuardArc as InnerAsyncRwLockReadGuardArc;
 use async_lock::RwLockWriteGuard as InnerAsyncRwLockWriteGuard;
 use async_lock::RwLockWriteGuardArc as InnerAsyncRwLockWriteGuardArc;
 
+/// An async reader-writer lock allowing many concurrent readers or one writer.
+///
+/// Wraps `async_lock::RwLock`; under the `debug-locks` feature, acquisitions that
+/// stall past [`DEBUG_LOCKS_DURATION_MS`] are reported as deadlocks.
 #[derive(Debug)]
 pub struct AsyncRwLock<T>
 where
@@ -18,6 +22,7 @@ where
 }
 
 impl<T> AsyncRwLock<T> {
+    /// Create a new lock holding `t`, initially unlocked.
     pub fn new(t: T) -> AsyncRwLock<T> {
         AsyncRwLock {
             inner: Arc::new(InnerAsyncRwLock::new(t)),
@@ -26,6 +31,10 @@ impl<T> AsyncRwLock<T> {
         }
     }
 
+    /// Acquire shared read access, waiting for any writer to finish, returning an owned guard.
+    ///
+    /// Blocks until no writer holds the lock. The returned guard holds read access until dropped.
+    /// Under `debug-locks`, a wait past [`DEBUG_LOCKS_DURATION_MS`] is reported as a deadlock.
     #[inline]
     pub async fn read_arc(self: &Arc<Self>) -> AsyncRwLockReadGuardArc<T> {
         cfg_if! {
@@ -48,6 +57,9 @@ impl<T> AsyncRwLock<T> {
         }
     }
 
+    /// Try to acquire shared read access without waiting, returning an owned guard, or `None` if a writer holds the lock.
+    ///
+    /// Never blocks. On success the guard holds read access until dropped.
     #[inline]
     #[must_use]
     pub fn try_read_arc(self: &Arc<Self>) -> Option<AsyncRwLockReadGuardArc<T>> {
@@ -64,6 +76,9 @@ impl<T> AsyncRwLock<T> {
 }
 
 impl<T: ?Sized> AsyncRwLock<T> {
+    /// Try to acquire shared read access without waiting, or `None` if a writer holds the lock.
+    ///
+    /// Never blocks. On success the guard holds read access until dropped.
     #[inline]
     #[must_use]
     pub fn try_read(&self) -> Option<AsyncRwLockReadGuard<'_, T>> {
@@ -78,6 +93,10 @@ impl<T: ?Sized> AsyncRwLock<T> {
         Some(out)
     }
 
+    /// Acquire shared read access, waiting for any writer to finish.
+    ///
+    /// Blocks until no writer holds the lock. The returned guard holds read access until dropped.
+    /// Under `debug-locks`, a wait past [`DEBUG_LOCKS_DURATION_MS`] is reported as a deadlock.
     #[inline]
     pub async fn read(&self) -> AsyncRwLockReadGuard<'_, T> {
         cfg_if! {
@@ -100,6 +119,9 @@ impl<T: ?Sized> AsyncRwLock<T> {
         }
     }
 
+    /// Try to acquire exclusive write access without waiting, or `None` if any reader or writer holds the lock.
+    ///
+    /// Never blocks. On success the guard holds write access until dropped.
     #[inline]
     #[must_use]
     pub fn try_write(&self) -> Option<AsyncRwLockWriteGuard<'_, T>> {
@@ -114,6 +136,10 @@ impl<T: ?Sized> AsyncRwLock<T> {
         Some(out)
     }
 
+    /// Acquire exclusive write access, waiting for all readers and any writer to finish.
+    ///
+    /// Blocks until no reader or writer holds the lock. The returned guard holds write access until dropped.
+    /// Under `debug-locks`, a wait past [`DEBUG_LOCKS_DURATION_MS`] is reported as a deadlock.
     #[inline]
     pub async fn write(&self) -> AsyncRwLockWriteGuard<'_, T> {
         cfg_if! {
@@ -136,6 +162,9 @@ impl<T: ?Sized> AsyncRwLock<T> {
         }
     }
 
+    /// Try to acquire exclusive write access without waiting, returning an owned guard, or `None` if any reader or writer holds the lock.
+    ///
+    /// Never blocks. On success the guard holds write access until dropped.
     #[inline]
     #[must_use]
     pub fn try_write_arc(self: &Arc<Self>) -> Option<AsyncRwLockWriteGuardArc<T>> {
@@ -150,6 +179,10 @@ impl<T: ?Sized> AsyncRwLock<T> {
         Some(out)
     }
 
+    /// Acquire exclusive write access, waiting for all readers and any writer to finish, returning an owned guard.
+    ///
+    /// Blocks until no reader or writer holds the lock. The returned guard holds write access until dropped.
+    /// Under `debug-locks`, a wait past [`DEBUG_LOCKS_DURATION_MS`] is reported as a deadlock.
     #[inline]
     pub async fn write_arc(self: &Arc<Self>) -> AsyncRwLockWriteGuardArc<T> {
         cfg_if! {
@@ -180,6 +213,7 @@ impl<T> From<T> for AsyncRwLock<T> {
     }
 }
 
+/// Borrowed guard for shared read access; derefs to `T` and releases on drop.
 #[clippy::has_significant_drop]
 #[derive(Debug)]
 pub struct AsyncRwLockReadGuard<'a, T: ?Sized> {
@@ -204,6 +238,7 @@ impl<T: ?Sized> std::ops::Deref for AsyncRwLockReadGuard<'_, T> {
     }
 }
 
+/// Owned guard for shared read access; derefs to `T` and releases on drop.
 #[clippy::has_significant_drop]
 #[derive(Debug)]
 pub struct AsyncRwLockReadGuardArc<T> {
@@ -228,6 +263,7 @@ impl<T> std::ops::Deref for AsyncRwLockReadGuardArc<T> {
     }
 }
 
+/// Borrowed guard for exclusive write access; derefs to `T` (mutably) and releases on drop.
 #[clippy::has_significant_drop]
 #[derive(Debug)]
 pub struct AsyncRwLockWriteGuard<'a, T: ?Sized> {
@@ -259,6 +295,7 @@ impl<T: ?Sized> std::ops::DerefMut for AsyncRwLockWriteGuard<'_, T> {
     }
 }
 
+/// Owned guard for exclusive write access; derefs to `T` (mutably) and releases on drop.
 #[clippy::has_significant_drop]
 #[derive(Debug)]
 pub struct AsyncRwLockWriteGuardArc<T: ?Sized> {

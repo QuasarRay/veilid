@@ -14,6 +14,9 @@ struct FanoutContext<'a> {
     ticker_stop_source: Option<StopSource>,
     /// Timestamp consensus was first reached
     consensus_reached_ts: Option<Timestamp>,
+    /// Timestamp of the most recent accepting disposition; before consensus the deadline
+    /// tracks a full timeout past this so fanout keeps converging while making progress
+    last_accepted_ts: Timestamp,
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -416,7 +419,11 @@ impl<'a> FanoutCall<'a> {
                         let mut context_locked = context.lock();
                         let cur_ts = Timestamp::now_non_decreasing();
 
-                        // Process disposition of the output of the fanout call routine
+                        // Process disposition of the output of the fanout call routine.
+                        // Any accepting disposition stamps last_accepted_ts, which resets the
+                        // pre-consensus deadline in run(): the accepted node's server-side state
+                        // is protected by a background keepalive, so it's safe to keep converging
+                        // toward closer nodes as long as we're still making progress.
                         match output.disposition {
                             FanoutCallDisposition::Timeout => {
                                 context_locked.fanout_queue.timeout(work_node, cur_ts);
@@ -426,14 +433,17 @@ impl<'a> FanoutCall<'a> {
                             }
                             FanoutCallDisposition::Accepted => {
                                 context_locked.fanout_queue.accepted(work_node, cur_ts);
+                                context_locked.last_accepted_ts = cur_ts;
                             }
                             FanoutCallDisposition::AcceptedNewerRestart => {
                                 context_locked.fanout_queue.all_accepted_to_queued(cur_ts);
                                 context_locked.fanout_queue.accepted(work_node, cur_ts);
+                                context_locked.last_accepted_ts = cur_ts;
                             }
                             FanoutCallDisposition::AcceptedNewer => {
                                 context_locked.fanout_queue.all_accepted_to_stale(cur_ts);
                                 context_locked.fanout_queue.accepted(work_node, cur_ts);
+                                context_locked.last_accepted_ts = cur_ts;
                             }
                             FanoutCallDisposition::Invalid => {
                                 context_locked.fanout_queue.disqualified(work_node, cur_ts);
@@ -492,6 +502,11 @@ impl<'a> FanoutCall<'a> {
                     let Some(snap) = opt_snap else {
                         return false;
                     };
+
+                    // Seed only from nodes we've actually reached; 'initial' (never-contacted) nodes are often dead in a cold table.
+                    if snap.state < BucketEntryState::Unreliable {
+                        return false;
+                    }
 
                     // Filter entries
                     let Some(peer_info) = snap.get_peer_info(RoutingDomain::PublicInternet) else {
@@ -552,7 +567,7 @@ impl<'a> FanoutCall<'a> {
                 self.consensus_width,
                 match fanout_queue_mode {
                     FanoutQueueMode::ThrottleAtConsensus => {
-                        let rpc_timeout_ms = self.config().network.rpc.timeout_ms;
+                        let rpc_timeout_ms = self.config().internal().network.rpc.timeout_ms;
                         Some(
                             TimestampDuration::new_ms(rpc_timeout_ms.into())
                                 .saturating_mul(THROTTLE_DURATION_PERCENT)
@@ -570,6 +585,7 @@ impl<'a> FanoutCall<'a> {
             done: FanoutDoneDisposition::NotDone,
             ticker_stop_source: Some(StopSource::new()),
             consensus_reached_ts: None,
+            last_accepted_ts: Timestamp::now_non_decreasing(),
         }));
 
         // Initialize closest nodes list
@@ -623,11 +639,23 @@ impl<'a> FanoutCall<'a> {
             unord.push(make_tick_future());
         }
 
-        // Effective deadline; shrinks once consensus is reached
+        // Effective deadline. Before consensus it tracks a full timeout past the last
+        // accepting disposition, so the fanout keeps converging on closer nodes while it's
+        // still making progress (accepted nodes are kept alive server-side by a background
+        // keepalive). After consensus it only shrinks (post_consensus_timeout_callback).
         let mut effective_deadline = Timestamp::now_non_decreasing().later(self.timeout);
         let inner_result: FanoutLoopResult = loop {
-            // Time remaining to the (possibly shrunken) deadline
             let now = Timestamp::now_non_decreasing();
+            // Pre-consensus: keep the deadline a full timeout past the last accept.
+            {
+                let ctx = context.lock();
+                if ctx.consensus_reached_ts.is_none() {
+                    let progress_deadline = ctx.last_accepted_ts.later(self.timeout);
+                    if progress_deadline > effective_deadline {
+                        effective_deadline = progress_deadline;
+                    }
+                }
+            }
             if now >= effective_deadline {
                 break FanoutLoopResult::DeadlineReached;
             }

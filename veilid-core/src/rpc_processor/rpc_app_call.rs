@@ -93,9 +93,9 @@ impl RPCProcessor {
         let app_call_q = match kind {
             RPCOperationKind::Question(q) => match q.destructure() {
                 (_, RPCQuestionDetail::AppCallQ(q)) => q,
-                _ => panic!("not an appcall question"),
+                _ => return Err(RPCError::internal("not an appcall question")),
             },
-            _ => panic!("not a question"),
+            _ => return Err(RPCError::internal("not a question")),
         };
 
         // Get the crypto kind used to send this question
@@ -107,7 +107,7 @@ impl RPCProcessor {
             .as_ref()
             .map(|nr| nr.node_ids().get(crypto_kind).unwrap_or_log());
 
-        #[cfg(not(feature = "footgun"))]
+        #[cfg(not(feature = "footgun-nodeid-target"))]
         {
             if sender.is_some() {
                 return Ok(NetworkResult::invalid_message(

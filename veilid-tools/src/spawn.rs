@@ -1,5 +1,6 @@
 use super::*;
 
+/// Run `x`, then yield once to the runtime before returning its result.
 pub async fn yielding<R, T: FnOnce() -> R>(x: T) -> R {
     let out = x();
     sleep(0).await;
@@ -10,6 +11,7 @@ cfg_if! {
     if #[cfg(feature="rt-wasm-bindgen")] {
         use async_executors::{Bindgen, LocalSpawnHandleExt, SpawnHandleExt};
 
+        /// Spawn a named future on the async runtime, returning a join handle that must be awaited or detached.
         pub fn spawn<Out>(_name: &str, future: impl Future<Output = Out> + Send + 'static) -> MustJoinHandle<Out>
         where
             Out: Send + 'static,
@@ -21,6 +23,7 @@ cfg_if! {
             )
         }
 
+        /// Spawn a named `!Send` future on the current thread, returning a join handle that must be awaited or detached.
         pub fn spawn_local<Out>(_name: &str, future: impl Future<Output = Out> + 'static) -> MustJoinHandle<Out>
         where
             Out: 'static,
@@ -32,6 +35,7 @@ cfg_if! {
             )
         }
 
+        /// Spawn a named future and let it run unattended, with no join handle.
         pub fn spawn_detached<Out>(_name: &str, future: impl Future<Output = Out> + Send + 'static)
         where
             Out: Send + 'static,
@@ -41,6 +45,7 @@ cfg_if! {
                 .expect_or_log("wasm-bindgen-futures spawn_handle_local should never error out")
                 .detach()
         }
+        /// Spawn a named `!Send` future on the current thread and let it run unattended, with no join handle.
         pub fn spawn_detached_local<Out>(_name: &str, future: impl Future<Output = Out> + 'static)
         where
             Out: 'static,
@@ -80,6 +85,7 @@ cfg_if! {
 
     } else {
 
+        /// Spawn a named future on the async runtime, returning a join handle that must be awaited or detached.
         pub fn spawn<Out>(name: &str, future: impl Future<Output = Out> + Send + 'static) -> MustJoinHandle<Out>
         where
             Out: Send + 'static,
@@ -96,6 +102,7 @@ cfg_if! {
             }
         }
 
+        /// Spawn a named `!Send` future on the current thread, returning a join handle that must be awaited or detached.
         pub fn spawn_local<Out>(name: &str, future: impl Future<Output = Out> + 'static) -> MustJoinHandle<Out>
         where
             Out: 'static,
@@ -112,6 +119,7 @@ cfg_if! {
             }
         }
 
+        /// Spawn a named future and let it run unattended, with no join handle.
         pub fn spawn_detached<Out>(name: &str, future: impl Future<Output = Out> + Send + 'static)
         where
             Out: Send + 'static,
@@ -128,6 +136,7 @@ cfg_if! {
             }
         }
 
+        /// Spawn a named `!Send` future on the current thread and let it run unattended, with no join handle.
         pub fn spawn_detached_local<Out>(name: &str,future: impl Future<Output = Out> + 'static)
         where
             Out: 'static,
@@ -144,6 +153,7 @@ cfg_if! {
             }
         }
 
+        /// Run a blocking closure on the runtime's dedicated blocking-thread pool and await its result.
         pub async fn blocking_wrapper<F, R>(blocking_task: F) -> R
         where
             F: FnOnce() -> R + Send + 'static,

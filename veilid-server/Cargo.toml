@@ -30,7 +30,8 @@ default-async-std = [
 ]
 
 geolocation = ["veilid-core/geolocation"]
-footgun = ["veilid-core/footgun"]
+footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
+footgun-settings = ["veilid-core/footgun-config"]
 
 rt-tokio = [
     "veilid-core/rt-tokio",
@@ -87,6 +88,7 @@ config = { version = "0.15.21", default-features = false, features = ["yaml"] }
 cfg-if = "1.0.0"
 serde = "1.0.218"
 serde_derive = "1.0.218"
+serde_ignored = "0.1.14"
 serde_yaml = { package = "serde_yaml_ng", version = "0.10.0" }
 serde_test = "1.0.177"
 json = "0.12.4"

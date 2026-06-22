@@ -91,6 +91,10 @@ export const config: Options.Testrunner = {
       // 'goog:loggingPrefs' is the runtime key chromedriver wants but isn't in wdio's
       // capability types, hence the cast.
       'goog:loggingPrefs': { browser: 'OFF' },
+      // Classic WebDriver only: heavy console output floods the BiDi mapper and
+      // starves wdio's health poll (hardcoded 60s timeout), killing the worker
+      // mid-suite. Console capture uses the vite websocket and is unaffected.
+      'wdio:enforceWebDriverClassic': true,
     } as WebdriverIO.Capabilities & { 'goog:loggingPrefs': { browser: string } },
   ],
 
@@ -174,7 +178,8 @@ export const config: Options.Testrunner = {
   // See the full list at http://mochajs.org/
   mochaOpts: {
     ui: 'bdd',
-    timeout: 240000,
+    // Also caps the whole spec file in the browser runner; STRESS suites run past 240s
+    timeout: (process.env.STRESS == '1' || process.env.STRESS == 'true') ? 600000 : 240000,
   },
   //
   // =====

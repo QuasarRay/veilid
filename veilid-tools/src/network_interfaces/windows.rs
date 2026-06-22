@@ -271,7 +271,9 @@ impl WindowsInterfaces {
             unsafe {
                 ifaddrs = libc::malloc(buffersize as size_t) as *mut IP_ADAPTER_ADDRESSES;
                 if ifaddrs.is_null() {
-                    panic!("Failed to allocate buffer in get_if_addrs()");
+                    return Err(io_error_other!(
+                        "Failed to allocate buffer in get_if_addrs()"
+                    ));
                 }
 
                 let retcode = GetAdaptersAddresses(

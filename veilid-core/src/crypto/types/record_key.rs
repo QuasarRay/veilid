@@ -1,5 +1,6 @@
 use super::*;
 
+/// Untyped DHT record key: an opaque record key with an optional record encryption secret.
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
 #[derive(Clone, Default, PartialOrd, Ord, PartialEq, Eq, Hash, GetSize)]
 #[must_use]
@@ -9,25 +10,29 @@ pub struct BareRecordKey {
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-make_wasm_bindgen_stubs!(BareRecordKey);
 impl_try_from_js_value!(BareRecordKey);
 
 impl BareRecordKey {
+    /// Builds a record key from an opaque record key and an optional encryption secret.
     pub fn new(key: BareOpaqueRecordKey, encryption_key: Option<BareSharedSecret>) -> Self {
         Self {
             key,
             encryption_key,
         }
     }
+    /// Returns a reference to the opaque record key.
     pub fn ref_key(&self) -> &BareOpaqueRecordKey {
         &self.key
     }
+    /// Returns a reference to the encryption secret, if present.
     pub fn ref_encryption_key(&self) -> Option<&BareSharedSecret> {
         self.encryption_key.as_ref()
     }
+    /// Clones out the opaque record key and optional encryption secret.
     pub fn split(&self) -> (BareOpaqueRecordKey, Option<BareSharedSecret>) {
         (self.key.clone(), self.encryption_key.clone())
     }
+    /// Consumes the key, returning the opaque record key and optional encryption secret.
     pub fn into_split(self) -> (BareOpaqueRecordKey, Option<BareSharedSecret>) {
         (self.key, self.encryption_key)
     }
@@ -40,9 +45,11 @@ impl BareRecordKey {
         all(target_arch = "wasm32", target_os = "unknown"),
         wasm_bindgen(getter)
     )]
+    /// Returns a clone of the opaque record key.
     pub fn key(&self) -> BareOpaqueRecordKey {
         self.key.clone()
     }
+    /// Returns a clone of the encryption secret, if present.
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         wasm_bindgen(getter, js_name = "encryptionKey")
@@ -50,6 +57,7 @@ impl BareRecordKey {
     pub fn encryption_key(&self) -> Option<BareSharedSecret> {
         self.encryption_key.clone()
     }
+    /// Encodes as `<key>` or `<key>:<encryption_key>`, each part base64url-nopad.
     pub fn encode(&self) -> String {
         if let Some(encryption_key) = &self.encryption_key {
             format!("{}:{}", self.key.encode(), encryption_key.encode())
@@ -61,6 +69,7 @@ impl BareRecordKey {
         all(target_arch = "wasm32", target_os = "unknown"),
         wasm_bindgen(getter, js_name = "encodedLen")
     )]
+    /// Returns the length of the `encode` string.
     pub fn encoded_len(&self) -> usize {
         if let Some(encryption_key) = &self.encryption_key {
             self.key.encoded_len() + 1 + encryption_key.encoded_len()
@@ -68,6 +77,10 @@ impl BareRecordKey {
             self.key.encoded_len()
         }
     }
+    /// Decodes from a `<key>` or `<key>:<encryption_key>` string.
+    ///
+    /// Errors with `VeilidAPIError::ParseError` if `input` has more than two colon-separated parts,
+    /// or `VeilidAPIError::Generic` if any part is not valid base64url-nopad.
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         wasm_bindgen(js_name = "tryDecode")
@@ -76,6 +89,10 @@ impl BareRecordKey {
         let b = input.as_bytes();
         Self::try_decode_bytes(b)
     }
+    /// Decodes from `<key>` or `<key>:<encryption_key>` bytes.
+    ///
+    /// Errors with `VeilidAPIError::ParseError` if `b` has more than two colon-separated parts,
+    /// or `VeilidAPIError::Generic` if any part is not valid base64url-nopad.
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         wasm_bindgen(js_name = "tryDecodeBytes")
@@ -129,6 +146,8 @@ impl From<&BareRecordKey> for String {
 impl FromStr for BareRecordKey {
     type Err = VeilidAPIError;
 
+    /// Errors with `VeilidAPIError::ParseError` if `s` has more than two colon-separated parts,
+    /// or `VeilidAPIError::Generic` if any part is not valid base64url-nopad.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         BareRecordKey::try_from(s)
     }
@@ -174,6 +193,7 @@ impl<'de> serde::Deserialize<'de> for BareRecordKey {
 ////////////////////////////////////////////////////////////////////////////
 
 impl RecordKey {
+    /// Builds a record key from an opaque record key and an optional encryption secret, keeping its kind.
     pub fn from_opaque(
         opaque_record_key: OpaqueRecordKey,
         encryption_key: Option<BareSharedSecret>,
@@ -183,9 +203,11 @@ impl RecordKey {
             BareRecordKey::new(opaque_record_key.into_value(), encryption_key),
         )
     }
+    /// Returns the kinded opaque record key, dropping any encryption secret.
     pub fn opaque(&self) -> OpaqueRecordKey {
         OpaqueRecordKey::new(self.kind, self.ref_value().key())
     }
+    /// Consumes the key, returning the kinded opaque record key and optional encryption secret.
     pub fn into_split(self) -> (OpaqueRecordKey, Option<SharedSecret>) {
         let kind = self.kind;
         let (bork, bss) = self.into_value().into_split();
@@ -203,6 +225,7 @@ impl RecordKey {
         all(target_arch = "wasm32", target_os = "unknown"),
         wasm_bindgen(getter, js_name = "encryptionKey")
     )]
+    /// Returns the kinded encryption secret, if present.
     pub fn encryption_key(&self) -> Option<SharedSecret> {
         self.ref_value()
             .encryption_key()

@@ -94,7 +94,11 @@ impl PublicInternetRoutingDomainDetail {
     }
 
     pub fn make_relay_node_filter(&self) -> impl Fn(&BucketEntrySnapshot) -> bool {
-        let ip6_prefix_size = self.config().network.max_connections_per_ip6_prefix_size as usize;
+        let ip6_prefix_size = self
+            .config()
+            .internal()
+            .network
+            .max_connections_per_ip6_prefix_size as usize;
 
         // Get all our outbound protocol/address types
         let outbound_dif = self.outbound_dial_info_filter();
@@ -103,6 +107,11 @@ impl PublicInternetRoutingDomainDetail {
         let own_peer_info = self.get_peer_info();
 
         move |snap: &BucketEntrySnapshot| {
+            // Defensively exclude nodes that aren't responsive
+            if !snap.state.is_responsive() {
+                return false;
+            }
+
             // Ensure this node is not on the local network
             if snap
                 .routing_domain_set()
@@ -117,7 +126,7 @@ impl PublicInternetRoutingDomainDetail {
             }
 
             // Exclude nodes whose past protected connections died too fast.
-            if let Some(drop_stats) = &snap.peer_stats.protected_connection_drop {
+            if let Some(drop_stats) = &snap.connection_stats.protected_drop_span {
                 if drop_stats.tm90 < RELAY_MIN_PROTECTED_CONNECTION_TM90 {
                     return false;
                 }
@@ -156,13 +165,6 @@ impl PublicInternetRoutingDomainDetail {
                 return false;
             }
 
-            // Only select relays we have tested and proven reachable. A failed send
-            // clears the consecutive-seen timestamp, so this also drops a relay as
-            // soon as we can no longer reach it.
-            if !snap.is_tested() {
-                return false;
-            }
-
             // Ensure a transport we can reach this relay through is currently healthy.
             let mut has_reachable_transport = false;
             for did in peer_info.node_info().dial_info_detail_list() {
@@ -172,9 +174,12 @@ impl PublicInternetRoutingDomainDetail {
                 if !did.dial_info.matches_filter(&outbound_dif) {
                     continue;
                 }
-                let t: LowLevelTransportType = (&did.dial_info).into();
-                let healthy = snap.per_transport.get(&t).is_some_and(|pt| {
-                    pt.state != BucketEntryTransportState::Dead && pt.failed_to_send == 0
+                let t: TransportType = (&did.dial_info).into();
+                let healthy = snap.per_transport.get(&t).is_some_and(|stats| {
+                    stats.first_steady_answer_ts.is_some()
+                        && stats.unreachable == 0
+                        && stats.failed_to_send == 0
+                        && stats.recent_lost_questions == 0
                 });
                 if healthy {
                     has_reachable_transport = true;

@@ -16,6 +16,7 @@ mod routing_domain;
 mod routing_domain_health;
 mod routing_domain_network_config;
 mod routing_table_health;
+mod stats;
 
 use super::*;
 
@@ -37,3 +38,4 @@ pub use routing_domain::*;
 pub use routing_domain_health::*;
 pub use routing_domain_network_config::*;
 pub use routing_table_health::*;
+pub use stats::*;

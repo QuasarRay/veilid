@@ -20,6 +20,7 @@ use range_set_blaze::*;
     derive(Tsify),
     tsify(from_wasm_abi, into_wasm_abi)
 )]
+/// A set of DHT subkeys stored as inclusive ranges of [ValueSubkey]
 #[serde(transparent)]
 #[must_use]
 pub struct ValueSubkeyRangeSet {
@@ -34,51 +35,62 @@ pub struct ValueSubkeyRangeSet {
 }
 
 impl ValueSubkeyRangeSet {
+    /// An empty set
     pub fn new() -> Self {
         Self {
             data: Default::default(),
         }
     }
+    /// A set covering every subkey from `u32::MIN` to `u32::MAX` inclusive
     pub fn full() -> Self {
         let mut data = RangeSetBlaze::new();
         data.ranges_insert(u32::MIN..=u32::MAX);
         Self { data }
     }
+    /// A set wrapping an existing range collection
     pub fn new_with_data(data: RangeSetBlaze<ValueSubkey>) -> Self {
         Self { data }
     }
+    /// A set containing one subkey
     pub fn single(value: ValueSubkey) -> Self {
         let mut data = RangeSetBlaze::new();
         data.insert(value);
         Self { data }
     }
+    /// A set containing the inclusive range `low..=high`
     pub fn single_range(low: ValueSubkey, high: ValueSubkey) -> Self {
         let mut data = RangeSetBlaze::new();
         data.ranges_insert(low..=high);
         Self { data }
     }
 
+    /// The subkeys present in both this set and `other`
     pub fn intersect(&self, other: &ValueSubkeyRangeSet) -> ValueSubkeyRangeSet {
         Self::new_with_data(&self.data & &other.data)
     }
+    /// The subkeys in this set that are not in `other`
     pub fn difference(&self, other: &ValueSubkeyRangeSet) -> ValueSubkeyRangeSet {
         Self::new_with_data(&self.data - &other.data)
     }
+    /// The subkeys present in either this set or `other`
     pub fn union(&self, other: &ValueSubkeyRangeSet) -> ValueSubkeyRangeSet {
         Self::new_with_data(&self.data | &other.data)
     }
 
+    /// The count of subkeys in the set
     #[must_use]
     #[allow(clippy::unnecessary_cast)]
     pub fn len(&self) -> u64 {
         self.data.len() as u64
     }
 
+    /// True if the set contains no subkeys
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
+    /// True if the set covers the entire `u32::MIN..=u32::MAX` range, as produced by [ValueSubkeyRangeSet::full]
     #[must_use]
     pub fn is_full(&self) -> bool {
         self.data.ranges_len() == 1
@@ -86,15 +98,18 @@ impl ValueSubkeyRangeSet {
             && self.data.last().unwrap_or_log() == u32::MAX
     }
 
+    /// The underlying range collection, by reference
     #[must_use]
     pub fn data(&self) -> &RangeSetBlaze<ValueSubkey> {
         &self.data
     }
+    /// Consume the set and return the underlying range collection
     #[must_use]
     pub fn into_data(self) -> RangeSetBlaze<ValueSubkey> {
         self.data
     }
 
+    /// The subkey at position `idx` in ascending order, or `None` if `idx` is out of bounds
     #[must_use]
     pub fn nth_subkey(&self, idx: usize) -> Option<ValueSubkey> {
         let mut idxleft = idx;
@@ -108,6 +123,7 @@ impl ValueSubkeyRangeSet {
         None
     }
 
+    /// The ascending-order position of `subkey` in the set, or `None` if it is not present
     #[must_use]
     pub fn idx_of_subkey(&self, subkey: ValueSubkey) -> Option<usize> {
         let mut idx = 0usize;
@@ -126,6 +142,8 @@ impl ValueSubkeyRangeSet {
 impl FromStr for ValueSubkeyRangeSet {
     type Err = VeilidAPIError;
 
+    /// Errors with `VeilidAPIError::ParseError` if any comma-separated element lacks a `..=`
+    /// separator or either endpoint is not a valid [ValueSubkey].
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let mut data = RangeSetBlaze::<ValueSubkey>::new();
 

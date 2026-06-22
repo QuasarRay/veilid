@@ -5,6 +5,9 @@ cfg_if! {
     if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
         use async_executors::{Bindgen, Timer, YieldNow};
 
+        /// Suspend the current task for `millis` milliseconds; `0` yields once without sleeping.
+        ///
+        /// Abstracts over the async runtime (tokio, async-std, wasm).
         pub async fn sleep(millis: u32) {
             if millis == 0 {
                 Bindgen.yield_now().await;
@@ -15,6 +18,9 @@ cfg_if! {
 
     } else {
 
+        /// Suspend the current task for `millis` milliseconds; `0` yields once without sleeping.
+        ///
+        /// Abstracts over the async runtime (tokio, async-std, wasm).
         pub async fn sleep(millis: u32) {
             if millis == 0 {
                 cfg_if! {

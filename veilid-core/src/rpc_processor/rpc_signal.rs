@@ -68,9 +68,9 @@ impl RPCProcessor {
         let signal = match kind {
             RPCOperationKind::Statement(s) => match s.destructure() {
                 RPCStatementDetail::Signal(s) => s,
-                _ => panic!("not a signal"),
+                _ => return Ok(NetworkResult::invalid_message("not a signal")),
             },
-            _ => panic!("not a statement"),
+            _ => return Ok(NetworkResult::invalid_message("not a statement")),
         };
 
         // Handle it

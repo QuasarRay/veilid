@@ -68,7 +68,7 @@ impl RPCProcessor {
         // Get destination respond_to
         let respond_to = match self.get_destination_respond_to(&dest).await? {
             NetworkResult::Value(v) => v,
-            other => return Ok(StatusResult::NotSent(other.map(|_| unreachable!()))),
+            other => return Ok(StatusResult::NotSent(other.map(|_| ()))),
         };
 
         // Create status rpc question
@@ -86,7 +86,11 @@ impl RPCProcessor {
 
         // Note what kind of ping this was and to what peer scope
         let send_direct_dial_info = waitable_reply.context.send_data_result.direct_dial_info();
-        let send_unique_flow = waitable_reply.context.send_data_result.unique_flow();
+        let Some(send_unique_flow) = waitable_reply.context.send_data_result.unique_flow() else {
+            return Err(RPCError::internal(
+                "status question sent without a unique flow",
+            ));
+        };
 
         // Snapshot send_data_result for the return value (NCM is Clone; success-path NR is
         // Value(UniqueFlow) which is Copy)
@@ -192,9 +196,9 @@ impl RPCProcessor {
         let status_q = match kind {
             RPCOperationKind::Question(q) => match q.destructure() {
                 (_, RPCQuestionDetail::StatusQ(q)) => q,
-                _ => panic!("not a status question"),
+                _ => return Ok(NetworkResult::invalid_message("not a status question")),
             },
-            _ => panic!("not a question"),
+            _ => return Ok(NetworkResult::invalid_message("not a question")),
         };
         let q_node_status = status_q.destructure();
 

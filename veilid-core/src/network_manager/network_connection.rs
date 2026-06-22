@@ -526,8 +526,9 @@ impl NetworkConnection {
                         break;
                     }
                     Ok(None) => {
-                        // Should not happen
-                        unreachable!();
+                        // FuturesUnordered empty: should not happen, log and exit loop
+                        veilid_log!(registry error "connection processor futures unordered unexpectedly empty");
+                        break;
                     }
                     Err(_) => {
                         // Either one of the stop tokens

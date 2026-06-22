@@ -3,8 +3,13 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 //////////////////////////////////////
 /// VeilidAPIException
 
+/// Base type for all exceptions thrown by the Veilid API. Each subtype
+/// corresponds to a variant of the Rust `VeilidAPIError`.
 @immutable
 abstract class VeilidAPIException implements Exception {
+  /// Build the concrete exception subtype from its serialized `kind` tag.
+  ///
+  /// Throws [VeilidAPIExceptionInternal] if `kind` is not a recognized variant.
   factory VeilidAPIException.fromJson(dynamic j) {
     final json = j as Map<String, dynamic>;
     switch (json['kind']! as String) {
@@ -81,9 +86,11 @@ abstract class VeilidAPIException implements Exception {
     }
   }
 
+  /// Human-readable message suitable for display to an end user.
   String toDisplayError();
 }
 
+/// Thrown when the API is used before Veilid was started or after it detached.
 @immutable
 class VeilidAPIExceptionNotInitialized implements VeilidAPIException {
   @override
@@ -93,6 +100,7 @@ class VeilidAPIExceptionNotInitialized implements VeilidAPIException {
   String toDisplayError() => 'Not initialized';
 }
 
+/// Thrown when Veilid is initialized while it is already running.
 @immutable
 class VeilidAPIExceptionAlreadyInitialized implements VeilidAPIException {
   @override
@@ -102,6 +110,7 @@ class VeilidAPIExceptionAlreadyInitialized implements VeilidAPIException {
   String toDisplayError() => 'Already initialized';
 }
 
+/// Thrown when an operation did not complete within its time budget.
 @immutable
 class VeilidAPIExceptionTimeout implements VeilidAPIException {
   @override
@@ -111,11 +120,13 @@ class VeilidAPIExceptionTimeout implements VeilidAPIException {
   String toDisplayError() => 'Timeout';
 }
 
+/// Thrown when an operation could not complete yet and should be retried later.
 @immutable
 class VeilidAPIExceptionTryAgain implements VeilidAPIException {
+  /// Why the operation could not complete this time.
   final String message;
 
-  //
+  /// Construct with the reason the operation could not complete.
   const VeilidAPIExceptionTryAgain(this.message);
 
   @override
@@ -125,6 +136,7 @@ class VeilidAPIExceptionTryAgain implements VeilidAPIException {
   String toDisplayError() => 'Try again: (message: $message)';
 }
 
+/// Thrown when the API is shutting down and can no longer service requests.
 @immutable
 class VeilidAPIExceptionShutdown implements VeilidAPIException {
   @override
@@ -134,11 +146,13 @@ class VeilidAPIExceptionShutdown implements VeilidAPIException {
   String toDisplayError() => 'Currently shut down';
 }
 
+/// Thrown when the destination for an operation is unreachable or malformed.
 @immutable
 class VeilidAPIExceptionInvalidTarget implements VeilidAPIException {
+  /// Details about the unreachable or malformed target.
   final String message;
 
-  //
+  /// Construct with details about the bad target.
   const VeilidAPIExceptionInvalidTarget(this.message);
 
   @override
@@ -148,11 +162,13 @@ class VeilidAPIExceptionInvalidTarget implements VeilidAPIException {
   String toDisplayError() => 'Invalid target: (message: $message)';
 }
 
+/// Thrown when no network connection could be established for the operation.
 @immutable
 class VeilidAPIExceptionNoConnection implements VeilidAPIException {
+  /// Details about the connection failure.
   final String message;
 
-  //
+  /// Construct with details about the connection failure.
   const VeilidAPIExceptionNoConnection(this.message);
 
   @override
@@ -162,11 +178,13 @@ class VeilidAPIExceptionNoConnection implements VeilidAPIException {
   String toDisplayError() => 'No connection: $message';
 }
 
+/// Thrown when a requested DHT record key is not present in local storage.
 @immutable
 class VeilidAPIExceptionKeyNotFound implements VeilidAPIException {
+  /// The record key that was not found.
   final String key;
 
-  //
+  /// Construct with the record key that was not found.
   const VeilidAPIExceptionKeyNotFound(this.key);
 
   @override
@@ -176,11 +194,13 @@ class VeilidAPIExceptionKeyNotFound implements VeilidAPIException {
   String toDisplayError() => 'Key not found: $key';
 }
 
+/// Thrown when an internal invariant was violated, indicating a bug in Veilid.
 @immutable
 class VeilidAPIExceptionInternal implements VeilidAPIException {
+  /// Details about the internal failure.
   final String message;
 
-  //
+  /// Construct with details about the internal failure.
   const VeilidAPIExceptionInternal(this.message);
 
   @override
@@ -190,11 +210,14 @@ class VeilidAPIExceptionInternal implements VeilidAPIException {
   String toDisplayError() => 'Internal error: $message';
 }
 
+/// Thrown when a feature exists in the API surface but is not implemented on
+/// this platform or build.
 @immutable
 class VeilidAPIExceptionUnimplemented implements VeilidAPIException {
+  /// Which functionality is unimplemented.
   final String message;
 
-  //
+  /// Construct with the name of the unimplemented functionality.
   const VeilidAPIExceptionUnimplemented(this.message);
 
   @override
@@ -204,12 +227,16 @@ class VeilidAPIExceptionUnimplemented implements VeilidAPIException {
   String toDisplayError() => 'Unimplemented: $message';
 }
 
+/// Thrown when a value could not be parsed into its expected form.
 @immutable
 class VeilidAPIExceptionParseError implements VeilidAPIException {
+  /// What went wrong while parsing.
   final String message;
+
+  /// The input value that failed to parse.
   final String value;
 
-  //
+  /// Construct with the parse failure reason and the offending value.
   const VeilidAPIExceptionParseError(this.message, this.value);
 
   @override
@@ -220,13 +247,19 @@ class VeilidAPIExceptionParseError implements VeilidAPIException {
   String toDisplayError() => 'Parse error: $message';
 }
 
+/// Thrown when an argument was supplied but its value was rejected.
 @immutable
 class VeilidAPIExceptionInvalidArgument implements VeilidAPIException {
+  /// The calling context that rejected the argument.
   final String context;
+
+  /// The name of the offending argument.
   final String argument;
+
+  /// The rejected value.
   final String value;
 
-  //
+  /// Construct with the calling context, argument name, and rejected value.
   const VeilidAPIExceptionInvalidArgument(
       this.context, this.argument, this.value);
 
@@ -238,12 +271,16 @@ class VeilidAPIExceptionInvalidArgument implements VeilidAPIException {
   String toDisplayError() => 'Invalid argument for $context: $argument';
 }
 
+/// Thrown when a required argument was not supplied.
 @immutable
 class VeilidAPIExceptionMissingArgument implements VeilidAPIException {
+  /// The calling context that required the argument.
   final String context;
+
+  /// The name of the missing argument.
   final String argument;
 
-  //
+  /// Construct with the calling context and the name of the missing argument.
   const VeilidAPIExceptionMissingArgument(this.context, this.argument);
 
   @override
@@ -254,11 +291,13 @@ class VeilidAPIExceptionMissingArgument implements VeilidAPIException {
   String toDisplayError() => 'Missing argument for $context: $argument';
 }
 
+/// Thrown for a failure that does not fit any more specific category.
 @immutable
 class VeilidAPIExceptionGeneric implements VeilidAPIException {
+  /// Details about the failure.
   final String message;
 
-  //
+  /// Construct with details about the failure.
   const VeilidAPIExceptionGeneric(this.message);
 
   @override
@@ -268,11 +307,14 @@ class VeilidAPIExceptionGeneric implements VeilidAPIException {
   String toDisplayError() => message;
 }
 
+/// Thrown when a referenced DHT transaction does not exist, having expired or
+/// never been opened.
 @immutable
 class VeilidAPIExceptionTransactionNotFound implements VeilidAPIException {
+  /// Details about the missing transaction.
   final String message;
 
-  //
+  /// Construct with details about the missing transaction.
   const VeilidAPIExceptionTransactionNotFound(this.message);
 
   @override

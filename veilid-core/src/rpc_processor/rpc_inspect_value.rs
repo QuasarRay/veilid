@@ -192,9 +192,9 @@ impl RPCProcessor {
         let inspect_value_q = match kind {
             RPCOperationKind::Question(q) => match q.destructure() {
                 (_, RPCQuestionDetail::InspectValueQ(q)) => q,
-                _ => panic!("not a inspectvalue question"),
+                _ => return Err(RPCError::internal("not an inspectvalue question")),
             },
-            _ => panic!("not a question"),
+            _ => return Err(RPCError::internal("not a question")),
         };
 
         // Destructure
@@ -221,7 +221,7 @@ impl RPCProcessor {
         }
 
         // See if this is within the consensus width
-        let consensus_width = self.config().network.dht.consensus_width as usize;
+        let consensus_width = self.config().internal().network.dht.consensus_width as usize;
 
         let (accepted, inspect_result_seqs, inspect_result_descriptor) =
             if closer_to_key_peers.len() >= consensus_width {

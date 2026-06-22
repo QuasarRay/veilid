@@ -128,7 +128,7 @@ impl<T> RPCErrorIgnoreOk<T> for Result<T, RPCError> {
     }
 }
 
-#[macro_export]
+/// Returns an `RPCError::Ignore` from the enclosing function if the capnp reader lacks `$propname`.
 macro_rules! rpc_ignore_missing_property {
     ($reader:expr, $propname:tt) => {
         pastey::paste! {
@@ -138,8 +138,9 @@ macro_rules! rpc_ignore_missing_property {
         }
     };
 }
+pub(crate) use rpc_ignore_missing_property;
 
-#[macro_export]
+/// Returns the reader's length, or an `RPCError::Ignore` from the enclosing function if it exceeds `$max_len`.
 macro_rules! rpc_ignore_max_len {
     ($reader:expr, $max_len:expr) => {{
         let _len = $reader.len() as usize;
@@ -153,8 +154,9 @@ macro_rules! rpc_ignore_max_len {
         _len
     }};
 }
+pub(crate) use rpc_ignore_max_len;
 
-#[macro_export]
+/// Returns the reader's length, or an `RPCError::Ignore` from the enclosing function if it falls outside `[$min_len, $max_len]`.
 macro_rules! rpc_ignore_min_max_len {
     ($reader:expr, $min_len:expr, $max_len:expr) => {{
         let _len = $reader.len() as usize;
@@ -175,3 +177,4 @@ macro_rules! rpc_ignore_min_max_len {
         _len
     }};
 }
+pub(crate) use rpc_ignore_min_max_len;

@@ -28,26 +28,32 @@ impl fmt::Display for AtomicOptionTimestamp {
 }
 
 impl AtomicOptionTimestamp {
+    /// Make an atomic optional timestamp set to the given value.
     pub fn new(opt_ts: Option<Timestamp>) -> Self {
         Self(AtomicU64::new(opt_ts.map(|t| t.as_u64()).unwrap_or(0)))
     }
 
+    /// Make an atomic optional timestamp set to none.
     pub fn none() -> Self {
         Self(AtomicU64::new(0))
     }
 
+    /// Make an atomic optional timestamp set to the current time.
     pub fn now() -> Self {
         Self::new(Some(Timestamp::now()))
     }
 
+    /// Make an atomic optional timestamp set to the current non-decreasing time.
     pub fn now_non_decreasing() -> Self {
         Self::new(Some(Timestamp::now_non_decreasing()))
     }
 
+    /// Make an atomic optional timestamp set to the current increasing time.
     pub fn now_increasing() -> Self {
         Self::new(Some(Timestamp::now_increasing()))
     }
 
+    /// Load the optional timestamp.
     pub fn get(&self) -> Option<Timestamp> {
         let ts = self.0.load(Ordering::Acquire);
         if ts == 0 {
@@ -57,9 +63,22 @@ impl AtomicOptionTimestamp {
         }
     }
 
+    /// Store the optional timestamp.
     pub fn set(&self, opt_t: Option<Timestamp>) {
         self.0
             .store(opt_t.map(|t| t.as_u64()).unwrap_or(0), Ordering::Release);
+    }
+
+    /// Store the optional timestamp and return the previous value.
+    pub fn swap(&self, opt_t: Option<Timestamp>) -> Option<Timestamp> {
+        let old_ts = self
+            .0
+            .swap(opt_t.map(|t| t.as_u64()).unwrap_or(0), Ordering::AcqRel);
+        if old_ts == 0 {
+            None
+        } else {
+            Some(Timestamp::new(old_ts))
+        }
     }
 
     /// Fetch and update the optional timestamp atomically

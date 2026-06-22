@@ -253,8 +253,8 @@ enum DebugRouteSubcommand {
     #[command(help_template = DEBUG_HELP_TEMPLATE)]
     Allocate {
         /// Optional allocation arguments in any order:
-        /// - sequencing: `ord`, `*ord`, `pre`, `*pre`, `no`, `*no`
-        /// - stability: `rel` or `lowlat`
+        /// - sequencing: `ord`, `ord!`, `uno`
+        /// - stability: `rel` or `low`
         /// - hop count: positive integer
         /// - direction: `in` or `out`
         #[arg(allow_hyphen_values = true, value_name = "allocate_arg")]
@@ -330,9 +330,12 @@ enum DebugRecordSubcommand {
         /// Scope to purge (`local` or `remote`).
         #[arg(value_name = "scope")]
         scope: String,
-        /// Optional byte target to purge down to.
-        #[arg(value_name = "bytes")]
+        /// Optional byte target to purge down to. Conflicts with `--keys`.
+        #[arg(value_name = "bytes", group = "target")]
         bytes: Option<u64>,
+        /// Optional comma-delimited list of record keys to purge. No spaces allowed, conflicts with `bytes`.
+        #[arg(long, value_name = "keys", value_delimiter = ',', group = "target")]
+        keys: Option<Vec<String>>,
     },
     /// Create a new DHT record.
     #[command(help_template = DEBUG_HELP_TEMPLATE)]
@@ -820,7 +823,7 @@ fn get_safety_selection(
             let mut preferred_route = None;
             let mut hop_count = default_route_hop_count;
             let mut stability = Stability::Reliable;
-            let mut sequencing = Sequencing::NoPreference;
+            let mut sequencing = Sequencing::PreferUnordered;
             for x in text.split(',') {
                 let x = x.trim();
                 if let Some(pr) = get_route_id(registry.clone(), true, false)(x) {
@@ -850,7 +853,7 @@ fn get_safety_selection(
 
 fn get_node_ref_modifiers(node_ref: NodeRef) -> impl FnOnce(&str) -> Option<FilteredNodeRef> {
     move |text| {
-        let mut node_ref = node_ref.sequencing_filtered(Sequencing::NoPreference);
+        let mut node_ref = node_ref.sequencing_filtered(Sequencing::PreferUnordered);
         for m in text.split('/') {
             if let Some(pt) = get_protocol_type(m) {
                 node_ref.merge_filter(NodeRefFilter::new().with_protocol_type(pt));
@@ -982,7 +985,7 @@ fn resolve_filtered_node_ref(
             if let Some(mods) = mods {
                 Some(get_node_ref_modifiers(nr)(mods)?)
             } else {
-                Some(nr.sequencing_filtered(Sequencing::NoPreference))
+                Some(nr.sequencing_filtered(Sequencing::PreferUnordered))
             }
         })
     }
@@ -1188,7 +1191,7 @@ impl VeilidAPI {
     }
 
     fn debug_entries(&self, args: Vec<String>) -> VeilidAPIResult<String> {
-        let mut min_state = BucketEntryState::Unreliable;
+        let mut min_state = BucketEntryState::Missing;
         let mut capabilities = vec![];
         let mut fastest = false;
         for arg in args {
@@ -1242,7 +1245,7 @@ impl VeilidAPI {
                 "node_id",
                 resolve_node_ref(
                     registry.clone(),
-                    SafetySelection::Unsafe(Sequencing::NoPreference),
+                    SafetySelection::Unsafe(Sequencing::PreferUnordered),
                 ),
             )
             .await
@@ -1435,8 +1438,10 @@ impl VeilidAPI {
                 ) {
                     apibail_internal!("Must be detached to purge");
                 }
-                registry.routing_table().purge_buckets();
-                Ok("Buckets purged".to_owned())
+                match registry.routing_table().purge_buckets().await {
+                    Ok(_) => Ok("Buckets purged".to_owned()),
+                    Err(e) => Ok(format!("{}", e)),
+                }
             }
             DebugPurgeSubcommand::Connections => {
                 // Purge connection table
@@ -1463,7 +1468,7 @@ impl VeilidAPI {
                 });
                 match registry.routing_table().route_spec_store().purge().await {
                     Ok(_) => Ok("Routes purged".to_owned()),
-                    Err(e) => Ok(format!("Routes purged but failed to save: {}", e)),
+                    Err(e) => Ok(format!("{}", e)),
                 }
             }
         }
@@ -1698,7 +1703,7 @@ impl VeilidAPI {
     }
 
     async fn debug_route_allocate(&self, args: Vec<String>) -> VeilidAPIResult<String> {
-        // [ord|*ord] [rel] [<count>] [in|out] [avoid_node_id]
+        // [uno|ord|ord!] [rel] [<count>] [in|out] [avoid_node_id]
 
         let registry = self.core_context()?.registry();
         let routing_table = registry.routing_table();
@@ -1873,7 +1878,12 @@ impl VeilidAPI {
             "route_id",
             get_route_id(registry.clone(), true, true),
         ) {
-            Ok(rss.debug_route_by_id(&route_id))
+            // Content (persisted spec) view plus the cache view with live route stats
+            Ok(format!(
+                "{}\n{}",
+                rss.debug_route_by_id(&route_id),
+                rss.display_route_by_id(&route_id)
+            ))
         } else if let Ok(route_key) = get_debug_argument_at(
             &args,
             0,
@@ -2024,7 +2034,11 @@ impl VeilidAPI {
         Ok(out)
     }
 
-    async fn debug_record_purge(&self, args: Vec<String>) -> VeilidAPIResult<String> {
+    async fn debug_record_purge_bytes(
+        &self,
+        scope: String,
+        bytes: Option<u64>,
+    ) -> VeilidAPIResult<String> {
         // <local|remote> [bytes]
         let registry = self.core_context()?.registry();
         let storage_manager = registry.storage_manager();
@@ -2034,11 +2048,40 @@ impl VeilidAPI {
         });
         storage_manager.close_all_records().await?;
 
-        let scope = get_debug_argument_at(&args, 0, "debug_record_purge", "scope", get_string)?;
-        let bytes = get_debug_argument_at(&args, 1, "debug_record_purge", "bytes", get_number).ok();
         let out = match scope.as_str() {
-            "local" => storage_manager.purge_local_records(bytes).await,
-            "remote" => storage_manager.purge_remote_records(bytes).await,
+            "local" => storage_manager.purge_local_records_by_bytes(bytes).await,
+            "remote" => storage_manager.purge_remote_records_by_bytes(bytes).await,
+            _ => "Invalid scope\n".to_owned(),
+        };
+        Ok(out)
+    }
+
+    async fn debug_record_purge_keys(
+        &self,
+        scope: String,
+        keys: Vec<String>,
+    ) -> VeilidAPIResult<String> {
+        // <local|remote> [bytes]
+        let registry = self.core_context()?.registry();
+        let storage_manager = registry.storage_manager();
+
+        self.with_debug_cache(|dc| {
+            dc.opened_record_contexts.clear();
+        });
+        storage_manager.close_all_records().await?;
+
+        let keys = keys
+            .iter()
+            .map(|k| {
+                RecordKey::from_str(k)
+                    .map(|rk| rk.opaque())
+                    .or_else(|_| OpaqueRecordKey::from_str(k))
+            })
+            .collect::<Result<Vec<OpaqueRecordKey>, VeilidAPIError>>()?;
+
+        let out = match scope.as_str() {
+            "local" => storage_manager.purge_local_records_by_keys(keys).await,
+            "remote" => storage_manager.purge_remote_records_by_keys(keys).await,
             _ => "Invalid scope\n".to_owned(),
         };
         Ok(out)
@@ -2416,7 +2459,7 @@ impl VeilidAPI {
 
         // Do a record watch
         let active = match rc
-            .watch_dht_values(key, subkeys, opt_expiration, count, None)
+            .watch_dht_values(key, subkeys, opt_expiration, count)
             .await
         {
             Err(e) => {
@@ -2562,8 +2605,9 @@ impl VeilidAPI {
         storage_manager.add_rehydration_request(
             key.opaque(),
             subkeys.unwrap_or_default(),
-            consensus_count
-                .unwrap_or_else(|| registry.config().network.dht.set_value_count as usize),
+            consensus_count.unwrap_or_else(|| {
+                registry.config().internal().network.dht.set_value_count as usize
+            }),
         );
 
         Ok("Request added".to_owned())
@@ -2579,12 +2623,12 @@ impl VeilidAPI {
 
         match command {
             DebugRecordSubcommand::List { scope } => self.debug_record_list(vec![scope]),
-            DebugRecordSubcommand::Purge { scope, bytes } => {
-                let mut args = vec![scope];
-                if let Some(bytes) = bytes {
-                    args.push(bytes.to_string());
+            DebugRecordSubcommand::Purge { scope, bytes, keys } => {
+                if let Some(keys) = keys {
+                    self.debug_record_purge_keys(scope, keys).await
+                } else {
+                    self.debug_record_purge_bytes(scope, bytes).await
                 }
-                self.debug_record_purge(args).await
             }
             DebugRecordSubcommand::Create {
                 dht_schema,
@@ -2875,7 +2919,13 @@ impl VeilidAPI {
 
     /// Get the help text for 'internal debug' commands.
     pub fn debug_help(&self) -> VeilidAPIResult<String> {
-        Ok(render_parser_help::<DebugCommandParser>())
+        let out = render_parser_help::<DebugCommandParser>();
+        let out = out
+            .lines()
+            .map(|line| line.trim().to_string())
+            .collect::<Vec<String>>()
+            .join("\n");
+        Ok(out)
     }
 
     /// Get node uptime info.
@@ -2973,7 +3023,7 @@ impl VeilidAPI {
             let argv_parts = shell_words::split(&args)
                 .map_err(|e| VeilidAPIError::parse_error(e.to_string(), args))?;
 
-            if argv_parts.is_empty() {
+            if argv_parts.is_empty() || argv_parts.len() == 1 && argv_parts[0] == "help" {
                 return self.debug_help();
             }
 
@@ -3109,7 +3159,7 @@ impl VeilidAPI {
                     let target_nr = resolve_filtered_node_ref(
                         registry.clone(),
                         ss.clone()
-                            .unwrap_or(SafetySelection::Unsafe(Sequencing::NoPreference)),
+                            .unwrap_or(SafetySelection::Unsafe(Sequencing::PreferUnordered)),
                     )(text)
                     .await?;
 

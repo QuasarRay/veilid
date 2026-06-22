@@ -16,11 +16,17 @@ enum IpcStreamInternal {
     Server(NamedPipeServer),
 }
 
+/// A bidirectional IPC connection. Backed by a Windows named pipe.
 pub struct IpcStream {
     internal: IpcStreamInternal,
 }
 
 impl IpcStream {
+    /// Connect to the IPC endpoint at `path`.
+    ///
+    /// Opens the named pipe synchronously; does not block waiting for the server.
+    ///
+    /// Errors with the underlying pipe open failure: `NotFound` if no pipe exists at `path`, the OS error for `ERROR_PIPE_BUSY` if every server instance is already connected.
     #[expect(clippy::unused_async)]
     pub async fn connect<P: AsRef<Path>>(path: P) -> io::Result<IpcStream> {
         Ok(IpcStream {
@@ -115,6 +121,7 @@ impl FuturesAsyncWrite for IpcStream {
 
 /////////////////////////////////////////////////////////////
 
+/// Stream of incoming IPC connections, yielded by [`IpcListener::incoming`].
 pub struct IpcIncoming<'a> {
     listener: IpcListener,
     unord: FuturesUnordered<PinBoxFutureStatic<io::Result<IpcStream>>>,
@@ -143,6 +150,7 @@ impl Stream for IpcIncoming<'_> {
 
 /////////////////////////////////////////////////////////////
 
+/// Listener that accepts incoming IPC connections. Backed by a Windows named pipe.
 pub struct IpcListener {
     path: Option<PathBuf>,
     internal: Option<Mutex<Option<NamedPipeServer>>>,
@@ -150,6 +158,10 @@ pub struct IpcListener {
 
 impl IpcListener {
     /// Creates a new `IpcListener` bound to the specified path.
+    ///
+    /// Creates the first named-pipe instance synchronously; fails if another instance already owns the path.
+    ///
+    /// Errors with the OS error for `ERROR_ACCESS_DENIED` when another process already owns the pipe name (`first_pipe_instance` rejects a second owner).
     #[expect(clippy::unused_async)]
     pub async fn bind<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
@@ -163,6 +175,8 @@ impl IpcListener {
     }
 
     /// Accepts a new incoming connection to this listener.
+    ///
+    /// The returned future blocks until a client connects to the pipe. Errors `NotConnected` once [`IpcListener::incoming`] has consumed the listener; otherwise propagates the io error from creating the next pipe instance or from the pipe connect.
     #[must_use]
     pub fn accept(&self) -> PinBoxFutureStatic<io::Result<IpcStream>> {
         if self.path.is_none() {
@@ -189,6 +203,8 @@ impl IpcListener {
     }
 
     /// Returns a stream of incoming connections.
+    ///
+    /// Consumes the listener's internals into the returned [`IpcIncoming`]; a second call errors `NotConnected`.
     pub fn incoming(&mut self) -> io::Result<IpcIncoming<'_>> {
         if self.path.is_none() {
             return Err(io::Error::from(io::ErrorKind::NotConnected));

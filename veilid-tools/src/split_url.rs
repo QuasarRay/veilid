@@ -137,11 +137,13 @@ where
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+/// Error returned when parsing a URL component fails.
 #[derive(ThisError, Debug, Clone, Eq, PartialEq)]
 #[error("SplitUrlError: {0}")]
 pub struct SplitUrlError(String);
 
 impl SplitUrlError {
+    /// Build an error with the given message.
     pub fn new<T: ToString>(message: T) -> Self {
         SplitUrlError(message.to_string())
     }
@@ -149,14 +151,21 @@ impl SplitUrlError {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/// The portion of a URL after the host and port: path, optional fragment, optional query.
+///
+/// Path and fragment are stored percent-decoded; query is stored raw.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SplitUrlPath {
+    /// Percent-decoded path.
     pub path: String,
+    /// Percent-decoded fragment (the part after `#`), if present.
     pub fragment: Option<String>,
+    /// Raw query string (the part after `?`), if present.
     pub query: Option<String>,
 }
 
 impl SplitUrlPath {
+    /// Build a path from already-decoded components.
     pub fn new<P, F, Q>(path: P, fragment: Option<F>, query: Option<Q>) -> Self
     where
         P: AsRef<str>,
@@ -173,6 +182,8 @@ impl SplitUrlPath {
 
 impl FromStr for SplitUrlPath {
     type Err = SplitUrlError;
+    /// Errors with `SplitUrlError` if the path or fragment is not ASCII, holds a malformed
+    /// percent-escape, or decodes to invalid UTF-8.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(if let Some((p, q)) = s.split_once('?') {
             if let Some((p, f)) = p.split_once('#') {
@@ -215,13 +226,20 @@ impl fmt::Display for SplitUrlPath {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+/// The host field of a URL: either a DNS hostname or an IP address.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SplitUrlHost {
+    /// A DNS hostname.
     Hostname(String),
+    /// An IPv4 or IPv6 address.
     IpAddr(IpAddr),
 }
 
 impl SplitUrlHost {
+    /// Parse a host from a string. IPv6 addresses must be bracketed (`[::1]`).
+    ///
+    /// Errors with `SplitUrlError` if the string is empty, is bracketed but not a valid IPv6
+    /// address, or contains characters not allowed in a DNS hostname.
     pub fn new<S: AsRef<str>>(s: S) -> Result<Self, SplitUrlError> {
         Self::from_str(s.as_ref())
     }
@@ -230,6 +248,8 @@ impl SplitUrlHost {
 impl FromStr for SplitUrlHost {
     type Err = SplitUrlError;
 
+    /// Errors with `SplitUrlError` if the string is empty, is bracketed but not a valid IPv6
+    /// address, or contains characters not allowed in a DNS hostname.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
             return Err(SplitUrlError::new("Host is empty"));
@@ -271,16 +291,26 @@ impl fmt::Display for SplitUrlHost {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/// A URL split into its components, parsed from `scheme://[userinfo@]host[:port][/path]`.
+///
+/// A loose subset of the URL standard. No query-parameter parsing, no path `;` parameters,
+/// UTF-8 only, host limited to a DNS hostname or IP address.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SplitUrl {
+    /// URL scheme (the part before `://`).
     pub scheme: String,
+    /// Percent-decoded userinfo (the part before `@`), if present.
     pub userinfo: Option<String>,
+    /// Host field.
     pub host: SplitUrlHost,
+    /// Port, if specified.
     pub port: Option<u16>,
+    /// Path, fragment, and query, if present.
     pub path: Option<SplitUrlPath>,
 }
 
 impl SplitUrl {
+    /// Build a URL from its components.
     pub fn new<S>(
         scheme: S,
         userinfo: Option<String>,
@@ -300,6 +330,7 @@ impl SplitUrl {
         }
     }
 
+    /// Format `host:port`, substituting `default_port` when no port was specified.
     #[must_use]
     pub fn host_port(&self, default_port: u16) -> String {
         format!("{}:{}", self.host, self.port.unwrap_or(default_port))
@@ -322,6 +353,9 @@ fn split_host_with_port(s: &str) -> Option<(&str, &str)> {
 
 impl FromStr for SplitUrl {
     type Err = SplitUrlError;
+    /// Errors with `SplitUrlError` if there is no `://` scheme separator, the scheme is malformed,
+    /// the port is not a valid `u16`, or the userinfo, host, or path fail to parse (see the
+    /// `FromStr` impls for `SplitUrlHost` and `SplitUrlPath`).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some((scheme, mut rest)) = s.split_once("://") {
             if !is_valid_scheme(scheme) {

@@ -1,7 +1,10 @@
 use std::ops::Range;
 
 use super::*;
-mod blake3digest512;
+
+mod buffer;
+
+pub(crate) use buffer::*;
 
 #[cfg(feature = "enable-crypto-none")]
 pub(crate) mod none;
@@ -19,74 +22,74 @@ pub use vld0::*;
 // #[cfg(feature = "enable-crypto-vld1")]
 // pub use vld1::*;
 
-pub use blake3digest512::*;
-
-pub trait CryptoSystemBuffer: AsRef<[u8]> + AsMut<[u8]> {
-    /// Get the length of the buffer
-    fn len(&self) -> usize;
-
-    /// Is the buffer empty?
-    fn is_empty(&self) -> bool;
-
-    /// Extend this buffer from the given slice
-    fn extend_from_slice(&mut self, other: &[u8]);
-
-    /// Truncate this buffer to the given size
-    fn truncate(&mut self, len: usize);
-}
-
-impl CryptoSystemBuffer for Vec<u8> {
-    fn len(&self) -> usize {
-        Vec::<u8>::len(self)
-    }
-
-    fn is_empty(&self) -> bool {
-        Vec::<u8>::is_empty(self)
-    }
-
-    fn extend_from_slice(&mut self, other: &[u8]) {
-        Vec::<u8>::extend_from_slice(self, other);
-    }
-
-    fn truncate(&mut self, len: usize) {
-        Vec::<u8>::truncate(self, len);
-    }
-}
-
-impl CryptoSystemBuffer for BytesMut {
-    fn len(&self) -> usize {
-        BytesMut::len(self)
-    }
-
-    fn is_empty(&self) -> bool {
-        BytesMut::is_empty(self)
-    }
-
-    fn extend_from_slice(&mut self, other: &[u8]) {
-        BytesMut::extend_from_slice(self, other);
-    }
-
-    fn truncate(&mut self, len: usize) {
-        BytesMut::truncate(self, len);
-    }
-}
-
+/// The set of cryptographic primitives a single cryptosystem provides: key generation, signing
+/// and verification, AEAD and unauthenticated encryption, Diffie-Hellman key exchange and shared
+/// secret derivation, hashing, password hashing, and random byte generation.
+///
+/// Each implementation is tagged by a [`CryptoKind`] fourcc; keys, signatures, nonces, and digests
+/// carry that kind and are only accepted by the matching cryptosystem. VLD0 is the current
+/// implementation.
 pub trait CryptoSystem {
     // Accessors
+    /// The [`CryptoKind`] fourcc identifying this cryptosystem.
     fn kind(&self) -> CryptoKind;
+    /// Component guard for the parent [`Crypto`] registry, used to reach cross-cryptosystem caches.
     fn crypto(&self) -> VeilidComponentGuard<'_, Crypto>;
 
     // Cached Operations
+    /// Diffie-Hellman shared secret for the given public/secret key pair, memoized in the
+    /// [`Crypto`] DH cache to avoid recomputing the same exchange. See [`compute_dh`](Self::compute_dh).
+    ///
+    /// Local CPU only; on a cache miss runs the same scalar multiplication as `compute_dh`. Takes the
+    /// `Crypto` inner lock to read/update the cache.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `key` or `secret` carries the wrong kind or length, plus
+    /// the [`compute_dh`](Self::compute_dh) errors on a cache miss.
     fn cached_dh(&self, key: &PublicKey, secret: &SecretKey) -> VeilidAPIResult<SharedSecret>;
 
     // Generation
+    /// Fill a new `Vec` of `len` bytes from the cryptographic RNG.
     fn random_bytes(&self, len: usize) -> Vec<u8>;
+    /// Hash a password with the given salt, returning a self-describing PHC hash string suitable
+    /// for storage and later [`verify_password`](Self::verify_password).
+    ///
+    /// CPU-heavy (Argon2); blocks the calling thread for the full KDF. No network or disk.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `salt` length is outside the Argon2 bounds or the KDF
+    /// itself fails, `VeilidAPIError::ParseError` if the salt fails base64 encoding.
     fn hash_password(&self, password: &[u8], salt: &[u8]) -> VeilidAPIResult<String>;
+    /// Check a password against a PHC hash string produced by [`hash_password`](Self::hash_password).
+    /// Returns `Ok(false)` on mismatch; errors only on a malformed hash string.
+    ///
+    /// CPU-heavy (Argon2); blocks the calling thread for the full KDF. No network or disk.
+    ///
+    /// Errors `VeilidAPIError::ParseError` if `password_hash` is not a valid PHC string.
     fn verify_password(&self, password: &[u8], password_hash: &str) -> VeilidAPIResult<bool>;
+    /// Derive a shared secret from a password and salt via a password-hashing KDF. Deterministic:
+    /// the same password and salt always yield the same secret. Distinct from
+    /// [`generate_shared_secret`](Self::generate_shared_secret), which uses key exchange.
+    ///
+    /// CPU-heavy (Argon2); blocks the calling thread for the full KDF. No network or disk.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `salt` length is outside the Argon2 bounds or the KDF fails.
     fn derive_shared_secret(&self, password: &[u8], salt: &[u8]) -> VeilidAPIResult<SharedSecret>;
+    /// A fresh random nonce of [`nonce_length`](Self::nonce_length) bytes.
     fn random_nonce(&self) -> Nonce;
+    /// A fresh random shared secret of [`shared_secret_length`](Self::shared_secret_length) bytes.
     fn random_shared_secret(&self) -> SharedSecret;
+    /// Raw Diffie-Hellman shared secret for the given public/secret key pair, with no caching.
+    ///
+    /// Local CPU only (scalar multiplication); recomputes every call. Use
+    /// [`cached_dh`](Self::cached_dh) to memoize repeated exchanges.
+    ///
+    /// Errors `VeilidAPIError::Internal` if `key` is not a valid curve point, `VeilidAPIError::Generic`
+    /// if the exchange is non-contributory (low-order public key).
     fn compute_dh(&self, key: &PublicKey, secret: &SecretKey) -> VeilidAPIResult<SharedSecret>;
+    /// Derive a domain-separated shared secret from a key exchange: computes the DH secret, then
+    /// hashes it together with `domain` and the Veilid API domain tag. Distinct `domain` values
+    /// yield independent secrets from the same key pair.
+    ///
+    /// Errors with the [`compute_dh`](Self::compute_dh) errors if the key exchange fails.
     fn generate_shared_secret(
         &self,
         key: &PublicKey,
@@ -100,20 +103,37 @@ pub trait CryptoSystem {
             BareSharedSecret::new(&hash.into_value()),
         ))
     }
+    /// Generate a fresh random signing key pair for this cryptosystem.
     fn generate_keypair(&self) -> KeyPair;
+    /// Hash a byte slice, returning a digest tagged with this cryptosystem's kind.
     fn generate_hash(&self, data: &[u8]) -> HashDigest;
+    /// Hash a stream by reading it to end, returning the digest as a `PublicKey` (the digest and
+    /// public key share a byte length in this cryptosystem). Errors on read failure.
+    ///
+    /// Errors `VeilidAPIError::Generic` if reading from `reader` fails.
     fn generate_hash_reader(&self, reader: &mut dyn std::io::Read) -> VeilidAPIResult<PublicKey>;
 
     // Validation
+    /// Byte length of a shared secret.
     fn shared_secret_length(&self) -> usize;
+    /// Byte length of a nonce.
     fn nonce_length(&self) -> usize;
+    /// Byte length of a hash digest.
     fn hash_digest_length(&self) -> usize;
+    /// Byte length of a public key.
     fn public_key_length(&self) -> usize;
+    /// Byte length of a secret key.
     fn secret_key_length(&self) -> usize;
+    /// Byte length of a signature.
     fn signature_length(&self) -> usize;
+    /// Default salt length in bytes for password hashing and KDF operations.
     fn default_salt_length(&self) -> usize;
+    /// Bytes an AEAD operation adds to the ciphertext (the authentication tag length).
     fn aead_overhead(&self) -> usize;
 
+    /// Verify a shared secret carries this cryptosystem's kind and the correct length.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `secret` has the wrong kind or length.
     fn check_shared_secret(&self, secret: &SharedSecret) -> VeilidAPIResult<()> {
         if secret.kind() != self.kind() {
             apibail_generic!("incorrect shared secret kind");
@@ -127,6 +147,9 @@ pub trait CryptoSystem {
         }
         Ok(())
     }
+    /// Verify a nonce has the correct length.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `nonce` has the wrong length.
     fn check_nonce(&self, nonce: &Nonce) -> VeilidAPIResult<()> {
         if nonce.len() != self.nonce_length() {
             apibail_generic!(
@@ -137,6 +160,9 @@ pub trait CryptoSystem {
         }
         Ok(())
     }
+    /// Verify a hash digest carries this cryptosystem's kind and the correct length.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `hash` has the wrong kind or length.
     fn check_hash_digest(&self, hash: &HashDigest) -> VeilidAPIResult<()> {
         if hash.kind() != self.kind() {
             apibail_generic!("incorrect hash digest kind");
@@ -150,6 +176,9 @@ pub trait CryptoSystem {
         }
         Ok(())
     }
+    /// Verify a public key carries this cryptosystem's kind and the correct length.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `key` has the wrong kind or length.
     fn check_public_key(&self, key: &PublicKey) -> VeilidAPIResult<()> {
         if key.kind() != self.kind() {
             apibail_generic!("incorrect public key kind");
@@ -163,6 +192,9 @@ pub trait CryptoSystem {
         }
         Ok(())
     }
+    /// Verify a secret key carries this cryptosystem's kind and the correct length.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `key` has the wrong kind or length.
     fn check_secret_key(&self, key: &SecretKey) -> VeilidAPIResult<()> {
         if key.kind() != self.kind() {
             apibail_generic!("incorrect secret key kind");
@@ -176,6 +208,9 @@ pub trait CryptoSystem {
         }
         Ok(())
     }
+    /// Verify a signature carries this cryptosystem's kind and the correct length.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `signature` has the wrong kind or length.
     fn check_signature(&self, signature: &Signature) -> VeilidAPIResult<()> {
         if signature.kind() != self.kind() {
             apibail_generic!("incorrect signature kind");
@@ -189,6 +224,11 @@ pub trait CryptoSystem {
         }
         Ok(())
     }
+    /// Verify a key pair's kind and that both its public and secret keys have the correct length.
+    /// This is a structural check only; it does not verify the keys form a valid pair (see
+    /// [`validate_keypair`](Self::validate_keypair)).
+    ///
+    /// Errors `VeilidAPIError::Generic` if the pair or either key has the wrong kind or length.
     fn check_keypair(&self, keypair: &KeyPair) -> VeilidAPIResult<()> {
         if keypair.kind() != self.kind() {
             apibail_generic!("incorrect keypair kind");
@@ -198,8 +238,20 @@ pub trait CryptoSystem {
         Ok(())
     }
 
+    /// Check that a public and secret key form a usable signing pair by signing test data and
+    /// verifying it. Returns `Ok(false)` if they do not match; errors only on a malformed key.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `key` or `secret` has the wrong kind or length.
     fn validate_keypair(&self, key: &PublicKey, secret: &SecretKey) -> VeilidAPIResult<bool>;
+    /// Recompute the hash of `data` and compare it against `hash`. Returns `Ok(true)` on match.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `hash` has the wrong kind or length.
     fn validate_hash(&self, data: &[u8], hash: &HashDigest) -> VeilidAPIResult<bool>;
+    /// Hash a stream by reading it to end and compare against `hash`. Returns `Ok(true)` on match;
+    /// errors on read failure.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `hash` has the wrong kind or length, or if reading from
+    /// `reader` fails.
     fn validate_hash_reader(
         &self,
         reader: &mut dyn std::io::Read,
@@ -207,12 +259,25 @@ pub trait CryptoSystem {
     ) -> VeilidAPIResult<bool>;
 
     // Authentication
+    /// Sign `data` with the given key pair, returning a detached signature.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `public_key` or `secret` has the wrong kind or length,
+    /// `VeilidAPIError::ParseError` if they do not form a valid ed25519 keypair,
+    /// `VeilidAPIError::Internal` if signing fails.
     fn sign(
         &self,
         public_key: &PublicKey,
         secret: &SecretKey,
         data: &[u8],
     ) -> VeilidAPIResult<Signature>;
+    /// Sign the bytes of `data[range]` and write the signature into `data` at `sig_idx`, in place.
+    /// Used to sign a buffer and embed its own signature. Errors if `range` or the signature slot
+    /// is out of bounds.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `public_key` or `secret` has the wrong kind or length,
+    /// `VeilidAPIError::ParseError` if they do not form a valid ed25519 keypair or `sig_idx` is out
+    /// of bounds, `VeilidAPIError::InvalidArgument` if `range` is out of bounds,
+    /// `VeilidAPIError::Internal` if signing fails.
     fn sign_in_place(
         &self,
         public_key: &PublicKey,
@@ -221,12 +286,25 @@ pub trait CryptoSystem {
         range: Range<usize>,
         sig_idx: usize,
     ) -> VeilidAPIResult<()>;
+    /// Verify a detached `signature` over `data` for `public_key`. Returns `Ok(true)` if valid,
+    /// `Ok(false)` if not; errors only on a malformed key or signature.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `public_key` or `signature` has the wrong kind or length,
+    /// `VeilidAPIError::ParseError` if `public_key` is not a valid ed25519 point. A signature that
+    /// does not match returns `Ok(false)`, not an error.
     fn verify(
         &self,
         public_key: &PublicKey,
         data: &[u8],
         signature: &Signature,
     ) -> VeilidAPIResult<bool>;
+    /// Verify a signature embedded in `data` at `sig_idx` against the bytes of `data[range]`.
+    /// The inverse of [`sign_in_place`](Self::sign_in_place). Returns `Ok(true)` if valid.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `public_key` has the wrong kind or length,
+    /// `VeilidAPIError::ParseError` if `public_key` is not a valid ed25519 point,
+    /// `VeilidAPIError::Internal` if `range` or `sig_idx` is out of bounds. A signature that does
+    /// not match returns `Ok(false)`, not an error.
     fn verify_in_place(
         &self,
         public_key: &PublicKey,
@@ -236,6 +314,12 @@ pub trait CryptoSystem {
     ) -> VeilidAPIResult<bool>;
 
     // AEAD Encrypt/Decrypt
+    /// Decrypt and authenticate `body` in place, removing the authentication tag on success.
+    /// `associated_data` must match what was supplied at encryption. Errors if authentication
+    /// fails (tampered ciphertext, wrong key/nonce, or mismatched associated data).
+    ///
+    /// Errors `VeilidAPIError::Generic` if `shared_secret` has the wrong kind or length, or if
+    /// authentication fails; `VeilidAPIError::Internal` on an internal length conversion failure.
     fn decrypt_in_place_aead(
         &self,
         body: &mut dyn CryptoSystemBuffer,
@@ -243,6 +327,11 @@ pub trait CryptoSystem {
         shared_secret: &SharedSecret,
         associated_data: Option<&[u8]>,
     ) -> VeilidAPIResult<()>;
+    /// Decrypt and authenticate `body`, returning the plaintext. Allocating form of
+    /// [`decrypt_in_place_aead`](Self::decrypt_in_place_aead).
+    ///
+    /// Errors `VeilidAPIError::Generic` if `nonce` or `shared_secret` has the wrong kind or length,
+    /// or if authentication fails; `VeilidAPIError::Internal` on an internal length conversion failure.
     fn decrypt_aead(
         &self,
         body: &[u8],
@@ -250,6 +339,12 @@ pub trait CryptoSystem {
         shared_secret: &SharedSecret,
         associated_data: Option<&[u8]>,
     ) -> VeilidAPIResult<Vec<u8>>;
+    /// Encrypt and authenticate `body` in place, appending the authentication tag. `associated_data`
+    /// is authenticated but not encrypted, and must be supplied again at decryption. The same nonce
+    /// must never be reused with the same shared secret.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `nonce` or `shared_secret` has the wrong kind or length;
+    /// `VeilidAPIError::Internal` on an internal length conversion failure.
     fn encrypt_in_place_aead(
         &self,
         body: &mut dyn CryptoSystemBuffer,
@@ -257,6 +352,11 @@ pub trait CryptoSystem {
         shared_secret: &SharedSecret,
         associated_data: Option<&[u8]>,
     ) -> VeilidAPIResult<()>;
+    /// Encrypt and authenticate `body`, returning the ciphertext with appended tag. Allocating
+    /// form of [`encrypt_in_place_aead`](Self::encrypt_in_place_aead).
+    ///
+    /// Errors `VeilidAPIError::Generic` if `nonce` or `shared_secret` has the wrong kind or length;
+    /// `VeilidAPIError::Internal` on an internal length conversion failure.
     fn encrypt_aead(
         &self,
         body: &[u8],
@@ -266,12 +366,24 @@ pub trait CryptoSystem {
     ) -> VeilidAPIResult<Vec<u8>>;
 
     // NoAuth Encrypt/Decrypt
+    /// Apply the stream cipher to `body` in place, without authentication. Same operation for both
+    /// directions: re-applying with the same nonce and secret reverses it. Provides confidentiality
+    /// only, no integrity; callers needing tamper detection must use the AEAD variants.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `nonce` or `shared_secret` has the wrong kind or length;
+    /// `VeilidAPIError::Internal` on an internal length conversion failure.
     fn crypt_in_place_no_auth(
         &self,
         body: &mut [u8],
         nonce: &Nonce,
         shared_secret: &SharedSecret,
     ) -> VeilidAPIResult<()>;
+    /// Apply the stream cipher from `in_buf` into `out_buf` (buffer-to-buffer), without
+    /// authentication. `out_buf` must be at least as long as `in_buf`. See
+    /// [`crypt_in_place_no_auth`](Self::crypt_in_place_no_auth) for the integrity caveat.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `nonce` or `shared_secret` has the wrong kind or length;
+    /// `VeilidAPIError::Internal` on an internal length conversion failure.
     fn crypt_b2b_no_auth(
         &self,
         in_buf: &[u8],
@@ -279,12 +391,20 @@ pub trait CryptoSystem {
         nonce: &Nonce,
         shared_secret: &SharedSecret,
     ) -> VeilidAPIResult<()>;
+    /// Stream-cipher `body` into a freshly allocated 8-byte-aligned buffer, without authentication.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `nonce` or `shared_secret` has the wrong kind or length;
+    /// `VeilidAPIError::Internal` on an internal length conversion failure.
     fn crypt_no_auth_aligned_8(
         &self,
         body: &[u8],
         nonce: &Nonce,
         shared_secret: &SharedSecret,
     ) -> VeilidAPIResult<Vec<u8>>;
+    /// Stream-cipher `body` into a freshly allocated unaligned buffer, without authentication.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `nonce` or `shared_secret` has the wrong kind or length;
+    /// `VeilidAPIError::Internal` on an internal length conversion failure.
     fn crypt_no_auth_unaligned(
         &self,
         body: &[u8],

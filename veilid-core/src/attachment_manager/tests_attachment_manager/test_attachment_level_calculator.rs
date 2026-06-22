@@ -2,20 +2,20 @@ use super::*;
 use crate::attachment_manager::attachment_level_calculator::*;
 
 fn inputs(
-    reliable: u64,
-    live: u64,
-    tested: u64,
+    reliable_count: usize,
+    live_count: usize,
+    responsive_count: usize,
     est_net: u64,
     p75_ms: Option<u64>,
-    excess: u64,
+    excess_kickable: usize,
 ) -> AttachmentLevelInputs {
     AttachmentLevelInputs {
-        reliable_count: NodeCount::from(reliable),
-        live_count: NodeCount::from(live),
-        tested_count: NodeCount::from(tested),
-        estimated_network_size: NodeCount::from(est_net),
+        reliable_count,
+        live_count,
+        responsive_count,
+        estimated_network_size: est_net,
         median_latency: p75_ms.map(TimestampDuration::new_ms),
-        excess_kickable: NodeCount::from(excess),
+        excess_kickable,
     }
 }
 

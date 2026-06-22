@@ -30,6 +30,11 @@ cfg_if! {
     }
 }
 
+/// An async mutex giving one holder at a time exclusive access to `T`.
+///
+/// Backed by the executor's mutex (`async_lock`, `async-std`, or `tokio` depending on
+/// build features); under the `debug-locks` feature, acquisitions that stall past
+/// [`DEBUG_LOCKS_DURATION_MS`] are reported as deadlocks.
 #[derive(Debug)]
 pub struct AsyncMutex<T: ?Sized> {
     inner: Arc<InnerAsyncMutex<T>>,
@@ -38,6 +43,7 @@ pub struct AsyncMutex<T: ?Sized> {
 }
 
 impl<T: ?Sized> AsyncMutex<T> {
+    /// Create a new mutex holding `t`, initially unlocked.
     #[inline]
     pub fn new(t: T) -> Self
     where
@@ -50,6 +56,10 @@ impl<T: ?Sized> AsyncMutex<T> {
         }
     }
 
+    /// Acquire the mutex, waiting until it is free.
+    ///
+    /// Blocks until the lock is free. The returned guard holds the lock until dropped.
+    /// Under `debug-locks`, a wait past [`DEBUG_LOCKS_DURATION_MS`] is reported as a deadlock.
     #[inline]
     pub async fn lock(&self) -> AsyncMutexGuard<'_, T> {
         cfg_if! {
@@ -72,6 +82,10 @@ impl<T: ?Sized> AsyncMutex<T> {
         }
     }
 
+    /// Acquire the mutex, waiting until it is free, returning an owned guard.
+    ///
+    /// Blocks until the lock is free. The returned guard holds the lock until dropped.
+    /// Under `debug-locks`, a wait past [`DEBUG_LOCKS_DURATION_MS`] is reported as a deadlock.
     #[inline]
     pub async fn lock_arc(self: &Arc<Self>) -> AsyncMutexGuardArc<T> {
         cfg_if! {
@@ -94,6 +108,9 @@ impl<T: ?Sized> AsyncMutex<T> {
         }
     }
 
+    /// Try to acquire the mutex without waiting, or `None` if it is already held.
+    ///
+    /// Never blocks. On success the guard holds the lock until dropped.
     #[inline]
     #[must_use]
     pub fn try_lock(&self) -> Option<AsyncMutexGuard<'_, T>> {
@@ -108,6 +125,9 @@ impl<T: ?Sized> AsyncMutex<T> {
         Some(out)
     }
 
+    /// Try to acquire the mutex without waiting, returning an owned guard, or `None` if it is already held.
+    ///
+    /// Never blocks. On success the guard holds the lock until dropped.
     #[inline]
     #[must_use]
     pub fn try_lock_arc(self: &Arc<Self>) -> Option<AsyncMutexGuardArc<T>> {
@@ -129,6 +149,7 @@ impl<T> From<T> for AsyncMutex<T> {
     }
 }
 
+/// Borrowed guard holding the mutex; derefs to `T` (mutably) and unlocks on drop.
 #[clippy::has_significant_drop]
 #[must_use = "if unused the Mutex will immediately unlock"]
 #[derive(Debug)]
@@ -161,6 +182,7 @@ impl<T: ?Sized> std::ops::DerefMut for AsyncMutexGuard<'_, T> {
     }
 }
 
+/// Owned guard holding the mutex; derefs to `T` (mutably) and unlocks on drop.
 #[clippy::has_significant_drop]
 #[derive(Debug)]
 pub struct AsyncMutexGuardArc<T: ?Sized> {

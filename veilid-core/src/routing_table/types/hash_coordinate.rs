@@ -61,7 +61,7 @@ impl ToBareHashCoordinate for BareHashDigest {
 
 impl HashCoordinate {
     pub fn distance(&self, other: &HashCoordinate) -> HashDistance {
-        assert_eq!(self.kind(), other.kind());
+        debug_assert_eq!(self.kind(), other.kind());
         self.ref_value().distance(other.ref_value())
     }
 
@@ -130,8 +130,8 @@ impl core::ops::SubAssign for HashDistance {
 
 impl BareHashCoordinate {
     pub fn distance(&self, other: &BareHashCoordinate) -> HashDistance {
-        assert_eq!(self.len(), HASH_COORDINATE_LENGTH);
-        assert_eq!(other.len(), HASH_COORDINATE_LENGTH);
+        debug_assert_eq!(self.len(), HASH_COORDINATE_LENGTH);
+        debug_assert_eq!(other.len(), HASH_COORDINATE_LENGTH);
 
         let mut bytes = BytesMut::zeroed(HASH_COORDINATE_LENGTH);
 
@@ -143,8 +143,8 @@ impl BareHashCoordinate {
     }
 
     pub fn offset(&self, distance: &HashDistance) -> Self {
-        assert_eq!(self.len(), HASH_COORDINATE_LENGTH);
-        assert_eq!(distance.len(), HASH_COORDINATE_LENGTH);
+        debug_assert_eq!(self.len(), HASH_COORDINATE_LENGTH);
+        debug_assert_eq!(distance.len(), HASH_COORDINATE_LENGTH);
 
         let mut bytes = BytesMut::zeroed(HASH_COORDINATE_LENGTH);
 

@@ -3,6 +3,15 @@ use super::*;
 cfg_if! {
     if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
 
+        /// Spawn a named task that invokes `callback` every `freq_ms` milliseconds.
+        ///
+        /// If `immediate`, the first invocation runs at once; otherwise after one period. The
+        /// returned future cancels the task and waits for it to finish when awaited.
+        ///
+        /// Abstracts over the async runtime (tokio, async-std, wasm).
+        ///
+        /// The returned future must be driven to completion to stop the task. It holds the
+        /// task's join handle, so dropping it before completion panics.
         pub fn interval<F, FUT>(name: &str, freq_ms: u32, immediate: bool, callback: F) -> PinBoxFutureStatic<()>
         where
             F: Fn() -> FUT + Send + Sync + 'static,
@@ -41,6 +50,15 @@ cfg_if! {
 
     } else {
 
+        /// Spawn a named task that invokes `callback` every `freq_ms` milliseconds.
+        ///
+        /// If `immediate`, the first invocation runs at once; otherwise after one period. The
+        /// returned future cancels the task and waits for it to finish when awaited.
+        ///
+        /// Abstracts over the async runtime (tokio, async-std, wasm).
+        ///
+        /// The returned future must be driven to completion to stop the task. It holds the
+        /// task's join handle, so dropping it before completion panics.
         pub fn interval<F, FUT>(name: &str, freq_ms: u32, immediate: bool, callback: F) -> PinBoxFutureStatic<()>
         where
             F: Fn() -> FUT + Send + Sync + 'static,

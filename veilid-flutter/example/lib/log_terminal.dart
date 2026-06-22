@@ -34,7 +34,9 @@ class _LogTerminalState extends State<LogTerminal> {
   }
 
   @override
-  Widget build(BuildContext context) => TerminalView(
+  Widget build(BuildContext context) => GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: TerminalView(
         _terminal,
         textStyle: kDefaultTerminalStyle,
         controller: _terminalController,
@@ -54,5 +56,5 @@ class _LogTerminalState extends State<LogTerminal> {
             }
           }
         },
-      );
+      ));
 }

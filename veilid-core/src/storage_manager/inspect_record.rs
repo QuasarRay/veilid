@@ -109,7 +109,7 @@ impl StorageManager {
         let (safety_selection, offline_subkey_writes) = {
             let inner = self.inner.lock();
             let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
-                apibail_generic!("record not open");
+                apibail_invalid_argument!("record not open", "record_key", opaque_record_key);
             };
             let safety_selection = opened_record.safety_selection();
 
@@ -242,7 +242,7 @@ impl StorageManager {
             opaque_record_key.clone(),
             results_iter,
             false,
-            self.config().network.dht.consensus_width as usize,
+            self.config().internal().network.dht.consensus_width as usize,
         )?;
 
         if !existed {
@@ -294,20 +294,24 @@ impl StorageManager {
         {
             let config = self.config();
             (
-                config.network.dht.max_find_node_count as usize,
-                config.network.dht.set_value_count as usize,
-                config.network.dht.consensus_width as usize,
-                config.network.dht.set_value_fanout as usize,
-                TimestampDuration::from(ms_to_us(config.network.dht.set_value_timeout_ms)),
+                config.internal().network.dht.max_find_node_count as usize,
+                config.internal().network.dht.set_value_count as usize,
+                config.internal().network.dht.consensus_width as usize,
+                config.internal().network.dht.set_value_fanout as usize,
+                TimestampDuration::from(ms_to_us(
+                    config.internal().network.dht.set_value_timeout_ms,
+                )),
             )
         } else {
             let config = self.config();
             (
-                config.network.dht.max_find_node_count as usize,
-                config.network.dht.get_value_count as usize,
-                config.network.dht.consensus_width as usize,
-                config.network.dht.get_value_fanout as usize,
-                TimestampDuration::from(ms_to_us(config.network.dht.get_value_timeout_ms)),
+                config.internal().network.dht.max_find_node_count as usize,
+                config.internal().network.dht.get_value_count as usize,
+                config.internal().network.dht.consensus_width as usize,
+                config.internal().network.dht.get_value_fanout as usize,
+                TimestampDuration::from(ms_to_us(
+                    config.internal().network.dht.get_value_timeout_ms,
+                )),
             )
         };
 

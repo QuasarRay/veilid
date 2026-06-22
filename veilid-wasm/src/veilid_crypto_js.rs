@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 use super::*;
 
+/// A handle to a single cryptosystem, selected by [`CryptoKind`], exposing its
+/// crypto operations to JavaScript.
 #[wasm_bindgen(js_name = veilidCrypto)]
 pub struct VeilidCrypto {
     pub(crate) kind: CryptoKind,
@@ -51,6 +53,7 @@ impl VeilidCrypto {
 
     ////////////////////////////////////////////////////////////////////////////////
 
+    /// The [`CryptoKind`] fourcc identifying this cryptosystem.
     #[wasm_bindgen(getter, unchecked_return_type = "CryptoKind")]
     #[must_use]
     pub fn kind(&self) -> JsValue {
@@ -72,6 +75,10 @@ impl VeilidCrypto {
         closure(crypto_system.deref())
     }
 
+    /// Diffie-Hellman shared secret for the given public/secret key pair, memoized in the
+    /// DH cache to avoid recomputing the same exchange. See `computeDh`.
+    ///
+    /// Throws `Generic` if `key` or `secret` has the wrong kind or length, and on a cache miss the same errors as `computeDh`. Every method on this object also throws `InvalidArgument` if this cryptosystem kind is unavailable and `NotInitialized` if the node is not started.
     pub fn cachedDh(&self, key: &PublicKey, secret: &SecretKey) -> VeilidAPIResult<SharedSecret> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.cached_dh(key, secret)?;
@@ -79,10 +86,18 @@ impl VeilidCrypto {
         })
     }
 
+    /// Raw Diffie-Hellman shared secret for the given public/secret key pair, with no caching.
+    ///
+    /// Throws `Internal` if `key` is not a valid curve point, and `Generic` if the exchange is non-contributory (low-order public key).
     pub fn computeDh(&self, key: &PublicKey, secret: &SecretKey) -> VeilidAPIResult<SharedSecret> {
         self.with_crypto_system(|crypto_system| crypto_system.compute_dh(key, secret))
     }
 
+    /// Derive a domain-separated shared secret from a key exchange: computes the DH secret, then
+    /// hashes it together with `domain` and the Veilid API domain tag. Distinct `domain` values
+    /// yield independent secrets from the same key pair.
+    ///
+    /// Throws the `computeDh` errors if the key exchange fails.
     pub fn generateSharedSecret(
         &self,
         key: &PublicKey,
@@ -94,6 +109,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Fill a new buffer of `len` bytes from the cryptographic RNG.
     pub fn randomBytes(&self, len: usize) -> VeilidAPIResult<Box<[u8]>> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.random_bytes(len);
@@ -102,6 +118,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Byte length of a shared secret.
     pub fn sharedSecretLength(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.shared_secret_length();
@@ -109,6 +126,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Byte length of a nonce.
     pub fn nonceLength(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.nonce_length();
@@ -116,6 +134,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Byte length of a hash digest.
     pub fn hashDigestLength(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.hash_digest_length();
@@ -123,6 +142,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Byte length of a public key.
     pub fn publicKeyLength(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.public_key_length();
@@ -130,6 +150,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Byte length of a secret key.
     pub fn secretKeyLength(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.secret_key_length();
@@ -137,6 +158,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Byte length of a signature.
     pub fn signatureLength(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.signature_length();
@@ -144,6 +166,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Default salt length in bytes for password hashing and KDF operations.
     pub fn defaultSaltLength(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.default_salt_length();
@@ -151,6 +174,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Bytes an AEAD operation adds to the ciphertext (the authentication tag length).
     pub fn aeadOverhead(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.aead_overhead();
@@ -158,34 +182,60 @@ impl VeilidCrypto {
         })
     }
 
+    /// Verify a shared secret carries this cryptosystem's kind and the correct length.
+    ///
+    /// Throws `Generic` if `secret` has the wrong kind or length.
     pub fn checkSharedSecret(&self, secret: &SharedSecret) -> VeilidAPIResult<()> {
         self.with_crypto_system(|crypto_system| crypto_system.check_shared_secret(secret))
     }
 
+    /// Verify a nonce has the correct length.
+    ///
+    /// Throws `Generic` if `nonce` has the wrong length.
     pub fn checkNonce(&self, nonce: &Nonce) -> VeilidAPIResult<()> {
         self.with_crypto_system(|crypto_system| crypto_system.check_nonce(nonce))
     }
 
+    /// Verify a hash digest carries this cryptosystem's kind and the correct length.
+    ///
+    /// Throws `Generic` if `digest` has the wrong kind or length.
     pub fn checkHashDigest(&self, digest: &HashDigest) -> VeilidAPIResult<()> {
         self.with_crypto_system(|crypto_system| crypto_system.check_hash_digest(digest))
     }
 
+    /// Verify a public key carries this cryptosystem's kind and the correct length.
+    ///
+    /// Throws `Generic` if `key` has the wrong kind or length.
     pub fn checkPublicKey(&self, key: &PublicKey) -> VeilidAPIResult<()> {
         self.with_crypto_system(|crypto_system| crypto_system.check_public_key(key))
     }
 
+    /// Verify a secret key carries this cryptosystem's kind and the correct length.
+    ///
+    /// Throws `Generic` if `key` has the wrong kind or length.
     pub fn checkSecretKey(&self, key: &SecretKey) -> VeilidAPIResult<()> {
         self.with_crypto_system(|crypto_system| crypto_system.check_secret_key(key))
     }
 
+    /// Verify a signature carries this cryptosystem's kind and the correct length.
+    ///
+    /// Throws `Generic` if `signature` has the wrong kind or length.
     pub fn checkSignature(&self, signature: &Signature) -> VeilidAPIResult<()> {
         self.with_crypto_system(|crypto_system| crypto_system.check_signature(signature))
     }
 
+    /// Hash a password with the given salt, returning a self-describing PHC hash string suitable
+    /// for storage and later `verifyPassword`.
+    ///
+    /// Throws `Generic` if `salt` length is outside the Argon2 bounds or the KDF fails, and `ParseError` if the salt fails base64 encoding.
     pub fn hashPassword(&self, password: Box<[u8]>, salt: Box<[u8]>) -> VeilidAPIResult<String> {
         self.with_crypto_system(|crypto_system| crypto_system.hash_password(&password, &salt))
     }
 
+    /// Check a password against a PHC hash string produced by `hashPassword`.
+    /// Returns `false` on mismatch; errors only on a malformed hash string.
+    ///
+    /// Throws `ParseError` if `password_hash` is not a valid PHC string.
     pub fn verifyPassword(
         &self,
         password: Box<[u8]>,
@@ -196,6 +246,11 @@ impl VeilidCrypto {
         })
     }
 
+    /// Derive a shared secret from a password and salt via a password-hashing KDF. Deterministic:
+    /// the same password and salt always yield the same secret. Distinct from
+    /// `generateSharedSecret`, which uses key exchange.
+    ///
+    /// Throws `Generic` if `salt` length is outside the Argon2 bounds or the KDF fails.
     pub fn deriveSharedSecret(
         &self,
         password: Box<[u8]>,
@@ -206,6 +261,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// A fresh random nonce of `nonceLength` bytes.
     pub fn randomNonce(&self) -> VeilidAPIResult<Nonce> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.random_nonce();
@@ -213,6 +269,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// A fresh random shared secret of `sharedSecretLength` bytes.
     pub fn randomSharedSecret(&self) -> VeilidAPIResult<SharedSecret> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.random_shared_secret();
@@ -220,6 +277,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Generate a fresh random signing key pair for this cryptosystem.
     pub fn generateKeyPair(&self) -> VeilidAPIResult<KeyPair> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.generate_keypair();
@@ -227,6 +285,7 @@ impl VeilidCrypto {
         })
     }
 
+    /// Hash a byte slice, returning a digest tagged with this cryptosystem's kind.
     pub fn generateHash(&self, data: Box<[u8]>) -> VeilidAPIResult<HashDigest> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.generate_hash(&data);
@@ -234,14 +293,24 @@ impl VeilidCrypto {
         })
     }
 
+    /// Check that a public and secret key form a usable signing pair by signing test data and
+    /// verifying it. Returns `false` if they do not match; errors only on a malformed key.
+    ///
+    /// Throws `Generic` if `key` or `secret` has the wrong kind or length.
     pub fn validateKeyPair(&self, key: &PublicKey, secret: &SecretKey) -> VeilidAPIResult<bool> {
         self.with_crypto_system(|crypto_system| crypto_system.validate_keypair(key, secret))
     }
 
+    /// Recompute the hash of `data` and compare it against `hash`. Returns `true` on match.
+    ///
+    /// Throws `Generic` if `hash` has the wrong kind or length.
     pub fn validateHash(&self, data: Box<[u8]>, hash: &HashDigest) -> VeilidAPIResult<bool> {
         self.with_crypto_system(|crypto_system| crypto_system.validate_hash(&data, hash))
     }
 
+    /// Sign `data` with the given key pair, returning a detached signature.
+    ///
+    /// Throws `Generic` if `key` or `secret` has the wrong kind or length, `ParseError` if they do not form a valid ed25519 keypair, and `Internal` if signing fails.
     pub fn sign(
         &self,
         key: &PublicKey,
@@ -251,6 +320,10 @@ impl VeilidCrypto {
         self.with_crypto_system(|crypto_system| crypto_system.sign(key, secret, &data))
     }
 
+    /// Verify a detached `signature` over `data` for `key`. Returns `true` if valid,
+    /// `false` if not; errors only on a malformed key or signature.
+    ///
+    /// Throws `Generic` if `key` or `signature` has the wrong kind or length, and `ParseError` or `Internal` if `key` is not a valid ed25519 point. A signature that does not match returns `false`, not an error.
     pub fn verify(
         &self,
         key: &PublicKey,
@@ -260,6 +333,11 @@ impl VeilidCrypto {
         self.with_crypto_system(|crypto_system| crypto_system.verify(key, &data, signature))
     }
 
+    /// Decrypt and authenticate `body`, returning the plaintext. `associatedData` must match what
+    /// was supplied at encryption. Errors if authentication fails (tampered ciphertext, wrong
+    /// key/nonce, or mismatched associated data).
+    ///
+    /// Throws `Generic` if `nonce` or `shared_secret` has the wrong kind or length or if authentication fails, and `Internal` on an internal length conversion failure.
     pub fn decryptAead(
         &self,
         body: Box<[u8]>,
@@ -282,6 +360,11 @@ impl VeilidCrypto {
         })
     }
 
+    /// Encrypt and authenticate `body`, returning the ciphertext with appended tag. `associatedData`
+    /// is authenticated but not encrypted, and must be supplied again at decryption. The same nonce
+    /// must never be reused with the same shared secret.
+    ///
+    /// Throws `Generic` if `nonce` or `shared_secret` has the wrong kind or length, and `Internal` on an internal length conversion failure.
     pub fn encryptAead(
         &self,
         body: Box<[u8]>,
@@ -303,6 +386,11 @@ impl VeilidCrypto {
         })
     }
 
+    /// Apply the stream cipher to `body`, without authentication. Same operation for both
+    /// directions: re-applying with the same nonce and secret reverses it. Provides confidentiality
+    /// only, no integrity; callers needing tamper detection must use the AEAD variants.
+    ///
+    /// Throws `Generic` if `nonce` or `shared_secret` has the wrong kind or length, and `Internal` on an internal length conversion failure.
     pub fn cryptNoAuth(
         &self,
         mut body: Box<[u8]>,

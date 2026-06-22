@@ -20,6 +20,7 @@ pub struct TickTask<E: Send + 'static> {
 }
 
 impl<E: Send + fmt::Debug + 'static> TickTask<E> {
+    /// Create a tick task with a period given in microseconds.
     #[must_use]
     pub fn new_us(name: &str, tick_period_us: u64) -> Self {
         Self {
@@ -32,6 +33,7 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
             running: Arc::new(AtomicBool::new(false)),
         }
     }
+    /// Create a tick task with a period given in milliseconds.
     #[must_use]
     pub fn new_ms(name: &str, tick_period_ms: u32) -> Self {
         Self {
@@ -44,6 +46,7 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
             running: Arc::new(AtomicBool::new(false)),
         }
     }
+    /// Create a tick task with a period given in seconds.
     #[must_use]
     pub fn new(name: &str, tick_period_sec: u32) -> Self {
         Self {
@@ -57,6 +60,8 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
         }
     }
 
+    /// Set the routine to run on each tick. Must be set before the first tick.
+    /// Write-once: a second call after the routine is set is ignored (logged).
     pub fn set_routine(
         &self,
         routine: impl Fn(StopToken, u64, u64) -> PinBoxFutureStatic<Result<(), E>>
@@ -70,10 +75,12 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
             .unwrap_or_log();
     }
 
+    /// Returns true while the routine for a tick is executing.
     pub fn is_running(&self) -> bool {
         self.running.load(core::sync::atomic::Ordering::Acquire)
     }
 
+    /// The timestamp of the last tick that ran, or None if it has never ticked.
     pub fn last_timestamp_us(&self) -> Option<u64> {
         let ts = self
             .last_timestamp_us
@@ -85,6 +92,8 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
         }
     }
 
+    /// Request a stop and wait for the running tick to finish, propagating its error if any.
+    /// Idempotent: returns immediately if already stopped. Blocks until the in-flight tick completes.
     pub async fn stop(&self) -> Result<(), E> {
         // drop the stop source if we have one
         {
@@ -103,6 +112,9 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
         }
     }
 
+    /// Run the routine if at least the tick period has elapsed since the last run, otherwise do nothing.
+    /// Returns immediately before the period elapses; if a prior run is still in flight, leaves it
+    /// running and starts no second run (does not wait for it).
     pub async fn tick(&self) -> Result<(), E> {
         let now = get_raw_timestamp();
         let last_timestamp_us = self.last_timestamp_us.load(Ordering::Acquire);
@@ -118,6 +130,8 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
         itick.await.map(drop)
     }
 
+    /// Run the routine now regardless of the tick period. Returns true if a new run was started.
+    /// Does not wait for an already-running tick: returns false if one is in flight.
     pub async fn try_tick_now(&self) -> Result<bool, E> {
         let now = get_raw_timestamp();
         let last_timestamp_us = self.last_timestamp_us.load(Ordering::Acquire);

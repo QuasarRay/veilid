@@ -8,16 +8,8 @@ use super::*;
 pub struct RoutingTableHealth {
     /// Total number of entries in the routing table
     pub total_entry_count: usize,
-    /// Number of reliable (long-term responsive) entries in the routing table
-    pub reliable_entry_count: usize,
-    /// Number of unreliable (occasionally unresponsive) entries in the routing table
-    pub unreliable_entry_count: usize,
-    /// Number of live entries we have actually contacted (tested: seen + latency)
-    pub tested_entry_count: usize,
-    /// Number of punished (manually or automatically) entries in the routing table
-    pub punished_entry_count: usize,
-    /// Number of dead (always unresponsive) entries in the routing table
-    pub dead_entry_count: usize,
+    /// Number of nodes per bucket entry state
+    pub per_state_entry_count: BTreeMap<BucketEntryState, usize>,
     /// Health per routing domain
     pub routing_domain_health: BTreeMap<RoutingDomain, RoutingDomainHealth>,
 }
@@ -26,7 +18,37 @@ impl RoutingTableHealth {
     /// Number of live entries in the routing table
     #[must_use]
     pub fn live_entry_count(&self) -> usize {
-        self.reliable_entry_count + self.unreliable_entry_count
+        let mut live_count = 0;
+        for (state, count) in self.per_state_entry_count.iter() {
+            if state.is_live() {
+                live_count += count;
+            }
+        }
+        live_count
+    }
+
+    /// Number of responsive entries in the routing table
+    #[must_use]
+    pub fn responsive_entry_count(&self) -> usize {
+        let mut responsive_count = 0;
+        for (state, count) in self.per_state_entry_count.iter() {
+            if state.is_responsive() {
+                responsive_count += count;
+            }
+        }
+        responsive_count
+    }
+
+    /// Number of reliable entries in the routing table
+    #[must_use]
+    pub fn reliable_entry_count(&self) -> usize {
+        let mut reliable_count = 0;
+        for (state, count) in self.per_state_entry_count.iter() {
+            if state.is_reliable() {
+                reliable_count += count;
+            }
+        }
+        reliable_count
     }
 
     /// Whether the given routing domain is ready for use for all operations (inbound and outbound)
@@ -43,15 +65,16 @@ impl fmt::Display for RoutingTableHealth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut domains_health = Vec::new();
 
+        let mut per_state_counts = Vec::new();
+        for (state, count) in self.per_state_entry_count.iter() {
+            per_state_counts.push(format!("{}={}", f.to_string(state), count));
+        }
+
         domains_health.push(format!(
-            "All Domains:\n    total={}, live={} (reliable={}, unreliable={}), tested={}, dead={}, punished={}",
+            "All Domains:\n    total={}, live={} ({})",
             self.total_entry_count,
             self.live_entry_count(),
-            self.reliable_entry_count,
-            self.unreliable_entry_count,
-            self.tested_entry_count,
-            self.dead_entry_count,
-            self.punished_entry_count
+            per_state_counts.join(", ")
         ));
 
         for (rd, h) in self.routing_domain_health.iter() {

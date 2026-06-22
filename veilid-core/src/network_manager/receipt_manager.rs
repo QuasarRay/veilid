@@ -329,7 +329,7 @@ impl ReceiptManager {
         // Wait for everything to stop
         veilid_log!(self debug "waiting for timeout task to stop");
         if timeout_task.join().await.is_err() {
-            panic!("joining timeout task failed");
+            veilid_log!(self error "joining timeout task failed");
         }
     }
 

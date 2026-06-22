@@ -8,7 +8,7 @@ impl PublicInternetRoutingDomainController {
         &self,
         stop_token: StopToken,
         _last_ts: Timestamp,
-        cur_ts: Timestamp,
+        _cur_ts: Timestamp,
     ) -> EyreResult<()> {
         // Don't bother if the state changed and we don't need to bootstrap
         let nodes_needed = self.nodes_needed();
@@ -109,51 +109,67 @@ impl PublicInternetRoutingDomainController {
 
         self.read_dyn().clear_bootstrap_peers();
 
+        if self
+            .unlocked_inner
+            .bootstrap_wait_detector
+            .fetch_update(|opt_ts| {
+                if opt_ts.is_none() {
+                    Some(Some(Timestamp::now()))
+                } else {
+                    None
+                }
+            })
+            .is_ok()
+        {
+            veilid_log!(self info "Waiting for bootstrap...");
+        }
         let valid_bootstraps = self
             .bootstrap_with_peer_list(bootstrapped_peers.clone(), crypto_kinds.clone(), stop_token)
             .await?;
         if valid_bootstraps.is_empty() {
             veilid_log!(self debug "No external bootstrap peers");
-        } else {
-            veilid_log!(self debug "External bootstrap peers: {:#?}", valid_bootstraps);
 
-            // Get all node ids that have a peerinfo in this routing domain
-            let mut rd_peer_ids = BTreeSet::new();
-            for peer in bootstrapped_peers.iter() {
-                if peer.routing_domain() == RoutingDomain::PublicInternet {
-                    for nid in peer.node_ids().iter().cloned() {
-                        rd_peer_ids.insert(nid);
-                    }
-                }
-            }
+            // Leave bootstrap wait detector set so we don't spam logs
+            return Ok(());
+        }
+        veilid_log!(self debug "External bootstrap peers: {:#?}", valid_bootstraps);
 
-            // Add valid bootstrap peers to routing domain
-            for bootstrap_peer in valid_bootstraps.iter().cloned() {
-                let mut add = false;
-                if let Some(pi) = bootstrap_peer.get_peer_info(RoutingDomain::PublicInternet) {
-                    for nid in pi.node_ids().iter() {
-                        if rd_peer_ids.contains(nid) {
-                            add = true;
-                            break;
-                        }
-                    }
-                }
-                if add {
-                    self.read_dyn().add_bootstrap_peer(bootstrap_peer);
+        // Get all node ids that have a peerinfo in this routing domain
+        let mut rd_peer_ids = BTreeSet::new();
+        for peer in bootstrapped_peers.iter() {
+            if peer.routing_domain() == RoutingDomain::PublicInternet {
+                for nid in peer.node_ids().iter().cloned() {
+                    rd_peer_ids.insert(nid);
                 }
             }
         }
 
+        // Add valid bootstrap peers to routing domain
+        for bootstrap_peer in valid_bootstraps.iter().cloned() {
+            let mut add = false;
+            if let Some(pi) = bootstrap_peer.get_peer_info(RoutingDomain::PublicInternet) {
+                for nid in pi.node_ids().iter() {
+                    if rd_peer_ids.contains(nid) {
+                        add = true;
+                        break;
+                    }
+                }
+            }
+            if add {
+                self.read_dyn().add_bootstrap_peer(bootstrap_peer);
+            }
+        }
         let routing_table = self.routing_table();
         routing_table.flush().await;
-
-        let end_ts = Timestamp::now();
-        let duration = end_ts.duration_since(cur_ts);
 
         // Reset the low water mark for this routing domain
         routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());
 
-        veilid_log!(self info "Bootstrap finished in {:#} via {}", duration, valid_bootstraps.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
+        if let Some(old_ts) = self.unlocked_inner.bootstrap_wait_detector.swap(None) {
+            let end_ts = Timestamp::now();
+            let duration = end_ts.duration_since(old_ts);
+            veilid_log!(self info "Bootstrap finished in {:#} via {}", duration, valid_bootstraps.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","));
+        }
 
         Ok(())
     }
@@ -219,10 +235,7 @@ impl PublicInternetRoutingDomainController {
 
                     // Ensure we got the signed peer info
                     if !nr.peer_info_has_valid_signature(routing_domain) {
-                        veilid_log!(nr info "bootstrap server is not responding for dialinfo: {}", bsdi);
-
-                        // Try a different dialinfo next time
-                        network_manager.address_filter().set_transport_failed(bsdi);
+                        veilid_log!(nr debug "bootstrap server is not responding for dialinfo: {}", bsdi);
                         None
                     } else {
                         // otherwise this bootstrap is valid, lets ask it to find ourselves now
@@ -293,8 +306,8 @@ impl PublicInternetRoutingDomainController {
         // Snapshot once and extract existing node ids for dedup filtering
         let existing_node_ids = Arc::new(
             self.routing_table()
-                .snapshot_entries(Timestamp::now(), BucketEntryState::Unreliable)
-                .existing_node_ids(),
+                .snapshot_entries(Timestamp::now(), BucketEntryState::Initial)
+                .existing_node_ids(None),
         );
 
         // Run all bootstrap operations concurrently
@@ -310,7 +323,7 @@ impl PublicInternetRoutingDomainController {
                 continue;
             }
 
-            veilid_log!(self info "Attempting bootstrap: {}", peer.node_ids());
+            veilid_log!(self debug "Attempting bootstrap: {}", peer.node_ids());
             self.bootstrap_with_peer(peer_crypto_kinds, peer, existing_node_ids.clone(), &unord);
         }
 

@@ -4,6 +4,9 @@ use js_sys::{global, Reflect};
 use std::io;
 use ws_stream_wasm::WsErr;
 
+/// Whether the host JS environment is a browser (has a `navigator` global).
+///
+/// Result is cached after the first call.
 pub fn is_browser() -> bool {
     static CACHE: AtomicI8 = AtomicI8::new(-1);
     let cache = CACHE.load(Ordering::Acquire);
@@ -18,6 +21,9 @@ pub fn is_browser() -> bool {
     res
 }
 
+/// Whether the page was loaded over HTTPS.
+///
+/// Result is cached after the first call.
 pub fn is_browser_https() -> bool {
     static CACHE: AtomicI8 = AtomicI8::new(-1);
     let cache = CACHE.load(Ordering::Acquire);
@@ -36,6 +42,7 @@ pub fn is_browser_https() -> bool {
 
 static IPV6_IS_SUPPORTED: Mutex<Option<bool>> = Mutex::new(None);
 
+/// Whether IPv6 is usable in this wasm environment. Cached after the first call.
 pub fn is_ipv6_supported() -> bool {
     let mut opt_supp = IPV6_IS_SUPPORTED.lock();
     if let Some(supp) = *opt_supp {
@@ -51,6 +58,7 @@ pub fn is_ipv6_supported() -> bool {
 
 static IPV4_IS_SUPPORTED: Mutex<Option<bool>> = Mutex::new(None);
 
+/// Whether IPv4 is usable in this wasm environment. Cached after the first call.
 pub fn is_ipv4_supported() -> bool {
     let mut opt_supp = IPV4_IS_SUPPORTED.lock();
     if let Some(supp) = *opt_supp {
@@ -64,6 +72,9 @@ pub fn is_ipv4_supported() -> bool {
     supp
 }
 
+/// Number of logical cores reported by `navigator.hardwareConcurrency`, defaulting to 1.
+///
+/// Result is cached after the first call.
 pub fn get_concurrency() -> u32 {
     static CACHE: AtomicU32 = AtomicU32::new(0);
     let cache = CACHE.load(Ordering::Acquire);
@@ -80,6 +91,7 @@ pub fn get_concurrency() -> u32 {
     res
 }
 
+/// Map a `ws_stream_wasm` [`WsErr`] onto the closest [`io::Error`] kind.
 #[must_use]
 pub fn ws_err_to_io_error(err: WsErr) -> io::Error {
     match err {

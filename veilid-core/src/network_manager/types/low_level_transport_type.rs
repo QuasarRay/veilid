@@ -27,6 +27,7 @@ impl LowLevelTransportType {
         self.address_type
     }
 
+    #[expect(dead_code)]
     pub fn socket_type(&self) -> SocketType {
         self.low_level_protocol_type.socket_type()
     }

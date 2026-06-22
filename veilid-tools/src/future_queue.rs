@@ -3,6 +3,8 @@ use futures_util::{Stream, StreamExt as _};
 use stop_token::future::FutureExt as _;
 
 /// Returns true if the future queue was processed to completion, false if the stop token was triggered
+///
+/// Awaits until the queue drains or `stop_token` fires, at most `batch_size` futures in flight.
 pub async fn process_batched_future_queue_result<I, C, E, R>(
     future_queue: I,
     batch_size: usize,
@@ -32,6 +34,11 @@ where
     }
 }
 
+/// Drive an iterator of futures `batch_size` at a time, discarding their results.
+///
+/// Returns true if the queue ran to completion, false if the stop token fired first.
+///
+/// Awaits until the queue drains or `stop_token` fires, at most `batch_size` futures in flight.
 pub async fn process_batched_future_queue_void<I>(
     future_queue: I,
     batch_size: usize,
@@ -59,6 +66,12 @@ where
     }
 }
 
+/// Drive a stream of futures `batch_size` at a time, passing each result to `result_callback`.
+///
+/// Returns true if the stream ran to completion, false if the stop token fired first. A
+/// callback error short-circuits and propagates.
+///
+/// Awaits until the stream drains or `stop_token` fires, at most `batch_size` futures in flight.
 pub async fn process_batched_future_stream_result<S, C, E, R>(
     future_stream: S,
     batch_size: usize,
@@ -87,6 +100,11 @@ where
     }
 }
 
+/// Drive a stream of futures `batch_size` at a time, discarding their results.
+///
+/// Returns true if the stream ran to completion, false if the stop token fired first.
+///
+/// Awaits until the stream drains or `stop_token` fires, at most `batch_size` futures in flight.
 pub async fn process_batched_future_stream_void<S>(
     future_stream: S,
     batch_size: usize,

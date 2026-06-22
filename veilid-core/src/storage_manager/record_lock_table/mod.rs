@@ -1,10 +1,12 @@
 mod peek_lock_guard;
+mod peeks_lock_guard;
 mod record_lock;
 mod record_lock_guard;
 mod records_lock_guard;
 mod subkey_lock_guard;
 
 pub use peek_lock_guard::*;
+pub use peeks_lock_guard::*;
 pub use record_lock_guard::*;
 pub use records_lock_guard::*;
 pub use subkey_lock_guard::*;
@@ -101,7 +103,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
         inner
             .record_lock_table
             .entry(record.clone())
-            .or_insert_with(|| Arc::new(RecordLock::new(record.clone())))
+            .or_insert_with(|| Arc::new(RecordLock::new(self.registry.clone(), record.clone())))
     }
 
     pub async fn lock_record(&self, record: OpaqueRecordKey, purpose: R) -> RecordLockGuard<R, S> {
@@ -164,7 +166,12 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
                                 inner
                                     .record_lock_table
                                     .entry(record.clone())
-                                    .or_insert_with(|| Arc::new(RecordLock::new(record.clone())))
+                                    .or_insert_with(|| {
+                                        Arc::new(RecordLock::new(
+                                            self.registry.clone(),
+                                            record.clone(),
+                                        ))
+                                    })
                             })
                             .collect::<Vec<_>>()
                     };
@@ -205,7 +212,9 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
                     inner
                         .record_lock_table
                         .entry(record.clone())
-                        .or_insert_with(|| Arc::new(RecordLock::new(record.clone())))
+                        .or_insert_with(|| {
+                            Arc::new(RecordLock::new(self.registry.clone(), record.clone()))
+                        })
                 })
                 .collect::<Vec<_>>()
         };
@@ -218,6 +227,23 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
         }
 
         Some(RecordsLockGuard::new(record_lock_guards))
+    }
+
+    /// Bulk, non-blocking peek-lock acquisition: all records or none
+    pub fn try_peek_locks(
+        &self,
+        mut records: Vec<OpaqueRecordKey>,
+    ) -> Option<PeeksLockGuard<R, S>> {
+        // Always lock in sorted order to avoid deadlocks
+        records.sort();
+        let mut guards = vec![];
+        for record in records {
+            let record_lock = self.get_or_create_record_lock(&record);
+            let lifetime_guard = record_lock.get_lifetime_lock().try_read_arc()?;
+            record_lock.add_peek();
+            guards.push(PeekLockGuard::new(record_lock, lifetime_guard));
+        }
+        Some(PeeksLockGuard::new(guards))
     }
 
     pub async fn lock_subkey(
@@ -243,7 +269,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
                     let subkey_lock_guard = subkey_lock
                         .lock_arc()
                         .measure_debug(TimestampDuration::new_secs(10), |msg| {
-                            eprintln!("RecordLockTable::lock_subkey lock_arc: {}", msg);
+                            veilid_log!(self debug "RecordLockTable::lock_subkey lock_arc: {}", msg);
                         })
                         .await;
                     record_lock.set_subkey_purpose(subkey, purpose);
@@ -346,7 +372,7 @@ async fn acquire_lifetime_write<R: RecordLockPurpose, S: RecordLockPurpose>(
         "RecordLockTable::acquire_lifetime_write",
         |_name, _start| {
             #[cfg(feature = "debug-locks")]
-            tracing::debug!(target: "stor", "{}[start={:#}](site: {})", _name, _start, site);
+            veilid_log!(record_lock debug "{}[start={:#}](site: {})", _name, _start, site);
         },
     );
     recorder.record_fut(
@@ -356,7 +382,7 @@ async fn acquire_lifetime_write<R: RecordLockPurpose, S: RecordLockPurpose>(
                     match timeout(30000, record_lock.get_lifetime_lock().write_arc()).await {
                         Ok(v) => v,
                         Err(_) => {
-                            eprintln!("active guards: {:#?}", record_lock.get_active_guards().lock().values().collect::<Vec<_>>());
+                            veilid_log!(record_lock error "active guards: {:#?}", record_lock.get_active_guards().lock().values().collect::<Vec<_>>());
                             panic!("{} lifetime_lock deadlock", site);
                         }
                     }
@@ -365,7 +391,7 @@ async fn acquire_lifetime_write<R: RecordLockPurpose, S: RecordLockPurpose>(
                         .get_lifetime_lock()
                         .write_arc()
                         .measure_debug(TimestampDuration::new_secs(10), move |msg| {
-                            eprintln!("RecordLockTable::{} lifetime_lock write_arc: {}", site, msg);
+                            veilid_log!(record_lock debug "RecordLockTable::{} lifetime_lock write_arc: {}", site, msg);
                         })
                         .await
                 }
@@ -373,7 +399,7 @@ async fn acquire_lifetime_write<R: RecordLockPurpose, S: RecordLockPurpose>(
         },
         |_name, _start, _dur, ret| {
             #[cfg(feature = "debug-locks")]
-            tracing::debug!(target: "stor", "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
+            veilid_log!(record_lock debug "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
             ret
         },
     ).await
@@ -386,7 +412,7 @@ async fn acquire_lifetime_read<R: RecordLockPurpose, S: RecordLockPurpose>(
     let recorder =
         DurationRecorder::new("RecordLockTable::acquire_lifetime_read", |_name, _start| {
             #[cfg(feature = "debug-locks")]
-            tracing::debug!(target: "stor", "{}[start={:#}](site: {})", _name, _start, site);
+            veilid_log!(record_lock debug "{}[start={:#}](site: {})", _name, _start, site);
         });
     recorder.record_fut(
         async {
@@ -395,7 +421,7 @@ async fn acquire_lifetime_read<R: RecordLockPurpose, S: RecordLockPurpose>(
                     match timeout(30000, record_lock.get_lifetime_lock().read_arc()).await {
                         Ok(v) => v,
                         Err(_) => {
-                            eprintln!("active guards: {:#?}", record_lock.get_active_guards().lock().values().collect::<Vec<_>>());
+                            veilid_log!(record_lock error "active guards: {:#?}", record_lock.get_active_guards().lock().values().collect::<Vec<_>>());
                             panic!("{} lifetime_lock read deadlock", site);
                         }
                     }
@@ -404,7 +430,7 @@ async fn acquire_lifetime_read<R: RecordLockPurpose, S: RecordLockPurpose>(
                         .get_lifetime_lock()
                         .read_arc()
                         .measure_debug(TimestampDuration::new_secs(10), move |msg| {
-                            eprintln!("RecordLockTable::{} lifetime_lock read_arc: {}", site, msg);
+                            veilid_log!(record_lock debug "RecordLockTable::{} lifetime_lock read_arc: {}", site, msg);
                         })
                         .await
                 }
@@ -412,7 +438,7 @@ async fn acquire_lifetime_read<R: RecordLockPurpose, S: RecordLockPurpose>(
         },
         |_name, _start, _dur, ret| {
             #[cfg(feature = "debug-locks")]
-            tracing::debug!(target: "stor", "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
+            veilid_log!(record_lock debug "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
             ret
         },
     ).await
@@ -426,7 +452,7 @@ async fn acquire_transaction_write<R: RecordLockPurpose, S: RecordLockPurpose>(
         "RecordLockTable::acquire_transaction_write",
         |_name, _start| {
             #[cfg(feature = "debug-locks")]
-            tracing::debug!(target: "stor", "{}[start={:#}](site: {})", _name, _start, site);
+            veilid_log!(record_lock debug "{}[start={:#}](site: {})", _name, _start, site);
         },
     );
     recorder
@@ -436,16 +462,13 @@ async fn acquire_transaction_write<R: RecordLockPurpose, S: RecordLockPurpose>(
                     .get_transaction_lock()
                     .write_arc()
                     .measure_debug(TimestampDuration::new_secs(10), move |msg| {
-                        eprintln!(
-                            "RecordLockTable::{} transaction_lock write_arc: {}",
-                            site, msg
-                        );
+                        veilid_log!(record_lock debug "RecordLockTable::{} transaction_lock write_arc: {}", site, msg);
                     })
                     .await
             },
             |_name, _start, _dur, ret| {
                 #[cfg(feature = "debug-locks")]
-                tracing::debug!(target: "stor", "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
+                veilid_log!(record_lock debug "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
                 ret
             },
         )
@@ -460,7 +483,7 @@ async fn acquire_transaction_read<R: RecordLockPurpose, S: RecordLockPurpose>(
         "RecordLockTable::acquire_transaction_read",
         |_name, _start| {
             #[cfg(feature = "debug-locks")]
-            tracing::debug!(target: "stor", "{}[start={:#}](site: {})", _name, _start, site);
+            veilid_log!(record_lock debug "{}[start={:#}](site: {})", _name, _start, site);
         },
     );
     recorder
@@ -470,16 +493,13 @@ async fn acquire_transaction_read<R: RecordLockPurpose, S: RecordLockPurpose>(
                     .get_transaction_lock()
                     .read_arc()
                     .measure_debug(TimestampDuration::new_secs(10), move |msg| {
-                        eprintln!(
-                            "RecordLockTable::{} transaction_lock read_arc: {}",
-                            site, msg
-                        );
+                        veilid_log!(record_lock debug "RecordLockTable::{} transaction_lock read_arc: {}", site, msg);
                     })
                     .await
             },
             |_name, _start, _dur, ret| {
                 #[cfg(feature = "debug-locks")]
-                tracing::debug!(target: "stor", "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
+                veilid_log!(record_lock debug "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
                 ret
             },
         )
@@ -492,7 +512,7 @@ async fn acquire_watch<R: RecordLockPurpose, S: RecordLockPurpose>(
 ) -> AsyncMutexGuardArc<()> {
     let recorder = DurationRecorder::new("RecordLockTable::acquire_watch", |_name, _start| {
         #[cfg(feature = "debug-locks")]
-        tracing::debug!(target: "stor", "{}[start={:#}](site: {})", _name, _start, site);
+        veilid_log!(record_lock debug "{}[start={:#}](site: {})", _name, _start, site);
     });
     recorder
         .record_fut(
@@ -501,13 +521,13 @@ async fn acquire_watch<R: RecordLockPurpose, S: RecordLockPurpose>(
                     .get_watch_lock()
                     .lock_arc()
                     .measure_debug(TimestampDuration::new_secs(10), move |msg| {
-                        eprintln!("RecordLockTable::{} watch_lock lock_arc: {}", site, msg);
+                        veilid_log!(record_lock debug "RecordLockTable::{} watch_lock lock_arc: {}", site, msg);
                     })
                     .await
             },
             |_name, _start, _dur, ret| {
                 #[cfg(feature = "debug-locks")]
-                tracing::debug!(target: "stor", "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
+                veilid_log!(record_lock debug "{}[start={:#} dur={:#}]() done", _name, _start, _dur);
                 ret
             },
         )

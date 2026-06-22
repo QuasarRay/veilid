@@ -79,6 +79,25 @@ impl StorageManager {
             subkeys
         };
 
+        // If this record participates in a committed transaction set, rehydrate the whole set
+        // transactionally rather than via individual offline writes, which would break the
+        // cross-record consistency the transaction established.
+        let opt_membership = local_record_store
+            .with_record(&opaque_record_key, |r| {
+                r.detail().transaction_membership.clone()
+            })?
+            .flatten();
+        if let Some(membership) = opt_membership {
+            return self
+                .rehydrate_record_transactional(
+                    opaque_record_key,
+                    subkeys,
+                    consensus_count,
+                    membership,
+                )
+                .await;
+        }
+
         let peek_lock = self
             .record_lock_table
             .peek_lock(opaque_record_key.clone())
@@ -146,7 +165,7 @@ impl StorageManager {
             opaque_record_key.clone(),
             results_iter,
             false,
-            self.config().network.dht.consensus_width as usize,
+            self.config().internal().network.dht.consensus_width as usize,
         )?;
 
         if !existed {
@@ -196,16 +215,14 @@ impl StorageManager {
     ) -> VeilidAPIResult<RehydrateReport> {
         veilid_log!(self debug "Rehydrating all subkeys: record={} subkeys={}", opaque_record_key, subkeys);
 
-        let mut rehydrated = ValueSubkeyRangeSet::new();
-        for (n, subkey) in local_inspect_result.subkeys().iter().enumerate() {
-            if local_inspect_result.seqs()[n].is_some() {
-                self.add_offline_subkey_write(
-                    opaque_record_key.clone(),
-                    subkey,
-                    safety_selection.clone(),
-                );
-                rehydrated.insert(subkey);
-            }
+        let rehydrated =
+            Self::compute_rehydration_subkeys(&local_inspect_result, None, consensus_count);
+        for subkey in rehydrated.iter() {
+            self.add_offline_subkey_write(
+                opaque_record_key.clone(),
+                subkey,
+                safety_selection.clone(),
+            );
         }
 
         if rehydrated.is_empty() {
@@ -235,44 +252,18 @@ impl StorageManager {
         local_inspect_result: InspectResult,
         outbound_inspect_result: OutboundInspectValueResult,
     ) -> VeilidAPIResult<RehydrateReport> {
-        // For each subkey, determine if we should rehydrate it
-        let mut rehydrated = ValueSubkeyRangeSet::new();
-        for (n, subkey) in local_inspect_result.subkeys().iter().enumerate() {
-            let local_seq = local_inspect_result.seqs()[n];
-            if local_seq.is_none() {
-                apibail_internal!("None sequence number found in local inspect results. Should have been stripped by strip_none_seqs(): {:?}", local_inspect_result);
-            };
-
-            // Find matching network sequence number position
-            // (they must line up because subkey range is the same for both local and network inspect results)
-            let mut rehydrate = false;
-
-            let network_seq = outbound_inspect_result.inspect_result.seqs()[n];
-            if local_seq > network_seq {
-                // If our copy is newer, push it to the network
-                rehydrate = true;
-            } else {
-                // If our copy is older or equal, rehydrate only if there isn't enough consensus
-                let sfr = outbound_inspect_result
-                    .subkey_fanout_results
-                    .get(n)
-                    .unwrap_or_log();
-
-                // Does the online subkey have enough consensus?
-                // If not, schedule it to be written in the background
-                if sfr.consensus_nodes.len() < consensus_count {
-                    rehydrate = true;
-                }
-            }
-
-            if rehydrate {
-                self.add_offline_subkey_write(
-                    opaque_record_key.clone(),
-                    subkey,
-                    safety_selection.clone(),
-                );
-                rehydrated.insert(subkey);
-            }
+        // Determine which subkeys need rehydrating and schedule them as offline writes
+        let rehydrated = Self::compute_rehydration_subkeys(
+            &local_inspect_result,
+            Some(&outbound_inspect_result),
+            consensus_count,
+        );
+        for subkey in rehydrated.iter() {
+            self.add_offline_subkey_write(
+                opaque_record_key.clone(),
+                subkey,
+                safety_selection.clone(),
+            );
         }
 
         if rehydrated.is_empty() {
@@ -293,7 +284,7 @@ impl StorageManager {
             opaque_record_key.clone(),
             results_iter,
             false,
-            self.config().network.dht.consensus_width as usize,
+            self.config().internal().network.dht.consensus_width as usize,
         )?;
 
         if !existed {
@@ -309,5 +300,192 @@ impl StorageManager {
             consensus_count,
             rehydrated,
         })
+    }
+
+    /// Decide which subkeys need rehydrating: those newer locally than the network, or equal but
+    /// with fewer than `consensus_count` nodes in agreement. With no network result (the record is
+    /// absent online), every locally-present subkey is rehydrated.
+    pub(super) fn compute_rehydration_subkeys(
+        local_inspect_result: &InspectResult,
+        opt_outbound_inspect_result: Option<&OutboundInspectValueResult>,
+        consensus_count: usize,
+    ) -> ValueSubkeyRangeSet {
+        let mut rehydrated = ValueSubkeyRangeSet::new();
+        for (n, subkey) in local_inspect_result.subkeys().iter().enumerate() {
+            let local_seq = local_inspect_result.seqs()[n];
+            if local_seq.is_none() {
+                continue;
+            }
+            let needed = match opt_outbound_inspect_result {
+                // No network copy: push everything we have locally
+                None => true,
+                Some(outbound) => {
+                    let network_seq = outbound.inspect_result.seqs()[n];
+                    if local_seq > network_seq {
+                        // Our copy is newer
+                        true
+                    } else {
+                        // Equal or older: rehydrate only if the network lacks strict consensus
+                        outbound
+                            .subkey_fanout_results
+                            .get(n)
+                            .map(|sfr| sfr.consensus_nodes.len() < consensus_count)
+                            .unwrap_or(false)
+                    }
+                }
+            };
+            if needed {
+                rehydrated.insert(subkey);
+            }
+        }
+        rehydrated
+    }
+
+    /// Rehydrate a record that participates in a committed transaction set: begin a background
+    /// transaction over the whole set, re-push each member's needed subkeys (newer-than-network or
+    /// under strict consensus) as their existing signed values, and commit. All-or-nothing on
+    /// presence: a missing member or stored signer cancels the whole rehydration. Peek-lock
+    /// contention with an overlapping set surfaces as TryAgain and re-enqueues.
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "stor", skip(self, membership), ret, err)
+    )]
+    async fn rehydrate_record_transactional(
+        &self,
+        opaque_record_key: OpaqueRecordKey,
+        subkeys: ValueSubkeyRangeSet,
+        consensus_count: usize,
+        membership: TransactionMembership,
+    ) -> VeilidAPIResult<RehydrateReport> {
+        // Triggering record key, with its encryption key if it is currently open
+        let triggering_record_key = {
+            let inner = self.inner.lock();
+            let encryption_key = inner
+                .opened_records
+                .get(&opaque_record_key)
+                .and_then(|or| or.encryption_key());
+            RecordKey::from_opaque(opaque_record_key.clone(), encryption_key)
+        };
+
+        let triggering_opaque = opaque_record_key.clone();
+        let rehydrated = self
+            .with_background_transaction(
+                triggering_record_key,
+                membership,
+                move |transaction_handle, members| async move {
+                    let mut triggering_rehydrated = ValueSubkeyRangeSet::new();
+                    for member in &members {
+                        let member_opaque = member.opaque();
+                        let values = self
+                            .collect_member_rehydration_values(
+                                transaction_handle,
+                                member,
+                                consensus_count,
+                            )
+                            .await?;
+                        for (subkey, signed_value_data) in values {
+                            let _subkey_lock = self
+                                .record_lock_table
+                                .lock_subkey(
+                                    member_opaque.clone(),
+                                    subkey,
+                                    StorageManagerSubkeyLockPurpose::TransactSet,
+                                )
+                                .await;
+                            self.transaction_set_signed_value_data(
+                                transaction_handle,
+                                member.clone(),
+                                subkey,
+                                signed_value_data,
+                            )
+                            .await?;
+                            if member_opaque == triggering_opaque {
+                                triggering_rehydrated.insert(subkey);
+                            }
+                        }
+                    }
+
+                    // Commit the whole set
+                    self.end_and_commit_transaction(transaction_handle).await?;
+                    VeilidAPIResult::Ok(triggering_rehydrated)
+                },
+            )
+            .await?;
+
+        Ok(RehydrateReport {
+            opaque_record_key,
+            subkeys,
+            consensus_count,
+            rehydrated,
+        })
+    }
+
+    /// Determine which of a transaction-set member's subkeys need rehydrating and read their
+    /// existing local signed values. Uses the data the begin fanout already gathered (no second
+    /// fanout): per-subkey seqs come from the transaction state via `transaction_inspect`, and the
+    /// consensus node count per subkey comes from the local record's `PerNodeRecordDetail` coverage
+    /// that the begin's `process_fanout_results` populated.
+    async fn collect_member_rehydration_values(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+        member_record_key: &RecordKey,
+        consensus_count: usize,
+    ) -> VeilidAPIResult<Vec<(ValueSubkey, Arc<SignedValueData>)>> {
+        let opaque_record_key = member_record_key.opaque();
+        let local_record_store = self.get_local_record_store()?;
+
+        // Per-subkey local and begin-time network seqs from the transaction state (no fanout)
+        let report = self.transaction_inspect(
+            transaction_handle,
+            member_record_key.clone(),
+            Some(ValueSubkeyRangeSet::full()),
+            DHTReportScope::SyncGet,
+        )?;
+
+        // Per-node subkey coverage gathered by the begin fanout, used to count consensus per
+        // subkey. Only the nodes from the most recent fanout count: those sharing the latest
+        // last_seen timestamp. Older entries are stale and would inflate the consensus count.
+        let node_subkey_sets: Vec<ValueSubkeyRangeSet> = local_record_store
+            .peek_record(&opaque_record_key, |r| {
+                let nodes = &r.detail().nodes;
+                match nodes.values().map(|n| n.last_seen).max() {
+                    Some(latest) => nodes
+                        .values()
+                        .filter(|n| n.last_seen == latest)
+                        .map(|n| n.subkeys.clone())
+                        .collect(),
+                    None => vec![],
+                }
+            })
+            .unwrap_or_default();
+
+        let mut values = vec![];
+        for (n, subkey) in report.subkeys().iter().enumerate() {
+            let local_seq = report.local_seqs()[n];
+            if local_seq.is_none() {
+                continue;
+            }
+            let network_seq = report.network_seqs()[n];
+            let needed = if local_seq > network_seq {
+                // Our copy is newer than the network
+                true
+            } else {
+                // Equal or older: rehydrate only if fewer than strict consensus nodes have it
+                let node_count = node_subkey_sets
+                    .iter()
+                    .filter(|s| s.contains(subkey))
+                    .count();
+                node_count < consensus_count
+            };
+            if needed {
+                let get_result = self
+                    .handle_get_single_local_value(&opaque_record_key, subkey, false)
+                    .await?;
+                if let Some(signed_value_data) = get_result.opt_value {
+                    values.push((subkey, signed_value_data));
+                }
+            }
+        }
+        Ok(values)
     }
 }

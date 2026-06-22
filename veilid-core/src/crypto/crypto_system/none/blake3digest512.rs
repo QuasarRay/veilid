@@ -3,6 +3,10 @@ use curve25519_dalek::digest::{
     Digest, FixedOutput, FixedOutputReset, Output, OutputSizeUser, Reset, Update,
 };
 
+/// A BLAKE3 hasher exposing a fixed 64-byte (512-bit) output via the RustCrypto `Digest` traits.
+///
+/// BLAKE3 is natively an extendable-output function; this wraps it as a fixed-size digest by
+/// reading 64 bytes from its XOF, so it can be used wherever a 512-bit `Digest` is expected.
 pub struct Blake3Digest512 {
     dig: blake3::Hasher,
 }

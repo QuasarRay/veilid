@@ -9,6 +9,7 @@ pub(crate) enum SocketType {
     Datagram = 1,
 }
 
+#[expect(dead_code)]
 pub(crate) type SocketTypeSet = EnumSet<SocketType>;
 
 impl fmt::Display for SocketType {

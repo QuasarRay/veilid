@@ -287,6 +287,8 @@ impl TableStore {
     }
 
     /// List all known tables
+    ///
+    /// Reads cached names locally without blocking on disk; returns empty before init or after shutdown.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -305,6 +307,8 @@ impl TableStore {
     }
 
     /// Delete all known tables
+    ///
+    /// No-op before init or after shutdown. Blocks on deleting each table on disk and flushing.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -695,6 +699,10 @@ impl TableStore {
 
     /// Get or create a TableDB database table. If the column count is greater than an
     /// existing TableDB's column count, the database will be upgraded to add the missing columns.
+    ///
+    /// Returns a `TableDB` handle the caller must drop before the table can be deleted; while any clone is held the table counts as opened. Opening the same name again returns a handle to the same shared database. Blocks on opening the on-disk database.
+    ///
+    /// Same errors as `open_pooled`.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -707,6 +715,15 @@ impl TableStore {
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
+    /// Get or create a TableDB table, opening a pool of `concurrency` database connections for it.
+    /// Like `open`, upgrades the table if `column_count` exceeds the existing column count.
+    ///
+    /// Returns a `TableDB` handle the caller must drop before the table can be deleted; while any clone is held the table counts as opened. Opening the same name again returns a handle to the same shared database. Blocks on opening the on-disk database.
+    ///
+    /// Errors with:
+    /// - `VeilidAPIError::InvalidArgument` if `column_count` is zero or `name` contains characters other than alphanumeric, `_`, or `-`.
+    /// - `VeilidAPIError::NotInitialized` before init or after shutdown, or when the existing data fails to decrypt (wrong device encryption key) and `wipe_on_invalid_device_encryption_key` is disabled.
+    /// - `VeilidAPIError::Generic` if the table is already open with a smaller column count than requested (close it first), or if the backing-store open fails (`::Internal` for filesystem-permission failures).
     pub async fn open_pooled(
         &self,
         name: &str,
@@ -807,8 +824,9 @@ impl TableStore {
         let mut first_failure: Option<(u32, String)> = None;
         for col in 0..existing_col_count {
             match table_db.get_keys(col).await {
-                Ok(keys) => {
-                    veilid_log!(self debug "table {}({}) col {}: {} keys read ok", name, table_name, col, keys.len());
+                Ok(_keys) => {
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug "table {}({}) col {}: {} keys read ok", name, table_name, col, _keys.len());
                 }
                 Err(e) => {
                     veilid_log!(self warn "table {}({}) col {}: get_keys failed: {}", name, table_name, col, e);
@@ -898,6 +916,13 @@ impl TableStore {
     }
 
     /// Delete a TableDB table by name
+    ///
+    /// Errors if the table is still opened; the caller must drop all `TableDB` handles for it first. Blocks on the on-disk delete and flush.
+    ///
+    /// Returns `Ok(false)` if no table by that name exists. Errors with:
+    /// - `VeilidAPIError::NotInitialized` before init or after shutdown.
+    /// - `VeilidAPIError::InvalidArgument` if `name` contains characters other than alphanumeric, `_`, or `-`.
+    /// - `VeilidAPIError::Generic` if the table is still opened (drop all handles first) or the backing-store delete fails.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
@@ -945,6 +970,11 @@ impl TableStore {
         self.flush().await;
         Ok(true)
     }
+    /// Get column and key-count information for a table, or `None` if it does not exist.
+    ///
+    /// Opens the table to read it; blocks on the on-disk open and key-count reads.
+    ///
+    /// Errors with `VeilidAPIError::NotInitialized` before init or after shutdown, the same errors as `open` (the table is opened to read it), or `VeilidAPIError::Generic` if a column-count or key-count read fails.
     pub async fn info(&self, name: &str) -> VeilidAPIResult<Option<TableInfo>> {
         let Ok(_startup_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
@@ -1020,6 +1050,13 @@ impl TableStore {
     }
 
     /// Rename a TableDB table
+    ///
+    /// Blocks on flushing the renamed name table to disk.
+    ///
+    /// Errors with:
+    /// - `VeilidAPIError::NotInitialized` before init or after shutdown.
+    /// - `VeilidAPIError::InvalidArgument` if `old_name` or `new_name` contains characters other than alphanumeric, `_`, or `-`.
+    /// - `VeilidAPIError::Generic` if `new_name` already exists or `old_name` does not exist.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)

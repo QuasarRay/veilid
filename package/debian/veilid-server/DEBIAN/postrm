@@ -2,6 +2,13 @@
 
 set -e
 
+# Remove the SELinux policy module on remove/purge (no-op if SELinux is off).
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if command -v semodule >/dev/null 2>&1 && command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+        semodule -r veilid_server 2>/dev/null || true
+    fi
+fi
+
 if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
 fi

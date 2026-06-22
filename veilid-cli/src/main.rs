@@ -30,13 +30,13 @@ enum LogLevel {
 #[command(author, version, about = "Veilid Console Client")]
 struct CmdlineArgs {
     /// IPC socket to connect to
-    #[arg(long, short = 'p')]
+    #[arg(long, short = 'p', group = "connection")]
     ipc_path: Option<PathBuf>,
-    /// Subnode index to use when connecting
-    #[arg(short('n'), long, default_value = "0")]
-    subnode_index: u16,
+    /// Subnode index to use when connecting to IPC socket
+    #[arg(short('n'), long, group = "connection")]
+    subnode_index: Option<u16>,
     /// Address to connect to
-    #[arg(long, short = 'a')]
+    #[arg(long, short = 'a', group = "connection")]
     address: Option<String>,
     /// Wait for debugger to attach
     #[arg(long)]
@@ -48,8 +48,8 @@ struct CmdlineArgs {
     #[arg(long, value_enum)]
     cli_log_level: Option<LogLevel>,
     /// interactive mode
-    #[arg(long, short = 'i', group = "execution_mode")]
-    interactive: bool,
+    #[arg(long, short = 't', group = "execution_mode")]
+    tui: Option<bool>,
     /// evaluate the rest of the line as a cli command
     #[arg(long, short = 'e', group = "execution_mode")]
     evaluate: Option<String>,
@@ -101,24 +101,16 @@ fn main() -> Result<(), String> {
         }
 
         // If we are running in interactive mode disable some things
-        let mut enable_cursive = true;
-        if args.interactive || args.log || args.command_file.is_some() || args.evaluate.is_some() {
-            // Not using the cursive UI
-            enable_cursive = false;
-        } else {
+        let mut enable_cursive = false;
+        if args.tui.unwrap_or(settings.interface.tui) {
             // If we're using the cursive UI, don't print logs to the terminal
             settings.logging.terminal.enabled = false;
+            enable_cursive = true;
         }
 
         // Create UI object
         let (mut ui, uisender) = if enable_cursive {
             let (ui, uisender) = cursive_ui::CursiveUI::new(&settings);
-            (
-                Box::new(ui) as Box<dyn UI>,
-                Box::new(uisender) as Box<dyn UISender>,
-            )
-        } else if args.interactive {
-            let (ui, uisender) = interactive_ui::InteractiveUI::new(&settings);
             (
                 Box::new(ui) as Box<dyn UI>,
                 Box::new(uisender) as Box<dyn UISender>,
@@ -188,7 +180,11 @@ fn main() -> Result<(), String> {
                 Box::new(uisender) as Box<dyn UISender>,
             )
         } else {
-            panic!("unknown ui mode");
+            let (ui, uisender) = interactive_ui::InteractiveUI::new(&settings);
+            (
+                Box::new(ui) as Box<dyn UI>,
+                Box::new(uisender) as Box<dyn UISender>,
+            )
         };
 
         // Set up loggers
@@ -242,21 +238,24 @@ fn main() -> Result<(), String> {
         }
 
         // Get client address
-        let enable_ipc = (settings.enable_ipc && args.address.is_none()) || args.ipc_path.is_some();
-        let mut enable_network =
-            (settings.enable_network && args.ipc_path.is_none()) || args.address.is_some();
-
-        // Determine IPC path to try
         let mut client_api_ipc_path = None;
-        if enable_ipc {
-            client_api_ipc_path = settings.resolve_ipc_path(args.ipc_path, args.subnode_index);
-            if client_api_ipc_path.is_some() {
-                enable_network = false;
-            }
-        }
         let mut client_api_network_addresses = None;
-        if enable_network {
-            client_api_network_addresses = settings.resolve_network_address(args.address)?;
+
+        if args.ipc_path.is_some() {
+            client_api_ipc_path = settings.resolve_ipc_path(args.ipc_path, None)?;
+        } else if let Some(subnode_index) = args.subnode_index {
+            client_api_ipc_path = settings.resolve_ipc_path(None, Some(subnode_index))?;
+        } else if args.address.is_some() {
+            client_api_network_addresses = settings.resolve_network_address(args.address, 0)?;
+        } else {
+            if let Ok(opt_ipc_path) = settings.resolve_ipc_path(None, None) {
+                client_api_ipc_path = opt_ipc_path;
+            }
+            if client_api_ipc_path.is_none() {
+                if let Ok(opt_network_address) = settings.resolve_network_address(None, 0) {
+                    client_api_network_addresses = opt_network_address;
+                }
+            }
         }
 
         // Create command processor
@@ -273,13 +272,10 @@ fn main() -> Result<(), String> {
         comproc.set_client_api_connection(capi.clone());
 
         // Keep a connection to the server
-        if let Some(client_api_ipc_path) = client_api_ipc_path {
-            comproc.set_ipc_path(Some(client_api_ipc_path));
-        } else if let Some(client_api_network_address) = client_api_network_addresses {
-            let network_addr = client_api_network_address.first().cloned();
-            comproc.set_network_address(network_addr);
-        } else {
-            return Err("veilid-server could not be reached".to_owned());
+        if let Some(p) = client_api_ipc_path {
+            comproc.set_ipc_path(p);
+        } else if let Some(a) = client_api_network_addresses {
+            comproc.set_network_address(a);
         }
 
         let comproc2 = comproc.clone();

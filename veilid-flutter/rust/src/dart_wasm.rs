@@ -42,6 +42,11 @@ fn take_veilid_api() -> Result<veilid_core::VeilidAPI, veilid_core::VeilidAPIErr
         .ok_or(veilid_core::VeilidAPIError::NotInitialized)
 }
 
+// Serialize a value to JSON and wrap it as a JS string value.
+fn to_json<T: Serialize + fmt::Debug>(val: T) -> JsValue {
+    JsValue::from_str(&serialize_json(val))
+}
+
 // Utility types for async API results
 pub fn wrap_api_future_json<F, T>(future: F) -> Promise
 where
@@ -57,7 +62,7 @@ where
     JsValue: From<T>,
     T: 'static,
 {
-    future_to_promise(future.map(|res| res.map(|v| to_jsvalue(v)).map_err(to_json)))
+    future_to_promise(future.map(|res| res.map(JsValue::from).map_err(to_json)))
 }
 
 pub fn wrap_api_future_void<F>(future: F) -> Promise
@@ -513,7 +518,6 @@ pub fn routing_context_watch_dht_values(
     subkeys: String,
     expiration: String,
     count: u32,
-    transactional: bool,
 ) -> Promise {
     wrap_api_future_plain(async move {
         let key: veilid_core::RecordKey = veilid_core::deserialize_json(&key)?;
@@ -526,13 +530,7 @@ pub fn routing_context_watch_dht_values(
         let routing_context = get_routing_context(id, "routing_context_watch_dht_values")?;
 
         let res = routing_context
-            .watch_dht_values(
-                key,
-                Some(subkeys),
-                Some(expiration),
-                Some(count),
-                Some(transactional),
-            )
+            .watch_dht_values(key, Some(subkeys), Some(expiration), Some(count))
             .await?;
         VeilidAPIResult::Ok(res)
     })

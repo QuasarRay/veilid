@@ -62,10 +62,14 @@ pub async fn run_all_tests() {
     test_async_keyed_cache::test_all().await;
     info!("TEST: exec_test_async_tag_lock");
     test_async_tag_lock::test_all().await;
+    info!("TEST: exec_test_async_weighted_semaphore");
+    test_async_weighted_semaphore::test_all().await;
     info!("TEST: exec_test_tag_lock");
     test_tag_lock::test_all();
     info!("TEST: exec_test_assembly_buffer");
     test_assembly_buffer::test_all().await;
+    info!("TEST: exec_test_tracked_mutex");
+    test_tracked_mutex::test_all();
 
     info!("Finished unit tests");
 }
@@ -194,6 +198,14 @@ cfg_if! {
         }
 
         #[test]
+        fn run_test_async_weighted_semaphore() {
+            setup();
+            block_on(async {
+                test_async_weighted_semaphore::test_all().await;
+            });
+        }
+
+        #[test]
         fn run_test_event_bus() {
             setup();
             block_on(async {
@@ -237,6 +249,12 @@ cfg_if! {
             block_on(async {
                 test_assembly_buffer::test_all().await;
             });
+        }
+
+        #[test]
+        fn run_test_tracked_mutex() {
+            setup();
+            test_tracked_mutex::test_all();
         }
     }
 }

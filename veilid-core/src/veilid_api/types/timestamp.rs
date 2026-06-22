@@ -26,15 +26,18 @@ impl FromStr for Timestamp {
 }
 
 impl Timestamp {
+    /// Current wall-clock time. May move backward if the system clock is adjusted.
     pub fn now() -> Self {
         Self::new(get_raw_timestamp())
     }
 
+    /// Returns true if the timestamp is zero.
     #[must_use]
     pub fn is_zero(&self) -> bool {
         self.0 == 0
     }
 
+    /// Current time, clamped to never read earlier than a previous call. Repeated values are allowed.
     pub fn now_non_decreasing() -> Self {
         let mut last_raw_timestamp = LAST_NON_DECREASING_RAW_TIMESTAMP.lock();
         let mut next_raw_timestamp = get_raw_timestamp();
@@ -47,6 +50,7 @@ impl Timestamp {
         Self::new(next_raw_timestamp)
     }
 
+    /// Current time, clamped to always read at least 1us later than a previous call. Never repeats a value.
     pub fn now_increasing() -> Self {
         let mut last_raw_timestamp = LAST_INCREASING_RAW_TIMESTAMP.lock();
         let mut next_raw_timestamp = get_raw_timestamp();
@@ -61,14 +65,17 @@ impl Timestamp {
         Self::new(next_raw_timestamp)
     }
 
+    /// Timestamp shifted later by a duration, saturating at the maximum value.
     pub fn later(self, rhs: TimestampDuration) -> Self {
         Self::new(self.0.saturating_add(rhs.as_u64()))
     }
 
+    /// Timestamp shifted earlier by a duration, saturating at zero.
     pub fn earlier(self, rhs: TimestampDuration) -> Self {
         Self::new(self.0.saturating_sub(rhs.as_u64()))
     }
 
+    /// Duration from `older` to this timestamp, saturating to zero if `older` is later.
     pub fn duration_since(self, older: Self) -> TimestampDuration {
         TimestampDuration::new(self.0.saturating_sub(older.0))
     }

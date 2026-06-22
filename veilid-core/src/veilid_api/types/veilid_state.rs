@@ -9,21 +9,31 @@ use super::*;
 )]
 #[must_use]
 pub enum AttachmentState {
+    /// Not attached to the network.
     #[default]
     Detached = 0,
+    /// Attaching, but not yet able to perform network operations.
     Attaching = 1,
+    /// Attached with the weakest signal strength.
     AttachedWeak = 2,
+    /// Attached with fair signal strength.
     AttachedFair = 3,
+    /// Attached with good signal strength.
     AttachedGood = 4,
+    /// Attached with strong signal strength.
     AttachedStrong = 5,
+    /// Attached with the strongest signal strength.
     AttachedFull = 6,
+    /// Detaching from the network and shutting down connections.
     Detaching = 7,
 }
 impl AttachmentState {
+    /// Returns true when the node is fully detached from the network.
     #[must_use]
     pub fn is_detached(&self) -> bool {
         matches!(self, Self::Detached)
     }
+    /// Returns true when the node is attached at any signal strength.
     #[must_use]
     pub fn is_attached(&self) -> bool {
         matches!(
@@ -127,7 +137,7 @@ pub struct VeilidStateAttachment {
     pub attached_uptime: Option<TimestampDuration>,
     /// Reliable peers in the routing table.
     pub reliable_peer_count: NodeCount,
-    /// Live peers (reliable + unreliable) in the routing table.
+    /// Live peers (reliable, unreliable, and newly added) in the routing table.
     pub live_peer_count: NodeCount,
     /// Smoothed estimate of total reachable network size.
     pub estimated_network_size: NodeCount,
@@ -331,14 +341,23 @@ impl fmt::Display for VeilidValueChange {
 #[serde(tag = "kind")]
 #[must_use]
 pub enum VeilidUpdate {
+    /// A log message emitted by veilid-core.
     Log(Box<VeilidLog>),
+    /// A one-way application message delivered over the network.
     AppMessage(Box<VeilidAppMessage>),
+    /// An application call expecting a reply from the host application.
     AppCall(Box<VeilidAppCall>),
+    /// The node's attachment state has changed.
     Attachment(Box<VeilidStateAttachment>),
+    /// The node's network state has changed.
     Network(Box<VeilidStateNetwork>),
+    /// The node's configuration has changed.
     Config(Box<VeilidStateConfig>),
+    /// An allocated or imported route has died or been released.
     RouteChange(Box<VeilidRouteChange>),
+    /// A watched DHT record has changed subkey values.
     ValueChange(Box<VeilidValueChange>),
+    /// The node is shutting down; no further updates will follow.
     Shutdown,
 }
 
@@ -389,7 +408,10 @@ impl fmt::Display for VeilidUpdate {
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
 pub struct VeilidState {
+    /// The current attachment state.
     pub attachment: Box<VeilidStateAttachment>,
+    /// The current network state.
     pub network: Box<VeilidStateNetwork>,
+    /// The current node configuration.
     pub config: Box<VeilidStateConfig>,
 }

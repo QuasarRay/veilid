@@ -17,46 +17,13 @@ use x25519_dalek as xd;
 
 pub use chacha20poly1305::aead::Buffer;
 
-pub struct BufferWrapper<'a> {
-    buffer: &'a mut dyn CryptoSystemBuffer,
-}
-
-impl<'a> BufferWrapper<'a> {
-    pub fn new(buffer: &'a mut dyn CryptoSystemBuffer) -> Self {
-        Self { buffer }
-    }
-}
-impl<'a> AsRef<[u8]> for BufferWrapper<'a> {
-    fn as_ref(&self) -> &[u8] {
-        self.buffer.as_ref()
-    }
-}
-impl<'a> AsMut<[u8]> for BufferWrapper<'a> {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.buffer.as_mut()
-    }
-}
-impl<'a> ch::aead::Buffer for BufferWrapper<'a> {
-    fn len(&self) -> usize {
-        self.buffer.len()
-    }
-    fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
-    }
-    fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), ch::Error> {
-        self.buffer.extend_from_slice(other);
-        Ok(())
-    }
-    fn truncate(&mut self, len: usize) {
-        self.buffer.truncate(len)
-    }
-}
-
 const VLD0_DOMAIN_SIGN: &[u8] = b"VLD0_SIGN";
 const VLD0_DOMAIN_CRYPT: &[u8] = b"VLD0_CRYPT";
 
 const VLD0_AEAD_OVERHEAD: usize = 16;
+/// [`CryptoKind`] fourcc identifying the VLD0 cryptosystem.
 pub const CRYPTO_KIND_VLD0: CryptoKind = CryptoKind::new(*b"VLD0");
+/// The VLD0 fourcc as a big-endian `u32`.
 pub const CRYPTO_KIND_VLD0_FOURCC: u32 = u32::from_be_bytes(*b"VLD0");
 pub use sizes::*;
 

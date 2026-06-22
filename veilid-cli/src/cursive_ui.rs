@@ -322,15 +322,15 @@ impl CursiveUI {
 
     fn render_attachment_state(inner: &mut CursiveUIInner) -> String {
         let att = match inner.ui_state.attachment_state.get().as_str() {
-            "Detached" => "[----]",
-            "Attaching" => "[/   ]",
-            "AttachedWeak" => "[|   ]",
-            "AttachedGood" => "[||  ]",
-            "AttachedStrong" => "[||| ]",
-            "FullyAttached" => "[||||]",
-            "OverAttached" => "[++++]",
-            "Detaching" => "[////]",
-            _ => "[????]",
+            "Detached" => "[-----]",
+            "Attaching" => "[ ^^^ ]",
+            "AttachedWeak" => "[|    ]",
+            "AttachedFair" => "[||   ]",
+            "AttachedGood" => "[|||  ]",
+            "AttachedStrong" => "[|||| ]",
+            "AttachedFull" => "[|||||]",
+            "Detaching" => "[ vvv ]",
+            _ => "[?????]",
         };
         let pi = if *inner.ui_state.public_internet_ready.get() {
             "+P"
@@ -359,10 +359,10 @@ impl CursiveUI {
                 "Detached" => ("Attach", true),
                 "Attaching" => ("Detach", true),
                 "AttachedWeak" => ("Detach", true),
+                "AttachedFair" => ("Detach", true),
                 "AttachedGood" => ("Detach", true),
                 "AttachedStrong" => ("Detach", true),
-                "FullyAttached" => ("Detach", true),
-                "OverAttached" => ("Detach", true),
+                "AttachedFull" => ("Detach", true),
                 "Detaching" => ("Detach", false),
                 _ => ("???", false),
             }
@@ -519,10 +519,10 @@ impl CursiveUI {
             "Detached" => Some(true),
             "Attaching" => Some(false),
             "AttachedWeak" => Some(false),
+            "AttachedFair" => Some(false),
             "AttachedGood" => Some(false),
             "AttachedStrong" => Some(false),
-            "FullyAttached" => Some(false),
-            "OverAttached" => Some(false),
+            "AttachedFull" => Some(false),
             "Detaching" => None,
             _ => None,
         };
@@ -558,15 +558,14 @@ impl CursiveUI {
                 return;
             }
         };
-        Self::command_processor(s).set_ipc_path(Some(ipc_path));
-        Self::command_processor(s).set_network_address(None);
+        Self::command_processor(s).set_ipc_path(ipc_path);
         Self::command_processor(s).start_connection();
     }
 
     fn submit_network_address(s: &mut Cursive) {
         let edit = Self::network_address(s);
         let addr = (*edit.get_content()).clone();
-        let sa = match addr.parse::<std::net::SocketAddr>() {
+        let network_address = match addr.parse::<std::net::SocketAddr>() {
             Ok(sa) => sa,
             Err(_) => {
                 s.add_layer(
@@ -577,8 +576,7 @@ impl CursiveUI {
                 return;
             }
         };
-        Self::command_processor(s).set_ipc_path(None);
-        Self::command_processor(s).set_network_address(Some(sa));
+        Self::command_processor(s).set_network_address(network_address);
         Self::command_processor(s).start_connection();
     }
 
@@ -717,7 +715,7 @@ impl CursiveUI {
                     hide = true;
                 }
             }
-            ConnectionState::RetryingTCP(_, _) | ConnectionState::RetryingIPC(_, _) => {
+            ConnectionState::ConnectingTCP(_, _) | ConnectionState::ConnectingIPC(_, _) => {
                 if inner.connection_dialog_state.is_none()
                     || inner
                         .connection_dialog_state
@@ -856,7 +854,7 @@ impl CursiveUI {
                 });
             }
             ConnectionState::ConnectedTCP(_, _) | ConnectionState::ConnectedIPC(_, _) => {}
-            ConnectionState::RetryingTCP(addr, _) => {
+            ConnectionState::ConnectingTCP(addr, _) => {
                 let mut text = Self::connecting_text(s);
                 text.set_content(addr.to_string());
 
@@ -865,7 +863,7 @@ impl CursiveUI {
                     Self::command_processor(s).cancel_reconnect();
                 });
             }
-            ConnectionState::RetryingIPC(ipc_path, _) => {
+            ConnectionState::ConnectingIPC(ipc_path, _) => {
                 let mut text = Self::connecting_text(s);
                 text.set_content(ipc_path.to_string_lossy().to_string());
 
@@ -900,14 +898,14 @@ impl CursiveUI {
                 );
                 status.append_styled("|", ColorStyle::highlight_inactive());
             }
-            ConnectionState::RetryingTCP(addr, _) => {
+            ConnectionState::ConnectingTCP(addr, _) => {
                 status.append_styled(
                     format!("Reconnecting to {} ", addr),
                     ColorStyle::highlight_inactive(),
                 );
                 status.append_styled("|", ColorStyle::highlight_inactive());
             }
-            ConnectionState::RetryingIPC(path, _) => {
+            ConnectionState::ConnectingIPC(path, _) => {
                 status.append_styled(
                     format!(
                         "Reconnecting to IPC#{} ",
@@ -1227,6 +1225,10 @@ impl CursiveUI {
 
         this.siv
             .add_fullscreen_layer(mainlayout.with_name("main-layout"));
+
+        let _ = this
+            .siv
+            .focus(&cursive::view::Selector::Name("command-line"));
 
         CursiveUI::setup_colors(&mut this.siv, &mut inner, settings);
         CursiveUI::setup_quit_handler(&mut this.siv);

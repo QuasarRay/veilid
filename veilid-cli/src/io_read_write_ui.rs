@@ -108,8 +108,8 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> IOReadWriteUI<R,
                 | Ok(ConnectionState::ConnectedIPC(_, _)) => {
                     break;
                 }
-                Ok(ConnectionState::RetryingTCP(_, _)) | Ok(ConnectionState::RetryingIPC(_, _)) => {
-                }
+                Ok(ConnectionState::ConnectingTCP(_, _))
+                | Ok(ConnectionState::ConnectingIPC(_, _)) => {}
                 Ok(ConnectionState::Disconnected) => {}
                 Err(e) => {
                     eprintln!("Error: {:?}", e);

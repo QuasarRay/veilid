@@ -8,6 +8,14 @@ pub(in crate::storage_manager) struct PerNodeRecordDetail {
     pub subkeys: ValueSubkeyRangeSet,
 }
 
+/// A record's most recent transaction membership: the set it was committed with, plus the signer
+/// used (writer if write-opened, else the default signing keypair) so background transactions can be begun
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
+pub(in crate::storage_manager) struct TransactionMembership {
+    pub record_set: Vec<OpaqueRecordKey>,
+    pub operation_signer: KeyPair,
+}
+
 /// Information required to handle locally opened records
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
 pub(in crate::storage_manager) struct LocalRecordDetail {
@@ -17,9 +25,9 @@ pub(in crate::storage_manager) struct LocalRecordDetail {
     /// The nodes that we have seen this record cached on recently
     #[serde(default)]
     pub nodes: HashMap<NodeId, PerNodeRecordDetail>,
-    /// Most recent set of records committed in a transaction with this one; while set, background ops treat the record transactionally
+    /// Most recent transaction membership; while set, background ops treat the record transactionally
     #[serde(default)]
-    pub transaction_record_set: Option<Vec<OpaqueRecordKey>>,
+    pub transaction_membership: Option<TransactionMembership>,
 }
 
 impl LocalRecordDetail {
@@ -27,7 +35,7 @@ impl LocalRecordDetail {
         Self {
             safety_selection,
             nodes: Default::default(),
-            transaction_record_set: None,
+            transaction_membership: None,
         }
     }
 }

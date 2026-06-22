@@ -103,6 +103,15 @@ where
 pub(super) type SubkeyValueList = Vec<(ValueSubkey, Arc<SignedValueData>)>;
 pub(super) type RecordSubkeyValueList = Vec<(OpaqueRecordKey, SubkeyValueList)>;
 
+/// A record's committed subkey values plus the operation signer used, for the commit-time local
+/// write and for stamping the record's transaction membership
+#[derive(Clone)]
+pub(super) struct RecordCommitValues {
+    pub opaque_record_key: OpaqueRecordKey,
+    pub operation_signer: KeyPair,
+    pub subkey_values: SubkeyValueList,
+}
+
 impl<D> RecordStore<D>
 where
     D: RecordDetail,

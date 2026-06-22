@@ -298,7 +298,11 @@ impl<T: fmt::Debug + Clone> AddressPool<T> {
                 "AddressPool-v4".to_owned(),
             ));
         }
-        assert!(self.owner_tags_v4.is_empty(), "tags should be empty");
+        if !self.owner_tags_v4.is_empty() {
+            return Err(GlobalStateManagerError::ResourceInUse(
+                "AddressPool-v4".to_owned(),
+            ));
+        }
         self.scope_v4.clear();
         self.allocated_v4.clear();
         self.owner_tags_v4.clear();
@@ -321,7 +325,11 @@ impl<T: fmt::Debug + Clone> AddressPool<T> {
                 "AddressPool-v6".to_owned(),
             ));
         }
-        assert!(self.owner_tags_v6.is_empty(), "tags should be empty");
+        if !self.owner_tags_v6.is_empty() {
+            return Err(GlobalStateManagerError::ResourceInUse(
+                "AddressPool-v6".to_owned(),
+            ));
+        }
         self.scope_v6.clear();
         self.allocated_v6.clear();
         self.owner_tags_v6.clear();
@@ -399,7 +407,7 @@ impl<T: fmt::Debug + Clone> AddressPool<T> {
         let mut scope_index = 0usize;
         let mut scope_start_subnet_index = 0u32;
         loop {
-            assert!(
+            debug_assert!(
                 scope_index < scope_ranges.len(),
                 "should always have chosen a starting point inside a scope"
             );
@@ -501,7 +509,7 @@ impl<T: fmt::Debug + Clone> AddressPool<T> {
         let mut scope_index = 0usize;
         let mut scope_start_subnet_index = 0u128;
         loop {
-            assert!(
+            debug_assert!(
                 scope_index < scope_ranges.len(),
                 "should always have chosen a starting point inside a scope"
             );

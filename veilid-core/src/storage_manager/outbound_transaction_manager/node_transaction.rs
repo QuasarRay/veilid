@@ -101,11 +101,6 @@ impl NodeTransaction {
         self.stage_ts
     }
 
-    /// Most recent RTT measured for this node, used to bound per-RPC command timeouts.
-    pub fn opt_last_rtt(&self) -> Option<TimestampDuration> {
-        self.opt_last_rtt
-    }
-
     pub fn stage(&self) -> OutboundTransactionStage {
         self.stage
     }

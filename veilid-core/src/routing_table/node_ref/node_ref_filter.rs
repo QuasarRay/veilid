@@ -48,7 +48,6 @@ impl NodeRefFilter {
         self.dial_info_filter = self.dial_info_filter.with_protocol_type(protocol_type);
         self
     }
-    #[expect(dead_code)]
     pub fn with_protocol_type_set(mut self, protocol_set: ProtocolTypeSet) -> Self {
         self.dial_info_filter = self.dial_info_filter.with_protocol_type_set(protocol_set);
         self
@@ -136,27 +135,51 @@ impl From<Flow> for NodeRefFilter {
 
 impl fmt::Display for NodeRefFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut mods = vec![];
-        let pts = self.dial_info_filter.protocol_type_set();
-        if pts.is_empty() {
-            mods.push("no-protocol-type".to_string());
-        } else if pts != ProtocolTypeSet::all() {
-            mods.extend(pts.iter().map(|x| x.to_string()));
-        }
-        let ats = self.dial_info_filter.address_type_set();
-        if ats.is_empty() {
-            mods.push("no-address-type".to_string());
-        } else if ats != AddressTypeSet::all() {
-            mods.extend(ats.iter().map(|x| x.to_string()));
-        }
-        if self.routing_domain_set.is_empty() {
-            mods.push("no-routing-domain".to_string());
-        } else if self.routing_domain_set != RoutingDomainSet::all() {
-            mods.extend(self.routing_domain_set.iter().map(|x| x.to_string()))
-        }
-        let mods: String = mods.join("/");
+        if f.alternate() {
+            let mut mods = vec![];
+            let pts = self.dial_info_filter.protocol_type_set();
+            if pts.is_empty() {
+                mods.push("!PROT".to_string());
+            } else if pts != ProtocolTypeSet::all() {
+                mods.extend(pts.iter().map(|x| f.to_string(x)));
+            }
+            let ats = self.dial_info_filter.address_type_set();
+            if ats.is_empty() {
+                mods.push("!ADDR".to_string());
+            } else if ats != AddressTypeSet::all() {
+                mods.extend(ats.iter().map(|x| f.to_string(x)));
+            }
+            if self.routing_domain_set.is_empty() {
+                mods.push("!ROUT".to_string());
+            } else if self.routing_domain_set != RoutingDomainSet::all() {
+                mods.extend(self.routing_domain_set.iter().map(|x| f.to_string(x)))
+            }
+            let mods: String = mods.join("/");
 
-        write!(f, "{}", mods)
+            write!(f, "{}", mods)
+        } else {
+            let mut mods = vec![];
+            let pts = self.dial_info_filter.protocol_type_set();
+            if pts.is_empty() {
+                mods.push("no-protocol-type".to_string());
+            } else if pts != ProtocolTypeSet::all() {
+                mods.extend(pts.iter().map(|x| x.to_string()));
+            }
+            let ats = self.dial_info_filter.address_type_set();
+            if ats.is_empty() {
+                mods.push("no-address-type".to_string());
+            } else if ats != AddressTypeSet::all() {
+                mods.extend(ats.iter().map(|x| x.to_string()));
+            }
+            if self.routing_domain_set.is_empty() {
+                mods.push("no-routing-domain".to_string());
+            } else if self.routing_domain_set != RoutingDomainSet::all() {
+                mods.extend(self.routing_domain_set.iter().map(|x| x.to_string()))
+            }
+            let mods: String = mods.join("/");
+
+            write!(f, "{}", mods)
+        }
     }
 }
 

@@ -11,22 +11,38 @@ pub use smpl::*;
 #[serde(tag = "kind")]
 #[must_use]
 pub enum DHTSchema {
+    /// Default schema: a fixed number of owner-writable subkeys.
     DFLT(DHTSchemaDFLT),
+    /// Simple schema: owner subkeys plus per-member writable subkeys.
     SMPL(DHTSchemaSMPL),
 }
 
 impl DHTSchema {
+    /// Maximum number of distinct writers (owner plus members) a schema may have.
     pub const MAX_WRITER_COUNT: usize = 256;
+    /// Maximum number of subkeys a schema may allocate.
     pub const MAX_SUBKEY_COUNT: usize = 1024;
 
+    /// Make a default schema with the given owner subkey count.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if `o_cnt` is 0 or exceeds [DHTSchema::MAX_SUBKEY_COUNT].
     pub fn dflt(o_cnt: u16) -> VeilidAPIResult<DHTSchema> {
         Ok(DHTSchema::DFLT(DHTSchemaDFLT::new(o_cnt)?))
     }
+    /// Make a simple schema with the given owner subkey count and members.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if a member key is the wrong size, the member
+    /// count exceeds [DHTSchemaSMPL::MAX_MEMBER_COUNT], the writer count exceeds
+    /// [DHTSchema::MAX_WRITER_COUNT], or the total subkey count is 0 or exceeds
+    /// [DHTSchema::MAX_SUBKEY_COUNT].
     pub fn smpl(o_cnt: u16, members: Vec<DHTSchemaSMPLMember>) -> VeilidAPIResult<DHTSchema> {
         Ok(DHTSchema::SMPL(DHTSchemaSMPL::new(o_cnt, members)?))
     }
 
     /// Validate the data representation
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if the variant's constraints are violated
+    /// (see [DHTSchema::dflt] and [DHTSchema::smpl]).
     pub fn validate(&self) -> VeilidAPIResult<()> {
         match self {
             DHTSchema::DFLT(d) => d.validate(),
@@ -114,6 +130,8 @@ impl Default for DHTSchema {
 
 impl TryFrom<&[u8]> for DHTSchema {
     type Error = VeilidAPIError;
+    /// Errors with `VeilidAPIError::Generic` if `b` is shorter than 4 bytes or its fourcc is not a
+    /// known schema, or `VeilidAPIError::InvalidArgument` if the decoded schema fails validation.
     fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
         if b.len() < 4 {
             apibail_generic!("invalid size");

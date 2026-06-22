@@ -242,9 +242,13 @@ impl RPCProcessor {
         let transact_begin_q = match kind {
             RPCOperationKind::Question(q) => match q.destructure() {
                 (_, RPCQuestionDetail::TransactBeginQ(q)) => q,
-                _ => panic!("not a transactbegin question"),
+                _ => {
+                    return Ok(NetworkResult::invalid_message(
+                        "not a transactbegin question",
+                    ))
+                }
             },
-            _ => panic!("not a question"),
+            _ => return Ok(NetworkResult::invalid_message("not a question")),
         };
 
         // Destructure
@@ -288,7 +292,7 @@ impl RPCProcessor {
         }
 
         // See if this is within the consensus width
-        let consensus_width = self.config().network.dht.consensus_width as usize;
+        let consensus_width = self.config().internal().network.dht.consensus_width as usize;
 
         let (
             accepted,

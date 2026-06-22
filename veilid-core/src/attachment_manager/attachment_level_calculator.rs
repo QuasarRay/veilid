@@ -10,31 +10,36 @@ const LATENCY_PENALTY_THRESHOLD_3: TimestampDuration = TimestampDuration::new_ms
 
 #[derive(Clone, Debug, Default)]
 pub(in crate::attachment_manager) struct AttachmentLevelInputs {
-    pub reliable_count: NodeCount,
-    pub live_count: NodeCount,
-    pub tested_count: NodeCount,
-    pub estimated_network_size: NodeCount,
+    /// Nodes in 'reliable' state
+    pub reliable_count: usize,
+    /// Nodes in 'reliable' + 'unreliable' state
+    pub responsive_count: usize,
+    /// Nodes in 'reliable' + 'unreliable' + 'initial' state
+    pub live_count: usize,
+    /// Smoothed estimate of total reachable network size
+    pub estimated_network_size: u64,
+    /// Median p75 latency across reliable peers, None when no samples yet.
     pub median_latency: Option<TimestampDuration>,
-    pub excess_kickable: NodeCount,
+    /// Nodes in bucket overflow awaiting lazy kick
+    pub excess_kickable: usize,
 }
 
 pub(in crate::attachment_manager) fn compute_attachment_state(
     inputs: &AttachmentLevelInputs,
 ) -> AttachmentState {
     // No live nodes at all: still attaching.
-    if inputs.live_count.as_u64() == 0 {
+    if inputs.live_count == 0 {
         return AttachmentState::Attaching;
     }
 
     let target = SATURATION_TARGET_RELIABLE_NODES
-        .min(inputs.estimated_network_size.as_u64() / 2)
-        .max(1);
+        .min(inputs.estimated_network_size / 2)
+        .max(1) as usize;
 
     // Bars are driven by nodes we have actually contacted (tested), not by
     // never-contacted live nodes.
     let raw_bars = inputs
-        .tested_count
-        .as_u64()
+        .responsive_count
         .saturating_mul(5)
         .saturating_div(target)
         .min(5) as u8;
@@ -95,9 +100,9 @@ impl AttachmentLevelCalculator {
         let health = routing_table.get_routing_table_health();
 
         let inputs = AttachmentLevelInputs {
-            reliable_count: NodeCount::from(health.reliable_entry_count as u64),
-            live_count: NodeCount::from(health.live_entry_count() as u64),
-            tested_count: NodeCount::from(health.tested_entry_count as u64),
+            reliable_count: health.reliable_entry_count(),
+            responsive_count: health.responsive_entry_count(),
+            live_count: health.live_entry_count(),
             estimated_network_size: routing_table.estimate_network_size_combined(),
             median_latency: median_p75_latency(&routing_table),
             excess_kickable: routing_table.excess_kickable_count(),

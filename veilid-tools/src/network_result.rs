@@ -8,7 +8,9 @@ use std::io;
 //////////////////////////////////////////////////////////////////
 // Non-fallible network results conversions
 
+/// Folds a `TimeoutError` outcome into a [`NetworkResult`].
 pub trait NetworkResultExt<T> {
+    /// `Ok(v)` becomes `Value(v)`; a timeout becomes [`NetworkResult::Timeout`].
     fn into_network_result(self) -> NetworkResult<T>;
 }
 
@@ -20,7 +22,12 @@ impl<T> NetworkResultExt<T> for Result<T, TimeoutError> {
     }
 }
 
+/// Folds an [`io::Result`] into a [`NetworkResult`], routing benign socket errors to
+/// the matching network condition.
 pub trait IoNetworkResultExt<T> {
+    /// `Ok(v)` becomes `Value(v)`. Unreachable-host, timeout, connection-reset,
+    /// already-in-use and bad-data errors map to the corresponding non-error variant;
+    /// any other error stays an `Err`.
     fn into_network_result(self) -> io::Result<NetworkResult<T>>;
 }
 
@@ -65,7 +72,10 @@ impl<T> IoNetworkResultExt<T> for io::Result<T> {
     }
 }
 
+/// Swaps the nesting of a [`NetworkResult`] wrapping a [`Result`].
 pub trait NetworkResultResultExt<T, E> {
+    /// Turns `NetworkResult<Result<T, E>>` into `Result<NetworkResult<T>, E>`: the inner
+    /// `Err(e)` becomes the outer `Err(e)`, everything else stays a `NetworkResult`.
     fn into_result_network_result(self) -> Result<NetworkResult<T>, E>;
 }
 
@@ -83,7 +93,12 @@ impl<T, E> NetworkResultResultExt<T, E> for NetworkResult<Result<T, E>> {
     }
 }
 
+/// Folds a timeout-or-io outcome into a single [`NetworkResult`].
 pub trait FoldedNetworkResultExt<T> {
+    /// Collapses a [`TimeoutOr`] or nested [`NetworkResult`] together with any io error
+    /// into one `io::Result<NetworkResult<T>>`, routing benign socket errors as
+    /// [`IoNetworkResultExt::into_network_result`] does. Any io error not routed to a benign
+    /// variant stays an `Err`.
     fn folded(self) -> io::Result<NetworkResult<T>>;
 }
 
@@ -109,54 +124,80 @@ impl<T> FoldedNetworkResultExt<T> for io::Result<NetworkResult<T>> {
 //////////////////////////////////////////////////////////////////
 // Non-fallible network result
 
+/// Outcome of a network operation that separates a real `Value` from benign network
+/// conditions which should not be treated as hard errors.
+///
+/// Used throughout veilid so callers can distinguish "the peer answered" from the many
+/// ways a request can fail to produce an answer without anything being wrong locally.
 #[must_use]
 pub enum NetworkResult<T> {
+    /// The operation did not complete in time.
     Timeout,
+    /// The remote refused to service the request; the string carries the reason.
     ServiceUnavailable(String),
+    /// No connection could be established or the existing one dropped.
     NoConnection(io::Error),
+    /// The remote reports the thing being created already exists, or the local address is
+    /// already bound.
     AlreadyExists(io::Error),
+    /// A message arrived but failed to parse or validate; the string carries the reason.
     InvalidMessage(String),
+    /// The operation succeeded, carrying its result.
     Value(T),
 }
 
 impl<T> NetworkResult<T> {
+    /// Constructs a [`NetworkResult::Timeout`].
     pub fn timeout() -> Self {
         Self::Timeout
     }
+    /// Constructs a [`NetworkResult::ServiceUnavailable`] with the given reason.
     pub fn service_unavailable<S: ToString>(s: S) -> Self {
         Self::ServiceUnavailable(s.to_string())
     }
+    /// Constructs a [`NetworkResult::NoConnection`] from an io error.
     pub fn no_connection(e: io::Error) -> Self {
         Self::NoConnection(e)
     }
+    /// Constructs a [`NetworkResult::NoConnection`] from a message, wrapping it in an
+    /// `io::Error::other`.
     pub fn no_connection_other<S: ToString>(s: S) -> Self {
         Self::NoConnection(io::Error::other(s.to_string()))
     }
+    /// Constructs a [`NetworkResult::InvalidMessage`] with the given reason.
     pub fn invalid_message<S: ToString>(s: S) -> Self {
         Self::InvalidMessage(s.to_string())
     }
+    /// Constructs a [`NetworkResult::AlreadyExists`] from an io error.
     pub fn already_exists(e: io::Error) -> Self {
         Self::AlreadyExists(e)
     }
+    /// Constructs a [`NetworkResult::Value`].
     pub fn value(value: T) -> Self {
         Self::Value(value)
     }
 
+    /// True if this is a [`NetworkResult::Timeout`].
     pub fn is_timeout(&self) -> bool {
         matches!(self, Self::Timeout)
     }
+    /// True if this is a [`NetworkResult::NoConnection`].
     pub fn is_no_connection(&self) -> bool {
         matches!(self, Self::NoConnection(_))
     }
+    /// True if this is a [`NetworkResult::AlreadyExists`].
     pub fn is_already_exists(&self) -> bool {
         matches!(self, Self::AlreadyExists(_))
     }
+    /// True if this is a [`NetworkResult::InvalidMessage`].
     pub fn is_invalid_message(&self) -> bool {
         matches!(self, Self::InvalidMessage(_))
     }
+    /// True if this is a [`NetworkResult::Value`].
     pub fn is_value(&self) -> bool {
         matches!(self, Self::Value(_))
     }
+    /// Maps the contained `Value` through `f`, passing every other variant unchanged.
     pub fn map<X, F: Fn(T) -> X>(self, f: F) -> NetworkResult<X> {
         match self {
             Self::Timeout => NetworkResult::<X>::Timeout,
@@ -167,6 +208,8 @@ impl<T> NetworkResult<T> {
             Self::Value(v) => NetworkResult::<X>::Value(f(v)),
         }
     }
+    /// Collapses into an [`io::Result`], turning each non-value variant into the io error
+    /// it stands for.
     pub fn into_io_result(self) -> Result<T, io::Error> {
         match self {
             Self::Timeout => Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out")),
@@ -225,6 +268,8 @@ impl<T: Debug + Display> Error for NetworkResult<T> {}
 //////////////////////////////////////////////////////////////////
 // Non-fallible network result macros
 
+/// Returns early from the enclosing `Result<NetworkResult<_>, _>`-returning function,
+/// re-raising a non-value [`NetworkResult`] under a new value type. Panics on `Value`.
 #[macro_export]
 macro_rules! network_result_raise {
     ($r: expr) => {
@@ -239,6 +284,9 @@ macro_rules! network_result_raise {
     };
 }
 
+/// Unwraps the `Value` of a [`NetworkResult`], or returns the non-value variant early
+/// from the enclosing `Result<NetworkResult<_>, _>`-returning function. The `=> $f`
+/// form runs `$f` before returning, for cleanup on the early-exit path.
 #[macro_export]
 macro_rules! network_result_try {
     ($r: expr) => {

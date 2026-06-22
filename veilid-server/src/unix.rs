@@ -54,7 +54,6 @@ pub async fn run_veilid_server_with_signals(
     res
 }
 
-#[warn(missing_docs)]
 #[instrument(level = "trace", skip_all, err)]
 pub fn run_daemon(settings: Settings, _args: CmdlineArgs) -> EyreResult<()> {
     let daemon = {

@@ -17,6 +17,10 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
+/// Bind a UDP socket to `local_address` with `SO_REUSEADDR`/`SO_REUSEPORT` set.
+///
+/// Returns `Ok(None)` if the address could not be bound (a bind failure is not an error).
+/// Errors only on socket creation or option failures (`Socket::new`, reuse-address/port, and the tokio non-blocking conversion).
 pub fn bind_async_udp_socket(local_address: SocketAddr) -> io::Result<Option<UdpSocket>> {
     let Some(socket) = new_bound_shared_socket2_udp(local_address)? else {
         return Ok(None);
@@ -37,6 +41,12 @@ pub fn bind_async_udp_socket(local_address: SocketAddr) -> io::Result<Option<Udp
     Ok(Some(udp_socket))
 }
 
+/// Bind a TCP listener to `local_address`.
+///
+/// Probes the port with a non-shared socket first, then binds a shared
+/// (`SO_REUSEADDR`/`SO_REUSEPORT`) socket once the port is known free.
+/// Returns `Ok(None)` if the address could not be bound or listened on (these are not errors).
+/// Errors only on socket creation or option failures (`Socket::new`, linger, nodelay, reuse-address/port, and the tokio non-blocking conversion).
 pub fn bind_async_tcp_listener(local_address: SocketAddr) -> io::Result<Option<TcpListener>> {
     // Create a default non-shared socket and bind it
     let Some(socket) = new_bound_default_socket2_tcp(local_address)? else {
@@ -71,6 +81,13 @@ pub fn bind_async_tcp_listener(local_address: SocketAddr) -> io::Result<Option<T
     Ok(Some(listener))
 }
 
+/// Connect a TCP stream to `remote_address`, optionally bound to `local_address`.
+///
+/// When `local_address` is given the connecting socket is shared
+/// (`SO_REUSEADDR`/`SO_REUSEPORT`); otherwise a default socket is used. The
+/// connect is non-blocking and bounded by `timeout_ms`.
+///
+/// A timeout yields `Ok(TimeoutOr::timeout())`, not an error. Errors with `AddrInUse` when `local_address` cannot be bound, and propagates the connect failure (e.g. `ConnectionRefused`, `HostUnreachable`) along with any socket creation or option io error.
 pub async fn connect_async_tcp_stream(
     local_address: Option<SocketAddr>,
     remote_address: SocketAddr,
@@ -87,6 +104,12 @@ pub async fn connect_async_tcp_stream(
     nonblocking_connect(socket, remote_address, timeout_ms).await
 }
 
+/// Set the `SO_LINGER` option on a TCP stream.
+///
+/// Works around runtimes that do not expose linger directly by reaching the
+/// underlying socket via the raw fd/handle.
+///
+/// Errors with the io error from the underlying `setsockopt`.
 pub fn set_tcp_stream_linger(
     tcp_stream: &TcpStream,
     linger: Option<core::time::Duration>,
@@ -119,16 +142,21 @@ pub fn set_tcp_stream_linger(
 
 cfg_if! {
     if #[cfg(feature="rt-async-std")] {
+        /// Owned read half of a split [`TcpStream`].
         pub type ReadHalf = futures_util::io::ReadHalf<TcpStream>;
+        /// Owned write half of a split [`TcpStream`].
         pub type WriteHalf = futures_util::io::WriteHalf<TcpStream>;
     } else if #[cfg(feature="rt-tokio")] {
+        /// Owned read half of a split [`TcpStream`].
         pub type ReadHalf = tokio::net::tcp::OwnedReadHalf;
+        /// Owned write half of a split [`TcpStream`].
         pub type WriteHalf = tokio::net::tcp::OwnedWriteHalf;
     } else {
         compile_error!("needs executor implementation");
     }
 }
 
+/// Wrap a [`TcpListener`] as a stream of accepted [`TcpStream`] connections.
 #[must_use]
 pub fn async_tcp_listener_incoming(
     tcp_listener: TcpListener,
@@ -144,6 +172,7 @@ pub fn async_tcp_listener_incoming(
     }
 }
 
+/// Split a [`TcpStream`] into owned read and write halves.
 #[must_use]
 pub fn split_async_tcp_stream(tcp_stream: TcpStream) -> (ReadHalf, WriteHalf) {
     cfg_if! {
@@ -189,6 +218,9 @@ fn new_bound_shared_socket2_udp(local_address: SocketAddr) -> io::Result<Option<
     Ok(Some(socket))
 }
 
+/// Create a non-shared TCP [`Socket`] for `domain` with zero linger and `TCP_NODELAY` set.
+///
+/// Errors with the io error from socket creation or any of the option calls (linger, nodelay, IPv6-only).
 pub fn new_default_socket2_tcp(domain: core::ffi::c_int) -> io::Result<Socket> {
     let domain = Domain::from(domain);
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
@@ -288,14 +320,16 @@ async fn nonblocking_connect(
     }
 }
 
+/// The socket address family (`AF_INET`/`AF_INET6`) for `address`.
 #[must_use]
 pub fn domain_for_address(address: SocketAddr) -> core::ffi::c_int {
     socket2::Domain::for_address(address).into()
 }
 
-// Local IP the kernel would pick as the source for outbound traffic. UDP-connects
-// to an unallocated probe; no packets are sent. None if no default route exists.
-
+/// Local IPv4 the kernel would pick as the source for outbound traffic.
+///
+/// UDP-connects to an unallocated probe; no packets are sent. `None` if no
+/// default IPv4 route exists.
 #[must_use]
 pub fn primary_source_ipv4() -> Option<Ipv4Addr> {
     let ipv4addr = "1.2.3.4".parse::<Ipv4Addr>().unwrap();
@@ -309,6 +343,10 @@ pub fn primary_source_ipv4() -> Option<Ipv4Addr> {
     }
 }
 
+/// Local IPv6 the kernel would pick as the source for outbound traffic.
+///
+/// UDP-connects to an unallocated probe; no packets are sent. `None` if no
+/// default IPv6 route exists.
 #[must_use]
 pub fn primary_source_ipv6() -> Option<Ipv6Addr> {
     let ipv6addr = "2222::1".parse::<Ipv6Addr>().unwrap();
@@ -325,6 +363,7 @@ pub fn primary_source_ipv6() -> Option<Ipv6Addr> {
 // Run operations on underlying socket
 cfg_if! {
     if #[cfg(unix)] {
+        /// Run `callback` against the [`socket2::Socket`] backing `s` without taking ownership of it.
         pub fn socket2_operation<S: std::os::fd::AsRawFd, F: FnOnce(&mut socket2::Socket) -> R, R>(
             s: &S,
             callback: F,
@@ -336,6 +375,7 @@ cfg_if! {
             res
         }
     } else if #[cfg(windows)] {
+        /// Run `callback` against the [`socket2::Socket`] backing `s` without taking ownership of it.
         pub fn socket2_operation<
             S: std::os::windows::io::AsRawSocket,
             F: FnOnce(&mut socket2::Socket) -> R,

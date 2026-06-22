@@ -220,6 +220,7 @@ impl PublicInternetRoutingDomainController {
         // Get locally allocated routes needing testing and enqueue them
         let routes_needing_testing = self.get_allocated_routes_to_test(cur_ts);
         if !routes_needing_testing.is_empty() {
+            #[cfg(feature = "verbose-tracing")]
             veilid_log!(self debug "Enqueuing {} allocated route tests", routes_needing_testing.len());
             routing_table
                 .enqueue_route_tests(
@@ -233,6 +234,7 @@ impl PublicInternetRoutingDomainController {
         // Get locally allocated routes needing loopback keepalive and enqueue them
         let routes_needing_keepalive = self.get_allocated_routes_to_loopback_keepalive(cur_ts);
         if !routes_needing_keepalive.is_empty() {
+            #[cfg(feature = "verbose-tracing")]
             veilid_log!(self debug "Enqueuing loopback keepalives for {} routes", routes_needing_keepalive.len());
             routing_table
                 .enqueue_route_loopback_keepalives(cur_ts, routes_needing_keepalive, 0)
@@ -327,6 +329,7 @@ impl PublicInternetRoutingDomainController {
 
         // Enqueue tests for newly allocated routes
         if !newly_allocated_routes.is_empty() {
+            #[cfg(feature = "verbose-tracing")]
             veilid_log!(self debug "Enqueuing {} newly allocated route tests ({} safe, {} unsafe)",
                 newly_allocated_routes.len(), newly_safe_routes.len(), newly_unsafe_routes.len());
             routing_table
@@ -350,6 +353,7 @@ impl PublicInternetRoutingDomainController {
             })
         });
         if !remote_routes_needing_testing.is_empty() {
+            #[cfg(feature = "verbose-tracing")]
             veilid_log!(self debug "Enqueuing {} remote route tests", remote_routes_needing_testing.len());
             routing_table
                 .enqueue_route_tests(

@@ -1,3 +1,4 @@
+/// Android-specific JNI setup for registering the host app's JavaVM and Context.
 #[cfg(target_os = "android")]
 pub mod android;
 mod api;

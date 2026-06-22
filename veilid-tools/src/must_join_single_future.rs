@@ -35,6 +35,7 @@ impl<T> MustJoinSingleFuture<T>
 where
     T: 'static,
 {
+    /// Create an empty runner with no task in flight.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -58,13 +59,14 @@ where
 
     fn unlock(&self, jh: Option<MustJoinHandle<T>>) {
         let mut inner = self.inner.lock();
-        assert!(inner.locked);
-        assert!(inner.join_handle.is_none());
+        debug_assert!(inner.locked);
+        debug_assert!(inner.join_handle.is_none());
         inner.locked = false;
         inner.join_handle = jh;
     }
 
     /// Check the result and take it if there is one
+    /// Non-blocking: polls the in-flight task once and returns immediately; `Err` if another caller holds the lock.
     pub async fn check(&self) -> Result<Option<T>, ()> {
         let mut out: Option<T> = None;
 
@@ -96,6 +98,7 @@ where
     }
 
     /// Wait for the result and take it
+    /// Blocks until the in-flight task finishes; `Err` if another caller is concurrently polling.
     pub async fn join(&self) -> Result<Option<T>, ()> {
         let mut out: Option<T> = None;
 
@@ -122,7 +125,9 @@ where
         Ok(out)
     }
 
-    // Possibly spawn the future possibly returning the value of the last execution
+    /// Spawn the future on the current thread unless one is already running.
+    /// Returns the prior task's result if it had finished, and whether a new task was started.
+    /// Single-flight: if a task is still in flight the passed future is dropped unrun and the returned bool is false; non-blocking, only polls the prior task once.
     pub async fn single_spawn_local(
         &self,
         name: &str,
@@ -166,6 +171,9 @@ impl<T> MustJoinSingleFuture<T>
 where
     T: 'static + Send,
 {
+    /// Spawn the future unless one is already running.
+    /// Returns the prior task's result if it had finished, and whether a new task was started.
+    /// Single-flight: if a task is still in flight the callback is not invoked and the returned bool is false; non-blocking, only polls the prior task once.
     pub async fn single_spawn<F: Future<Output = T> + Send + 'static, C: FnOnce() -> F>(
         &self,
         name: &str,

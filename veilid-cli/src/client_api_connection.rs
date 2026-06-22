@@ -27,6 +27,20 @@ struct ClientApiConnectionInner {
     next_req_id: u32,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub enum ClientApiConnectionError {
+    ConnectionFailed(String),
+    ConnectionLost(String),
+}
+pub type ClientApiConnectionResult = Result<(), ClientApiConnectionError>;
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum ServerDebugError {
+    NotConnected,
+    Error(String),
+}
+pub type ServerDebugResult = Result<String, ServerDebugError>;
+
 #[derive(Clone)]
 pub struct ClientApiConnection {
     inner: Arc<Mutex<ClientApiConnectionInner>>,
@@ -220,15 +234,22 @@ impl ClientApiConnection {
         }
     }
 
-    async fn handle_tcp_connection(&self, connect_addr: SocketAddr) -> Result<(), String> {
+    pub async fn handle_tcp_connection(
+        &self,
+        connect_addr: SocketAddr,
+    ) -> ClientApiConnectionResult {
         trace!("ClientApiConnection::handle_tcp_connection");
 
         // Connect the TCP socket
         let stream = connect_async_tcp_stream(None, connect_addr, 10_000)
             .await
-            .map_err(map_to_string)?
+            .map_err(|e| ClientApiConnectionError::ConnectionFailed(e.to_string()))?
             .into_timeout_error()
-            .map_err(map_to_string)?;
+            .map_err(|_| {
+                ClientApiConnectionError::ConnectionFailed(
+                    "Connection attempt timed out".to_owned(),
+                )
+            })?;
 
         // State we connected
         let comproc = self.inner.lock().comproc.clone();
@@ -242,14 +263,19 @@ impl ClientApiConnection {
         let (reader, writer) = split_async_tcp_stream(stream);
         let reader = BufReader::new(reader);
 
-        self.clone().run_json_api_processor(reader, writer).await
+        self.clone()
+            .run_json_api_processor(reader, writer)
+            .await
+            .map_err(ClientApiConnectionError::ConnectionLost)
     }
 
-    async fn handle_ipc_connection(&self, ipc_path: PathBuf) -> Result<(), String> {
+    pub async fn handle_ipc_connection(&self, ipc_path: PathBuf) -> ClientApiConnectionResult {
         trace!("ClientApiConnection::handle_ipc_connection");
 
         // Connect the IPC socket
-        let stream = IpcStream::connect(&ipc_path).await.map_err(map_to_string)?;
+        let stream = IpcStream::connect(&ipc_path)
+            .await
+            .map_err(|e| ClientApiConnectionError::ConnectionFailed(e.to_string()))?;
 
         // State we connected
         let comproc = self.inner.lock().comproc.clone();
@@ -268,7 +294,10 @@ impl ClientApiConnection {
         }
         let reader = BufReader::new(reader);
 
-        self.clone().run_json_api_processor(reader, writer).await
+        self.clone()
+            .run_json_api_processor(reader, writer)
+            .await
+            .map_err(ClientApiConnectionError::ConnectionLost)
     }
 
     async fn perform_request(&self, mut req: json::JsonValue) -> Option<json::JsonValue> {
@@ -352,32 +381,18 @@ impl ClientApiConnection {
         Ok(())
     }
 
-    // pub async fn server_check_alive(&self) -> bool {
-    //     trace!("ClientApiConnection::server_check_alive");
-    //     let mut req = json::JsonValue::new_object();
-    //     req["op"] = "Control".into();
-    //     req["args"] = json::JsonValue::new_array();
-    //     let Some(resp) = self.perform_request(req).await else {
-    //         return false;
-    //     };
-    //     if resp.has_key("error") {
-    //         return true;
-    //     }
-    //     false
-    // }
-
-    pub async fn server_debug(&self, what: String) -> Result<String, String> {
+    pub async fn server_debug(&self, what: String) -> ServerDebugResult {
         trace!("ClientApiConnection::server_debug");
         let mut req = json::JsonValue::new_object();
         req["op"] = "Debug".into();
         req["command"] = what.into();
         let Some(resp) = self.perform_request(req).await else {
-            return Err("Not connected".to_owned());
+            return Err(ServerDebugError::NotConnected);
         };
         if resp.has_key("error") {
-            return Err(resp["error"].to_string());
+            return Err(ServerDebugError::Error(resp["error"].to_string()));
         }
-        Ok(resp["value"].to_string().trim().to_string())
+        Ok(resp["value"].to_string())
     }
 
     pub async fn server_change_log_level(
@@ -420,18 +435,6 @@ impl ClientApiConnection {
             return Err(resp["error"].to_string());
         }
         Ok(())
-    }
-
-    // Start Client API connection
-    pub async fn ipc_connect(&self, ipc_path: PathBuf) -> Result<(), String> {
-        trace!("ClientApiConnection::ipc_connect");
-        // Save the pathto connect to
-        self.handle_ipc_connection(ipc_path).await
-    }
-    pub async fn tcp_connect(&self, connect_addr: SocketAddr) -> Result<(), String> {
-        trace!("ClientApiConnection::tcp_connect");
-        // Save the address to connect to
-        self.handle_tcp_connection(connect_addr).await
     }
 
     // End Client API connection

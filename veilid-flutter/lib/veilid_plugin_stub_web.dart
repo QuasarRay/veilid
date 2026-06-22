@@ -1,3 +1,6 @@
+// ignore_for_file: public_member_api_docs
+// Low-level platform binding to veilid-core; not part of the documented public API.
+
 import 'dart:async';
 
 import 'package:flutter/services.dart';

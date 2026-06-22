@@ -98,9 +98,9 @@ impl RPCProcessor {
         let find_node_q = match kind {
             RPCOperationKind::Question(q) => match q.destructure() {
                 (_, RPCQuestionDetail::FindNodeQ(q)) => q,
-                _ => panic!("not a findnode question"),
+                _ => return Err(RPCError::internal("not a findnode question")),
             },
-            _ => panic!("not a question"),
+            _ => return Err(RPCError::internal("not a question")),
         };
         let (hash_coordinate, capabilities) = find_node_q.destructure();
 

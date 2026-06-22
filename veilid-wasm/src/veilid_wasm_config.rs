@@ -133,9 +133,12 @@ pub struct VeilidWASMConfigLoggingAPI {
     tsify(from_wasm_abi, into_wasm_abi),
     serde(rename_all = "camelCase")
 )]
+/// Configuration for all WASM logging outputs.
 pub struct VeilidWASMConfigLogging {
+    /// Performance/console logging configuration.
     #[serde(default = "default_veilid_wasm_config_logging_performance")]
     pub performance: VeilidWASMConfigLoggingPerformance,
+    /// API logging configuration.
     #[serde(default = "default_veilid_wasm_config_logging_api")]
     pub api: VeilidWASMConfigLoggingAPI,
 }
@@ -147,7 +150,9 @@ pub struct VeilidWASMConfigLogging {
     tsify(from_wasm_abi, into_wasm_abi),
     serde(rename_all = "camelCase")
 )]
+/// Startup configuration for the Veilid WASM module.
 pub struct VeilidWASMConfig {
+    /// Logging configuration.
     #[serde(default = "default_veilid_wasm_config_logging")]
     pub logging: VeilidWASMConfigLogging,
 }

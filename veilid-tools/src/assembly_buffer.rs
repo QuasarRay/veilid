@@ -245,6 +245,7 @@ impl AssemblyBuffer {
         }
     }
 
+    /// Creates an empty assembly buffer.
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(Self::new_inner())),
@@ -357,9 +358,9 @@ impl AssemblyBuffer {
 
     /// Add framing to chunk to send to the wire
     fn frame_chunk(chunk: &[u8], offset: usize, message_len: usize, seq: SequenceType) -> Bytes {
-        assert!(!chunk.is_empty());
-        assert!(message_len <= MAX_LEN);
-        assert!(offset + chunk.len() <= message_len);
+        debug_assert!(!chunk.is_empty());
+        debug_assert!(message_len <= MAX_LEN);
+        debug_assert!(offset + chunk.len() <= message_len);
 
         let off: LengthType = offset as LengthType;
         let len: LengthType = message_len as LengthType;

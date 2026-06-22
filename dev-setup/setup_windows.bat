@@ -26,6 +26,15 @@ IF NOT DEFINED CARGO_FOUND (
     goto ends
 )
 
+REM Install targets
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android wasm32-unknown-unknown
+
+REM Install nightly
+rustup install nightly --profile minimal
+
+REM Install cargo packages
+cargo +stable install wasm-bindgen-cli cargo-edit@0.13.0 cargo-nextest cargo-public-api
+
 echo Setup successful
 :end
 ENDLOCAL

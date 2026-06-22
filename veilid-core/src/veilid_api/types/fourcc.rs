@@ -1,4 +1,5 @@
-#[macro_export]
+/// Define a named four-character-code newtype wrapping `[u8; 4]`, with
+/// conversions to and from `String` and the raw byte array.
 macro_rules! fourcc_type {
     ($name:ident) => {
         pastey::paste! {
@@ -28,17 +29,16 @@ macro_rules! fourcc_type {
             pub struct $name(#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"),tsify(type = "string"))] [u8; 4]);
 
             impl $name {
+                /// Make a code from four bytes.
                 pub const fn new(b: [u8; 4]) -> Self {
                     $name(b)
                 }
+                /// Get the four bytes of the code.
                 #[must_use]
                 pub fn bytes(&self) -> &[u8; 4] {
                     &self.0
                 }
             }
-
-            #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-            impl_opaque_newtype!($name, [< $name Inner >]);
 
             impl From<[u8; 4]> for $name {
                 fn from(b: [u8; 4]) -> Self {
@@ -66,6 +66,7 @@ macro_rules! fourcc_type {
 
             impl TryFrom<&[u8]> for $name {
                 type Error = VeilidAPIError;
+                /// Errors with `VeilidAPIError::ParseError` if `b` is not exactly 4 bytes.
                 fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
                     Ok(Self(b.try_into().map_err(|e: std::array::TryFromSliceError| VeilidAPIError::parse_error(e.to_string(), hex::encode(b)))?))
                 }
@@ -73,6 +74,7 @@ macro_rules! fourcc_type {
 
             impl TryFrom<String> for $name {
                 type Error = VeilidAPIError;
+                /// Errors with `VeilidAPIError::ParseError` if `s` is not exactly 4 bytes.
                 fn try_from(s: String) -> Result<Self, Self::Error> {
                     Self::from_str(s.as_str())
                 }
@@ -91,6 +93,7 @@ macro_rules! fourcc_type {
 
             impl FromStr for $name {
                 type Err = VeilidAPIError;
+                /// Errors with `VeilidAPIError::ParseError` if `s` is not exactly 4 bytes.
                 fn from_str(s: &str) -> Result<Self, Self::Err> {
                     Ok(Self(
                         s.as_bytes().try_into().map_err(|e: std::array::TryFromSliceError| VeilidAPIError::parse_error(e.to_string(), s))?,
@@ -100,3 +103,4 @@ macro_rules! fourcc_type {
         }
     };
 }
+pub(crate) use fourcc_type;

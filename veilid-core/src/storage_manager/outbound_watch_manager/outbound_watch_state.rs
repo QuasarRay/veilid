@@ -31,6 +31,10 @@ pub(in crate::storage_manager) struct OutboundWatchState {
     /// have been delivered via ValueChanged but weren't. Forces a reconcile
     /// to re-establish the watch with fresh notification routes.
     needs_forced_reconcile: bool,
+    /// Last sequence number reported to the app per subkey for a transactional (non-committing) hint.
+    /// Gates hints to be monotonically increasing so replays and duplicate per-node reports are dropped.
+    #[serde(default)]
+    last_reported_subkey_seqs: BTreeMap<ValueSubkey, ValueSeqNum>,
 }
 
 impl fmt::Display for OutboundWatchState {
@@ -113,6 +117,9 @@ impl OutboundWatchStateEditor<'_> {
     pub fn clear_forced_reconcile(&mut self) {
         self.state.needs_forced_reconcile = false;
     }
+    pub fn set_last_reported_subkey_seq(&mut self, subkey: ValueSubkey, seq: ValueSeqNum) {
+        self.state.last_reported_subkey_seqs.insert(subkey, seq);
+    }
 }
 
 impl OutboundWatchState {
@@ -132,6 +139,7 @@ impl OutboundWatchState {
             last_value_changed_ts: None,
             last_fallback_inspect_ts: None,
             needs_forced_reconcile: false,
+            last_reported_subkey_seqs: BTreeMap::new(),
         }
     }
 
@@ -155,6 +163,9 @@ impl OutboundWatchState {
     }
     pub fn value_changed_routes(&self) -> &BTreeSet<PublicKey> {
         &self.value_changed_routes
+    }
+    pub fn last_reported_subkey_seq(&self, subkey: ValueSubkey) -> Option<ValueSeqNum> {
+        self.last_reported_subkey_seqs.get(&subkey).copied()
     }
 
     /// Get the parameters we use if we're updating this state's per node watches

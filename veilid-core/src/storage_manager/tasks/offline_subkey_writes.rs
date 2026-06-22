@@ -176,7 +176,7 @@ impl StorageManager {
         instrument(level = "trace", target = "stor", skip_all)
     )]
     fn process_single_result(&self, result: WorkItemResult) {
-        let consensus_width = self.config().network.dht.consensus_width as usize;
+        let consensus_width = self.config().internal().network.dht.consensus_width as usize;
 
         // Debug print the result
         veilid_log!(self debug "Offline write result: {:?}", result);

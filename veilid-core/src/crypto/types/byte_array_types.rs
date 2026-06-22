@@ -16,6 +16,9 @@ fn bytes_size_helper(bytes: &Bytes) -> usize {
 macro_rules! byte_array_type {
     ($visibility:vis $name:ident) => {
 
+        /// Fixed-purpose byte array holding the raw bytes of a `$name`.
+        ///
+        /// Serializes as a base64url-nopad string. Ordering, hashing, and equality are over the raw bytes.
         #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
         #[derive(Clone, Hash, Default, PartialOrd, Ord, PartialEq, Eq, GetSize)]
         #[must_use]
@@ -24,26 +27,28 @@ macro_rules! byte_array_type {
             bytes: Bytes,
         }
 
-
         #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-        make_wasm_bindgen_stubs!($name);
         impl_try_from_js_value!($name);
 
         impl $name {
+            /// Builds a `$name` by copying a byte slice.
             #[allow(dead_code)] // Not all implementors of this macro use this
             pub fn new(data: &[u8]) -> Self {
                 Self {
                     bytes: Bytes::copy_from_slice(data),
                 }
             }
+            /// Builds a `$name` from an existing `Bytes`, taking ownership without copying.
             pub fn new_from_bytes(bytes: Bytes) -> Self {
                 Self { bytes }
             }
 
+            /// Returns a clone of the underlying bytes.
             pub fn bytes(&self) -> Bytes {
                 self.bytes.clone()
             }
 
+            /// Returns the index and value of the first nonzero nibble, big-endian, or `None` if all bytes are zero.
             #[allow(dead_code)]
             pub fn first_nonzero_nibble(&self) -> Option<(usize, u8)> {
                 for i in 0..(self.bytes.len() * 2) {
@@ -58,21 +63,25 @@ macro_rules! byte_array_type {
         #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
         #[wasm_bindgen]
         impl $name {
+            /// Builds a `$name` by copying a byte slice.
             #[wasm_bindgen(constructor)]
             pub fn js_new(data: &[u8]) -> Self {
                 Self::new(data)
             }
 
+            /// Parses a `$name` from its base64url-nopad string form.
             #[wasm_bindgen(js_name = parse)]
             pub fn js_parse(s: String) -> VeilidAPIResult<Self> {
                 Self::from_str(&s)
             }
 
+            /// Returns the base64url-nopad string form.
             #[wasm_bindgen(js_name = toString)]
             pub fn js_to_string(&self) -> String {
                 self.to_string()
             }
 
+            /// Returns `true` if both have the same bytes.
             #[wasm_bindgen(js_name = isEqual)]
             pub fn js_is_equal(&self, other: &Self) -> bool {
                 self == other
@@ -84,18 +93,22 @@ macro_rules! byte_array_type {
         #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
         #[allow(dead_code)]
         impl $name {
+            /// Returns the number of bytes.
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(getter, js_name = length))]
             pub fn len(&self) -> usize {
                 self.bytes.len()
             }
+            /// Returns `true` if there are no bytes.
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(js_name = isEmpty))]
             pub fn is_empty(&self) -> bool {
                 self.bytes.is_empty()
             }
+            /// Copies the bytes into a new `Vec<u8>`.
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(js_name = toArray))]
             pub fn to_vec(&self) -> Vec<u8> {
                 self.bytes.to_vec()
             }
+            /// Returns the bit at `index`, big-endian (bit 0 is the most significant bit of the first byte).
             // Big endian bit ordering
             pub fn bit(&self, index: usize) -> bool {
                 let bi = index / 8;
@@ -103,6 +116,7 @@ macro_rules! byte_array_type {
                 ((self.bytes[bi] >> ti) & 1) != 0
             }
 
+            /// Returns the index of the first set bit, big-endian, or `None` if all bytes are zero.
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(getter, js_name = "firstNonZeroBit"))]
             pub fn first_nonzero_bit(&self) -> Option<usize> {
                 for i in 0..self.bytes.len() {
@@ -113,12 +127,13 @@ macro_rules! byte_array_type {
                                 return Some((i * 8) + n);
                             }
                         }
-                        unreachable!("nonzero byte must have nonzero bit");
+                        return Some(i * 8);
                     }
                 }
                 None
             }
 
+            /// Returns the nibble at `index`, big-endian (nibble 0 is the high nibble of the first byte).
             // Big endian nibble ordering
             pub fn nibble(&self, index: usize) -> u8 {
                 let bi = index / 2;
@@ -129,18 +144,26 @@ macro_rules! byte_array_type {
                 }
             }
 
+            /// Encodes the bytes as a base64url-nopad string.
             pub fn encode(&self) -> String {
                 BASE64URL_NOPAD.encode(&self.bytes)
             }
+            /// Returns the length of the base64url-nopad encoding.
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(getter, js_name = "encodedLength"))]
             pub fn encoded_len(&self) -> usize {
                 BASE64URL_NOPAD.encode_len(self.bytes.len())
             }
+            /// Decodes a `$name` from a base64url-nopad string. An empty string yields the default value.
+            ///
+            /// Errors with `VeilidAPIError::Generic` if `input` is not valid base64url-nopad.
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(js_name = tryDecode))]
             pub fn try_decode(input: &str) -> VeilidAPIResult<Self> {
                 let b = input.as_bytes();
                 Self::try_decode_bytes(b)
             }
+            /// Decodes a `$name` from base64url-nopad bytes. An empty input yields the default value.
+            ///
+            /// Errors with `VeilidAPIError::Generic` if `b` is not valid base64url-nopad.
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(js_name = tryDecodeBytes))]
             pub fn try_decode_bytes(b: &[u8]) -> VeilidAPIResult<Self> {
                 if b.len() == 0 {
@@ -209,6 +232,7 @@ macro_rules! byte_array_type {
         impl FromStr for $name {
             type Err = VeilidAPIError;
 
+            /// Errors with `VeilidAPIError::Generic` if `s` is not valid base64url-nopad.
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 $name::try_from(s)
             }

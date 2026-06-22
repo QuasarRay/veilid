@@ -1,6 +1,12 @@
+mod address_family_confirm;
+mod global_event_listener_wrapper;
+mod global_online_offline_event;
 mod protocol;
 
 use super::*;
+
+use global_event_listener_wrapper::GlobalEventListenerWrapper;
+use global_online_offline_event::{GLOBAL_OFFLINE_EVENT, GLOBAL_ONLINE_EVENT};
 
 pub use protocol::*;
 use std::io;
@@ -20,6 +26,12 @@ pub struct ProtocolConfig {
 struct WasmNetworkInner {
     network_needs_restart: bool,
     protocol_config: ProtocolConfig,
+    last_confirm_request_ts: BTreeMap<RoutingDomain, Timestamp>,
+    // Address-family confirmation worker lifecycle (cancelled+joined in cancel_tasks)
+    address_family_stop_source: Option<StopSource>,
+    address_family_worker_jh: Option<MustJoinHandle<()>>,
+    online_event_listener_jh: Option<MustJoinHandle<()>>,
+    offline_event_listener_jh: Option<MustJoinHandle<()>>,
 }
 
 pub(super) struct WasmNetworkUnlockedInner {
@@ -117,7 +129,7 @@ impl PlatformNetwork for WasmNetwork {
                 return Ok(());
             };
 
-            // No tasks for WASM
+            // No per-tick tasks for WASM; the address-family confirmation worker self-drives
 
             Ok(())
         })
@@ -125,7 +137,30 @@ impl PlatformNetwork for WasmNetwork {
 
     fn cancel_tasks(&self) -> PinBoxFuture<'_, ()> {
         Box::pin(async move {
-            // Nothing to do for WASM
+            // Cancel the address-family confirmation worker and wait for it to exit
+            let (
+                opt_address_family_worker_jh,
+                opt_online_event_listener_jh,
+                opt_offline_event_listener_jh,
+            ) = {
+                let mut inner = self.inner.lock();
+
+                drop(inner.address_family_stop_source.take());
+                (
+                    inner.address_family_worker_jh.take(),
+                    inner.online_event_listener_jh.take(),
+                    inner.offline_event_listener_jh.take(),
+                )
+            };
+            if let Some(jh) = opt_address_family_worker_jh {
+                jh.await;
+            }
+            if let Some(jh) = opt_online_event_listener_jh {
+                jh.await;
+            }
+            if let Some(jh) = opt_offline_event_listener_jh {
+                jh.await;
+            }
         })
     }
 
@@ -156,56 +191,57 @@ impl PlatformNetwork for WasmNetwork {
         Box::pin(async move {
             let _guard = self.unlocked_inner.startup_lock.enter()?;
 
-            self.record_dial_info_failure(dial_info.clone(), async move {
-                let data_len = data.len();
-                let ip_addr = dial_info.address().ip_addr();
-                let timeout_ms = self.config().network.connection_initial_timeout_ms;
+            let data_len = data.len();
+            let ip_addr = dial_info.address().ip_addr();
+            let timeout_ms = self
+                .config()
+                .internal()
+                .network
+                .connection_initial_timeout_ms;
 
-                if self
-                    .network_manager()
-                    .address_filter()
-                    .is_ip_addr_punished(ip_addr)
-                {
-                    return Ok(NetworkResult::no_connection_other("punished"));
+            if self
+                .network_manager()
+                .address_filter()
+                .is_ip_addr_punished(ip_addr)
+            {
+                return Ok(NetworkResult::no_connection_other("punished"));
+            }
+
+            match dial_info.protocol_type() {
+                ProtocolType::UDP => {
+                    bail!("no support for UDP protocol")
                 }
+                ProtocolType::TCP => {
+                    bail!("no support for TCP protocol")
+                }
+                ProtocolType::WS => {
+                    let pnc = network_result_try!(ws::WebsocketProtocolHandler::connect(
+                        self.registry(),
+                        dial_info,
+                        timeout_ms
+                    )
+                    .await
+                    .wrap_err("connect failure")?);
+                    network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                }
+                #[cfg(feature = "enable-protocol-wss")]
+                ProtocolType::WSS => {
+                    let pnc = network_result_try!(ws::WebsocketProtocolHandler::connect(
+                        self.registry(),
+                        dial_info,
+                        timeout_ms
+                    )
+                    .await
+                    .wrap_err("connect failure")?);
+                    network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                }
+            };
 
-                match dial_info.protocol_type() {
-                    ProtocolType::UDP => {
-                        bail!("no support for UDP protocol")
-                    }
-                    ProtocolType::TCP => {
-                        bail!("no support for TCP protocol")
-                    }
-                    ProtocolType::WS => {
-                        let pnc = network_result_try!(ws::WebsocketProtocolHandler::connect(
-                            self.registry(),
-                            dial_info,
-                            timeout_ms
-                        )
-                        .await
-                        .wrap_err("connect failure")?);
-                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
-                    }
-                    #[cfg(feature = "enable-protocol-wss")]
-                    ProtocolType::WSS => {
-                        let pnc = network_result_try!(ws::WebsocketProtocolHandler::connect(
-                            self.registry(),
-                            dial_info,
-                            timeout_ms
-                        )
-                        .await
-                        .wrap_err("connect failure")?);
-                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
-                    }
-                };
+            // Network accounting
+            self.network_manager()
+                .stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
 
-                // Network accounting
-                self.network_manager()
-                    .stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
-
-                Ok(NetworkResult::Value(()))
-            })
-            .await
+            Ok(NetworkResult::Value(()))
         })
     }
 
@@ -218,70 +254,68 @@ impl PlatformNetwork for WasmNetwork {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
 
-            self.record_dial_info_failure(dial_info.clone(), async move {
-                let data_len = data.len();
-                let network_manager = self.network_manager();
-                let ip_addr = dial_info.address().ip_addr();
-                let connect_timeout_ms = self.config().network.connection_initial_timeout_ms;
+            let data_len = data.len();
+            let network_manager = self.network_manager();
+            let ip_addr = dial_info.address().ip_addr();
+            let connect_timeout_ms = self
+                .config()
+                .internal()
+                .network
+                .connection_initial_timeout_ms;
 
-                if network_manager
-                    .address_filter()
-                    .is_ip_addr_punished(ip_addr)
-                {
-                    return Ok(NetworkResult::no_connection_other("punished"));
+            if network_manager
+                .address_filter()
+                .is_ip_addr_punished(ip_addr)
+            {
+                return Ok(NetworkResult::no_connection_other("punished"));
+            }
+
+            match dial_info.protocol_type() {
+                ProtocolType::UDP => {
+                    bail!("no support for UDP protocol")
                 }
+                ProtocolType::TCP => {
+                    bail!("no support for TCP protocol")
+                }
+                _ => {
+                    let pnc = network_result_try!(match dial_info.protocol_type() {
+                        ProtocolType::UDP => bail!("no support for UDP protocol"),
+                        ProtocolType::TCP => bail!("no support for TCP protocol"),
+                        ProtocolType::WS => {
+                            ws::WebsocketProtocolHandler::connect(
+                                self.registry(),
+                                dial_info,
+                                connect_timeout_ms,
+                            )
+                            .await
+                            .wrap_err("connect failure")?
+                        }
+                        #[cfg(feature = "enable-protocol-wss")]
+                        ProtocolType::WSS => {
+                            ws::WebsocketProtocolHandler::connect(
+                                self.registry(),
+                                dial_info,
+                                connect_timeout_ms,
+                            )
+                            .await
+                            .wrap_err("connect failure")?
+                        }
+                    });
 
-                match dial_info.protocol_type() {
-                    ProtocolType::UDP => {
-                        bail!("no support for UDP protocol")
-                    }
-                    ProtocolType::TCP => {
-                        bail!("no support for TCP protocol")
-                    }
-                    _ => {
-                        let pnc = network_result_try!(match dial_info.protocol_type() {
-                            ProtocolType::UDP => unreachable!(),
-                            ProtocolType::TCP => unreachable!(),
-                            ProtocolType::WS => {
-                                ws::WebsocketProtocolHandler::connect(
-                                    self.registry(),
-                                    dial_info,
-                                    connect_timeout_ms,
-                                )
-                                .await
-                                .wrap_err("connect failure")?
-                            }
-                            #[cfg(feature = "enable-protocol-wss")]
-                            ProtocolType::WSS => {
-                                ws::WebsocketProtocolHandler::connect(
-                                    self.registry(),
-                                    dial_info,
-                                    connect_timeout_ms,
-                                )
-                                .await
-                                .wrap_err("connect failure")?
-                            }
-                        });
+                    network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                    network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
 
-                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
-                        network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
-
-                        let out = network_result_try!(network_result_try!(timeout(
-                            timeout_ms,
-                            pnc.recv()
-                        )
-                        .await
-                        .into_network_result())
+                    let out =
+                        network_result_try!(network_result_try!(timeout(timeout_ms, pnc.recv())
+                            .await
+                            .into_network_result())
                         .wrap_err("recv failure")?);
 
-                        network_manager
-                            .stats_packet_rcvd(ip_addr, ByteCount::new(out.len() as u64));
+                    network_manager.stats_packet_rcvd(ip_addr, ByteCount::new(out.len() as u64));
 
-                        Ok(NetworkResult::Value(out))
-                    }
+                    Ok(NetworkResult::Value(out))
                 }
-            })
-            .await
+            }
         })
     }
 
@@ -343,40 +377,37 @@ impl PlatformNetwork for WasmNetwork {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
 
-            self.record_dial_info_failure(dial_info.clone(), async move {
-                let network_manager = self.network_manager();
-                let ip_addr = dial_info.address().ip_addr();
-                let data_len = data.len();
+            let network_manager = self.network_manager();
+            let ip_addr = dial_info.address().ip_addr();
+            let data_len = data.len();
 
-                if dial_info.protocol_type() == ProtocolType::UDP {
-                    bail!("no support for UDP protocol");
-                }
-                if dial_info.protocol_type() == ProtocolType::TCP {
-                    bail!("no support for TCP protocol");
-                }
+            if dial_info.protocol_type() == ProtocolType::UDP {
+                bail!("no support for UDP protocol");
+            }
+            if dial_info.protocol_type() == ProtocolType::TCP {
+                bail!("no support for TCP protocol");
+            }
 
-                // Handle connection-oriented protocols
-                let conn = network_result_try!(
-                    network_manager
-                        .connection_manager()
-                        .get_or_create_connection(dial_info)
-                        .await?
-                );
+            // Handle connection-oriented protocols
+            let conn = network_result_try!(
+                network_manager
+                    .connection_manager()
+                    .get_or_create_connection(dial_info)
+                    .await?
+            );
 
-                if let ConnectionHandleSendResult::NotSent(_) = conn.send_async(data).await {
-                    return Ok(NetworkResult::NoConnection(io::Error::new(
-                        io::ErrorKind::ConnectionReset,
-                        "failed to send",
-                    )));
-                }
-                let unique_flow = conn.unique_flow();
+            if let ConnectionHandleSendResult::NotSent(_) = conn.send_async(data).await {
+                return Ok(NetworkResult::NoConnection(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "failed to send",
+                )));
+            }
+            let unique_flow = conn.unique_flow();
 
-                // Network accounting
-                network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
+            // Network accounting
+            network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
 
-                Ok(NetworkResult::value(unique_flow))
-            })
-            .await
+            Ok(NetworkResult::value(unique_flow))
         })
     }
 
@@ -413,19 +444,18 @@ impl PlatformNetwork for WasmNetwork {
             return BTreeSet::new();
         };
 
-        // Stub for WASM
-        BTreeSet::new()
+        // WASM detects supported address families empirically via confirm_address_families,
+        // so PublicInternet starts unconfirmed and re-confirms on address change.
+        BTreeSet::from([RoutingDomain::PublicInternet])
     }
 
-    fn routing_domain_request_confirm_dial_info(&self, _routing_domain: RoutingDomain) -> bool {
+    fn routing_domain_request_confirm_dial_info(&self, routing_domain: RoutingDomain) -> bool {
         let Ok(_guard) = self.startup_lock.enter() else {
-            veilid_log!(self debug "ignoring 'force_confirm_dial_info' due to not started up");
+            veilid_log!(self debug "ignoring 'request_confirm_dial_info' due to not started up");
             return false;
         };
 
-        // Stub for WASM
-        veilid_log!(self debug "ignoring 'force_confirm_dial_info' on WASM target");
-        false
+        self.reset_address_family_confirm_state(routing_domain)
     }
 }
 
@@ -436,6 +466,11 @@ impl WasmNetwork {
         WasmNetworkInner {
             network_needs_restart: false,
             protocol_config: Default::default(),
+            last_confirm_request_ts: BTreeMap::new(),
+            address_family_stop_source: None,
+            address_family_worker_jh: None,
+            online_event_listener_jh: None,
+            offline_event_listener_jh: None,
         }
     }
 
@@ -451,23 +486,6 @@ impl WasmNetwork {
             inner: Arc::new(Mutex::new(Self::new_inner())),
             unlocked_inner: Arc::new(Self::new_unlocked_inner()),
         }
-    }
-
-    /////////////////////////////////////////////////////////////////
-
-    // Record DialInfo failures
-    async fn record_dial_info_failure<T, F: Future<Output = EyreResult<NetworkResult<T>>>>(
-        &self,
-        dial_info: DialInfo,
-        fut: F,
-    ) -> EyreResult<NetworkResult<T>> {
-        let network_result = fut.await?;
-        if matches!(network_result, NetworkResult::NoConnection(_)) {
-            self.network_manager()
-                .address_filter()
-                .set_transport_failed(dial_info);
-        }
-        Ok(network_result)
     }
 
     /////////////////////////////////////////////////////////////////
@@ -488,13 +506,10 @@ impl WasmNetwork {
                 outbound.insert(ProtocolType::WSS);
             }
 
-            let supported_address_types: AddressTypeSet = if is_ipv6_supported() {
-                AddressType::IPV4 | AddressType::IPV6
-            } else {
-                AddressType::IPV4.into()
-            };
-
-            let family_global = supported_address_types;
+            // Start optimistic (all config-allowed families) but unconfirmed; the routing
+            // domain sits in NeedsDialInfoConfirmation until confirm_address_families()
+            // narrows this to the families that answer and sets confirmed=true.
+            let family_global = configured_address_type_set(&config);
 
             let public_internet_capabilities = {
                 PUBLIC_INTERNET_CAPABILITIES
@@ -532,11 +547,22 @@ impl WasmNetwork {
             protocol_config.public_internet_capabilities,
         );
         public_internet_editor.set_network_config(network_config_public_internet);
-        public_internet_editor.set_confirmed(true);
+        // Start unconfirmed; confirm_address_families() (driven from tick) probes the
+        // address families and sets confirmed=true once it has a verdict.
+        public_internet_editor.set_confirmed(false);
+
+        self.inner.lock().last_confirm_request_ts.insert(
+            RoutingDomain::PublicInternet,
+            Timestamp::now_non_decreasing(),
+        );
 
         // commit routing domain edits
         public_internet_editor.commit();
         public_internet_controller.publish_peer_info();
+
+        // Spawn the address-family confirmation worker (cancelled+joined in cancel_tasks)
+        // Turn on detection of online/offline status from window/worker events
+        self.start_address_family_confirm_worker();
 
         Ok(StartupDisposition::Success)
     }

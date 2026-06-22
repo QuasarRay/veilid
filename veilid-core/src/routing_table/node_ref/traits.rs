@@ -77,6 +77,12 @@ pub(crate) trait NodeRefCommonTrait:
     fn peer_stats(&self) -> PeerStats {
         self.operate(|e| e.peer_stats().clone())
     }
+    fn rpc_stats(&self) -> RPCStats {
+        self.operate(|e| e.rpc_stats().clone())
+    }
+    fn connection_stats(&self) -> ConnectionStats {
+        self.operate(|e| e.connection_stats().clone())
+    }
 
     fn get_peer_info(&self, routing_domain: RoutingDomain) -> Option<Arc<PeerInfo>> {
         self.operate(|e| e.get_peer_info(routing_domain))
@@ -292,6 +298,16 @@ pub(crate) trait NodeRefCommonTrait:
         self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport);
     }
 
+    fn report_contact_method_result(&self, cm: &ContactMethod, success: bool) {
+        self.operate_mut(|e| {
+            e.report_contact_method_result(cm, success);
+        })
+    }
+
+    fn get_contact_method_failure_ts(&self, cm: &ContactMethod) -> Option<Timestamp> {
+        self.operate(|e| e.get_contact_method_failure_ts(cm))
+    }
+
     fn stats_question_sent(
         &self,
         ts: Timestamp,
@@ -330,9 +346,9 @@ pub(crate) trait NodeRefCommonTrait:
             e.answer_rcvd(send_ts, recv_ts, bytes, transport);
         })
     }
-    fn stats_lost_answer(&self, transport: TransportType) {
+    fn stats_lost_question(&self, transport: TransportType) {
         self.operate_mut(|e| {
-            e.lost_answer(transport);
+            e.lost_question(transport);
         })
     }
     fn stats_routed_up(&self, key: PublicKey, bytes: ByteCount) {

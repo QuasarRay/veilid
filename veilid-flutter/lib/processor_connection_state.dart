@@ -15,12 +15,15 @@ sealed class ProcessorConnectionState with _$ProcessorConnectionState {
   }) = _ProcessorConnectionState;
   const ProcessorConnectionState._();
 
+  /// Attached at any signal strength (excludes detaching/attaching transitions).
   bool get isAttached =>
       !(attachment.state == AttachmentState.detached ||
           attachment.state == AttachmentState.detaching ||
           attachment.state == AttachmentState.attaching);
 
+  /// Fully detached from the network.
   bool get isDetached => attachment.state == AttachmentState.detached;
 
+  /// PublicInternet routing domain is ready for all operations.
   bool get isPublicInternetReady => attachment.publicInternetReady;
 }

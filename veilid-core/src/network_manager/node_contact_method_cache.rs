@@ -16,8 +16,6 @@ pub struct NodeContactMethodCacheKey {
     pub target_node_ref_filter: NodeRefFilter,
     /// The sequencing requirement for connections to the target
     pub target_node_ref_sequencing: Sequencing,
-    /// The ordering of dial info failures from least recent to most recent
-    pub dial_info_failures: Vec<DialInfo>,
 }
 
 #[derive(Copy, Clone, Default, Debug)]
@@ -27,8 +25,11 @@ pub struct HitMissStats {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-enum ContactMethodKind {
-    Unreachable,
+enum NodeContactMethodKind {
+    NoRoutingDomain,
+    NoPeerInfo,
+    NoContactMethod,
+    Punished,
     Existing,
     Direct,
     SignalReverse,
@@ -36,30 +37,30 @@ enum ContactMethodKind {
     InboundRelay,
     OutboundRelay,
 }
-impl From<&NodeContactMethodResult> for ContactMethodKind {
+impl From<&NodeContactMethodResult> for NodeContactMethodKind {
     fn from(value: &NodeContactMethodResult) -> Self {
         match value {
-            NodeContactMethodResult::NoRoutingDomain
-            | NodeContactMethodResult::NoPeerInfo
-            | NodeContactMethodResult::NoContactMethod
-            | NodeContactMethodResult::Punished => ContactMethodKind::Unreachable,
-            NodeContactMethodResult::Resolved(NodeContactMethod::Existing) => {
-                ContactMethodKind::Existing
+            NodeContactMethodResult::NoRoutingDomain => NodeContactMethodKind::NoRoutingDomain,
+            NodeContactMethodResult::NoPeerInfo => NodeContactMethodKind::NoPeerInfo,
+            NodeContactMethodResult::NoContactMethod => NodeContactMethodKind::NoContactMethod,
+            NodeContactMethodResult::Punished => NodeContactMethodKind::Punished,
+            NodeContactMethodResult::Resolved(ContactMethod::Existing) => {
+                NodeContactMethodKind::Existing
             }
-            NodeContactMethodResult::Resolved(NodeContactMethod::Direct { .. }) => {
-                ContactMethodKind::Direct
+            NodeContactMethodResult::Resolved(ContactMethod::Direct { .. }) => {
+                NodeContactMethodKind::Direct
             }
-            NodeContactMethodResult::Resolved(NodeContactMethod::SignalReverse { .. }) => {
-                ContactMethodKind::SignalReverse
+            NodeContactMethodResult::Resolved(ContactMethod::SignalReverse { .. }) => {
+                NodeContactMethodKind::SignalReverse
             }
-            NodeContactMethodResult::Resolved(NodeContactMethod::SignalHolePunch { .. }) => {
-                ContactMethodKind::SignalHolePunch
+            NodeContactMethodResult::Resolved(ContactMethod::SignalHolePunch { .. }) => {
+                NodeContactMethodKind::SignalHolePunch
             }
-            NodeContactMethodResult::Resolved(NodeContactMethod::InboundRelay { .. }) => {
-                ContactMethodKind::InboundRelay
+            NodeContactMethodResult::Resolved(ContactMethod::InboundRelay { .. }) => {
+                NodeContactMethodKind::InboundRelay
             }
-            NodeContactMethodResult::Resolved(NodeContactMethod::OutboundRelay { .. }) => {
-                ContactMethodKind::OutboundRelay
+            NodeContactMethodResult::Resolved(ContactMethod::OutboundRelay { .. }) => {
+                NodeContactMethodKind::OutboundRelay
             }
         }
     }
@@ -84,13 +85,13 @@ impl fmt::Display for HitMissStats {
 }
 
 pub struct NodeContactMethodCache {
-    cache: hashlink::LruCache<NodeContactMethodCacheKey, NodeContactMethodResult>,
+    cache: hashlink::LruCache<NodeContactMethodCacheKey, Vec<ContactMethod>>,
 
     // Statistics for cache hits/misses
     cache_stats: HitMissStats,
 
     // Recorded stats for contact method success
-    contact_method_kind_stats: HashMap<ContactMethodKind, HitMissStats>,
+    contact_method_kind_stats: HashMap<NodeContactMethodKind, HitMissStats>,
 }
 
 impl fmt::Debug for NodeContactMethodCache {
@@ -111,29 +112,25 @@ impl NodeContactMethodCache {
             contact_method_kind_stats: HashMap::new(),
         }
     }
-    pub fn insert(
-        &mut self,
-        ncm_key: NodeContactMethodCacheKey,
-        ncm_result: NodeContactMethodResult,
-    ) {
-        self.cache.insert(ncm_key, ncm_result);
+    pub fn insert(&mut self, ncm_key: NodeContactMethodCacheKey, ncm_value: Vec<ContactMethod>) {
+        self.cache.insert(ncm_key, ncm_value);
     }
 
-    pub fn get(&mut self, ncm_key: &NodeContactMethodCacheKey) -> Option<NodeContactMethodResult> {
-        if let Some(ncm_result) = self.cache.get(ncm_key) {
+    pub fn get(&mut self, ncm_key: &NodeContactMethodCacheKey) -> Option<Vec<ContactMethod>> {
+        if let Some(ncm_value) = self.cache.get(ncm_key) {
             self.cache_stats.hit += 1;
-            return Some(ncm_result.clone());
+            return Some(ncm_value.clone());
         }
         self.cache_stats.miss += 1;
         None
     }
 
     pub fn record_contact_method_success(&mut self, ncm_result: &NodeContactMethodResult) {
-        let cmk = ContactMethodKind::from(ncm_result);
+        let cmk = NodeContactMethodKind::from(ncm_result);
         self.contact_method_kind_stats.entry(cmk).or_default().hit += 1;
     }
     pub fn record_contact_method_failure(&mut self, ncm_result: &NodeContactMethodResult) {
-        let cmk = ContactMethodKind::from(ncm_result);
+        let cmk = NodeContactMethodKind::from(ncm_result);
         self.contact_method_kind_stats.entry(cmk).or_default().miss += 1;
     }
 

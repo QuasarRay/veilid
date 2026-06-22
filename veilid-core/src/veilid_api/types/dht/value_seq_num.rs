@@ -13,12 +13,16 @@ use super::*;
 pub struct ValueSeqNum(Option<u32>);
 
 impl ValueSeqNum {
+    /// The largest representable sequence number (`u32::MAX` is reserved to mean [ValueSeqNum::NONE])
     pub const MAX: Self = ValueSeqNum(Some(u32::MAX - 1));
+    /// No sequence number, for a subkey that has never been written
     pub const NONE: Self = ValueSeqNum(None);
+    /// The sequence number of a subkey's first write
     pub const ZERO: Self = ValueSeqNum(Some(0));
 }
 
 impl ValueSeqNum {
+    /// The next sequence number, starting at [ValueSeqNum::ZERO] from [ValueSeqNum::NONE]. Fails at [ValueSeqNum::MAX].
     pub fn next(&self) -> VeilidAPIResult<Self> {
         if let Some(v) = self.0 {
             if v == u32::MAX - 1 {
@@ -30,22 +34,26 @@ impl ValueSeqNum {
         }
     }
 
+    /// True if this is [ValueSeqNum::MAX]
     #[must_use]
     pub const fn is_max(&self) -> bool {
         // Unwrap is the only way rust can do this in a const fn right now
         self.0.is_some() && self.0.unwrap() == u32::MAX - 1
     }
 
+    /// True if this is [ValueSeqNum::NONE]
     #[must_use]
     pub const fn is_none(&self) -> bool {
         self.0.is_none()
     }
 
+    /// True if this holds a sequence number
     #[must_use]
     pub const fn is_some(&self) -> bool {
         self.0.is_some()
     }
 
+    /// The sequence number as an [Option], `None` for [ValueSeqNum::NONE]
     #[must_use]
     pub const fn to_option(&self) -> Option<u32> {
         self.0

@@ -211,9 +211,13 @@ impl RPCProcessor {
         let transact_value_q = match kind {
             RPCOperationKind::Question(q) => match q.destructure() {
                 (_, RPCQuestionDetail::TransactCommandQ(q)) => q,
-                _ => panic!("not a transactcommand question"),
+                _ => {
+                    return Ok(NetworkResult::invalid_message(
+                        "not a transactcommand question",
+                    ))
+                }
             },
-            _ => panic!("not a question"),
+            _ => return Ok(NetworkResult::invalid_message("not a question")),
         };
 
         // Destructure

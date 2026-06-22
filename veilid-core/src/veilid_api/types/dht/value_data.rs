@@ -33,8 +33,12 @@ pub struct ValueData {
 }
 
 impl ValueData {
+    /// Maximum length in bytes of the data a single subkey may hold
     pub const MAX_LEN: usize = 32768;
 
+    /// Make a new value with sequence number [ValueSeqNum::ZERO]. Fails if `data` exceeds [ValueData::MAX_LEN].
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `data` exceeds [ValueData::MAX_LEN].
     pub fn new<B: Into<Bytes>>(data: B, writer: PublicKey) -> VeilidAPIResult<Self> {
         let data = data.into();
         if data.len() > Self::MAX_LEN {
@@ -46,6 +50,9 @@ impl ValueData {
             writer,
         })
     }
+    /// Make a new value with an explicit sequence number. Fails if `seq` is [ValueSeqNum::NONE] or `data` exceeds [ValueData::MAX_LEN].
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `seq` is [ValueSeqNum::NONE] or `data` exceeds [ValueData::MAX_LEN].
     pub fn new_with_seq<B: Into<Bytes>>(
         seq: ValueSeqNum,
         data: B,
@@ -61,34 +68,41 @@ impl ValueData {
         Ok(Self { seq, data, writer })
     }
 
+    /// The public identity key of the writer of the data, by reference
     pub fn ref_writer(&self) -> &PublicKey {
         &self.writer
     }
 
+    /// The stored bytes
     #[must_use]
     pub fn data(&self) -> &[u8] {
         &self.data
     }
 
+    /// The stored bytes as an owned [Bytes]
     #[must_use]
     pub fn data_bytes(&self) -> Bytes {
         self.data.clone()
     }
 
+    /// The sequence number ordering this value among changes to the same subkey
     #[must_use]
     pub fn seq(&self) -> ValueSeqNum {
         self.seq
     }
 
+    /// The public identity key of the writer of the data
     pub fn writer(&self) -> PublicKey {
         self.writer.clone()
     }
 
+    /// The length in bytes of the stored data
     #[must_use]
     pub fn data_size(&self) -> usize {
         self.data.len()
     }
 
+    /// The in-memory footprint of this value, including the struct itself and its data
     #[must_use]
     pub fn total_size(&self) -> usize {
         mem::size_of::<Self>() + self.data.len()

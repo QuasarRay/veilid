@@ -4,12 +4,18 @@ use super::*;
 
 use std::path::{Path, PathBuf};
 
+/// Where a [LogOutput] sends its formatted log events.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LogOutputKind {
+    /// Standard output of the process.
     StdOut,
+    /// Standard error of the process.
     StdErr,
+    /// A file on disk.
     File,
+    /// `VeilidUpdate::Log` events delivered through the API.
     Api,
+    /// A caller-supplied `tracing` layer, identified by name.
     Layer(String),
 }
 

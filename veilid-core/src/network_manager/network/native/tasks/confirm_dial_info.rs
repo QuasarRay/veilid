@@ -54,6 +54,12 @@ impl NativeNetwork {
     // Outbound-only nodes will frequently be symmetric NAT and not have a -consistent- public address
     // so we have to do checks to see if the address has -become- consistent.
     fn public_internet_wants_confirm_dial_info(&self) -> bool {
+        // Suppress dial info confirmation if we are configured to only use relays for inbound connections
+        let config = self.config();
+        if config.network.privacy.require_inbound_relay {
+            return false;
+        }
+
         let routing_table = self.routing_table();
 
         let (routing_domain_inbound_stage, current_peer_info, entry_summary) = {

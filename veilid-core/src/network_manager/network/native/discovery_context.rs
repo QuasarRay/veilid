@@ -328,8 +328,8 @@ impl DiscoveryContext {
                         // Found no public address from this node
                     }
                     Ok(None) => {
-                        // Should never happen in this loop
-                        unreachable!();
+                        // unord just pushed; next() yielding None here should be impossible, skip
+                        veilid_log!(self error "discover_external_addresses: empty unord poll");
                     }
                     Err(_) => {
                         // stop requested
@@ -440,7 +440,7 @@ impl DiscoveryContext {
             AddressType::IPV4 => IGDAddressType::IPV4,
         };
 
-        let igd_manager = self.network.igd_manager.clone();
+        let igd_manager = self.network.igd_manager.clone()?;
 
         // Attempt a port mapping. If this doesn't succeed, it's not going to
         let mapped_external_address = igd_manager
@@ -772,7 +772,7 @@ impl DiscoveryContext {
         // NAT Detection
         ///////////
 
-        let retry_count = self.config().network.restricted_nat_retries;
+        let retry_count = self.config().internal().network.restricted_nat_retries;
 
         // Full Cone NAT Detection
         ///////////
@@ -918,9 +918,8 @@ impl DiscoveryContext {
 
         // UPNP Automatic Mapping
         ///////////
-        let config = self.config();
-        let enable_upnp = config.network.upnp && !config.network.privacy.require_inbound_relay;
-        if enable_upnp {
+        // igd_manager is only present when UPnP is enabled
+        if self.network.igd_manager.is_some() {
             // Attempt a port mapping via all available and enabled mechanisms
             // Try this before the direct mapping in the event that we are restarting
             // and may not have recorded a mapping created the last time

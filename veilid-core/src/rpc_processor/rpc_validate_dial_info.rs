@@ -26,7 +26,11 @@ impl RPCProcessor {
         let network_manager = self.network_manager();
 
         let validate_dial_info_receipt_time_ms =
-            self.config().network.dht.validate_dial_info_receipt_time_ms as u64;
+            self.config()
+                .internal()
+                .network
+                .dht
+                .validate_dial_info_receipt_time_ms as u64;
 
         let receipt_time = TimestampDuration::new_ms(validate_dial_info_receipt_time_ms);
 
@@ -125,9 +129,9 @@ impl RPCProcessor {
         let (dial_info, receipt, redirect) = match kind {
             RPCOperationKind::Statement(s) => match s.destructure() {
                 RPCStatementDetail::ValidateDialInfo(s) => s.destructure(),
-                _ => panic!("not a validate dial info"),
+                _ => return Ok(NetworkResult::invalid_message("not a validate dial info")),
             },
-            _ => panic!("not a statement"),
+            _ => return Ok(NetworkResult::invalid_message("not a statement")),
         };
 
         // Redirect this request if we are asked to
@@ -138,7 +142,7 @@ impl RPCProcessor {
             // an ipv6 address
             let sender_node_id = detail.envelope.get_sender_id();
             let routing_domain = detail.routing_domain;
-            let node_count = self.config().network.dht.max_find_node_count as usize;
+            let node_count = self.config().internal().network.dht.max_find_node_count as usize;
 
             // Filter on nodes that can validate dial info, and can reach a specific dial info
             let outbound_dial_info_entry_filter = routing_table
@@ -188,7 +192,7 @@ impl RPCProcessor {
 
                 // Send the validate_dial_info request
                 // This can only be sent directly, as relays can not validate dial info
-                network_result_value_or_log!(self pin_future_closure!(self.statement(Destination::direct(peer.sequencing_filtered(Sequencing::NoPreference), None), statement, None, None))
+                network_result_value_or_log!(self pin_future_closure!(self.statement(Destination::direct(peer.sequencing_filtered(Sequencing::PreferUnordered), None), statement, None, None))
                     .await? => [ format!(": peer={} statement={:?}", peer, statement) ] {
                         continue;
                     }

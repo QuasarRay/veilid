@@ -1,4 +1,5 @@
 pub mod mocks;
+pub mod test_bucket_entry_state;
 pub mod test_network_estimator;
 pub mod test_routing_metrics;
 pub mod test_serialize_routing_table;
@@ -25,4 +26,18 @@ pub async fn test_all() {
     test_network_estimator::test_network_estimator_entered_slot_zeros_old_data();
     test_network_estimator::test_network_estimator_combined_single_kind();
     test_network_estimator::test_network_estimator_clock_backward_ignored();
+    test_bucket_entry_state::test_state_punished();
+    test_bucket_entry_state::test_state_dead_excessive_unreachable();
+    test_bucket_entry_state::test_state_dead_excessive_send_failures();
+    test_bucket_entry_state::test_state_dead_never_seen_lost_questions();
+    test_bucket_entry_state::test_state_dead_steady_lost_questions();
+    test_bucket_entry_state::test_state_missing_failed_to_send();
+    test_bucket_entry_state::test_state_missing_lost_questions();
+    test_bucket_entry_state::test_state_initial();
+    test_bucket_entry_state::test_state_unreliable();
+    test_bucket_entry_state::test_state_reliable();
+    test_bucket_entry_state::test_state_precedence_dead_beats_reliable();
+    test_bucket_entry_state::test_state_transition_reliable_degrades_to_missing();
+    test_bucket_entry_state::test_state_offline_credit_steady_lost_questions();
+    test_bucket_entry_state::test_state_offline_credit_unreliable_answer();
 }

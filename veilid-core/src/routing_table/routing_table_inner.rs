@@ -188,14 +188,14 @@ impl RoutingTableInner {
             .unwrap_or_log()
     }
 
-    pub fn snapshot_entries(
+    pub fn snapshot(
         &self,
         registry: VeilidComponentRegistry,
         cur_ts: Timestamp,
         min_state: BucketEntryState,
-    ) -> EntrySnapshot {
-        #[cfg(feature = "verbose-tracing")]
-        let start_ts = Timestamp::now();
+    ) -> RoutingTableSnapshot {
+        // #[cfg(feature = "verbose-tracing")]
+        // let start_ts = Timestamp::now();
 
         let mut entries = Vec::with_capacity(self.bucket_entry_count());
         self.with_entries(cur_ts, min_state, |v| {
@@ -203,12 +203,12 @@ impl RoutingTableInner {
             Option::<()>::None
         });
 
-        #[cfg(feature = "verbose-tracing")]
-        {
-            let elapsed = Timestamp::now().duration_since(start_ts);
-            veilid_log!(self debug "snapshot_entries: {} entries in {:#}", entries.len(), elapsed);
-        }
+        // #[cfg(feature = "verbose-tracing")]
+        // {
+        //     let elapsed = Timestamp::now().duration_since(start_ts);
+        //     veilid_log!(self debug "snapshot_entries: {} entries in {:#}", entries.len(), elapsed);
+        // }
 
-        EntrySnapshot::new(registry, cur_ts, entries)
+        RoutingTableSnapshot::new(registry, cur_ts, entries)
     }
 }

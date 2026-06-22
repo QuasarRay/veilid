@@ -6,14 +6,22 @@ use super::*;
 
 use core::hash::*;
 
+/// Scope of an IPv6 multicast address (RFC 4291 § 2.7), in increasing reach.
 #[derive(Copy, PartialEq, Eq, Clone, Hash, Debug)]
 pub enum Ipv6MulticastScope {
+    /// Confined to a single interface, for loopback multicast.
     InterfaceLocal,
+    /// Confined to a single link.
     LinkLocal,
+    /// Confined to the local realm.
     RealmLocal,
+    /// Confined to a locally administered scope.
     AdminLocal,
+    /// Confined to a single site.
     SiteLocal,
+    /// Confined to a single organization.
     OrganizationLocal,
+    /// Reaches the whole internet.
     Global,
 }
 
@@ -281,6 +289,11 @@ pub fn ipv6addr_is_multicast(addr: &Ipv6Addr) -> bool {
     (addr.segments()[0] & 0xff00) == 0xff00
 }
 
+/// Collapses an address to its allocation block by masking the host bits.
+///
+/// IPv4 addresses are returned unchanged (treated as single hosts). IPv6 addresses
+/// keep the top `ip6_prefix_size` bits and set the remaining host bits, yielding the
+/// prefix-allocated block the address belongs to.
 // Converts an ip to a ip block by applying a netmask
 // to the host part of the ip address
 // ipv4 addresses are treated as single hosts
@@ -306,35 +319,31 @@ pub fn ip_to_ipblock(ip6_prefix_size: usize, addr: IpAddr) -> IpAddr {
     }
 }
 
+/// Applies `netmask` to `addr`, zeroing the host bits. Returns `None` if the address
+/// and netmask are different IP families.
 #[must_use]
-pub fn ipaddr_apply_netmask(addr: IpAddr, netmask: IpAddr) -> IpAddr {
+pub fn ipaddr_apply_netmask(addr: IpAddr, netmask: IpAddr) -> Option<IpAddr> {
     match addr {
         IpAddr::V4(v4) => {
-            let v4mask = match netmask {
-                IpAddr::V4(v4mask) => v4mask,
-                IpAddr::V6(_) => {
-                    panic!("netmask doesn't match ipv4 address");
-                }
+            let IpAddr::V4(v4mask) = netmask else {
+                return None;
             };
             let v4 = v4.octets();
             let v4mask = v4mask.octets();
-            IpAddr::V4(Ipv4Addr::new(
+            Some(IpAddr::V4(Ipv4Addr::new(
                 v4[0] & v4mask[0],
                 v4[1] & v4mask[1],
                 v4[2] & v4mask[2],
                 v4[3] & v4mask[3],
-            ))
+            )))
         }
         IpAddr::V6(v6) => {
-            let v6mask = match netmask {
-                IpAddr::V4(_) => {
-                    panic!("netmask doesn't match ipv6 address");
-                }
-                IpAddr::V6(v6mask) => v6mask,
+            let IpAddr::V6(v6mask) = netmask else {
+                return None;
             };
             let v6 = v6.segments();
             let v6mask = v6mask.segments();
-            IpAddr::V6(Ipv6Addr::new(
+            Some(IpAddr::V6(Ipv6Addr::new(
                 v6[0] & v6mask[0],
                 v6[1] & v6mask[1],
                 v6[2] & v6mask[2],
@@ -343,11 +352,13 @@ pub fn ipaddr_apply_netmask(addr: IpAddr, netmask: IpAddr) -> IpAddr {
                 v6[5] & v6mask[5],
                 v6[6] & v6mask[6],
                 v6[7] & v6mask[7],
-            ))
+            )))
         }
     }
 }
 
+/// True if `addr` falls within the network `netaddr`/`netmask`. False if `addr` and
+/// `netaddr` are different IP families.
 #[must_use]
 pub fn ipaddr_in_network(addr: IpAddr, netaddr: IpAddr, netmask: IpAddr) -> bool {
     if addr.is_ipv4() && !netaddr.is_ipv4() {
@@ -356,5 +367,11 @@ pub fn ipaddr_in_network(addr: IpAddr, netaddr: IpAddr, netmask: IpAddr) -> bool
     if addr.is_ipv6() && !netaddr.is_ipv6() {
         return false;
     }
-    ipaddr_apply_netmask(netaddr, netmask) == ipaddr_apply_netmask(addr, netmask)
+    match (
+        ipaddr_apply_netmask(netaddr, netmask),
+        ipaddr_apply_netmask(addr, netmask),
+    ) {
+        (Some(net), Some(masked)) => net == masked,
+        _ => false,
+    }
 }

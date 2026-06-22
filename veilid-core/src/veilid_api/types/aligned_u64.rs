@@ -30,6 +30,7 @@ macro_rules! aligned_u64_type {
         #[repr(C, align(8))]
         #[serde(transparent)]
         #[must_use]
+        /// 8-byte-aligned `u64` newtype that serializes as a string for JSON safety.
         pub struct $name(
             #[serde(with = "as_human_string")]
             #[schemars(with = "String")]
@@ -52,9 +53,11 @@ macro_rules! aligned_u64_type {
         }
 
         impl $name {
+            /// Wraps a raw `u64`.
             pub const fn new(v: u64) -> Self {
                 Self(v)
             }
+            /// Returns the underlying `u64`.
             #[must_use]
             pub const fn as_u64(self) -> u64 {
                 self.0
@@ -122,6 +125,7 @@ macro_rules! aligned_u64_type_default_math_impl {
         }
 
         impl $name {
+            /// Subtracts `rhs`, saturating at zero instead of underflowing.
             pub fn saturating_sub(self, rhs: Self) -> Self {
                 Self(self.0.saturating_sub(rhs.0))
             }

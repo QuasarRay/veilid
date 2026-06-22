@@ -3277,7 +3277,7 @@ $VeilidWASMConfigLoggingCopyWith<$Res> get logging {
 /// @nodoc
 mixin _$VeilidConfigUDP implements DiagnosticableTreeMixin {
 
- bool get enabled; int get socketPoolSize; String get listenAddress; String? get publicAddress;
+ bool get enabled; String get listenAddress; String? get publicAddress;
 /// Create a copy of VeilidConfigUDP
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -3291,21 +3291,21 @@ $VeilidConfigUDPCopyWith<VeilidConfigUDP> get copyWith => _$VeilidConfigUDPCopyW
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigUDP'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('socketPoolSize', socketPoolSize))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('publicAddress', publicAddress));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('publicAddress', publicAddress));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigUDP&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.socketPoolSize, socketPoolSize) || other.socketPoolSize == socketPoolSize)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.publicAddress, publicAddress) || other.publicAddress == publicAddress));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigUDP&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.publicAddress, publicAddress) || other.publicAddress == publicAddress));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,socketPoolSize,listenAddress,publicAddress);
+int get hashCode => Object.hash(runtimeType,enabled,listenAddress,publicAddress);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigUDP(enabled: $enabled, socketPoolSize: $socketPoolSize, listenAddress: $listenAddress, publicAddress: $publicAddress)';
+  return 'VeilidConfigUDP(enabled: $enabled, listenAddress: $listenAddress, publicAddress: $publicAddress)';
 }
 
 
@@ -3316,7 +3316,7 @@ abstract mixin class $VeilidConfigUDPCopyWith<$Res>  {
   factory $VeilidConfigUDPCopyWith(VeilidConfigUDP value, $Res Function(VeilidConfigUDP) _then) = _$VeilidConfigUDPCopyWithImpl;
 @useResult
 $Res call({
- bool enabled, int socketPoolSize, String listenAddress, String? publicAddress
+ bool enabled, String listenAddress, String? publicAddress
 });
 
 
@@ -3333,11 +3333,10 @@ class _$VeilidConfigUDPCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigUDP
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? socketPoolSize = null,Object? listenAddress = null,Object? publicAddress = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? listenAddress = null,Object? publicAddress = freezed,}) {
   return _then(_self.copyWith(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
-as bool,socketPoolSize: null == socketPoolSize ? _self.socketPoolSize : socketPoolSize // ignore: cast_nullable_to_non_nullable
-as int,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
 as String,publicAddress: freezed == publicAddress ? _self.publicAddress : publicAddress // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
@@ -3421,10 +3420,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  int socketPoolSize,  String listenAddress,  String? publicAddress)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  String listenAddress,  String? publicAddress)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigUDP() when $default != null:
-return $default(_that.enabled,_that.socketPoolSize,_that.listenAddress,_that.publicAddress);case _:
+return $default(_that.enabled,_that.listenAddress,_that.publicAddress);case _:
   return orElse();
 
 }
@@ -3442,10 +3441,10 @@ return $default(_that.enabled,_that.socketPoolSize,_that.listenAddress,_that.pub
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  int socketPoolSize,  String listenAddress,  String? publicAddress)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  String listenAddress,  String? publicAddress)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigUDP():
-return $default(_that.enabled,_that.socketPoolSize,_that.listenAddress,_that.publicAddress);}
+return $default(_that.enabled,_that.listenAddress,_that.publicAddress);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -3459,10 +3458,10 @@ return $default(_that.enabled,_that.socketPoolSize,_that.listenAddress,_that.pub
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  int socketPoolSize,  String listenAddress,  String? publicAddress)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  String listenAddress,  String? publicAddress)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigUDP() when $default != null:
-return $default(_that.enabled,_that.socketPoolSize,_that.listenAddress,_that.publicAddress);case _:
+return $default(_that.enabled,_that.listenAddress,_that.publicAddress);case _:
   return null;
 
 }
@@ -3474,11 +3473,10 @@ return $default(_that.enabled,_that.socketPoolSize,_that.listenAddress,_that.pub
 @JsonSerializable()
 
 class _VeilidConfigUDP with DiagnosticableTreeMixin implements VeilidConfigUDP {
-  const _VeilidConfigUDP({required this.enabled, required this.socketPoolSize, required this.listenAddress, this.publicAddress});
+  const _VeilidConfigUDP({required this.enabled, required this.listenAddress, this.publicAddress});
   factory _VeilidConfigUDP.fromJson(Map<String, dynamic> json) => _$VeilidConfigUDPFromJson(json);
 
 @override final  bool enabled;
-@override final  int socketPoolSize;
 @override final  String listenAddress;
 @override final  String? publicAddress;
 
@@ -3496,21 +3494,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigUDP'))
-    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('socketPoolSize', socketPoolSize))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('publicAddress', publicAddress));
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('publicAddress', publicAddress));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigUDP&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.socketPoolSize, socketPoolSize) || other.socketPoolSize == socketPoolSize)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.publicAddress, publicAddress) || other.publicAddress == publicAddress));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigUDP&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.publicAddress, publicAddress) || other.publicAddress == publicAddress));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,enabled,socketPoolSize,listenAddress,publicAddress);
+int get hashCode => Object.hash(runtimeType,enabled,listenAddress,publicAddress);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigUDP(enabled: $enabled, socketPoolSize: $socketPoolSize, listenAddress: $listenAddress, publicAddress: $publicAddress)';
+  return 'VeilidConfigUDP(enabled: $enabled, listenAddress: $listenAddress, publicAddress: $publicAddress)';
 }
 
 
@@ -3521,7 +3519,7 @@ abstract mixin class _$VeilidConfigUDPCopyWith<$Res> implements $VeilidConfigUDP
   factory _$VeilidConfigUDPCopyWith(_VeilidConfigUDP value, $Res Function(_VeilidConfigUDP) _then) = __$VeilidConfigUDPCopyWithImpl;
 @override @useResult
 $Res call({
- bool enabled, int socketPoolSize, String listenAddress, String? publicAddress
+ bool enabled, String listenAddress, String? publicAddress
 });
 
 
@@ -3538,11 +3536,10 @@ class __$VeilidConfigUDPCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigUDP
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? socketPoolSize = null,Object? listenAddress = null,Object? publicAddress = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? listenAddress = null,Object? publicAddress = freezed,}) {
   return _then(_VeilidConfigUDP(
 enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
-as bool,socketPoolSize: null == socketPoolSize ? _self.socketPoolSize : socketPoolSize // ignore: cast_nullable_to_non_nullable
-as int,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
 as String,publicAddress: freezed == publicAddress ? _self.publicAddress : publicAddress // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
@@ -3555,7 +3552,7 @@ as String?,
 /// @nodoc
 mixin _$VeilidConfigTCP implements DiagnosticableTreeMixin {
 
- bool get connect; bool get listen; int get maxConnections; String get listenAddress; String? get publicAddress;
+ bool get connect; bool get listen; String get listenAddress; String? get publicAddress;
 /// Create a copy of VeilidConfigTCP
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -3569,21 +3566,21 @@ $VeilidConfigTCPCopyWith<VeilidConfigTCP> get copyWith => _$VeilidConfigTCPCopyW
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigTCP'))
-    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('publicAddress', publicAddress));
+    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('publicAddress', publicAddress));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigTCP&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.publicAddress, publicAddress) || other.publicAddress == publicAddress));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigTCP&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.publicAddress, publicAddress) || other.publicAddress == publicAddress));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,connect,listen,maxConnections,listenAddress,publicAddress);
+int get hashCode => Object.hash(runtimeType,connect,listen,listenAddress,publicAddress);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigTCP(connect: $connect, listen: $listen, maxConnections: $maxConnections, listenAddress: $listenAddress, publicAddress: $publicAddress)';
+  return 'VeilidConfigTCP(connect: $connect, listen: $listen, listenAddress: $listenAddress, publicAddress: $publicAddress)';
 }
 
 
@@ -3594,7 +3591,7 @@ abstract mixin class $VeilidConfigTCPCopyWith<$Res>  {
   factory $VeilidConfigTCPCopyWith(VeilidConfigTCP value, $Res Function(VeilidConfigTCP) _then) = _$VeilidConfigTCPCopyWithImpl;
 @useResult
 $Res call({
- bool connect, bool listen, int maxConnections, String listenAddress, String? publicAddress
+ bool connect, bool listen, String listenAddress, String? publicAddress
 });
 
 
@@ -3611,12 +3608,11 @@ class _$VeilidConfigTCPCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigTCP
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? connect = null,Object? listen = null,Object? maxConnections = null,Object? listenAddress = null,Object? publicAddress = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? connect = null,Object? listen = null,Object? listenAddress = null,Object? publicAddress = freezed,}) {
   return _then(_self.copyWith(
 connect: null == connect ? _self.connect : connect // ignore: cast_nullable_to_non_nullable
 as bool,listen: null == listen ? _self.listen : listen // ignore: cast_nullable_to_non_nullable
-as bool,maxConnections: null == maxConnections ? _self.maxConnections : maxConnections // ignore: cast_nullable_to_non_nullable
-as int,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
 as String,publicAddress: freezed == publicAddress ? _self.publicAddress : publicAddress // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
@@ -3700,10 +3696,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool connect,  bool listen,  int maxConnections,  String listenAddress,  String? publicAddress)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool connect,  bool listen,  String listenAddress,  String? publicAddress)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigTCP() when $default != null:
-return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddress,_that.publicAddress);case _:
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.publicAddress);case _:
   return orElse();
 
 }
@@ -3721,10 +3717,10 @@ return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddr
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool connect,  bool listen,  int maxConnections,  String listenAddress,  String? publicAddress)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool connect,  bool listen,  String listenAddress,  String? publicAddress)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigTCP():
-return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddress,_that.publicAddress);}
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.publicAddress);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -3738,10 +3734,10 @@ return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddr
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool connect,  bool listen,  int maxConnections,  String listenAddress,  String? publicAddress)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool connect,  bool listen,  String listenAddress,  String? publicAddress)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigTCP() when $default != null:
-return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddress,_that.publicAddress);case _:
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.publicAddress);case _:
   return null;
 
 }
@@ -3753,12 +3749,11 @@ return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddr
 @JsonSerializable()
 
 class _VeilidConfigTCP with DiagnosticableTreeMixin implements VeilidConfigTCP {
-  const _VeilidConfigTCP({required this.connect, required this.listen, required this.maxConnections, required this.listenAddress, this.publicAddress});
+  const _VeilidConfigTCP({required this.connect, required this.listen, required this.listenAddress, this.publicAddress});
   factory _VeilidConfigTCP.fromJson(Map<String, dynamic> json) => _$VeilidConfigTCPFromJson(json);
 
 @override final  bool connect;
 @override final  bool listen;
-@override final  int maxConnections;
 @override final  String listenAddress;
 @override final  String? publicAddress;
 
@@ -3776,21 +3771,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigTCP'))
-    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('publicAddress', publicAddress));
+    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('publicAddress', publicAddress));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigTCP&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.publicAddress, publicAddress) || other.publicAddress == publicAddress));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigTCP&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.publicAddress, publicAddress) || other.publicAddress == publicAddress));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,connect,listen,maxConnections,listenAddress,publicAddress);
+int get hashCode => Object.hash(runtimeType,connect,listen,listenAddress,publicAddress);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigTCP(connect: $connect, listen: $listen, maxConnections: $maxConnections, listenAddress: $listenAddress, publicAddress: $publicAddress)';
+  return 'VeilidConfigTCP(connect: $connect, listen: $listen, listenAddress: $listenAddress, publicAddress: $publicAddress)';
 }
 
 
@@ -3801,7 +3796,7 @@ abstract mixin class _$VeilidConfigTCPCopyWith<$Res> implements $VeilidConfigTCP
   factory _$VeilidConfigTCPCopyWith(_VeilidConfigTCP value, $Res Function(_VeilidConfigTCP) _then) = __$VeilidConfigTCPCopyWithImpl;
 @override @useResult
 $Res call({
- bool connect, bool listen, int maxConnections, String listenAddress, String? publicAddress
+ bool connect, bool listen, String listenAddress, String? publicAddress
 });
 
 
@@ -3818,12 +3813,11 @@ class __$VeilidConfigTCPCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigTCP
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? connect = null,Object? listen = null,Object? maxConnections = null,Object? listenAddress = null,Object? publicAddress = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? connect = null,Object? listen = null,Object? listenAddress = null,Object? publicAddress = freezed,}) {
   return _then(_VeilidConfigTCP(
 connect: null == connect ? _self.connect : connect // ignore: cast_nullable_to_non_nullable
 as bool,listen: null == listen ? _self.listen : listen // ignore: cast_nullable_to_non_nullable
-as bool,maxConnections: null == maxConnections ? _self.maxConnections : maxConnections // ignore: cast_nullable_to_non_nullable
-as int,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
 as String,publicAddress: freezed == publicAddress ? _self.publicAddress : publicAddress // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
@@ -3836,7 +3830,7 @@ as String?,
 /// @nodoc
 mixin _$VeilidConfigWS implements DiagnosticableTreeMixin {
 
- bool get connect; bool get listen; int get maxConnections; String get listenAddress; String get path; String? get url;
+ bool get connect; bool get listen; String get listenAddress; String get path; String? get url;
 /// Create a copy of VeilidConfigWS
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -3850,21 +3844,21 @@ $VeilidConfigWSCopyWith<VeilidConfigWS> get copyWith => _$VeilidConfigWSCopyWith
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigWS'))
-    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('path', path))..add(DiagnosticsProperty('url', url));
+    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('path', path))..add(DiagnosticsProperty('url', url));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigWS&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.path, path) || other.path == path)&&(identical(other.url, url) || other.url == url));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigWS&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.path, path) || other.path == path)&&(identical(other.url, url) || other.url == url));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,connect,listen,maxConnections,listenAddress,path,url);
+int get hashCode => Object.hash(runtimeType,connect,listen,listenAddress,path,url);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigWS(connect: $connect, listen: $listen, maxConnections: $maxConnections, listenAddress: $listenAddress, path: $path, url: $url)';
+  return 'VeilidConfigWS(connect: $connect, listen: $listen, listenAddress: $listenAddress, path: $path, url: $url)';
 }
 
 
@@ -3875,7 +3869,7 @@ abstract mixin class $VeilidConfigWSCopyWith<$Res>  {
   factory $VeilidConfigWSCopyWith(VeilidConfigWS value, $Res Function(VeilidConfigWS) _then) = _$VeilidConfigWSCopyWithImpl;
 @useResult
 $Res call({
- bool connect, bool listen, int maxConnections, String listenAddress, String path, String? url
+ bool connect, bool listen, String listenAddress, String path, String? url
 });
 
 
@@ -3892,12 +3886,11 @@ class _$VeilidConfigWSCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigWS
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? connect = null,Object? listen = null,Object? maxConnections = null,Object? listenAddress = null,Object? path = null,Object? url = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? connect = null,Object? listen = null,Object? listenAddress = null,Object? path = null,Object? url = freezed,}) {
   return _then(_self.copyWith(
 connect: null == connect ? _self.connect : connect // ignore: cast_nullable_to_non_nullable
 as bool,listen: null == listen ? _self.listen : listen // ignore: cast_nullable_to_non_nullable
-as bool,maxConnections: null == maxConnections ? _self.maxConnections : maxConnections // ignore: cast_nullable_to_non_nullable
-as int,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
 as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
 as String,url: freezed == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
 as String?,
@@ -3982,10 +3975,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool connect,  bool listen,  int maxConnections,  String listenAddress,  String path,  String? url)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigWS() when $default != null:
-return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddress,_that.path,_that.url);case _:
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);case _:
   return orElse();
 
 }
@@ -4003,10 +3996,10 @@ return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddr
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool connect,  bool listen,  int maxConnections,  String listenAddress,  String path,  String? url)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigWS():
-return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddress,_that.path,_that.url);}
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -4020,10 +4013,10 @@ return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddr
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool connect,  bool listen,  int maxConnections,  String listenAddress,  String path,  String? url)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool connect,  bool listen,  String listenAddress,  String path,  String? url)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigWS() when $default != null:
-return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddress,_that.path,_that.url);case _:
+return $default(_that.connect,_that.listen,_that.listenAddress,_that.path,_that.url);case _:
   return null;
 
 }
@@ -4035,12 +4028,11 @@ return $default(_that.connect,_that.listen,_that.maxConnections,_that.listenAddr
 @JsonSerializable()
 
 class _VeilidConfigWS with DiagnosticableTreeMixin implements VeilidConfigWS {
-  const _VeilidConfigWS({required this.connect, required this.listen, required this.maxConnections, required this.listenAddress, required this.path, this.url});
+  const _VeilidConfigWS({required this.connect, required this.listen, required this.listenAddress, required this.path, this.url});
   factory _VeilidConfigWS.fromJson(Map<String, dynamic> json) => _$VeilidConfigWSFromJson(json);
 
 @override final  bool connect;
 @override final  bool listen;
-@override final  int maxConnections;
 @override final  String listenAddress;
 @override final  String path;
 @override final  String? url;
@@ -4059,21 +4051,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigWS'))
-    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('path', path))..add(DiagnosticsProperty('url', url));
+    ..add(DiagnosticsProperty('connect', connect))..add(DiagnosticsProperty('listen', listen))..add(DiagnosticsProperty('listenAddress', listenAddress))..add(DiagnosticsProperty('path', path))..add(DiagnosticsProperty('url', url));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigWS&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.path, path) || other.path == path)&&(identical(other.url, url) || other.url == url));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigWS&&(identical(other.connect, connect) || other.connect == connect)&&(identical(other.listen, listen) || other.listen == listen)&&(identical(other.listenAddress, listenAddress) || other.listenAddress == listenAddress)&&(identical(other.path, path) || other.path == path)&&(identical(other.url, url) || other.url == url));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,connect,listen,maxConnections,listenAddress,path,url);
+int get hashCode => Object.hash(runtimeType,connect,listen,listenAddress,path,url);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigWS(connect: $connect, listen: $listen, maxConnections: $maxConnections, listenAddress: $listenAddress, path: $path, url: $url)';
+  return 'VeilidConfigWS(connect: $connect, listen: $listen, listenAddress: $listenAddress, path: $path, url: $url)';
 }
 
 
@@ -4084,7 +4076,7 @@ abstract mixin class _$VeilidConfigWSCopyWith<$Res> implements $VeilidConfigWSCo
   factory _$VeilidConfigWSCopyWith(_VeilidConfigWS value, $Res Function(_VeilidConfigWS) _then) = __$VeilidConfigWSCopyWithImpl;
 @override @useResult
 $Res call({
- bool connect, bool listen, int maxConnections, String listenAddress, String path, String? url
+ bool connect, bool listen, String listenAddress, String path, String? url
 });
 
 
@@ -4101,12 +4093,11 @@ class __$VeilidConfigWSCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigWS
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? connect = null,Object? listen = null,Object? maxConnections = null,Object? listenAddress = null,Object? path = null,Object? url = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? connect = null,Object? listen = null,Object? listenAddress = null,Object? path = null,Object? url = freezed,}) {
   return _then(_VeilidConfigWS(
 connect: null == connect ? _self.connect : connect // ignore: cast_nullable_to_non_nullable
 as bool,listen: null == listen ? _self.listen : listen // ignore: cast_nullable_to_non_nullable
-as bool,maxConnections: null == maxConnections ? _self.maxConnections : maxConnections // ignore: cast_nullable_to_non_nullable
-as int,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
+as bool,listenAddress: null == listenAddress ? _self.listenAddress : listenAddress // ignore: cast_nullable_to_non_nullable
 as String,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
 as String,url: freezed == url ? _self.url : url // ignore: cast_nullable_to_non_nullable
 as String?,
@@ -4993,7 +4984,7 @@ as int,
 /// @nodoc
 mixin _$VeilidConfigDHT implements DiagnosticableTreeMixin {
 
- int get resolveNodeTimeoutMs; int get resolveNodeCount; int get resolveNodeFanout; int get maxFindNodeCount; int get getValueTimeoutMs; int get getValueCount; int get getValueFanout; int get setValueTimeoutMs; int get setValueCount; int get setValueFanout; int get consensusWidth; int get minPeerCount; int get minPeerRefreshTimeMs; int get validateDialInfoReceiptTimeMs; int get localSubkeyCacheSize; int get localMaxSubkeyCacheMemoryMb; int get remoteSubkeyCacheSize; int get remoteMaxRecords; int get remoteMaxSubkeyCacheMemoryMb; int get remoteMaxStorageSpaceMb; int get publicWatchLimit; int get memberWatchLimit; int get maxWatchExpirationMs; int get publicTransactionLimit; int get memberTransactionLimit;
+ int get localSubkeyCacheSize; int get localMaxSubkeyCacheMemoryMb; int get remoteSubkeyCacheSize; int get remoteMaxRecords; int get remoteMaxSubkeyCacheMemoryMb; int get remoteMaxStorageSpaceMb; int get maxConcurrentOperations;
 /// Create a copy of VeilidConfigDHT
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -5007,21 +4998,21 @@ $VeilidConfigDHTCopyWith<VeilidConfigDHT> get copyWith => _$VeilidConfigDHTCopyW
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigDHT'))
-    ..add(DiagnosticsProperty('resolveNodeTimeoutMs', resolveNodeTimeoutMs))..add(DiagnosticsProperty('resolveNodeCount', resolveNodeCount))..add(DiagnosticsProperty('resolveNodeFanout', resolveNodeFanout))..add(DiagnosticsProperty('maxFindNodeCount', maxFindNodeCount))..add(DiagnosticsProperty('getValueTimeoutMs', getValueTimeoutMs))..add(DiagnosticsProperty('getValueCount', getValueCount))..add(DiagnosticsProperty('getValueFanout', getValueFanout))..add(DiagnosticsProperty('setValueTimeoutMs', setValueTimeoutMs))..add(DiagnosticsProperty('setValueCount', setValueCount))..add(DiagnosticsProperty('setValueFanout', setValueFanout))..add(DiagnosticsProperty('consensusWidth', consensusWidth))..add(DiagnosticsProperty('minPeerCount', minPeerCount))..add(DiagnosticsProperty('minPeerRefreshTimeMs', minPeerRefreshTimeMs))..add(DiagnosticsProperty('validateDialInfoReceiptTimeMs', validateDialInfoReceiptTimeMs))..add(DiagnosticsProperty('localSubkeyCacheSize', localSubkeyCacheSize))..add(DiagnosticsProperty('localMaxSubkeyCacheMemoryMb', localMaxSubkeyCacheMemoryMb))..add(DiagnosticsProperty('remoteSubkeyCacheSize', remoteSubkeyCacheSize))..add(DiagnosticsProperty('remoteMaxRecords', remoteMaxRecords))..add(DiagnosticsProperty('remoteMaxSubkeyCacheMemoryMb', remoteMaxSubkeyCacheMemoryMb))..add(DiagnosticsProperty('remoteMaxStorageSpaceMb', remoteMaxStorageSpaceMb))..add(DiagnosticsProperty('publicWatchLimit', publicWatchLimit))..add(DiagnosticsProperty('memberWatchLimit', memberWatchLimit))..add(DiagnosticsProperty('maxWatchExpirationMs', maxWatchExpirationMs))..add(DiagnosticsProperty('publicTransactionLimit', publicTransactionLimit))..add(DiagnosticsProperty('memberTransactionLimit', memberTransactionLimit));
+    ..add(DiagnosticsProperty('localSubkeyCacheSize', localSubkeyCacheSize))..add(DiagnosticsProperty('localMaxSubkeyCacheMemoryMb', localMaxSubkeyCacheMemoryMb))..add(DiagnosticsProperty('remoteSubkeyCacheSize', remoteSubkeyCacheSize))..add(DiagnosticsProperty('remoteMaxRecords', remoteMaxRecords))..add(DiagnosticsProperty('remoteMaxSubkeyCacheMemoryMb', remoteMaxSubkeyCacheMemoryMb))..add(DiagnosticsProperty('remoteMaxStorageSpaceMb', remoteMaxStorageSpaceMb))..add(DiagnosticsProperty('maxConcurrentOperations', maxConcurrentOperations));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigDHT&&(identical(other.resolveNodeTimeoutMs, resolveNodeTimeoutMs) || other.resolveNodeTimeoutMs == resolveNodeTimeoutMs)&&(identical(other.resolveNodeCount, resolveNodeCount) || other.resolveNodeCount == resolveNodeCount)&&(identical(other.resolveNodeFanout, resolveNodeFanout) || other.resolveNodeFanout == resolveNodeFanout)&&(identical(other.maxFindNodeCount, maxFindNodeCount) || other.maxFindNodeCount == maxFindNodeCount)&&(identical(other.getValueTimeoutMs, getValueTimeoutMs) || other.getValueTimeoutMs == getValueTimeoutMs)&&(identical(other.getValueCount, getValueCount) || other.getValueCount == getValueCount)&&(identical(other.getValueFanout, getValueFanout) || other.getValueFanout == getValueFanout)&&(identical(other.setValueTimeoutMs, setValueTimeoutMs) || other.setValueTimeoutMs == setValueTimeoutMs)&&(identical(other.setValueCount, setValueCount) || other.setValueCount == setValueCount)&&(identical(other.setValueFanout, setValueFanout) || other.setValueFanout == setValueFanout)&&(identical(other.consensusWidth, consensusWidth) || other.consensusWidth == consensusWidth)&&(identical(other.minPeerCount, minPeerCount) || other.minPeerCount == minPeerCount)&&(identical(other.minPeerRefreshTimeMs, minPeerRefreshTimeMs) || other.minPeerRefreshTimeMs == minPeerRefreshTimeMs)&&(identical(other.validateDialInfoReceiptTimeMs, validateDialInfoReceiptTimeMs) || other.validateDialInfoReceiptTimeMs == validateDialInfoReceiptTimeMs)&&(identical(other.localSubkeyCacheSize, localSubkeyCacheSize) || other.localSubkeyCacheSize == localSubkeyCacheSize)&&(identical(other.localMaxSubkeyCacheMemoryMb, localMaxSubkeyCacheMemoryMb) || other.localMaxSubkeyCacheMemoryMb == localMaxSubkeyCacheMemoryMb)&&(identical(other.remoteSubkeyCacheSize, remoteSubkeyCacheSize) || other.remoteSubkeyCacheSize == remoteSubkeyCacheSize)&&(identical(other.remoteMaxRecords, remoteMaxRecords) || other.remoteMaxRecords == remoteMaxRecords)&&(identical(other.remoteMaxSubkeyCacheMemoryMb, remoteMaxSubkeyCacheMemoryMb) || other.remoteMaxSubkeyCacheMemoryMb == remoteMaxSubkeyCacheMemoryMb)&&(identical(other.remoteMaxStorageSpaceMb, remoteMaxStorageSpaceMb) || other.remoteMaxStorageSpaceMb == remoteMaxStorageSpaceMb)&&(identical(other.publicWatchLimit, publicWatchLimit) || other.publicWatchLimit == publicWatchLimit)&&(identical(other.memberWatchLimit, memberWatchLimit) || other.memberWatchLimit == memberWatchLimit)&&(identical(other.maxWatchExpirationMs, maxWatchExpirationMs) || other.maxWatchExpirationMs == maxWatchExpirationMs)&&(identical(other.publicTransactionLimit, publicTransactionLimit) || other.publicTransactionLimit == publicTransactionLimit)&&(identical(other.memberTransactionLimit, memberTransactionLimit) || other.memberTransactionLimit == memberTransactionLimit));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigDHT&&(identical(other.localSubkeyCacheSize, localSubkeyCacheSize) || other.localSubkeyCacheSize == localSubkeyCacheSize)&&(identical(other.localMaxSubkeyCacheMemoryMb, localMaxSubkeyCacheMemoryMb) || other.localMaxSubkeyCacheMemoryMb == localMaxSubkeyCacheMemoryMb)&&(identical(other.remoteSubkeyCacheSize, remoteSubkeyCacheSize) || other.remoteSubkeyCacheSize == remoteSubkeyCacheSize)&&(identical(other.remoteMaxRecords, remoteMaxRecords) || other.remoteMaxRecords == remoteMaxRecords)&&(identical(other.remoteMaxSubkeyCacheMemoryMb, remoteMaxSubkeyCacheMemoryMb) || other.remoteMaxSubkeyCacheMemoryMb == remoteMaxSubkeyCacheMemoryMb)&&(identical(other.remoteMaxStorageSpaceMb, remoteMaxStorageSpaceMb) || other.remoteMaxStorageSpaceMb == remoteMaxStorageSpaceMb)&&(identical(other.maxConcurrentOperations, maxConcurrentOperations) || other.maxConcurrentOperations == maxConcurrentOperations));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hashAll([runtimeType,resolveNodeTimeoutMs,resolveNodeCount,resolveNodeFanout,maxFindNodeCount,getValueTimeoutMs,getValueCount,getValueFanout,setValueTimeoutMs,setValueCount,setValueFanout,consensusWidth,minPeerCount,minPeerRefreshTimeMs,validateDialInfoReceiptTimeMs,localSubkeyCacheSize,localMaxSubkeyCacheMemoryMb,remoteSubkeyCacheSize,remoteMaxRecords,remoteMaxSubkeyCacheMemoryMb,remoteMaxStorageSpaceMb,publicWatchLimit,memberWatchLimit,maxWatchExpirationMs,publicTransactionLimit,memberTransactionLimit]);
+int get hashCode => Object.hash(runtimeType,localSubkeyCacheSize,localMaxSubkeyCacheMemoryMb,remoteSubkeyCacheSize,remoteMaxRecords,remoteMaxSubkeyCacheMemoryMb,remoteMaxStorageSpaceMb,maxConcurrentOperations);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigDHT(resolveNodeTimeoutMs: $resolveNodeTimeoutMs, resolveNodeCount: $resolveNodeCount, resolveNodeFanout: $resolveNodeFanout, maxFindNodeCount: $maxFindNodeCount, getValueTimeoutMs: $getValueTimeoutMs, getValueCount: $getValueCount, getValueFanout: $getValueFanout, setValueTimeoutMs: $setValueTimeoutMs, setValueCount: $setValueCount, setValueFanout: $setValueFanout, consensusWidth: $consensusWidth, minPeerCount: $minPeerCount, minPeerRefreshTimeMs: $minPeerRefreshTimeMs, validateDialInfoReceiptTimeMs: $validateDialInfoReceiptTimeMs, localSubkeyCacheSize: $localSubkeyCacheSize, localMaxSubkeyCacheMemoryMb: $localMaxSubkeyCacheMemoryMb, remoteSubkeyCacheSize: $remoteSubkeyCacheSize, remoteMaxRecords: $remoteMaxRecords, remoteMaxSubkeyCacheMemoryMb: $remoteMaxSubkeyCacheMemoryMb, remoteMaxStorageSpaceMb: $remoteMaxStorageSpaceMb, publicWatchLimit: $publicWatchLimit, memberWatchLimit: $memberWatchLimit, maxWatchExpirationMs: $maxWatchExpirationMs, publicTransactionLimit: $publicTransactionLimit, memberTransactionLimit: $memberTransactionLimit)';
+  return 'VeilidConfigDHT(localSubkeyCacheSize: $localSubkeyCacheSize, localMaxSubkeyCacheMemoryMb: $localMaxSubkeyCacheMemoryMb, remoteSubkeyCacheSize: $remoteSubkeyCacheSize, remoteMaxRecords: $remoteMaxRecords, remoteMaxSubkeyCacheMemoryMb: $remoteMaxSubkeyCacheMemoryMb, remoteMaxStorageSpaceMb: $remoteMaxStorageSpaceMb, maxConcurrentOperations: $maxConcurrentOperations)';
 }
 
 
@@ -5032,7 +5023,7 @@ abstract mixin class $VeilidConfigDHTCopyWith<$Res>  {
   factory $VeilidConfigDHTCopyWith(VeilidConfigDHT value, $Res Function(VeilidConfigDHT) _then) = _$VeilidConfigDHTCopyWithImpl;
 @useResult
 $Res call({
- int resolveNodeTimeoutMs, int resolveNodeCount, int resolveNodeFanout, int maxFindNodeCount, int getValueTimeoutMs, int getValueCount, int getValueFanout, int setValueTimeoutMs, int setValueCount, int setValueFanout, int consensusWidth, int minPeerCount, int minPeerRefreshTimeMs, int validateDialInfoReceiptTimeMs, int localSubkeyCacheSize, int localMaxSubkeyCacheMemoryMb, int remoteSubkeyCacheSize, int remoteMaxRecords, int remoteMaxSubkeyCacheMemoryMb, int remoteMaxStorageSpaceMb, int publicWatchLimit, int memberWatchLimit, int maxWatchExpirationMs, int publicTransactionLimit, int memberTransactionLimit
+ int localSubkeyCacheSize, int localMaxSubkeyCacheMemoryMb, int remoteSubkeyCacheSize, int remoteMaxRecords, int remoteMaxSubkeyCacheMemoryMb, int remoteMaxStorageSpaceMb, int maxConcurrentOperations
 });
 
 
@@ -5049,33 +5040,15 @@ class _$VeilidConfigDHTCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigDHT
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? resolveNodeTimeoutMs = null,Object? resolveNodeCount = null,Object? resolveNodeFanout = null,Object? maxFindNodeCount = null,Object? getValueTimeoutMs = null,Object? getValueCount = null,Object? getValueFanout = null,Object? setValueTimeoutMs = null,Object? setValueCount = null,Object? setValueFanout = null,Object? consensusWidth = null,Object? minPeerCount = null,Object? minPeerRefreshTimeMs = null,Object? validateDialInfoReceiptTimeMs = null,Object? localSubkeyCacheSize = null,Object? localMaxSubkeyCacheMemoryMb = null,Object? remoteSubkeyCacheSize = null,Object? remoteMaxRecords = null,Object? remoteMaxSubkeyCacheMemoryMb = null,Object? remoteMaxStorageSpaceMb = null,Object? publicWatchLimit = null,Object? memberWatchLimit = null,Object? maxWatchExpirationMs = null,Object? publicTransactionLimit = null,Object? memberTransactionLimit = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? localSubkeyCacheSize = null,Object? localMaxSubkeyCacheMemoryMb = null,Object? remoteSubkeyCacheSize = null,Object? remoteMaxRecords = null,Object? remoteMaxSubkeyCacheMemoryMb = null,Object? remoteMaxStorageSpaceMb = null,Object? maxConcurrentOperations = null,}) {
   return _then(_self.copyWith(
-resolveNodeTimeoutMs: null == resolveNodeTimeoutMs ? _self.resolveNodeTimeoutMs : resolveNodeTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,resolveNodeCount: null == resolveNodeCount ? _self.resolveNodeCount : resolveNodeCount // ignore: cast_nullable_to_non_nullable
-as int,resolveNodeFanout: null == resolveNodeFanout ? _self.resolveNodeFanout : resolveNodeFanout // ignore: cast_nullable_to_non_nullable
-as int,maxFindNodeCount: null == maxFindNodeCount ? _self.maxFindNodeCount : maxFindNodeCount // ignore: cast_nullable_to_non_nullable
-as int,getValueTimeoutMs: null == getValueTimeoutMs ? _self.getValueTimeoutMs : getValueTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,getValueCount: null == getValueCount ? _self.getValueCount : getValueCount // ignore: cast_nullable_to_non_nullable
-as int,getValueFanout: null == getValueFanout ? _self.getValueFanout : getValueFanout // ignore: cast_nullable_to_non_nullable
-as int,setValueTimeoutMs: null == setValueTimeoutMs ? _self.setValueTimeoutMs : setValueTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,setValueCount: null == setValueCount ? _self.setValueCount : setValueCount // ignore: cast_nullable_to_non_nullable
-as int,setValueFanout: null == setValueFanout ? _self.setValueFanout : setValueFanout // ignore: cast_nullable_to_non_nullable
-as int,consensusWidth: null == consensusWidth ? _self.consensusWidth : consensusWidth // ignore: cast_nullable_to_non_nullable
-as int,minPeerCount: null == minPeerCount ? _self.minPeerCount : minPeerCount // ignore: cast_nullable_to_non_nullable
-as int,minPeerRefreshTimeMs: null == minPeerRefreshTimeMs ? _self.minPeerRefreshTimeMs : minPeerRefreshTimeMs // ignore: cast_nullable_to_non_nullable
-as int,validateDialInfoReceiptTimeMs: null == validateDialInfoReceiptTimeMs ? _self.validateDialInfoReceiptTimeMs : validateDialInfoReceiptTimeMs // ignore: cast_nullable_to_non_nullable
-as int,localSubkeyCacheSize: null == localSubkeyCacheSize ? _self.localSubkeyCacheSize : localSubkeyCacheSize // ignore: cast_nullable_to_non_nullable
+localSubkeyCacheSize: null == localSubkeyCacheSize ? _self.localSubkeyCacheSize : localSubkeyCacheSize // ignore: cast_nullable_to_non_nullable
 as int,localMaxSubkeyCacheMemoryMb: null == localMaxSubkeyCacheMemoryMb ? _self.localMaxSubkeyCacheMemoryMb : localMaxSubkeyCacheMemoryMb // ignore: cast_nullable_to_non_nullable
 as int,remoteSubkeyCacheSize: null == remoteSubkeyCacheSize ? _self.remoteSubkeyCacheSize : remoteSubkeyCacheSize // ignore: cast_nullable_to_non_nullable
 as int,remoteMaxRecords: null == remoteMaxRecords ? _self.remoteMaxRecords : remoteMaxRecords // ignore: cast_nullable_to_non_nullable
 as int,remoteMaxSubkeyCacheMemoryMb: null == remoteMaxSubkeyCacheMemoryMb ? _self.remoteMaxSubkeyCacheMemoryMb : remoteMaxSubkeyCacheMemoryMb // ignore: cast_nullable_to_non_nullable
 as int,remoteMaxStorageSpaceMb: null == remoteMaxStorageSpaceMb ? _self.remoteMaxStorageSpaceMb : remoteMaxStorageSpaceMb // ignore: cast_nullable_to_non_nullable
-as int,publicWatchLimit: null == publicWatchLimit ? _self.publicWatchLimit : publicWatchLimit // ignore: cast_nullable_to_non_nullable
-as int,memberWatchLimit: null == memberWatchLimit ? _self.memberWatchLimit : memberWatchLimit // ignore: cast_nullable_to_non_nullable
-as int,maxWatchExpirationMs: null == maxWatchExpirationMs ? _self.maxWatchExpirationMs : maxWatchExpirationMs // ignore: cast_nullable_to_non_nullable
-as int,publicTransactionLimit: null == publicTransactionLimit ? _self.publicTransactionLimit : publicTransactionLimit // ignore: cast_nullable_to_non_nullable
-as int,memberTransactionLimit: null == memberTransactionLimit ? _self.memberTransactionLimit : memberTransactionLimit // ignore: cast_nullable_to_non_nullable
+as int,maxConcurrentOperations: null == maxConcurrentOperations ? _self.maxConcurrentOperations : maxConcurrentOperations // ignore: cast_nullable_to_non_nullable
 as int,
   ));
 }
@@ -5158,10 +5131,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int resolveNodeTimeoutMs,  int resolveNodeCount,  int resolveNodeFanout,  int maxFindNodeCount,  int getValueTimeoutMs,  int getValueCount,  int getValueFanout,  int setValueTimeoutMs,  int setValueCount,  int setValueFanout,  int consensusWidth,  int minPeerCount,  int minPeerRefreshTimeMs,  int validateDialInfoReceiptTimeMs,  int localSubkeyCacheSize,  int localMaxSubkeyCacheMemoryMb,  int remoteSubkeyCacheSize,  int remoteMaxRecords,  int remoteMaxSubkeyCacheMemoryMb,  int remoteMaxStorageSpaceMb,  int publicWatchLimit,  int memberWatchLimit,  int maxWatchExpirationMs,  int publicTransactionLimit,  int memberTransactionLimit)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int localSubkeyCacheSize,  int localMaxSubkeyCacheMemoryMb,  int remoteSubkeyCacheSize,  int remoteMaxRecords,  int remoteMaxSubkeyCacheMemoryMb,  int remoteMaxStorageSpaceMb,  int maxConcurrentOperations)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigDHT() when $default != null:
-return $default(_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveNodeFanout,_that.maxFindNodeCount,_that.getValueTimeoutMs,_that.getValueCount,_that.getValueFanout,_that.setValueTimeoutMs,_that.setValueCount,_that.setValueFanout,_that.consensusWidth,_that.minPeerCount,_that.minPeerRefreshTimeMs,_that.validateDialInfoReceiptTimeMs,_that.localSubkeyCacheSize,_that.localMaxSubkeyCacheMemoryMb,_that.remoteSubkeyCacheSize,_that.remoteMaxRecords,_that.remoteMaxSubkeyCacheMemoryMb,_that.remoteMaxStorageSpaceMb,_that.publicWatchLimit,_that.memberWatchLimit,_that.maxWatchExpirationMs,_that.publicTransactionLimit,_that.memberTransactionLimit);case _:
+return $default(_that.localSubkeyCacheSize,_that.localMaxSubkeyCacheMemoryMb,_that.remoteSubkeyCacheSize,_that.remoteMaxRecords,_that.remoteMaxSubkeyCacheMemoryMb,_that.remoteMaxStorageSpaceMb,_that.maxConcurrentOperations);case _:
   return orElse();
 
 }
@@ -5179,10 +5152,10 @@ return $default(_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveN
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int resolveNodeTimeoutMs,  int resolveNodeCount,  int resolveNodeFanout,  int maxFindNodeCount,  int getValueTimeoutMs,  int getValueCount,  int getValueFanout,  int setValueTimeoutMs,  int setValueCount,  int setValueFanout,  int consensusWidth,  int minPeerCount,  int minPeerRefreshTimeMs,  int validateDialInfoReceiptTimeMs,  int localSubkeyCacheSize,  int localMaxSubkeyCacheMemoryMb,  int remoteSubkeyCacheSize,  int remoteMaxRecords,  int remoteMaxSubkeyCacheMemoryMb,  int remoteMaxStorageSpaceMb,  int publicWatchLimit,  int memberWatchLimit,  int maxWatchExpirationMs,  int publicTransactionLimit,  int memberTransactionLimit)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int localSubkeyCacheSize,  int localMaxSubkeyCacheMemoryMb,  int remoteSubkeyCacheSize,  int remoteMaxRecords,  int remoteMaxSubkeyCacheMemoryMb,  int remoteMaxStorageSpaceMb,  int maxConcurrentOperations)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigDHT():
-return $default(_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveNodeFanout,_that.maxFindNodeCount,_that.getValueTimeoutMs,_that.getValueCount,_that.getValueFanout,_that.setValueTimeoutMs,_that.setValueCount,_that.setValueFanout,_that.consensusWidth,_that.minPeerCount,_that.minPeerRefreshTimeMs,_that.validateDialInfoReceiptTimeMs,_that.localSubkeyCacheSize,_that.localMaxSubkeyCacheMemoryMb,_that.remoteSubkeyCacheSize,_that.remoteMaxRecords,_that.remoteMaxSubkeyCacheMemoryMb,_that.remoteMaxStorageSpaceMb,_that.publicWatchLimit,_that.memberWatchLimit,_that.maxWatchExpirationMs,_that.publicTransactionLimit,_that.memberTransactionLimit);}
+return $default(_that.localSubkeyCacheSize,_that.localMaxSubkeyCacheMemoryMb,_that.remoteSubkeyCacheSize,_that.remoteMaxRecords,_that.remoteMaxSubkeyCacheMemoryMb,_that.remoteMaxStorageSpaceMb,_that.maxConcurrentOperations);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -5196,10 +5169,10 @@ return $default(_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveN
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int resolveNodeTimeoutMs,  int resolveNodeCount,  int resolveNodeFanout,  int maxFindNodeCount,  int getValueTimeoutMs,  int getValueCount,  int getValueFanout,  int setValueTimeoutMs,  int setValueCount,  int setValueFanout,  int consensusWidth,  int minPeerCount,  int minPeerRefreshTimeMs,  int validateDialInfoReceiptTimeMs,  int localSubkeyCacheSize,  int localMaxSubkeyCacheMemoryMb,  int remoteSubkeyCacheSize,  int remoteMaxRecords,  int remoteMaxSubkeyCacheMemoryMb,  int remoteMaxStorageSpaceMb,  int publicWatchLimit,  int memberWatchLimit,  int maxWatchExpirationMs,  int publicTransactionLimit,  int memberTransactionLimit)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int localSubkeyCacheSize,  int localMaxSubkeyCacheMemoryMb,  int remoteSubkeyCacheSize,  int remoteMaxRecords,  int remoteMaxSubkeyCacheMemoryMb,  int remoteMaxStorageSpaceMb,  int maxConcurrentOperations)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigDHT() when $default != null:
-return $default(_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveNodeFanout,_that.maxFindNodeCount,_that.getValueTimeoutMs,_that.getValueCount,_that.getValueFanout,_that.setValueTimeoutMs,_that.setValueCount,_that.setValueFanout,_that.consensusWidth,_that.minPeerCount,_that.minPeerRefreshTimeMs,_that.validateDialInfoReceiptTimeMs,_that.localSubkeyCacheSize,_that.localMaxSubkeyCacheMemoryMb,_that.remoteSubkeyCacheSize,_that.remoteMaxRecords,_that.remoteMaxSubkeyCacheMemoryMb,_that.remoteMaxStorageSpaceMb,_that.publicWatchLimit,_that.memberWatchLimit,_that.maxWatchExpirationMs,_that.publicTransactionLimit,_that.memberTransactionLimit);case _:
+return $default(_that.localSubkeyCacheSize,_that.localMaxSubkeyCacheMemoryMb,_that.remoteSubkeyCacheSize,_that.remoteMaxRecords,_that.remoteMaxSubkeyCacheMemoryMb,_that.remoteMaxStorageSpaceMb,_that.maxConcurrentOperations);case _:
   return null;
 
 }
@@ -5211,34 +5184,16 @@ return $default(_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveN
 @JsonSerializable()
 
 class _VeilidConfigDHT with DiagnosticableTreeMixin implements VeilidConfigDHT {
-  const _VeilidConfigDHT({required this.resolveNodeTimeoutMs, required this.resolveNodeCount, required this.resolveNodeFanout, required this.maxFindNodeCount, required this.getValueTimeoutMs, required this.getValueCount, required this.getValueFanout, required this.setValueTimeoutMs, required this.setValueCount, required this.setValueFanout, required this.consensusWidth, required this.minPeerCount, required this.minPeerRefreshTimeMs, required this.validateDialInfoReceiptTimeMs, required this.localSubkeyCacheSize, required this.localMaxSubkeyCacheMemoryMb, required this.remoteSubkeyCacheSize, required this.remoteMaxRecords, required this.remoteMaxSubkeyCacheMemoryMb, required this.remoteMaxStorageSpaceMb, required this.publicWatchLimit, required this.memberWatchLimit, required this.maxWatchExpirationMs, required this.publicTransactionLimit, required this.memberTransactionLimit});
+  const _VeilidConfigDHT({required this.localSubkeyCacheSize, required this.localMaxSubkeyCacheMemoryMb, required this.remoteSubkeyCacheSize, required this.remoteMaxRecords, required this.remoteMaxSubkeyCacheMemoryMb, required this.remoteMaxStorageSpaceMb, required this.maxConcurrentOperations});
   factory _VeilidConfigDHT.fromJson(Map<String, dynamic> json) => _$VeilidConfigDHTFromJson(json);
 
-@override final  int resolveNodeTimeoutMs;
-@override final  int resolveNodeCount;
-@override final  int resolveNodeFanout;
-@override final  int maxFindNodeCount;
-@override final  int getValueTimeoutMs;
-@override final  int getValueCount;
-@override final  int getValueFanout;
-@override final  int setValueTimeoutMs;
-@override final  int setValueCount;
-@override final  int setValueFanout;
-@override final  int consensusWidth;
-@override final  int minPeerCount;
-@override final  int minPeerRefreshTimeMs;
-@override final  int validateDialInfoReceiptTimeMs;
 @override final  int localSubkeyCacheSize;
 @override final  int localMaxSubkeyCacheMemoryMb;
 @override final  int remoteSubkeyCacheSize;
 @override final  int remoteMaxRecords;
 @override final  int remoteMaxSubkeyCacheMemoryMb;
 @override final  int remoteMaxStorageSpaceMb;
-@override final  int publicWatchLimit;
-@override final  int memberWatchLimit;
-@override final  int maxWatchExpirationMs;
-@override final  int publicTransactionLimit;
-@override final  int memberTransactionLimit;
+@override final  int maxConcurrentOperations;
 
 /// Create a copy of VeilidConfigDHT
 /// with the given fields replaced by the non-null parameter values.
@@ -5254,21 +5209,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigDHT'))
-    ..add(DiagnosticsProperty('resolveNodeTimeoutMs', resolveNodeTimeoutMs))..add(DiagnosticsProperty('resolveNodeCount', resolveNodeCount))..add(DiagnosticsProperty('resolveNodeFanout', resolveNodeFanout))..add(DiagnosticsProperty('maxFindNodeCount', maxFindNodeCount))..add(DiagnosticsProperty('getValueTimeoutMs', getValueTimeoutMs))..add(DiagnosticsProperty('getValueCount', getValueCount))..add(DiagnosticsProperty('getValueFanout', getValueFanout))..add(DiagnosticsProperty('setValueTimeoutMs', setValueTimeoutMs))..add(DiagnosticsProperty('setValueCount', setValueCount))..add(DiagnosticsProperty('setValueFanout', setValueFanout))..add(DiagnosticsProperty('consensusWidth', consensusWidth))..add(DiagnosticsProperty('minPeerCount', minPeerCount))..add(DiagnosticsProperty('minPeerRefreshTimeMs', minPeerRefreshTimeMs))..add(DiagnosticsProperty('validateDialInfoReceiptTimeMs', validateDialInfoReceiptTimeMs))..add(DiagnosticsProperty('localSubkeyCacheSize', localSubkeyCacheSize))..add(DiagnosticsProperty('localMaxSubkeyCacheMemoryMb', localMaxSubkeyCacheMemoryMb))..add(DiagnosticsProperty('remoteSubkeyCacheSize', remoteSubkeyCacheSize))..add(DiagnosticsProperty('remoteMaxRecords', remoteMaxRecords))..add(DiagnosticsProperty('remoteMaxSubkeyCacheMemoryMb', remoteMaxSubkeyCacheMemoryMb))..add(DiagnosticsProperty('remoteMaxStorageSpaceMb', remoteMaxStorageSpaceMb))..add(DiagnosticsProperty('publicWatchLimit', publicWatchLimit))..add(DiagnosticsProperty('memberWatchLimit', memberWatchLimit))..add(DiagnosticsProperty('maxWatchExpirationMs', maxWatchExpirationMs))..add(DiagnosticsProperty('publicTransactionLimit', publicTransactionLimit))..add(DiagnosticsProperty('memberTransactionLimit', memberTransactionLimit));
+    ..add(DiagnosticsProperty('localSubkeyCacheSize', localSubkeyCacheSize))..add(DiagnosticsProperty('localMaxSubkeyCacheMemoryMb', localMaxSubkeyCacheMemoryMb))..add(DiagnosticsProperty('remoteSubkeyCacheSize', remoteSubkeyCacheSize))..add(DiagnosticsProperty('remoteMaxRecords', remoteMaxRecords))..add(DiagnosticsProperty('remoteMaxSubkeyCacheMemoryMb', remoteMaxSubkeyCacheMemoryMb))..add(DiagnosticsProperty('remoteMaxStorageSpaceMb', remoteMaxStorageSpaceMb))..add(DiagnosticsProperty('maxConcurrentOperations', maxConcurrentOperations));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigDHT&&(identical(other.resolveNodeTimeoutMs, resolveNodeTimeoutMs) || other.resolveNodeTimeoutMs == resolveNodeTimeoutMs)&&(identical(other.resolveNodeCount, resolveNodeCount) || other.resolveNodeCount == resolveNodeCount)&&(identical(other.resolveNodeFanout, resolveNodeFanout) || other.resolveNodeFanout == resolveNodeFanout)&&(identical(other.maxFindNodeCount, maxFindNodeCount) || other.maxFindNodeCount == maxFindNodeCount)&&(identical(other.getValueTimeoutMs, getValueTimeoutMs) || other.getValueTimeoutMs == getValueTimeoutMs)&&(identical(other.getValueCount, getValueCount) || other.getValueCount == getValueCount)&&(identical(other.getValueFanout, getValueFanout) || other.getValueFanout == getValueFanout)&&(identical(other.setValueTimeoutMs, setValueTimeoutMs) || other.setValueTimeoutMs == setValueTimeoutMs)&&(identical(other.setValueCount, setValueCount) || other.setValueCount == setValueCount)&&(identical(other.setValueFanout, setValueFanout) || other.setValueFanout == setValueFanout)&&(identical(other.consensusWidth, consensusWidth) || other.consensusWidth == consensusWidth)&&(identical(other.minPeerCount, minPeerCount) || other.minPeerCount == minPeerCount)&&(identical(other.minPeerRefreshTimeMs, minPeerRefreshTimeMs) || other.minPeerRefreshTimeMs == minPeerRefreshTimeMs)&&(identical(other.validateDialInfoReceiptTimeMs, validateDialInfoReceiptTimeMs) || other.validateDialInfoReceiptTimeMs == validateDialInfoReceiptTimeMs)&&(identical(other.localSubkeyCacheSize, localSubkeyCacheSize) || other.localSubkeyCacheSize == localSubkeyCacheSize)&&(identical(other.localMaxSubkeyCacheMemoryMb, localMaxSubkeyCacheMemoryMb) || other.localMaxSubkeyCacheMemoryMb == localMaxSubkeyCacheMemoryMb)&&(identical(other.remoteSubkeyCacheSize, remoteSubkeyCacheSize) || other.remoteSubkeyCacheSize == remoteSubkeyCacheSize)&&(identical(other.remoteMaxRecords, remoteMaxRecords) || other.remoteMaxRecords == remoteMaxRecords)&&(identical(other.remoteMaxSubkeyCacheMemoryMb, remoteMaxSubkeyCacheMemoryMb) || other.remoteMaxSubkeyCacheMemoryMb == remoteMaxSubkeyCacheMemoryMb)&&(identical(other.remoteMaxStorageSpaceMb, remoteMaxStorageSpaceMb) || other.remoteMaxStorageSpaceMb == remoteMaxStorageSpaceMb)&&(identical(other.publicWatchLimit, publicWatchLimit) || other.publicWatchLimit == publicWatchLimit)&&(identical(other.memberWatchLimit, memberWatchLimit) || other.memberWatchLimit == memberWatchLimit)&&(identical(other.maxWatchExpirationMs, maxWatchExpirationMs) || other.maxWatchExpirationMs == maxWatchExpirationMs)&&(identical(other.publicTransactionLimit, publicTransactionLimit) || other.publicTransactionLimit == publicTransactionLimit)&&(identical(other.memberTransactionLimit, memberTransactionLimit) || other.memberTransactionLimit == memberTransactionLimit));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigDHT&&(identical(other.localSubkeyCacheSize, localSubkeyCacheSize) || other.localSubkeyCacheSize == localSubkeyCacheSize)&&(identical(other.localMaxSubkeyCacheMemoryMb, localMaxSubkeyCacheMemoryMb) || other.localMaxSubkeyCacheMemoryMb == localMaxSubkeyCacheMemoryMb)&&(identical(other.remoteSubkeyCacheSize, remoteSubkeyCacheSize) || other.remoteSubkeyCacheSize == remoteSubkeyCacheSize)&&(identical(other.remoteMaxRecords, remoteMaxRecords) || other.remoteMaxRecords == remoteMaxRecords)&&(identical(other.remoteMaxSubkeyCacheMemoryMb, remoteMaxSubkeyCacheMemoryMb) || other.remoteMaxSubkeyCacheMemoryMb == remoteMaxSubkeyCacheMemoryMb)&&(identical(other.remoteMaxStorageSpaceMb, remoteMaxStorageSpaceMb) || other.remoteMaxStorageSpaceMb == remoteMaxStorageSpaceMb)&&(identical(other.maxConcurrentOperations, maxConcurrentOperations) || other.maxConcurrentOperations == maxConcurrentOperations));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hashAll([runtimeType,resolveNodeTimeoutMs,resolveNodeCount,resolveNodeFanout,maxFindNodeCount,getValueTimeoutMs,getValueCount,getValueFanout,setValueTimeoutMs,setValueCount,setValueFanout,consensusWidth,minPeerCount,minPeerRefreshTimeMs,validateDialInfoReceiptTimeMs,localSubkeyCacheSize,localMaxSubkeyCacheMemoryMb,remoteSubkeyCacheSize,remoteMaxRecords,remoteMaxSubkeyCacheMemoryMb,remoteMaxStorageSpaceMb,publicWatchLimit,memberWatchLimit,maxWatchExpirationMs,publicTransactionLimit,memberTransactionLimit]);
+int get hashCode => Object.hash(runtimeType,localSubkeyCacheSize,localMaxSubkeyCacheMemoryMb,remoteSubkeyCacheSize,remoteMaxRecords,remoteMaxSubkeyCacheMemoryMb,remoteMaxStorageSpaceMb,maxConcurrentOperations);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigDHT(resolveNodeTimeoutMs: $resolveNodeTimeoutMs, resolveNodeCount: $resolveNodeCount, resolveNodeFanout: $resolveNodeFanout, maxFindNodeCount: $maxFindNodeCount, getValueTimeoutMs: $getValueTimeoutMs, getValueCount: $getValueCount, getValueFanout: $getValueFanout, setValueTimeoutMs: $setValueTimeoutMs, setValueCount: $setValueCount, setValueFanout: $setValueFanout, consensusWidth: $consensusWidth, minPeerCount: $minPeerCount, minPeerRefreshTimeMs: $minPeerRefreshTimeMs, validateDialInfoReceiptTimeMs: $validateDialInfoReceiptTimeMs, localSubkeyCacheSize: $localSubkeyCacheSize, localMaxSubkeyCacheMemoryMb: $localMaxSubkeyCacheMemoryMb, remoteSubkeyCacheSize: $remoteSubkeyCacheSize, remoteMaxRecords: $remoteMaxRecords, remoteMaxSubkeyCacheMemoryMb: $remoteMaxSubkeyCacheMemoryMb, remoteMaxStorageSpaceMb: $remoteMaxStorageSpaceMb, publicWatchLimit: $publicWatchLimit, memberWatchLimit: $memberWatchLimit, maxWatchExpirationMs: $maxWatchExpirationMs, publicTransactionLimit: $publicTransactionLimit, memberTransactionLimit: $memberTransactionLimit)';
+  return 'VeilidConfigDHT(localSubkeyCacheSize: $localSubkeyCacheSize, localMaxSubkeyCacheMemoryMb: $localMaxSubkeyCacheMemoryMb, remoteSubkeyCacheSize: $remoteSubkeyCacheSize, remoteMaxRecords: $remoteMaxRecords, remoteMaxSubkeyCacheMemoryMb: $remoteMaxSubkeyCacheMemoryMb, remoteMaxStorageSpaceMb: $remoteMaxStorageSpaceMb, maxConcurrentOperations: $maxConcurrentOperations)';
 }
 
 
@@ -5279,7 +5234,7 @@ abstract mixin class _$VeilidConfigDHTCopyWith<$Res> implements $VeilidConfigDHT
   factory _$VeilidConfigDHTCopyWith(_VeilidConfigDHT value, $Res Function(_VeilidConfigDHT) _then) = __$VeilidConfigDHTCopyWithImpl;
 @override @useResult
 $Res call({
- int resolveNodeTimeoutMs, int resolveNodeCount, int resolveNodeFanout, int maxFindNodeCount, int getValueTimeoutMs, int getValueCount, int getValueFanout, int setValueTimeoutMs, int setValueCount, int setValueFanout, int consensusWidth, int minPeerCount, int minPeerRefreshTimeMs, int validateDialInfoReceiptTimeMs, int localSubkeyCacheSize, int localMaxSubkeyCacheMemoryMb, int remoteSubkeyCacheSize, int remoteMaxRecords, int remoteMaxSubkeyCacheMemoryMb, int remoteMaxStorageSpaceMb, int publicWatchLimit, int memberWatchLimit, int maxWatchExpirationMs, int publicTransactionLimit, int memberTransactionLimit
+ int localSubkeyCacheSize, int localMaxSubkeyCacheMemoryMb, int remoteSubkeyCacheSize, int remoteMaxRecords, int remoteMaxSubkeyCacheMemoryMb, int remoteMaxStorageSpaceMb, int maxConcurrentOperations
 });
 
 
@@ -5296,33 +5251,15 @@ class __$VeilidConfigDHTCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigDHT
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? resolveNodeTimeoutMs = null,Object? resolveNodeCount = null,Object? resolveNodeFanout = null,Object? maxFindNodeCount = null,Object? getValueTimeoutMs = null,Object? getValueCount = null,Object? getValueFanout = null,Object? setValueTimeoutMs = null,Object? setValueCount = null,Object? setValueFanout = null,Object? consensusWidth = null,Object? minPeerCount = null,Object? minPeerRefreshTimeMs = null,Object? validateDialInfoReceiptTimeMs = null,Object? localSubkeyCacheSize = null,Object? localMaxSubkeyCacheMemoryMb = null,Object? remoteSubkeyCacheSize = null,Object? remoteMaxRecords = null,Object? remoteMaxSubkeyCacheMemoryMb = null,Object? remoteMaxStorageSpaceMb = null,Object? publicWatchLimit = null,Object? memberWatchLimit = null,Object? maxWatchExpirationMs = null,Object? publicTransactionLimit = null,Object? memberTransactionLimit = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? localSubkeyCacheSize = null,Object? localMaxSubkeyCacheMemoryMb = null,Object? remoteSubkeyCacheSize = null,Object? remoteMaxRecords = null,Object? remoteMaxSubkeyCacheMemoryMb = null,Object? remoteMaxStorageSpaceMb = null,Object? maxConcurrentOperations = null,}) {
   return _then(_VeilidConfigDHT(
-resolveNodeTimeoutMs: null == resolveNodeTimeoutMs ? _self.resolveNodeTimeoutMs : resolveNodeTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,resolveNodeCount: null == resolveNodeCount ? _self.resolveNodeCount : resolveNodeCount // ignore: cast_nullable_to_non_nullable
-as int,resolveNodeFanout: null == resolveNodeFanout ? _self.resolveNodeFanout : resolveNodeFanout // ignore: cast_nullable_to_non_nullable
-as int,maxFindNodeCount: null == maxFindNodeCount ? _self.maxFindNodeCount : maxFindNodeCount // ignore: cast_nullable_to_non_nullable
-as int,getValueTimeoutMs: null == getValueTimeoutMs ? _self.getValueTimeoutMs : getValueTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,getValueCount: null == getValueCount ? _self.getValueCount : getValueCount // ignore: cast_nullable_to_non_nullable
-as int,getValueFanout: null == getValueFanout ? _self.getValueFanout : getValueFanout // ignore: cast_nullable_to_non_nullable
-as int,setValueTimeoutMs: null == setValueTimeoutMs ? _self.setValueTimeoutMs : setValueTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,setValueCount: null == setValueCount ? _self.setValueCount : setValueCount // ignore: cast_nullable_to_non_nullable
-as int,setValueFanout: null == setValueFanout ? _self.setValueFanout : setValueFanout // ignore: cast_nullable_to_non_nullable
-as int,consensusWidth: null == consensusWidth ? _self.consensusWidth : consensusWidth // ignore: cast_nullable_to_non_nullable
-as int,minPeerCount: null == minPeerCount ? _self.minPeerCount : minPeerCount // ignore: cast_nullable_to_non_nullable
-as int,minPeerRefreshTimeMs: null == minPeerRefreshTimeMs ? _self.minPeerRefreshTimeMs : minPeerRefreshTimeMs // ignore: cast_nullable_to_non_nullable
-as int,validateDialInfoReceiptTimeMs: null == validateDialInfoReceiptTimeMs ? _self.validateDialInfoReceiptTimeMs : validateDialInfoReceiptTimeMs // ignore: cast_nullable_to_non_nullable
-as int,localSubkeyCacheSize: null == localSubkeyCacheSize ? _self.localSubkeyCacheSize : localSubkeyCacheSize // ignore: cast_nullable_to_non_nullable
+localSubkeyCacheSize: null == localSubkeyCacheSize ? _self.localSubkeyCacheSize : localSubkeyCacheSize // ignore: cast_nullable_to_non_nullable
 as int,localMaxSubkeyCacheMemoryMb: null == localMaxSubkeyCacheMemoryMb ? _self.localMaxSubkeyCacheMemoryMb : localMaxSubkeyCacheMemoryMb // ignore: cast_nullable_to_non_nullable
 as int,remoteSubkeyCacheSize: null == remoteSubkeyCacheSize ? _self.remoteSubkeyCacheSize : remoteSubkeyCacheSize // ignore: cast_nullable_to_non_nullable
 as int,remoteMaxRecords: null == remoteMaxRecords ? _self.remoteMaxRecords : remoteMaxRecords // ignore: cast_nullable_to_non_nullable
 as int,remoteMaxSubkeyCacheMemoryMb: null == remoteMaxSubkeyCacheMemoryMb ? _self.remoteMaxSubkeyCacheMemoryMb : remoteMaxSubkeyCacheMemoryMb // ignore: cast_nullable_to_non_nullable
 as int,remoteMaxStorageSpaceMb: null == remoteMaxStorageSpaceMb ? _self.remoteMaxStorageSpaceMb : remoteMaxStorageSpaceMb // ignore: cast_nullable_to_non_nullable
-as int,publicWatchLimit: null == publicWatchLimit ? _self.publicWatchLimit : publicWatchLimit // ignore: cast_nullable_to_non_nullable
-as int,memberWatchLimit: null == memberWatchLimit ? _self.memberWatchLimit : memberWatchLimit // ignore: cast_nullable_to_non_nullable
-as int,maxWatchExpirationMs: null == maxWatchExpirationMs ? _self.maxWatchExpirationMs : maxWatchExpirationMs // ignore: cast_nullable_to_non_nullable
-as int,publicTransactionLimit: null == publicTransactionLimit ? _self.publicTransactionLimit : publicTransactionLimit // ignore: cast_nullable_to_non_nullable
-as int,memberTransactionLimit: null == memberTransactionLimit ? _self.memberTransactionLimit : memberTransactionLimit // ignore: cast_nullable_to_non_nullable
+as int,maxConcurrentOperations: null == maxConcurrentOperations ? _self.maxConcurrentOperations : maxConcurrentOperations // ignore: cast_nullable_to_non_nullable
 as int,
   ));
 }
@@ -5334,7 +5271,7 @@ as int,
 /// @nodoc
 mixin _$VeilidConfigRPC implements DiagnosticableTreeMixin {
 
- int get concurrency; int get queueSize; int get timeoutMs; int get maxRouteHopCount; int get defaultRouteHopCount; int? get maxTimestampBehindMs; int? get maxTimestampAheadMs;
+ int get defaultRouteHopCount;
 /// Create a copy of VeilidConfigRPC
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -5348,21 +5285,21 @@ $VeilidConfigRPCCopyWith<VeilidConfigRPC> get copyWith => _$VeilidConfigRPCCopyW
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigRPC'))
-    ..add(DiagnosticsProperty('concurrency', concurrency))..add(DiagnosticsProperty('queueSize', queueSize))..add(DiagnosticsProperty('timeoutMs', timeoutMs))..add(DiagnosticsProperty('maxRouteHopCount', maxRouteHopCount))..add(DiagnosticsProperty('defaultRouteHopCount', defaultRouteHopCount))..add(DiagnosticsProperty('maxTimestampBehindMs', maxTimestampBehindMs))..add(DiagnosticsProperty('maxTimestampAheadMs', maxTimestampAheadMs));
+    ..add(DiagnosticsProperty('defaultRouteHopCount', defaultRouteHopCount));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigRPC&&(identical(other.concurrency, concurrency) || other.concurrency == concurrency)&&(identical(other.queueSize, queueSize) || other.queueSize == queueSize)&&(identical(other.timeoutMs, timeoutMs) || other.timeoutMs == timeoutMs)&&(identical(other.maxRouteHopCount, maxRouteHopCount) || other.maxRouteHopCount == maxRouteHopCount)&&(identical(other.defaultRouteHopCount, defaultRouteHopCount) || other.defaultRouteHopCount == defaultRouteHopCount)&&(identical(other.maxTimestampBehindMs, maxTimestampBehindMs) || other.maxTimestampBehindMs == maxTimestampBehindMs)&&(identical(other.maxTimestampAheadMs, maxTimestampAheadMs) || other.maxTimestampAheadMs == maxTimestampAheadMs));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigRPC&&(identical(other.defaultRouteHopCount, defaultRouteHopCount) || other.defaultRouteHopCount == defaultRouteHopCount));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,concurrency,queueSize,timeoutMs,maxRouteHopCount,defaultRouteHopCount,maxTimestampBehindMs,maxTimestampAheadMs);
+int get hashCode => Object.hash(runtimeType,defaultRouteHopCount);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigRPC(concurrency: $concurrency, queueSize: $queueSize, timeoutMs: $timeoutMs, maxRouteHopCount: $maxRouteHopCount, defaultRouteHopCount: $defaultRouteHopCount, maxTimestampBehindMs: $maxTimestampBehindMs, maxTimestampAheadMs: $maxTimestampAheadMs)';
+  return 'VeilidConfigRPC(defaultRouteHopCount: $defaultRouteHopCount)';
 }
 
 
@@ -5373,7 +5310,7 @@ abstract mixin class $VeilidConfigRPCCopyWith<$Res>  {
   factory $VeilidConfigRPCCopyWith(VeilidConfigRPC value, $Res Function(VeilidConfigRPC) _then) = _$VeilidConfigRPCCopyWithImpl;
 @useResult
 $Res call({
- int concurrency, int queueSize, int timeoutMs, int maxRouteHopCount, int defaultRouteHopCount, int? maxTimestampBehindMs, int? maxTimestampAheadMs
+ int defaultRouteHopCount
 });
 
 
@@ -5390,16 +5327,10 @@ class _$VeilidConfigRPCCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigRPC
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? concurrency = null,Object? queueSize = null,Object? timeoutMs = null,Object? maxRouteHopCount = null,Object? defaultRouteHopCount = null,Object? maxTimestampBehindMs = freezed,Object? maxTimestampAheadMs = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? defaultRouteHopCount = null,}) {
   return _then(_self.copyWith(
-concurrency: null == concurrency ? _self.concurrency : concurrency // ignore: cast_nullable_to_non_nullable
-as int,queueSize: null == queueSize ? _self.queueSize : queueSize // ignore: cast_nullable_to_non_nullable
-as int,timeoutMs: null == timeoutMs ? _self.timeoutMs : timeoutMs // ignore: cast_nullable_to_non_nullable
-as int,maxRouteHopCount: null == maxRouteHopCount ? _self.maxRouteHopCount : maxRouteHopCount // ignore: cast_nullable_to_non_nullable
-as int,defaultRouteHopCount: null == defaultRouteHopCount ? _self.defaultRouteHopCount : defaultRouteHopCount // ignore: cast_nullable_to_non_nullable
-as int,maxTimestampBehindMs: freezed == maxTimestampBehindMs ? _self.maxTimestampBehindMs : maxTimestampBehindMs // ignore: cast_nullable_to_non_nullable
-as int?,maxTimestampAheadMs: freezed == maxTimestampAheadMs ? _self.maxTimestampAheadMs : maxTimestampAheadMs // ignore: cast_nullable_to_non_nullable
-as int?,
+defaultRouteHopCount: null == defaultRouteHopCount ? _self.defaultRouteHopCount : defaultRouteHopCount // ignore: cast_nullable_to_non_nullable
+as int,
   ));
 }
 
@@ -5481,10 +5412,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int concurrency,  int queueSize,  int timeoutMs,  int maxRouteHopCount,  int defaultRouteHopCount,  int? maxTimestampBehindMs,  int? maxTimestampAheadMs)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int defaultRouteHopCount)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigRPC() when $default != null:
-return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRouteHopCount,_that.defaultRouteHopCount,_that.maxTimestampBehindMs,_that.maxTimestampAheadMs);case _:
+return $default(_that.defaultRouteHopCount);case _:
   return orElse();
 
 }
@@ -5502,10 +5433,10 @@ return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRoute
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int concurrency,  int queueSize,  int timeoutMs,  int maxRouteHopCount,  int defaultRouteHopCount,  int? maxTimestampBehindMs,  int? maxTimestampAheadMs)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int defaultRouteHopCount)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigRPC():
-return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRouteHopCount,_that.defaultRouteHopCount,_that.maxTimestampBehindMs,_that.maxTimestampAheadMs);}
+return $default(_that.defaultRouteHopCount);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -5519,10 +5450,10 @@ return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRoute
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int concurrency,  int queueSize,  int timeoutMs,  int maxRouteHopCount,  int defaultRouteHopCount,  int? maxTimestampBehindMs,  int? maxTimestampAheadMs)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int defaultRouteHopCount)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigRPC() when $default != null:
-return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRouteHopCount,_that.defaultRouteHopCount,_that.maxTimestampBehindMs,_that.maxTimestampAheadMs);case _:
+return $default(_that.defaultRouteHopCount);case _:
   return null;
 
 }
@@ -5534,16 +5465,10 @@ return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRoute
 @JsonSerializable()
 
 class _VeilidConfigRPC with DiagnosticableTreeMixin implements VeilidConfigRPC {
-  const _VeilidConfigRPC({required this.concurrency, required this.queueSize, required this.timeoutMs, required this.maxRouteHopCount, required this.defaultRouteHopCount, this.maxTimestampBehindMs, this.maxTimestampAheadMs});
+  const _VeilidConfigRPC({required this.defaultRouteHopCount});
   factory _VeilidConfigRPC.fromJson(Map<String, dynamic> json) => _$VeilidConfigRPCFromJson(json);
 
-@override final  int concurrency;
-@override final  int queueSize;
-@override final  int timeoutMs;
-@override final  int maxRouteHopCount;
 @override final  int defaultRouteHopCount;
-@override final  int? maxTimestampBehindMs;
-@override final  int? maxTimestampAheadMs;
 
 /// Create a copy of VeilidConfigRPC
 /// with the given fields replaced by the non-null parameter values.
@@ -5559,21 +5484,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigRPC'))
-    ..add(DiagnosticsProperty('concurrency', concurrency))..add(DiagnosticsProperty('queueSize', queueSize))..add(DiagnosticsProperty('timeoutMs', timeoutMs))..add(DiagnosticsProperty('maxRouteHopCount', maxRouteHopCount))..add(DiagnosticsProperty('defaultRouteHopCount', defaultRouteHopCount))..add(DiagnosticsProperty('maxTimestampBehindMs', maxTimestampBehindMs))..add(DiagnosticsProperty('maxTimestampAheadMs', maxTimestampAheadMs));
+    ..add(DiagnosticsProperty('defaultRouteHopCount', defaultRouteHopCount));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigRPC&&(identical(other.concurrency, concurrency) || other.concurrency == concurrency)&&(identical(other.queueSize, queueSize) || other.queueSize == queueSize)&&(identical(other.timeoutMs, timeoutMs) || other.timeoutMs == timeoutMs)&&(identical(other.maxRouteHopCount, maxRouteHopCount) || other.maxRouteHopCount == maxRouteHopCount)&&(identical(other.defaultRouteHopCount, defaultRouteHopCount) || other.defaultRouteHopCount == defaultRouteHopCount)&&(identical(other.maxTimestampBehindMs, maxTimestampBehindMs) || other.maxTimestampBehindMs == maxTimestampBehindMs)&&(identical(other.maxTimestampAheadMs, maxTimestampAheadMs) || other.maxTimestampAheadMs == maxTimestampAheadMs));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigRPC&&(identical(other.defaultRouteHopCount, defaultRouteHopCount) || other.defaultRouteHopCount == defaultRouteHopCount));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,concurrency,queueSize,timeoutMs,maxRouteHopCount,defaultRouteHopCount,maxTimestampBehindMs,maxTimestampAheadMs);
+int get hashCode => Object.hash(runtimeType,defaultRouteHopCount);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigRPC(concurrency: $concurrency, queueSize: $queueSize, timeoutMs: $timeoutMs, maxRouteHopCount: $maxRouteHopCount, defaultRouteHopCount: $defaultRouteHopCount, maxTimestampBehindMs: $maxTimestampBehindMs, maxTimestampAheadMs: $maxTimestampAheadMs)';
+  return 'VeilidConfigRPC(defaultRouteHopCount: $defaultRouteHopCount)';
 }
 
 
@@ -5584,7 +5509,7 @@ abstract mixin class _$VeilidConfigRPCCopyWith<$Res> implements $VeilidConfigRPC
   factory _$VeilidConfigRPCCopyWith(_VeilidConfigRPC value, $Res Function(_VeilidConfigRPC) _then) = __$VeilidConfigRPCCopyWithImpl;
 @override @useResult
 $Res call({
- int concurrency, int queueSize, int timeoutMs, int maxRouteHopCount, int defaultRouteHopCount, int? maxTimestampBehindMs, int? maxTimestampAheadMs
+ int defaultRouteHopCount
 });
 
 
@@ -5601,16 +5526,10 @@ class __$VeilidConfigRPCCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigRPC
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? concurrency = null,Object? queueSize = null,Object? timeoutMs = null,Object? maxRouteHopCount = null,Object? defaultRouteHopCount = null,Object? maxTimestampBehindMs = freezed,Object? maxTimestampAheadMs = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? defaultRouteHopCount = null,}) {
   return _then(_VeilidConfigRPC(
-concurrency: null == concurrency ? _self.concurrency : concurrency // ignore: cast_nullable_to_non_nullable
-as int,queueSize: null == queueSize ? _self.queueSize : queueSize // ignore: cast_nullable_to_non_nullable
-as int,timeoutMs: null == timeoutMs ? _self.timeoutMs : timeoutMs // ignore: cast_nullable_to_non_nullable
-as int,maxRouteHopCount: null == maxRouteHopCount ? _self.maxRouteHopCount : maxRouteHopCount // ignore: cast_nullable_to_non_nullable
-as int,defaultRouteHopCount: null == defaultRouteHopCount ? _self.defaultRouteHopCount : defaultRouteHopCount // ignore: cast_nullable_to_non_nullable
-as int,maxTimestampBehindMs: freezed == maxTimestampBehindMs ? _self.maxTimestampBehindMs : maxTimestampBehindMs // ignore: cast_nullable_to_non_nullable
-as int?,maxTimestampAheadMs: freezed == maxTimestampAheadMs ? _self.maxTimestampAheadMs : maxTimestampAheadMs // ignore: cast_nullable_to_non_nullable
-as int?,
+defaultRouteHopCount: null == defaultRouteHopCount ? _self.defaultRouteHopCount : defaultRouteHopCount // ignore: cast_nullable_to_non_nullable
+as int,
   ));
 }
 
@@ -5923,7 +5842,7 @@ as List<PublicKey>,
 /// @nodoc
 mixin _$VeilidConfigNetwork implements DiagnosticableTreeMixin {
 
- int get connectionInitialTimeoutMs; int get connectionInactivityTimeoutMs; int get maxConnectionsPerIp4; int get maxConnectionsPerIp6Prefix; int get maxConnectionsPerIp6PrefixSize; int get maxConnectionFrequencyPerMin; int get clientAllowlistTimeoutMs; int get reverseConnectionReceiptTimeMs; int get holePunchReceiptTimeMs; VeilidConfigRoutingTable get routingTable; VeilidConfigRPC get rpc; VeilidConfigDHT get dht; bool get upnp; bool? get detectAddressChanges; int get restrictedNatRetries; VeilidConfigTLS get tls; VeilidConfigProtocol get protocol; VeilidConfigPrivacy get privacy; String? get networkKeyPassword;
+ int get maxConnections; VeilidConfigRoutingTable get routingTable; VeilidConfigRPC get rpc; VeilidConfigDHT get dht; List<VeilidConfigAddressType> get addressTypes; bool get upnp; bool? get detectAddressChanges; VeilidConfigTLS get tls; VeilidConfigProtocol get protocol; VeilidConfigPrivacy get privacy; String? get networkKeyPassword;
 /// Create a copy of VeilidConfigNetwork
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -5937,21 +5856,21 @@ $VeilidConfigNetworkCopyWith<VeilidConfigNetwork> get copyWith => _$VeilidConfig
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigNetwork'))
-    ..add(DiagnosticsProperty('connectionInitialTimeoutMs', connectionInitialTimeoutMs))..add(DiagnosticsProperty('connectionInactivityTimeoutMs', connectionInactivityTimeoutMs))..add(DiagnosticsProperty('maxConnectionsPerIp4', maxConnectionsPerIp4))..add(DiagnosticsProperty('maxConnectionsPerIp6Prefix', maxConnectionsPerIp6Prefix))..add(DiagnosticsProperty('maxConnectionsPerIp6PrefixSize', maxConnectionsPerIp6PrefixSize))..add(DiagnosticsProperty('maxConnectionFrequencyPerMin', maxConnectionFrequencyPerMin))..add(DiagnosticsProperty('clientAllowlistTimeoutMs', clientAllowlistTimeoutMs))..add(DiagnosticsProperty('reverseConnectionReceiptTimeMs', reverseConnectionReceiptTimeMs))..add(DiagnosticsProperty('holePunchReceiptTimeMs', holePunchReceiptTimeMs))..add(DiagnosticsProperty('routingTable', routingTable))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('upnp', upnp))..add(DiagnosticsProperty('detectAddressChanges', detectAddressChanges))..add(DiagnosticsProperty('restrictedNatRetries', restrictedNatRetries))..add(DiagnosticsProperty('tls', tls))..add(DiagnosticsProperty('protocol', protocol))..add(DiagnosticsProperty('privacy', privacy))..add(DiagnosticsProperty('networkKeyPassword', networkKeyPassword));
+    ..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('routingTable', routingTable))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('addressTypes', addressTypes))..add(DiagnosticsProperty('upnp', upnp))..add(DiagnosticsProperty('detectAddressChanges', detectAddressChanges))..add(DiagnosticsProperty('tls', tls))..add(DiagnosticsProperty('protocol', protocol))..add(DiagnosticsProperty('privacy', privacy))..add(DiagnosticsProperty('networkKeyPassword', networkKeyPassword));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigNetwork&&(identical(other.connectionInitialTimeoutMs, connectionInitialTimeoutMs) || other.connectionInitialTimeoutMs == connectionInitialTimeoutMs)&&(identical(other.connectionInactivityTimeoutMs, connectionInactivityTimeoutMs) || other.connectionInactivityTimeoutMs == connectionInactivityTimeoutMs)&&(identical(other.maxConnectionsPerIp4, maxConnectionsPerIp4) || other.maxConnectionsPerIp4 == maxConnectionsPerIp4)&&(identical(other.maxConnectionsPerIp6Prefix, maxConnectionsPerIp6Prefix) || other.maxConnectionsPerIp6Prefix == maxConnectionsPerIp6Prefix)&&(identical(other.maxConnectionsPerIp6PrefixSize, maxConnectionsPerIp6PrefixSize) || other.maxConnectionsPerIp6PrefixSize == maxConnectionsPerIp6PrefixSize)&&(identical(other.maxConnectionFrequencyPerMin, maxConnectionFrequencyPerMin) || other.maxConnectionFrequencyPerMin == maxConnectionFrequencyPerMin)&&(identical(other.clientAllowlistTimeoutMs, clientAllowlistTimeoutMs) || other.clientAllowlistTimeoutMs == clientAllowlistTimeoutMs)&&(identical(other.reverseConnectionReceiptTimeMs, reverseConnectionReceiptTimeMs) || other.reverseConnectionReceiptTimeMs == reverseConnectionReceiptTimeMs)&&(identical(other.holePunchReceiptTimeMs, holePunchReceiptTimeMs) || other.holePunchReceiptTimeMs == holePunchReceiptTimeMs)&&(identical(other.routingTable, routingTable) || other.routingTable == routingTable)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&(identical(other.upnp, upnp) || other.upnp == upnp)&&(identical(other.detectAddressChanges, detectAddressChanges) || other.detectAddressChanges == detectAddressChanges)&&(identical(other.restrictedNatRetries, restrictedNatRetries) || other.restrictedNatRetries == restrictedNatRetries)&&(identical(other.tls, tls) || other.tls == tls)&&(identical(other.protocol, protocol) || other.protocol == protocol)&&(identical(other.privacy, privacy) || other.privacy == privacy)&&(identical(other.networkKeyPassword, networkKeyPassword) || other.networkKeyPassword == networkKeyPassword));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigNetwork&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.routingTable, routingTable) || other.routingTable == routingTable)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&const DeepCollectionEquality().equals(other.addressTypes, addressTypes)&&(identical(other.upnp, upnp) || other.upnp == upnp)&&(identical(other.detectAddressChanges, detectAddressChanges) || other.detectAddressChanges == detectAddressChanges)&&(identical(other.tls, tls) || other.tls == tls)&&(identical(other.protocol, protocol) || other.protocol == protocol)&&(identical(other.privacy, privacy) || other.privacy == privacy)&&(identical(other.networkKeyPassword, networkKeyPassword) || other.networkKeyPassword == networkKeyPassword));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hashAll([runtimeType,connectionInitialTimeoutMs,connectionInactivityTimeoutMs,maxConnectionsPerIp4,maxConnectionsPerIp6Prefix,maxConnectionsPerIp6PrefixSize,maxConnectionFrequencyPerMin,clientAllowlistTimeoutMs,reverseConnectionReceiptTimeMs,holePunchReceiptTimeMs,routingTable,rpc,dht,upnp,detectAddressChanges,restrictedNatRetries,tls,protocol,privacy,networkKeyPassword]);
+int get hashCode => Object.hash(runtimeType,maxConnections,routingTable,rpc,dht,const DeepCollectionEquality().hash(addressTypes),upnp,detectAddressChanges,tls,protocol,privacy,networkKeyPassword);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigNetwork(connectionInitialTimeoutMs: $connectionInitialTimeoutMs, connectionInactivityTimeoutMs: $connectionInactivityTimeoutMs, maxConnectionsPerIp4: $maxConnectionsPerIp4, maxConnectionsPerIp6Prefix: $maxConnectionsPerIp6Prefix, maxConnectionsPerIp6PrefixSize: $maxConnectionsPerIp6PrefixSize, maxConnectionFrequencyPerMin: $maxConnectionFrequencyPerMin, clientAllowlistTimeoutMs: $clientAllowlistTimeoutMs, reverseConnectionReceiptTimeMs: $reverseConnectionReceiptTimeMs, holePunchReceiptTimeMs: $holePunchReceiptTimeMs, routingTable: $routingTable, rpc: $rpc, dht: $dht, upnp: $upnp, detectAddressChanges: $detectAddressChanges, restrictedNatRetries: $restrictedNatRetries, tls: $tls, protocol: $protocol, privacy: $privacy, networkKeyPassword: $networkKeyPassword)';
+  return 'VeilidConfigNetwork(maxConnections: $maxConnections, routingTable: $routingTable, rpc: $rpc, dht: $dht, addressTypes: $addressTypes, upnp: $upnp, detectAddressChanges: $detectAddressChanges, tls: $tls, protocol: $protocol, privacy: $privacy, networkKeyPassword: $networkKeyPassword)';
 }
 
 
@@ -5962,7 +5881,7 @@ abstract mixin class $VeilidConfigNetworkCopyWith<$Res>  {
   factory $VeilidConfigNetworkCopyWith(VeilidConfigNetwork value, $Res Function(VeilidConfigNetwork) _then) = _$VeilidConfigNetworkCopyWithImpl;
 @useResult
 $Res call({
- int connectionInitialTimeoutMs, int connectionInactivityTimeoutMs, int maxConnectionsPerIp4, int maxConnectionsPerIp6Prefix, int maxConnectionsPerIp6PrefixSize, int maxConnectionFrequencyPerMin, int clientAllowlistTimeoutMs, int reverseConnectionReceiptTimeMs, int holePunchReceiptTimeMs, VeilidConfigRoutingTable routingTable, VeilidConfigRPC rpc, VeilidConfigDHT dht, bool upnp, bool? detectAddressChanges, int restrictedNatRetries, VeilidConfigTLS tls, VeilidConfigProtocol protocol, VeilidConfigPrivacy privacy, String? networkKeyPassword
+ int maxConnections, VeilidConfigRoutingTable routingTable, VeilidConfigRPC rpc, VeilidConfigDHT dht, List<VeilidConfigAddressType> addressTypes, bool upnp, bool? detectAddressChanges, VeilidConfigTLS tls, VeilidConfigProtocol protocol, VeilidConfigPrivacy privacy, String? networkKeyPassword
 });
 
 
@@ -5979,24 +5898,16 @@ class _$VeilidConfigNetworkCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigNetwork
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? connectionInitialTimeoutMs = null,Object? connectionInactivityTimeoutMs = null,Object? maxConnectionsPerIp4 = null,Object? maxConnectionsPerIp6Prefix = null,Object? maxConnectionsPerIp6PrefixSize = null,Object? maxConnectionFrequencyPerMin = null,Object? clientAllowlistTimeoutMs = null,Object? reverseConnectionReceiptTimeMs = null,Object? holePunchReceiptTimeMs = null,Object? routingTable = null,Object? rpc = null,Object? dht = null,Object? upnp = null,Object? detectAddressChanges = freezed,Object? restrictedNatRetries = null,Object? tls = null,Object? protocol = null,Object? privacy = null,Object? networkKeyPassword = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? maxConnections = null,Object? routingTable = null,Object? rpc = null,Object? dht = null,Object? addressTypes = null,Object? upnp = null,Object? detectAddressChanges = freezed,Object? tls = null,Object? protocol = null,Object? privacy = null,Object? networkKeyPassword = freezed,}) {
   return _then(_self.copyWith(
-connectionInitialTimeoutMs: null == connectionInitialTimeoutMs ? _self.connectionInitialTimeoutMs : connectionInitialTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,connectionInactivityTimeoutMs: null == connectionInactivityTimeoutMs ? _self.connectionInactivityTimeoutMs : connectionInactivityTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,maxConnectionsPerIp4: null == maxConnectionsPerIp4 ? _self.maxConnectionsPerIp4 : maxConnectionsPerIp4 // ignore: cast_nullable_to_non_nullable
-as int,maxConnectionsPerIp6Prefix: null == maxConnectionsPerIp6Prefix ? _self.maxConnectionsPerIp6Prefix : maxConnectionsPerIp6Prefix // ignore: cast_nullable_to_non_nullable
-as int,maxConnectionsPerIp6PrefixSize: null == maxConnectionsPerIp6PrefixSize ? _self.maxConnectionsPerIp6PrefixSize : maxConnectionsPerIp6PrefixSize // ignore: cast_nullable_to_non_nullable
-as int,maxConnectionFrequencyPerMin: null == maxConnectionFrequencyPerMin ? _self.maxConnectionFrequencyPerMin : maxConnectionFrequencyPerMin // ignore: cast_nullable_to_non_nullable
-as int,clientAllowlistTimeoutMs: null == clientAllowlistTimeoutMs ? _self.clientAllowlistTimeoutMs : clientAllowlistTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,reverseConnectionReceiptTimeMs: null == reverseConnectionReceiptTimeMs ? _self.reverseConnectionReceiptTimeMs : reverseConnectionReceiptTimeMs // ignore: cast_nullable_to_non_nullable
-as int,holePunchReceiptTimeMs: null == holePunchReceiptTimeMs ? _self.holePunchReceiptTimeMs : holePunchReceiptTimeMs // ignore: cast_nullable_to_non_nullable
+maxConnections: null == maxConnections ? _self.maxConnections : maxConnections // ignore: cast_nullable_to_non_nullable
 as int,routingTable: null == routingTable ? _self.routingTable : routingTable // ignore: cast_nullable_to_non_nullable
 as VeilidConfigRoutingTable,rpc: null == rpc ? _self.rpc : rpc // ignore: cast_nullable_to_non_nullable
 as VeilidConfigRPC,dht: null == dht ? _self.dht : dht // ignore: cast_nullable_to_non_nullable
-as VeilidConfigDHT,upnp: null == upnp ? _self.upnp : upnp // ignore: cast_nullable_to_non_nullable
+as VeilidConfigDHT,addressTypes: null == addressTypes ? _self.addressTypes : addressTypes // ignore: cast_nullable_to_non_nullable
+as List<VeilidConfigAddressType>,upnp: null == upnp ? _self.upnp : upnp // ignore: cast_nullable_to_non_nullable
 as bool,detectAddressChanges: freezed == detectAddressChanges ? _self.detectAddressChanges : detectAddressChanges // ignore: cast_nullable_to_non_nullable
-as bool?,restrictedNatRetries: null == restrictedNatRetries ? _self.restrictedNatRetries : restrictedNatRetries // ignore: cast_nullable_to_non_nullable
-as int,tls: null == tls ? _self.tls : tls // ignore: cast_nullable_to_non_nullable
+as bool?,tls: null == tls ? _self.tls : tls // ignore: cast_nullable_to_non_nullable
 as VeilidConfigTLS,protocol: null == protocol ? _self.protocol : protocol // ignore: cast_nullable_to_non_nullable
 as VeilidConfigProtocol,privacy: null == privacy ? _self.privacy : privacy // ignore: cast_nullable_to_non_nullable
 as VeilidConfigPrivacy,networkKeyPassword: freezed == networkKeyPassword ? _self.networkKeyPassword : networkKeyPassword // ignore: cast_nullable_to_non_nullable
@@ -6136,10 +6047,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int connectionInitialTimeoutMs,  int connectionInactivityTimeoutMs,  int maxConnectionsPerIp4,  int maxConnectionsPerIp6Prefix,  int maxConnectionsPerIp6PrefixSize,  int maxConnectionFrequencyPerMin,  int clientAllowlistTimeoutMs,  int reverseConnectionReceiptTimeMs,  int holePunchReceiptTimeMs,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  bool upnp,  bool? detectAddressChanges,  int restrictedNatRetries,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigNetwork() when $default != null:
-return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeoutMs,_that.maxConnectionsPerIp4,_that.maxConnectionsPerIp6Prefix,_that.maxConnectionsPerIp6PrefixSize,_that.maxConnectionFrequencyPerMin,_that.clientAllowlistTimeoutMs,_that.reverseConnectionReceiptTimeMs,_that.holePunchReceiptTimeMs,_that.routingTable,_that.rpc,_that.dht,_that.upnp,_that.detectAddressChanges,_that.restrictedNatRetries,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);case _:
+return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);case _:
   return orElse();
 
 }
@@ -6157,10 +6068,10 @@ return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeo
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int connectionInitialTimeoutMs,  int connectionInactivityTimeoutMs,  int maxConnectionsPerIp4,  int maxConnectionsPerIp6Prefix,  int maxConnectionsPerIp6PrefixSize,  int maxConnectionFrequencyPerMin,  int clientAllowlistTimeoutMs,  int reverseConnectionReceiptTimeMs,  int holePunchReceiptTimeMs,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  bool upnp,  bool? detectAddressChanges,  int restrictedNatRetries,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigNetwork():
-return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeoutMs,_that.maxConnectionsPerIp4,_that.maxConnectionsPerIp6Prefix,_that.maxConnectionsPerIp6PrefixSize,_that.maxConnectionFrequencyPerMin,_that.clientAllowlistTimeoutMs,_that.reverseConnectionReceiptTimeMs,_that.holePunchReceiptTimeMs,_that.routingTable,_that.rpc,_that.dht,_that.upnp,_that.detectAddressChanges,_that.restrictedNatRetries,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);}
+return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -6174,10 +6085,10 @@ return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeo
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int connectionInitialTimeoutMs,  int connectionInactivityTimeoutMs,  int maxConnectionsPerIp4,  int maxConnectionsPerIp6Prefix,  int maxConnectionsPerIp6PrefixSize,  int maxConnectionFrequencyPerMin,  int clientAllowlistTimeoutMs,  int reverseConnectionReceiptTimeMs,  int holePunchReceiptTimeMs,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  bool upnp,  bool? detectAddressChanges,  int restrictedNatRetries,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigNetwork() when $default != null:
-return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeoutMs,_that.maxConnectionsPerIp4,_that.maxConnectionsPerIp6Prefix,_that.maxConnectionsPerIp6PrefixSize,_that.maxConnectionFrequencyPerMin,_that.clientAllowlistTimeoutMs,_that.reverseConnectionReceiptTimeMs,_that.holePunchReceiptTimeMs,_that.routingTable,_that.rpc,_that.dht,_that.upnp,_that.detectAddressChanges,_that.restrictedNatRetries,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);case _:
+return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);case _:
   return null;
 
 }
@@ -6189,24 +6100,22 @@ return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeo
 @JsonSerializable()
 
 class _VeilidConfigNetwork with DiagnosticableTreeMixin implements VeilidConfigNetwork {
-  const _VeilidConfigNetwork({required this.connectionInitialTimeoutMs, required this.connectionInactivityTimeoutMs, required this.maxConnectionsPerIp4, required this.maxConnectionsPerIp6Prefix, required this.maxConnectionsPerIp6PrefixSize, required this.maxConnectionFrequencyPerMin, required this.clientAllowlistTimeoutMs, required this.reverseConnectionReceiptTimeMs, required this.holePunchReceiptTimeMs, required this.routingTable, required this.rpc, required this.dht, required this.upnp, required this.detectAddressChanges, required this.restrictedNatRetries, required this.tls, required this.protocol, required this.privacy, this.networkKeyPassword});
+  const _VeilidConfigNetwork({required this.maxConnections, required this.routingTable, required this.rpc, required this.dht, final  List<VeilidConfigAddressType> addressTypes = const <VeilidConfigAddressType>[], required this.upnp, required this.detectAddressChanges, required this.tls, required this.protocol, required this.privacy, this.networkKeyPassword}): _addressTypes = addressTypes;
   factory _VeilidConfigNetwork.fromJson(Map<String, dynamic> json) => _$VeilidConfigNetworkFromJson(json);
 
-@override final  int connectionInitialTimeoutMs;
-@override final  int connectionInactivityTimeoutMs;
-@override final  int maxConnectionsPerIp4;
-@override final  int maxConnectionsPerIp6Prefix;
-@override final  int maxConnectionsPerIp6PrefixSize;
-@override final  int maxConnectionFrequencyPerMin;
-@override final  int clientAllowlistTimeoutMs;
-@override final  int reverseConnectionReceiptTimeMs;
-@override final  int holePunchReceiptTimeMs;
+@override final  int maxConnections;
 @override final  VeilidConfigRoutingTable routingTable;
 @override final  VeilidConfigRPC rpc;
 @override final  VeilidConfigDHT dht;
+ final  List<VeilidConfigAddressType> _addressTypes;
+@override@JsonKey() List<VeilidConfigAddressType> get addressTypes {
+  if (_addressTypes is EqualUnmodifiableListView) return _addressTypes;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_addressTypes);
+}
+
 @override final  bool upnp;
 @override final  bool? detectAddressChanges;
-@override final  int restrictedNatRetries;
 @override final  VeilidConfigTLS tls;
 @override final  VeilidConfigProtocol protocol;
 @override final  VeilidConfigPrivacy privacy;
@@ -6226,21 +6135,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigNetwork'))
-    ..add(DiagnosticsProperty('connectionInitialTimeoutMs', connectionInitialTimeoutMs))..add(DiagnosticsProperty('connectionInactivityTimeoutMs', connectionInactivityTimeoutMs))..add(DiagnosticsProperty('maxConnectionsPerIp4', maxConnectionsPerIp4))..add(DiagnosticsProperty('maxConnectionsPerIp6Prefix', maxConnectionsPerIp6Prefix))..add(DiagnosticsProperty('maxConnectionsPerIp6PrefixSize', maxConnectionsPerIp6PrefixSize))..add(DiagnosticsProperty('maxConnectionFrequencyPerMin', maxConnectionFrequencyPerMin))..add(DiagnosticsProperty('clientAllowlistTimeoutMs', clientAllowlistTimeoutMs))..add(DiagnosticsProperty('reverseConnectionReceiptTimeMs', reverseConnectionReceiptTimeMs))..add(DiagnosticsProperty('holePunchReceiptTimeMs', holePunchReceiptTimeMs))..add(DiagnosticsProperty('routingTable', routingTable))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('upnp', upnp))..add(DiagnosticsProperty('detectAddressChanges', detectAddressChanges))..add(DiagnosticsProperty('restrictedNatRetries', restrictedNatRetries))..add(DiagnosticsProperty('tls', tls))..add(DiagnosticsProperty('protocol', protocol))..add(DiagnosticsProperty('privacy', privacy))..add(DiagnosticsProperty('networkKeyPassword', networkKeyPassword));
+    ..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('routingTable', routingTable))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('addressTypes', addressTypes))..add(DiagnosticsProperty('upnp', upnp))..add(DiagnosticsProperty('detectAddressChanges', detectAddressChanges))..add(DiagnosticsProperty('tls', tls))..add(DiagnosticsProperty('protocol', protocol))..add(DiagnosticsProperty('privacy', privacy))..add(DiagnosticsProperty('networkKeyPassword', networkKeyPassword));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigNetwork&&(identical(other.connectionInitialTimeoutMs, connectionInitialTimeoutMs) || other.connectionInitialTimeoutMs == connectionInitialTimeoutMs)&&(identical(other.connectionInactivityTimeoutMs, connectionInactivityTimeoutMs) || other.connectionInactivityTimeoutMs == connectionInactivityTimeoutMs)&&(identical(other.maxConnectionsPerIp4, maxConnectionsPerIp4) || other.maxConnectionsPerIp4 == maxConnectionsPerIp4)&&(identical(other.maxConnectionsPerIp6Prefix, maxConnectionsPerIp6Prefix) || other.maxConnectionsPerIp6Prefix == maxConnectionsPerIp6Prefix)&&(identical(other.maxConnectionsPerIp6PrefixSize, maxConnectionsPerIp6PrefixSize) || other.maxConnectionsPerIp6PrefixSize == maxConnectionsPerIp6PrefixSize)&&(identical(other.maxConnectionFrequencyPerMin, maxConnectionFrequencyPerMin) || other.maxConnectionFrequencyPerMin == maxConnectionFrequencyPerMin)&&(identical(other.clientAllowlistTimeoutMs, clientAllowlistTimeoutMs) || other.clientAllowlistTimeoutMs == clientAllowlistTimeoutMs)&&(identical(other.reverseConnectionReceiptTimeMs, reverseConnectionReceiptTimeMs) || other.reverseConnectionReceiptTimeMs == reverseConnectionReceiptTimeMs)&&(identical(other.holePunchReceiptTimeMs, holePunchReceiptTimeMs) || other.holePunchReceiptTimeMs == holePunchReceiptTimeMs)&&(identical(other.routingTable, routingTable) || other.routingTable == routingTable)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&(identical(other.upnp, upnp) || other.upnp == upnp)&&(identical(other.detectAddressChanges, detectAddressChanges) || other.detectAddressChanges == detectAddressChanges)&&(identical(other.restrictedNatRetries, restrictedNatRetries) || other.restrictedNatRetries == restrictedNatRetries)&&(identical(other.tls, tls) || other.tls == tls)&&(identical(other.protocol, protocol) || other.protocol == protocol)&&(identical(other.privacy, privacy) || other.privacy == privacy)&&(identical(other.networkKeyPassword, networkKeyPassword) || other.networkKeyPassword == networkKeyPassword));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigNetwork&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.routingTable, routingTable) || other.routingTable == routingTable)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&const DeepCollectionEquality().equals(other._addressTypes, _addressTypes)&&(identical(other.upnp, upnp) || other.upnp == upnp)&&(identical(other.detectAddressChanges, detectAddressChanges) || other.detectAddressChanges == detectAddressChanges)&&(identical(other.tls, tls) || other.tls == tls)&&(identical(other.protocol, protocol) || other.protocol == protocol)&&(identical(other.privacy, privacy) || other.privacy == privacy)&&(identical(other.networkKeyPassword, networkKeyPassword) || other.networkKeyPassword == networkKeyPassword));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hashAll([runtimeType,connectionInitialTimeoutMs,connectionInactivityTimeoutMs,maxConnectionsPerIp4,maxConnectionsPerIp6Prefix,maxConnectionsPerIp6PrefixSize,maxConnectionFrequencyPerMin,clientAllowlistTimeoutMs,reverseConnectionReceiptTimeMs,holePunchReceiptTimeMs,routingTable,rpc,dht,upnp,detectAddressChanges,restrictedNatRetries,tls,protocol,privacy,networkKeyPassword]);
+int get hashCode => Object.hash(runtimeType,maxConnections,routingTable,rpc,dht,const DeepCollectionEquality().hash(_addressTypes),upnp,detectAddressChanges,tls,protocol,privacy,networkKeyPassword);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigNetwork(connectionInitialTimeoutMs: $connectionInitialTimeoutMs, connectionInactivityTimeoutMs: $connectionInactivityTimeoutMs, maxConnectionsPerIp4: $maxConnectionsPerIp4, maxConnectionsPerIp6Prefix: $maxConnectionsPerIp6Prefix, maxConnectionsPerIp6PrefixSize: $maxConnectionsPerIp6PrefixSize, maxConnectionFrequencyPerMin: $maxConnectionFrequencyPerMin, clientAllowlistTimeoutMs: $clientAllowlistTimeoutMs, reverseConnectionReceiptTimeMs: $reverseConnectionReceiptTimeMs, holePunchReceiptTimeMs: $holePunchReceiptTimeMs, routingTable: $routingTable, rpc: $rpc, dht: $dht, upnp: $upnp, detectAddressChanges: $detectAddressChanges, restrictedNatRetries: $restrictedNatRetries, tls: $tls, protocol: $protocol, privacy: $privacy, networkKeyPassword: $networkKeyPassword)';
+  return 'VeilidConfigNetwork(maxConnections: $maxConnections, routingTable: $routingTable, rpc: $rpc, dht: $dht, addressTypes: $addressTypes, upnp: $upnp, detectAddressChanges: $detectAddressChanges, tls: $tls, protocol: $protocol, privacy: $privacy, networkKeyPassword: $networkKeyPassword)';
 }
 
 
@@ -6251,7 +6160,7 @@ abstract mixin class _$VeilidConfigNetworkCopyWith<$Res> implements $VeilidConfi
   factory _$VeilidConfigNetworkCopyWith(_VeilidConfigNetwork value, $Res Function(_VeilidConfigNetwork) _then) = __$VeilidConfigNetworkCopyWithImpl;
 @override @useResult
 $Res call({
- int connectionInitialTimeoutMs, int connectionInactivityTimeoutMs, int maxConnectionsPerIp4, int maxConnectionsPerIp6Prefix, int maxConnectionsPerIp6PrefixSize, int maxConnectionFrequencyPerMin, int clientAllowlistTimeoutMs, int reverseConnectionReceiptTimeMs, int holePunchReceiptTimeMs, VeilidConfigRoutingTable routingTable, VeilidConfigRPC rpc, VeilidConfigDHT dht, bool upnp, bool? detectAddressChanges, int restrictedNatRetries, VeilidConfigTLS tls, VeilidConfigProtocol protocol, VeilidConfigPrivacy privacy, String? networkKeyPassword
+ int maxConnections, VeilidConfigRoutingTable routingTable, VeilidConfigRPC rpc, VeilidConfigDHT dht, List<VeilidConfigAddressType> addressTypes, bool upnp, bool? detectAddressChanges, VeilidConfigTLS tls, VeilidConfigProtocol protocol, VeilidConfigPrivacy privacy, String? networkKeyPassword
 });
 
 
@@ -6268,24 +6177,16 @@ class __$VeilidConfigNetworkCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigNetwork
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? connectionInitialTimeoutMs = null,Object? connectionInactivityTimeoutMs = null,Object? maxConnectionsPerIp4 = null,Object? maxConnectionsPerIp6Prefix = null,Object? maxConnectionsPerIp6PrefixSize = null,Object? maxConnectionFrequencyPerMin = null,Object? clientAllowlistTimeoutMs = null,Object? reverseConnectionReceiptTimeMs = null,Object? holePunchReceiptTimeMs = null,Object? routingTable = null,Object? rpc = null,Object? dht = null,Object? upnp = null,Object? detectAddressChanges = freezed,Object? restrictedNatRetries = null,Object? tls = null,Object? protocol = null,Object? privacy = null,Object? networkKeyPassword = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? maxConnections = null,Object? routingTable = null,Object? rpc = null,Object? dht = null,Object? addressTypes = null,Object? upnp = null,Object? detectAddressChanges = freezed,Object? tls = null,Object? protocol = null,Object? privacy = null,Object? networkKeyPassword = freezed,}) {
   return _then(_VeilidConfigNetwork(
-connectionInitialTimeoutMs: null == connectionInitialTimeoutMs ? _self.connectionInitialTimeoutMs : connectionInitialTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,connectionInactivityTimeoutMs: null == connectionInactivityTimeoutMs ? _self.connectionInactivityTimeoutMs : connectionInactivityTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,maxConnectionsPerIp4: null == maxConnectionsPerIp4 ? _self.maxConnectionsPerIp4 : maxConnectionsPerIp4 // ignore: cast_nullable_to_non_nullable
-as int,maxConnectionsPerIp6Prefix: null == maxConnectionsPerIp6Prefix ? _self.maxConnectionsPerIp6Prefix : maxConnectionsPerIp6Prefix // ignore: cast_nullable_to_non_nullable
-as int,maxConnectionsPerIp6PrefixSize: null == maxConnectionsPerIp6PrefixSize ? _self.maxConnectionsPerIp6PrefixSize : maxConnectionsPerIp6PrefixSize // ignore: cast_nullable_to_non_nullable
-as int,maxConnectionFrequencyPerMin: null == maxConnectionFrequencyPerMin ? _self.maxConnectionFrequencyPerMin : maxConnectionFrequencyPerMin // ignore: cast_nullable_to_non_nullable
-as int,clientAllowlistTimeoutMs: null == clientAllowlistTimeoutMs ? _self.clientAllowlistTimeoutMs : clientAllowlistTimeoutMs // ignore: cast_nullable_to_non_nullable
-as int,reverseConnectionReceiptTimeMs: null == reverseConnectionReceiptTimeMs ? _self.reverseConnectionReceiptTimeMs : reverseConnectionReceiptTimeMs // ignore: cast_nullable_to_non_nullable
-as int,holePunchReceiptTimeMs: null == holePunchReceiptTimeMs ? _self.holePunchReceiptTimeMs : holePunchReceiptTimeMs // ignore: cast_nullable_to_non_nullable
+maxConnections: null == maxConnections ? _self.maxConnections : maxConnections // ignore: cast_nullable_to_non_nullable
 as int,routingTable: null == routingTable ? _self.routingTable : routingTable // ignore: cast_nullable_to_non_nullable
 as VeilidConfigRoutingTable,rpc: null == rpc ? _self.rpc : rpc // ignore: cast_nullable_to_non_nullable
 as VeilidConfigRPC,dht: null == dht ? _self.dht : dht // ignore: cast_nullable_to_non_nullable
-as VeilidConfigDHT,upnp: null == upnp ? _self.upnp : upnp // ignore: cast_nullable_to_non_nullable
+as VeilidConfigDHT,addressTypes: null == addressTypes ? _self._addressTypes : addressTypes // ignore: cast_nullable_to_non_nullable
+as List<VeilidConfigAddressType>,upnp: null == upnp ? _self.upnp : upnp // ignore: cast_nullable_to_non_nullable
 as bool,detectAddressChanges: freezed == detectAddressChanges ? _self.detectAddressChanges : detectAddressChanges // ignore: cast_nullable_to_non_nullable
-as bool?,restrictedNatRetries: null == restrictedNatRetries ? _self.restrictedNatRetries : restrictedNatRetries // ignore: cast_nullable_to_non_nullable
-as int,tls: null == tls ? _self.tls : tls // ignore: cast_nullable_to_non_nullable
+as bool?,tls: null == tls ? _self.tls : tls // ignore: cast_nullable_to_non_nullable
 as VeilidConfigTLS,protocol: null == protocol ? _self.protocol : protocol // ignore: cast_nullable_to_non_nullable
 as VeilidConfigProtocol,privacy: null == privacy ? _self.privacy : privacy // ignore: cast_nullable_to_non_nullable
 as VeilidConfigPrivacy,networkKeyPassword: freezed == networkKeyPassword ? _self.networkKeyPassword : networkKeyPassword // ignore: cast_nullable_to_non_nullable
@@ -7461,9 +7362,1818 @@ as List<String>,
 
 
 /// @nodoc
+mixin _$VeilidConfigInternalUDP implements DiagnosticableTreeMixin {
+
+ int get socketPoolSize;
+/// Create a copy of VeilidConfigInternalUDP
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalUDPCopyWith<VeilidConfigInternalUDP> get copyWith => _$VeilidConfigInternalUDPCopyWithImpl<VeilidConfigInternalUDP>(this as VeilidConfigInternalUDP, _$identity);
+
+  /// Serializes this VeilidConfigInternalUDP to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalUDP'))
+    ..add(DiagnosticsProperty('socketPoolSize', socketPoolSize));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigInternalUDP&&(identical(other.socketPoolSize, socketPoolSize) || other.socketPoolSize == socketPoolSize));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,socketPoolSize);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalUDP(socketPoolSize: $socketPoolSize)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidConfigInternalUDPCopyWith<$Res>  {
+  factory $VeilidConfigInternalUDPCopyWith(VeilidConfigInternalUDP value, $Res Function(VeilidConfigInternalUDP) _then) = _$VeilidConfigInternalUDPCopyWithImpl;
+@useResult
+$Res call({
+ int socketPoolSize
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidConfigInternalUDPCopyWithImpl<$Res>
+    implements $VeilidConfigInternalUDPCopyWith<$Res> {
+  _$VeilidConfigInternalUDPCopyWithImpl(this._self, this._then);
+
+  final VeilidConfigInternalUDP _self;
+  final $Res Function(VeilidConfigInternalUDP) _then;
+
+/// Create a copy of VeilidConfigInternalUDP
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? socketPoolSize = null,}) {
+  return _then(_self.copyWith(
+socketPoolSize: null == socketPoolSize ? _self.socketPoolSize : socketPoolSize // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidConfigInternalUDP].
+extension VeilidConfigInternalUDPPatterns on VeilidConfigInternalUDP {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidConfigInternalUDP value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalUDP() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidConfigInternalUDP value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalUDP():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidConfigInternalUDP value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalUDP() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int socketPoolSize)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalUDP() when $default != null:
+return $default(_that.socketPoolSize);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int socketPoolSize)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalUDP():
+return $default(_that.socketPoolSize);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int socketPoolSize)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalUDP() when $default != null:
+return $default(_that.socketPoolSize);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidConfigInternalUDP with DiagnosticableTreeMixin implements VeilidConfigInternalUDP {
+  const _VeilidConfigInternalUDP({required this.socketPoolSize});
+  factory _VeilidConfigInternalUDP.fromJson(Map<String, dynamic> json) => _$VeilidConfigInternalUDPFromJson(json);
+
+@override final  int socketPoolSize;
+
+/// Create a copy of VeilidConfigInternalUDP
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidConfigInternalUDPCopyWith<_VeilidConfigInternalUDP> get copyWith => __$VeilidConfigInternalUDPCopyWithImpl<_VeilidConfigInternalUDP>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidConfigInternalUDPToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalUDP'))
+    ..add(DiagnosticsProperty('socketPoolSize', socketPoolSize));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigInternalUDP&&(identical(other.socketPoolSize, socketPoolSize) || other.socketPoolSize == socketPoolSize));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,socketPoolSize);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalUDP(socketPoolSize: $socketPoolSize)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidConfigInternalUDPCopyWith<$Res> implements $VeilidConfigInternalUDPCopyWith<$Res> {
+  factory _$VeilidConfigInternalUDPCopyWith(_VeilidConfigInternalUDP value, $Res Function(_VeilidConfigInternalUDP) _then) = __$VeilidConfigInternalUDPCopyWithImpl;
+@override @useResult
+$Res call({
+ int socketPoolSize
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidConfigInternalUDPCopyWithImpl<$Res>
+    implements _$VeilidConfigInternalUDPCopyWith<$Res> {
+  __$VeilidConfigInternalUDPCopyWithImpl(this._self, this._then);
+
+  final _VeilidConfigInternalUDP _self;
+  final $Res Function(_VeilidConfigInternalUDP) _then;
+
+/// Create a copy of VeilidConfigInternalUDP
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? socketPoolSize = null,}) {
+  return _then(_VeilidConfigInternalUDP(
+socketPoolSize: null == socketPoolSize ? _self.socketPoolSize : socketPoolSize // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
+mixin _$VeilidConfigInternalProtocol implements DiagnosticableTreeMixin {
+
+ VeilidConfigInternalUDP get udp;
+/// Create a copy of VeilidConfigInternalProtocol
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalProtocolCopyWith<VeilidConfigInternalProtocol> get copyWith => _$VeilidConfigInternalProtocolCopyWithImpl<VeilidConfigInternalProtocol>(this as VeilidConfigInternalProtocol, _$identity);
+
+  /// Serializes this VeilidConfigInternalProtocol to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalProtocol'))
+    ..add(DiagnosticsProperty('udp', udp));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigInternalProtocol&&(identical(other.udp, udp) || other.udp == udp));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,udp);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalProtocol(udp: $udp)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidConfigInternalProtocolCopyWith<$Res>  {
+  factory $VeilidConfigInternalProtocolCopyWith(VeilidConfigInternalProtocol value, $Res Function(VeilidConfigInternalProtocol) _then) = _$VeilidConfigInternalProtocolCopyWithImpl;
+@useResult
+$Res call({
+ VeilidConfigInternalUDP udp
+});
+
+
+$VeilidConfigInternalUDPCopyWith<$Res> get udp;
+
+}
+/// @nodoc
+class _$VeilidConfigInternalProtocolCopyWithImpl<$Res>
+    implements $VeilidConfigInternalProtocolCopyWith<$Res> {
+  _$VeilidConfigInternalProtocolCopyWithImpl(this._self, this._then);
+
+  final VeilidConfigInternalProtocol _self;
+  final $Res Function(VeilidConfigInternalProtocol) _then;
+
+/// Create a copy of VeilidConfigInternalProtocol
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? udp = null,}) {
+  return _then(_self.copyWith(
+udp: null == udp ? _self.udp : udp // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalUDP,
+  ));
+}
+/// Create a copy of VeilidConfigInternalProtocol
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalUDPCopyWith<$Res> get udp {
+  
+  return $VeilidConfigInternalUDPCopyWith<$Res>(_self.udp, (value) {
+    return _then(_self.copyWith(udp: value));
+  });
+}
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidConfigInternalProtocol].
+extension VeilidConfigInternalProtocolPatterns on VeilidConfigInternalProtocol {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidConfigInternalProtocol value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalProtocol() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidConfigInternalProtocol value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalProtocol():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidConfigInternalProtocol value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalProtocol() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidConfigInternalUDP udp)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalProtocol() when $default != null:
+return $default(_that.udp);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidConfigInternalUDP udp)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalProtocol():
+return $default(_that.udp);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidConfigInternalUDP udp)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalProtocol() when $default != null:
+return $default(_that.udp);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidConfigInternalProtocol with DiagnosticableTreeMixin implements VeilidConfigInternalProtocol {
+  const _VeilidConfigInternalProtocol({required this.udp});
+  factory _VeilidConfigInternalProtocol.fromJson(Map<String, dynamic> json) => _$VeilidConfigInternalProtocolFromJson(json);
+
+@override final  VeilidConfigInternalUDP udp;
+
+/// Create a copy of VeilidConfigInternalProtocol
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidConfigInternalProtocolCopyWith<_VeilidConfigInternalProtocol> get copyWith => __$VeilidConfigInternalProtocolCopyWithImpl<_VeilidConfigInternalProtocol>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidConfigInternalProtocolToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalProtocol'))
+    ..add(DiagnosticsProperty('udp', udp));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigInternalProtocol&&(identical(other.udp, udp) || other.udp == udp));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,udp);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalProtocol(udp: $udp)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidConfigInternalProtocolCopyWith<$Res> implements $VeilidConfigInternalProtocolCopyWith<$Res> {
+  factory _$VeilidConfigInternalProtocolCopyWith(_VeilidConfigInternalProtocol value, $Res Function(_VeilidConfigInternalProtocol) _then) = __$VeilidConfigInternalProtocolCopyWithImpl;
+@override @useResult
+$Res call({
+ VeilidConfigInternalUDP udp
+});
+
+
+@override $VeilidConfigInternalUDPCopyWith<$Res> get udp;
+
+}
+/// @nodoc
+class __$VeilidConfigInternalProtocolCopyWithImpl<$Res>
+    implements _$VeilidConfigInternalProtocolCopyWith<$Res> {
+  __$VeilidConfigInternalProtocolCopyWithImpl(this._self, this._then);
+
+  final _VeilidConfigInternalProtocol _self;
+  final $Res Function(_VeilidConfigInternalProtocol) _then;
+
+/// Create a copy of VeilidConfigInternalProtocol
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? udp = null,}) {
+  return _then(_VeilidConfigInternalProtocol(
+udp: null == udp ? _self.udp : udp // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalUDP,
+  ));
+}
+
+/// Create a copy of VeilidConfigInternalProtocol
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalUDPCopyWith<$Res> get udp {
+  
+  return $VeilidConfigInternalUDPCopyWith<$Res>(_self.udp, (value) {
+    return _then(_self.copyWith(udp: value));
+  });
+}
+}
+
+
+/// @nodoc
+mixin _$VeilidConfigInternalRPC implements DiagnosticableTreeMixin {
+
+ int get concurrency; int get queueSize; int get timeoutMs; int get maxRouteHopCount; int? get maxTimestampBehindMs; int? get maxTimestampAheadMs;
+/// Create a copy of VeilidConfigInternalRPC
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalRPCCopyWith<VeilidConfigInternalRPC> get copyWith => _$VeilidConfigInternalRPCCopyWithImpl<VeilidConfigInternalRPC>(this as VeilidConfigInternalRPC, _$identity);
+
+  /// Serializes this VeilidConfigInternalRPC to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalRPC'))
+    ..add(DiagnosticsProperty('concurrency', concurrency))..add(DiagnosticsProperty('queueSize', queueSize))..add(DiagnosticsProperty('timeoutMs', timeoutMs))..add(DiagnosticsProperty('maxRouteHopCount', maxRouteHopCount))..add(DiagnosticsProperty('maxTimestampBehindMs', maxTimestampBehindMs))..add(DiagnosticsProperty('maxTimestampAheadMs', maxTimestampAheadMs));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigInternalRPC&&(identical(other.concurrency, concurrency) || other.concurrency == concurrency)&&(identical(other.queueSize, queueSize) || other.queueSize == queueSize)&&(identical(other.timeoutMs, timeoutMs) || other.timeoutMs == timeoutMs)&&(identical(other.maxRouteHopCount, maxRouteHopCount) || other.maxRouteHopCount == maxRouteHopCount)&&(identical(other.maxTimestampBehindMs, maxTimestampBehindMs) || other.maxTimestampBehindMs == maxTimestampBehindMs)&&(identical(other.maxTimestampAheadMs, maxTimestampAheadMs) || other.maxTimestampAheadMs == maxTimestampAheadMs));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,concurrency,queueSize,timeoutMs,maxRouteHopCount,maxTimestampBehindMs,maxTimestampAheadMs);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalRPC(concurrency: $concurrency, queueSize: $queueSize, timeoutMs: $timeoutMs, maxRouteHopCount: $maxRouteHopCount, maxTimestampBehindMs: $maxTimestampBehindMs, maxTimestampAheadMs: $maxTimestampAheadMs)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidConfigInternalRPCCopyWith<$Res>  {
+  factory $VeilidConfigInternalRPCCopyWith(VeilidConfigInternalRPC value, $Res Function(VeilidConfigInternalRPC) _then) = _$VeilidConfigInternalRPCCopyWithImpl;
+@useResult
+$Res call({
+ int concurrency, int queueSize, int timeoutMs, int maxRouteHopCount, int? maxTimestampBehindMs, int? maxTimestampAheadMs
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidConfigInternalRPCCopyWithImpl<$Res>
+    implements $VeilidConfigInternalRPCCopyWith<$Res> {
+  _$VeilidConfigInternalRPCCopyWithImpl(this._self, this._then);
+
+  final VeilidConfigInternalRPC _self;
+  final $Res Function(VeilidConfigInternalRPC) _then;
+
+/// Create a copy of VeilidConfigInternalRPC
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? concurrency = null,Object? queueSize = null,Object? timeoutMs = null,Object? maxRouteHopCount = null,Object? maxTimestampBehindMs = freezed,Object? maxTimestampAheadMs = freezed,}) {
+  return _then(_self.copyWith(
+concurrency: null == concurrency ? _self.concurrency : concurrency // ignore: cast_nullable_to_non_nullable
+as int,queueSize: null == queueSize ? _self.queueSize : queueSize // ignore: cast_nullable_to_non_nullable
+as int,timeoutMs: null == timeoutMs ? _self.timeoutMs : timeoutMs // ignore: cast_nullable_to_non_nullable
+as int,maxRouteHopCount: null == maxRouteHopCount ? _self.maxRouteHopCount : maxRouteHopCount // ignore: cast_nullable_to_non_nullable
+as int,maxTimestampBehindMs: freezed == maxTimestampBehindMs ? _self.maxTimestampBehindMs : maxTimestampBehindMs // ignore: cast_nullable_to_non_nullable
+as int?,maxTimestampAheadMs: freezed == maxTimestampAheadMs ? _self.maxTimestampAheadMs : maxTimestampAheadMs // ignore: cast_nullable_to_non_nullable
+as int?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidConfigInternalRPC].
+extension VeilidConfigInternalRPCPatterns on VeilidConfigInternalRPC {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidConfigInternalRPC value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalRPC() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidConfigInternalRPC value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalRPC():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidConfigInternalRPC value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalRPC() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int concurrency,  int queueSize,  int timeoutMs,  int maxRouteHopCount,  int? maxTimestampBehindMs,  int? maxTimestampAheadMs)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalRPC() when $default != null:
+return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRouteHopCount,_that.maxTimestampBehindMs,_that.maxTimestampAheadMs);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int concurrency,  int queueSize,  int timeoutMs,  int maxRouteHopCount,  int? maxTimestampBehindMs,  int? maxTimestampAheadMs)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalRPC():
+return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRouteHopCount,_that.maxTimestampBehindMs,_that.maxTimestampAheadMs);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int concurrency,  int queueSize,  int timeoutMs,  int maxRouteHopCount,  int? maxTimestampBehindMs,  int? maxTimestampAheadMs)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalRPC() when $default != null:
+return $default(_that.concurrency,_that.queueSize,_that.timeoutMs,_that.maxRouteHopCount,_that.maxTimestampBehindMs,_that.maxTimestampAheadMs);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidConfigInternalRPC with DiagnosticableTreeMixin implements VeilidConfigInternalRPC {
+  const _VeilidConfigInternalRPC({required this.concurrency, required this.queueSize, required this.timeoutMs, required this.maxRouteHopCount, this.maxTimestampBehindMs, this.maxTimestampAheadMs});
+  factory _VeilidConfigInternalRPC.fromJson(Map<String, dynamic> json) => _$VeilidConfigInternalRPCFromJson(json);
+
+@override final  int concurrency;
+@override final  int queueSize;
+@override final  int timeoutMs;
+@override final  int maxRouteHopCount;
+@override final  int? maxTimestampBehindMs;
+@override final  int? maxTimestampAheadMs;
+
+/// Create a copy of VeilidConfigInternalRPC
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidConfigInternalRPCCopyWith<_VeilidConfigInternalRPC> get copyWith => __$VeilidConfigInternalRPCCopyWithImpl<_VeilidConfigInternalRPC>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidConfigInternalRPCToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalRPC'))
+    ..add(DiagnosticsProperty('concurrency', concurrency))..add(DiagnosticsProperty('queueSize', queueSize))..add(DiagnosticsProperty('timeoutMs', timeoutMs))..add(DiagnosticsProperty('maxRouteHopCount', maxRouteHopCount))..add(DiagnosticsProperty('maxTimestampBehindMs', maxTimestampBehindMs))..add(DiagnosticsProperty('maxTimestampAheadMs', maxTimestampAheadMs));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigInternalRPC&&(identical(other.concurrency, concurrency) || other.concurrency == concurrency)&&(identical(other.queueSize, queueSize) || other.queueSize == queueSize)&&(identical(other.timeoutMs, timeoutMs) || other.timeoutMs == timeoutMs)&&(identical(other.maxRouteHopCount, maxRouteHopCount) || other.maxRouteHopCount == maxRouteHopCount)&&(identical(other.maxTimestampBehindMs, maxTimestampBehindMs) || other.maxTimestampBehindMs == maxTimestampBehindMs)&&(identical(other.maxTimestampAheadMs, maxTimestampAheadMs) || other.maxTimestampAheadMs == maxTimestampAheadMs));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,concurrency,queueSize,timeoutMs,maxRouteHopCount,maxTimestampBehindMs,maxTimestampAheadMs);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalRPC(concurrency: $concurrency, queueSize: $queueSize, timeoutMs: $timeoutMs, maxRouteHopCount: $maxRouteHopCount, maxTimestampBehindMs: $maxTimestampBehindMs, maxTimestampAheadMs: $maxTimestampAheadMs)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidConfigInternalRPCCopyWith<$Res> implements $VeilidConfigInternalRPCCopyWith<$Res> {
+  factory _$VeilidConfigInternalRPCCopyWith(_VeilidConfigInternalRPC value, $Res Function(_VeilidConfigInternalRPC) _then) = __$VeilidConfigInternalRPCCopyWithImpl;
+@override @useResult
+$Res call({
+ int concurrency, int queueSize, int timeoutMs, int maxRouteHopCount, int? maxTimestampBehindMs, int? maxTimestampAheadMs
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidConfigInternalRPCCopyWithImpl<$Res>
+    implements _$VeilidConfigInternalRPCCopyWith<$Res> {
+  __$VeilidConfigInternalRPCCopyWithImpl(this._self, this._then);
+
+  final _VeilidConfigInternalRPC _self;
+  final $Res Function(_VeilidConfigInternalRPC) _then;
+
+/// Create a copy of VeilidConfigInternalRPC
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? concurrency = null,Object? queueSize = null,Object? timeoutMs = null,Object? maxRouteHopCount = null,Object? maxTimestampBehindMs = freezed,Object? maxTimestampAheadMs = freezed,}) {
+  return _then(_VeilidConfigInternalRPC(
+concurrency: null == concurrency ? _self.concurrency : concurrency // ignore: cast_nullable_to_non_nullable
+as int,queueSize: null == queueSize ? _self.queueSize : queueSize // ignore: cast_nullable_to_non_nullable
+as int,timeoutMs: null == timeoutMs ? _self.timeoutMs : timeoutMs // ignore: cast_nullable_to_non_nullable
+as int,maxRouteHopCount: null == maxRouteHopCount ? _self.maxRouteHopCount : maxRouteHopCount // ignore: cast_nullable_to_non_nullable
+as int,maxTimestampBehindMs: freezed == maxTimestampBehindMs ? _self.maxTimestampBehindMs : maxTimestampBehindMs // ignore: cast_nullable_to_non_nullable
+as int?,maxTimestampAheadMs: freezed == maxTimestampAheadMs ? _self.maxTimestampAheadMs : maxTimestampAheadMs // ignore: cast_nullable_to_non_nullable
+as int?,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
+mixin _$VeilidConfigInternalDHT implements DiagnosticableTreeMixin {
+
+ int get maxFindNodeCount; int get resolveNodeTimeoutMs; int get resolveNodeCount; int get resolveNodeFanout; int get getValueTimeoutMs; int get getValueCount; int get getValueFanout; int get setValueTimeoutMs; int get setValueCount; int get setValueFanout; int get consensusWidth; int get minPeerCount; int get minPeerRefreshTimeMs; int get validateDialInfoReceiptTimeMs; int get maxWatchExpirationMs; int get publicWatchLimit; int get memberWatchLimit; int get publicTransactionLimit; int get memberTransactionLimit;
+/// Create a copy of VeilidConfigInternalDHT
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalDHTCopyWith<VeilidConfigInternalDHT> get copyWith => _$VeilidConfigInternalDHTCopyWithImpl<VeilidConfigInternalDHT>(this as VeilidConfigInternalDHT, _$identity);
+
+  /// Serializes this VeilidConfigInternalDHT to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalDHT'))
+    ..add(DiagnosticsProperty('maxFindNodeCount', maxFindNodeCount))..add(DiagnosticsProperty('resolveNodeTimeoutMs', resolveNodeTimeoutMs))..add(DiagnosticsProperty('resolveNodeCount', resolveNodeCount))..add(DiagnosticsProperty('resolveNodeFanout', resolveNodeFanout))..add(DiagnosticsProperty('getValueTimeoutMs', getValueTimeoutMs))..add(DiagnosticsProperty('getValueCount', getValueCount))..add(DiagnosticsProperty('getValueFanout', getValueFanout))..add(DiagnosticsProperty('setValueTimeoutMs', setValueTimeoutMs))..add(DiagnosticsProperty('setValueCount', setValueCount))..add(DiagnosticsProperty('setValueFanout', setValueFanout))..add(DiagnosticsProperty('consensusWidth', consensusWidth))..add(DiagnosticsProperty('minPeerCount', minPeerCount))..add(DiagnosticsProperty('minPeerRefreshTimeMs', minPeerRefreshTimeMs))..add(DiagnosticsProperty('validateDialInfoReceiptTimeMs', validateDialInfoReceiptTimeMs))..add(DiagnosticsProperty('maxWatchExpirationMs', maxWatchExpirationMs))..add(DiagnosticsProperty('publicWatchLimit', publicWatchLimit))..add(DiagnosticsProperty('memberWatchLimit', memberWatchLimit))..add(DiagnosticsProperty('publicTransactionLimit', publicTransactionLimit))..add(DiagnosticsProperty('memberTransactionLimit', memberTransactionLimit));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigInternalDHT&&(identical(other.maxFindNodeCount, maxFindNodeCount) || other.maxFindNodeCount == maxFindNodeCount)&&(identical(other.resolveNodeTimeoutMs, resolveNodeTimeoutMs) || other.resolveNodeTimeoutMs == resolveNodeTimeoutMs)&&(identical(other.resolveNodeCount, resolveNodeCount) || other.resolveNodeCount == resolveNodeCount)&&(identical(other.resolveNodeFanout, resolveNodeFanout) || other.resolveNodeFanout == resolveNodeFanout)&&(identical(other.getValueTimeoutMs, getValueTimeoutMs) || other.getValueTimeoutMs == getValueTimeoutMs)&&(identical(other.getValueCount, getValueCount) || other.getValueCount == getValueCount)&&(identical(other.getValueFanout, getValueFanout) || other.getValueFanout == getValueFanout)&&(identical(other.setValueTimeoutMs, setValueTimeoutMs) || other.setValueTimeoutMs == setValueTimeoutMs)&&(identical(other.setValueCount, setValueCount) || other.setValueCount == setValueCount)&&(identical(other.setValueFanout, setValueFanout) || other.setValueFanout == setValueFanout)&&(identical(other.consensusWidth, consensusWidth) || other.consensusWidth == consensusWidth)&&(identical(other.minPeerCount, minPeerCount) || other.minPeerCount == minPeerCount)&&(identical(other.minPeerRefreshTimeMs, minPeerRefreshTimeMs) || other.minPeerRefreshTimeMs == minPeerRefreshTimeMs)&&(identical(other.validateDialInfoReceiptTimeMs, validateDialInfoReceiptTimeMs) || other.validateDialInfoReceiptTimeMs == validateDialInfoReceiptTimeMs)&&(identical(other.maxWatchExpirationMs, maxWatchExpirationMs) || other.maxWatchExpirationMs == maxWatchExpirationMs)&&(identical(other.publicWatchLimit, publicWatchLimit) || other.publicWatchLimit == publicWatchLimit)&&(identical(other.memberWatchLimit, memberWatchLimit) || other.memberWatchLimit == memberWatchLimit)&&(identical(other.publicTransactionLimit, publicTransactionLimit) || other.publicTransactionLimit == publicTransactionLimit)&&(identical(other.memberTransactionLimit, memberTransactionLimit) || other.memberTransactionLimit == memberTransactionLimit));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hashAll([runtimeType,maxFindNodeCount,resolveNodeTimeoutMs,resolveNodeCount,resolveNodeFanout,getValueTimeoutMs,getValueCount,getValueFanout,setValueTimeoutMs,setValueCount,setValueFanout,consensusWidth,minPeerCount,minPeerRefreshTimeMs,validateDialInfoReceiptTimeMs,maxWatchExpirationMs,publicWatchLimit,memberWatchLimit,publicTransactionLimit,memberTransactionLimit]);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalDHT(maxFindNodeCount: $maxFindNodeCount, resolveNodeTimeoutMs: $resolveNodeTimeoutMs, resolveNodeCount: $resolveNodeCount, resolveNodeFanout: $resolveNodeFanout, getValueTimeoutMs: $getValueTimeoutMs, getValueCount: $getValueCount, getValueFanout: $getValueFanout, setValueTimeoutMs: $setValueTimeoutMs, setValueCount: $setValueCount, setValueFanout: $setValueFanout, consensusWidth: $consensusWidth, minPeerCount: $minPeerCount, minPeerRefreshTimeMs: $minPeerRefreshTimeMs, validateDialInfoReceiptTimeMs: $validateDialInfoReceiptTimeMs, maxWatchExpirationMs: $maxWatchExpirationMs, publicWatchLimit: $publicWatchLimit, memberWatchLimit: $memberWatchLimit, publicTransactionLimit: $publicTransactionLimit, memberTransactionLimit: $memberTransactionLimit)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidConfigInternalDHTCopyWith<$Res>  {
+  factory $VeilidConfigInternalDHTCopyWith(VeilidConfigInternalDHT value, $Res Function(VeilidConfigInternalDHT) _then) = _$VeilidConfigInternalDHTCopyWithImpl;
+@useResult
+$Res call({
+ int maxFindNodeCount, int resolveNodeTimeoutMs, int resolveNodeCount, int resolveNodeFanout, int getValueTimeoutMs, int getValueCount, int getValueFanout, int setValueTimeoutMs, int setValueCount, int setValueFanout, int consensusWidth, int minPeerCount, int minPeerRefreshTimeMs, int validateDialInfoReceiptTimeMs, int maxWatchExpirationMs, int publicWatchLimit, int memberWatchLimit, int publicTransactionLimit, int memberTransactionLimit
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidConfigInternalDHTCopyWithImpl<$Res>
+    implements $VeilidConfigInternalDHTCopyWith<$Res> {
+  _$VeilidConfigInternalDHTCopyWithImpl(this._self, this._then);
+
+  final VeilidConfigInternalDHT _self;
+  final $Res Function(VeilidConfigInternalDHT) _then;
+
+/// Create a copy of VeilidConfigInternalDHT
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? maxFindNodeCount = null,Object? resolveNodeTimeoutMs = null,Object? resolveNodeCount = null,Object? resolveNodeFanout = null,Object? getValueTimeoutMs = null,Object? getValueCount = null,Object? getValueFanout = null,Object? setValueTimeoutMs = null,Object? setValueCount = null,Object? setValueFanout = null,Object? consensusWidth = null,Object? minPeerCount = null,Object? minPeerRefreshTimeMs = null,Object? validateDialInfoReceiptTimeMs = null,Object? maxWatchExpirationMs = null,Object? publicWatchLimit = null,Object? memberWatchLimit = null,Object? publicTransactionLimit = null,Object? memberTransactionLimit = null,}) {
+  return _then(_self.copyWith(
+maxFindNodeCount: null == maxFindNodeCount ? _self.maxFindNodeCount : maxFindNodeCount // ignore: cast_nullable_to_non_nullable
+as int,resolveNodeTimeoutMs: null == resolveNodeTimeoutMs ? _self.resolveNodeTimeoutMs : resolveNodeTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,resolveNodeCount: null == resolveNodeCount ? _self.resolveNodeCount : resolveNodeCount // ignore: cast_nullable_to_non_nullable
+as int,resolveNodeFanout: null == resolveNodeFanout ? _self.resolveNodeFanout : resolveNodeFanout // ignore: cast_nullable_to_non_nullable
+as int,getValueTimeoutMs: null == getValueTimeoutMs ? _self.getValueTimeoutMs : getValueTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,getValueCount: null == getValueCount ? _self.getValueCount : getValueCount // ignore: cast_nullable_to_non_nullable
+as int,getValueFanout: null == getValueFanout ? _self.getValueFanout : getValueFanout // ignore: cast_nullable_to_non_nullable
+as int,setValueTimeoutMs: null == setValueTimeoutMs ? _self.setValueTimeoutMs : setValueTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,setValueCount: null == setValueCount ? _self.setValueCount : setValueCount // ignore: cast_nullable_to_non_nullable
+as int,setValueFanout: null == setValueFanout ? _self.setValueFanout : setValueFanout // ignore: cast_nullable_to_non_nullable
+as int,consensusWidth: null == consensusWidth ? _self.consensusWidth : consensusWidth // ignore: cast_nullable_to_non_nullable
+as int,minPeerCount: null == minPeerCount ? _self.minPeerCount : minPeerCount // ignore: cast_nullable_to_non_nullable
+as int,minPeerRefreshTimeMs: null == minPeerRefreshTimeMs ? _self.minPeerRefreshTimeMs : minPeerRefreshTimeMs // ignore: cast_nullable_to_non_nullable
+as int,validateDialInfoReceiptTimeMs: null == validateDialInfoReceiptTimeMs ? _self.validateDialInfoReceiptTimeMs : validateDialInfoReceiptTimeMs // ignore: cast_nullable_to_non_nullable
+as int,maxWatchExpirationMs: null == maxWatchExpirationMs ? _self.maxWatchExpirationMs : maxWatchExpirationMs // ignore: cast_nullable_to_non_nullable
+as int,publicWatchLimit: null == publicWatchLimit ? _self.publicWatchLimit : publicWatchLimit // ignore: cast_nullable_to_non_nullable
+as int,memberWatchLimit: null == memberWatchLimit ? _self.memberWatchLimit : memberWatchLimit // ignore: cast_nullable_to_non_nullable
+as int,publicTransactionLimit: null == publicTransactionLimit ? _self.publicTransactionLimit : publicTransactionLimit // ignore: cast_nullable_to_non_nullable
+as int,memberTransactionLimit: null == memberTransactionLimit ? _self.memberTransactionLimit : memberTransactionLimit // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidConfigInternalDHT].
+extension VeilidConfigInternalDHTPatterns on VeilidConfigInternalDHT {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidConfigInternalDHT value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalDHT() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidConfigInternalDHT value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalDHT():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidConfigInternalDHT value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalDHT() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int maxFindNodeCount,  int resolveNodeTimeoutMs,  int resolveNodeCount,  int resolveNodeFanout,  int getValueTimeoutMs,  int getValueCount,  int getValueFanout,  int setValueTimeoutMs,  int setValueCount,  int setValueFanout,  int consensusWidth,  int minPeerCount,  int minPeerRefreshTimeMs,  int validateDialInfoReceiptTimeMs,  int maxWatchExpirationMs,  int publicWatchLimit,  int memberWatchLimit,  int publicTransactionLimit,  int memberTransactionLimit)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalDHT() when $default != null:
+return $default(_that.maxFindNodeCount,_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveNodeFanout,_that.getValueTimeoutMs,_that.getValueCount,_that.getValueFanout,_that.setValueTimeoutMs,_that.setValueCount,_that.setValueFanout,_that.consensusWidth,_that.minPeerCount,_that.minPeerRefreshTimeMs,_that.validateDialInfoReceiptTimeMs,_that.maxWatchExpirationMs,_that.publicWatchLimit,_that.memberWatchLimit,_that.publicTransactionLimit,_that.memberTransactionLimit);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int maxFindNodeCount,  int resolveNodeTimeoutMs,  int resolveNodeCount,  int resolveNodeFanout,  int getValueTimeoutMs,  int getValueCount,  int getValueFanout,  int setValueTimeoutMs,  int setValueCount,  int setValueFanout,  int consensusWidth,  int minPeerCount,  int minPeerRefreshTimeMs,  int validateDialInfoReceiptTimeMs,  int maxWatchExpirationMs,  int publicWatchLimit,  int memberWatchLimit,  int publicTransactionLimit,  int memberTransactionLimit)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalDHT():
+return $default(_that.maxFindNodeCount,_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveNodeFanout,_that.getValueTimeoutMs,_that.getValueCount,_that.getValueFanout,_that.setValueTimeoutMs,_that.setValueCount,_that.setValueFanout,_that.consensusWidth,_that.minPeerCount,_that.minPeerRefreshTimeMs,_that.validateDialInfoReceiptTimeMs,_that.maxWatchExpirationMs,_that.publicWatchLimit,_that.memberWatchLimit,_that.publicTransactionLimit,_that.memberTransactionLimit);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int maxFindNodeCount,  int resolveNodeTimeoutMs,  int resolveNodeCount,  int resolveNodeFanout,  int getValueTimeoutMs,  int getValueCount,  int getValueFanout,  int setValueTimeoutMs,  int setValueCount,  int setValueFanout,  int consensusWidth,  int minPeerCount,  int minPeerRefreshTimeMs,  int validateDialInfoReceiptTimeMs,  int maxWatchExpirationMs,  int publicWatchLimit,  int memberWatchLimit,  int publicTransactionLimit,  int memberTransactionLimit)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalDHT() when $default != null:
+return $default(_that.maxFindNodeCount,_that.resolveNodeTimeoutMs,_that.resolveNodeCount,_that.resolveNodeFanout,_that.getValueTimeoutMs,_that.getValueCount,_that.getValueFanout,_that.setValueTimeoutMs,_that.setValueCount,_that.setValueFanout,_that.consensusWidth,_that.minPeerCount,_that.minPeerRefreshTimeMs,_that.validateDialInfoReceiptTimeMs,_that.maxWatchExpirationMs,_that.publicWatchLimit,_that.memberWatchLimit,_that.publicTransactionLimit,_that.memberTransactionLimit);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidConfigInternalDHT with DiagnosticableTreeMixin implements VeilidConfigInternalDHT {
+  const _VeilidConfigInternalDHT({required this.maxFindNodeCount, required this.resolveNodeTimeoutMs, required this.resolveNodeCount, required this.resolveNodeFanout, required this.getValueTimeoutMs, required this.getValueCount, required this.getValueFanout, required this.setValueTimeoutMs, required this.setValueCount, required this.setValueFanout, required this.consensusWidth, required this.minPeerCount, required this.minPeerRefreshTimeMs, required this.validateDialInfoReceiptTimeMs, required this.maxWatchExpirationMs, required this.publicWatchLimit, required this.memberWatchLimit, required this.publicTransactionLimit, required this.memberTransactionLimit});
+  factory _VeilidConfigInternalDHT.fromJson(Map<String, dynamic> json) => _$VeilidConfigInternalDHTFromJson(json);
+
+@override final  int maxFindNodeCount;
+@override final  int resolveNodeTimeoutMs;
+@override final  int resolveNodeCount;
+@override final  int resolveNodeFanout;
+@override final  int getValueTimeoutMs;
+@override final  int getValueCount;
+@override final  int getValueFanout;
+@override final  int setValueTimeoutMs;
+@override final  int setValueCount;
+@override final  int setValueFanout;
+@override final  int consensusWidth;
+@override final  int minPeerCount;
+@override final  int minPeerRefreshTimeMs;
+@override final  int validateDialInfoReceiptTimeMs;
+@override final  int maxWatchExpirationMs;
+@override final  int publicWatchLimit;
+@override final  int memberWatchLimit;
+@override final  int publicTransactionLimit;
+@override final  int memberTransactionLimit;
+
+/// Create a copy of VeilidConfigInternalDHT
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidConfigInternalDHTCopyWith<_VeilidConfigInternalDHT> get copyWith => __$VeilidConfigInternalDHTCopyWithImpl<_VeilidConfigInternalDHT>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidConfigInternalDHTToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalDHT'))
+    ..add(DiagnosticsProperty('maxFindNodeCount', maxFindNodeCount))..add(DiagnosticsProperty('resolveNodeTimeoutMs', resolveNodeTimeoutMs))..add(DiagnosticsProperty('resolveNodeCount', resolveNodeCount))..add(DiagnosticsProperty('resolveNodeFanout', resolveNodeFanout))..add(DiagnosticsProperty('getValueTimeoutMs', getValueTimeoutMs))..add(DiagnosticsProperty('getValueCount', getValueCount))..add(DiagnosticsProperty('getValueFanout', getValueFanout))..add(DiagnosticsProperty('setValueTimeoutMs', setValueTimeoutMs))..add(DiagnosticsProperty('setValueCount', setValueCount))..add(DiagnosticsProperty('setValueFanout', setValueFanout))..add(DiagnosticsProperty('consensusWidth', consensusWidth))..add(DiagnosticsProperty('minPeerCount', minPeerCount))..add(DiagnosticsProperty('minPeerRefreshTimeMs', minPeerRefreshTimeMs))..add(DiagnosticsProperty('validateDialInfoReceiptTimeMs', validateDialInfoReceiptTimeMs))..add(DiagnosticsProperty('maxWatchExpirationMs', maxWatchExpirationMs))..add(DiagnosticsProperty('publicWatchLimit', publicWatchLimit))..add(DiagnosticsProperty('memberWatchLimit', memberWatchLimit))..add(DiagnosticsProperty('publicTransactionLimit', publicTransactionLimit))..add(DiagnosticsProperty('memberTransactionLimit', memberTransactionLimit));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigInternalDHT&&(identical(other.maxFindNodeCount, maxFindNodeCount) || other.maxFindNodeCount == maxFindNodeCount)&&(identical(other.resolveNodeTimeoutMs, resolveNodeTimeoutMs) || other.resolveNodeTimeoutMs == resolveNodeTimeoutMs)&&(identical(other.resolveNodeCount, resolveNodeCount) || other.resolveNodeCount == resolveNodeCount)&&(identical(other.resolveNodeFanout, resolveNodeFanout) || other.resolveNodeFanout == resolveNodeFanout)&&(identical(other.getValueTimeoutMs, getValueTimeoutMs) || other.getValueTimeoutMs == getValueTimeoutMs)&&(identical(other.getValueCount, getValueCount) || other.getValueCount == getValueCount)&&(identical(other.getValueFanout, getValueFanout) || other.getValueFanout == getValueFanout)&&(identical(other.setValueTimeoutMs, setValueTimeoutMs) || other.setValueTimeoutMs == setValueTimeoutMs)&&(identical(other.setValueCount, setValueCount) || other.setValueCount == setValueCount)&&(identical(other.setValueFanout, setValueFanout) || other.setValueFanout == setValueFanout)&&(identical(other.consensusWidth, consensusWidth) || other.consensusWidth == consensusWidth)&&(identical(other.minPeerCount, minPeerCount) || other.minPeerCount == minPeerCount)&&(identical(other.minPeerRefreshTimeMs, minPeerRefreshTimeMs) || other.minPeerRefreshTimeMs == minPeerRefreshTimeMs)&&(identical(other.validateDialInfoReceiptTimeMs, validateDialInfoReceiptTimeMs) || other.validateDialInfoReceiptTimeMs == validateDialInfoReceiptTimeMs)&&(identical(other.maxWatchExpirationMs, maxWatchExpirationMs) || other.maxWatchExpirationMs == maxWatchExpirationMs)&&(identical(other.publicWatchLimit, publicWatchLimit) || other.publicWatchLimit == publicWatchLimit)&&(identical(other.memberWatchLimit, memberWatchLimit) || other.memberWatchLimit == memberWatchLimit)&&(identical(other.publicTransactionLimit, publicTransactionLimit) || other.publicTransactionLimit == publicTransactionLimit)&&(identical(other.memberTransactionLimit, memberTransactionLimit) || other.memberTransactionLimit == memberTransactionLimit));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hashAll([runtimeType,maxFindNodeCount,resolveNodeTimeoutMs,resolveNodeCount,resolveNodeFanout,getValueTimeoutMs,getValueCount,getValueFanout,setValueTimeoutMs,setValueCount,setValueFanout,consensusWidth,minPeerCount,minPeerRefreshTimeMs,validateDialInfoReceiptTimeMs,maxWatchExpirationMs,publicWatchLimit,memberWatchLimit,publicTransactionLimit,memberTransactionLimit]);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalDHT(maxFindNodeCount: $maxFindNodeCount, resolveNodeTimeoutMs: $resolveNodeTimeoutMs, resolveNodeCount: $resolveNodeCount, resolveNodeFanout: $resolveNodeFanout, getValueTimeoutMs: $getValueTimeoutMs, getValueCount: $getValueCount, getValueFanout: $getValueFanout, setValueTimeoutMs: $setValueTimeoutMs, setValueCount: $setValueCount, setValueFanout: $setValueFanout, consensusWidth: $consensusWidth, minPeerCount: $minPeerCount, minPeerRefreshTimeMs: $minPeerRefreshTimeMs, validateDialInfoReceiptTimeMs: $validateDialInfoReceiptTimeMs, maxWatchExpirationMs: $maxWatchExpirationMs, publicWatchLimit: $publicWatchLimit, memberWatchLimit: $memberWatchLimit, publicTransactionLimit: $publicTransactionLimit, memberTransactionLimit: $memberTransactionLimit)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidConfigInternalDHTCopyWith<$Res> implements $VeilidConfigInternalDHTCopyWith<$Res> {
+  factory _$VeilidConfigInternalDHTCopyWith(_VeilidConfigInternalDHT value, $Res Function(_VeilidConfigInternalDHT) _then) = __$VeilidConfigInternalDHTCopyWithImpl;
+@override @useResult
+$Res call({
+ int maxFindNodeCount, int resolveNodeTimeoutMs, int resolveNodeCount, int resolveNodeFanout, int getValueTimeoutMs, int getValueCount, int getValueFanout, int setValueTimeoutMs, int setValueCount, int setValueFanout, int consensusWidth, int minPeerCount, int minPeerRefreshTimeMs, int validateDialInfoReceiptTimeMs, int maxWatchExpirationMs, int publicWatchLimit, int memberWatchLimit, int publicTransactionLimit, int memberTransactionLimit
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidConfigInternalDHTCopyWithImpl<$Res>
+    implements _$VeilidConfigInternalDHTCopyWith<$Res> {
+  __$VeilidConfigInternalDHTCopyWithImpl(this._self, this._then);
+
+  final _VeilidConfigInternalDHT _self;
+  final $Res Function(_VeilidConfigInternalDHT) _then;
+
+/// Create a copy of VeilidConfigInternalDHT
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? maxFindNodeCount = null,Object? resolveNodeTimeoutMs = null,Object? resolveNodeCount = null,Object? resolveNodeFanout = null,Object? getValueTimeoutMs = null,Object? getValueCount = null,Object? getValueFanout = null,Object? setValueTimeoutMs = null,Object? setValueCount = null,Object? setValueFanout = null,Object? consensusWidth = null,Object? minPeerCount = null,Object? minPeerRefreshTimeMs = null,Object? validateDialInfoReceiptTimeMs = null,Object? maxWatchExpirationMs = null,Object? publicWatchLimit = null,Object? memberWatchLimit = null,Object? publicTransactionLimit = null,Object? memberTransactionLimit = null,}) {
+  return _then(_VeilidConfigInternalDHT(
+maxFindNodeCount: null == maxFindNodeCount ? _self.maxFindNodeCount : maxFindNodeCount // ignore: cast_nullable_to_non_nullable
+as int,resolveNodeTimeoutMs: null == resolveNodeTimeoutMs ? _self.resolveNodeTimeoutMs : resolveNodeTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,resolveNodeCount: null == resolveNodeCount ? _self.resolveNodeCount : resolveNodeCount // ignore: cast_nullable_to_non_nullable
+as int,resolveNodeFanout: null == resolveNodeFanout ? _self.resolveNodeFanout : resolveNodeFanout // ignore: cast_nullable_to_non_nullable
+as int,getValueTimeoutMs: null == getValueTimeoutMs ? _self.getValueTimeoutMs : getValueTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,getValueCount: null == getValueCount ? _self.getValueCount : getValueCount // ignore: cast_nullable_to_non_nullable
+as int,getValueFanout: null == getValueFanout ? _self.getValueFanout : getValueFanout // ignore: cast_nullable_to_non_nullable
+as int,setValueTimeoutMs: null == setValueTimeoutMs ? _self.setValueTimeoutMs : setValueTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,setValueCount: null == setValueCount ? _self.setValueCount : setValueCount // ignore: cast_nullable_to_non_nullable
+as int,setValueFanout: null == setValueFanout ? _self.setValueFanout : setValueFanout // ignore: cast_nullable_to_non_nullable
+as int,consensusWidth: null == consensusWidth ? _self.consensusWidth : consensusWidth // ignore: cast_nullable_to_non_nullable
+as int,minPeerCount: null == minPeerCount ? _self.minPeerCount : minPeerCount // ignore: cast_nullable_to_non_nullable
+as int,minPeerRefreshTimeMs: null == minPeerRefreshTimeMs ? _self.minPeerRefreshTimeMs : minPeerRefreshTimeMs // ignore: cast_nullable_to_non_nullable
+as int,validateDialInfoReceiptTimeMs: null == validateDialInfoReceiptTimeMs ? _self.validateDialInfoReceiptTimeMs : validateDialInfoReceiptTimeMs // ignore: cast_nullable_to_non_nullable
+as int,maxWatchExpirationMs: null == maxWatchExpirationMs ? _self.maxWatchExpirationMs : maxWatchExpirationMs // ignore: cast_nullable_to_non_nullable
+as int,publicWatchLimit: null == publicWatchLimit ? _self.publicWatchLimit : publicWatchLimit // ignore: cast_nullable_to_non_nullable
+as int,memberWatchLimit: null == memberWatchLimit ? _self.memberWatchLimit : memberWatchLimit // ignore: cast_nullable_to_non_nullable
+as int,publicTransactionLimit: null == publicTransactionLimit ? _self.publicTransactionLimit : publicTransactionLimit // ignore: cast_nullable_to_non_nullable
+as int,memberTransactionLimit: null == memberTransactionLimit ? _self.memberTransactionLimit : memberTransactionLimit // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
+mixin _$VeilidConfigInternalNetwork implements DiagnosticableTreeMixin {
+
+ int get connectionInitialTimeoutMs; int get connectionInactivityTimeoutMs; int get maxConnectionsPerIp4; int get maxConnectionsPerIp6Prefix; int get maxConnectionsPerIp6PrefixSize; int get maxConnectionFrequencyPerMin; int get clientAllowlistTimeoutMs; int get reverseConnectionReceiptTimeMs; int get holePunchReceiptTimeMs; int get restrictedNatRetries; VeilidConfigInternalRPC get rpc; VeilidConfigInternalDHT get dht; VeilidConfigInternalProtocol get protocol;
+/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalNetworkCopyWith<VeilidConfigInternalNetwork> get copyWith => _$VeilidConfigInternalNetworkCopyWithImpl<VeilidConfigInternalNetwork>(this as VeilidConfigInternalNetwork, _$identity);
+
+  /// Serializes this VeilidConfigInternalNetwork to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalNetwork'))
+    ..add(DiagnosticsProperty('connectionInitialTimeoutMs', connectionInitialTimeoutMs))..add(DiagnosticsProperty('connectionInactivityTimeoutMs', connectionInactivityTimeoutMs))..add(DiagnosticsProperty('maxConnectionsPerIp4', maxConnectionsPerIp4))..add(DiagnosticsProperty('maxConnectionsPerIp6Prefix', maxConnectionsPerIp6Prefix))..add(DiagnosticsProperty('maxConnectionsPerIp6PrefixSize', maxConnectionsPerIp6PrefixSize))..add(DiagnosticsProperty('maxConnectionFrequencyPerMin', maxConnectionFrequencyPerMin))..add(DiagnosticsProperty('clientAllowlistTimeoutMs', clientAllowlistTimeoutMs))..add(DiagnosticsProperty('reverseConnectionReceiptTimeMs', reverseConnectionReceiptTimeMs))..add(DiagnosticsProperty('holePunchReceiptTimeMs', holePunchReceiptTimeMs))..add(DiagnosticsProperty('restrictedNatRetries', restrictedNatRetries))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('protocol', protocol));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigInternalNetwork&&(identical(other.connectionInitialTimeoutMs, connectionInitialTimeoutMs) || other.connectionInitialTimeoutMs == connectionInitialTimeoutMs)&&(identical(other.connectionInactivityTimeoutMs, connectionInactivityTimeoutMs) || other.connectionInactivityTimeoutMs == connectionInactivityTimeoutMs)&&(identical(other.maxConnectionsPerIp4, maxConnectionsPerIp4) || other.maxConnectionsPerIp4 == maxConnectionsPerIp4)&&(identical(other.maxConnectionsPerIp6Prefix, maxConnectionsPerIp6Prefix) || other.maxConnectionsPerIp6Prefix == maxConnectionsPerIp6Prefix)&&(identical(other.maxConnectionsPerIp6PrefixSize, maxConnectionsPerIp6PrefixSize) || other.maxConnectionsPerIp6PrefixSize == maxConnectionsPerIp6PrefixSize)&&(identical(other.maxConnectionFrequencyPerMin, maxConnectionFrequencyPerMin) || other.maxConnectionFrequencyPerMin == maxConnectionFrequencyPerMin)&&(identical(other.clientAllowlistTimeoutMs, clientAllowlistTimeoutMs) || other.clientAllowlistTimeoutMs == clientAllowlistTimeoutMs)&&(identical(other.reverseConnectionReceiptTimeMs, reverseConnectionReceiptTimeMs) || other.reverseConnectionReceiptTimeMs == reverseConnectionReceiptTimeMs)&&(identical(other.holePunchReceiptTimeMs, holePunchReceiptTimeMs) || other.holePunchReceiptTimeMs == holePunchReceiptTimeMs)&&(identical(other.restrictedNatRetries, restrictedNatRetries) || other.restrictedNatRetries == restrictedNatRetries)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&(identical(other.protocol, protocol) || other.protocol == protocol));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,connectionInitialTimeoutMs,connectionInactivityTimeoutMs,maxConnectionsPerIp4,maxConnectionsPerIp6Prefix,maxConnectionsPerIp6PrefixSize,maxConnectionFrequencyPerMin,clientAllowlistTimeoutMs,reverseConnectionReceiptTimeMs,holePunchReceiptTimeMs,restrictedNatRetries,rpc,dht,protocol);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalNetwork(connectionInitialTimeoutMs: $connectionInitialTimeoutMs, connectionInactivityTimeoutMs: $connectionInactivityTimeoutMs, maxConnectionsPerIp4: $maxConnectionsPerIp4, maxConnectionsPerIp6Prefix: $maxConnectionsPerIp6Prefix, maxConnectionsPerIp6PrefixSize: $maxConnectionsPerIp6PrefixSize, maxConnectionFrequencyPerMin: $maxConnectionFrequencyPerMin, clientAllowlistTimeoutMs: $clientAllowlistTimeoutMs, reverseConnectionReceiptTimeMs: $reverseConnectionReceiptTimeMs, holePunchReceiptTimeMs: $holePunchReceiptTimeMs, restrictedNatRetries: $restrictedNatRetries, rpc: $rpc, dht: $dht, protocol: $protocol)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidConfigInternalNetworkCopyWith<$Res>  {
+  factory $VeilidConfigInternalNetworkCopyWith(VeilidConfigInternalNetwork value, $Res Function(VeilidConfigInternalNetwork) _then) = _$VeilidConfigInternalNetworkCopyWithImpl;
+@useResult
+$Res call({
+ int connectionInitialTimeoutMs, int connectionInactivityTimeoutMs, int maxConnectionsPerIp4, int maxConnectionsPerIp6Prefix, int maxConnectionsPerIp6PrefixSize, int maxConnectionFrequencyPerMin, int clientAllowlistTimeoutMs, int reverseConnectionReceiptTimeMs, int holePunchReceiptTimeMs, int restrictedNatRetries, VeilidConfigInternalRPC rpc, VeilidConfigInternalDHT dht, VeilidConfigInternalProtocol protocol
+});
+
+
+$VeilidConfigInternalRPCCopyWith<$Res> get rpc;$VeilidConfigInternalDHTCopyWith<$Res> get dht;$VeilidConfigInternalProtocolCopyWith<$Res> get protocol;
+
+}
+/// @nodoc
+class _$VeilidConfigInternalNetworkCopyWithImpl<$Res>
+    implements $VeilidConfigInternalNetworkCopyWith<$Res> {
+  _$VeilidConfigInternalNetworkCopyWithImpl(this._self, this._then);
+
+  final VeilidConfigInternalNetwork _self;
+  final $Res Function(VeilidConfigInternalNetwork) _then;
+
+/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? connectionInitialTimeoutMs = null,Object? connectionInactivityTimeoutMs = null,Object? maxConnectionsPerIp4 = null,Object? maxConnectionsPerIp6Prefix = null,Object? maxConnectionsPerIp6PrefixSize = null,Object? maxConnectionFrequencyPerMin = null,Object? clientAllowlistTimeoutMs = null,Object? reverseConnectionReceiptTimeMs = null,Object? holePunchReceiptTimeMs = null,Object? restrictedNatRetries = null,Object? rpc = null,Object? dht = null,Object? protocol = null,}) {
+  return _then(_self.copyWith(
+connectionInitialTimeoutMs: null == connectionInitialTimeoutMs ? _self.connectionInitialTimeoutMs : connectionInitialTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,connectionInactivityTimeoutMs: null == connectionInactivityTimeoutMs ? _self.connectionInactivityTimeoutMs : connectionInactivityTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,maxConnectionsPerIp4: null == maxConnectionsPerIp4 ? _self.maxConnectionsPerIp4 : maxConnectionsPerIp4 // ignore: cast_nullable_to_non_nullable
+as int,maxConnectionsPerIp6Prefix: null == maxConnectionsPerIp6Prefix ? _self.maxConnectionsPerIp6Prefix : maxConnectionsPerIp6Prefix // ignore: cast_nullable_to_non_nullable
+as int,maxConnectionsPerIp6PrefixSize: null == maxConnectionsPerIp6PrefixSize ? _self.maxConnectionsPerIp6PrefixSize : maxConnectionsPerIp6PrefixSize // ignore: cast_nullable_to_non_nullable
+as int,maxConnectionFrequencyPerMin: null == maxConnectionFrequencyPerMin ? _self.maxConnectionFrequencyPerMin : maxConnectionFrequencyPerMin // ignore: cast_nullable_to_non_nullable
+as int,clientAllowlistTimeoutMs: null == clientAllowlistTimeoutMs ? _self.clientAllowlistTimeoutMs : clientAllowlistTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,reverseConnectionReceiptTimeMs: null == reverseConnectionReceiptTimeMs ? _self.reverseConnectionReceiptTimeMs : reverseConnectionReceiptTimeMs // ignore: cast_nullable_to_non_nullable
+as int,holePunchReceiptTimeMs: null == holePunchReceiptTimeMs ? _self.holePunchReceiptTimeMs : holePunchReceiptTimeMs // ignore: cast_nullable_to_non_nullable
+as int,restrictedNatRetries: null == restrictedNatRetries ? _self.restrictedNatRetries : restrictedNatRetries // ignore: cast_nullable_to_non_nullable
+as int,rpc: null == rpc ? _self.rpc : rpc // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalRPC,dht: null == dht ? _self.dht : dht // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalDHT,protocol: null == protocol ? _self.protocol : protocol // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalProtocol,
+  ));
+}
+/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalRPCCopyWith<$Res> get rpc {
+  
+  return $VeilidConfigInternalRPCCopyWith<$Res>(_self.rpc, (value) {
+    return _then(_self.copyWith(rpc: value));
+  });
+}/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalDHTCopyWith<$Res> get dht {
+  
+  return $VeilidConfigInternalDHTCopyWith<$Res>(_self.dht, (value) {
+    return _then(_self.copyWith(dht: value));
+  });
+}/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalProtocolCopyWith<$Res> get protocol {
+  
+  return $VeilidConfigInternalProtocolCopyWith<$Res>(_self.protocol, (value) {
+    return _then(_self.copyWith(protocol: value));
+  });
+}
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidConfigInternalNetwork].
+extension VeilidConfigInternalNetworkPatterns on VeilidConfigInternalNetwork {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidConfigInternalNetwork value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalNetwork() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidConfigInternalNetwork value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalNetwork():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidConfigInternalNetwork value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternalNetwork() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int connectionInitialTimeoutMs,  int connectionInactivityTimeoutMs,  int maxConnectionsPerIp4,  int maxConnectionsPerIp6Prefix,  int maxConnectionsPerIp6PrefixSize,  int maxConnectionFrequencyPerMin,  int clientAllowlistTimeoutMs,  int reverseConnectionReceiptTimeMs,  int holePunchReceiptTimeMs,  int restrictedNatRetries,  VeilidConfigInternalRPC rpc,  VeilidConfigInternalDHT dht,  VeilidConfigInternalProtocol protocol)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalNetwork() when $default != null:
+return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeoutMs,_that.maxConnectionsPerIp4,_that.maxConnectionsPerIp6Prefix,_that.maxConnectionsPerIp6PrefixSize,_that.maxConnectionFrequencyPerMin,_that.clientAllowlistTimeoutMs,_that.reverseConnectionReceiptTimeMs,_that.holePunchReceiptTimeMs,_that.restrictedNatRetries,_that.rpc,_that.dht,_that.protocol);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int connectionInitialTimeoutMs,  int connectionInactivityTimeoutMs,  int maxConnectionsPerIp4,  int maxConnectionsPerIp6Prefix,  int maxConnectionsPerIp6PrefixSize,  int maxConnectionFrequencyPerMin,  int clientAllowlistTimeoutMs,  int reverseConnectionReceiptTimeMs,  int holePunchReceiptTimeMs,  int restrictedNatRetries,  VeilidConfigInternalRPC rpc,  VeilidConfigInternalDHT dht,  VeilidConfigInternalProtocol protocol)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalNetwork():
+return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeoutMs,_that.maxConnectionsPerIp4,_that.maxConnectionsPerIp6Prefix,_that.maxConnectionsPerIp6PrefixSize,_that.maxConnectionFrequencyPerMin,_that.clientAllowlistTimeoutMs,_that.reverseConnectionReceiptTimeMs,_that.holePunchReceiptTimeMs,_that.restrictedNatRetries,_that.rpc,_that.dht,_that.protocol);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int connectionInitialTimeoutMs,  int connectionInactivityTimeoutMs,  int maxConnectionsPerIp4,  int maxConnectionsPerIp6Prefix,  int maxConnectionsPerIp6PrefixSize,  int maxConnectionFrequencyPerMin,  int clientAllowlistTimeoutMs,  int reverseConnectionReceiptTimeMs,  int holePunchReceiptTimeMs,  int restrictedNatRetries,  VeilidConfigInternalRPC rpc,  VeilidConfigInternalDHT dht,  VeilidConfigInternalProtocol protocol)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternalNetwork() when $default != null:
+return $default(_that.connectionInitialTimeoutMs,_that.connectionInactivityTimeoutMs,_that.maxConnectionsPerIp4,_that.maxConnectionsPerIp6Prefix,_that.maxConnectionsPerIp6PrefixSize,_that.maxConnectionFrequencyPerMin,_that.clientAllowlistTimeoutMs,_that.reverseConnectionReceiptTimeMs,_that.holePunchReceiptTimeMs,_that.restrictedNatRetries,_that.rpc,_that.dht,_that.protocol);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidConfigInternalNetwork with DiagnosticableTreeMixin implements VeilidConfigInternalNetwork {
+  const _VeilidConfigInternalNetwork({required this.connectionInitialTimeoutMs, required this.connectionInactivityTimeoutMs, required this.maxConnectionsPerIp4, required this.maxConnectionsPerIp6Prefix, required this.maxConnectionsPerIp6PrefixSize, required this.maxConnectionFrequencyPerMin, required this.clientAllowlistTimeoutMs, required this.reverseConnectionReceiptTimeMs, required this.holePunchReceiptTimeMs, required this.restrictedNatRetries, required this.rpc, required this.dht, required this.protocol});
+  factory _VeilidConfigInternalNetwork.fromJson(Map<String, dynamic> json) => _$VeilidConfigInternalNetworkFromJson(json);
+
+@override final  int connectionInitialTimeoutMs;
+@override final  int connectionInactivityTimeoutMs;
+@override final  int maxConnectionsPerIp4;
+@override final  int maxConnectionsPerIp6Prefix;
+@override final  int maxConnectionsPerIp6PrefixSize;
+@override final  int maxConnectionFrequencyPerMin;
+@override final  int clientAllowlistTimeoutMs;
+@override final  int reverseConnectionReceiptTimeMs;
+@override final  int holePunchReceiptTimeMs;
+@override final  int restrictedNatRetries;
+@override final  VeilidConfigInternalRPC rpc;
+@override final  VeilidConfigInternalDHT dht;
+@override final  VeilidConfigInternalProtocol protocol;
+
+/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidConfigInternalNetworkCopyWith<_VeilidConfigInternalNetwork> get copyWith => __$VeilidConfigInternalNetworkCopyWithImpl<_VeilidConfigInternalNetwork>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidConfigInternalNetworkToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternalNetwork'))
+    ..add(DiagnosticsProperty('connectionInitialTimeoutMs', connectionInitialTimeoutMs))..add(DiagnosticsProperty('connectionInactivityTimeoutMs', connectionInactivityTimeoutMs))..add(DiagnosticsProperty('maxConnectionsPerIp4', maxConnectionsPerIp4))..add(DiagnosticsProperty('maxConnectionsPerIp6Prefix', maxConnectionsPerIp6Prefix))..add(DiagnosticsProperty('maxConnectionsPerIp6PrefixSize', maxConnectionsPerIp6PrefixSize))..add(DiagnosticsProperty('maxConnectionFrequencyPerMin', maxConnectionFrequencyPerMin))..add(DiagnosticsProperty('clientAllowlistTimeoutMs', clientAllowlistTimeoutMs))..add(DiagnosticsProperty('reverseConnectionReceiptTimeMs', reverseConnectionReceiptTimeMs))..add(DiagnosticsProperty('holePunchReceiptTimeMs', holePunchReceiptTimeMs))..add(DiagnosticsProperty('restrictedNatRetries', restrictedNatRetries))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('protocol', protocol));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigInternalNetwork&&(identical(other.connectionInitialTimeoutMs, connectionInitialTimeoutMs) || other.connectionInitialTimeoutMs == connectionInitialTimeoutMs)&&(identical(other.connectionInactivityTimeoutMs, connectionInactivityTimeoutMs) || other.connectionInactivityTimeoutMs == connectionInactivityTimeoutMs)&&(identical(other.maxConnectionsPerIp4, maxConnectionsPerIp4) || other.maxConnectionsPerIp4 == maxConnectionsPerIp4)&&(identical(other.maxConnectionsPerIp6Prefix, maxConnectionsPerIp6Prefix) || other.maxConnectionsPerIp6Prefix == maxConnectionsPerIp6Prefix)&&(identical(other.maxConnectionsPerIp6PrefixSize, maxConnectionsPerIp6PrefixSize) || other.maxConnectionsPerIp6PrefixSize == maxConnectionsPerIp6PrefixSize)&&(identical(other.maxConnectionFrequencyPerMin, maxConnectionFrequencyPerMin) || other.maxConnectionFrequencyPerMin == maxConnectionFrequencyPerMin)&&(identical(other.clientAllowlistTimeoutMs, clientAllowlistTimeoutMs) || other.clientAllowlistTimeoutMs == clientAllowlistTimeoutMs)&&(identical(other.reverseConnectionReceiptTimeMs, reverseConnectionReceiptTimeMs) || other.reverseConnectionReceiptTimeMs == reverseConnectionReceiptTimeMs)&&(identical(other.holePunchReceiptTimeMs, holePunchReceiptTimeMs) || other.holePunchReceiptTimeMs == holePunchReceiptTimeMs)&&(identical(other.restrictedNatRetries, restrictedNatRetries) || other.restrictedNatRetries == restrictedNatRetries)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&(identical(other.protocol, protocol) || other.protocol == protocol));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,connectionInitialTimeoutMs,connectionInactivityTimeoutMs,maxConnectionsPerIp4,maxConnectionsPerIp6Prefix,maxConnectionsPerIp6PrefixSize,maxConnectionFrequencyPerMin,clientAllowlistTimeoutMs,reverseConnectionReceiptTimeMs,holePunchReceiptTimeMs,restrictedNatRetries,rpc,dht,protocol);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternalNetwork(connectionInitialTimeoutMs: $connectionInitialTimeoutMs, connectionInactivityTimeoutMs: $connectionInactivityTimeoutMs, maxConnectionsPerIp4: $maxConnectionsPerIp4, maxConnectionsPerIp6Prefix: $maxConnectionsPerIp6Prefix, maxConnectionsPerIp6PrefixSize: $maxConnectionsPerIp6PrefixSize, maxConnectionFrequencyPerMin: $maxConnectionFrequencyPerMin, clientAllowlistTimeoutMs: $clientAllowlistTimeoutMs, reverseConnectionReceiptTimeMs: $reverseConnectionReceiptTimeMs, holePunchReceiptTimeMs: $holePunchReceiptTimeMs, restrictedNatRetries: $restrictedNatRetries, rpc: $rpc, dht: $dht, protocol: $protocol)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidConfigInternalNetworkCopyWith<$Res> implements $VeilidConfigInternalNetworkCopyWith<$Res> {
+  factory _$VeilidConfigInternalNetworkCopyWith(_VeilidConfigInternalNetwork value, $Res Function(_VeilidConfigInternalNetwork) _then) = __$VeilidConfigInternalNetworkCopyWithImpl;
+@override @useResult
+$Res call({
+ int connectionInitialTimeoutMs, int connectionInactivityTimeoutMs, int maxConnectionsPerIp4, int maxConnectionsPerIp6Prefix, int maxConnectionsPerIp6PrefixSize, int maxConnectionFrequencyPerMin, int clientAllowlistTimeoutMs, int reverseConnectionReceiptTimeMs, int holePunchReceiptTimeMs, int restrictedNatRetries, VeilidConfigInternalRPC rpc, VeilidConfigInternalDHT dht, VeilidConfigInternalProtocol protocol
+});
+
+
+@override $VeilidConfigInternalRPCCopyWith<$Res> get rpc;@override $VeilidConfigInternalDHTCopyWith<$Res> get dht;@override $VeilidConfigInternalProtocolCopyWith<$Res> get protocol;
+
+}
+/// @nodoc
+class __$VeilidConfigInternalNetworkCopyWithImpl<$Res>
+    implements _$VeilidConfigInternalNetworkCopyWith<$Res> {
+  __$VeilidConfigInternalNetworkCopyWithImpl(this._self, this._then);
+
+  final _VeilidConfigInternalNetwork _self;
+  final $Res Function(_VeilidConfigInternalNetwork) _then;
+
+/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? connectionInitialTimeoutMs = null,Object? connectionInactivityTimeoutMs = null,Object? maxConnectionsPerIp4 = null,Object? maxConnectionsPerIp6Prefix = null,Object? maxConnectionsPerIp6PrefixSize = null,Object? maxConnectionFrequencyPerMin = null,Object? clientAllowlistTimeoutMs = null,Object? reverseConnectionReceiptTimeMs = null,Object? holePunchReceiptTimeMs = null,Object? restrictedNatRetries = null,Object? rpc = null,Object? dht = null,Object? protocol = null,}) {
+  return _then(_VeilidConfigInternalNetwork(
+connectionInitialTimeoutMs: null == connectionInitialTimeoutMs ? _self.connectionInitialTimeoutMs : connectionInitialTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,connectionInactivityTimeoutMs: null == connectionInactivityTimeoutMs ? _self.connectionInactivityTimeoutMs : connectionInactivityTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,maxConnectionsPerIp4: null == maxConnectionsPerIp4 ? _self.maxConnectionsPerIp4 : maxConnectionsPerIp4 // ignore: cast_nullable_to_non_nullable
+as int,maxConnectionsPerIp6Prefix: null == maxConnectionsPerIp6Prefix ? _self.maxConnectionsPerIp6Prefix : maxConnectionsPerIp6Prefix // ignore: cast_nullable_to_non_nullable
+as int,maxConnectionsPerIp6PrefixSize: null == maxConnectionsPerIp6PrefixSize ? _self.maxConnectionsPerIp6PrefixSize : maxConnectionsPerIp6PrefixSize // ignore: cast_nullable_to_non_nullable
+as int,maxConnectionFrequencyPerMin: null == maxConnectionFrequencyPerMin ? _self.maxConnectionFrequencyPerMin : maxConnectionFrequencyPerMin // ignore: cast_nullable_to_non_nullable
+as int,clientAllowlistTimeoutMs: null == clientAllowlistTimeoutMs ? _self.clientAllowlistTimeoutMs : clientAllowlistTimeoutMs // ignore: cast_nullable_to_non_nullable
+as int,reverseConnectionReceiptTimeMs: null == reverseConnectionReceiptTimeMs ? _self.reverseConnectionReceiptTimeMs : reverseConnectionReceiptTimeMs // ignore: cast_nullable_to_non_nullable
+as int,holePunchReceiptTimeMs: null == holePunchReceiptTimeMs ? _self.holePunchReceiptTimeMs : holePunchReceiptTimeMs // ignore: cast_nullable_to_non_nullable
+as int,restrictedNatRetries: null == restrictedNatRetries ? _self.restrictedNatRetries : restrictedNatRetries // ignore: cast_nullable_to_non_nullable
+as int,rpc: null == rpc ? _self.rpc : rpc // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalRPC,dht: null == dht ? _self.dht : dht // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalDHT,protocol: null == protocol ? _self.protocol : protocol // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalProtocol,
+  ));
+}
+
+/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalRPCCopyWith<$Res> get rpc {
+  
+  return $VeilidConfigInternalRPCCopyWith<$Res>(_self.rpc, (value) {
+    return _then(_self.copyWith(rpc: value));
+  });
+}/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalDHTCopyWith<$Res> get dht {
+  
+  return $VeilidConfigInternalDHTCopyWith<$Res>(_self.dht, (value) {
+    return _then(_self.copyWith(dht: value));
+  });
+}/// Create a copy of VeilidConfigInternalNetwork
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalProtocolCopyWith<$Res> get protocol {
+  
+  return $VeilidConfigInternalProtocolCopyWith<$Res>(_self.protocol, (value) {
+    return _then(_self.copyWith(protocol: value));
+  });
+}
+}
+
+
+/// @nodoc
+mixin _$VeilidConfigInternal implements DiagnosticableTreeMixin {
+
+ VeilidConfigInternalNetwork get network;
+/// Create a copy of VeilidConfigInternal
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalCopyWith<VeilidConfigInternal> get copyWith => _$VeilidConfigInternalCopyWithImpl<VeilidConfigInternal>(this as VeilidConfigInternal, _$identity);
+
+  /// Serializes this VeilidConfigInternal to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternal'))
+    ..add(DiagnosticsProperty('network', network));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigInternal&&(identical(other.network, network) || other.network == network));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,network);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternal(network: $network)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidConfigInternalCopyWith<$Res>  {
+  factory $VeilidConfigInternalCopyWith(VeilidConfigInternal value, $Res Function(VeilidConfigInternal) _then) = _$VeilidConfigInternalCopyWithImpl;
+@useResult
+$Res call({
+ VeilidConfigInternalNetwork network
+});
+
+
+$VeilidConfigInternalNetworkCopyWith<$Res> get network;
+
+}
+/// @nodoc
+class _$VeilidConfigInternalCopyWithImpl<$Res>
+    implements $VeilidConfigInternalCopyWith<$Res> {
+  _$VeilidConfigInternalCopyWithImpl(this._self, this._then);
+
+  final VeilidConfigInternal _self;
+  final $Res Function(VeilidConfigInternal) _then;
+
+/// Create a copy of VeilidConfigInternal
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? network = null,}) {
+  return _then(_self.copyWith(
+network: null == network ? _self.network : network // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalNetwork,
+  ));
+}
+/// Create a copy of VeilidConfigInternal
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalNetworkCopyWith<$Res> get network {
+  
+  return $VeilidConfigInternalNetworkCopyWith<$Res>(_self.network, (value) {
+    return _then(_self.copyWith(network: value));
+  });
+}
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidConfigInternal].
+extension VeilidConfigInternalPatterns on VeilidConfigInternal {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidConfigInternal value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternal() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidConfigInternal value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternal():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidConfigInternal value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidConfigInternal() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidConfigInternalNetwork network)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternal() when $default != null:
+return $default(_that.network);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidConfigInternalNetwork network)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternal():
+return $default(_that.network);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidConfigInternalNetwork network)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidConfigInternal() when $default != null:
+return $default(_that.network);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidConfigInternal with DiagnosticableTreeMixin implements VeilidConfigInternal {
+  const _VeilidConfigInternal({required this.network});
+  factory _VeilidConfigInternal.fromJson(Map<String, dynamic> json) => _$VeilidConfigInternalFromJson(json);
+
+@override final  VeilidConfigInternalNetwork network;
+
+/// Create a copy of VeilidConfigInternal
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidConfigInternalCopyWith<_VeilidConfigInternal> get copyWith => __$VeilidConfigInternalCopyWithImpl<_VeilidConfigInternal>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidConfigInternalToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidConfigInternal'))
+    ..add(DiagnosticsProperty('network', network));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigInternal&&(identical(other.network, network) || other.network == network));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,network);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidConfigInternal(network: $network)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidConfigInternalCopyWith<$Res> implements $VeilidConfigInternalCopyWith<$Res> {
+  factory _$VeilidConfigInternalCopyWith(_VeilidConfigInternal value, $Res Function(_VeilidConfigInternal) _then) = __$VeilidConfigInternalCopyWithImpl;
+@override @useResult
+$Res call({
+ VeilidConfigInternalNetwork network
+});
+
+
+@override $VeilidConfigInternalNetworkCopyWith<$Res> get network;
+
+}
+/// @nodoc
+class __$VeilidConfigInternalCopyWithImpl<$Res>
+    implements _$VeilidConfigInternalCopyWith<$Res> {
+  __$VeilidConfigInternalCopyWithImpl(this._self, this._then);
+
+  final _VeilidConfigInternal _self;
+  final $Res Function(_VeilidConfigInternal) _then;
+
+/// Create a copy of VeilidConfigInternal
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? network = null,}) {
+  return _then(_VeilidConfigInternal(
+network: null == network ? _self.network : network // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternalNetwork,
+  ));
+}
+
+/// Create a copy of VeilidConfigInternal
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalNetworkCopyWith<$Res> get network {
+  
+  return $VeilidConfigInternalNetworkCopyWith<$Res>(_self.network, (value) {
+    return _then(_self.copyWith(network: value));
+  });
+}
+}
+
+
+/// @nodoc
 mixin _$VeilidConfig implements DiagnosticableTreeMixin {
 
- String get programName; String get namespace; VeilidConfigCapabilities get capabilities; VeilidConfigProtectedStore get protectedStore; VeilidConfigTableStore get tableStore; VeilidConfigBlockStore get blockStore; VeilidConfigNetwork get network;
+ String get programName; String get namespace; VeilidConfigCapabilities get capabilities; VeilidConfigProtectedStore get protectedStore; VeilidConfigTableStore get tableStore; VeilidConfigBlockStore get blockStore; VeilidConfigNetwork get network; VeilidConfigInternal? get internal;
 /// Create a copy of VeilidConfig
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -7477,21 +9187,21 @@ $VeilidConfigCopyWith<VeilidConfig> get copyWith => _$VeilidConfigCopyWithImpl<V
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfig'))
-    ..add(DiagnosticsProperty('programName', programName))..add(DiagnosticsProperty('namespace', namespace))..add(DiagnosticsProperty('capabilities', capabilities))..add(DiagnosticsProperty('protectedStore', protectedStore))..add(DiagnosticsProperty('tableStore', tableStore))..add(DiagnosticsProperty('blockStore', blockStore))..add(DiagnosticsProperty('network', network));
+    ..add(DiagnosticsProperty('programName', programName))..add(DiagnosticsProperty('namespace', namespace))..add(DiagnosticsProperty('capabilities', capabilities))..add(DiagnosticsProperty('protectedStore', protectedStore))..add(DiagnosticsProperty('tableStore', tableStore))..add(DiagnosticsProperty('blockStore', blockStore))..add(DiagnosticsProperty('network', network))..add(DiagnosticsProperty('internal', internal));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfig&&(identical(other.programName, programName) || other.programName == programName)&&(identical(other.namespace, namespace) || other.namespace == namespace)&&(identical(other.capabilities, capabilities) || other.capabilities == capabilities)&&(identical(other.protectedStore, protectedStore) || other.protectedStore == protectedStore)&&(identical(other.tableStore, tableStore) || other.tableStore == tableStore)&&(identical(other.blockStore, blockStore) || other.blockStore == blockStore)&&(identical(other.network, network) || other.network == network));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfig&&(identical(other.programName, programName) || other.programName == programName)&&(identical(other.namespace, namespace) || other.namespace == namespace)&&(identical(other.capabilities, capabilities) || other.capabilities == capabilities)&&(identical(other.protectedStore, protectedStore) || other.protectedStore == protectedStore)&&(identical(other.tableStore, tableStore) || other.tableStore == tableStore)&&(identical(other.blockStore, blockStore) || other.blockStore == blockStore)&&(identical(other.network, network) || other.network == network)&&(identical(other.internal, internal) || other.internal == internal));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,programName,namespace,capabilities,protectedStore,tableStore,blockStore,network);
+int get hashCode => Object.hash(runtimeType,programName,namespace,capabilities,protectedStore,tableStore,blockStore,network,internal);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfig(programName: $programName, namespace: $namespace, capabilities: $capabilities, protectedStore: $protectedStore, tableStore: $tableStore, blockStore: $blockStore, network: $network)';
+  return 'VeilidConfig(programName: $programName, namespace: $namespace, capabilities: $capabilities, protectedStore: $protectedStore, tableStore: $tableStore, blockStore: $blockStore, network: $network, internal: $internal)';
 }
 
 
@@ -7502,11 +9212,11 @@ abstract mixin class $VeilidConfigCopyWith<$Res>  {
   factory $VeilidConfigCopyWith(VeilidConfig value, $Res Function(VeilidConfig) _then) = _$VeilidConfigCopyWithImpl;
 @useResult
 $Res call({
- String programName, String namespace, VeilidConfigCapabilities capabilities, VeilidConfigProtectedStore protectedStore, VeilidConfigTableStore tableStore, VeilidConfigBlockStore blockStore, VeilidConfigNetwork network
+ String programName, String namespace, VeilidConfigCapabilities capabilities, VeilidConfigProtectedStore protectedStore, VeilidConfigTableStore tableStore, VeilidConfigBlockStore blockStore, VeilidConfigNetwork network, VeilidConfigInternal? internal
 });
 
 
-$VeilidConfigCapabilitiesCopyWith<$Res> get capabilities;$VeilidConfigProtectedStoreCopyWith<$Res> get protectedStore;$VeilidConfigTableStoreCopyWith<$Res> get tableStore;$VeilidConfigBlockStoreCopyWith<$Res> get blockStore;$VeilidConfigNetworkCopyWith<$Res> get network;
+$VeilidConfigCapabilitiesCopyWith<$Res> get capabilities;$VeilidConfigProtectedStoreCopyWith<$Res> get protectedStore;$VeilidConfigTableStoreCopyWith<$Res> get tableStore;$VeilidConfigBlockStoreCopyWith<$Res> get blockStore;$VeilidConfigNetworkCopyWith<$Res> get network;$VeilidConfigInternalCopyWith<$Res>? get internal;
 
 }
 /// @nodoc
@@ -7519,7 +9229,7 @@ class _$VeilidConfigCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfig
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? programName = null,Object? namespace = null,Object? capabilities = null,Object? protectedStore = null,Object? tableStore = null,Object? blockStore = null,Object? network = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? programName = null,Object? namespace = null,Object? capabilities = null,Object? protectedStore = null,Object? tableStore = null,Object? blockStore = null,Object? network = null,Object? internal = freezed,}) {
   return _then(_self.copyWith(
 programName: null == programName ? _self.programName : programName // ignore: cast_nullable_to_non_nullable
 as String,namespace: null == namespace ? _self.namespace : namespace // ignore: cast_nullable_to_non_nullable
@@ -7528,7 +9238,8 @@ as VeilidConfigCapabilities,protectedStore: null == protectedStore ? _self.prote
 as VeilidConfigProtectedStore,tableStore: null == tableStore ? _self.tableStore : tableStore // ignore: cast_nullable_to_non_nullable
 as VeilidConfigTableStore,blockStore: null == blockStore ? _self.blockStore : blockStore // ignore: cast_nullable_to_non_nullable
 as VeilidConfigBlockStore,network: null == network ? _self.network : network // ignore: cast_nullable_to_non_nullable
-as VeilidConfigNetwork,
+as VeilidConfigNetwork,internal: freezed == internal ? _self.internal : internal // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternal?,
   ));
 }
 /// Create a copy of VeilidConfig
@@ -7575,6 +9286,18 @@ $VeilidConfigNetworkCopyWith<$Res> get network {
   
   return $VeilidConfigNetworkCopyWith<$Res>(_self.network, (value) {
     return _then(_self.copyWith(network: value));
+  });
+}/// Create a copy of VeilidConfig
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalCopyWith<$Res>? get internal {
+    if (_self.internal == null) {
+    return null;
+  }
+
+  return $VeilidConfigInternalCopyWith<$Res>(_self.internal!, (value) {
+    return _then(_self.copyWith(internal: value));
   });
 }
 }
@@ -7655,10 +9378,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String programName,  String namespace,  VeilidConfigCapabilities capabilities,  VeilidConfigProtectedStore protectedStore,  VeilidConfigTableStore tableStore,  VeilidConfigBlockStore blockStore,  VeilidConfigNetwork network)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String programName,  String namespace,  VeilidConfigCapabilities capabilities,  VeilidConfigProtectedStore protectedStore,  VeilidConfigTableStore tableStore,  VeilidConfigBlockStore blockStore,  VeilidConfigNetwork network,  VeilidConfigInternal? internal)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfig() when $default != null:
-return $default(_that.programName,_that.namespace,_that.capabilities,_that.protectedStore,_that.tableStore,_that.blockStore,_that.network);case _:
+return $default(_that.programName,_that.namespace,_that.capabilities,_that.protectedStore,_that.tableStore,_that.blockStore,_that.network,_that.internal);case _:
   return orElse();
 
 }
@@ -7676,10 +9399,10 @@ return $default(_that.programName,_that.namespace,_that.capabilities,_that.prote
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String programName,  String namespace,  VeilidConfigCapabilities capabilities,  VeilidConfigProtectedStore protectedStore,  VeilidConfigTableStore tableStore,  VeilidConfigBlockStore blockStore,  VeilidConfigNetwork network)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String programName,  String namespace,  VeilidConfigCapabilities capabilities,  VeilidConfigProtectedStore protectedStore,  VeilidConfigTableStore tableStore,  VeilidConfigBlockStore blockStore,  VeilidConfigNetwork network,  VeilidConfigInternal? internal)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfig():
-return $default(_that.programName,_that.namespace,_that.capabilities,_that.protectedStore,_that.tableStore,_that.blockStore,_that.network);}
+return $default(_that.programName,_that.namespace,_that.capabilities,_that.protectedStore,_that.tableStore,_that.blockStore,_that.network,_that.internal);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -7693,10 +9416,10 @@ return $default(_that.programName,_that.namespace,_that.capabilities,_that.prote
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String programName,  String namespace,  VeilidConfigCapabilities capabilities,  VeilidConfigProtectedStore protectedStore,  VeilidConfigTableStore tableStore,  VeilidConfigBlockStore blockStore,  VeilidConfigNetwork network)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String programName,  String namespace,  VeilidConfigCapabilities capabilities,  VeilidConfigProtectedStore protectedStore,  VeilidConfigTableStore tableStore,  VeilidConfigBlockStore blockStore,  VeilidConfigNetwork network,  VeilidConfigInternal? internal)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfig() when $default != null:
-return $default(_that.programName,_that.namespace,_that.capabilities,_that.protectedStore,_that.tableStore,_that.blockStore,_that.network);case _:
+return $default(_that.programName,_that.namespace,_that.capabilities,_that.protectedStore,_that.tableStore,_that.blockStore,_that.network,_that.internal);case _:
   return null;
 
 }
@@ -7708,7 +9431,7 @@ return $default(_that.programName,_that.namespace,_that.capabilities,_that.prote
 @JsonSerializable()
 
 class _VeilidConfig with DiagnosticableTreeMixin implements VeilidConfig {
-  const _VeilidConfig({required this.programName, required this.namespace, required this.capabilities, required this.protectedStore, required this.tableStore, required this.blockStore, required this.network});
+  const _VeilidConfig({required this.programName, required this.namespace, required this.capabilities, required this.protectedStore, required this.tableStore, required this.blockStore, required this.network, this.internal});
   factory _VeilidConfig.fromJson(Map<String, dynamic> json) => _$VeilidConfigFromJson(json);
 
 @override final  String programName;
@@ -7718,6 +9441,7 @@ class _VeilidConfig with DiagnosticableTreeMixin implements VeilidConfig {
 @override final  VeilidConfigTableStore tableStore;
 @override final  VeilidConfigBlockStore blockStore;
 @override final  VeilidConfigNetwork network;
+@override final  VeilidConfigInternal? internal;
 
 /// Create a copy of VeilidConfig
 /// with the given fields replaced by the non-null parameter values.
@@ -7733,21 +9457,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfig'))
-    ..add(DiagnosticsProperty('programName', programName))..add(DiagnosticsProperty('namespace', namespace))..add(DiagnosticsProperty('capabilities', capabilities))..add(DiagnosticsProperty('protectedStore', protectedStore))..add(DiagnosticsProperty('tableStore', tableStore))..add(DiagnosticsProperty('blockStore', blockStore))..add(DiagnosticsProperty('network', network));
+    ..add(DiagnosticsProperty('programName', programName))..add(DiagnosticsProperty('namespace', namespace))..add(DiagnosticsProperty('capabilities', capabilities))..add(DiagnosticsProperty('protectedStore', protectedStore))..add(DiagnosticsProperty('tableStore', tableStore))..add(DiagnosticsProperty('blockStore', blockStore))..add(DiagnosticsProperty('network', network))..add(DiagnosticsProperty('internal', internal));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfig&&(identical(other.programName, programName) || other.programName == programName)&&(identical(other.namespace, namespace) || other.namespace == namespace)&&(identical(other.capabilities, capabilities) || other.capabilities == capabilities)&&(identical(other.protectedStore, protectedStore) || other.protectedStore == protectedStore)&&(identical(other.tableStore, tableStore) || other.tableStore == tableStore)&&(identical(other.blockStore, blockStore) || other.blockStore == blockStore)&&(identical(other.network, network) || other.network == network));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfig&&(identical(other.programName, programName) || other.programName == programName)&&(identical(other.namespace, namespace) || other.namespace == namespace)&&(identical(other.capabilities, capabilities) || other.capabilities == capabilities)&&(identical(other.protectedStore, protectedStore) || other.protectedStore == protectedStore)&&(identical(other.tableStore, tableStore) || other.tableStore == tableStore)&&(identical(other.blockStore, blockStore) || other.blockStore == blockStore)&&(identical(other.network, network) || other.network == network)&&(identical(other.internal, internal) || other.internal == internal));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,programName,namespace,capabilities,protectedStore,tableStore,blockStore,network);
+int get hashCode => Object.hash(runtimeType,programName,namespace,capabilities,protectedStore,tableStore,blockStore,network,internal);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfig(programName: $programName, namespace: $namespace, capabilities: $capabilities, protectedStore: $protectedStore, tableStore: $tableStore, blockStore: $blockStore, network: $network)';
+  return 'VeilidConfig(programName: $programName, namespace: $namespace, capabilities: $capabilities, protectedStore: $protectedStore, tableStore: $tableStore, blockStore: $blockStore, network: $network, internal: $internal)';
 }
 
 
@@ -7758,11 +9482,11 @@ abstract mixin class _$VeilidConfigCopyWith<$Res> implements $VeilidConfigCopyWi
   factory _$VeilidConfigCopyWith(_VeilidConfig value, $Res Function(_VeilidConfig) _then) = __$VeilidConfigCopyWithImpl;
 @override @useResult
 $Res call({
- String programName, String namespace, VeilidConfigCapabilities capabilities, VeilidConfigProtectedStore protectedStore, VeilidConfigTableStore tableStore, VeilidConfigBlockStore blockStore, VeilidConfigNetwork network
+ String programName, String namespace, VeilidConfigCapabilities capabilities, VeilidConfigProtectedStore protectedStore, VeilidConfigTableStore tableStore, VeilidConfigBlockStore blockStore, VeilidConfigNetwork network, VeilidConfigInternal? internal
 });
 
 
-@override $VeilidConfigCapabilitiesCopyWith<$Res> get capabilities;@override $VeilidConfigProtectedStoreCopyWith<$Res> get protectedStore;@override $VeilidConfigTableStoreCopyWith<$Res> get tableStore;@override $VeilidConfigBlockStoreCopyWith<$Res> get blockStore;@override $VeilidConfigNetworkCopyWith<$Res> get network;
+@override $VeilidConfigCapabilitiesCopyWith<$Res> get capabilities;@override $VeilidConfigProtectedStoreCopyWith<$Res> get protectedStore;@override $VeilidConfigTableStoreCopyWith<$Res> get tableStore;@override $VeilidConfigBlockStoreCopyWith<$Res> get blockStore;@override $VeilidConfigNetworkCopyWith<$Res> get network;@override $VeilidConfigInternalCopyWith<$Res>? get internal;
 
 }
 /// @nodoc
@@ -7775,7 +9499,7 @@ class __$VeilidConfigCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfig
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? programName = null,Object? namespace = null,Object? capabilities = null,Object? protectedStore = null,Object? tableStore = null,Object? blockStore = null,Object? network = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? programName = null,Object? namespace = null,Object? capabilities = null,Object? protectedStore = null,Object? tableStore = null,Object? blockStore = null,Object? network = null,Object? internal = freezed,}) {
   return _then(_VeilidConfig(
 programName: null == programName ? _self.programName : programName // ignore: cast_nullable_to_non_nullable
 as String,namespace: null == namespace ? _self.namespace : namespace // ignore: cast_nullable_to_non_nullable
@@ -7784,7 +9508,8 @@ as VeilidConfigCapabilities,protectedStore: null == protectedStore ? _self.prote
 as VeilidConfigProtectedStore,tableStore: null == tableStore ? _self.tableStore : tableStore // ignore: cast_nullable_to_non_nullable
 as VeilidConfigTableStore,blockStore: null == blockStore ? _self.blockStore : blockStore // ignore: cast_nullable_to_non_nullable
 as VeilidConfigBlockStore,network: null == network ? _self.network : network // ignore: cast_nullable_to_non_nullable
-as VeilidConfigNetwork,
+as VeilidConfigNetwork,internal: freezed == internal ? _self.internal : internal // ignore: cast_nullable_to_non_nullable
+as VeilidConfigInternal?,
   ));
 }
 
@@ -7832,6 +9557,18 @@ $VeilidConfigNetworkCopyWith<$Res> get network {
   
   return $VeilidConfigNetworkCopyWith<$Res>(_self.network, (value) {
     return _then(_self.copyWith(network: value));
+  });
+}/// Create a copy of VeilidConfig
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidConfigInternalCopyWith<$Res>? get internal {
+    if (_self.internal == null) {
+    return null;
+  }
+
+  return $VeilidConfigInternalCopyWith<$Res>(_self.internal!, (value) {
+    return _then(_self.copyWith(internal: value));
   });
 }
 }

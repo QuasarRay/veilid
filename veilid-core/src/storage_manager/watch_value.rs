@@ -79,17 +79,6 @@ impl OutboundWatchValueResult {
     }
 }
 
-/// Result of update_watch_per_node_state_inner.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum WatchChangeAcceptance {
-    /// Per-node state update rejected; skip this notification.
-    Reject,
-    /// Accept normally: report value + run change-inspection if needed.
-    Accept,
-    /// Accept transactionally: report subkey range only, no local-store update.
-    AcceptTransactional,
-}
-
 impl StorageManager {
     /// Create, update or cancel an outbound watch to a DHT value
     #[cfg_attr(
@@ -102,7 +91,6 @@ impl StorageManager {
         subkeys: ValueSubkeyRangeSet,
         expiration: Timestamp,
         count: u32,
-        transactional: bool,
     ) -> VeilidAPIResult<bool> {
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
@@ -115,14 +103,7 @@ impl StorageManager {
             .await;
 
         let mut inner = self.inner.lock();
-        self.watch_values_inner(
-            &mut inner,
-            record_key,
-            subkeys,
-            expiration,
-            count,
-            transactional,
-        )
+        self.watch_values_inner(&mut inner, record_key, subkeys, expiration, count)
     }
 
     #[cfg_attr(
@@ -152,7 +133,7 @@ impl StorageManager {
         let mut inner = self.inner.lock();
 
         let Some(_opened_record) = inner.opened_records.get(&opaque_record_key) else {
-            apibail_generic!("record not open");
+            apibail_invalid_argument!("record not open", "record_key", opaque_record_key);
         };
 
         // See what watch we have currently if any
@@ -198,14 +179,12 @@ impl StorageManager {
 
         // Update the watch. This just calls through to the above watch_values_inner() function
         // This will update the active_watch so we don't need to do that in this routine.
-        let transactional = desired.transactional;
         self.watch_values_inner(
             &mut inner,
             record_key,
             new_subkeys,
             desired.expiration,
             count,
-            transactional,
         )
     }
 
@@ -249,7 +228,6 @@ impl StorageManager {
         subkeys: ValueSubkeyRangeSet,
         expiration: Timestamp,
         count: u32,
-        transactional: bool,
     ) -> VeilidAPIResult<bool> {
         let opaque_record_key = record_key.opaque();
 
@@ -257,7 +235,7 @@ impl StorageManager {
         let (safety_selection, opt_watcher) = {
             let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
                 // Record must be opened already to change watch
-                apibail_generic!("record not open");
+                apibail_invalid_argument!("record not open", "record_key", opaque_record_key);
             };
             (
                 opened_record.safety_selection(),
@@ -290,7 +268,7 @@ impl StorageManager {
         } else {
             // Get the minimum expiration timestamp we will accept
             let rpc_timeout =
-                TimestampDuration::new_ms(self.config().network.rpc.timeout_ms.into());
+                TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
             let min_expiration = Timestamp::now().later(rpc_timeout);
             let expiration = if expiration.as_u64() == 0 {
                 expiration
@@ -307,7 +285,6 @@ impl StorageManager {
                 subkeys,
                 opt_watcher,
                 safety_selection,
-                transactional,
             })
         };
 
@@ -461,11 +438,12 @@ impl StorageManager {
 
         // Get the DHT parameters for 'WatchValue', some of which are the same for 'GetValue' operations
         let config = self.config();
-        let node_count = config.network.dht.max_find_node_count as usize;
-        let consensus_count = config.network.dht.get_value_count as usize;
-        let consensus_width = config.network.dht.consensus_width as usize;
-        let fanout_tasks = config.network.dht.get_value_fanout as usize;
-        let timeout = TimestampDuration::from(ms_to_us(config.network.dht.get_value_timeout_ms));
+        let node_count = config.internal().network.dht.max_find_node_count as usize;
+        let consensus_count = config.internal().network.dht.get_value_count as usize;
+        let consensus_width = config.internal().network.dht.consensus_width as usize;
+        let fanout_tasks = config.internal().network.dht.get_value_fanout as usize;
+        let timeout =
+            TimestampDuration::from(ms_to_us(config.internal().network.dht.get_value_timeout_ms));
 
         // Get the appropriate watcher key, if anonymous use a static anonymous watch key
         // which lives for the duration of the app's runtime
@@ -681,7 +659,7 @@ impl StorageManager {
             record_key.opaque(),
             core::iter::once((ValueSubkeyRangeSet::new(), fanout_result)),
             false,
-            self.config().network.dht.consensus_width as usize,
+            self.config().internal().network.dht.consensus_width as usize,
         )?;
         if !existed {
             apibail_internal!(
@@ -717,8 +695,8 @@ impl StorageManager {
         }
 
         // Send valuechange with dead count and no subkeys to inform the api that this watch is now gone completely
-        drop(record_lock);
         self.update_callback_value_change(
+            record_lock,
             outbound_watch.record_key(),
             ValueSubkeyRangeSet::new(),
             0,
@@ -1176,26 +1154,19 @@ impl StorageManager {
         if opt_old_state_params != Some(desired) || did_add_nodes {
             inner
                 .outbound_watch_manager
-                .enqueue_change_inspect(self, record_key, watch_subkeys);
+                .enqueue_change_inspect(record_key, watch_subkeys);
         }
     }
 
     /// Get the next operation for a particular watch's state machine
     /// Can be processed in the foreground, or by the background operation queue
-    pub(super) fn get_next_outbound_watch_operation(
-        &self,
-        key: RecordKey,
+    pub(super) fn get_next_outbound_watch_operation_inner(
+        registry: VeilidComponentRegistry,
+        record_lock: StorageManagerRecordLockGuard,
         cur_ts: Timestamp,
         outbound_watch: &mut OutboundWatch,
     ) -> Option<PinBoxFutureStatic<()>> {
-        let registry = self.registry();
-        let consensus_count = self.config().network.dht.get_value_count as usize;
-
-        // Operate on this watch only if it isn't already being operated on.
-        // Watch mode (lifetime.read + watch_lock) is concurrent with reads/sets/transactions.
-        let record_lock = self
-            .record_lock_table
-            .try_lock_record(key.opaque(), StorageManagerRecordLockPurpose::Watch)?;
+        let consensus_count = registry.config().internal().network.dht.get_value_count as usize;
 
         // Terminate the 'desired' params for watches
         // that have no remaining count or have expired
@@ -1205,7 +1176,7 @@ impl StorageManager {
         if outbound_watch.is_dead() {
             // Outbound watch is dead
             let fut = {
-                let registry = self.registry();
+                let registry = registry.clone();
                 async move {
                     registry
                         .storage_manager()
@@ -1216,7 +1187,7 @@ impl StorageManager {
         } else if outbound_watch.needs_cancel(&registry) {
             // Outbound watch needs to be cancelled
             let fut = {
-                let registry = self.registry();
+                let registry = registry.clone();
                 async move {
                     registry
                         .storage_manager()
@@ -1228,7 +1199,7 @@ impl StorageManager {
         } else if outbound_watch.needs_renew(&registry, consensus_count, cur_ts) {
             // Outbound watch expired but can be renewed
             let fut = {
-                let registry = self.registry();
+                let registry = registry.clone();
                 async move {
                     registry
                         .storage_manager()
@@ -1240,7 +1211,7 @@ impl StorageManager {
         } else if outbound_watch.needs_reconcile(&registry, consensus_count, cur_ts) {
             // Outbound watch parameters have changed or it needs more nodes
             let fut = {
-                let registry = self.registry();
+                let registry = registry.clone();
                 async move {
                     registry
                         .storage_manager()
@@ -1256,14 +1227,38 @@ impl StorageManager {
     /// Perform an inspection of the record's subkeys to see if we have the latest data
     /// If not, then get the first changed subkey and post a ValueChanged update about it
     /// Can be processed in the foreground, or by the background operation queue
-    pub(super) fn get_change_inspection_operation(
-        &self,
+    /// Build the change-inspection operation for a record, routing to the transactional
+    /// variant when the record currently participates in a transaction set.
+    pub(super) fn get_change_inspection_operation_inner(
+        registry: VeilidComponentRegistry,
+        local_record_store: RecordStore<LocalRecordDetail>,
+        record_key: RecordKey,
+        subkeys: ValueSubkeyRangeSet,
+    ) -> PinBoxFutureStatic<()> {
+        let opaque_record_key = record_key.opaque();
+        let opt_membership = match local_record_store.with_record(&opaque_record_key, |r| {
+            r.detail().transaction_membership.clone()
+        }) {
+            Ok(Some(membership)) => membership,
+            _ => None,
+        };
+        match opt_membership {
+            Some(membership) => Self::get_change_inspection_operation_transactional_inner(
+                registry, record_key, subkeys, membership,
+            ),
+            None => Self::get_change_inspection_operation_non_transactional_inner(
+                registry, record_key, subkeys,
+            ),
+        }
+    }
+
+    fn get_change_inspection_operation_non_transactional_inner(
+        registry: VeilidComponentRegistry,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
     ) -> PinBoxFutureStatic<()> {
         let fut = {
             let opaque_record_key = record_key.opaque();
-            let registry = self.registry();
             async move {
                 let this = registry.storage_manager();
 
@@ -1298,59 +1293,17 @@ impl StorageManager {
                     if let Some(value) = value {
                         let local_seq = report.local_seqs()[n];
                         if value.seq() > local_seq {
-                            // Calculate the update
-                            let (changed_subkeys, remaining_count, value) = {
-                                let _record_lock = this
-                                    .record_lock_table
-                                    .lock_record(
-                                        opaque_record_key.clone(),
-                                        StorageManagerRecordLockPurpose::Watch,
-                                    )
-                                    .await;
-
-                                let inner = &mut *this.inner.lock();
-
-                                // Get the outbound watch
-                                let Some(outbound_watch) = inner
-                                    .outbound_watch_manager
-                                    .outbound_watches
-                                    .get_mut(&opaque_record_key)
-                                else {
-                                    // No outbound watch means no callback
-                                    return;
-                                };
-
-                                let Some(state) = outbound_watch.state_mut() else {
-                                    // No outbound watch current state means no callback
-                                    return;
-                                };
-
-                                // the remaining updates count
-                                let remaining_count = state.remaining_count().saturating_sub(1);
-                                let cur_ts = Timestamp::now_non_decreasing();
-                                let missing_value_changes = state.needs_fallback_inspect(cur_ts);
-                                state.edit(
-                                    &inner.outbound_watch_manager.per_node_states,
-                                    |editor| {
-                                        editor.set_remaining_count(remaining_count);
-                                        if missing_value_changes {
-                                            editor.set_forced_reconcile();
-                                        }
-                                    },
-                                );
-
-                                (newer_online_subkeys, remaining_count, value)
-                            };
-
-                            // Send the update
-                            this.update_callback_value_change(
+                            // Committed change: get_value already wrote the local store, so we
+                            // don't track a reported seq here.
+                            this.report_change_inspect_value(
                                 record_key,
-                                changed_subkeys,
-                                remaining_count,
-                                Some(value),
-                            );
-
-                            // Update was sent, we're done
+                                &opaque_record_key,
+                                newer_online_subkeys,
+                                first_changed_subkey,
+                                value,
+                                false,
+                            )
+                            .await;
                             return;
                         }
                     }
@@ -1362,6 +1315,179 @@ impl StorageManager {
             }
         };
         pin_dyn_future!(fut)
+    }
+
+    /// Report a changed subkey's value to the app during a change inspection: decrement the watch
+    /// count, force a reconcile if value changes were missed, and (for the non-committing hint
+    /// path) record the reported sequence number. Holds the watch record lock across the update.
+    async fn report_change_inspect_value(
+        &self,
+        record_key: RecordKey,
+        opaque_record_key: &OpaqueRecordKey,
+        changed_subkeys: ValueSubkeyRangeSet,
+        first_changed_subkey: ValueSubkey,
+        value: ValueData,
+        record_reported_seq: bool,
+    ) {
+        let record_lock = self
+            .record_lock_table
+            .lock_record(
+                opaque_record_key.clone(),
+                StorageManagerRecordLockPurpose::Watch,
+            )
+            .await;
+
+        let remaining_count = {
+            let inner = &mut *self.inner.lock();
+            let Some(outbound_watch) = inner
+                .outbound_watch_manager
+                .outbound_watches
+                .get_mut(opaque_record_key)
+            else {
+                veilid_log!(self debug "change inspect report skipped: no outbound watch for {}", opaque_record_key);
+                return;
+            };
+            let Some(state) = outbound_watch.state_mut() else {
+                veilid_log!(self debug "change inspect report skipped: no outbound watch state for {}", opaque_record_key);
+                return;
+            };
+            let remaining_count = state.remaining_count().saturating_sub(1);
+            let cur_ts = Timestamp::now_non_decreasing();
+            let missing_value_changes = state.needs_fallback_inspect(cur_ts);
+            let seq = value.seq();
+            state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+                editor.set_remaining_count(remaining_count);
+                if record_reported_seq {
+                    editor.set_last_reported_subkey_seq(first_changed_subkey, seq);
+                }
+                if missing_value_changes {
+                    editor.set_forced_reconcile();
+                }
+            });
+            remaining_count
+        };
+
+        self.update_callback_value_change(
+            record_lock,
+            record_key,
+            changed_subkeys,
+            remaining_count,
+            Some(value),
+        );
+    }
+
+    fn get_change_inspection_operation_transactional_inner(
+        registry: VeilidComponentRegistry,
+        record_key: RecordKey,
+        subkeys: ValueSubkeyRangeSet,
+        transaction_membership: TransactionMembership,
+    ) -> PinBoxFutureStatic<()> {
+        let fut = {
+            let opaque_record_key = record_key.opaque();
+            async move {
+                let this = registry.storage_manager();
+
+                // Run inside a background transaction over the whole stored set so nothing the
+                // notification path can't see is committed. The closure only inspects/gets and
+                // reports a non-committing hint; the helper rolls the transaction back on teardown.
+                let closure_registry = registry.clone();
+                let closure_record_key = record_key.clone();
+                let closure_subkeys = subkeys.clone();
+                let res = this
+                    .with_background_transaction(
+                        record_key.clone(),
+                        transaction_membership,
+                        move |transaction_handle, _members| async move {
+                            let this = closure_registry.storage_manager();
+                            this.transactional_change_inspect_and_report(
+                                transaction_handle,
+                                closure_record_key,
+                                opaque_record_key,
+                                closure_subkeys,
+                            )
+                            .await;
+                            VeilidAPIResult::Ok(())
+                        },
+                    )
+                    .await;
+
+                match res {
+                    Ok(()) => {}
+                    Err(VeilidAPIError::TryAgain { .. }) => {
+                        // Contended; re-enqueue and try later
+                        let mut inner = this.inner.lock();
+                        inner
+                            .outbound_watch_manager
+                            .enqueue_change_inspect(record_key, subkeys);
+                    }
+                    Err(e) => {
+                        veilid_log!(this debug "transactional change inspection failed: {}", e);
+                    }
+                }
+            }
+        };
+        pin_dyn_future!(fut)
+    }
+
+    /// Inspect a transactional record's changes and report the first changed subkey as a
+    /// non-committing hint. Runs inside the caller's transaction (which is rolled back), so the
+    /// local store is never modified.
+    async fn transactional_change_inspect_and_report(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+        record_key: RecordKey,
+        opaque_record_key: OpaqueRecordKey,
+        subkeys: ValueSubkeyRangeSet,
+    ) {
+        let report = match self.transaction_inspect(
+            transaction_handle,
+            record_key.clone(),
+            Some(subkeys),
+            DHTReportScope::SyncGet,
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                veilid_log!(self debug "Failed to inspect record for changes (transactional): {}", e);
+                return;
+            }
+        };
+        let mut newer_online_subkeys = report.newer_online_subkeys();
+
+        let mut n = 0;
+        while !newer_online_subkeys.is_empty() {
+            let first_changed_subkey = newer_online_subkeys.first().unwrap_or_log();
+
+            let value = match self
+                .transaction_get(transaction_handle, record_key.clone(), first_changed_subkey)
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    veilid_log!(self debug "Failed to get changed record (transactional): {}", e);
+                    return;
+                }
+            };
+
+            if let Some(value) = value {
+                let local_seq = report.local_seqs()[n];
+                if value.seq() > local_seq {
+                    // Non-committing hint: track the reported seq since nothing is written locally
+                    self.report_change_inspect_value(
+                        record_key,
+                        &opaque_record_key,
+                        newer_online_subkeys,
+                        first_changed_subkey,
+                        value,
+                        true,
+                    )
+                    .await;
+                    return;
+                }
+            }
+
+            newer_online_subkeys.pop_first();
+            n += 1;
+        }
     }
 
     /// Handle a received 'Watch Value' query
@@ -1440,19 +1566,19 @@ impl StorageManager {
         count: u32,
         inbound_node_id: &NodeId,
         watch_id: u64,
-    ) -> VeilidAPIResult<WatchChangeAcceptance> {
+    ) -> VeilidAPIResult<bool> {
         let opaque_record_key = record_key.opaque();
         let owm = &mut inner.outbound_watch_manager;
 
         // Get the outbound watch
         let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
             // No outbound watch means no callback
-            return Ok(WatchChangeAcceptance::Reject);
+            return Ok(false);
         };
 
         let Some(state) = outbound_watch.state_mut() else {
             // No outbound watch current state means no callback (we haven't reconciled yet)
-            return Ok(WatchChangeAcceptance::Reject);
+            return Ok(false);
         };
 
         // If the reporting node is not part of our current watch, don't process the value change
@@ -1461,20 +1587,20 @@ impl StorageManager {
             node_id: inbound_node_id.clone(),
         };
         if !state.nodes().contains(&pnk) {
-            return Ok(WatchChangeAcceptance::Reject);
+            return Ok(false);
         }
 
         // Get per node state
         let Some(per_node_state) = owm.per_node_states.get_mut(&pnk) else {
             // No per node state means no callback
             veilid_log!(self warn "Missing per node state in outbound watch: {:?}", pnk);
-            return Ok(WatchChangeAcceptance::Reject);
+            return Ok(false);
         };
 
         // If watch id doesn't match it's for an older watch and should be ignored
         if per_node_state.watch_id != watch_id {
             veilid_log!(self debug "Incorrect watch id for per node state in outbound watch: {:?} {} != {}", pnk, per_node_state.watch_id, watch_id);
-            return Ok(WatchChangeAcceptance::Reject);
+            return Ok(false);
         }
 
         // Update per node state
@@ -1492,7 +1618,7 @@ impl StorageManager {
 
             // Force count to zero for this node id so it gets cancelled out by the background process
             per_node_state.count = 0;
-            return Ok(WatchChangeAcceptance::Reject);
+            return Ok(false);
         } else if count == per_node_state.count {
             // If a packet gets delivered twice or something else is wrong, report a non-decremented watch count
             // Log this because watch counts should always be decrementing non a per-node basis.
@@ -1518,9 +1644,6 @@ impl StorageManager {
             per_node_state.count = count;
         }
 
-        // Read the transactional flag before state.edit reborrows
-        let transactional = state.params().transactional;
-
         // Record that we received a valid ValueChanged — resets fallback inspection timer
         // NOTE: It is possible this should be a per-node state, but for now let's try it on the whole watch
         // Done after per_node_state usage to avoid borrow conflicts with owm.per_node_states
@@ -1528,11 +1651,7 @@ impl StorageManager {
             editor.touch_value_changed(Timestamp::now_non_decreasing());
         });
 
-        Ok(if transactional {
-            WatchChangeAcceptance::AcceptTransactional
-        } else {
-            WatchChangeAcceptance::Accept
-        })
+        Ok(true)
     }
 
     async fn accept_single_value_change_and_report(
@@ -1586,14 +1705,75 @@ impl StorageManager {
             .maybe_decrypt_value_data(&record_key, value.value_data())
             .await?;
 
-        drop(record_lock);
-
         // We have a single value with a newer sequence number to report
         self.update_callback_value_change(
+            record_lock,
             record_key,
             reportable_subkeys,
             remaining_count,
             Some(value),
+        );
+
+        Ok(())
+    }
+
+    /// Report a value-change to the app as a non-committing hint (no local-store write) and
+    /// decrement the watch count. When a value is present its decrypted form is reported and
+    /// its sequence number recorded so replays/duplicate reports are gated out.
+    async fn report_value_change_hint(
+        &self,
+        record_lock: StorageManagerRecordLockGuard,
+        record_key: RecordKey,
+        reportable_subkeys: ValueSubkeyRangeSet,
+        opt_value: Option<Arc<SignedValueData>>,
+    ) -> VeilidAPIResult<()> {
+        let opaque_record_key = record_lock.record();
+        let opt_reported = opt_value.as_ref().map(|v| {
+            (
+                reportable_subkeys.first().unwrap_or_log(),
+                v.value_data().seq(),
+            )
+        });
+
+        let remaining_count = {
+            let inner = &mut *self.inner.lock();
+            if let Some(outbound_watch) = inner
+                .outbound_watch_manager
+                .outbound_watches
+                .get_mut(&opaque_record_key)
+            {
+                if let Some(state) = outbound_watch.state_mut() {
+                    let rc = state.remaining_count().saturating_sub(1);
+                    state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+                        editor.set_remaining_count(rc);
+                        if let Some((subkey, seq)) = opt_reported {
+                            editor.set_last_reported_subkey_seq(subkey, seq);
+                        }
+                    });
+                    rc
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
+        };
+
+        let opt_value_data = if let Some(value) = &opt_value {
+            Some(
+                self.maybe_decrypt_value_data(&record_key, value.value_data())
+                    .await?,
+            )
+        } else {
+            None
+        };
+
+        self.update_callback_value_change(
+            record_lock,
+            record_key,
+            reportable_subkeys,
+            remaining_count,
+            opt_value_data,
         );
 
         Ok(())
@@ -1624,9 +1804,18 @@ impl StorageManager {
             .lock_record(record_key.opaque(), StorageManagerRecordLockPurpose::Watch)
             .await;
 
+        // A record currently in a transaction set is reported as a non-committing hint
+        // rather than being committed to the local store.
+        let record_is_transactional = self
+            .get_local_record_store()?
+            .with_record(&opaque_record_key, |r| {
+                r.detail().transaction_membership.is_some()
+            })?
+            .unwrap_or(false);
+
         // Determine if we have reportable subkeys
         // Also clears the value if the value should not be reported
-        let (mut reportable_subkeys, transactional) = {
+        let mut reportable_subkeys = {
             let inner = &mut *self.inner.lock();
 
             // No subkeys means remote node cancelled, but we already captured that with the
@@ -1647,26 +1836,17 @@ impl StorageManager {
                 return Ok(NetworkResult::value(()));
             };
 
-            // Update the per-node watch state and determine acceptance
-            let acceptance = self.update_watch_per_node_state_inner(
+            // Update the per-node watch state; skip if rejected
+            let accepted = self.update_watch_per_node_state_inner(
                 inner,
                 &record_key,
                 count,
                 &inbound_node_id,
                 watch_id,
             )?;
-            let transactional = match acceptance {
-                WatchChangeAcceptance::Reject => {
-                    // Per-node state update was rejected, skip this
-                    return Ok(NetworkResult::value(()));
-                }
-                WatchChangeAcceptance::AcceptTransactional => {
-                    // Drop the inline value; the watcher fetches transactionally
-                    opt_value = None;
-                    true
-                }
-                WatchChangeAcceptance::Accept => false,
-            };
+            if !accepted {
+                return Ok(NetworkResult::value(()));
+            }
 
             // If our watched subkey range differs from the reported change's range
             // we should only report changes that we care about
@@ -1679,7 +1859,7 @@ impl StorageManager {
                 opt_value = None;
             }
 
-            (reportable_subkeys, transactional)
+            reportable_subkeys
         };
 
         // See if the value we received can be reported as-is
@@ -1725,11 +1905,25 @@ impl StorageManager {
                 )));
             }
 
-            // Make sure this value would actually be newer
-            if let Some(last_value) = &last_get_result.opt_value {
-                if value.value_data().seq() <= last_value.value_data().seq() {
-                    // inbound value is older than or equal to the sequence number that we have
-                    // so we're not going to report this
+            // Make sure this value would actually be newer than what we last stored (commit path)
+            // or last reported (transactional hint path, which doesn't touch the local store)
+            let opt_last_seq = if record_is_transactional {
+                let inner = self.inner.lock();
+                inner
+                    .outbound_watch_manager
+                    .outbound_watches
+                    .get(&opaque_record_key)
+                    .and_then(|ow| ow.state())
+                    .and_then(|s| s.last_reported_subkey_seq(first_subkey))
+            } else {
+                last_get_result
+                    .opt_value
+                    .as_ref()
+                    .map(|v| v.value_data().seq())
+            };
+            if let Some(last_seq) = opt_last_seq {
+                if value.value_data().seq() <= last_seq {
+                    // Not newer than what we last stored/reported, so we're not going to report this
                     opt_value = None;
 
                     // Shrink up the subkey range because we're removing the first value from the things we'd possibly report on
@@ -1742,64 +1936,32 @@ impl StorageManager {
             }
         }
 
-        // Keep the value because it is newer than the one we have, and it was the only
-        // value we got a change update for. Report the change as well to the app.
+        // Report the change to the app
         if let Some(value) = opt_value.clone() {
-            self.accept_single_value_change_and_report(
-                record_lock,
-                record_key,
-                reportable_subkeys,
-                value,
-            )
-            .await?;
-        } else if !reportable_subkeys.is_empty() {
-            if transactional {
-                // Transactional watcher: emit ValueChange with the changed
-                // subkey range only. Decrement remaining count to match the
-                // non-transactional accept path. The watcher will fetch the
-                // new value under its own transaction; do NOT enqueue a
-                // change inspection (its forced get would update the local
-                // store outside that transaction).
-                let remaining_count = {
-                    let inner = &mut *self.inner.lock();
-                    if let Some(outbound_watch) = inner
-                        .outbound_watch_manager
-                        .outbound_watches
-                        .get_mut(&opaque_record_key)
-                    {
-                        if let Some(state) = outbound_watch.state_mut() {
-                            let rc = state.remaining_count().saturating_sub(1);
-                            state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
-                                editor.set_remaining_count(rc)
-                            });
-                            rc
-                        } else {
-                            0
-                        }
-                    } else {
-                        0
-                    }
-                };
-                drop(record_lock);
-                self.update_callback_value_change(
+            if record_is_transactional {
+                // Non-committing hint: report the validated value but do NOT write the local store
+                self.report_value_change_hint(
+                    record_lock,
                     record_key,
                     reportable_subkeys,
-                    remaining_count,
-                    None,
-                );
+                    Some(value),
+                )
+                .await?;
             } else {
-                // We have subkeys that have be reported as possibly changed
-                // but not a specific record reported, so we should defer reporting and
-                // inspect the range to see what changed
-
-                // Queue this up for inspection
-                let mut inner = self.inner.lock();
-                inner.outbound_watch_manager.enqueue_change_inspect(
-                    self,
+                // Commit the value locally and report it
+                self.accept_single_value_change_and_report(
+                    record_lock,
                     record_key,
                     reportable_subkeys,
-                );
+                    value,
+                )
+                .await?;
             }
+        } else if !reportable_subkeys.is_empty() {
+            // No single reportable value (e.g. multiple subkeys changed): report the changed
+            // range immediately so the app fetches it, rather than deferring a change inspection
+            self.report_value_change_hint(record_lock, record_key, reportable_subkeys, None)
+                .await?;
         }
 
         Ok(NetworkResult::value(()))
@@ -1830,11 +1992,9 @@ impl StorageManager {
         veilid_log!(self debug "change inspecting {} watches", change_inspects.len());
 
         for change_inspect in change_inspects {
-            inner.outbound_watch_manager.enqueue_change_inspect(
-                self,
-                change_inspect.0,
-                change_inspect.1,
-            );
+            inner
+                .outbound_watch_manager
+                .enqueue_change_inspect(change_inspect.0, change_inspect.1);
         }
     }
 }

@@ -212,6 +212,12 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
                 return true;
             }
         }
+
+        // Explicitly allow loopback addresses in local network routing domain to permit proxying
+        if ipaddr_is_loopback(&ip) {
+            return true;
+        }
+
         false
     }
 

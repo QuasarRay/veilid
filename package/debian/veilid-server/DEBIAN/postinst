@@ -21,6 +21,17 @@ chmod 0750 /var/db/veilid-server
 
 chmod 755 /usr/bin/veilid-server
 
+# Load the SELinux policy module when SELinux is enabled. Debian/Ubuntu default to
+# AppArmor, so this is a no-op there; never fail the install over it.
+if command -v semodule >/dev/null 2>&1 && command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+    semodule -i /usr/share/selinux/packages/veilid_server.pp.bz2 || true
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon -R /usr/bin/veilid-server /etc/veilid-server /var/db/veilid-server || true
+    fi
+else
+    echo "SELinux not enabled; skipping veilid-server SELinux policy module"
+fi
+
 # Add and start systemd unit
 if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
     # This will only remove masks created by d-s-h on package removal.

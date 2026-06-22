@@ -193,6 +193,7 @@ network:
     disable_capabilites: []
     public_keys: null
     secret_keys: null
+    address_types: []
     upnp: true
     detect_address_changes: true
     enable_local_peer_scope: false

@@ -29,7 +29,7 @@ async def test_routing_contexts(api_connection: veilid.VeilidAPI):
 
     rc = await (await api_connection.new_routing_context()).with_safety(
         veilid.SafetySelection.safe(
-            veilid.SafetySpec(None, 2, veilid.Stability.LOW_LATENCY, veilid.Sequencing.NO_PREFERENCE)
+            veilid.SafetySpec(None, 2, veilid.Stability.LOW_LATENCY, veilid.Sequencing.PREFER_UNORDERED)
         )
     )
     await rc.release()

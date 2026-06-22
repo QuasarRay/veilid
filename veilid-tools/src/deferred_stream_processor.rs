@@ -14,9 +14,12 @@ struct DeferredStreamProcessorInner {
     opt_join_handle: Option<MustJoinHandle<()>>,
 }
 
+/// Result of a per-item handler, controlling whether stream processing continues.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum DeferredStreamResult {
+    /// Stop processing the stream.
     Done,
+    /// Keep processing the next item.
     Continue,
 }
 
@@ -41,6 +44,8 @@ impl DeferredStreamProcessor {
     }
 
     /// Initialize the processor before use
+    ///
+    /// Pairs with `terminate`. Spawns the background task; not idempotent, calling it twice panics dropping the prior un-awaited join handle.
     pub fn init(&self) {
         let stopper = StopSource::new();
         let stop_token = stopper.token();
@@ -56,6 +61,8 @@ impl DeferredStreamProcessor {
     }
 
     /// Terminate the processor and ensure all streams are closed
+    ///
+    /// Awaits the background task's exit. Idempotent: a no-op once already terminated or never initialized.
     pub async fn terminate(&self) {
         let opt_jh = {
             let mut inner = self.inner.lock();
@@ -119,6 +126,8 @@ impl DeferredStreamProcessor {
     /// * 'handler' is the callback to handle each item from the stream
     ///
     /// Returns 'true' if the stream was added for processing, and 'false' if the stream could not be added, possibly due to not being initialized.
+    ///
+    /// Non-blocking; the stream is processed by the background task until exhausted or `terminate` is called.
     pub fn add_stream<
         T: Send + 'static,
         S: futures_util::Stream<Item = T> + Unpin + Send + 'static,
@@ -151,6 +160,8 @@ impl DeferredStreamProcessor {
     }
 
     /// Queue a single future to process in the background
+    ///
+    /// Non-blocking; returns false if the processor was not initialized. The future runs until done or `terminate` is called.
     pub fn add_future<F>(&self, fut: F) -> bool
     where
         F: Future<Output = ()> + Send + 'static,

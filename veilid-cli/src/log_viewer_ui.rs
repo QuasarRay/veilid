@@ -71,8 +71,8 @@ impl LogViewerUI {
                 | Ok(ConnectionState::ConnectedIPC(_, _)) => {
                     break;
                 }
-                Ok(ConnectionState::RetryingTCP(_, _)) | Ok(ConnectionState::RetryingIPC(_, _)) => {
-                }
+                Ok(ConnectionState::ConnectingTCP(_, _))
+                | Ok(ConnectionState::ConnectingIPC(_, _)) => {}
                 Ok(ConnectionState::Disconnected) => {}
                 Err(e) => {
                     eprintln!("Error: {:?}", e);
@@ -101,7 +101,7 @@ impl LogViewerUI {
                     }
                     'e' | 'E' => {
                         if let Err(e) = cmdproc.run_command(
-                            "change_log_level api #enabled=error",
+                            "change_log_level api #unspecified=error",
                             UICallback::LogViewer(Box::new(|| {})),
                         ) {
                             eprintln!("Error: {:?}", e);
@@ -110,7 +110,7 @@ impl LogViewerUI {
                     }
                     'w' | 'W' => {
                         if let Err(e) = cmdproc.run_command(
-                            "change_log_level api #enabled=warn",
+                            "change_log_level api #unspecified=warn",
                             UICallback::LogViewer(Box::new(|| {})),
                         ) {
                             eprintln!("Error: {:?}", e);
@@ -119,7 +119,7 @@ impl LogViewerUI {
                     }
                     'i' | 'I' => {
                         if let Err(e) = cmdproc.run_command(
-                            "change_log_level api #enabled=info",
+                            "change_log_level api #unspecified=info",
                             UICallback::LogViewer(Box::new(|| {})),
                         ) {
                             eprintln!("Error: {:?}", e);
@@ -128,7 +128,7 @@ impl LogViewerUI {
                     }
                     'd' | 'D' => {
                         if let Err(e) = cmdproc.run_command(
-                            "change_log_level api #enabled=debug",
+                            "change_log_level api #unspecified=debug",
                             UICallback::LogViewer(Box::new(|| {})),
                         ) {
                             eprintln!("Error: {:?}", e);
@@ -137,7 +137,7 @@ impl LogViewerUI {
                     }
                     't' | 'T' => {
                         if let Err(e) = cmdproc.run_command(
-                            "change_log_level api #enabled=trace",
+                            "change_log_level api #unspecified=trace",
                             UICallback::LogViewer(Box::new(|| {})),
                         ) {
                             eprintln!("Error: {:?}", e);
@@ -148,11 +148,11 @@ impl LogViewerUI {
                         println!(
                             r"Help:
     h - This help
-    e - Change log level for enable facilities to 'error'
-    w - Change log level for enable facilities to 'warn'
-    i - Change log level for enable facilities to 'info'
-    d - Change log level for enable facilities to 'debug'
-    t - Change log level for enable facilities to 'trace'
+    e - Change log level for enabled facilities to 'error'
+    w - Change log level for enabled facilities to 'warn'
+    i - Change log level for enabled facilities to 'info'
+    d - Change log level for enabled facilities to 'debug'
+    t - Change log level for enabled facilities to 'trace'
     q - Quit
 "
                         );

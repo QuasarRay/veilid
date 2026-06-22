@@ -9,6 +9,9 @@ impl<S> SendStream for S where S: AsyncRead + AsyncWrite + Send + Unpin + 'stati
 
 ////////
 
+/// Future returned by [`AsyncPeekStream::peek`].
+///
+/// Resolves with however many bytes are currently buffered, up to `buf.len()`.
 pub struct Peek<'a> {
     aps: AsyncPeekStream,
     buf: &'a mut [u8],
@@ -54,6 +57,9 @@ impl Future for Peek<'_> {
 
 ////////
 
+/// Future returned by [`AsyncPeekStream::peek_exact`].
+///
+/// Resolves once `buf` has been completely filled without consuming the bytes.
 pub struct PeekExact<'a> {
     aps: AsyncPeekStream,
     buf: &'a mut [u8],
@@ -109,6 +115,11 @@ struct AsyncPeekStreamInner {
     peekbuf_len: usize,
 }
 
+/// An [`AsyncRead`] + [`AsyncWrite`] stream wrapper that allows peeking at
+/// incoming bytes without consuming them.
+///
+/// Peeked bytes are held in an internal buffer and re-delivered by the next
+/// read. Cloning shares the same underlying stream and peek buffer.
 #[derive(Clone)]
 pub struct AsyncPeekStream
 where
@@ -118,6 +129,7 @@ where
 }
 
 impl AsyncPeekStream {
+    /// Wrap an existing async stream so its incoming bytes can be peeked.
     pub fn new<S>(stream: S) -> Self
     where
         S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -131,6 +143,9 @@ impl AsyncPeekStream {
         }
     }
 
+    /// Peek up to `buf.len()` bytes without consuming them, returning the count available.
+    ///
+    /// The returned future awaits one `poll_read` on the underlying stream when more bytes are needed; no timeout.
     pub fn peek<'a>(&'a self, buf: &'a mut [u8]) -> Peek<'a> {
         Peek::<'a> {
             aps: self.clone(),
@@ -138,6 +153,9 @@ impl AsyncPeekStream {
         }
     }
 
+    /// Peek exactly `buf.len()` bytes without consuming them, waiting until that many arrive.
+    ///
+    /// The returned future blocks on the underlying stream until `buf` is full; no timeout, so it hangs if fewer bytes ever arrive.
     pub fn peek_exact<'a>(&'a self, buf: &'a mut [u8]) -> PeekExact<'a> {
         PeekExact::<'a> {
             aps: self.clone(),

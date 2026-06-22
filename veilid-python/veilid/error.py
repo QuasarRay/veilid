@@ -1,3 +1,5 @@
+"""Exception hierarchy mirroring veilid-core's `VeilidAPIError` variants."""
+
 import inspect
 from dataclasses import dataclass
 from typing import Any, Self
@@ -19,6 +21,23 @@ class VeilidAPIError(Exception):
 
     @classmethod
     def from_json(cls, json: dict) -> Self:
+        """Build the matching error subclass from a serialized error dict, keyed on `kind`.
+
+        `kind` is the serialized veilid-core `VeilidAPIError` variant name. Each maps to one
+        subclass: `NotInitialized` -> VeilidAPIErrorNotInitialized (API used before attach or
+        after detach), `AlreadyInitialized` -> VeilidAPIErrorAlreadyInitialized, `Timeout` ->
+        VeilidAPIErrorTimeout (time budget elapsed), `TryAgain` -> VeilidAPIErrorTryAgain
+        (retry later), `InvalidTarget` -> VeilidAPIErrorInvalidTarget, `NoConnection` ->
+        VeilidAPIErrorNoConnection, `Shutdown` -> VeilidAPIErrorShutdown, `KeyNotFound` ->
+        VeilidAPIErrorKeyNotFound, `Internal` -> VeilidAPIErrorInternal (bug in veilid-core),
+        `Unimplemented` -> VeilidAPIErrorUnimplemented, `ParseError` -> VeilidAPIErrorParseError,
+        `InvalidArgument` -> VeilidAPIErrorInvalidArgument, `MissingArgument` ->
+        VeilidAPIErrorMissingArgument, `Generic` -> VeilidAPIErrorGeneric, `TransactionNotFound`
+        -> VeilidAPIErrorTransactionNotFound (DHT transaction expired or never opened).
+
+        An unrecognized `kind` falls back to a plain VeilidAPIError carrying the unknown-type
+        message rather than raising.
+        """
         kind = json["kind"]
         try:
             error_class = _ERROR_REGISTRY[kind]
@@ -31,7 +50,7 @@ class VeilidAPIError(Exception):
 
 @dataclass
 class VeilidAPIErrorNotInitialized(VeilidAPIError):
-    """Veilid was not initialized"""
+    """API used before Veilid was attached, or after it was detached"""
 
     label = "Not initialized"
 
@@ -91,7 +110,7 @@ class VeilidAPIErrorKeyNotFound(VeilidAPIError):
 
 @dataclass
 class VeilidAPIErrorInternal(VeilidAPIError):
-    """Veilid experienced an internal failure"""
+    """An internal invariant was violated; indicates a bug in Veilid itself"""
 
     label = "Internal"
     message: str
@@ -99,7 +118,7 @@ class VeilidAPIErrorInternal(VeilidAPIError):
 
 @dataclass
 class VeilidAPIErrorUnimplemented(VeilidAPIError):
-    """Functionality is not yet implemented"""
+    """Functionality is not yet implemented on this platform or build"""
 
     label = "Unimplemented"
     message: str
@@ -143,7 +162,7 @@ class VeilidAPIErrorGeneric(VeilidAPIError):
 
 @dataclass
 class VeilidAPIErrorTransactionNotFound(VeilidAPIError):
-    """Transaction was not found or is no longer valid"""
+    """DHT transaction does not exist, having expired or never been opened"""
 
     label = "Transaction not found"
     message: str
@@ -162,6 +181,12 @@ _ERROR_REGISTRY.update(
 
 
 def raise_api_result(api_result: dict) -> Any:
+    """Return the `value` from an API result, or raise the matching VeilidAPIError.
+
+    Raises the VeilidAPIError subclass selected by `from_json` when the result carries an
+    `error` (see `from_json` for the kind-to-subclass mapping). Raises ValueError if the
+    result has neither a `value` nor an `error` key.
+    """
     if "value" in api_result:
         return api_result["value"]
     if "error" in api_result:

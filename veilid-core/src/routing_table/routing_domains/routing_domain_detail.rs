@@ -19,7 +19,6 @@ pub trait RoutingDomainDetail:
     fn relay_requirements(&self) -> Arc<RelayRequirements>;
 
     /// The current network configuration for this routing domain
-    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     fn network_config(&self) -> &RoutingDomainNetworkConfig;
     /// What protocols are supported for outbound connections from this domain
     fn outbound_protocols(&self) -> ProtocolTypeSet;

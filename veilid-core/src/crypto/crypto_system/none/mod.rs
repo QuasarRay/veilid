@@ -1,16 +1,21 @@
+mod blake3digest512;
 mod sizes;
 
 use super::*;
+
 use argon2::password_hash::Salt;
+use blake3digest512::Blake3Digest512;
 use data_encoding::BASE64URL_NOPAD;
 use digest::rand_core::RngCore;
 use digest::Digest;
 const NONE_AEAD_OVERHEAD: usize = NONE_PUBLIC_KEY_LENGTH;
+/// [`CryptoKind`] fourcc identifying the NONE cryptosystem.
 pub const CRYPTO_KIND_NONE: CryptoKind = CryptoKind::new(*b"NONE");
+/// The NONE fourcc as a big-endian `u32`.
 pub const CRYPTO_KIND_NONE_FOURCC: u32 = u32::from_be_bytes(*b"NONE");
 pub use sizes::*;
 
-pub fn none_generate_keypair() -> KeyPair {
+pub(crate) fn none_generate_keypair() -> KeyPair {
     let mut csprng = VeilidRng {};
     let mut pub_bytes = [0u8; NONE_PUBLIC_KEY_LENGTH];
     let mut sec_bytes = [0u8; NONE_SECRET_KEY_LENGTH];

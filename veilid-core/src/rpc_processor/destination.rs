@@ -274,17 +274,17 @@ impl fmt::Display for Destination {
                 SafetySelection::Safe(ss) => {
                     let spec = f.to_string(ss);
                     if spec.is_empty() {
-                        write!(f, "{}%SR", node.unfiltered())
+                        write!(f, "{}%SR", f.to_string(node.unfiltered()))
                     } else {
-                        write!(f, "{}%SR({})", node.unfiltered(), spec)
+                        write!(f, "{}%SR({})", f.to_string(node.unfiltered()), spec)
                     }
                 }
                 SafetySelection::Unsafe(_) => {
-                    write!(f, "{}", node)
+                    write!(f, "{}", f.to_string(node))
                 }
             },
             Destination::Relay { relay_di, node } => {
-                write!(f, "{}@{}", node, relay_di)
+                write!(f, "{}@{}", f.to_string(node), f.to_string(relay_di))
             }
             Destination::PrivateRoute {
                 private_route,
@@ -293,13 +293,18 @@ impl fmt::Display for Destination {
                 SafetySelection::Safe(ss) => {
                     let spec = f.to_string(ss);
                     if spec.is_empty() {
-                        write!(f, "PR%{}%SR", private_route.public_key)
+                        write!(f, "PR%{}%SR", f.to_string(&private_route.public_key))
                     } else {
-                        write!(f, "PR%{}%SR({})", private_route.public_key, spec)
+                        write!(
+                            f,
+                            "PR%{}%SR({})",
+                            f.to_string(&private_route.public_key),
+                            spec
+                        )
                     }
                 }
                 SafetySelection::Unsafe(_) => {
-                    write!(f, "PR%{}", private_route.public_key)
+                    write!(f, "PR%{}", f.to_string(&private_route.public_key))
                 }
             },
         }
@@ -504,7 +509,7 @@ impl RPCProcessor {
         let respond_to = match request.operation.kind() {
             RPCOperationKind::Question(q) => q.respond_to(),
             _ => {
-                panic!("not a question");
+                return NetworkResult::invalid_message("not a question");
             }
         };
 

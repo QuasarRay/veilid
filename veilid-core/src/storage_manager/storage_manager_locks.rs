@@ -51,3 +51,8 @@ pub type StorageManagerRecordsLockGuard =
     RecordsLockGuard<StorageManagerRecordLockPurpose, StorageManagerSubkeyLockPurpose>;
 pub type StorageManagerSubkeyLockGuard =
     SubkeyLockGuard<StorageManagerRecordLockPurpose, StorageManagerSubkeyLockPurpose>;
+#[expect(dead_code)]
+pub type StorageManagerPeekLockGuard =
+    PeekLockGuard<StorageManagerRecordLockPurpose, StorageManagerSubkeyLockPurpose>;
+pub type StorageManagerPeeksLockGuard =
+    PeeksLockGuard<StorageManagerRecordLockPurpose, StorageManagerSubkeyLockPurpose>;

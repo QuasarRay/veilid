@@ -5,6 +5,12 @@ import 'package:path_provider/path_provider.dart';
 
 import 'veilid.dart';
 
+/// Build a [VeilidConfig] from veilid-core's defaults, overriding the
+/// program/storage/network fields most callers need to set.
+///
+/// On non-web platforms the store directories are placed under the
+/// application support directory. [bootstrap] and [bootstrapKeys] are
+/// comma-separated; empty strings leave the built-in defaults in place.
 Future<VeilidConfig> getDefaultVeilidConfig({
   required bool isWeb,
   required String programName,

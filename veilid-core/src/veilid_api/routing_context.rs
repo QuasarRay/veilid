@@ -79,6 +79,8 @@ impl RoutingContext {
     /// * Sequencing default is to prefer ordered before unordered message delivery.
     ///
     /// To customize the safety selection in use, use [RoutingContext::with_safety()].
+    ///
+    /// Errors with `VeilidAPIError::NotInitialized` if the node is shut down (config unavailable).
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub fn with_default_safety(self) -> VeilidAPIResult<Self> {
         let this = self.clone();
@@ -99,6 +101,10 @@ impl RoutingContext {
     }
 
     /// Use a custom [SafetySelection]. Can be used to disable safety via [SafetySelection::Unsafe].
+    ///
+    /// Errors with `VeilidAPIError::Generic` if [SafetySelection::Unsafe] is requested without the
+    /// `footgun-nodeid-target` feature, or if `hop_count` exceeds the configured max route hop count.
+    /// Errors with `VeilidAPIError::InvalidArgument` if a `preferred_route` is set that is not a known route id.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub fn with_safety(self, mut safety_selection: SafetySelection) -> VeilidAPIResult<Self> {
         let this = self.clone();
@@ -107,9 +113,9 @@ impl RoutingContext {
             "RoutingContext::with_safety(self: {:?}, safety_selection: {:?})", self, safety_selection);
 
             if let SafetySelection::Unsafe(_) = &safety_selection {
-                #[cfg(not(feature = "footgun"))]
+                #[cfg(not(feature = "footgun-nodeid-target"))]
                 {
-                    apibail_generic!("Unsafe routing mode is not allowed without the 'footgun' feature enabled");
+                    apibail_generic!("Unsafe routing mode is not allowed without the 'footgun-nodeid-target' feature enabled");
                 }
             }
 
@@ -122,7 +128,7 @@ impl RoutingContext {
                 }
                 let config = self.api.config()?;
                 let default_route_hop_count = config.network.rpc.default_route_hop_count as usize;
-                let max_route_hop_count = config.network.rpc.max_route_hop_count as usize;
+                let max_route_hop_count = config.internal().network.rpc.max_route_hop_count as usize;
 
                 if safe.hop_count == 0 {
                     safe.hop_count = default_route_hop_count;
@@ -260,7 +266,7 @@ impl RoutingContext {
         }.await.inspect_err(log_veilid_api_error!(self))
     }
 
-    #[cfg(feature = "footgun")]
+    #[cfg(feature = "footgun-nodeid-target")]
     /// App-level bidirectional call that expects a response to be returned.
     ///
     /// Veilid apps may use this for arbitrary message passing.
@@ -269,13 +275,20 @@ impl RoutingContext {
     /// * `message` - an arbitrary message blob of up to 32768 bytes.
     ///
     /// Returns an answer blob of up to 32768 bytes.
+    ///
+    /// Blocks on the network awaiting the reply; governed by `network.rpc.timeout_ms`.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if `target` is an unsupported or malformed node id or route id.
+    /// Errors with `VeilidAPIError::NoConnection` if the target node id or remote private route could not be
+    /// resolved or no route could be allocated (retryable), `::Timeout` if the reply deadline elapsed (retryable),
+    /// `::TryAgain` if a route is temporarily unavailable (retryable), and `::InvalidTarget` if the target is unreachable.
     pub async fn app_call(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<Vec<u8>> {
         self.internal_app_call(target, message.into())
             .await
             .map(|x| x.into())
     }
 
-    #[cfg(not(feature = "footgun"))]
+    #[cfg(not(feature = "footgun-nodeid-target"))]
     /// App-level bidirectional call that expects a response to be returned.
     ///
     /// Veilid apps may use this for arbitrary message passing.
@@ -284,6 +297,13 @@ impl RoutingContext {
     /// * `message` - an arbitrary message blob of up to 32768 bytes.
     ///
     /// Returns an answer blob of up to 32768 bytes.
+    ///
+    /// Blocks on the network awaiting the reply; governed by `network.rpc.timeout_ms`.
+    ///
+    /// Errors with `VeilidAPIError::InvalidTarget` if `target` is a `NodeId` (only `RouteId` is permitted without
+    /// the `footgun-nodeid-target` feature). Otherwise errors with `VeilidAPIError::NoConnection` if the route could
+    /// not be resolved or allocated (retryable), `::Timeout` if the reply deadline elapsed (retryable), or `::TryAgain`
+    /// if a route is temporarily unavailable (retryable).
     pub async fn app_call(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<Vec<u8>> {
         match target {
             Target::RouteId(_) => self
@@ -322,24 +342,38 @@ impl RoutingContext {
         }.await.inspect_err(log_veilid_api_error!(self))
     }
 
-    #[cfg(feature = "footgun")]
+    #[cfg(feature = "footgun-nodeid-target")]
     /// App-level unidirectional message that does not expect any value to be returned.
     ///
     /// Veilid apps may use this for arbitrary message passing.
     ///
     /// * `target` - can be either a direct node id or a private route.
     /// * `message` - an arbitrary message blob of up to 32768 bytes.
+    ///
+    /// Sends over the network but does not await a reply; returns once the statement is dispatched.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if `target` is an unsupported or malformed node id or route id.
+    /// Errors with `VeilidAPIError::NoConnection` if the target node id or remote private route could not be
+    /// resolved or no route could be allocated (retryable), `::Timeout` if dispatch timed out (retryable),
+    /// `::TryAgain` if a route is temporarily unavailable (retryable), and `::InvalidTarget` if the target is unreachable.
     pub async fn app_message(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<()> {
         self.internal_app_message(target, message.into()).await
     }
 
-    #[cfg(not(feature = "footgun"))]
+    #[cfg(not(feature = "footgun-nodeid-target"))]
     /// App-level unidirectional message that does not expect any value to be returned.
     ///
     /// Veilid apps may use this for arbitrary message passing.
     ///
     /// * `target` - a private route.
     /// * `message` - an arbitrary message blob of up to 32768 bytes.
+    ///
+    /// Sends over the network but does not await a reply; returns once the statement is dispatched.
+    ///
+    /// Errors with `VeilidAPIError::InvalidTarget` if `target` is a `NodeId` (only `RouteId` is permitted without
+    /// the `footgun-nodeid-target` feature). Otherwise errors with `VeilidAPIError::NoConnection` if the route could
+    /// not be resolved or allocated (retryable), `::Timeout` if dispatch timed out (retryable), or `::TryAgain`
+    /// if a route is temporarily unavailable (retryable).
     pub async fn app_message(&self, target: Target, message: Vec<u8>) -> VeilidAPIResult<()> {
         match target {
             Target::RouteId(_) => self.internal_app_message(target, message.into()).await,
@@ -361,6 +395,14 @@ impl RoutingContext {
     ///
     /// Returns the newly allocated DHT record's key if successful.
     /// Note: if you pass in an owner keypair this call is a deterministic! This means that if you try to create a new record for a given owner and schema that already exists it *will* fail.
+    ///
+    /// Local-only: builds and opens the record in the local store without network fanout.
+    /// The returned record is left open; close it with [RoutingContext::close_dht_record] or it leaks the open handle.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `kind` is an unsupported crypto kind or `owner` is a malformed keypair.
+    /// Errors with `VeilidAPIError::InvalidArgument` if `schema` has an invalid subkey/member/writer count, if `owner`
+    /// is the wrong crypto kind for `kind`, or if this node's id would be a schema member. Errors with
+    /// `VeilidAPIError::NotInitialized` if the node is shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn create_dht_record(
         &self,
@@ -407,6 +449,15 @@ impl RoutingContext {
     /// safety selection.
     ///
     /// Returns the DHT record descriptor for the opened record if successful.
+    ///
+    /// Half of an open/close pair: close it with [RoutingContext::close_dht_record] or the open handle and its watches leak.
+    /// Re-opening an already-open record is safe and replaces the writer and safety selection in place, preserving active watches.
+    /// Returns from the local store without a network round-trip when the record is already local; otherwise blocks on a network inspect (subkey 0), and returns `TryAgain` if offline.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `record_key` is an unsupported kind or malformed, or `default_writer`
+    /// is a malformed keypair. Errors with `VeilidAPIError::TryAgain` if the record is not yet local and the node is
+    /// offline (retryable), `::KeyNotFound` if the record does not exist on the network, and `::NotInitialized` if the
+    /// node is shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn open_dht_record(
         &self,
@@ -445,6 +496,13 @@ impl RoutingContext {
     /// Closes a DHT record at a specific key that was opened with create_dht_record or open_dht_record.
     ///
     /// Closing a record allows you to re-open it with a different routing context.
+    ///
+    /// The release half of the open/close pair; cancels the record's watch (in the background) and drops any associated transaction.
+    /// Blocks holding the record lock until pending writes are flushed to the local store (awaits a disk flush).
+    /// Closing a record that is local but not currently open is a no-op; closing one not in the local store returns `KeyNotFound`.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `record_key` is an unsupported kind or malformed, and
+    /// `::NotInitialized` if the node is shut down. Neither `KeyNotFound` nor these errors are retryable.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn close_dht_record(&self, record_key: RecordKey) -> VeilidAPIResult<()> {
         async {
@@ -480,6 +538,9 @@ impl RoutingContext {
     /// When a `timeout` is specified, returns `Ok(true)` if all pending writes were flushed, or `Ok(false)` if `timeout` elapsed first.
     /// When no `timeout` is specified, waits indefinitely for writes to be flushed and then returns `Ok(true)`.
     /// If the system shuts down while waiting, returns `Err(VeilidAPIError::NotInitialized)`.
+    /// Errors with `VeilidAPIError::Generic` if `record_key` is an unsupported kind or malformed.
+    ///
+    /// Blocks until pending writes flush, the `timeout` elapses, or shutdown; non-blocking when there are no pending writes.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn flush_dht_record(
         &self,
@@ -515,6 +576,11 @@ impl RoutingContext {
     /// If the record is opened, it must be closed before it is deleted.
     /// Deleting a record does not delete it from the network, but will remove the storage of the record
     /// locally, and will prevent its value from being refreshed on the network by this node.
+    ///
+    /// Local-only: closes the record if still open, then removes it from the local store; no network round-trip.
+    ///
+    /// Errors with `VeilidAPIError::Generic` if `record_key` is an unsupported kind or malformed, `::KeyNotFound`
+    /// if the record is not in the local store, and `::NotInitialized` if the node is shut down. None are retryable.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn delete_dht_record(&self, record_key: RecordKey) -> VeilidAPIResult<()> {
         async {
@@ -550,6 +616,12 @@ impl RoutingContext {
     ///
     /// Returns `None` if the value subkey has not yet been set.
     /// Returns `Some(data)` if the value subkey has valid data.
+    ///
+    /// Non-blocking when a local value exists and `force_refresh` is false; otherwise blocks on a network fanout and returns `TryAgain` if offline.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if the record is not open, `::Generic` if `record_key` is an
+    /// unsupported kind or malformed, `::TryAgain` if a network refresh is needed and the node is offline (retryable),
+    /// `::KeyNotFound` if the record no longer exists, and `::NotInitialized` if shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn get_dht_value(
         &self,
@@ -586,6 +658,14 @@ impl RoutingContext {
     ///
     /// Returns `None` if the value was successfully set.
     /// Returns `Some(data)` if the value set was older than the one available on the network.
+    ///
+    /// Blocks on a network fanout to push the value; when offline or the fanout fails, queues the write for later flush (if `allow_offline`) and returns `Ok(None)`.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if the record is not open, `::Generic` if `record_key` is an
+    /// unsupported kind or the record is not writable (no writer) or the value fails schema validation (subkey out of
+    /// schema range, `data` larger than the per-subkey limit, or wrong writer for the subkey), `::TryAgain` if the
+    /// record is currently in a transaction (retryable), `::KeyNotFound` if the record no longer exists, and
+    /// `::NotInitialized` if shut down. A failed network fanout does not error; the write is deferred (returns `Ok(None)`).
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(data), fields(duration, __VEILID_LOG_KEY = self.log_key(), data.len = data.len()), ret))]
     pub async fn set_dht_value(
         &self,
@@ -633,12 +713,17 @@ impl RoutingContext {
     /// * `count:
     ///   - None: specifies a watch count of u32::MAX
     ///   - Some(count): is the number of times the watch will be sent, maximum. A zero value here is equivalent to a cancellation.
-    /// * `transactional`: when true, ValueChanged notifications report only the changed subkey range; the local record store
-    ///   is not auto-updated and no change-inspection forced get is run. The watcher must fetch new values under its own
-    ///   transaction. Required by DHTLog/DHTShortArray. Defaults to false.
     ///
     /// Returns Ok(true) if a watch is active for this record.
     /// Returns Ok(false) if the entire watch has been cancelled.
+    ///
+    /// Re-watching the same record replaces the prior watch's desired parameters in place; only one watch exists per record.
+    /// Records the desired watch state and returns without a network round-trip; a background task reconciles it with a remote node.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if the record is not open or a non-zero `expiration` is sooner than
+    /// `network.rpc.timeout_ms` in the future; `::Generic` if `record_key` is an unsupported kind or malformed, or no
+    /// local record is found; and `::NotInitialized` if shut down. None are retryable; no network errors surface here
+    /// since reconciliation is deferred to a background task.
     ///
     /// DHT watches are accepted with the following conditions:
     /// * First-come first-served basis for arbitrary unauthenticated readers, up to network.dht.public_watch_limit per record.
@@ -652,7 +737,6 @@ impl RoutingContext {
         subkeys: Option<ValueSubkeyRangeSet>,
         expiration: Option<Timestamp>,
         count: Option<u32>,
-        transactional: Option<bool>,
     ) -> VeilidAPIResult<bool> {
         async {
             self.api
@@ -663,14 +747,13 @@ impl RoutingContext {
 
             let recorder = DurationRecorder::new("RoutingContext::watch_dht_values", |name, start| {
                 veilid_log!(self debug
-                    "{}[start={:#}](self: {:?}, key: {:?}, subkeys: {:?}, expiration: {:?}, count: {:?}, transactional: {:?})", name, start, self, record_key, subkeys, expiration, count, transactional);
+                    "{}[start={:#}](self: {:?}, key: {:?}, subkeys: {:?}, expiration: {:?}, count: {:?})", name, start, self, record_key, subkeys, expiration, count);
             });
             let subkeys = subkeys.unwrap_or_default();
             let expiration = expiration.unwrap_or_default();
             let count = count.unwrap_or(u32::MAX);
-            let transactional = transactional.unwrap_or(false);
             recorder.record_fut(
-                Box::pin(storage_manager.watch_values(record_key, subkeys, expiration, count, transactional)),
+                Box::pin(storage_manager.watch_values(record_key, subkeys, expiration, count)),
                 |name, start, dur, ret| {
                     veilid_log!(self debug
                         "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
@@ -693,6 +776,12 @@ impl RoutingContext {
     ///
     /// Returns Ok(true) if a watch is active for this record.
     /// Returns Ok(false) if the entire watch has been cancelled.
+    ///
+    /// A no-op returning `Ok(false)` when no watch is active for the record.
+    /// Records the reduced desired watch state and returns without a network round-trip; a background task sends the cancel.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if the record is not open, `::Generic` if `record_key` is an
+    /// unsupported kind or malformed or no local record is found, and `::NotInitialized` if shut down. None are retryable.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn cancel_dht_watch(
         &self,
@@ -763,6 +852,12 @@ impl RoutingContext {
     ///     Useful for determine which subkeys would change with an SetValue operation.
     ///
     /// Returns `Ok(DHTRecordReport)` with the subkey ranges that were returned that overlapped the schema, and sequence numbers for each of the subkeys in the range.
+    ///
+    /// `DHTReportScope::Local` is local-only and non-blocking; the Sync/Update scopes block on a network inspect fanout and return `TryAgain` if offline.
+    ///
+    /// Errors with `VeilidAPIError::InvalidArgument` if the record is not open, `::Generic` if `record_key` is an
+    /// unsupported kind or malformed, `::TryAgain` if a network scope is requested and the node is offline (retryable),
+    /// and `::NotInitialized` if shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn inspect_dht_record(
         &self,
@@ -799,12 +894,12 @@ impl RoutingContext {
     #[cfg(feature = "unstable-blockstore")]
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn find_block(&self, _block_id: BlockId) -> VeilidAPIResult<Vec<u8>> {
-        panic!("unimplemented");
+        apibail_internal!("unimplemented");
     }
 
     #[cfg(feature = "unstable-blockstore")]
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret,))]
     pub async fn supply_block(&self, _block_id: BlockId) -> VeilidAPIResult<bool> {
-        panic!("unimplemented");
+        apibail_internal!("unimplemented");
     }
 }

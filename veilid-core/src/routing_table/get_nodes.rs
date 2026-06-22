@@ -7,21 +7,21 @@ use super::*;
 impl_veilid_log_facility!("rtab");
 
 /// Why a node needs a ping. Lower priority numbers run first.
-pub(crate) enum NeedPing {
+pub(crate) enum NodePing {
     /// We don't have node status yet for this node.
     NodeStatus,
     /// The node hasn't seen our latest node info timestamp.
     OurNodeInfoTs,
-    /// Timing-based per-transport pings: which low-level transports need probing.
-    PerTransportTiming(BTreeSet<LowLevelTransportType>),
+    /// Timing-based per-ordering pings to determine node reliability
+    ProofOfLife(SequenceOrderingSet),
 }
 
-impl NeedPing {
+impl NodePing {
     pub fn priority(&self) -> usize {
         match self {
             Self::NodeStatus => 50,
             Self::OurNodeInfoTs => 75,
-            Self::PerTransportTiming(_) => 100,
+            Self::ProofOfLife(_) => 100,
         }
     }
 }
@@ -30,53 +30,60 @@ impl RoutingTable {
     /// Decide if a node needs a ping. None means no ping needed right now.
     /// `outbound_dif` is our outbound dial-info filter for the routing domain;
     /// it determines which of the node's transports we can actually reach.
-    pub fn need_ping(
+    /// Return ping priorities in reverse order. If a node needs a proof of life ping,
+    /// It should get only that ping until it has been proven alive, etc.
+    /// However, proof of life pings take lower precedence overall than the others
+    /// because interacting with known nodes is more important than proving reachability
+    /// of unknown nodes.
+    pub fn needs_node_ping(
         &self,
         routing_domain: RoutingDomain,
         opt_own_node_info_ts: Option<Timestamp>,
         outbound_dif: &DialInfoFilter,
         snap: &BucketEntrySnapshot,
-    ) -> Option<NeedPing> {
+    ) -> Option<NodePing> {
         // If this entry doesn't have node info in the routing domain we are checking, don't include it
         if !snap.has_node_info(routing_domain.into()) {
             return None;
         }
 
-        // If we don't have node status for this node, then we should ping it to get some node status
-        if snap.node_status(routing_domain).is_none() {
-            #[cfg(feature = "verbose-tracing")]
-            veilid_log!(self debug "Ping reason: node_status is none (rd={:?} ids={:?})", routing_domain, snap.node_ids);
-            return Some(NeedPing::NodeStatus);
+        // If any sequence ordering this node supports needs a timing-based ping
+        // (or has never been pinged yet), schedule per-sequence-ordering pings.
+        let sequence_orderings: SequenceOrderingSet =
+            snap.needs_proof_of_life_ping(routing_domain, outbound_dif);
+        if !sequence_orderings.is_empty() {
+            veilid_log!(self debug target: "rtab::state::node", "Ping reason: reachability (rd={:?} ids={:?} sequence_orderings={:?})",
+                routing_domain, snap.node_ids, sequence_orderings);
+            return Some(NodePing::ProofOfLife(sequence_orderings));
         }
 
-        // If this entry needs a ping because this node hasn't seen our latest node info, then do it
-        if let Some(own_node_info_ts) = opt_own_node_info_ts {
-            if !snap.has_seen_our_node_info_ts(routing_domain, own_node_info_ts) {
-                #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self debug "Ping reason: has not seen our node info timestamp (rd={:?} ids={:?} own_ni_ts={}",
-                    routing_domain, snap.node_ids, own_node_info_ts);
-                return Some(NeedPing::OurNodeInfoTs);
+        // Some pings should only be done to nodes if they are responsive already
+        if snap.state.is_responsive() {
+            // Some pings should only be done if we have published our own node info already
+            if let Some(own_node_info_ts) = opt_own_node_info_ts {
+                // If this entry needs a ping because this node hasn't seen our latest node info, then do it
+                if !snap.has_seen_our_node_info_ts(routing_domain, own_node_info_ts) {
+                    veilid_log!(self debug target: "rtab::state::node", "Ping reason: has not seen our node info timestamp (rd={:?} ids={:?} own_ni_ts={}",
+                        routing_domain, snap.node_ids, own_node_info_ts);
+                    return Some(NodePing::OurNodeInfoTs);
+                }
+
+                // If we don't have node status for this node, then we should ping it to get some node status
+                // but only after we've published our own node info and are sure it's the latest node info
+                // This should basically never fire unless we clear a node's status for the purposes of refreshing it
+                if snap.node_status(routing_domain).is_none() && snap.state.is_responsive() {
+                    veilid_log!(self debug target: "rtab::state::node", "Ping reason: node_status is none (rd={:?} ids={:?})", routing_domain, snap.node_ids);
+                    return Some(NodePing::NodeStatus);
+                }
             }
-        }
-
-        // If any low-level transport this node supports needs a timing-based ping
-        // (or has never been pinged yet), schedule per-transport pings.
-        let needing: BTreeSet<LowLevelTransportType> = snap
-            .supported_low_level_transports(routing_domain, outbound_dif)
-            .into_iter()
-            .filter(|t| snap.transport_state(*t).is_none() || snap.needs_ping_for(*t))
-            .collect();
-        if !needing.is_empty() {
-            #[cfg(feature = "verbose-tracing")]
-            veilid_log!(self debug "Ping reason: timing (rd={:?} ids={:?} transports={:?})",
-                routing_domain, snap.node_ids, needing);
-            return Some(NeedPing::PerTransportTiming(needing));
         }
 
         None
     }
 
-    /// See which nodes need to be pinged. Priority-100 entries are transport-pinned;
+    /// See which nodes need to be pinged.
+    /// Only considers nodes that are >= Missing
+    /// Priority-100 entries are SequenceOrdering-pinned;
     /// priority 50/75 entries use Sequencing::PreferOrdered (multi-transport).
     pub fn get_relability_ping_nodes(
         &self,
@@ -101,7 +108,7 @@ impl RoutingTable {
             let snap = v.as_ref().unwrap_or_log();
 
             // See if this node needs a ping
-            self.need_ping(
+            self.needs_node_ping(
                 routing_domain,
                 opt_own_node_info_ts,
                 &filter_outbound_dif,
@@ -121,13 +128,11 @@ impl RoutingTable {
                 let b_snap = opt_b_snap.as_ref().unwrap_or_log();
 
                 let ca = a_snap
-                    .peer_stats
                     .rpc_stats
                     .last_seen_ts
                     .unwrap_or(Timestamp::new(0))
                     .as_u64();
                 let cb = b_snap
-                    .peer_stats
                     .rpc_stats
                     .last_seen_ts
                     .unwrap_or(Timestamp::new(0))
@@ -142,7 +147,7 @@ impl RoutingTable {
             let snap = opt_snap.unwrap_or_log();
 
             let need_ping = self
-                .need_ping(
+                .needs_node_ping(
                     routing_domain,
                     opt_own_node_info_ts,
                     &transform_outbound_dif,
@@ -159,9 +164,9 @@ impl RoutingTable {
             },
         ) as RoutingTableEntryPreSortFilter;
 
-        let snapshot = self.snapshot_entries(cur_ts, BucketEntryState::Unreliable);
+        let snapshot = self.snapshot_entries(cur_ts, BucketEntryState::Missing);
 
-        let priority_nodes: Vec<(NeedPing, BucketEntrySnapshot)> = snapshot
+        let priority_nodes: Vec<(NodePing, BucketEntrySnapshot)> = snapshot
             .get_peers_with_sort_and_filter(
                 usize::MAX,
                 cur_ts,
@@ -175,26 +180,24 @@ impl RoutingTable {
         for (need_ping, snap) in priority_nodes {
             let priority = need_ping.priority();
             let bucket = out.entry(priority).or_default();
-            let node = snap.node_ref.clone();
+            let node_ref = snap.node_ref.clone();
             match need_ping {
-                NeedPing::NodeStatus | NeedPing::OurNodeInfoTs => {
+                NodePing::NodeStatus | NodePing::OurNodeInfoTs => {
                     // Node-level ping: multi-transport, PreferOrdered.
-                    bucket.push(
-                        node.routing_domain_filtered(routing_domain)
-                            .with_sequencing(Sequencing::PreferOrdered),
-                    );
+                    let filtered_node_ref = node_ref
+                        .routing_domain_filtered(routing_domain)
+                        .with_sequencing(Sequencing::PreferOrdered);
+                    bucket.push(filtered_node_ref);
                 }
-                NeedPing::PerTransportTiming(low_levels) => {
-                    // For each low-level transport needing a ping, pick the preferred
-                    // high-level protocol the node supports and construct a single
-                    // transport-pinned ping. TCP wins over WS within Stream class.
-                    for llt in low_levels {
-                        let Some(t) =
-                            snap.preferred_transport_for(routing_domain, llt, &outbound_dif)
-                        else {
-                            continue;
-                        };
-                        bucket.push(node.with_transport(routing_domain, t).into_filtered());
+                NodePing::ProofOfLife(sequence_orderings) => {
+                    // For each node that needs a reachability ping over a SequenceOrdering
+                    // construct a noderef filtered to that orderings
+                    for so in sequence_orderings {
+                        let filter = NodeRefFilter::new()
+                            .with_routing_domain(routing_domain)
+                            .with_protocol_type_set(ProtocolType::all_sequence_ordering_set(so));
+                        let filtered_node_ref = node_ref.custom_filtered(filter);
+                        bucket.push(filtered_node_ref);
                     }
                 }
             }
@@ -203,6 +206,9 @@ impl RoutingTable {
         out
     }
 
+    /// Find nodes that are not on the local network and are in the desired routing domain.
+    /// Only considers nodes that are >= Initial.
+    /// Used for finding nodes for DialInfo and external address detection.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub fn find_fast_non_local_nodes_filtered(
         &self,
@@ -210,11 +216,10 @@ impl RoutingTable {
         node_count: usize,
         mut filters: VecDeque<RoutingTableEntryFilter>,
     ) -> Vec<NodeRef> {
-        assert_ne!(
-            routing_domain,
-            RoutingDomain::LocalNetwork,
-            "LocalNetwork is not a valid non-local RoutingDomain"
-        );
+        if routing_domain == RoutingDomain::LocalNetwork {
+            veilid_log!(self error "LocalNetwork is not a valid non-local RoutingDomain");
+            return Vec::new();
+        }
         let public_node_filter =
             Box::new(move |v: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
                 let snap = v.as_ref().unwrap_or_log();
@@ -235,6 +240,9 @@ impl RoutingTable {
         })
     }
 
+    /// Find nodes that are in the desired routing domain.
+    /// Only considers nodes that are >= Initial.
+    /// Used for finding nodes for bootstrap, DialInfo and external address detection.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub fn get_preferred_fastest_nodes<T, O>(
         &self,
@@ -294,7 +302,7 @@ impl RoutingTable {
             },
         ) as RoutingTableEntryPreSortFilter;
 
-        let snapshot = self.snapshot_entries(cur_ts, BucketEntryState::Unreliable);
+        let snapshot = self.snapshot_entries(cur_ts, BucketEntryState::Initial);
 
         snapshot.get_peers_with_sort_and_filter(
             node_count,
@@ -389,7 +397,7 @@ impl RoutingTable {
             },
         ) as RoutingTableEntryPreSortFilter;
 
-        let snapshot = self.snapshot_entries(cur_ts, BucketEntryState::Unreliable);
+        let snapshot = self.snapshot_entries(cur_ts, BucketEntryState::Initial);
 
         let out = snapshot.get_peers_with_sort_and_filter(
             node_count,
@@ -401,63 +409,6 @@ impl RoutingTable {
         );
         veilid_log!(self trace ">> find_closest_nodes: node count = {}", out.len());
         out
-    }
-
-    #[expect(dead_code)]
-    pub fn sort_and_clean_closest_noderefs(
-        &self,
-        hash_coordinate: HashCoordinate,
-        closest_nodes: &[NodeRef],
-    ) -> Vec<NodeRef> {
-        let kind = hash_coordinate.kind();
-        let mut closest_nodes: Vec<NodeRef> = closest_nodes
-            .iter()
-            .filter_map(|nr| {
-                if nr.node_ids().kinds().contains(&kind) {
-                    Some(nr.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Sort closest
-        let sort = Self::make_closest_noderef_sort(hash_coordinate);
-        closest_nodes.sort_by(sort);
-
-        closest_nodes
-    }
-
-    pub fn make_closest_noderef_sort(
-        hash_coordinate: HashCoordinate,
-    ) -> impl Fn(&NodeRef, &NodeRef) -> core::cmp::Ordering {
-        let kind = hash_coordinate.kind();
-
-        move |a: &NodeRef, b: &NodeRef| -> core::cmp::Ordering {
-            // same nodes are always the same
-            if a.same_entry(b) {
-                return core::cmp::Ordering::Equal;
-            }
-
-            a.operate(|a_entry| {
-                b.operate(|b_entry| {
-                    // get keys
-                    let a_key = a_entry.node_ids().get(kind).unwrap_or_log();
-                    let b_key = b_entry.node_ids().get(kind).unwrap_or_log();
-
-                    // distance is the next metric, closer nodes first
-                    let da = a_key
-                        .ref_value()
-                        .to_bare_hash_coordinate()
-                        .distance(hash_coordinate.ref_value());
-                    let db = b_key
-                        .ref_value()
-                        .to_bare_hash_coordinate()
-                        .distance(hash_coordinate.ref_value());
-                    da.cmp(&db)
-                })
-            })
-        }
     }
 
     /// Utility to find the closest nodes to a particular hash coordinate, preferring reliable nodes first,
@@ -492,7 +443,7 @@ impl RoutingTable {
         ) as RoutingTableEntryFilter;
         let filters = VecDeque::from([filter]);
 
-        let node_count = self.config().network.dht.max_find_node_count as usize;
+        let node_count = self.config().internal().network.dht.max_find_node_count as usize;
 
         self.get_preferred_closest_nodes(
             node_count,
@@ -533,15 +484,14 @@ impl RoutingTable {
                 let Some(snap) = opt_entry else {
                     return false;
                 };
+                // Exclude non-reliable nodes
+                if !snap.is_reliable() {
+                    return false;
+                }
                 // Ensure only things that have a minimum set of capabilities are returned
                 if !snap.has_all_capabilities(routing_domain, &required_capabilities) {
                     return false;
                 }
-
-                if !snap.is_reliable() {
-                    return false;
-                }
-
                 // Ensure things further from the key than our own node are not included
                 let Some(entry_node_id) = snap.node_ids.get(crypto_kind) else {
                     return false;
@@ -557,7 +507,7 @@ impl RoutingTable {
         ) as RoutingTableEntryFilter;
         let filters = VecDeque::from([filter]);
 
-        let node_count = self.config().network.dht.max_find_node_count as usize;
+        let node_count = self.config().internal().network.dht.max_find_node_count as usize;
 
         //
         let closest_nodes = self.get_preferred_closest_nodes(
@@ -645,7 +595,7 @@ impl RoutingTable {
         routing_domain: RoutingDomain,
         hash_coordinates: &[HashCoordinate],
         required_capabilities: &[VeilidCapability],
-        snapshot: &EntrySnapshot,
+        snapshot: &RoutingTableSnapshot,
     ) -> Vec<Option<FilteredNodeRef>> {
         if hash_coordinates.is_empty() {
             return Vec::new();
@@ -755,7 +705,7 @@ far (self): {}
     )]
     pub fn get_random_fast_node(
         &self,
-        snapshot: &EntrySnapshot,
+        snapshot: &RoutingTableSnapshot,
         filter: impl Fn(&BucketEntrySnapshot) -> bool,
         percentile: f32,
         metric: impl Fn(&LatencyStats) -> TimestampDuration,

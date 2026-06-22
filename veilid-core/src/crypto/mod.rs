@@ -1,10 +1,9 @@
+mod crypto_system;
 mod dh_cache;
 mod envelope;
 mod guard;
 mod receipt;
 mod types;
-
-pub mod crypto_system;
 
 #[cfg(any(test, feature = "test-util"))]
 #[doc(hidden)]
@@ -152,6 +151,9 @@ impl Crypto {
     }
 
     /// Factory method to get a specific crypto version
+    ///
+    /// Returns a guard borrowing this `Crypto`; the cryptosystem stays reachable for the guard's
+    /// lifetime. Non-blocking (clones an `Arc`).
     pub fn get(&self, kind: CryptoKind) -> Option<CryptoSystemGuard<'_>> {
         match kind {
             #[cfg(feature = "enable-crypto-vld0")]
@@ -163,6 +165,9 @@ impl Crypto {
     }
 
     /// Factory method to get a specific crypto version for async use
+    ///
+    /// Returns a guard borrowing this `Crypto`; the cryptosystem stays reachable for the guard's
+    /// lifetime. Non-blocking (clones an `Arc`).
     pub fn get_async(&self, kind: CryptoKind) -> Option<AsyncCryptoSystemGuard<'_>> {
         self.get(kind).map(|x| x.as_async())
     }
@@ -178,6 +183,10 @@ impl Crypto {
     }
 
     // Convenience validators
+
+    /// Validate a shared secret against the cryptosystem named by its kind. Fails if the kind is unsupported.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `secret`'s kind is unsupported or its length is wrong.
     pub fn check_shared_secret(&self, secret: &SharedSecret) -> VeilidAPIResult<()> {
         let Some(vcrypto) = self.get(secret.kind()) else {
             apibail_generic!("unsupported crypto kind");
@@ -185,30 +194,46 @@ impl Crypto {
         vcrypto.check_shared_secret(secret)
     }
 
+    /// Validate a hash digest against the cryptosystem named by its kind. Fails if the kind is unsupported.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `hash`'s kind is unsupported or its length is wrong.
     pub fn check_hash_digest(&self, hash: &HashDigest) -> VeilidAPIResult<()> {
         let Some(vcrypto) = self.get(hash.kind()) else {
             apibail_generic!("unsupported crypto kind");
         };
         vcrypto.check_hash_digest(hash)
     }
+    /// Validate a public key against the cryptosystem named by its kind. Fails if the kind is unsupported.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `key`'s kind is unsupported or its length is wrong.
     pub fn check_public_key(&self, key: &PublicKey) -> VeilidAPIResult<()> {
         let Some(vcrypto) = self.get(key.kind()) else {
             apibail_generic!("unsupported crypto kind");
         };
         vcrypto.check_public_key(key)
     }
+    /// Validate a secret key against the cryptosystem named by its kind. Fails if the kind is unsupported.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `key`'s kind is unsupported or its length is wrong.
     pub fn check_secret_key(&self, key: &SecretKey) -> VeilidAPIResult<()> {
         let Some(vcrypto) = self.get(key.kind()) else {
             apibail_generic!("unsupported crypto kind");
         };
         vcrypto.check_secret_key(key)
     }
+    /// Validate a signature against the cryptosystem named by its kind. Fails if the kind is unsupported.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `signature`'s kind is unsupported or its length is wrong.
     pub fn check_signature(&self, signature: &Signature) -> VeilidAPIResult<()> {
         let Some(vcrypto) = self.get(signature.kind()) else {
             apibail_generic!("unsupported crypto kind");
         };
         vcrypto.check_signature(signature)
     }
+    /// Validate a keypair against the cryptosystem named by its kind. Fails if the kind is unsupported.
+    ///
+    /// Errors `VeilidAPIError::Generic` if `key_pair`'s kind is unsupported, or if the pair or either
+    /// key has the wrong length.
     pub fn check_keypair(&self, key_pair: &KeyPair) -> VeilidAPIResult<()> {
         let Some(vcrypto) = self.get(key_pair.kind()) else {
             apibail_generic!("unsupported crypto kind");
@@ -219,6 +244,12 @@ impl Crypto {
     /// BareSignature set verification
     /// Returns Some() the set of signature cryptokinds that validate and are supported
     /// Returns None if any cryptokinds are supported and do not validate
+    ///
+    /// Local CPU only; verifies each signature inline (no offload).
+    ///
+    /// A supported signature that does not match returns `Ok(None)`, not an error. Errors
+    /// `VeilidAPIError::Generic` or `VeilidAPIError::ParseError` if a matching public key or
+    /// signature is malformed (propagated from the underlying verify).
     pub fn verify_signatures(
         &self,
         public_keys: &[PublicKey],
@@ -244,6 +275,11 @@ impl Crypto {
     /// BareSignature set generation
     /// Generates the set of signatures that are supported
     /// Any cryptokinds that are not supported are silently dropped
+    ///
+    /// Local CPU only; signs inline for each keypair (no offload).
+    ///
+    /// Errors `VeilidAPIError::Generic`, `VeilidAPIError::ParseError`, or `VeilidAPIError::Internal`
+    /// if a supported keypair is malformed (propagated from the underlying sign).
     pub fn generate_signatures<F, R>(
         &self,
         data: &[u8],
@@ -265,6 +301,8 @@ impl Crypto {
 
     /// Generate keypair
     /// Does not require startup/init
+    ///
+    /// Errors `VeilidAPIError::Generic` if `crypto_kind` is not a supported cryptosystem.
     pub fn generate_keypair(crypto_kind: CryptoKind) -> VeilidAPIResult<KeyPair> {
         #[cfg(feature = "enable-crypto-vld0")]
         if crypto_kind == CRYPTO_KIND_VLD0 {

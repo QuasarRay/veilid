@@ -3,14 +3,17 @@ use super::*;
 #[cfg(feature = "debug-locks")]
 use std::sync::Mutex as StdMutex;
 
+/// Returned by `startup` when the lock is already in the started state.
 #[derive(ThisError, Debug, Copy, Clone, PartialEq, Eq)]
 #[error("Already started")]
 pub struct StartupLockAlreadyStartedError;
 
+/// Returned by `shutdown` when the lock is already in the shut down state.
 #[derive(ThisError, Debug, Copy, Clone, PartialEq, Eq)]
 #[error("Already shut down")]
 pub struct StartupLockAlreadyShutDownError;
 
+/// Returned by `enter` when the lock is not in the started state.
 #[derive(ThisError, Debug, Copy, Clone, PartialEq, Eq)]
 #[error("Not started")]
 pub struct StartupLockNotStartedError;
@@ -86,6 +89,7 @@ pub struct StartupLock {
 }
 
 impl StartupLock {
+    /// Create a new lock in the shut down state.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -99,6 +103,7 @@ impl StartupLock {
     /// Start up if things are not already started up
     /// One must call 'success()' on the returned startup lock guard if startup was successful
     /// otherwise the startup lock will not shift to the 'started' state.
+    /// Non-blocking: fails immediately with `StartupLockAlreadyStartedError` if already started or in transition.
     pub fn startup(&self) -> Result<StartupLockGuard<'_>, StartupLockAlreadyStartedError> {
         let guard = self
             .startup_state
@@ -123,6 +128,7 @@ impl StartupLock {
 
     /// Check if this StartupLock is currently in a started state
     /// Returns false is the state is in transition
+    /// Non-blocking: a `try_read` that returns false rather than waiting when the state is mid-transition.
     pub fn is_started(&self) -> bool {
         let Some(guard) = self.startup_state.try_read() else {
             return false;
@@ -132,6 +138,7 @@ impl StartupLock {
 
     /// Check if this StartupLock is currently in a shut down state
     /// Returns false is the state is in transition
+    /// Non-blocking: a `try_read` that returns false rather than waiting when the state is mid-transition.
     pub fn is_shut_down(&self) -> bool {
         let Some(guard) = self.startup_state.try_read() else {
             return false;
@@ -142,6 +149,9 @@ impl StartupLock {
     /// Wait for all 'entered' operations to finish before shutting down
     /// One must call 'success()' on the returned startup lock guard if shutdown was successful
     /// otherwise the startup lock will not shift to the 'stopped' state.
+    /// Blocks until every outstanding `enter`/`enter_arc` guard is dropped (acquires the write lock).
+    /// With the `debug-locks` feature this wait is bounded to 30s and panics on timeout as a deadlock.
+    /// Errors with `StartupLockAlreadyShutDownError` if the lock is already in the shut down state.
     pub async fn shutdown(&self) -> Result<StartupLockGuard<'_>, StartupLockAlreadyShutDownError> {
         // Drop the stop source to ensure we can detect shutdown has been requested
         *self.stop_source.lock() = None;
@@ -183,6 +193,8 @@ impl StartupLock {
     /// Enter an operation in a started-up module.
     /// If this module has not yet started up or is in the process of startup or shutdown
     /// this will fail.
+    /// Non-blocking: fails immediately with `StartupLockNotStartedError` rather than waiting on a transition.
+    /// The returned guard holds a read lock that delays `shutdown` until dropped; drop it when the operation finishes.
     pub fn enter(&self) -> Result<StartupLockEnterGuard<'_>, StartupLockNotStartedError> {
         let guard = self
             .startup_state
@@ -212,6 +224,8 @@ impl StartupLock {
     /// Enter an operation in a started-up module, using an owned lock.
     /// If this module has not yet started up or is in the process of startup or shutdown
     /// this will fail.
+    /// Non-blocking: fails immediately with `StartupLockNotStartedError` rather than waiting on a transition.
+    /// The returned owned guard holds a read lock that delays `shutdown` until dropped; drop it when the operation finishes.
     pub fn enter_arc(&self) -> Result<StartupLockEnterGuardArc, StartupLockNotStartedError> {
         let guard = self
             .startup_state

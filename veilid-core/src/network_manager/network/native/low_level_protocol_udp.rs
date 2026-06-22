@@ -86,7 +86,13 @@ impl NativeNetwork {
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(super) fn create_udp_listener_tasks(&self) -> EyreResult<()> {
         // Spawn socket tasks
-        let mut task_count = self.config().network.protocol.udp.socket_pool_size;
+        let mut task_count = self
+            .config()
+            .internal()
+            .network
+            .protocol
+            .udp
+            .socket_pool_size;
         if task_count == 0 {
             task_count = get_concurrency() / 2;
             if task_count == 0 {
@@ -192,7 +198,8 @@ impl NativeNetwork {
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(super) fn create_outbound_udp_protocol_handlers(&self) -> EyreResult<bool> {
-        let enable_ipv4 = is_ipv4_supported();
+        let allowed = configured_address_type_set(&self.config());
+        let enable_ipv4 = is_ipv4_supported() && allowed.contains(AddressType::IPV4);
         if enable_ipv4 {
             let has_ipv4_handler = self
                 .inner
@@ -211,7 +218,7 @@ impl NativeNetwork {
                 }
             }
         }
-        let enable_ipv6 = is_ipv6_supported();
+        let enable_ipv6 = is_ipv6_supported() && allowed.contains(AddressType::IPV6);
         if enable_ipv6 {
             let has_ipv6_handler = self
                 .inner

@@ -3,15 +3,15 @@ use super::*;
 impl NetworkManager {
     pub fn debug_info_nodeinfo(&self) -> String {
         let mut out = String::new();
-        let inner = self.inner.lock();
+        let stats = self.stats.read();
         out += &format!(
             "Relay Worker Dequeue Latency:\n{}",
-            indent_all_string(format!("{:#}", inner.stats.relay_worker_dequeue_latency))
+            indent_all_string(format!("{:#}", stats.relay_worker_dequeue_latency))
         );
         out += "\n";
         out += &format!(
             "Relay Worker Process Latency:\n{}",
-            indent_all_string(format!("{:#}", inner.stats.relay_worker_process_latency))
+            indent_all_string(format!("{:#}", stats.relay_worker_process_latency))
         );
         out
     }

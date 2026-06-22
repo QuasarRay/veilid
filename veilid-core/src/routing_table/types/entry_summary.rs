@@ -70,12 +70,14 @@ impl fmt::Display for CapabilityCounts {
 pub struct EntrySummaryDetail {
     /// A count of the entries in the routing domain per crypto kind
     pub total: CapabilityCounts,
-    /// A count of the entries in the routing domain per crypto kind that are live
+    /// A count of the entries in the routing domain per crypto kind that might be alive (not known to be dead)
+    pub maybe_live: CapabilityCounts,
+    /// A count of the entries in the routing domain per crypto kind that are live (reliable, unreliable, or initial)
     pub live: CapabilityCounts,
     /// Live entries that can serve as safety route hops (not on our own network)
     pub live_external: CapabilityCounts,
-    /// A count of the entries in the routing domain per crypto kind that have been tested
-    pub tested: CapabilityCounts,
+    /// A count of the entries in the routing domain per crypto kind that are responding (reliable or unreliable)
+    pub responsive: CapabilityCounts,
 }
 
 impl EntrySummaryDetail {
@@ -86,16 +88,16 @@ impl EntrySummaryDetail {
         is_own_network: bool,
     ) {
         self.total.add_entry(routing_domain, e);
-        if matches!(
-            e.state,
-            BucketEntryState::Reliable | BucketEntryState::Unreliable
-        ) {
-            self.live.add_entry(routing_domain, e);
-            if !is_own_network {
-                self.live_external.add_entry(routing_domain, e);
-            }
-            if e.is_tested() {
-                self.tested.add_entry(routing_domain, e);
+        if e.state.maybe_live() {
+            self.maybe_live.add_entry(routing_domain, e);
+            if e.state.is_live() {
+                self.live.add_entry(routing_domain, e);
+                if !is_own_network {
+                    self.live_external.add_entry(routing_domain, e);
+                }
+                if e.state.is_responsive() {
+                    self.responsive.add_entry(routing_domain, e);
+                }
             }
         }
     }
@@ -106,14 +108,14 @@ impl fmt::Display for EntrySummaryDetail {
         if f.alternate() {
             write!(
                 f,
-                "total: {}\nlive: {}\nlive_external: {}\ntested: {}",
-                self.total, self.live, self.live_external, self.tested
+                "total: {}\nmaybe_live: {}\nlive: {}\nlive_external: {}\nresponsive: {}",
+                self.total, self.maybe_live, self.live, self.live_external, self.responsive
             )
         } else {
             write!(
                 f,
-                "total:{} / live:{} / live_external:{} / tested:{}",
-                self.total, self.live, self.live_external, self.tested
+                "total:{} / maybe_live:{} / live:{} / live_external:{} / responsive:{}",
+                self.total, self.maybe_live, self.live, self.live_external, self.responsive
             )
         }
     }

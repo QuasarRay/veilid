@@ -87,10 +87,10 @@ impl StorageManager {
         subkeys_written: ValueSubkeyRangeSet,
         subkeys_still_offline: ValueSubkeyRangeSet,
     ) {
-        assert!(
-            subkeys_written.is_disjoint(&subkeys_still_offline),
-            "subkeys can not be written and still offline"
-        );
+        if !subkeys_written.is_disjoint(&subkeys_still_offline) {
+            veilid_log!(self error "subkeys can not be written and still offline");
+            return;
+        }
 
         // Get the offline subkey write record
         let mut inner = self.inner.lock();

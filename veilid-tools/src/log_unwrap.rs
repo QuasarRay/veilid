@@ -5,22 +5,27 @@ use std::fmt;
 
 /// Extension trait for Result types.
 pub trait ResultExt<T, E> {
+    /// Log the error and return None on `Err`, otherwise return `Some` of the value.
     fn ok_or_log(self) -> Option<T>
     where
         E: fmt::Debug;
 
+    /// Return the value, or log the error and panic on `Err`.
     fn unwrap_or_log(self) -> T
     where
         E: fmt::Debug;
 
+    /// Return the value, or log `msg` with the error and panic on `Err`.
     fn expect_or_log(self, msg: &str) -> T
     where
         E: fmt::Debug;
 
+    /// Return the error, or log the value and panic on `Ok`.
     fn unwrap_err_or_log(self) -> E
     where
         T: fmt::Debug;
 
+    /// Return the error, or log `msg` with the value and panic on `Ok`.
     fn expect_err_or_log(self, msg: &str) -> E
     where
         T: fmt::Debug;
@@ -93,14 +98,18 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
 
 /// Extension trait for Option types.
 pub trait OptionExt<T> {
+    /// Return the value, or log and panic on `None`.
     fn unwrap_or_log(self) -> T;
 
+    /// Return the value, or log `msg` and panic on `None`.
     fn expect_or_log(self, msg: &str) -> T;
 
+    /// Log the value and panic on `Some`, otherwise do nothing.
     fn unwrap_none_or_log(self)
     where
         T: fmt::Debug;
 
+    /// Log `msg` with the value and panic on `Some`, otherwise do nothing.
     fn expect_none_or_log(self, msg: &str)
     where
         T: fmt::Debug;

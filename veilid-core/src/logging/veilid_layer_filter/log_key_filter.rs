@@ -15,6 +15,7 @@ pub type VeilidLayerLogKeyFilter = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 /// This has a static lifetime because it is used in the `veilid_log!()` macros
 pub type VeilidLogKey = &'static str;
 
+/// Selects which log keys a [VeilidLayerFilter] accepts.
 #[derive(Clone, Default)]
 #[must_use]
 pub enum VeilidLogKeyFilterMode {

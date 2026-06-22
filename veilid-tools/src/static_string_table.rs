@@ -6,7 +6,9 @@ static STRING_TABLE: std::sync::LazyLock<Mutex<BTreeSet<&'static str>>> =
 static STRING_TRANSFORM_TABLE: std::sync::LazyLock<Mutex<HashMap<(usize, usize), &'static str>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Intern a string into a process-global table, returning a `&'static str` for it.
 pub trait ToStaticStr {
+    /// Return a `&'static str` for this value, interning and leaking the bytes the first time a given string is seen.
     fn to_static_str(&self) -> &'static str;
 }
 
@@ -23,7 +25,9 @@ impl<T: AsRef<str>> ToStaticStr for T {
     }
 }
 
+/// Cache the result of transforming a `&'static str`, keyed by its pointer and length.
 pub trait StaticStrTransform {
+    /// Return the cached transform of this string, computing it with `transform` on the first call for a given static slice.
     fn static_transform<F: FnOnce(&'static str) -> &'static str>(
         self,
         transform: F,

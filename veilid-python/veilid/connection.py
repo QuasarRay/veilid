@@ -1,3 +1,5 @@
+"""Client-side helpers for locating and connecting to a veilid-server."""
+
 import appdirs
 import errno
 import os
@@ -21,7 +23,10 @@ class VeilidConnectionError(Exception):
 
 @cache
 def server_info(subindex: int = 0) -> tuple[str, int]:
-    """Return the hostname and port of the server."""
+    """Return the hostname and port of the server.
+
+    Cached per subindex; the env var is read once.
+    """
     VEILID_SERVER_NETWORK = os.getenv("VEILID_SERVER_NETWORK")
     if VEILID_SERVER_NETWORK is None:
         return "localhost", 5959 + subindex
@@ -44,7 +49,10 @@ def ipc_path_exists(path: str) -> bool:
 
 @cache
 def ipc_info(subindex: int = 0) -> str:
-    """Return the path of the ipc socket of the server."""
+    """Return the path of the ipc socket of the server.
+
+    Cached per subindex; the env var is read once.
+    """
     VEILID_SERVER_IPC = os.getenv("VEILID_SERVER_IPC")
     if VEILID_SERVER_IPC is not None:
         return VEILID_SERVER_IPC
@@ -70,6 +78,15 @@ async def api_connector(callback: Callable, subindex: int = 0) -> _JsonVeilidAPI
 
     If the connection fails due to an inability to connect to the
     server's socket, raise an easy-to-catch VeilidConnectionError.
+
+    Awaits on opening the IPC or TCP socket. The returned API holds a
+    background receive task; the caller must release() it (or use it as
+    an async context manager) or the task and socket leak.
+
+    Raises VeilidConnectionError when the socket connect fails with
+    ECONNREFUSED (single address, or every address when the hostname
+    resolved to several). Re-raises the original OSError for any other
+    connect failure (e.g. host unreachable, name resolution failure).
     """
 
     ipc_path = ipc_info(subindex)

@@ -14,9 +14,13 @@ const NEW_CONNECTION_RETRY_DELAY_MS: u32 = 500;
 ///////////////////////////////////////////////////////////
 // Connection manager
 
+/// Per-remote address lock guard, acquired at accept time and held until the connection is
+/// registered, keeping the connection table in sync with the kernel's connection table.
+pub(super) type AddressLockGuard = AsyncTagLockGuard<SocketAddr>;
+
 #[derive(Debug)]
 enum ConnectionManagerEvent {
-    Accepted(ProtocolNetworkConnection),
+    Accepted(ProtocolNetworkConnection, AddressLockGuard),
     Dead(Box<NetworkConnection>),
 }
 
@@ -117,8 +121,9 @@ impl ConnectionManager {
     }
     fn new_arc(registry: VeilidComponentRegistry) -> ConnectionManagerArc {
         let config = registry.config();
-        let connection_initial_timeout_ms = config.network.connection_initial_timeout_ms;
-        let connection_inactivity_timeout_ms = config.network.connection_inactivity_timeout_ms;
+        let connection_initial_timeout_ms = config.internal().network.connection_initial_timeout_ms;
+        let connection_inactivity_timeout_ms =
+            config.internal().network.connection_inactivity_timeout_ms;
 
         ConnectionManagerArc {
             reconnection_processor: DeferredStreamProcessor::new(),
@@ -166,7 +171,7 @@ impl ConnectionManager {
         {
             let mut inner = self.arc.inner.lock();
             if inner.is_some() {
-                panic!("shouldn't start connection manager twice without shutting it down first");
+                bail!("shouldn't start connection manager twice without shutting it down first");
             }
             *inner = Some(Self::new_inner(stop_source, sender, async_processor));
         }
@@ -218,7 +223,8 @@ impl ConnectionManager {
             match inner_lock.take() {
                 Some(v) => v,
                 None => {
-                    panic!("not started");
+                    veilid_log!(self error "connection manager not started");
+                    return;
                 }
             }
         };
@@ -461,9 +467,13 @@ impl ConnectionManager {
 
         let peer_address = dial_info.peer_address();
         let remote_addr = peer_address.socket_addr();
+        let remote = (
+            dial_info.protocol_type().low_level_protocol_type(),
+            *peer_address.socket_address(),
+        );
         // Prefer a publicly-routable source (PublicInternet only); else use configured listener
         let net = self.network_manager().net();
-        let mut preferred_local_address = net
+        let preferred_local_address = net
             .preferred_outbound_source_addr(&dial_info)
             .or_else(|| net.get_preferred_local_address(&dial_info));
         let best_port = preferred_local_address.map(|pla| pla.port());
@@ -473,7 +483,7 @@ impl ConnectionManager {
         if let Some(best_existing_conn) = self
             .arc
             .connection_table
-            .get_best_connection_by_remote(best_port, peer_address)
+            .get_best_connection_by_remote(best_port, remote)
         {
             return Ok(NetworkResult::Value(best_existing_conn));
         }
@@ -495,7 +505,7 @@ impl ConnectionManager {
         if let Some(best_existing_conn) = self
             .arc
             .connection_table
-            .get_best_connection_by_remote(best_port, peer_address)
+            .get_best_connection_by_remote(best_port, remote)
         {
             veilid_log!(self trace
                 "== Returning best existing connection {:?}",
@@ -503,16 +513,6 @@ impl ConnectionManager {
             );
 
             return Ok(NetworkResult::Value(best_existing_conn));
-        }
-
-        // If there is a low-level connection collision here, then we release the 'preferred local address'
-        // so we can make a second connection with an ephemeral port
-        if self
-            .arc
-            .connection_table
-            .check_for_colliding_connection(&dial_info)
-        {
-            preferred_local_address = None;
         }
 
         // Attempt new connection
@@ -599,6 +599,26 @@ impl ConnectionManager {
         }
     }
 
+    /// Closes connections whose specific local address is no longer in
+    /// `valid_local_addresses`.
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        expect(dead_code)
+    )]
+    pub fn close_all_connections(&self) {
+        let Ok(_guard) = self.arc.startup_lock.enter() else {
+            return;
+        };
+        let dead_ids = self.arc.connection_table.get_all_connection_ids();
+        if dead_ids.is_empty() {
+            return;
+        }
+        veilid_log!(self debug "closing {} connections after interface change", dead_ids.len());
+        for id in dead_ids {
+            self.report_connection_finished(id);
+        }
+    }
+
     ///////////////////////////////////////////////////////////////////////////////////////////////////////
     // Asynchronous Event Processor
 
@@ -608,20 +628,13 @@ impl ConnectionManager {
         allow_accept: bool,
     ) {
         match event {
-            ConnectionManagerEvent::Accepted(prot_conn) => {
+            ConnectionManagerEvent::Accepted(prot_conn, _address_lock_guard) => {
                 if !allow_accept {
                     return;
                 }
                 let Ok(_guard) = self.arc.startup_lock.enter() else {
                     return;
                 };
-
-                // Async lock on the remote address for atomicity per remote
-                let _lock_guard = self
-                    .arc
-                    .address_lock_table
-                    .lock_tag(prot_conn.flow().remote_address().socket_addr())
-                    .await;
 
                 let mut inner = self.arc.inner.lock();
                 match &mut *inner {
@@ -665,12 +678,29 @@ impl ConnectionManager {
         }
     }
 
+    // Acquire the per-remote address lock for an inbound low-level connection before its protocol
+    // is classified, so a concurrent outbound to the same remote waits and reuses. Threaded into
+    // the Accepted event and held until the connection is registered. None on timeout.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
+    pub(super) async fn acquire_inbound_address_lock(
+        &self,
+        remote: SocketAddr,
+    ) -> Option<AddressLockGuard> {
+        timeout(
+            self.arc.connection_initial_timeout_ms,
+            self.arc.address_lock_table.lock_tag(remote),
+        )
+        .await
+        .ok()
+    }
+
     // Called by low-level network when any connection-oriented protocol connection appears
     // either from incoming connections.
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     pub(super) async fn on_accepted_protocol_network_connection(
         &self,
         protocol_connection: ProtocolNetworkConnection,
+        address_lock_guard: AddressLockGuard,
     ) -> EyreResult<()> {
         // Get channel sender
         let sender = {
@@ -687,7 +717,10 @@ impl ConnectionManager {
 
         // Inform the processor of the event
         let _ = sender
-            .send_async(ConnectionManagerEvent::Accepted(protocol_connection))
+            .send_async(ConnectionManagerEvent::Accepted(
+                protocol_connection,
+                address_lock_guard,
+            ))
             .await;
         Ok(())
     }
@@ -717,7 +750,7 @@ impl ConnectionManager {
         // Inform the processor of the event
         if let Some(conn) = conn {
             // If the connection closed while it was protected, report it on the node the connection was established on
-            // In-use connections will already get reported because they will cause a 'lost_answer' stat on the remote node
+            // In-use connections will already get reported because they will cause a 'lost_question' stat on the remote node
             if let Some(protect_nr) = conn.protected_node_ref() {
                 // Lifetime: only counts remote-closed protected connections.
                 // Skip recording when we're offline ourselves so peer-side
@@ -783,6 +816,14 @@ impl ConnectionManager {
                 }
             }
             let _ = sender.send(ConnectionManagerEvent::Dead(Box::new(conn)));
+        }
+
+        // If there are no connections left in the table, we may have switched networks and killed off all the connections
+        if self.arc.connection_table.connection_count() == 0 {
+            veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
+            self.network_manager()
+                .net()
+                .routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
         }
     }
 

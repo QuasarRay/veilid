@@ -62,7 +62,9 @@ geolocation = ["maxminddb", "reqwest"]
 
 # Features that go against "Natural Security" concepts
 # https://gitlab.com/veilid/veilid/-/issues/420
-footgun = []
+footgun-nodeid-target = []
+# Honor the VeilidConfig.internal footgun tuning tree (otherwise ignored)
+footgun-config = []
 
 # Reserved for use by future components
 unstable-blockstore = []
@@ -164,6 +166,7 @@ capnp = { version = "0.25.0", default-features = false, features = [
     "std",
 ] }
 serde = { version = "1.0.218", features = ["derive", "rc"] }
+serde_ignored = "0.1.14"
 serde_json = { version = "1.0.149" }
 data-encoding = { version = "2.8.0" }
 schemars = "1.0.3"
@@ -226,8 +229,9 @@ veilid-tools = { version = "0.5.3", path = "../veilid-tools", default-features =
 getrandom = { version = "0.4.2", features = ["wasm_js"] }
 
 # System
-js-sys = ">=0.3.83"
-wasm-bindgen = ">=0.2.121"
+js-sys = "0.3.83"
+wasm-bindgen = "0.2.121"
+gloo-events = { version = "0.3.0" }
 
 send_wrapper = { version = "0.6.0", features = ["futures"] }
 serde_bytes = { version = "0.11", default-features = false, features = [
@@ -255,6 +259,9 @@ features = [
     'IdbOpenDbRequest',
     'Storage',
     'Location',
+    'DedicatedWorkerGlobalScope',
+    'ServiceWorkerGlobalScope',
+    'SharedWorkerGlobalScope',
     'Window',
 ]
 

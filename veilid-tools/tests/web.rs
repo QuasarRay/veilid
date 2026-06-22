@@ -91,8 +91,22 @@ async fn run_test_async_tag_lock() {
 }
 
 #[wasm_bindgen_test]
+async fn run_test_async_weighted_semaphore() {
+    setup();
+
+    test_async_weighted_semaphore::test_all().await;
+}
+
+#[wasm_bindgen_test]
 async fn run_test_startup_lock() {
     setup();
 
     test_startup_lock::test_all().await;
+}
+
+#[wasm_bindgen_test]
+async fn run_test_tracked_mutex() {
+    setup();
+
+    test_tracked_mutex::test_all();
 }

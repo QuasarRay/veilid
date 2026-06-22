@@ -13,6 +13,7 @@ pub struct FlapDetector<T: PartialEq> {
 }
 
 impl<T: PartialEq> FlapDetector<T> {
+    /// Creates a detector that trips at `threshold` accumulated penalty, decaying by half every `half_life_us`.
     #[must_use]
     pub fn new(threshold: f64, half_life_us: u64) -> Self {
         Self {
@@ -64,6 +65,15 @@ impl<T: PartialEq> FlapDetector<T> {
         }
         None
     }
+
+    /// Clear accumulated penalty and history. Use after a deliberate offline period
+    /// (e.g. detach) so it isn't counted as flapping; threshold/half-life are kept.
+    pub fn reset(&mut self) {
+        self.penalty = 0.0;
+        self.last_update_us = 0;
+        self.flapping = false;
+        self.last_value = None;
+    }
 }
 
 #[cfg(test)]
@@ -108,5 +118,21 @@ mod tests {
         assert_eq!(fd.record(t2, true), None);
         assert_eq!(fd.record(t2, false), None);
         assert!(fd.record(t2, true).is_some());
+    }
+
+    #[test]
+    fn reset_clears_penalty_and_history() {
+        let mut fd = FlapDetector::new(3.0, 30 * SEC);
+        let t = 5 * SEC;
+        fd.record(t, true);
+        fd.record(t, false);
+        fd.record(t, true); // penalty 2, just under threshold
+        fd.reset();
+        // After reset the next observation is a fresh baseline (no transition),
+        // so it takes a full new burst to trip rather than one more flip.
+        assert_eq!(fd.record(t, false), None); // first observation post-reset
+        assert_eq!(fd.record(t, true), None); // transition 1, penalty 1
+        assert_eq!(fd.record(t, false), None); // transition 2, penalty 2
+        assert!(fd.record(t, true).is_some()); // transition 3, penalty 3 => trips
     }
 }

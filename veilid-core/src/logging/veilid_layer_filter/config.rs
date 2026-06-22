@@ -9,15 +9,18 @@ pub struct VeilidLayerFilterConfig {
 }
 
 impl VeilidLayerFilterConfig {
+    /// Creates an empty configuration with no directives.
     pub fn new() -> Self {
         Self { directives: vec![] }
     }
 
+    /// Appends directives to this configuration.
     pub fn apply_directives<C: IntoIterator<Item = VeilidLogDirective>>(&mut self, directives: C) {
         let mut directives = directives.into_iter().collect();
         self.directives.append(&mut directives);
     }
 
+    /// Appends directives and returns the configuration for chaining.
     pub fn with_directives<C: IntoIterator<Item = VeilidLogDirective>>(
         mut self,
         directives: C,
@@ -26,6 +29,7 @@ impl VeilidLayerFilterConfig {
         self
     }
 
+    /// Appends items that can be parsed into directives, returning an error if any fail to parse.
     pub fn try_apply_directives<C: TryIntoIterVeilidLogDirective>(
         &mut self,
         directives: C,
@@ -34,6 +38,7 @@ impl VeilidLayerFilterConfig {
         Ok(())
     }
 
+    /// Appends items that can be parsed into directives and returns the configuration for chaining.
     pub fn try_with_directives<C: TryIntoIterVeilidLogDirective>(
         self,
         directives: C,
@@ -41,6 +46,7 @@ impl VeilidLayerFilterConfig {
         Ok(self.with_directives(directives.try_into_iter()?))
     }
 
+    /// Iterates over this configuration's directives.
     pub fn directives(&self) -> impl Iterator<Item = &VeilidLogDirective> {
         self.directives.iter()
     }
@@ -108,13 +114,25 @@ impl VeilidLayerFilterConfig {
     pub fn apply_common_log_level(&mut self, level: VeilidConfigLogLevel) {
         self.apply_directives([
             VeilidLogDirective::try_facility_level("#common", Some(level)).unwrap(),
-        ])
+        ]);
+
+        // If verbose tracing is enabled, apply to the #verbose log tag as well
+        #[cfg(feature = "verbose-tracing")]
+        self.apply_directives([
+            VeilidLogDirective::try_facility_level("#verbose", Some(level)).unwrap(),
+        ]);
     }
 
     /// Convenience function that pass-through applies a default log level to the 'veilid::common' Veilid log tags
     pub fn with_common_log_level(mut self, level: VeilidConfigLogLevel) -> Self {
         self.apply_directives([
             VeilidLogDirective::try_facility_level("#common", Some(level)).unwrap(),
+        ]);
+
+        // If verbose tracing is enabled, apply to the #verbose log tag as well
+        #[cfg(feature = "verbose-tracing")]
+        self.apply_directives([
+            VeilidLogDirective::try_facility_level("#verbose", Some(level)).unwrap(),
         ]);
         self
     }

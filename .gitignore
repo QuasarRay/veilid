@@ -97,5 +97,9 @@ perf.data.old
 
 ## Ignore rustc crash files
 rustc-ice-*
+
+## Ignore Claude cache
 .claude/
 
+## Ignore pytest cache
+.pytest_cache/

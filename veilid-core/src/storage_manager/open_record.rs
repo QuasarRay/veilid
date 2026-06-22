@@ -33,7 +33,7 @@ impl StorageManager {
         )? {
             // We had an existing record, so check the network to see if we should
             // update it with what we have here
-            let set_consensus = self.config().network.dht.set_value_count as usize;
+            let set_consensus = self.config().internal().network.dht.set_value_count as usize;
 
             self.add_rehydration_request(
                 opaque_record_key,
@@ -259,7 +259,7 @@ impl StorageManager {
             opaque_record_key.clone(),
             results_iter,
             false,
-            self.config().network.dht.consensus_width as usize,
+            self.config().internal().network.dht.consensus_width as usize,
         )?;
 
         if !existed {

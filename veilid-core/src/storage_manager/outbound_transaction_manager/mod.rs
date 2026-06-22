@@ -33,10 +33,6 @@ pub use outbound_transaction_handle::*;
 
 impl_veilid_log_facility!("stor");
 
-/// Number of concurrent network operations per transaction
-/// excluding keepalives. Applies only to get/set operations inside a begin state.
-const PER_TRANSACTION_OPERATION_CONCURRENCY: usize = 32;
-
 /// Parameters for adding a node transaction to an existing transaction
 pub(in crate::storage_manager) struct AddNodeTransactionParams {
     /// Handle of the transaction this node belongs to
@@ -633,7 +629,8 @@ impl OutboundTransactionManager {
         let registry = self.registry();
 
         // Get the required strict consensus count
-        let required_strict_consensus_count = self.config().network.dht.set_value_count as usize;
+        let required_strict_consensus_count =
+            self.config().internal().network.dht.set_value_count as usize;
 
         // Add all node transaction ids
         // Each record must still be in Init state (no node_transactions yet) when being recorded
@@ -1361,7 +1358,8 @@ impl OutboundTransactionManager {
         let nodes = record_state.get_transact_command_nodes(None, None)?;
         // Use get_value_count as GET consensus threshold so a single non-responding node
         // won't force a costly retry that exceeds the outer timeout. (get_value_count <= set_value_count by config.)
-        let required_strict_consensus_count = self.config().network.dht.get_value_count as usize;
+        let required_strict_consensus_count =
+            self.config().internal().network.dht.get_value_count as usize;
 
         Ok(Arc::new(OutboundTransactCommandParams {
             opaque_record_key: opaque_record_key.clone(),

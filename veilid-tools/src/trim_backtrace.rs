@@ -1,21 +1,27 @@
 use super::*;
 
+/// A [`backtrace::Backtrace`] whose [`fmt::Display`] output drops runtime and panic-machinery
+/// frames (backtrace, tokio, async-lock, panic/unwind internals) and shortens paths relative to
+/// the current directory.
 pub struct TrimmedBacktrace {
     backtrace: backtrace::Backtrace,
 }
 
 impl TrimmedBacktrace {
+    /// Resolve and wrap a backtrace for trimmed display.
     #[must_use]
     pub fn new(mut backtrace: backtrace::Backtrace) -> Self {
         backtrace.resolve();
         Self { backtrace }
     }
 
+    /// Borrow the underlying backtrace.
     #[must_use]
     pub fn backtrace(&self) -> &backtrace::Backtrace {
         &self.backtrace
     }
 
+    /// Mutably borrow the underlying backtrace.
     #[must_use]
     pub fn backtrace_mut(&mut self) -> &mut backtrace::Backtrace {
         &mut self.backtrace
@@ -88,7 +94,9 @@ impl core::ops::DerefMut for TrimmedBacktrace {
     }
 }
 
+/// Wrap a backtrace in a [`TrimmedBacktrace`].
 pub trait TrimBacktraceTrait {
+    /// Clone this backtrace into a [`TrimmedBacktrace`] for trimmed display.
     fn trim(&self) -> TrimmedBacktrace;
 }
 

@@ -222,9 +222,9 @@ impl RPCProcessor {
         let set_value_q = match kind {
             RPCOperationKind::Question(q) => match q.destructure() {
                 (_, RPCQuestionDetail::SetValueQ(q)) => q,
-                _ => panic!("not a setvalue question"),
+                _ => return Err(RPCError::internal("not a setvalue question")),
             },
-            _ => panic!("not a question"),
+            _ => return Err(RPCError::internal("not a question")),
         };
 
         // Destructure
@@ -254,7 +254,7 @@ impl RPCProcessor {
         veilid_log!(self debug target: "dht", "{}", debug_string);
 
         // If there are less than 'consensus_width' peers that are closer, then store here too
-        let consensus_width = self.config().network.dht.consensus_width as usize;
+        let consensus_width = self.config().internal().network.dht.consensus_width as usize;
 
         let (accepted, need_descriptor, return_value) =
             if closer_to_key_peers.len() >= consensus_width {

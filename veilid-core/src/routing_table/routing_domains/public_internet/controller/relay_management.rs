@@ -18,7 +18,7 @@ impl PublicInternetRoutingDomainController {
         relay: &RoutingDomainRelay,
         mut relay_state: RoutingDomainRelayState,
         relay_node_filter: &impl Fn(&BucketEntrySnapshot) -> bool,
-        snapshot: &EntrySnapshot,
+        snapshot: &RoutingTableSnapshot,
     ) -> Option<RoutingDomainRelayState> {
         let relay_node = relay.relay_node.clone();
         let state_reason = relay_node.state_reason(cur_ts);
@@ -48,7 +48,7 @@ impl PublicInternetRoutingDomainController {
         }
 
         // Pathological: protected connections die too fast on this relay.
-        if let Some(drop_stats) = relay_node.peer_stats().protected_connection_drop {
+        if let Some(drop_stats) = relay_node.connection_stats().protected_drop_span {
             if drop_stats.tm90 < RELAY_MIN_PROTECTED_CONNECTION_TM90 {
                 veilid_log!(routing_table debug
                     "Relay protected connection lifetime tm90={} < {}, dropping relay {}",

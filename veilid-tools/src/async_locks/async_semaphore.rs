@@ -5,6 +5,10 @@ use async_lock::Semaphore as InnerAsyncSemaphore;
 use async_lock::SemaphoreGuard as InnerAsyncSemaphoreGuard;
 use async_lock::SemaphoreGuardArc as InnerAsyncSemaphoreGuardArc;
 
+/// An async counting semaphore bounding the number of concurrent permit holders.
+///
+/// Wraps `async_lock::Semaphore`; under the `debug-locks` feature, acquisitions that
+/// stall past [`DEBUG_LOCKS_DURATION_MS`] are reported as deadlocks.
 #[derive(Debug)]
 pub struct AsyncSemaphore {
     inner: Arc<InnerAsyncSemaphore>,
@@ -13,6 +17,7 @@ pub struct AsyncSemaphore {
 }
 
 impl AsyncSemaphore {
+    /// Create a semaphore with `n` permits.
     #[inline]
     #[must_use]
     pub fn new(n: usize) -> AsyncSemaphore {
@@ -23,6 +28,9 @@ impl AsyncSemaphore {
         }
     }
 
+    /// Try to acquire one permit without waiting, or `None` if none are available.
+    ///
+    /// Never blocks. On success the guard holds the permit until dropped.
     #[inline]
     #[must_use]
     pub fn try_acquire(&self) -> Option<AsyncSemaphoreGuard<'_>> {
@@ -36,6 +44,10 @@ impl AsyncSemaphore {
         Some(out)
     }
 
+    /// Acquire one permit, waiting until one is available.
+    ///
+    /// Blocks until a permit frees up. The returned guard holds the permit until dropped.
+    /// Under `debug-locks`, a wait past [`DEBUG_LOCKS_DURATION_MS`] is reported as a deadlock.
     #[inline]
     #[must_use]
     pub async fn acquire(&self) -> AsyncSemaphoreGuard<'_> {
@@ -59,6 +71,9 @@ impl AsyncSemaphore {
         }
     }
 
+    /// Try to acquire one permit without waiting, returning an owned guard, or `None` if none are available.
+    ///
+    /// Never blocks. On success the guard holds the permit until dropped.
     #[inline]
     #[must_use]
     pub fn try_acquire_arc(self: &Arc<Self>) -> Option<AsyncSemaphoreGuardArc> {
@@ -72,6 +87,10 @@ impl AsyncSemaphore {
         Some(out)
     }
 
+    /// Acquire one permit, waiting until one is available, returning an owned guard.
+    ///
+    /// Blocks until a permit frees up. The returned guard holds the permit until dropped.
+    /// Under `debug-locks`, a wait past [`DEBUG_LOCKS_DURATION_MS`] is reported as a deadlock.
     #[inline]
     #[must_use]
     pub async fn acquire_arc(self: &Arc<Self>) -> AsyncSemaphoreGuardArc {
@@ -96,6 +115,7 @@ impl AsyncSemaphore {
     }
 }
 
+/// A borrowed guard that releases its permit on drop.
 #[clippy::has_significant_drop]
 #[derive(Debug)]
 pub struct AsyncSemaphoreGuard<'a> {
