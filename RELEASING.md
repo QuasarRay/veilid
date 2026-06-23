@@ -16,6 +16,8 @@ Releases happen via a CI/CD pipeline. The release process flows as follows:
 
     1.3 If everything checks out, MR meets the published requirements, and tests passed, execute the merge functions in the Gitlab UI.
 
+    1.4 WAIT FOR A PERIOD OF 48 HOURS for a code freeze on `main`. This ensures nightly builds are deployed correctly and upgrades are successful.
+
 2. Maintainer performs version bump:
 
     2.1 Update your local copy of `main` to mirror the newly merged upstream `main`

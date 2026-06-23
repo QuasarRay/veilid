@@ -33,7 +33,7 @@ core:
       bootstrap_keys: ["VLD0:<your bootstrap signing public key>"]
     network_key_password: "<your-chosen-passkey>"
   protected_store:
-    insecure_fallback_directory: "/var/db/veilid-server/protected_store"
+    directory: "/var/db/veilid-server/protected_store"
   table_store:
     directory: "/var/db/veilid-server/table_store"
   block_store:
