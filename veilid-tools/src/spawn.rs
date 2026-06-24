@@ -8,7 +8,7 @@ pub async fn yielding<R, T: FnOnce() -> R>(x: T) -> R {
 }
 
 cfg_if! {
-    if #[cfg(feature="rt-wasm-bindgen")] {
+    if #[cfg(all(target_arch = "wasm32", target_os = "unknown", feature="rt-wasm-bindgen"))] {
         use async_executors::{Bindgen, LocalSpawnHandleExt, SpawnHandleExt};
 
         /// Spawn a named future on the async runtime, returning a join handle that must be awaited or detached.

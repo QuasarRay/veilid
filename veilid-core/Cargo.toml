@@ -25,11 +25,12 @@ default = ["default-tokio"]
 # Common features
 default-tokio = ["enable-crypto-vld0", "rt-tokio"]
 default-async-std = ["enable-crypto-vld0", "rt-async-std"]
-default-wasm = ["enable-crypto-vld0"]
+default-wasm = ["enable-crypto-vld0", "rt-wasm-bindgen"]
 
 # Runtimes
 rt-async-std = ["async-std", "veilid-tools/rt-async-std"]
 rt-tokio = ["tokio", "veilid-tools/rt-tokio"]
+rt-wasm-bindgen = ["veilid-tools/rt-wasm-bindgen"]
 
 # Crypto support features
 enable-crypto-vld0 = [
@@ -220,10 +221,6 @@ webpki-roots = { version = "1.0.6", optional = true }
 
 ### Dependencies for WASM builds only
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-
-veilid-tools = { version = "0.5.4", path = "../veilid-tools", default-features = false, features = [
-    "rt-wasm-bindgen",
-] }
 
 # Crypto
 getrandom = { version = "0.4.2", features = ["wasm_js"] }
