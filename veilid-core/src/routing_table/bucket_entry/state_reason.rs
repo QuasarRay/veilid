@@ -112,10 +112,7 @@ impl BucketEntryInner {
     pub(super) fn compute_state_reason(&self, cur_ts: Timestamp) -> BucketEntryStateReason {
         // Credit reliability windows for time PublicInternet was offline (couldn't
         // ping). Zero when there's no network manager (early init / tests).
-        let opt_nm = self
-            .opt_registry
-            .as_ref()
-            .and_then(|r| r.lookup::<NetworkManager>());
+        let opt_nm = self.registry.lookup::<NetworkManager>();
         let offline_overlap_since = |from: Timestamp| {
             opt_nm
                 .as_ref()

@@ -123,11 +123,18 @@ impl fmt::Display for BucketEntryLocalNetwork {
 }
 
 /// The data associated with each bucket entry
-#[derive(Debug, Serialize, Deserialize)]
+///
+/// Deserialized via a manual `DeserializeSeed` (see below) rather than `derive(Deserialize)`,
+/// so the registry can be attached and `best_node_id` reconstructed (and validated) on load.
+#[derive(Debug, Serialize)]
 pub(crate) struct BucketEntryInner {
     /// Registry for logging
     #[serde(skip)]
-    opt_registry: Option<VeilidComponentRegistry>,
+    registry: VeilidComponentRegistry,
+    /// The best (most-preferred valid) node id. Always present and kept in sync with
+    /// `node_ids`, so `best_node_id()` is infallible. Reconstructed on load, not persisted.
+    #[serde(skip)]
+    best_node_id: NodeId,
     /// The node ids matching this bucket entry
     node_ids: NodeIdGroup,
     /// when the peer was added to the routing table
@@ -214,6 +221,178 @@ pub(crate) struct BucketEntryInner {
     #[cfg(feature = "geolocation")]
     #[serde(skip)]
     geolocation_info: GeolocationInfo,
+}
+
+/// Deserialization context for `BucketEntryInner`: carries the registry to attach to the
+/// deserialized entry, replacing the old `prepare` step.
+pub(crate) struct BucketEntryInnerDeserializeSeed {
+    pub registry: VeilidComponentRegistry,
+}
+
+impl BucketEntryInner {
+    /// Deserialize a persisted entry, attaching `registry` and reconstructing the best node
+    /// id. Errors if the entry has no valid node id.
+    pub fn deserialize_from_persisted(
+        registry: VeilidComponentRegistry,
+        bytes: &[u8],
+    ) -> EyreResult<BucketEntryInner> {
+        use serde::de::DeserializeSeed;
+        let seed = BucketEntryInnerDeserializeSeed { registry };
+        let mut de = serde_json::Deserializer::from_slice(bytes);
+        seed.deserialize(&mut de).map_err(|e| eyre!("{}", e))
+    }
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for BucketEntryInnerDeserializeSeed {
+    type Value = BucketEntryInner;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<BucketEntryInner, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(BucketEntryInnerVisitor {
+            registry: self.registry,
+        })
+    }
+}
+
+struct BucketEntryInnerVisitor {
+    registry: VeilidComponentRegistry,
+}
+
+impl<'de> serde::de::Visitor<'de> for BucketEntryInnerVisitor {
+    type Value = BucketEntryInner;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a BucketEntryInner map")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<BucketEntryInner, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        use serde::de::Error as _;
+
+        let mut node_ids: Option<NodeIdGroup> = None;
+        let mut time_added: Option<Timestamp> = None;
+        let mut envelope_support: Option<Vec<EnvelopeVersion>> = None;
+        let mut updated_since_last_network_change: Option<bool> = None;
+        let mut public_internet: Option<BucketEntryPublicInternet> = None;
+        let mut local_network: Option<BucketEntryLocalNetwork> = None;
+        let mut peer_stats: Option<PeerStats> = None;
+        let mut rpc_stats: Option<RPCStats> = None;
+
+        // Only the persisted (non-skip) fields are recognized; unknown keys are ignored,
+        // matching the previous derive.
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "node_ids" => {
+                    if node_ids.is_some() {
+                        return Err(A::Error::duplicate_field("node_ids"));
+                    }
+                    node_ids = Some(map.next_value()?);
+                }
+                "time_added" => {
+                    if time_added.is_some() {
+                        return Err(A::Error::duplicate_field("time_added"));
+                    }
+                    time_added = Some(map.next_value()?);
+                }
+                "envelope_support" => {
+                    if envelope_support.is_some() {
+                        return Err(A::Error::duplicate_field("envelope_support"));
+                    }
+                    envelope_support = Some(map.next_value()?);
+                }
+                "updated_since_last_network_change" => {
+                    if updated_since_last_network_change.is_some() {
+                        return Err(A::Error::duplicate_field(
+                            "updated_since_last_network_change",
+                        ));
+                    }
+                    updated_since_last_network_change = Some(map.next_value()?);
+                }
+                "public_internet" => {
+                    if public_internet.is_some() {
+                        return Err(A::Error::duplicate_field("public_internet"));
+                    }
+                    public_internet = Some(map.next_value()?);
+                }
+                "local_network" => {
+                    if local_network.is_some() {
+                        return Err(A::Error::duplicate_field("local_network"));
+                    }
+                    local_network = Some(map.next_value()?);
+                }
+                "peer_stats" => {
+                    if peer_stats.is_some() {
+                        return Err(A::Error::duplicate_field("peer_stats"));
+                    }
+                    peer_stats = Some(map.next_value()?);
+                }
+                "rpc_stats" => {
+                    if rpc_stats.is_some() {
+                        return Err(A::Error::duplicate_field("rpc_stats"));
+                    }
+                    rpc_stats = Some(map.next_value()?);
+                }
+                _ => {
+                    let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+        }
+
+        let node_ids = node_ids.ok_or_else(|| A::Error::missing_field("node_ids"))?;
+        let time_added = time_added.ok_or_else(|| A::Error::missing_field("time_added"))?;
+        let envelope_support =
+            envelope_support.ok_or_else(|| A::Error::missing_field("envelope_support"))?;
+        let updated_since_last_network_change = updated_since_last_network_change
+            .ok_or_else(|| A::Error::missing_field("updated_since_last_network_change"))?;
+        let public_internet =
+            public_internet.ok_or_else(|| A::Error::missing_field("public_internet"))?;
+        let local_network =
+            local_network.ok_or_else(|| A::Error::missing_field("local_network"))?;
+        // peer_stats and rpc_stats default when absent (matching their #[serde(default)]).
+        let peer_stats = peer_stats.unwrap_or_default();
+        let rpc_stats = rpc_stats.unwrap_or_default();
+
+        // Reconstruct the best node id (most-preferred valid kind); fail if there is none.
+        let best_node_id = node_ids
+            .iter()
+            .find(|nid| VALID_CRYPTO_KINDS.contains(&nid.kind()))
+            .cloned()
+            .ok_or_else(|| A::Error::custom("bucket entry has no valid node id"))?;
+
+        Ok(BucketEntryInner {
+            registry: self.registry,
+            best_node_id,
+            node_ids,
+            time_added,
+            envelope_support,
+            updated_since_last_network_change,
+            last_flows: BTreeMap::new(),
+            last_sender_info: HashMap::new(),
+            public_internet,
+            local_network,
+            peer_stats,
+            rpc_stats,
+            per_sequence_ordering_stats: BTreeMap::new(),
+            per_transport_stats: BTreeMap::new(),
+            per_route_stats: default_per_route_stats(),
+            connection_stats: ConnectionStats::default(),
+            punishment: None,
+            contact_method_failures: HashMap::new(),
+            state_stats: StateStats::default(),
+            answer_stats: AnswerStats::default(),
+            latency_stats_accounting: LatencyStatsAccounting::new(),
+            protected_drop_span_accounting: LatencyStatsAccounting::new(),
+            transfer_stats_accounting: TransferStatsAccounting::new(),
+            state_stats_accounting: Mutex::new(StateStatsAccounting::new()),
+            answer_stats_accounting: AnswerStatsAccounting::default(),
+            #[cfg(feature = "geolocation")]
+            geolocation_info: Default::default(),
+        })
+    }
 }
 
 impl fmt::Display for BucketEntryInner {
@@ -322,7 +501,7 @@ impl fmt::Display for BucketEntryInner {
 
 impl VeilidComponentRegistryAccessor for BucketEntryInner {
     fn registry(&self) -> VeilidComponentRegistry {
-        self.opt_registry.clone().unwrap_or_log()
+        self.registry.clone()
     }
 }
 
@@ -330,11 +509,20 @@ fn default_per_route_stats() -> LruCache<PublicKey, PerRouteStats> {
     LruCache::new(PER_ROUTE_STATS_LRU_SIZE)
 }
 
-impl BucketEntryInner {
-    pub fn prepare(&mut self, registry: VeilidComponentRegistry) {
-        self.opt_registry = Some(registry);
-    }
+/// The valid node ids added to and removed from a bucket entry by `replace_node_ids`.
+pub(crate) struct NodeIdsDelta {
+    pub added: BTreeSet<NodeId>,
+    pub removed: BTreeSet<NodeId>,
+}
 
+impl NodeIdsDelta {
+    /// True if no valid node ids changed.
+    pub fn is_unchanged(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty()
+    }
+}
+
+impl BucketEntryInner {
     /// Get time added
     pub fn time_added(&self) -> Timestamp {
         self.time_added
@@ -364,11 +552,11 @@ impl BucketEntryInner {
     }
 
     /// Get best node id
+    ///
+    /// Infallible: `best_node_id` is kept in sync with `node_ids` (seeded by `new`, updated
+    /// by `replace_node_ids`, reconstructed on load) and is always a valid node id.
     pub fn best_node_id(&self) -> NodeId {
-        self.node_ids
-            .first()
-            .expect_or_log("all entries must have one valid node id")
-            .clone()
+        self.best_node_id.clone()
     }
 
     /// Get best public key
@@ -387,31 +575,40 @@ impl BucketEntryInner {
         }
     }
 
-    /// Add a node id for a particular crypto kind.
-    /// Returns Ok(Some(node)) any previous existing node id associated with that crypto kind
-    /// Returns Ok(None) if no previous existing node id was associated with that crypto kind, or one existed but nothing changed.
-    /// Results Err() if this operation would add more crypto kinds than we support
-    pub fn add_node_id(&mut self, node_id: NodeId) -> EyreResult<Option<NodeId>> {
-        if let Some(old_node_id) = self.node_ids.get(node_id.kind()) {
-            // If this was already there we do nothing
-            if old_node_id == node_id {
-                return Ok(None);
-            }
-            // Won't change number of crypto kinds, but the node id changed
-            self.node_ids.add(node_id);
+    /// Atomically replace the entry's node ids with `new_ids` (one per crypto kind).
+    ///
+    /// An entry must always retain at least one valid (supported) node id, so this errors
+    /// and leaves the entry unchanged if `new_ids` contains no valid node id. Returns the
+    /// valid node ids added and removed so the caller can update bucket membership to match.
+    pub fn replace_node_ids(&mut self, new_ids: &[NodeId]) -> EyreResult<NodeIdsDelta> {
+        let new_group = NodeIdGroup::from(new_ids.to_vec());
 
-            return Ok(Some(old_node_id));
-        }
-        self.node_ids.add(node_id);
+        // Enforce the invariant: an entry must always have at least one valid node id, which
+        // is also the new best node id (most-preferred valid kind, sorted first).
+        let Some(best_node_id) = new_group
+            .iter()
+            .find(|nid| VALID_CRYPTO_KINDS.contains(&nid.kind()))
+            .cloned()
+        else {
+            bail!("refusing to replace node ids with a set that has no valid node id");
+        };
 
-        Ok(None)
-    }
+        // Compute the valid-id delta vs the current set (compared by exact value).
+        let added: BTreeSet<NodeId> = new_group
+            .iter()
+            .filter(|nid| VALID_CRYPTO_KINDS.contains(&nid.kind()) && !self.node_ids.contains(nid))
+            .cloned()
+            .collect();
+        let removed: BTreeSet<NodeId> = self
+            .node_ids
+            .iter()
+            .filter(|nid| VALID_CRYPTO_KINDS.contains(&nid.kind()) && !new_group.contains(nid))
+            .cloned()
+            .collect();
 
-    /// Remove a node id for a particular crypto kind.
-    /// Returns Some(node) any previous existing node id associated with that crypto kind
-    /// Returns None if no previous existing node id was associated with that crypto kind
-    pub fn remove_node_id(&mut self, crypto_kind: CryptoKind) -> Option<NodeId> {
-        self.node_ids.remove(crypto_kind)
+        self.node_ids = new_group;
+        self.best_node_id = best_node_id;
+        Ok(NodeIdsDelta { added, removed })
     }
 
     /// All-of capability check
@@ -1132,7 +1329,8 @@ impl BucketEntry {
 
         let now = Timestamp::now();
         let inner = BucketEntryInner {
-            opt_registry: Some(registry),
+            registry,
+            best_node_id: first_node_id.clone(),
             node_ids: NodeIdGroup::from(first_node_id),
             time_added: now,
             envelope_support: Vec::new(),

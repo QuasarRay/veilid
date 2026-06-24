@@ -81,6 +81,9 @@ type SerializedBucketMap = BTreeMap<CryptoKind, SerializedBuckets>;
 
 pub type BucketIndex = (CryptoKind, usize);
 
+/// Old/new peer info pairs produced by a node id change, for subscriber notification.
+type PeerInfoUpdatePairs = Vec<(Arc<PeerInfo>, Arc<PeerInfo>)>;
+
 #[derive(Debug, Clone, Copy)]
 #[must_use]
 pub struct RecentPeersEntry {
@@ -955,21 +958,35 @@ impl RoutingTable {
         serialized_bucket_map: SerializedBucketMap,
         all_entry_bytes: SerializedBuckets,
     ) -> EyreResult<()> {
-        let mut all_entries: Vec<Arc<BucketEntry>> = Vec::with_capacity(all_entry_bytes.len());
+        let mut all_entries: Vec<Option<Arc<BucketEntry>>> =
+            Vec::with_capacity(all_entry_bytes.len());
         for entry_bytes in all_entry_bytes {
-            let mut entryinner: BucketEntryInner = deserialize_json_bytes(&entry_bytes)
-                .wrap_err("failed to deserialize bucket entry")?;
-            entryinner.prepare(inner.registry());
+            // Deserialize with the registry attached and the best node id reconstructed.
+            // Entries that fail to deserialize or have no valid node id are skipped; a None
+            // slot keeps the bucket map's entry indices aligned.
+            let entryinner = match BucketEntryInner::deserialize_from_persisted(
+                inner.registry(),
+                &entry_bytes,
+            ) {
+                Ok(e) => e,
+                Err(e) => {
+                    veilid_log!(inner debug "skipping bucket entry on load: {}", e);
+                    all_entries.push(None);
+                    continue;
+                }
+            };
 
             #[cfg(feature = "geolocation")]
-            {
+            let entryinner = {
+                let mut entryinner = entryinner;
                 entryinner.update_geolocation_info();
-            }
+                entryinner
+            };
 
             let entry = Arc::new(BucketEntry::new_with_inner(entryinner));
 
             // Keep strong reference in table
-            all_entries.push(entry.clone());
+            all_entries.push(Some(entry.clone()));
 
             // Keep all entries in weak table too
             inner.all_entries.insert(entry);
@@ -1168,88 +1185,66 @@ impl RoutingTable {
         entry: Arc<BucketEntry>,
         node_ids: &[NodeId],
     ) -> EyreResult<()> {
-        entry.with_mut(|e| {
-            let mut existing_node_ids = e.node_ids();
+        // Mutate the entry under a single entry lock so the node id replacement and its
+        // surrounding peer-info reads are atomic. The lock-free routing (bucket membership,
+        // subscriber notification) is done afterwards from the returned values.
+        let (delta, peer_info_updates) =
+            entry.with_mut(|e| -> EyreResult<(NodeIdsDelta, PeerInfoUpdatePairs)> {
+                // Peer infos before the change (carry the old node ids).
+                let old_peer_infos: Vec<Arc<PeerInfo>> = RoutingDomainSet::all()
+                    .into_iter()
+                    .filter_map(|rd| e.get_peer_info(rd))
+                    .collect();
 
-            // Peer infos for all routing domains we have
-            let mut old_peer_infos = vec![];
-
-            for node_id in node_ids {
-                let ck = node_id.kind();
-                let is_existing_node_id = existing_node_ids.contains(node_id);
-
-                existing_node_ids.remove(ck);
-
-                // Skip node ids that exist already
-                if is_existing_node_id {
-                    continue;
+                // Atomically replace the entry's node ids with the new set, requiring at
+                // least one valid node id to remain (refuses otherwise, leaving unchanged).
+                let delta = e.replace_node_ids(node_ids)?;
+                if delta.is_unchanged() {
+                    return Ok((delta, Vec::new()));
                 }
 
-                // New node id, get the old peer info if we don't have it yet
-                if old_peer_infos.is_empty() {
-                    for rd in RoutingDomainSet::all() {
-                        if let Some(old_peer_info) = e.get_peer_info(rd) {
-                            old_peer_infos.push(old_peer_info);
-                        }
-                    }
-                }
-
-                // Add new node id to entry
-                if let Some(old_node_id) = e.add_node_id(node_id.clone())? {
-                    // Remove any old node id for this crypto kind
-                    if VALID_CRYPTO_KINDS.contains(&ck) {
-                        let bucket_index = self.calculate_bucket_index(&old_node_id)?;
-                        let bucket = inner.get_bucket_mut(bucket_index);
-                        bucket.remove_entry(old_node_id.ref_value());
-                        self.kick_queue.lock().insert(bucket_index);
-                    }
-                }
-
-                // Bucket the entry appropriately
-                if VALID_CRYPTO_KINDS.contains(&ck) {
-                    let bucket_index = self.calculate_bucket_index(node_id)?;
-                    let bucket = inner.get_bucket_mut(bucket_index);
-                    bucket.add_existing_entry(node_id.value(), entry.clone());
-
-                    // Kick bucket
-                    self.kick_queue.lock().insert(bucket_index);
-                }
-            }
-
-            // Remove from buckets if node id wasn't seen in new peer info list
-            for node_id in existing_node_ids.iter() {
-                let ck = node_id.kind();
-                if VALID_CRYPTO_KINDS.contains(&ck) {
-                    let bucket_index = self.calculate_bucket_index(node_id)?;
-                    let bucket = inner.get_bucket_mut(bucket_index);
-                    bucket.remove_entry(node_id.ref_value());
-                    entry.with_mut(|e| e.remove_node_id(ck));
-                }
-            }
-
-            // New node id, get the old peer info if we don't have it yet
-            if !old_peer_infos.is_empty() {
-                let mut new_peer_infos = vec![];
-                for rd in RoutingDomainSet::all() {
-                    if let Some(new_peer_info) = e.get_peer_info(rd) {
-                        new_peer_infos.push(new_peer_info);
-                    }
-                }
-
-                // adding a node id should never change what routing domains peers are in
-                // so we should have a 1:1 ordered mapping here to update with the new nodeids
+                // Peer infos after the change (carry the new node ids).
+                let new_peer_infos: Vec<Arc<PeerInfo>> = RoutingDomainSet::all()
+                    .into_iter()
+                    .filter_map(|rd| e.get_peer_info(rd))
+                    .collect();
                 if old_peer_infos.len() != new_peer_infos.len() {
-                    bail!("adding a node id should not change peer info routing domain count");
+                    bail!("changing node ids should not change peer info routing domain count");
                 }
-                for (old_pi, new_pi) in old_peer_infos.into_iter().zip(new_peer_infos) {
-                    if old_pi.routing_domain() != new_pi.routing_domain() {
-                        bail!("adding a node id should not change a peer's routing domain");
-                    }
-                    self.on_entry_peer_info_updated(Some(old_pi), Some(new_pi));
-                }
+                let updates = old_peer_infos.into_iter().zip(new_peer_infos).collect();
+                Ok((delta, updates))
+            })?;
+        if delta.is_unchanged() {
+            return Ok(());
+        }
+
+        // Update bucket membership to match the changed valid node ids, batching the
+        // kick-queue inserts under a single lock.
+        let mut kick_indices = Vec::new();
+        for removed in &delta.removed {
+            let bucket_index = self.calculate_bucket_index(removed)?;
+            inner
+                .get_bucket_mut(bucket_index)
+                .remove_entry(removed.ref_value());
+            kick_indices.push(bucket_index);
+        }
+        for added in &delta.added {
+            let bucket_index = self.calculate_bucket_index(added)?;
+            inner
+                .get_bucket_mut(bucket_index)
+                .add_existing_entry(added.value(), entry.clone());
+            kick_indices.push(bucket_index);
+        }
+        self.kick_queue.lock().extend(kick_indices);
+
+        // Inform subscribers that this entry's node ids changed, outside the entry lock.
+        for (old_pi, new_pi) in peer_info_updates {
+            if old_pi.routing_domain() != new_pi.routing_domain() {
+                bail!("changing node ids should not change a peer's routing domain");
             }
-            Ok(())
-        })
+            self.on_entry_peer_info_updated(Some(old_pi), Some(new_pi));
+        }
+        Ok(())
     }
 
     /// Create a node reference, possibly creating a bucket entry
@@ -1273,7 +1268,7 @@ impl RoutingTable {
         // Look up all bucket entries and make sure we only have zero or one
         // If we have more than one, pick the one with the best cryptokind to add node ids to
 
-        let entry = {
+        let (entry, nr) = {
             let mut inner = self.inner.write();
 
             let mut best_entry: Option<Arc<BucketEntry>> = None;
@@ -1336,13 +1331,15 @@ impl RoutingTable {
                 new_entry
             };
 
-            entry
+            // Bump the NodeRef (ref_count) while still holding the routing table lock so a
+            // concurrent bucket kick sees ref_count > 0 and won't evict this entry between
+            // creation and the ref bump.
+            let nr = NodeRef::new(self.registry(), entry.clone());
+            (entry, nr)
         };
 
-        // Make node ref to return
-        let nr = NodeRef::new(self.registry(), entry.clone());
-
-        // Update the entry with the update func
+        // Apply the caller's update (e.g. peer info) only after node id replacement
+        // succeeded; a failed replacement bails above, rejecting the whole update.
         if let Some(update_func) = opt_update_func {
             entry.with_mut(|e| update_func(e));
         }
@@ -1372,12 +1369,17 @@ impl RoutingTable {
         }
 
         let bucket_index = self.calculate_bucket_index(&node_id)?;
-        let opt_entry = {
+        // Construct the NodeRef (bump ref_count) while still holding the read lock, so a
+        // concurrent bucket kick sees ref_count > 0 and won't evict this entry in the
+        // window between lookup and ref bump.
+        let opt_nr = {
             let inner = self.inner.read();
             let bucket = inner.get_bucket(bucket_index);
-            bucket.entry(node_id.ref_value())
+            bucket
+                .entry(node_id.ref_value())
+                .map(|e| NodeRef::new(self.registry(), e))
         };
-        Ok(opt_entry.map(|e| NodeRef::new(self.registry(), e)))
+        Ok(opt_nr)
     }
 
     /// Our own published direct dial-info socket addresses for a routing domain.

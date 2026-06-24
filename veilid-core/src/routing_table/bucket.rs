@@ -44,13 +44,31 @@ impl Bucket {
     pub(super) fn load_bucket(
         &mut self,
         data: Vec<u8>,
-        all_entries: &[Arc<BucketEntry>],
+        all_entries: &[Option<Arc<BucketEntry>>],
     ) -> EyreResult<()> {
         let bucket_data: SerializedBucketData = deserialize_json_bytes(&data)?;
 
         for e in bucket_data.entries {
-            self.entries
-                .insert(e.key, all_entries[e.value as usize].clone());
+            // Skip dangling indices and entries that were dropped on load (e.g. no valid
+            // node ids).
+            let Some(Some(entry)) = all_entries.get(e.value as usize) else {
+                veilid_log!(self debug "bucket references missing entry index {}", e.value);
+                continue;
+            };
+            // An entry must carry the node id for this bucket's kind matching the key,
+            // otherwise it has no best node id for this bucket and must not be added.
+            let has_key = entry.with(|inner| {
+                inner
+                    .node_ids()
+                    .get(self.kind)
+                    .map(|nid| nid.ref_value() == &e.key)
+                    .unwrap_or(false)
+            });
+            if !has_key {
+                veilid_log!(self debug "dropping bucket entry with no node id for {}:{}", self.kind, e.key);
+                continue;
+            }
+            self.entries.insert(e.key, entry.clone());
         }
 
         Ok(())
@@ -176,18 +194,17 @@ impl Bucket {
             b.3.cmp(&a.3)
         });
 
-        for (bare_node_id, entry, _, _) in sorted_entries {
+        for (bare_node_id, _, _, _) in sorted_entries {
             // If we're not evicting more entries, exit
             if extra_entries == 0 {
                 break;
             }
             extra_entries -= 1;
 
-            // if no references, lets evict it
+            // No references; evict it from this bucket. The entry's node ids are left
+            // intact — eviction is by bucket key (remove_entry below), and an entry must
+            // always retain a best node id.
             dead_node_ids.insert(bare_node_id);
-
-            // And remove the node id from the entry
-            entry.with_mut(|e| e.remove_node_id(self.kind));
         }
 
         // Now purge the dead node ids
