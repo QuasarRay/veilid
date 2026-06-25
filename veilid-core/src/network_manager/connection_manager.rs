@@ -1,7 +1,6 @@
 use super::*;
 use connection_table::ConnectionRefKind;
 use connection_table::*;
-use network_connection::*;
 use stop_token::future::FutureExt;
 
 impl_veilid_log_facility!("net");
