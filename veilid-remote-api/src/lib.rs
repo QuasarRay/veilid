@@ -1,10 +1,15 @@
-#![recursion_limit = "256"]
-#![warn(missing_docs)]
 //! # veilid-remote-api
 //!
 //! This crate provides the ability to control a Veilid node remotely.
 //!
 //! The [JsonRequestProcessor] is a wrapper around the [VeilidAPI] and provides a way to process requests and send responses.
+
+#![warn(missing_docs)]
+#![deny(warnings)]
+#![recursion_limit = "256"]
+
+// Re-export veilid-core
+pub use veilid_core;
 
 use veilid_core::tools::*;
 use veilid_core::*;

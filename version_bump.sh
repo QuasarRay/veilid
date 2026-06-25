@@ -1,7 +1,10 @@
 #!/bin/bash
 
+SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+pushd $SCRIPTDIR/.. >/dev/null
+
 # Fail out if any step has an error
-set -ex
+set -ex -o pipefail
 
 if [ "$1" == "patch" ]; then
     echo Bumping patch version
@@ -49,3 +52,8 @@ popd 2>/dev/null
 pushd veilid-wasm/tests 2>/dev/null
 npm install --package-lock-only
 popd 2>/dev/null
+
+# Run smoketests without locking dependencies to update lockfiles
+scripts/_smoketest_all.sh
+
+popd >/dev/null

@@ -1,4 +1,5 @@
 pub mod veilid_remote_api
+pub use veilid_remote_api::veilid_core
 pub enum veilid_remote_api::ApiResult<T> where T: core::clone::Clone + core::fmt::Debug + schemars::JsonSchema
 pub veilid_remote_api::ApiResult::Err
 pub veilid_remote_api::ApiResult::Err::error: veilid_core::veilid_api::error::VeilidAPIError

@@ -168,7 +168,7 @@ impl PublicInternetRoutingDomainController {
     fn get_allocated_routes_to_loopback_keepalive(
         &self,
         cur_ts: Timestamp,
-    ) -> Vec<RouteKeepaliveRequest> {
+    ) -> Vec<RoutePingValidationRequest> {
         let routing_table = self.routing_table();
         let rss = routing_table.route_spec_store();
 
@@ -193,9 +193,10 @@ impl PublicInternetRoutingDomainController {
                 }
             });
             if !needed.is_empty() {
-                out.push(RouteKeepaliveRequest {
+                out.push(RoutePingValidationRequest {
                     route_id: k.clone(),
                     orderings: needed,
+                    purpose: RoutePingValidationPurpose::Keepalive,
                 });
             }
             Option::<()>::None

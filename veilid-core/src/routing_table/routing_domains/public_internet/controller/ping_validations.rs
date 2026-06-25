@@ -56,7 +56,10 @@ impl PublicInternetRoutingDomainController {
 
             // Enqueue the pings
             for relay_ping in relay.pings.clone() {
-                let dest = Destination::direct(relay_ping.node_ref, None);
+                let dest = Destination::dial_info(
+                    relay_ping.dial_info.clone(),
+                    relay_ping.node_ref.clone(),
+                );
                 validations.push(dest);
             }
 

@@ -262,11 +262,8 @@ impl RelayCompiler {
                 // Add the ping if we determined we could use it
                 if add_ping {
                     relay.pings.push(RelayPing {
-                        node_ref: relay.relay_node.unfiltered().custom_filtered(
-                            NodeRefFilter::new()
-                                .with_routing_domain(self.requirements.routing_domain)
-                                .with_dial_info_filter(did.dial_info.make_filter()),
-                        ),
+                        node_ref: relay.relay_node.unfiltered(),
+                        dial_info: did.dial_info.clone(),
                     });
                 }
             }

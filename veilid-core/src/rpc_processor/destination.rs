@@ -19,11 +19,17 @@ pub(crate) enum Destination {
         /// Require safety route or not
         safety_selection: SafetySelection,
     },
-    /// Send to node for relay purposes
-    Relay {
-        /// The relay dial info to send to
-        relay_di: DialInfo,
-        /// The final destination the relay should send to
+    /// Send to node via direct dial info,
+    /// bypassing safety route selection and
+    /// contact method selection.
+    /// Used for targeted keepalive messages
+    /// and sending to a relay
+    DialInfo {
+        /// The dial info to send to
+        /// Could be either a node's direct dial info, or
+        /// a relay dial info for that node
+        dial_info: DialInfo,
+        /// The final destination node the RPC is intended for
         node: NodeRef,
     },
     /// Send to private route
@@ -51,12 +57,12 @@ impl PartialEq for Destination {
                 self_node.equivalent(other_node) && self_safety_selection == other_safety_selection
             }
             (
-                Destination::Relay {
-                    relay_di: self_relay_di,
+                Destination::DialInfo {
+                    dial_info: self_relay_di,
                     node: self_node,
                 },
-                Destination::Relay {
-                    relay_di: other_relay_di,
+                Destination::DialInfo {
+                    dial_info: other_relay_di,
                     node: other_node,
                 },
             ) => self_relay_di == other_relay_di && self_node.equivalent(other_node),
@@ -91,7 +97,10 @@ impl core::hash::Hash for Destination {
                 node.hash(state);
                 safety_selection.hash(state);
             }
-            Destination::Relay { relay_di, node } => {
+            Destination::DialInfo {
+                dial_info: relay_di,
+                node,
+            } => {
                 relay_di.hash(state);
                 node.hash(state);
             }
@@ -115,8 +124,8 @@ impl Destination {
                 .unwrap_or_else(|| SafetySelection::Unsafe(sequencing)),
         }
     }
-    pub fn relay(relay_di: DialInfo, node: NodeRef) -> Self {
-        Self::Relay { relay_di, node }
+    pub fn dial_info(dial_info: DialInfo, node: NodeRef) -> Self {
+        Self::DialInfo { dial_info, node }
     }
     pub fn private_route(
         private_route: Arc<PrivateRoute>,
@@ -134,7 +143,7 @@ impl Destination {
                 node: _,
                 safety_selection,
             } => safety_selection.clone(),
-            Destination::Relay { relay_di: _, node } => {
+            Destination::DialInfo { dial_info: _, node } => {
                 // Relayed dialinfo is always sent directly
                 SafetySelection::Unsafe(node.sequencing())
             }
@@ -151,7 +160,7 @@ impl Destination {
                 node,
                 safety_selection: _,
             } => Some(node.node_ids()),
-            Destination::Relay { relay_di: _, node } => Some(node.node_ids()),
+            Destination::DialInfo { dial_info: _, node } => Some(node.node_ids()),
             Destination::PrivateRoute {
                 private_route: _,
                 safety_selection: _,
@@ -165,7 +174,7 @@ impl Destination {
                 node,
                 safety_selection: _,
             } => Ok(Target::NodeId(node.best_node_id())),
-            Destination::Relay { relay_di: _, node } => Ok(Target::NodeId(node.best_node_id())),
+            Destination::DialInfo { dial_info: _, node } => Ok(Target::NodeId(node.best_node_id())),
             Destination::PrivateRoute {
                 private_route,
                 safety_selection: _,
@@ -209,7 +218,10 @@ impl Destination {
                 };
                 (Some(node.unfiltered()), opt_routing_domain)
             }
-            Destination::Relay { relay_di, node } => {
+            Destination::DialInfo {
+                dial_info: relay_di,
+                node,
+            } => {
                 let opt_routing_domain =
                     routing_table.routing_domain_for_address(relay_di.address());
                 if opt_routing_domain.is_none() {
@@ -244,7 +256,7 @@ impl Destination {
                     .ok_or_else(|| RPCError::internal("no public key in routing domain"))?;
                 Ok(public_key)
             }
-            Destination::Relay { relay_di: _, node } => {
+            Destination::DialInfo { dial_info: _, node } => {
                 let routing_domain = node
                     .best_routing_domain()
                     .ok_or_else(|| RPCError::internal("no reachable routing domain"))?;
@@ -283,8 +295,8 @@ impl fmt::Display for Destination {
                     write!(f, "{}", f.to_string(node))
                 }
             },
-            Destination::Relay { relay_di, node } => {
-                write!(f, "{}@{}", f.to_string(node), f.to_string(relay_di))
+            Destination::DialInfo { dial_info, node } => {
+                write!(f, "{}@{}", f.to_string(node), f.to_string(dial_info))
             }
             Destination::PrivateRoute {
                 private_route,
@@ -405,11 +417,11 @@ impl RPCProcessor {
                     Ok(NetworkResult::Value(RespondTo::PrivateRoute(private_route)))
                 }
             },
-            Destination::Relay {
-                relay_di: _,
+            Destination::DialInfo {
+                dial_info: _,
                 node: _,
             } => {
-                // Sent directly via a relay, must respond directly
+                // Sent directly, must respond directly
                 Ok(NetworkResult::value(RespondTo::Sender))
             }
             Destination::PrivateRoute {

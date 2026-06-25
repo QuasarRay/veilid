@@ -11,12 +11,28 @@ impl_veilid_log_facility!("rtab");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PingValidationGroup {
-    RouteTest = 0,
-    Keepalive = 1,
+    /// `Keepalive` pings as Status RPCs sent to keep flows alive:
+    /// - Loopbacks with `Destination::PrivateRoute` for keeping
+    ///   allocated safety routes alive independent of destination
+    /// - Relay keepalives with `Destination::DialInfo` to ensure the
+    ///   protected relay flow is used
+    /// - Active watch keepalives with `Destination::Direct` + `SafetySelection::Safe`
+    ///   for DHT caching nodes we are watching
+    Keepalive = 0,
+    /// `RouteTest` pings are Status RPCs always sent via safety routes:
+    /// - Nodes with `Destination::Direct` + `SafetySelection::Safe` for testing
+    ///   safety route deliverability to a specific destination
+    /// - Private routes with `Destination::PrivateRoute` + `SafetySelection::Safe` for
+    ///   testing imported remote routes
+    RouteTest = 1,
+    /// `Reliability` pings are Status RPCs sent to routing table nodes:
+    /// - Unsafe routing table pings with `Destination::Direct` + `SafetySelection::Unsafe` to
+    ///   assess node timing, reachability, and reliability
     Reliability = 2,
 }
 
 impl PingValidationGroup {
+    /// The maximum number of pings that can be in-flight for this group
     fn max_parallel(&self) -> usize {
         match self {
             Self::RouteTest => 4,
@@ -417,12 +433,13 @@ impl RoutingTable {
                     veilid_log!(self debug "Could not build allocated route test for {:#}", arsid);
                     continue;
                 };
-                let req = RouteKeepaliveRequest {
+                let req = RoutePingValidationRequest {
                     route_id: arsid,
                     orderings: info.orderings,
+                    purpose: RoutePingValidationPurpose::Test,
                 };
                 let route_entries =
-                    Self::build_route_loopback_entries(rss, cur_ts, &req, priority).await;
+                    Self::build_route_loopback_ping_validations(rss, cur_ts, &req, priority).await;
                 entries.extend(route_entries);
             }
         }
@@ -437,7 +454,7 @@ impl RoutingTable {
     pub async fn enqueue_route_loopback_keepalives(
         &self,
         cur_ts: Timestamp,
-        requests: Vec<RouteKeepaliveRequest>,
+        requests: Vec<RoutePingValidationRequest>,
         priority: usize,
     ) {
         let rss = self.route_spec_store();
@@ -445,7 +462,7 @@ impl RoutingTable {
         let mut entries = Vec::new();
         for req in requests {
             let route_entries =
-                Self::build_route_loopback_entries(rss, cur_ts, &req, priority).await;
+                Self::build_route_loopback_ping_validations(rss, cur_ts, &req, priority).await;
             entries.extend(route_entries);
         }
 
@@ -500,10 +517,10 @@ impl RoutingTable {
     /// Each entry's callback reports per-(first-hop, transport) failure on definitive failure
     /// and a per-ordering keepalive timestamp is stamped at enqueue so the keepalive rate
     /// limiter sees the work even before the answer comes back.
-    async fn build_route_loopback_entries(
+    async fn build_route_loopback_ping_validations(
         rss: &RouteSpecStore,
         cur_ts: Timestamp,
-        req: &RouteKeepaliveRequest,
+        req: &RoutePingValidationRequest,
         priority: usize,
     ) -> Vec<PingValidationEntry> {
         let Some(info) = rss.get_allocated_route_test_info(&req.route_id) else {
@@ -524,7 +541,10 @@ impl RoutingTable {
                 ordering.strict_sequencing(),
             );
             entries.push(PingValidationEntry {
-                group: PingValidationGroup::RouteTest,
+                group: match req.purpose {
+                    RoutePingValidationPurpose::Test => PingValidationGroup::RouteTest,
+                    RoutePingValidationPurpose::Keepalive => PingValidationGroup::Keepalive,
+                },
                 priority,
                 key: PingValidationKey::RouteTest {
                     route_id: req.route_id.clone().into(),

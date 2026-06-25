@@ -1,4 +1,3 @@
-#![warn(missing_docs)]
 //! # veilid-tools
 //!
 //! A collection of baseline tools for Rust development use by Veilid and Veilid-enabled Rust applications
@@ -21,6 +20,9 @@
 //! * `rt-async-std` - Uses `async-std` as the async runtime
 //! * `rt-wasm-bindgen` - When building for the `wasm32` architecture, use this to enable `wasm-bindgen-futures` as the async runtime
 //!
+
+#![warn(missing_docs)]
+#![deny(warnings)]
 
 /// Packet fragmentation and reassembly for the sender and receiver ends.
 pub mod assembly_buffer;

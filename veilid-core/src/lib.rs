@@ -1,4 +1,3 @@
-#![warn(missing_docs)]
 //! # The Veilid Framework
 //!
 //! This is the core library used to create a Veilid node and operate it as part of an application.
@@ -28,6 +27,8 @@
 //! * `default-wasm` - When building for the `wasm32` architecture, use this to enable `wasm-bindgen-futures` as the async runtime.
 //!
 
+#![warn(missing_docs)]
+#![deny(warnings)]
 #![recursion_limit = "256"]
 
 cfg_if::cfg_if! {

@@ -16,10 +16,19 @@ pub struct AllocatedRouteTestInfo {
     pub orderings: SequenceOrderingSet,
 }
 
-/// One route's keepalive schedule: send a loopback for each ordering listed.
-pub struct RouteKeepaliveRequest {
+/// The purpose of a ping validation request
+pub enum RoutePingValidationPurpose {
+    /// A test of the route's deliverability
+    Test,
+    /// A keepalive of the route to keep it alive
+    Keepalive,
+}
+
+/// One route's test or keepalive schedule: send a loopback for each ordering listed.
+pub struct RoutePingValidationRequest {
     pub route_id: AllocatedRouteSetId,
     pub orderings: SequenceOrderingSet,
+    pub purpose: RoutePingValidationPurpose,
 }
 
 impl RouteSpecStore {

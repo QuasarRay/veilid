@@ -360,14 +360,23 @@ class Veilid:
         return container
 
     @function
-    async def clippy(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
-        """Run clippy linting for multiple targets"""
+    async def lint(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run source linting for multiple targets"""
         container = self.code_linux(source, base, ci_registry_image)
 
         # Run clippy for different targets
-        result = await container.with_exec(["./scripts/_clippy_all.sh", "--cleanup"]).combined_output()
+        result = await container.with_exec(["./scripts/_lint_all.sh", "--cleanup"]).combined_output()
 
         return f"Clippy completed:\n{result}"
+
+    @function
+    async def smoketest(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run Smoketest checks for all published crates"""
+        container = self.code_linux(source, base, ci_registry_image)
+
+        result = await container.with_exec(["./scripts/_smoketest_all.sh", "--locked"]).combined_output()
+
+        return f"MSRV check completed:\n{result}"
 
     @function
     async def msrv(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
@@ -499,6 +508,13 @@ class Veilid:
         return f"Public API check completed:\n{result}"
 
     @function
+    async def test_smoketest_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+        """Run Smoketest checks for all published crates"""
+        container = self.code_linux(source, base, ci_registry_image)
+        result = await container.with_exec(["./scripts/_smoketest_all.sh", "--locked"]).combined_output()
+        return f"Smoketest check completed:\n{result}"
+
+    @function
     async def test_check_wasm_builds_dart(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
         """Check WASM builds for Dart"""
         container = self.code_linux(source, base, ci_registry_image)
@@ -567,6 +583,7 @@ class Veilid:
         results = []
         results.append(await self.test_msrv_all(source, base, ci_registry_image))
         results.append(await self.test_public_api(source, base, ci_registry_image))
+        results.append(await self.test_smoketest_all(source, base, ci_registry_image))
         results.append(await self.test_check_wasm_builds_dart(source, base, ci_registry_image))
         results.append(await self.test_check_wasm_builds_js(source, base, ci_registry_image))
         results.append(await self.test_clippy_wasm32_unknown_unknown(source, base, ci_registry_image))

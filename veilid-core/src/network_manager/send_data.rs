@@ -19,15 +19,20 @@ impl NetworkManager {
         dial_info: DialInfo,
         data: Bytes,
     ) -> EyreResult<SendDataResult> {
-        let cm = ContactMethod::Direct {
-            target_di: dial_info.clone(),
-        };
-        let nr =
-            pin_future_closure!(self.send_data_cm_direct(node_ref, dial_info, data, true)).await?;
-        Ok(SendDataResult::new(
-            NodeContactMethodResult::Resolved(cm),
-            nr,
-        ))
+        let net = self.net();
+        let nres = pin_future!(net.send_data_to_dial_info(dial_info.clone(), data)).await?;
+        let sdr = SendDataResult::new(
+            NodeContactMethodResult::Resolved(ContactMethod::Direct {
+                target_di: dial_info.clone(),
+            }),
+            nres,
+        );
+
+        if let Some(unique_flow) = sdr.unique_flow() {
+            self.set_last_flow(node_ref, unique_flow.flow, Timestamp::now());
+        }
+
+        Ok(sdr)
     }
 
     fn report_contact_method_result(
@@ -168,13 +173,18 @@ impl NetworkManager {
 
         // Try the contact method
         let nres = match &ncm_result {
+            // Punished nodes don't get a response
+            NodeContactMethodResult::Punished => {
+                NetworkResult::no_connection_other("node was punished")
+            }
             // No contact method resolved: last-chance attempt over any existing inbound flow.
-            // Punished is included — passive: we won't open new connections, but we can
-            // still respond on a flow they already have to us.
+            //
+            // Initial inbound communications to nodes we haven't seen yet are handle here via the
+            // `NoPeerInfo` case. register_node_without_peer_info() creates the entry, and this is
+            // how we can reply to inbound requests for that node.
             NodeContactMethodResult::NoRoutingDomain
             | NodeContactMethodResult::NoPeerInfo
-            | NodeContactMethodResult::NoContactMethod
-            | NodeContactMethodResult::Punished => {
+            | NodeContactMethodResult::NoContactMethod => {
                 pin_future_closure!(self.send_data_unreachable(destination_node_ref, data)).await?
             }
             NodeContactMethodResult::Resolved(ContactMethod::Existing) => {
@@ -192,7 +202,6 @@ impl NetworkManager {
                     destination_node_ref.unfiltered(),
                     relay_di.clone(),
                     data,
-                    false,
                 ))
                 .await?
             }
@@ -201,7 +210,6 @@ impl NetworkManager {
                     destination_node_ref.unfiltered(),
                     relay_di.clone(),
                     data,
-                    false,
                 ))
                 .await?
             }
@@ -210,7 +218,6 @@ impl NetworkManager {
                     destination_node_ref.unfiltered(),
                     target_di.clone(),
                     data,
-                    true
                 ))
                 .await?
             }
@@ -279,7 +286,11 @@ impl NetworkManager {
             };
 
         // Update timestamp for this last connection since we just sent to it
-        self.set_last_flow(target_node_ref.unfiltered(), flow, Timestamp::now());
+        self.set_last_flow(
+            target_node_ref.unfiltered(),
+            unique_flow.flow,
+            Timestamp::now(),
+        );
 
         Ok(NetworkResult::value(unique_flow))
     }
@@ -327,7 +338,7 @@ impl NetworkManager {
             };
 
         // Update timestamp for this last connection since we just sent to it
-        self.set_last_flow(target_node_ref, flow, Timestamp::now());
+        self.set_last_flow(target_node_ref, unique_flow.flow, Timestamp::now());
 
         Ok(NetworkResult::value(unique_flow))
     }
@@ -365,7 +376,11 @@ impl NetworkManager {
             {
                 SendDataToExistingFlowResult::Sent(unique_flow) => {
                     // Update timestamp for this last connection since we just sent to it
-                    self.set_last_flow(target_node_ref.unfiltered(), flow, Timestamp::now());
+                    self.set_last_flow(
+                        target_node_ref.unfiltered(),
+                        unique_flow.flow,
+                        Timestamp::now(),
+                    );
 
                     return Ok(NetworkResult::value(unique_flow));
                 }
@@ -437,7 +452,11 @@ impl NetworkManager {
             {
                 SendDataToExistingFlowResult::Sent(unique_flow) => {
                     // Update timestamp for this last connection since we just sent to it
-                    self.set_last_flow(target_node_ref.unfiltered(), flow, Timestamp::now());
+                    self.set_last_flow(
+                        target_node_ref.unfiltered(),
+                        unique_flow.flow,
+                        Timestamp::now(),
+                    );
 
                     return Ok(NetworkResult::value(unique_flow));
                 }
@@ -493,19 +512,12 @@ impl NetworkManager {
         node_ref: NodeRef,
         dial_info: DialInfo,
         data: Bytes,
-        direct_only: bool,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
         // Reuse only the existing flow whose remote address matches the target dial info
         let filtered_node_ref =
             node_ref.custom_filtered(NodeRefFilter::from(dial_info.make_filter()));
 
-        let target_addr = dial_info.socket_address();
-
-        let opt_last_flow = if direct_only {
-            filtered_node_ref.last_flow_to(target_addr)
-        } else {
-            filtered_node_ref.last_flow()
-        };
+        let opt_last_flow = filtered_node_ref.last_flow();
 
         let data = if let Some(flow) = opt_last_flow {
             veilid_log!(self debug target:"contact_method",
@@ -524,7 +536,7 @@ impl NetworkManager {
             .await?
             {
                 SendDataToExistingFlowResult::Sent(unique_flow) => {
-                    self.set_last_flow(node_ref, flow, Timestamp::now());
+                    self.set_last_flow(node_ref, unique_flow.flow, Timestamp::now());
                     return Ok(NetworkResult::value(unique_flow));
                 }
                 SendDataToExistingFlowResult::NotSent(d) => {
@@ -535,20 +547,15 @@ impl NetworkManager {
         } else {
             // No last connection
             veilid_log!(self debug target:"contact_method",
-                "No last flow to {} via {} for {:?}",
-                target_addr,
-                if direct_only {
-                    "direct-flow direct send"
-                } else {
-                    "indirect-flow direct send"
-                },
+                "No last flow in direct send to {} for {:?}",
+                dial_info,
                 filtered_node_ref
             );
 
             data
         };
 
-        // No matching existing flow; create a new connection.
+        // No matching existing flow, send to the dial info directly which may create a new connection.
         let net = self.net();
         let unique_flow = network_result_try!(
             pin_future!(net.send_data_to_dial_info(dial_info.clone(), data)).await?
@@ -770,7 +777,7 @@ impl NetworkManager {
         // Issue the signal
         let rpc = self.rpc_processor();
         network_result_try!(pin_future!(rpc.rpc_call_signal(
-            Destination::relay(relay_di.clone(), target_nr.clone()),
+            Destination::dial_info(relay_di.clone(), target_nr.clone()),
             SignalInfo::ReverseConnect {
                 receipt,
                 peer_info: published_peer_info
@@ -823,6 +830,7 @@ impl NetworkManager {
             let net = self.net();
             match pin_future!(net.send_data_to_existing_flow(flow, data)).await? {
                 SendDataToExistingFlowResult::Sent(unique_flow) => {
+                    self.set_last_flow(target_nr, unique_flow.flow, Timestamp::now());
                     Ok(NetworkResult::value(unique_flow))
                 }
                 SendDataToExistingFlowResult::NotSent(_) => Ok(NetworkResult::no_connection_other(
@@ -897,7 +905,7 @@ impl NetworkManager {
         // Issue the signal
         let rpc = self.rpc_processor();
         network_result_try!(pin_future!(rpc.rpc_call_signal(
-            Destination::relay(relay_di, target_nr.clone()),
+            Destination::dial_info(relay_di, target_nr.clone()),
             SignalInfo::HolePunch {
                 receipt,
                 peer_info: published_peer_info,
@@ -958,6 +966,7 @@ impl NetworkManager {
         if let Some(flow) = inbound_nr.last_flow() {
             match self.net().send_data_to_existing_flow(flow, data).await? {
                 SendDataToExistingFlowResult::Sent(unique_flow) => {
+                    self.set_last_flow(target_nr, unique_flow.flow, Timestamp::now());
                     Ok(NetworkResult::value(unique_flow))
                 }
                 SendDataToExistingFlowResult::NotSent(_) => Ok(NetworkResult::no_connection_other(

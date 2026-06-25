@@ -253,15 +253,20 @@ code-android:
     COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
     COPY --keep-ts scripts/earthly/cargo-android/config.toml /veilid/.cargo/config.toml
 
-# Clippy only
-clippy:
+# Lints only
+lint:
     FROM +code-linux
-    RUN ./scripts/_clippy_all.sh --cleanup
+    RUN ./scripts/_lint_all.sh --cleanup
 
 # MSRV only
 msrv:
     FROM +code-linux
     RUN ./scripts/_msrv_all.sh        
+
+# Smoketest only
+smoketest:
+    FROM +code-linux
+    RUN ./scripts/_smoketest_all.sh --locked
 
 # Public API only
 public-api:
@@ -328,6 +333,9 @@ build-android:
 test-msrv-all:
     FROM +code-linux
     RUN ./scripts/_msrv_all.sh
+test-smoketest-all:
+    FROM +code-linux
+    RUN ./scripts/_smoketest_all.sh --locked
 test-public-api:
     FROM +code-linux
     RUN ./scripts/_check_public_api.sh
@@ -360,6 +368,7 @@ test-unit-tests-all:
     RUN ./scripts/_unit_tests_all.sh
 test-all:
     BUILD +test-msrv-all
+    BUILD +test-smoketest-all
     BUILD +test-public-api
     BUILD +test-check-wasm-builds-dart
     BUILD +test-check-wasm-builds-js

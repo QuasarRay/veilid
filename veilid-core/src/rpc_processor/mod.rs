@@ -836,7 +836,7 @@ impl RPCProcessor {
             outer_op_id: op_id,
             message,
             node_ref: compiled_route.first_hop.clone(),
-            opt_relay_di: None,
+            opt_dial_info: None,
             opt_safety_route_ref,
             opt_remote_private_route_ref,
             opt_reply_private_route_ref,
@@ -914,11 +914,11 @@ impl RPCProcessor {
 
         // To where are we sending the request
         match dest {
-            Destination::Relay {
-                relay_di,
+            Destination::DialInfo {
+                dial_info,
                 node: ref node_ref,
             } => {
-                // Send to a node directly via a relay dialinfo
+                // Send to a node directly via a specific dialinfo
 
                 // Reply private route should be None here, even for questions
                 if opt_reply_private_route.is_some() {
@@ -933,12 +933,12 @@ impl RPCProcessor {
                     outer_op_id: op_id,
                     message,
                     node_ref: node_ref.sequencing_filtered(
-                        relay_di
+                        dial_info
                             .protocol_type()
                             .sequence_ordering()
                             .strict_sequencing(),
                     ),
-                    opt_relay_di: Some(relay_di),
+                    opt_dial_info: Some(dial_info),
                     opt_safety_route_ref: None,
                     opt_remote_private_route_ref: None,
                     opt_reply_private_route_ref: None,
@@ -971,7 +971,7 @@ impl RPCProcessor {
                             outer_op_id: op_id,
                             message,
                             node_ref,
-                            opt_relay_di: None,
+                            opt_dial_info: None,
                             opt_safety_route_ref: None,
                             opt_remote_private_route_ref: None,
                             opt_reply_private_route_ref: None,
@@ -1753,7 +1753,7 @@ impl RPCProcessor {
             outer_op_id,
             message,
             node_ref,
-            opt_relay_di,
+            opt_dial_info,
             opt_safety_route_ref,
             opt_remote_private_route_ref,
             opt_reply_private_route_ref,
@@ -1798,7 +1798,7 @@ impl RPCProcessor {
         let message_len = message.len();
         let send_data_result = self
             .network_manager()
-            .send_envelope(node_ref.clone(), opt_relay_di.clone(), message)
+            .send_envelope(node_ref.clone(), opt_dial_info.clone(), message)
             .await
             .map_err(|e| {
                 // Envelope-level error: no transport was attempted.
@@ -1819,7 +1819,7 @@ impl RPCProcessor {
         if !matches!(send_data_result.network_result(), NetworkResult::Value(_)) {
             veilid_log!(self debug target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
                 send_data_result.network_result(), file!(), line!(),
-                outer_op_id, node_ref, opt_relay_di.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
+                outer_op_id, node_ref, opt_dial_info.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
             self.record_send_failure(
                 RPCKind::Question,
                 send_ts,
@@ -1908,7 +1908,7 @@ impl RPCProcessor {
             outer_op_id,
             message,
             node_ref,
-            opt_relay_di,
+            opt_dial_info,
             opt_safety_route_ref: safety_route,
             opt_remote_private_route_ref: remote_private_route,
             // Held until end of scope; statements are one-shot.
@@ -1949,7 +1949,7 @@ impl RPCProcessor {
         let message_len = message.len();
         let send_data_result = self
             .network_manager()
-            .send_envelope(node_ref.clone(), opt_relay_di.clone(), message)
+            .send_envelope(node_ref.clone(), opt_dial_info.clone(), message)
             .await
             .map_err(|e| {
                 // Envelope-level error: no transport was attempted.
@@ -1970,7 +1970,7 @@ impl RPCProcessor {
         if !matches!(send_data_result.network_result(), NetworkResult::Value(_)) {
             veilid_log!(self debug target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
                 send_data_result.network_result(), file!(), line!(),
-                outer_op_id, node_ref, opt_relay_di.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
+                outer_op_id, node_ref, opt_dial_info.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
             self.record_send_failure(
                 RPCKind::Statement,
                 send_ts,
@@ -2037,7 +2037,7 @@ impl RPCProcessor {
             outer_op_id,
             message,
             node_ref,
-            opt_relay_di,
+            opt_dial_info,
             opt_safety_route_ref: safety_route,
             opt_remote_private_route_ref: remote_private_route,
             // Held until end of scope; answers are one-shot server-side.
@@ -2078,7 +2078,7 @@ impl RPCProcessor {
         let message_len = message.len();
         let send_data_result = self
             .network_manager()
-            .send_envelope(node_ref.clone(), opt_relay_di.clone(), message)
+            .send_envelope(node_ref.clone(), opt_dial_info.clone(), message)
             .await
             .map_err(|e| {
                 // Envelope-level error: no transport was attempted.
@@ -2099,7 +2099,7 @@ impl RPCProcessor {
         if !matches!(send_data_result.network_result(), NetworkResult::Value(_)) {
             veilid_log!(self debug target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
                 send_data_result.network_result(), file!(), line!(),
-                outer_op_id, node_ref, opt_relay_di.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
+                outer_op_id, node_ref, opt_dial_info.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
             self.record_send_failure(
                 RPCKind::Answer,
                 send_ts,

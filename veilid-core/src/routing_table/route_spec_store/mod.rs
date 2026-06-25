@@ -32,7 +32,7 @@ pub(crate) use route_select::{RouteIdAndKeys, RouteSelectParams};
 pub(crate) use route_set_id::{AllocatedRouteSetId, RemoteRouteSetId};
 pub(crate) use route_set_ref::{AllocatedRouteSetRef, RemoteRouteSetRef};
 pub use route_stats::*;
-pub(crate) use route_test::RouteKeepaliveRequest;
+pub(crate) use route_test::{RoutePingValidationPurpose, RoutePingValidationRequest};
 
 impl_veilid_log_facility!("rtab");
 

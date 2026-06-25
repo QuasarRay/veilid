@@ -164,8 +164,8 @@ impl RPCProcessor {
                     }
                 }
             }
-            Destination::Relay {
-                relay_di: _,
+            Destination::DialInfo {
+                dial_info: _,
                 node: _,
             }
             | Destination::PrivateRoute {

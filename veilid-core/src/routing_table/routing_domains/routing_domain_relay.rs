@@ -61,18 +61,24 @@ impl fmt::Display for RoutingDomainRelay {
 /// The record of a node that needs to be pinged to keep a relay alive
 #[derive(Debug, Clone)]
 pub struct RelayPing {
-    pub node_ref: FilteredNodeRef,
+    pub node_ref: NodeRef,
+    pub dial_info: DialInfo,
 }
 
 impl RelayPing {
     pub fn equivalent(&self, other: &Self) -> bool {
-        self.node_ref.equivalent(&other.node_ref)
+        self.node_ref.equivalent(&other.node_ref) && self.dial_info == other.dial_info
     }
 }
 
 impl fmt::Display for RelayPing {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", f.to_string(&self.node_ref))
+        write!(
+            f,
+            "{}@{}",
+            f.to_string(&self.node_ref),
+            f.to_string(&self.dial_info)
+        )
     }
 }
 

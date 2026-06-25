@@ -220,6 +220,7 @@ pub(crate) trait NodeRefCommonTrait:
     /// Prefers an exact (IP, port) match. Falls back to any flow with the same remote IP,
     /// which covers incoming connections from a peer (ephemeral source port) where exact
     /// port match would miss. Relay-mediated flows have a different remote IP and don't match.
+    #[expect(dead_code)]
     fn last_flow_to(&self, remote: SocketAddress) -> Option<Flow> {
         self.operate(|e| {
             let routing_table = self.routing_table();

@@ -947,8 +947,8 @@ impl NetworkManager {
 
     /// Called by the RPC handler when we want to issue an RPC request or response
     /// node_ref is the final destination to which the envelope will be sent
-    /// If `relay_di` is specified, then it will be directly sent to this dialinfo without
-    /// resolving the contact method
+    /// If `opt_dial_info` is specified, then it will be directly sent to this dialinfo
+    /// without resolving the contact method
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -956,7 +956,7 @@ impl NetworkManager {
     pub async fn send_envelope(
         &self,
         node_ref: FilteredNodeRef,
-        opt_relay_di: Option<DialInfo>,
+        opt_dial_info: Option<DialInfo>,
         body: Bytes,
     ) -> EyreResult<SendDataResult> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
@@ -998,11 +998,11 @@ impl NetworkManager {
             .await
             .map_err(|_| eyre!("network is stopping"))??;
 
-        if let Some(relay_di) = &opt_relay_di {
+        if let Some(dial_info) = &opt_dial_info {
             veilid_log!(self trace
                 "sending envelope to {:?} via {:?}, len={}, timestamp={:?}",
                 node_ref,
-                relay_di,
+                dial_info,
                 out.len(),
                 timestamp
             );
@@ -1012,8 +1012,8 @@ impl NetworkManager {
 
         // Send the envelope via whatever means necessary, gated on the shutdown stop token.
         let send_fut = async {
-            if let Some(relay_di) = opt_relay_di {
-                self.send_data_direct(node_ref.unfiltered(), relay_di, out)
+            if let Some(dial_info) = opt_dial_info {
+                self.send_data_direct(node_ref.unfiltered(), dial_info, out)
                     .await
             } else {
                 self.send_data(node_ref, out).await
@@ -1298,7 +1298,9 @@ impl NetworkManager {
 
         // Add the sender's node without its peer info
         // Gets noderef filtered to the routing domain
-        let sender_noderef = match routing_table.register_node_with_id(routing_domain, sender_id) {
+        let sender_noderef = match routing_table
+            .register_node_without_peer_info(routing_domain, sender_id)
+        {
             Ok(v) => v,
             Err(e) => {
                 // If the node couldn't be registered just skip this envelope,

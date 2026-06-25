@@ -13,7 +13,9 @@ documentation = "https://docs.rs/veilid-remote-api"
 homepage = "https://veilid.gitlab.io/developer-book/"
 
 [features]
-default = ["rt-tokio"]
+default = ["default-tokio"]
+
+default-tokio = ["rt-tokio"]
 default-async-std = ["rt-async-std"]
 
 rt-tokio = ["veilid-core/default-tokio"]

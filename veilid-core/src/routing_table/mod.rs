@@ -1484,10 +1484,11 @@ impl RoutingTable {
     }
 
     /// Shortcut function to add a node to our routing table if it doesn't exist
-    /// Returns a noderef filtered to
-    /// the routing domain in which this node was registered for convenience.
+    /// Adds no peer info to the node at this time. The node will unreachable except over the
+    /// existing inbound flow that is established to us.
+    /// Returns a noderef filtered to the routing domain in which this node was registered for convenience.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub fn register_node_with_id(
+    pub fn register_node_without_peer_info(
         &self,
         routing_domain: RoutingDomain,
         node_id: NodeId,

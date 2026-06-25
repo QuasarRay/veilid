@@ -1542,7 +1542,10 @@ impl VeilidAPI {
                 &dest,
                 routing_table.debug_info_entry(node.unfiltered())
             )),
-            Destination::Relay { relay_di, node } => Ok(format!(
+            Destination::DialInfo {
+                dial_info: relay_di,
+                node,
+            } => Ok(format!(
                 "Destination: {:#?}\nNode:\n{}\nDialInfo:\n{}\n",
                 &dest,
                 routing_table.debug_info_entry(node.clone()),
@@ -3153,7 +3156,7 @@ impl VeilidAPI {
                     let relay_di = DialInfo::from_str(second).ok()?;
                     let target_nr = get_node_ref(registry.clone())(first)?;
 
-                    Some(Destination::relay(relay_di, target_nr))
+                    Some(Destination::dial_info(relay_di, target_nr))
                 } else {
                     // Direct
                     let target_nr = resolve_filtered_node_ref(
