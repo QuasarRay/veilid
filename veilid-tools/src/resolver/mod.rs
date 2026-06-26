@@ -39,6 +39,6 @@ cfg_if! {
 #[derive(Debug, Clone, Eq, PartialEq, ThisError)]
 pub enum ResolverError {
     /// Resolution failed; the string carries a backend-specific description.
-    #[error("Generic resolver error")]
+    #[error("Generic resolver error: {0}")]
     Generic(String),
 }

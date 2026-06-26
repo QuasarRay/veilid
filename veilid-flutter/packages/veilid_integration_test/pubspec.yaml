@@ -18,7 +18,7 @@ dependencies:
     path: ../..
   veilid_test:
     path: ../veilid_test
-  xterm: ^4.0.0
+  veilid_xterm: 4.0.0-veilid.1
 
 dev_dependencies:
   flutter_lints: ^6.0.0

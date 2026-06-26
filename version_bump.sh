@@ -43,6 +43,15 @@ pushd veilid-flutter 2>/dev/null
 flutter pub get
 popd 2>/dev/null
 
+# Update flutter package lockfiles
+pushd veilid-flutter/packages/veilid_test 2>/dev/null
+flutter pub get
+popd 2>/dev/null
+
+pushd veilid-flutter/packages/veilid_integration_test 2>/dev/null
+flutter pub get
+popd 2>/dev/null
+
 # Build wasm bundle (debug) — refreshes pkg/package.json with new version
 # so the local tests/ dependency resolves to the bumped version.
 pushd veilid-wasm 2>/dev/null

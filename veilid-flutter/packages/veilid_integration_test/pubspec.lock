@@ -482,7 +482,7 @@ packages:
       path: "../.."
       relative: true
     source: path
-    version: "0.5.3"
+    version: "0.5.4"
   veilid_test:
     dependency: "direct main"
     description:
@@ -490,6 +490,14 @@ packages:
       relative: true
     source: path
     version: "0.1.0"
+  veilid_xterm:
+    dependency: "direct main"
+    description:
+      name: veilid_xterm
+      sha256: "0302c817a161eb1c8d3465b6e918e46a15ff5fbde5349551a09036e6667737b2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0-veilid.1"
   vm_service:
     dependency: transitive
     description:
@@ -522,14 +530,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.0"
-  xterm:
-    dependency: "direct main"
-    description:
-      name: xterm
-      sha256: "168dfedca77cba33fdb6f52e2cd001e9fde216e398e89335c19b524bb22da3a2"
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.0.0"
   yaml:
     dependency: transitive
     description:

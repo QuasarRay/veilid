@@ -23,7 +23,8 @@ get_filename_component(repository_root
     "${CMAKE_SOURCE_DIR}/${relative_path_to_repository_root}"
     ABSOLUTE)
 
-corrosion_import_crate(MANIFEST_PATH ${repository_root}/../veilid/Cargo.toml CRATES veilid-flutter)
+corrosion_set_env_vars(${PLUGIN_NAME} "CFLAGS=-MD$<$<CONFIG:Debug>:d>" "CXXFLAGS=-MD$<$<CONFIG:Debug>:d>")
+corrosion_import_crate(MANIFEST_PATH ${repository_root}/../veilid/Cargo.toml CRATE_TYPES cdylib CRATES veilid-flutter)
 
 # Flutter-specific
 

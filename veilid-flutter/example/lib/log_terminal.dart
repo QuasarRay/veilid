@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:xterm/xterm.dart';
+import 'package:veilid_xterm/veilid_xterm.dart';
 import 'log.dart';
 import 'veilid_theme.dart';
 

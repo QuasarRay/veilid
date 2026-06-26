@@ -9,7 +9,7 @@ import 'package:test_api/src/backend/invoker.dart';
 // ignore: implementation_imports
 import 'package:test_api/src/backend/message.dart';
 import 'package:veilid_test/veilid_test.dart';
-import 'package:xterm/xterm.dart';
+import 'package:veilid_xterm/veilid_xterm.dart';
 
 const _ansiReset = '\x1B[0m';
 const _ansiCyan = '\x1B[36m';
@@ -88,12 +88,14 @@ class IntegrationTestStatusSink extends ChangeNotifier {
 
   void onEnd(String name, int elapsedMs, List<String> errors) {
     currentTest = null;
-    results.add(TestResult(
-      name: name,
-      status: errors.isEmpty ? TestStatus.passed : TestStatus.failed,
-      elapsedMs: elapsedMs,
-      errors: errors,
-    ));
+    results.add(
+      TestResult(
+        name: name,
+        status: errors.isEmpty ? TestStatus.passed : TestStatus.failed,
+        elapsedMs: elapsedMs,
+        errors: errors,
+      ),
+    );
     notifyListeners();
   }
 }
@@ -124,15 +126,14 @@ void _onTestEnd() {
   final name = liveTest?.test.name ?? '?';
   final sw = _testStopwatches.remove(name);
   final elapsed = sw?.elapsedMilliseconds ?? 0;
-  final errors =
-      (liveTest?.errors ?? const []).map((e) => '${e.error}').toList();
+  final errors = (liveTest?.errors ?? const [])
+      .map((e) => '${e.error}')
+      .toList();
   IntegrationTestStatusSink.instance.onEnd(name, elapsed, errors);
   if (errors.isEmpty) {
-    IntegrationLogSink.instance
-        .writePass('✓ $name  (${elapsed}ms)');
+    IntegrationLogSink.instance.writePass('✓ $name  (${elapsed}ms)');
   } else {
-    IntegrationLogSink.instance
-        .writeFail('✗ $name  (${elapsed}ms)');
+    IntegrationLogSink.instance.writeFail('✗ $name  (${elapsed}ms)');
     for (final e in errors) {
       IntegrationLogSink.instance.writeFail('    $e');
     }
@@ -232,10 +233,7 @@ class _IntegrationLogAppState extends State<IntegrationLogApp> {
             ),
           ),
           Container(height: 1, color: Colors.grey.shade800),
-          const SizedBox(
-            height: 180,
-            child: IntegrationTestStatusPane(),
-          ),
+          const SizedBox(height: 180, child: IntegrationTestStatusPane()),
         ],
       ),
     ),
