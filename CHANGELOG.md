@@ -1,10 +1,11 @@
-**UNRELEASED**
+**Changed in Veilid 0.5.5**
 
 - Bug Fix Release:
   - Direct replies were broken, resulting in bootstrap failures on nodes with new IP addresses
   - Build failures due to confusing cargo feature unification issues affected simple programs linking in the `veilid-core` rust crate
 - Smoketest added for all published crates, testing the most-common, simple, non-veilid-workspace build configurations
   - Cargo feature unification bug reproduced with smoketest on 0.5.4, and is gone in this build.
+  - Flutter builds for Windows now use compatible linker options and debug CRT for debug builds. `veilid_integration_test` package now uses Veilid-maintained fork of `xterm` package.
 
 **Changed in Veilid 0.5.4**
 

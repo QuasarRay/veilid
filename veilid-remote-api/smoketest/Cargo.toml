@@ -6,7 +6,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-veilid-remote-api = { version = "0.5.4", path = "..", default-features = false }
+veilid-remote-api = { version = "0.5.5", path = "..", default-features = false }
 tokio = { version = "1.49.0", features = [
     "rt-multi-thread",
     "time",

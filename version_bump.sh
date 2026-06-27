@@ -1,10 +1,10 @@
 #!/bin/bash
 
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-pushd $SCRIPTDIR/.. >/dev/null
+pushd $SCRIPTDIR >/dev/null
 
 # Fail out if any step has an error
-set -ex -o pipefail
+set -e
 
 if [ "$1" == "patch" ]; then
     echo Bumping patch version
@@ -20,11 +20,17 @@ else
     exit 1
 fi
 
+# Ensure bump-my-version is installed as a uv tool
+if ! uv tool run bump-my-version --version >/dev/null 2>&1; then
+    echo Installing bump-my-version
+    uv tool install bump-my-version
+fi
+
 # Change version of crates and packages everywhere
-bumpversion $PART
+uv tool run bump-my-version bump $PART
 
 # Get the new version we bumped to
-NEW_VERSION=$(cat .bumpversion.cfg | grep current_version\ = | cut -d\  -f3)
+NEW_VERSION=$(uv tool run bump-my-version show current_version 2>/dev/null)
 echo NEW_VERSION=$NEW_VERSION
 
 # Update crate dependencies for the crates we publish

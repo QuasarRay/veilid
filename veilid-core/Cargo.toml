@@ -1,7 +1,7 @@
 [package]
 # --- Bumpversion match - do not reorder
 name = "veilid-core"
-version = "0.5.4"
+version = "0.5.5"
 # ---
 description = "Core library used to create a Veilid node and operate it as part of an application"
 build = "build.rs"
@@ -90,7 +90,7 @@ debug-locks = ["veilid-tools/debug-locks"]
 [dependencies]
 
 # Tools
-veilid-tools = { version = "0.5.4", path = "../veilid-tools", features = [
+veilid-tools = { version = "0.5.5", path = "../veilid-tools", features = [
     "tracing",
 ], default-features = false }
 pastey = "0.2.1"
