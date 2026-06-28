@@ -17,9 +17,10 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
 
-include(./rust.cmake)
+# Rust is compiled by the Dart build hook (hook/build.dart) and delivered as a
+# native-assets DLL; the Corrosion build (rust.cmake) is no longer used.
 # List of absolute paths to libraries that should be bundled with the plugin
 set(veilid_bundled_libraries
-  "$<TARGET_FILE:${CRATE_NAME}-shared>"
+  ""
   PARENT_SCOPE
 )

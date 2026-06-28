@@ -11,9 +11,9 @@ buildscript {
     }
 }
 
-plugins {
-    id "org.mozilla.rust-android-gradle.rust-android" version "0.9.6"
-}
+// rust-android-gradle removed: the Dart build hook (hook/build.dart) compiles
+// veilid-flutter/rust and Flutter's native-assets bundling delivers the .so to jniLibs.
+// The CMake cpplink target below is kept only to bundle libc++_shared.so.
 
 group 'com.veilid.veilid'
 version '1.0-SNAPSHOT'
@@ -79,33 +79,6 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 }
 
-apply plugin: 'org.mozilla.rust-android-gradle.rust-android'
-
-cargo {
-    module  = "../rust"
-    libname = "veilid_flutter"
-    targets = ["arm", "arm64", "x86", "x86_64"]
-    // cargo inherits CARGO_TARGET_DIR from the environment (CI relocates the
-    // target dir to a cacheable path); the plugin's artifact pickup must follow
-    targetDirectory = System.getenv("CARGO_TARGET_DIR") ?: "../../target"
-    pythonCommand = "python3"
-    prebuiltToolchains = true
-    profile = gradle.startParameter.taskNames.any{it.toLowerCase().contains("debug")} ? "debug" : "release"
-    exec { spec, toolchain ->
-        // Support 16KB page sizes
-        // https://developer.android.com/guide/practices/page-sizes#other-build-systems
-        spec.environment("RUST_ANDROID_GRADLE_CC_LINK_ARG", "-Wl,-z,max-page-size=16384,-soname,lib${libname}.so")
-    }
-}
-
-afterEvaluate {
-    // The `cargoBuild` task isn't available until after evaluation.
-    android.libraryVariants.all { variant ->
-        def productFlavor = ""
-        variant.productFlavors.each {
-            productFlavor += "${it.name.capitalize()}"
-        }
-        def buildType = "${variant.buildType.name.capitalize()}"
-        tasks["pre${productFlavor}${buildType}Build"].dependsOn(tasks["cargoBuild"])
-    }
-}
+// rust-android-gradle cargo build + cargoBuild task wiring removed — the Dart build
+// hook (hook/build.dart) compiles veilid-flutter/rust now. The Android 16KB-page link
+// arg (-Wl,-z,max-page-size=16384) is reapplied in hook/build.dart for android targets.

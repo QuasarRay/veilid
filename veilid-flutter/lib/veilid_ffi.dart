@@ -14,16 +14,31 @@ import 'veilid.dart';
 
 //////////////////////////////////////////////////////////
 
-// Load the veilid_flutter library once
+// Load the veilid_flutter library once.
+// Native-assets build hooks bundle it as a framework on Apple
+// (veilid_flutter.framework/veilid_flutter); the legacy side-by-side build ships
+// a bare dylib/.so/.dll (or, on iOS, a static lib force-loaded into the process
+// image). Try the framework first, then the legacy locations, then the process.
 const _base = 'veilid_flutter';
-final _path = Platform.isWindows
-    ? '$_base.dll'
-    : Platform.isMacOS
-    ? 'lib$_base.dylib'
-    : 'lib$_base.so';
-final _dylib = Platform.isIOS
-    ? DynamicLibrary.process()
-    : DynamicLibrary.open(_path);
+final DynamicLibrary _dylib = _openVeilidLibrary();
+
+DynamicLibrary _openVeilidLibrary() {
+  final candidates = <String>[
+    if (Platform.isMacOS || Platform.isIOS) '$_base.framework/$_base',
+    if (Platform.isMacOS) 'lib$_base.dylib',
+    if (Platform.isWindows) '$_base.dll',
+    if (Platform.isLinux || Platform.isAndroid) 'lib$_base.so',
+  ];
+  for (final name in candidates) {
+    try {
+      return DynamicLibrary.open(name);
+    } on ArgumentError {
+      // not present at this location; try the next candidate
+    }
+  }
+  // iOS legacy: static lib force-loaded into the app binary.
+  return DynamicLibrary.process();
+}
 
 // Linkage for initialization
 typedef _DartPostCObject =

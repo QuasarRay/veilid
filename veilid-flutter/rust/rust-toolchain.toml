@@ -1,0 +1,19 @@
+# Required by native_toolchain_rust: it validates the build target is listed
+# here and relies on rustup to provision the channel + targets. Channel matches
+# the repo's pinned RUST_VERSION (.dagger/versions.env).
+[toolchain]
+channel = "1.92.0"
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+    "x86_64-apple-ios",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-pc-windows-msvc",
+    "x86_64-pc-windows-msvc",
+]

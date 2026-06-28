@@ -18,7 +18,8 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 
-include(./rust.cmake)
+# Rust is compiled by the Dart build hook (hook/build.dart) and delivered as a
+# native-assets shared library; the Corrosion build (rust.cmake) is no longer used.
 # List of absolute paths to libraries that should be bundled with the plugin
 
 
@@ -42,6 +43,6 @@ endmacro()
 # message("All targets: ${all_targets}")
 
 set(veilid_bundled_libraries
-  "$<TARGET_FILE:${CRATE_NAME}-shared>"
+  ""
   PARENT_SCOPE
 )
