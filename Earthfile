@@ -14,18 +14,24 @@ VERSION 0.8
 # Start with older Ubuntu to ensure GLIBC symbol versioning support for older linux
 # Ensure we are using an amd64 platform because some of these targets use cross-platform tooling
 FROM ubuntu:18.04
-ENV ZIG_VERSION=0.13.0
-ENV CMAKE_VERSION_MINOR=4.0
-ENV CMAKE_VERSION_PATCH=4.0.2
+# Tool versions come from the single source of truth, .dagger/versions.env (the
+# dev-setup scripts source the same file). Read here as global ARGs via command
+# substitution so every RUN/ENV below uses them unchanged.
+COPY .dagger/versions.env /etc/veilid-versions.env
+ARG --global ZIG_VERSION=$(. /etc/veilid-versions.env && echo $ZIG_VERSION)
+ARG --global CMAKE_VERSION_MINOR=$(. /etc/veilid-versions.env && echo $CMAKE_VERSION_MINOR)
+ARG --global CMAKE_VERSION_PATCH=$(. /etc/veilid-versions.env && echo $CMAKE_VERSION_PATCH)
+ARG --global BINARYEN_VERSION=$(. /etc/veilid-versions.env && echo $BINARYEN_VERSION)
+ARG --global RUST_VERSION=$(. /etc/veilid-versions.env && echo $RUST_VERSION)
+ARG --global RUST_UNIT_TESTS_NIGHTLY_VERSION=$(. /etc/veilid-versions.env && echo $RUST_UNIT_TESTS_NIGHTLY_VERSION)
+ARG --global RUST_PACKAGE_TESTS_NIGHTLY_VERSION=$(. /etc/veilid-versions.env && echo $RUST_PACKAGE_TESTS_NIGHTLY_VERSION)
+ARG --global NDK_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_NDK_VERSION)
+ARG --global ANDROID_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_PLATFORM_VERSION)
+ARG --global ANDROID_BUILD_TOOLS_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_BUILD_TOOLS_VERSION)
+ARG --global RUST_STABLE_TARGETS=$(. /etc/veilid-versions.env && echo $RUST_STABLE_TARGETS)
+ARG --global RUST_NIGHTLY_TARGETS=$(. /etc/veilid-versions.env && echo $RUST_NIGHTLY_TARGETS)
 ENV BINSTALL_DISABLE_TELEMETRY=true
 ENV BINSTALL_NO_CONFIRM=true
-ENV BINARYEN_VERSION=125
-ENV RUST_VERSION=1.92.0
-ENV RUST_UNIT_TESTS_NIGHTLY_VERSION=nightly-2026-01-01
-ENV RUST_PACKAGE_TESTS_NIGHTLY_VERSION=nightly
-ENV NDK_VERSION=28.2.13676358
-ENV ANDROID_VERSION=36
-ENV ANDROID_BUILD_TOOLS_VERSION=35.0.0
 ENV ANDROID_COMMAND_LINE_TOOLS=https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV RUSTUP_DIST_SERVER=https://static.rust-lang.org
@@ -88,33 +94,16 @@ deps-rust:
         rustup --version; \
         cargo --version; \
         rustc --version;
+    # Targets come from versions.env (RUST_STABLE_TARGETS); unquoted so the shell word-splits.
     RUN retry=0; until [ "$retry" -ge $RETRY_COUNT ]; do \
-        rustup target add \
-            # Linux
-                x86_64-unknown-linux-gnu \
-                aarch64-unknown-linux-gnu \
-                x86_64-unknown-linux-musl \
-                aarch64-unknown-linux-musl \
-            # Windows
-                x86_64-pc-windows-gnu \
-            # MacOS
-                aarch64-apple-darwin \
-            # Android
-                aarch64-linux-android \
-                armv7-linux-androideabi \
-                i686-linux-android \
-                x86_64-linux-android \
-            # WASM
-                wasm32-unknown-unknown \
+            rustup target add $RUST_STABLE_TARGETS \
             && break; \
             retry=$((retry+1)); \
             echo "retry #$retry..."; \
             sleep 10; \
         done
     RUN retry=0; until [ "$retry" -ge $RETRY_COUNT ]; do \
-        rustup target add --toolchain nightly \
-            # Linux
-                x86_64-unknown-linux-gnu \
+            rustup target add --toolchain nightly $RUST_NIGHTLY_TARGETS \
             && break; \
             retry=$((retry+1)); \
             echo "retry #$retry..."; \

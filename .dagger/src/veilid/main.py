@@ -2,6 +2,8 @@ import sys
 from typing import Annotated
 from pathlib import Path
 import os
+import importlib.machinery
+import importlib.util
 
 import dagger
 from dagger import Ignore, dag, function, object_type
@@ -9,14 +11,36 @@ import platform
 
 from .ignore_patterns import DIRECTORY_IGNORE_PATTERNS
 
+
+def _load_versions():
+    """Single source of truth: .dagger/versions.env (polyglot KEY="value").
+
+    The module runtime mounts only .dagger, so versions.env lives there and is
+    imported by full path — the same file dev-setup and the Earthfile read.
+    """
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "versions.env")
+    loader = importlib.machinery.SourceFileLoader("_versions", path)  # .env isn't .py
+    spec = importlib.util.spec_from_loader("_versions", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+_V = _load_versions()
+
 VEILID_REPO = "registry.gitlab.com/veilid/veilid"
-ZIG_VERSION = "0.13.0"
-CMAKE_VERSION_MINOR = "4.0"
-CMAKE_VERSION_PATCH = "4.0.2"
-BINARYEN_VERSION = "125"
-RUST_VERSION = "1.92.0"
-RUST_UNIT_TESTS_NIGHTLY_VERSION="nightly-2026-01-01"
-RUST_PACKAGE_TESTS_NIGHTLY_VERSION="nightly"
+ZIG_VERSION = _V.ZIG_VERSION
+CMAKE_VERSION_MINOR = _V.CMAKE_VERSION_MINOR
+CMAKE_VERSION_PATCH = _V.CMAKE_VERSION_PATCH
+BINARYEN_VERSION = _V.BINARYEN_VERSION
+RUST_VERSION = _V.RUST_VERSION
+RUST_UNIT_TESTS_NIGHTLY_VERSION = _V.RUST_UNIT_TESTS_NIGHTLY_VERSION
+RUST_PACKAGE_TESTS_NIGHTLY_VERSION = _V.RUST_PACKAGE_TESTS_NIGHTLY_VERSION
+RUST_STABLE_TARGETS = _V.RUST_STABLE_TARGETS.split()
+RUST_NIGHTLY_TARGETS = _V.RUST_NIGHTLY_TARGETS.split()
+LINUX_BUILD_IMAGE = _V.LINUX_BUILD_IMAGE
+RPM_BUILD_IMAGE = _V.RPM_BUILD_IMAGE
+PACKAGING_IMAGE = _V.PACKAGING_IMAGE
 RETRY_COUNT = "12"
 RUSTUP_HOME = "/usr/local/rustup"
 RUSTUP_DIST_SERVER = "https://static.rust-lang.org"
@@ -48,7 +72,7 @@ class Veilid:
 
         return (
             dag.container()
-            .from_("ubuntu:18.04")
+            .from_(LINUX_BUILD_IMAGE)
             .with_env_variable("RUSTUP_HOME", RUSTUP_HOME)
             .with_env_variable("RUSTUP_DIST_SERVER", RUSTUP_DIST_SERVER)
             .with_env_variable("CARGO_HOME", CARGO_HOME)
@@ -149,33 +173,19 @@ class Veilid:
             "rustc", "--version"
         ])
 
-        # Install Rust targets
-        rust_stable_targets = [
-            "x86_64-unknown-linux-gnu",
-            "aarch64-unknown-linux-gnu",
-            "x86_64-unknown-linux-musl",
-            "aarch64-unknown-linux-musl",
-            "x86_64-pc-windows-gnu",
-            # "aarch64-pc-windows-gnullvm",
-            "aarch64-apple-darwin",
-            "aarch64-linux-android",
-            "armv7-linux-androideabi",
-            "i686-linux-android",
-            "x86_64-linux-android",
-            "wasm32-unknown-unknown"
-        ]
-        rust_nightly_targets = [
-            "x86_64-unknown-linux-gnu",
-        ]
+        # Rust targets: single source of truth is versions.env (RUST_STABLE_TARGETS /
+        # RUST_NIGHTLY_TARGETS, loaded at module top). No Apple desktop/iOS targets —
+        # Dagger is Linux-only and builds no Apple binaries (clippy uses the
+        # aarch64-apple-darwin already in the shared stable set).
 
         # Add a single default-target nightly toolchain for some tests
         container = container.with_exec(["rustup", "toolchain", "install", f"{RUST_UNIT_TESTS_NIGHTLY_VERSION}", "-c", "miri,rust-src"])
 
         # Add targets
-        container = container.with_exec(["rustup", "target", "add", "--toolchain", "stable", *rust_stable_targets])
+        container = container.with_exec(["rustup", "target", "add", "--toolchain", "stable", *RUST_STABLE_TARGETS])
 
         # Add nightly targets
-        container = container.with_exec(["rustup", "target", "add", "--toolchain", "nightly", *rust_nightly_targets])
+        container = container.with_exec(["rustup", "target", "add", "--toolchain", "nightly", *RUST_NIGHTLY_TARGETS])
 
 
         # Install cargo tools (try binstall of musl targets first, then fallback to regular install)
@@ -677,7 +687,7 @@ class Veilid:
         # Use Rocky Linux for RPM packaging
         container = (
             dag.container(platform=dagger.Platform(platform))
-            .from_("rockylinux:9")
+            .from_(RPM_BUILD_IMAGE)
             .with_exec(["yum", "install", "-y", "createrepo", "rpm-build", "rpm-sign", "yum-utils", "rpmdevtools", "selinux-policy-devel", "bzip2", "make"])
             .with_exec(["rpmdev-setuptree"])
         )
@@ -777,7 +787,7 @@ class Veilid:
     def package_linux_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
         """Package both DEB and RPM for Linux AMD64"""
         # Create a container to collect all packages
-        container = dag.container().from_("alpine:latest").with_exec(["mkdir", "-p", "/packages"])
+        container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get DEB packages
         deb_dir = self.package_deb(source, "amd64", is_nightly,base,ci_registry_image)
@@ -793,7 +803,7 @@ class Veilid:
     def package_linux_arm64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
         """Package both DEB and RPM for Linux ARM64"""
         # Create a container to collect all packages
-        container = dag.container().from_("alpine:latest").with_exec(["mkdir", "-p", "/packages"])
+        container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get DEB packages
         deb_dir = self.package_deb(source, "arm64", is_nightly, base, ci_registry_image)
@@ -811,7 +821,7 @@ class Veilid:
         """Package for all Linux architectures (AMD64 and ARM64)"""
 
         # Create a container to collect all packages
-        container = dag.container().from_("alpine:latest").with_exec(["mkdir", "-p", "/packages"])
+        container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get AMD64 packages
         amd64_dir = self.package_linux_amd64(source, is_nightly, base, ci_registry_image)
@@ -827,7 +837,7 @@ class Veilid:
     async def package_windows_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
         """Package ZIP for Windows AMD64"""
         # Create a container to collect all packages
-        container = dag.container().from_("alpine:latest").with_exec(["mkdir", "-p", "/packages"])
+        container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get Zip packages
         zip_dir = await self.package_zip(source, "amd64", is_nightly, base, ci_registry_image)
@@ -839,7 +849,7 @@ class Veilid:
     async def package_windows(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
         """Package for all Windows architectures (AMD64)"""
         # Create a container to collect all packages
-        container = dag.container().from_("alpine:latest").with_exec(["mkdir", "-p", "/packages"])
+        container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get AMD64 packages
         amd64_dir = await self.package_windows_amd64(source, is_nightly, base, ci_registry_image)

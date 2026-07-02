@@ -1,7 +1,7 @@
 use crate::command_processor::*;
 use crate::tools::*;
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures_util::stream::FuturesUnordered;
+use futures_util::StreamExt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -283,7 +283,7 @@ impl ClientApiConnection {
 
         // Split into reader and writer halves
         // with line buffering on the reader
-        use futures::AsyncReadExt;
+        use futures_util::AsyncReadExt;
         let (reader, writer) = stream.split();
         cfg_if! {
             if #[cfg(feature = "rt-tokio")] {

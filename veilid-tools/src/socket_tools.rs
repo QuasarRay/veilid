@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(feature = "rt-async-std")]
 use async_io::Async;
 use std::io;
 
@@ -286,7 +287,7 @@ async fn nonblocking_connect(
     // Make socket2 SockAddr
     let socket2_addr = socket2::SockAddr::from(addr);
 
-    // Connect to the remote address
+    // Connect to the remote address (non-blocking; completion signaled by writability)
     match socket.connect(&socket2_addr) {
         Ok(()) => Ok(()),
         #[cfg(unix)]
@@ -294,26 +295,31 @@ async fn nonblocking_connect(
         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(()),
         Err(e) => Err(e),
     }?;
-    let async_stream = Async::new(std::net::TcpStream::from(socket))?;
+    let std_stream = std::net::TcpStream::from(socket);
 
-    // The stream becomes writable when connected
-    timeout_or_try!(timeout(timeout_ms, async_stream.writable())
-        .await
-        .into_timeout_or()
-        .into_result()?);
-
-    // Check low level error
-    let async_stream = match async_stream.get_ref().take_error()? {
-        None => Ok(async_stream),
-        Some(err) => Err(err),
-    }?;
-
-    // Convert back to inner and then return async version
+    // Wait for writability (connect complete) on the executor's own reactor. async-io's reactor
+    // is never driven under tokio, so its wait and timeout would hang forever there.
     cfg_if! {
         if #[cfg(feature="rt-async-std")] {
+            let async_stream = Async::new(std_stream)?;
+            timeout_or_try!(timeout(timeout_ms, async_stream.writable())
+                .await
+                .into_timeout_or()
+                .into_result()?);
+            if let Some(err) = async_stream.get_ref().take_error()? {
+                return Err(err);
+            }
             Ok(TimeoutOr::value(TcpStream::from(async_stream.into_inner()?)))
         } else if #[cfg(feature="rt-tokio")] {
-            Ok(TimeoutOr::value(TcpStream::from_std(async_stream.into_inner()?)?))
+            let stream = TcpStream::from_std(std_stream)?;
+            timeout_or_try!(timeout(timeout_ms, stream.writable())
+                .await
+                .into_timeout_or()
+                .into_result()?);
+            if let Some(err) = stream.take_error()? {
+                return Err(err);
+            }
+            Ok(TimeoutOr::value(stream))
         } else {
             compile_error!("needs executor implementation");
         }

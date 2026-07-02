@@ -983,8 +983,8 @@ async def test_dht_write_read_local():
         async with rc0:
             for kind in await api0.valid_crypto_kinds():
 
-                # Previously COUNT was set to 500, which causes these tests to take
-                # 10s of minutes on slow connections or debug veilid-server builds
+                # capped low: higher counts take 10s of minutes on slow
+                # connections or debug veilid-server builds
                 COUNT = 100
                 TEST_DATA = b"ABCD"*1024
                 TEST_DATA2 = b"ABCD"*4096

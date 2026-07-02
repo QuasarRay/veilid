@@ -47,8 +47,14 @@ struct CmdlineArgs {
     /// Log level for the CLI itself (not for the Veilid node)
     #[arg(long, value_enum)]
     cli_log_level: Option<LogLevel>,
-    /// interactive mode
-    #[arg(long, short = 't', group = "execution_mode")]
+    /// Text-based user interface
+    #[arg(
+        long,
+        short = 't',
+        default_missing_value = "true",
+        num_args(0..=1),
+        group = "execution_mode"
+    )]
     tui: Option<bool>,
     /// evaluate the rest of the line as a cli command
     #[arg(long, short = 'e', group = "execution_mode")]
@@ -134,7 +140,7 @@ fn main() -> Result<(), String> {
                     use tokio_util::compat::{TokioAsyncWriteCompatExt, TokioAsyncReadCompatExt};
                     let (in_obj, out_obj) =
                         if command_file.to_string_lossy() == "-" {
-                            (Box::pin(tokio::io::stdin().compat()) as Pin<Box<dyn futures::AsyncRead + Send>>, tokio::io::stdout().compat_write())
+                            (Box::pin(tokio::io::stdin().compat()) as Pin<Box<dyn futures_util::AsyncRead + Send>>, tokio::io::stdout().compat_write())
                         } else {
                             let f = match tokio::fs::File::open(command_file).await {
                                 Ok(v) => v,
@@ -142,7 +148,7 @@ fn main() -> Result<(), String> {
                                     return Err(e.to_string());
                                 }
                             };
-                            (Box::pin(f.compat()) as Pin<Box<dyn futures::AsyncRead + Send>>, tokio::io::stdout().compat_write())
+                            (Box::pin(f.compat()) as Pin<Box<dyn futures_util::AsyncRead + Send>>, tokio::io::stdout().compat_write())
                         };
                 } else {
                     compile_error!("needs executor implementation");
@@ -162,7 +168,7 @@ fn main() -> Result<(), String> {
                 } else if #[cfg(feature="rt-tokio")] {
                     use tokio_util::compat::{TokioAsyncWriteCompatExt};
                     let in_str = format!("{}\n", evaluate);
-                    let (in_obj, out_obj) = (futures::io::Cursor::new(in_str), tokio::io::stdout().compat_write());
+                    let (in_obj, out_obj) = (futures_util::io::Cursor::new(in_str), tokio::io::stdout().compat_write());
                 } else {
                     compile_error!("needs executor implementation");
                 }

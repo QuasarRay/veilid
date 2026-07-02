@@ -1,9 +1,8 @@
 use super::*;
 
 use std::collections::VecDeque;
-use std::ops::Deref;
 use std::sync::Arc;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 
 use cursive::align::*;
 use cursive::theme::StyleType;
@@ -11,36 +10,11 @@ use cursive::utils::lines::spans::{LinesIterator, Row};
 use cursive::utils::markup::StyledString;
 use cursive::view::{SizeCache, View};
 use cursive::{Printer, Vec2, With, XY};
-use owning_ref::{ArcRef, OwningHandle};
 use unicode_width::UnicodeWidthStr;
 
 // Content type used internally for caching and storage
 type ContentType = VecDeque<StyledString>;
-type InnerContentType = Arc<ContentType>;
 type CacheType = StyledString;
-type InnerCacheType = Arc<StyledString>;
-
-/// A reference to the text content.
-///
-/// This can be deref'ed into a [`StyledString`].
-///
-/// [`StyledString`]: ../utils/markup/type.StyledString.html
-///
-/// This keeps the content locked. Do not store this!
-pub struct TextContentRef {
-    _handle: OwningHandle<ArcRef<Mutex<TextContentInner>>, MutexGuard<'static, TextContentInner>>,
-    // We also need to keep a copy of Arc so `deref` can return
-    // a reference to the `StyledString`
-    data: Arc<VecDeque<StyledString>>,
-}
-
-impl Deref for TextContentRef {
-    type Target = VecDeque<StyledString>;
-
-    fn deref(&self) -> &VecDeque<StyledString> {
-        self.data.as_ref()
-    }
-}
 
 /// Provides access to the content of a [`TextView`].
 ///
@@ -59,7 +33,7 @@ impl Deref for TextContentRef {
 /// content.set_content("new content");
 /// assert!(view.get_content().source().contains("new"));
 /// ```
-#[derive(Clone)]
+//#[derive(Clone)]
 pub struct TextContent {
     content: Arc<Mutex<TextContentInner>>,
 }
@@ -72,12 +46,12 @@ impl TextContent {
     where
         S: Into<ContentType>,
     {
-        let content = Arc::new(content.into());
+        let content_value = content.into();
 
         TextContent {
             content: Arc::new(Mutex::new(TextContentInner {
-                content_value: content,
-                content_cache: Arc::new(CacheType::default()),
+                content_value,
+                content_cache: CacheType::default(),
                 size_cache: None,
             })),
         }
@@ -88,7 +62,7 @@ impl TextContent {
     where
         S: Into<ContentType>,
     {
-        self.with_content(|c| {
+        self.with_content_mut(|c| {
             *c = content.into();
         });
     }
@@ -98,7 +72,7 @@ impl TextContent {
     where
         S: Into<StyledString>,
     {
-        self.with_content(|c| {
+        self.with_content_mut(|c| {
             c.push_back(line.into());
         })
     }
@@ -109,7 +83,7 @@ impl TextContent {
         S: Iterator<Item = I>,
         I: Into<StyledString>,
     {
-        self.with_content(|c| {
+        self.with_content_mut(|c| {
             for line in lines {
                 c.push_back(line.into());
             }
@@ -118,10 +92,10 @@ impl TextContent {
 
     /// Remove lines from the beginning until we have no more than 'count' from the end
     pub fn resize_back(&self, count: usize) {
-        if self.get_content().len() <= count {
-            return;
-        }
-        self.with_content(|c| {
+        self.with_content_mut(|c| {
+            if c.len() <= count {
+                return;
+            }
             while c.len() > count {
                 c.remove(0);
             }
@@ -131,39 +105,33 @@ impl TextContent {
     /// Remove lines from the end until we have no more than 'count' from the beginning
     #[expect(dead_code)]
     pub fn resize_front(&self, count: usize) {
-        if self.get_content().len() <= count {
-            return;
-        }
-        self.with_content(|c| {
+        self.with_content_mut(|c| {
+            if c.len() <= count {
+                return;
+            }
             while c.len() > count {
                 c.remove(c.len() - 1);
             }
         })
     }
-    /// Returns a reference to the content.
-    ///
-    /// This locks the data while the returned value is alive,
-    /// so don't keep it too long.
-    pub fn get_content(&self) -> TextContentRef {
-        TextContentInner::get_content(&self.content)
+
+    /// Apply the given closure to the inner content.
+    pub fn with_content<F, O>(&self, f: F) -> O
+    where
+        F: FnOnce(&ContentType) -> O,
+    {
+        let content = self.content.lock().unwrap_or_log();
+        f(&content.content_value)
     }
 
-    /// Apply the given closure to the inner content, and bust the cache afterward.
-    pub fn with_content<F, O>(&self, f: F) -> O
+    /// Apply the given closure to the mutable inner content, and bust the cache afterward.
+    pub fn with_content_mut<F, O>(&self, f: F) -> O
     where
         F: FnOnce(&mut ContentType) -> O,
     {
-        self.with_content_inner(|c| f(Arc::make_mut(&mut c.content_value)))
-    }
-
-    /// Apply the given closure to the inner content, and bust the cache afterward.
-    fn with_content_inner<F, O>(&self, f: F) -> O
-    where
-        F: FnOnce(&mut TextContentInner) -> O,
-    {
         let mut content = self.content.lock().unwrap_or_log();
 
-        let out = f(&mut content);
+        let out = f(&mut content.content_value);
 
         content.size_cache = None;
 
@@ -178,26 +146,14 @@ impl TextContent {
 /// Can be shared (through a `Arc<Mutex>`).
 struct TextContentInner {
     // content: String,
-    content_value: InnerContentType,
-    content_cache: InnerCacheType,
+    content_value: ContentType,
+    content_cache: CacheType,
 
     // We keep the cache here so it can be busted when we change the content.
     size_cache: Option<XY<SizeCache>>,
 }
 
 impl TextContentInner {
-    /// From a shareable content (Arc + Mutex), return a
-    fn get_content(content: &Arc<Mutex<TextContentInner>>) -> TextContentRef {
-        let arc_ref: ArcRef<Mutex<TextContentInner>> = ArcRef::new(Arc::clone(content));
-
-        let _handle =
-            OwningHandle::new_with_fn(arc_ref, |mutex| unsafe { (*mutex).lock().unwrap_or_log() });
-
-        let data = Arc::clone(&_handle.content_value);
-
-        TextContentRef { _handle, data }
-    }
-
     fn is_cache_valid(&self, size: Vec2) -> bool {
         match self.size_cache {
             None => false,
@@ -205,7 +161,7 @@ impl TextContentInner {
         }
     }
 
-    fn get_cache(&self) -> &InnerCacheType {
+    fn get_cache(&self) -> &CacheType {
         &self.content_cache
     }
 }
@@ -353,16 +309,16 @@ impl CachedTextView {
         self
     }
 
-    /// Replace the text in this view.
-    ///
-    /// Chainable variant.
-    #[must_use]
+    /// Apply the given closure to the inner content, and bust the cache afterward.
     #[expect(dead_code)]
-    pub fn content<S>(self, content: S) -> Self
-    where
-        S: Into<ContentType>,
-    {
-        self.with(|s| s.set_content(content))
+    pub fn with_content_mut<O>(&mut self, f: impl FnOnce(&mut ContentType) -> O) -> O {
+        self.content.with_content_mut(f)
+    }
+
+    /// Apply the given closure to the inner content, and bust the cache afterward.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn with_content<O>(&self, f: impl FnOnce(&ContentType) -> O) -> O {
+        self.content.with_content(f)
     }
 
     /// Replace the text in this view.
@@ -399,22 +355,6 @@ impl CachedTextView {
         }
     }
 
-    /// Returns the current text in this view.
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub fn get_content(&self) -> TextContentRef {
-        TextContentInner::get_content(&self.content.content)
-    }
-
-    /// Returns a shared reference to the content, allowing content mutation.
-    #[expect(dead_code)]
-    pub fn get_shared_content(&mut self) -> TextContent {
-        // We take &mut here without really needing it,
-        // because it sort of "makes sense".
-        TextContent {
-            content: Arc::clone(&self.content.content),
-        }
-    }
-
     // This must be non-destructive, as it may be called
     // multiple times during layout.
     fn compute_rows(&mut self, size: Vec2) {
@@ -428,16 +368,14 @@ impl CachedTextView {
         // Completely bust the cache
         // Just in case we fail, we don't want to leave a bad cache.
         content.size_cache = None;
-        content.content_cache = Arc::new(StyledString::from_iter(
-            content.content_value.iter().map(|s| {
-                let mut s = s.clone();
-                s.append_plain("\n");
-                s
-            }),
-        ));
+        content.content_cache = StyledString::from_iter(content.content_value.iter().map(|s| {
+            let mut s = s.clone();
+            s.append_plain("\n");
+            s
+        }));
 
         let rows = self.cache.compute(size.x, || {
-            LinesIterator::new(content.get_cache().as_ref(), size.x).collect()
+            LinesIterator::new(content.get_cache(), size.x).collect()
         });
 
         // Desired width
@@ -474,7 +412,7 @@ impl View for CachedTextView {
                 let l = row.width;
                 let mut x = self.align.h.get_offset(l, printer.size.x);
 
-                for span in row.resolve_stream(content.get_cache().as_ref()) {
+                for span in row.resolve_stream(content.get_cache()) {
                     printer.with_style(*span.attr, |printer| {
                         printer.print((x, y), span.content);
                         x += span.content.width();
@@ -600,7 +538,7 @@ mod tests {
     #[test]
     fn validate() {
         let text_view = CachedTextView::new(ContentType::default(), 5, None);
-        assert_eq!(text_view.get_content().data.len(), 0);
+        assert_eq!(text_view.with_content(|c| c.len()), 0);
     }
 
     #[test]

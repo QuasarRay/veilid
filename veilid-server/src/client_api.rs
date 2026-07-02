@@ -14,7 +14,7 @@ use tracing::*;
 use veilid_core::tools::*;
 use veilid_core::*;
 use veilid_remote_api::JsonRequestProcessor;
-use wg::AsyncWaitGroup;
+use wg::future::WaitGroup;
 
 const MAX_NON_JSON_LOGGING: usize = 50;
 
@@ -123,7 +123,7 @@ impl ClientApi {
         let mut incoming_stream = listener.incoming()?;
 
         // Make wait group for all incoming connections
-        let awg = AsyncWaitGroup::new();
+        let awg = WaitGroup::new();
 
         let stop_token = match self.inner.lock().stop.as_ref() {
             Some(stop) => stop.token(),
@@ -165,7 +165,7 @@ impl ClientApi {
         let mut incoming_stream = async_tcp_listener_incoming(listener);
 
         // Make wait group for all incoming connections
-        let awg = AsyncWaitGroup::new();
+        let awg = WaitGroup::new();
 
         let stop_token = match self.inner.lock().stop.as_ref() {
             Some(stop) => stop.token(),
@@ -436,7 +436,7 @@ impl ClientApi {
         self.inner.lock().update_channels.remove(&id);
     }
 
-    pub async fn handle_tcp_connection(self, stream: TcpStream, awg: AsyncWaitGroup) {
+    pub async fn handle_tcp_connection(self, stream: TcpStream, awg: WaitGroup) {
         // Get address of peer
         let peer_addr = match stream.peer_addr() {
             Ok(v) => v,
@@ -486,7 +486,7 @@ impl ClientApi {
         awg.done();
     }
 
-    pub async fn handle_ipc_connection(self, stream: IpcStream, awg: AsyncWaitGroup) {
+    pub async fn handle_ipc_connection(self, stream: IpcStream, awg: WaitGroup) {
         // Get connection tuple
         debug!("Accepted IPC Client API Connection");
 

@@ -23,9 +23,14 @@ if ! command -v podman >/dev/null 2>&1; then
 fi
 
 if ! podman machine inspect "$PODMAN_MACHINE" >/dev/null 2>&1; then
-    echo "* Creating podman machine '$PODMAN_MACHINE' (2 vCPU, 8GB RAM)"
-    # Resources match the gitlab-ci medium runner (2 vCPU, 8GB RAM).
-    podman machine init -m 8192 --cpus 2 --now "$PODMAN_MACHINE"
+    echo "* Creating podman machine '$PODMAN_MACHINE' (4 vCPU, 16GB RAM, 50GB disk)"
+    # Resources match the gitlab-ci medium runner (4 vCPU, 16GB RAM, 50GB disk).
+    if [ "$(uname -s)" = "Darwin" ]; then
+        # podman 6 defaults Apple Silicon to libkrun, which needs a separate krunkit binary; pin the built-in applehv.
+        podman machine init -m 16384 --cpus 4 --disk-size 50 --provider "${PODMAN_PROVIDER:-applehv}" --now "$PODMAN_MACHINE"
+    else
+        podman machine init -m 16384 --cpus 4 --disk-size 50 --now "$PODMAN_MACHINE"
+    fi
 else
     state="$(podman machine inspect "$PODMAN_MACHINE" --format '{{.State}}' 2>/dev/null || true)"
     if [ "$state" = "running" ]; then

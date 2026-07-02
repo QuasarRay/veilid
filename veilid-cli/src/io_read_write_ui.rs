@@ -5,7 +5,9 @@ use crate::tools::*;
 use crate::ui::*;
 
 use flexi_logger::DeferredNow;
-use futures::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
+use futures_util::{
+    io::BufReader, io::BufWriter, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt,
+};
 use indent::indent_by;
 use stop_token::future::FutureExt as StopTokenFutureExt;
 use stop_token::*;
@@ -187,7 +189,7 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
         Box::pin(async move {
             let out_fut = this.output_loop();
             let cmd_fut = this.command_loop();
-            futures::join!(out_fut, cmd_fut);
+            futures_util::future::join(out_fut, cmd_fut).await;
         })
     }
 }

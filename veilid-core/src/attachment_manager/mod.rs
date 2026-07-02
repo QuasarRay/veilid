@@ -573,9 +573,6 @@ impl AttachmentManager {
         veilid_log!(self info "Detach successful");
     }
 
-    // translate_routing_table_health was removed; AttachmentLevelCalculator
-    // computes state from live routing-table size + latency + network estimate.
-
     /// Update attachment and network readiness state
     /// and possibly send a VeilidUpdate::Attachment.
     fn update_attached_state(

@@ -360,10 +360,10 @@ impl OutboundTransactionKeepaliveProcessor {
         unord.push(Box::pin(fut));
     }
 
-    /// Update the train's shared state from a keepalive result. The next
-    /// deadline is no longer scheduled here — `start_keepalive` enqueued it
-    /// at send time. On a recording error the whole transaction's deadlines
-    /// are drained so further fires don't pile up after the TX is gone client-side.
+    /// Update the train's shared state from a keepalive result. The next deadline
+    /// is enqueued by `start_keepalive` at send time, not here. On a recording error
+    /// the whole transaction's deadlines are drained so further fires don't pile up
+    /// after the TX is gone client-side.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip(registry, deadlines))

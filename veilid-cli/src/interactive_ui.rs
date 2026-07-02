@@ -7,7 +7,7 @@ use crate::ui::*;
 use console::{style, Term};
 use flexi_logger::writers::LogWriter;
 use flexi_logger::DeferredNow;
-use futures::io::AsyncWriteExt as _;
+use futures_util::AsyncWriteExt as _;
 use indent::indent_by;
 use rustyline_async::SharedWriter;
 use rustyline_async::{Readline, ReadlineError, ReadlineEvent};
