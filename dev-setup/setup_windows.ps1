@@ -7,7 +7,8 @@
 # Standalone: no dependency on veilidchat. Supersedes setup_windows.bat.
 # Note: after a winget install, a tool may not be on PATH until a new shell — re-run then.
 param([switch]$Install, [switch]$Upgrade, [switch]$Update, [switch]$Help,
-      [ValidateSet('x64','arm64')][string]$TargetArch, [switch]$BuildOnly, [switch]$Flutter)
+      [ValidateSet('x64','arm64')][string]$TargetArch, [switch]$BuildOnly, [switch]$Flutter,
+      [string]$Prefix)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest progress bar is 10-50x slower over SSH/qcow2
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -27,6 +28,9 @@ Usage: pwsh setup_windows.ps1 [-Install | -Upgrade] [-Help]
                        cross); skips dev/test tools (cargo-nextest, llvm, node, nightly, ...)
   -Flutter             also install Flutter (for veilid-flutter work); only if missing or older than
                        veilid-flutter requires — never downgrades a newer one
+  -Prefix <dir>        contained toolchain root (CI cache / flutter-packer): rust, cmake, JDK and
+                       flutter install under it instead of LOCALAPPDATA/USERPROFILE. MSVC, git and
+                       pwsh are system installers and stay system-wide.
   -Help, /?            show this help
 "@
     exit 0
@@ -46,6 +50,15 @@ $V = @{}
 Get-Content (Join-Path $ScriptDir "..\.dagger\versions.env") | ForEach-Object {
     if ($_ -match '^\s*([A-Z_][A-Z0-9_]*)="?([^"#]*?)"?\s*(#.*)?$') { $V[$Matches[1]] = $Matches[2] }
 }
+
+# -Prefix: contained toolchain root. CARGO_HOME/RUSTUP_HOME steer rustup-init; $ToolRoot
+# replaces LOCALAPPDATA for the veilid-* tool dirs.
+if ($Prefix) {
+    $Prefix = (New-Item -ItemType Directory -Force -Path $Prefix).FullName
+    $env:CARGO_HOME  = Join-Path $Prefix "cargo"
+    $env:RUSTUP_HOME = Join-Path $Prefix "rustup"
+    $ToolRoot = $Prefix
+} else { $ToolRoot = $env:LOCALAPPDATA }
 
 # ---- check/report engine ---------------------------------------------------
 $script:ok = 0; $script:miss = 0; $script:old = 0; $script:conflict = 0
@@ -84,7 +97,7 @@ function RunStep($step) { if ($step) { try { & $step } catch { Write-Warning (" 
 
 # ---- install helpers (winget for packaged tools; downloads for the rest) -----
 # Upgrade-safe: winget upgrades if present; downloads no-op when already satisfied.
-$CargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+$CargoBin = if ($env:CARGO_HOME) { Join-Path $env:CARGO_HOME "bin" } else { Join-Path $env:USERPROFILE ".cargo\bin" }
 # NB: call winget.exe explicitly — a function named "Winget"/"winget" would shadow
 # the executable (PowerShell command resolution is case-insensitive) and self-recurse.
 function WinPkg($id) {
@@ -115,14 +128,14 @@ $iRust   = {
     $ri = Join-Path $env:TEMP "rustup-init.exe"
     Invoke-WebRequest -Uri "https://static.rust-lang.org/rustup/dist/$rsArch-pc-windows-msvc/rustup-init.exe" -OutFile $ri
     & $ri -y --default-toolchain $V.RUST_VERSION --profile minimal
-    $cb = Join-Path $env:USERPROFILE ".cargo\bin"
+    $cb = $CargoBin
     if ((Test-Path $cb) -and ($env:PATH -notmatch [regex]::Escape($cb))) { $env:PATH = "$cb;$env:PATH" }
 }
 # cmake — install the pinned CMAKE_VERSION_PATCH (single source of truth, same as the Earthly/Dagger
 # Linux build + ANDROID_CMAKE_VERSION) for the TARGET arch, direct from cmake.org. NOT VS's bundled
 # cmake: that's the host arch (arm64 on an ARM64 box), so an x64-on-arm64 build targets ARM64 and the
 # VCTargets probe fails ("BaseOutputPath not set"). A TargetArch cmake under Prism targets x64.
-$CmakeRoot = Join-Path $env:LOCALAPPDATA "veilid-cmake-$TargetArch"
+$CmakeRoot = Join-Path $ToolRoot "veilid-cmake-$TargetArch"
 $iCmake  = {
     $a = if ($TargetArch -eq 'arm64') { 'arm64' } else { 'x86_64' }
     $zip = Join-Path $env:TEMP "cmake-$($V.CMAKE_VERSION_PATCH)-windows-$a.zip"
@@ -174,7 +187,7 @@ $iJava   = { WinPkg "Microsoft.OpenJDK.$($V.JAVA_VERSION)" }   # host-arch JDK (
 # Cross JDK: download the *target-arch* Microsoft OpenJDK 17 zip to a known dir and point
 # JAVA_HOME at it. jni links the JDK's jvm.lib by arch, so a host arm64 jvm.lib fails the x64
 # link (LNK4272). winget would give the host arch, hence the explicit arch-specific download.
-$JdkRoot = Join-Path $env:LOCALAPPDATA "veilid-jdk-$TargetArch"
+$JdkRoot = Join-Path $ToolRoot "veilid-jdk-$TargetArch"
 $iJavaCross = {
     $jdkArch = if ($TargetArch -eq 'arm64') { 'aarch64' } else { 'x64' }
     $zip = Join-Path $env:TEMP "msjdk$($V.JAVA_VERSION)-$jdkArch.zip"
@@ -316,7 +329,7 @@ if ((-not $BuildOnly) -and $script:DoInstall -and (Has "rustup")) {
 # when flutter is absent or below veilid-flutter's requirement (FLUTTER_MIN_VERSION); never downgrades.
 if ($Flutter) {
     Write-Host "-- Flutter (veilid-flutter) --"
-    $fdir = Join-Path $env:LOCALAPPDATA "veilid-flutter"
+    $fdir = Join-Path $ToolRoot "veilid-flutter"
     $iFlutter = {
         $fv2 = $V.FLUTTER_VERSION
         $zip = Join-Path $env:TEMP "flutter_windows_$fv2-stable.zip"
@@ -332,7 +345,7 @@ if ($Flutter) {
             if ($env:PATH -notmatch [regex]::Escape($fbin)) { $env:PATH = "$fbin;$env:PATH" }
         } else { Write-Warning "  flutter extract failed" }
     }
-    $fv = if (Has "flutter") { (flutter --version 2>$null | Select-Object -First 1) } else { "" }
+    $fv = if (Has "flutter") { (flutter --version 2>$null | Select-String '^Flutter ' | Select-Object -First 1) } else { "" }
     DepMin "flutter" $fv $V.FLUTTER_MIN_VERSION $iFlutter
 }
 
