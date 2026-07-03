@@ -34,7 +34,15 @@ EOF
 dep_help_requested "$@" && { usage; exit 0; }
 
 [ "$(uname)" = Linux ] || { echo "Not running on Linux"; exit 1; }
-[ "$(id -u)" -ne 0 ] || { echo "Don't run this as root (it sudos when needed)"; exit 1; }
+# Root is normal in CI containers (sudo becomes a no-op, and may not exist there);
+# only refuse root on an interactive dev box.
+if [ "$(id -u)" -eq 0 ]; then
+    if [ -n "${CI:-}" ] || [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+        sudo() { "$@"; }
+    else
+        echo "Don't run this as root (it sudos when needed)"; exit 1
+    fi
+fi
 
 if command -v apt-get >/dev/null 2>&1; then PKG=apt
 elif command -v dnf >/dev/null 2>&1; then PKG=dnf
@@ -55,7 +63,15 @@ for a in "$@"; do
     case "$a" in --prefix=*) PREFIX="${a#--prefix=}" ;; esac
     _pp="$a"
 done
-[ -n "$PREFIX" ] && export PATH="${CARGO_HOME:-$PREFIX/cargo}/bin:$PATH"
+# Self-sufficient prefix env (a caller's exports win): rustup-init installs
+# wherever CARGO_HOME/RUSTUP_HOME point, and the checks look in the prefix —
+# without these, --prefix without caller exports installs to ~/.cargo while
+# the check looks in $PREFIX/cargo (permanent mismatch).
+if [ -n "$PREFIX" ]; then
+    export CARGO_HOME="${CARGO_HOME:-$PREFIX/cargo}"
+    export RUSTUP_HOME="${RUSTUP_HOME:-$PREFIX/rustup}"
+    export PATH="$CARGO_HOME/bin:$PATH"
+fi
 
 # ---- versions: single source of truth (.dagger/versions.env) ---------------
 source "$SCRIPTDIR/../.dagger/versions.env"

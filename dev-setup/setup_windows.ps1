@@ -161,19 +161,36 @@ $iMsvc = {
     Invoke-WebRequest -Uri "https://aka.ms/vs/$($V.VS_VERSION)/release/vs_BuildTools.exe" -OutFile $exe
     & $exe --quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.$($V.WINDOWS_SDK_VERSION) | Out-Null
 }
-$iGit  = { WinPkg "Git.Git" }
-# git.exe lives in Git\cmd but bash.exe in Git\bin, which isn't on PATH by default — the Windows build
-# (dist\windows\_build.ps1) needs Git Bash for its dev-overrides check. Put Git\bin on PATH (persisted).
-function EnsureGitBash {
+# The build needs git AND bash: CI runner images often ship MinGit (git.exe, no bash.exe),
+# so presence of git alone must not satisfy the check. Under -Prefix (or without winget),
+# install PortableGit into the prefix — self-contained, GitLab-cacheable; else winget full Git.
+$PortableGitRoot = Join-Path $ToolRoot "veilid-git"
+$iGit  = {
+    if ($Prefix -or -not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        $exe = Join-Path $env:TEMP $V.GIT_WINDOWS_FILE
+        Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/$($V.GIT_WINDOWS_TAG)/$($V.GIT_WINDOWS_FILE)" -OutFile $exe
+        # PortableGit is a 7-Zip SFX; -y -o extracts silently
+        Start-Process -Wait -FilePath $exe -ArgumentList "-y", "-o`"$PortableGitRoot`""
+        Remove-Item $exe -Force
+    } else { WinPkg "Git.Git" }
+}
+# bash.exe lives in Git\bin (full Git / PortableGit), not Git\cmd — the Windows build
+# (dist\windows\_build.ps1, flutter-packer) needs Git Bash. Put it on PATH (persisted).
+function GitBashDir {
+    $cands = @()
     $g = (Get-Command git -ErrorAction SilentlyContinue).Source
-    $gitRoot = if ($g) { Split-Path (Split-Path $g) } elseif (Test-Path "${env:ProgramFiles}\Git\bin\bash.exe") { "${env:ProgramFiles}\Git" } else { $null }
-    if (-not $gitRoot) { return }
-    $gb = Join-Path $gitRoot "bin"
-    if (Test-Path (Join-Path $gb "bash.exe")) {
-        $u = [Environment]::GetEnvironmentVariable("PATH","User")
-        if ($u -notmatch [regex]::Escape($gb)) { [Environment]::SetEnvironmentVariable("PATH","$u;$gb","User"); Write-Host "    added Git Bash to PATH: $gb" }
-        if ($env:PATH -notmatch [regex]::Escape($gb)) { $env:PATH = "$env:PATH;$gb" }
-    }
+    if ($g) { $cands += (Join-Path (Split-Path (Split-Path $g)) "bin") }
+    $cands += (Join-Path $PortableGitRoot "bin")
+    $cands += "${env:ProgramFiles}\Git\bin"
+    foreach ($d in $cands) { if (Test-Path (Join-Path $d "bash.exe")) { return $d } }
+    return $null
+}
+function EnsureGitBash {
+    $gb = GitBashDir
+    if (-not $gb) { return }
+    $u = [Environment]::GetEnvironmentVariable("PATH","User")
+    if ($u -notmatch [regex]::Escape($gb)) { [Environment]::SetEnvironmentVariable("PATH","$u;$gb","User"); Write-Host "    added Git Bash to PATH: $gb" }
+    if ($env:PATH -notmatch [regex]::Escape($gb)) { $env:PATH = "$env:PATH;$gb" }
 }
 # PowerShell 7 (pwsh) — the build runtime: dist\windows\_build.ps1 + .flutter-packer invoke `pwsh`,
 # not Windows PowerShell 5.1 (whose native-command stderr handling mis-fires). Official MSI, direct
@@ -225,8 +242,8 @@ $vsInst = if (Test-Path $vswhere) { (& $vswhere -latest -products * -requires Mi
 $msvc = [bool]$vsInst
 DepHave "MSVC build tools (VS 2022)" ($(if ($msvc) { "y" } else { "" })) "downloads VS 2022 BuildTools (vs_buildtools.exe: VC x64 + Win SDK)" $iMsvc
 # Git (+ Git Bash) — build-critical: dist\windows\_build.ps1 runs bash for the dev-overrides check.
-# Ensure git is installed AND Git\bin (bash.exe) is on PATH, not just Git\cmd (git.exe).
-DepHave "git" ($(if (Has "git") { "y" } else { "" })) "winget install --id Git.Git (includes Git Bash)" $iGit
+# The check requires BOTH: CI images ship MinGit (git.exe without bash.exe), which must not satisfy it.
+DepHave "git (+bash)" ($(if ((Has "git") -and (GitBashDir)) { "y" } else { "" })) "full Git (PortableGit under -Prefix; winget Git.Git otherwise)" $iGit
 if ($script:DoInstall) { EnsureGitBash }
 # PowerShell 7 — the build runtime (the dev-setup scripts stay 5.1-runnable to bootstrap, but the
 # build runs under pwsh; 5.1 mis-handles flutter's native stderr).
