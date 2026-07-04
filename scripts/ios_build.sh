@@ -8,9 +8,9 @@ CARGO_DIR=$(dirname $CARGO)
 
 CARGO_MANIFEST_PATH=$(python3 -c "import os; import json; print(json.loads(os.popen('$CARGO locate-project').read())['root'])")
 CARGO_WORKSPACE_PATH=$(python3 -c "import os; import json; print(json.loads(os.popen('$CARGO locate-project --workspace').read())['root'])")
-TARGET_PATH=$(python3 -c "import os; print(os.path.realpath(\"$CARGO_WORKSPACE_PATH/../target\"))")
+WORKSPACE_TARGET_PATH=$(python3 -c "import os; print(os.path.realpath(\"$CARGO_WORKSPACE_PATH/../target\"))")
 # A relocated cargo target dir (CI caching) moves the lipo inputs with it
-TARGET_PATH="${CARGO_TARGET_DIR:-$TARGET_PATH}"
+TARGET_PATH="${CARGO_TARGET_DIR:-$WORKSPACE_TARGET_PATH}"
 PACKAGE_NAME=$1
 shift
 
@@ -80,5 +80,13 @@ lipo $LIPOS -create -output "$TARGET_PATH/$LIPO_OUT_NAME/$BUILD_MODE/lib$PACKAGE
 
 # Make most recent dylib available without build mode for flutter
 cp "$TARGET_PATH/$LIPO_OUT_NAME/$BUILD_MODE/lib$PACKAGE_NAME.a" "$TARGET_PATH/$LIPO_OUT_NAME/lib$PACKAGE_NAME.a"
+
+# Xcode references the lipo outputs by the static workspace path; when the cargo
+# target dir is relocated (CI caching), mirror them back where Xcode looks.
+if [ "$TARGET_PATH" != "$WORKSPACE_TARGET_PATH" ]; then
+    mkdir -p "$WORKSPACE_TARGET_PATH/$LIPO_OUT_NAME/$BUILD_MODE/"
+    cp "$TARGET_PATH/$LIPO_OUT_NAME/$BUILD_MODE/lib$PACKAGE_NAME.a" "$WORKSPACE_TARGET_PATH/$LIPO_OUT_NAME/$BUILD_MODE/"
+    cp "$TARGET_PATH/$LIPO_OUT_NAME/lib$PACKAGE_NAME.a" "$WORKSPACE_TARGET_PATH/$LIPO_OUT_NAME/"
+fi
 
 popd >/dev/null
