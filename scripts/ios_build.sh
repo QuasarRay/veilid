@@ -29,6 +29,13 @@ fi
 
 set -euxo pipefail
 
+# Contained toolchains (dev-setup --prefix / flutter-packer) locate rust via
+# RUSTUP_HOME/CARGO_HOME; pass them through the sanitized env when set, or the
+# rustup proxy falls back to ~/.rustup — populated on dev Macs, empty on runners.
+RUST_ENV=()
+[ -n "${RUSTUP_HOME:-}" ] && RUST_ENV+=("RUSTUP_HOME=$RUSTUP_HOME")
+[ -n "${CARGO_HOME:-}" ] && RUST_ENV+=("CARGO_HOME=$CARGO_HOME")
+
 LIPOS=""
 for arch in $ARCHS
 do
@@ -58,7 +65,7 @@ do
         HOMEBREW_DIR=$(dirname `which brew`)
     fi
 
-    env -i PATH=/usr/bin:/bin:$HOMEBREW_DIR:$CARGO_DIR HOME="$HOME" USER="$USER" IPHONEOS_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET" cargo $CARGO_TOOLCHAIN build $EXTRA_CARGO_OPTIONS --target $CARGO_TARGET --manifest-path $CARGO_MANIFEST_PATH
+    env -i PATH=/usr/bin:/bin:$HOMEBREW_DIR:$CARGO_DIR HOME="$HOME" USER="$USER" IPHONEOS_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET" ${RUST_ENV[@]+"${RUST_ENV[@]}"} cargo $CARGO_TOOLCHAIN build $EXTRA_CARGO_OPTIONS --target $CARGO_TARGET --manifest-path $CARGO_MANIFEST_PATH
 
     LIPOS="$LIPOS $TARGET_PATH/$CARGO_TARGET/$BUILD_MODE/lib$PACKAGE_NAME.a"
 
