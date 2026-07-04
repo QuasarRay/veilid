@@ -51,6 +51,7 @@ dagger -v 'test-native $(host | directory --gitignore .)'
 | `deps_rust()`   | `deps-rust`         | Install Rust toolchain, targets, cargo tools, and Zig                      |
 | `deps_linux()`  | `deps-linux`        | Linux build dependencies (equivalent to deps-rust in Dagger)               |
 | `deps_cache()`  | `build-linux-cache` | Pre-compile Rust dependencies using cargo-chef for faster builds           |
+| `publish_debug_cache()` | `build-linux-cache` + `SAVE IMAGE --push` | Publish the cooked dependency cache to the registry as `build-cache:<cache-tag>` (cook layered at `/baked/target`) |
 
 ### Source and Code Preparation
 
@@ -61,7 +62,24 @@ dagger -v 'test-native $(host | directory --gitignore .)'
 **Base modes:**
 - `local` (default): Uses local deps_cache 
 - `uncached`: Uses deps_linux without cache
-- `container`: Uses remote registry cache image
+- `container`: Uses the remote registry cache image `build-cache:<cache-tag>` (`--cache-tag`, default `latest`)
+
+Dagger's `with_directory` replaces the mount path (unlike Earthly `COPY`, which merges),
+so `code_linux` captures the cooked cargo target before mounting source and re-injects
+it at `/veilid/target` afterwards — the same absolute path the cook used, keeping the
+chef fingerprints valid.
+
+**Expected partial cache misses (by design, not regressions):** the cooks build 5
+packages, while the clippy scripts check the whole workspace — resolver-v2 feature
+unification can give some dependencies different feature sets than the cook, and
+`_unit_tests_all.sh` adds `--features=debug-locks` the cook doesn't; those deps
+recompile once per run.
+
+**CI tag convention (for the Earthly→Dagger switch):** the module is tag-agnostic;
+CI computes content-keyed tags like `debug-<branch>-<toolkey>-<rustkey>-<arch>`
+(toolkey = versions.env + module source hash; rustkey = Cargo.lock + manifests hash;
+images are single-arch, so the consumer arch must be in the tag). See veilidchat's
+`.gitlab-ci.yml` for the working pattern.
 
 ### Linting and Code Quality
 

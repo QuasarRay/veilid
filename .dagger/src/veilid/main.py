@@ -49,8 +49,8 @@ CARGO_HOME = "/usr/local/cargo"
 CARGO_INCREMENTAL = "0" 
 # Reduce debug info to line-tables-only (still gives backtraces, much smaller binaries)
 CARGO_PROFILE_TEST_DEBUGINFO = "1"
-# Limit parallel jobs to match medium runner resources (2 vCPU, 8GB RAM)
-CARGO_BUILD_JOBS = "1"
+# Limit parallel jobs to match medium runner resources (4 vCPU, 16GB RAM)
+CARGO_BUILD_JOBS = "4"
 
 
 # Validate host architecture
@@ -182,7 +182,11 @@ class Veilid:
         container = container.with_exec(["rustup", "toolchain", "install", f"{RUST_UNIT_TESTS_NIGHTLY_VERSION}", "-c", "miri,rust-src"])
 
         # Add targets
-        container = container.with_exec(["rustup", "target", "add", "--toolchain", "stable", *RUST_STABLE_TARGETS])
+        # No --toolchain: targets must land on the DEFAULT (pinned RUST_VERSION)
+        # toolchain the builds use. `--toolchain stable` makes rustup auto-install a
+        # separate "stable" toolchain and attach the targets THERE — every cross-target
+        # build then fails E0463 "can't find crate for core". (Matches the Earthfile.)
+        container = container.with_exec(["rustup", "target", "add", *RUST_STABLE_TARGETS])
 
         # Add nightly targets
         container = container.with_exec(["rustup", "target", "add", "--toolchain", "nightly", *RUST_NIGHTLY_TARGETS])
@@ -245,29 +249,14 @@ class Veilid:
         """Pre-compile Rust dependencies for faster builds using cargo-chef"""
         container = self.deps_linux()
 
-        # Create project directory structure
-        container = container.with_exec([
-            "mkdir", "-p",
-            "veilid-cli", "veilid-core", "veilid-core/examples/basic",
-            "veilid-core/examples/private_route", "veilid-server", "veilid-tools",
-            "veilid-wasm", "veilid-flutter", "veilid-flutter/rust", "veilid-remote-api"
-        ])
-
-        # Copy only Cargo.toml files and build configuration for dependency resolution
-        container = (
-            container
-            .with_file(".cargo/config.toml", source.file(".cargo/config.toml"))
-            .with_file("Cargo.lock", source.file("Cargo.lock"))
-            .with_file("Cargo.toml", source.file("Cargo.toml"))
-            .with_file("veilid-cli/Cargo.toml", source.file("veilid-cli/Cargo.toml"))
-            .with_file("veilid-core/Cargo.toml", source.file("veilid-core/Cargo.toml"))
-            .with_file("veilid-core/examples/basic/Cargo.toml", source.file("veilid-core/examples/basic/Cargo.toml"))
-            .with_file("veilid-core/examples/private_route/Cargo.toml", source.file("veilid-core/examples/private_route/Cargo.toml"))
-            .with_file("veilid-server/Cargo.toml", source.file("veilid-server/Cargo.toml"))
-            .with_file("veilid-tools/Cargo.toml", source.file("veilid-tools/Cargo.toml"))
-            .with_file("veilid-remote-api/Cargo.toml", source.file("veilid-remote-api/Cargo.toml"))
-            .with_file("veilid-flutter/rust/Cargo.toml", source.file("veilid-flutter/rust/Cargo.toml"))
-            .with_file("veilid-wasm/Cargo.toml", source.file("veilid-wasm/Cargo.toml"))
+        # Manifest skeleton for the chef recipe: every Cargo.toml plus the lock and
+        # .cargo/config.toml (RUSTFLAGS source — dropping it silently invalidates every
+        # cooked fingerprint). The glob keeps new workspace members in the recipe
+        # automatically; the */smoketest manifests it also matches are [workspace]
+        # opt-outs the cooks never resolve.
+        container = container.with_directory(
+            "/veilid", source,
+            include=["**/Cargo.toml", "Cargo.lock", ".cargo/config.toml"],
         )
 
         # Prepare cargo chef recipe based on dependencies
@@ -332,26 +321,39 @@ class Veilid:
 
         return container
 
+    def _cache_image(self, ci_registry_image: str, cache_tag: str) -> dagger.Container:
+        """The published debug build-cache image (see publish_debug_cache)."""
+        return dag.container().from_(f"{ci_registry_image}/build-cache:{cache_tag}")
+
     @function
-    def code_linux(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Container:
+    def code_linux(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Container:
         """Import the whole veilid code repository with build dependencies"""
-        # Choose base container based on BASE parameter
+        # Choose base container based on BASE parameter. with_directory REPLACES the
+        # mount path (unlike Earthly COPY), so the cooked cargo target must be captured
+        # as a lazy Directory before the source mount and re-injected after — otherwise
+        # the whole chef cook is silently wiped and every build runs cold.
+        cooked = None
         if base == "local":
             # Use local deps_cache (equivalent to +build-linux-cache)
             container = self.deps_cache(source)
+            cooked = container.directory("/veilid/target")
         elif base == "uncached":
             # Use just deps-linux without cache
             container = self.deps_linux()
         else:
             # Use remote cache image from registry (equivalent to container mode)
-            container = dag.container().from_(f"{ci_registry_image}/build-cache:latest")
+            container = self._cache_image(ci_registry_image, cache_tag)
+            cooked = container.directory("/baked/target")
 
-        # Copy the full source code
+        # Copy the full source code, then restore the cooked target at the same
+        # absolute path so the chef fingerprints stay valid
         container = (
             container
             .with_directory("/veilid", source)
             .with_workdir("/veilid")
         )
+        if cooked is not None:
+            container = container.with_directory("/veilid/target", cooked)
 
         # Check to make sure Cargo.lock is up to date
         container = container.with_exec(["cargo", "update", "-w", "--locked"])
@@ -370,9 +372,41 @@ class Veilid:
         return container
 
     @function
-    async def lint(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def publish_debug_cache(
+        self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)],
+        ci_registry_image: str = VEILID_REPO,
+        cache_tag: str = "latest",
+        registry_user: str = "",
+        registry_password: dagger.Secret | None = None,
+    ) -> str:
+        """Publish the chef-cooked dependency cache as build-cache:<cache_tag>
+        (the Dagger equivalent of Earthly's +build-linux-cache SAVE IMAGE --push).
+
+        The cooked target is layered at /baked/target on top of deps_linux, so it
+        appears once in the image (no skeleton residue) and code_linux's container
+        base can re-inject it after the source mount. Content-wise this is a
+        toolchain + baked-deps image (test/clippy profiles); the host-target test
+        cook is keyed to the PUBLISHER's arch — consumers on another arch get the
+        cross-target cooks warm and the host-test cook cold.
+        """
+        c = self.deps_linux().with_directory(
+            "/baked/target", self.deps_cache(source).directory("/veilid/target"))
+        # Guard against publishing an empty cook: this failure mode is silent
+        # downstream (cache present, 100% miss).
+        c = c.with_exec([
+            "sh", "-c",
+            "test -d /baked/target/x86_64-unknown-linux-gnu && "
+            "test -d /baked/target/wasm32-unknown-unknown",
+        ])
+        if registry_password is not None:
+            address = ci_registry_image.split("/", 1)[0]
+            c = c.with_registry_auth(address, registry_user, registry_password)
+        return await c.publish(f"{ci_registry_image}/build-cache:{cache_tag}")
+
+    @function
+    async def lint(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run source linting for multiple targets"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
 
         # Run clippy for different targets
         result = await container.with_exec(["./scripts/_lint_all.sh", "--cleanup"]).combined_output()
@@ -380,36 +414,36 @@ class Veilid:
         return f"Clippy completed:\n{result}"
 
     @function
-    async def smoketest(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def smoketest(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run Smoketest checks for all published crates"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
 
         result = await container.with_exec(["./scripts/_smoketest_all.sh", "--locked"]).combined_output()
 
         return f"MSRV check completed:\n{result}"
 
     @function
-    async def msrv(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def msrv(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run MSRV checks for all crates"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
 
         result = await container.with_exec(["./scripts/_msrv_all.sh"]).combined_output()
 
         return f"MSRV check completed:\n{result}"
 
     @function
-    async def public_api(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def public_api(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run public API checks for all crates"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
 
         result = await container.with_exec(["./scripts/_check_public_api.sh"]).combined_output()
 
         return f"Public API check completed:\n{result}"
 
     @function
-    def build_windows_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    def build_windows_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Build Windows AMD64 binaries and return the target directory"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         target="x86_64-pc-windows-gnu"
 
         # Build release binaries for x86_64-pc-windows-gnu
@@ -432,9 +466,9 @@ class Veilid:
 
 
     @function
-    def build_linux_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    def build_linux_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Build Linux AMD64 binaries and return the target directory"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         target="x86_64-unknown-linux-gnu"
 
         # Build release binaries for x86_64-unknown-linux-gnu
@@ -456,9 +490,9 @@ class Veilid:
         return out
 
     @function
-    def build_linux_arm64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    def build_linux_arm64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Build Linux ARM64 binaries and return the target directory"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         target="aarch64-unknown-linux-gnu"
 
         # Build release binaries for aarch64-unknown-linux-gnu
@@ -481,9 +515,9 @@ class Veilid:
 
     # No support yet. One could do this with a host-mount of the Apple Developer SDKs and running on a MacOS machine.
     # @function
-    # def build_macos_arm64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    # def build_macos_arm64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
     #     """Build MacOS ARM64 binaries and return the target directory"""
-    #     container = self.code_linux(source, base, ci_registry_image)
+    #     container = self.code_linux(source, base, ci_registry_image, cache_tag)
     #     target="aarch64-apple-darwin"
     #     # Build release binaries for aarch64-apple-darwin
     #     # Careful not to include veilid-flutter or veilid-wasm here as they add the 'json-camel-case' feature
@@ -504,140 +538,140 @@ class Veilid:
     #     return out
 
     @function
-    async def test_msrv_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_msrv_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run MSRV checks for all crates"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_msrv_all.sh"]).combined_output()
         return f"MSRV check completed:\n{result}"
 
     @function
-    async def test_public_api(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_public_api(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run public API checks for all crates"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_check_public_api.sh"]).combined_output()
         return f"Public API check completed:\n{result}"
 
     @function
-    async def test_smoketest_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_smoketest_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run Smoketest checks for all published crates"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_smoketest_all.sh", "--locked"]).combined_output()
         return f"Smoketest check completed:\n{result}"
 
     @function
-    async def test_check_wasm_builds_dart(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_check_wasm_builds_dart(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Check WASM builds for Dart"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_check_wasm_builds.sh", "dart"]).combined_output()
         return f"WASM Dart build check completed:\n{result}"
 
     @function
-    async def test_check_wasm_builds_js(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_check_wasm_builds_js(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Check WASM builds for JS"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_check_wasm_builds.sh", "js"]).combined_output()
         return f"WASM JS build check completed:\n{result}"
 
     @function
-    async def test_clippy_wasm32_unknown_unknown(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_clippy_wasm32_unknown_unknown(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run clippy for wasm32-unknown-unknown"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_clippy_wasm32_unknown_unknown.sh"]).combined_output()
         return f"Clippy wasm32-unknown-unknown completed:\n{result}"
 
     @function
-    async def test_clippy_x86_64_pc_windows_gnu(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_clippy_x86_64_pc_windows_gnu(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run clippy for x86_64-pc-windows-gnu"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_clippy_x86_64_pc_windows_gnu.sh"]).combined_output()
         return f"Clippy x86_64-pc-windows-gnu completed:\n{result}"
 
     @function
-    async def test_clippy_aarch64_apple_darwin(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_clippy_aarch64_apple_darwin(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run clippy for aarch64-apple-darwin"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_clippy_aarch64_apple_darwin.sh"]).combined_output()
         return f"Clippy aarch64-apple-darwin completed:\n{result}"
 
     @function
-    async def test_clippy_x86_64_unknown_linux_gnu(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_clippy_x86_64_unknown_linux_gnu(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run clippy for x86_64-unknown-linux-gnu"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_clippy_x86_64_unknown_linux_gnu.sh"]).combined_output()
         return f"Clippy x86_64-unknown-linux-gnu completed:\n{result}"
 
     @function
-    async def test_clippy_x86_64_unknown_linux_gnu_async_std(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_clippy_x86_64_unknown_linux_gnu_async_std(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run clippy for x86_64-unknown-linux-gnu with async-std"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_clippy_x86_64_unknown_linux_gnu_async_std.sh"]).combined_output()
         return f"Clippy x86_64-unknown-linux-gnu async-std completed:\n{result}"
 
     @function
-    async def test_build_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_build_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Build documentation"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_build_docs.sh"]).combined_output()
         return f"Documentation build completed:\n{result}"
 
     @function
-    async def test_unit_tests_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_unit_tests_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run all unit tests"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_unit_tests_all.sh"]).combined_output()
         return f"Unit tests completed:\n{result}"
 
     @function
-    async def test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Run all tests (serially! for desktop, not CI use!)"""
         results = []
-        results.append(await self.test_msrv_all(source, base, ci_registry_image))
-        results.append(await self.test_public_api(source, base, ci_registry_image))
-        results.append(await self.test_smoketest_all(source, base, ci_registry_image))
-        results.append(await self.test_check_wasm_builds_dart(source, base, ci_registry_image))
-        results.append(await self.test_check_wasm_builds_js(source, base, ci_registry_image))
-        results.append(await self.test_clippy_wasm32_unknown_unknown(source, base, ci_registry_image))
-        results.append(await self.test_clippy_x86_64_pc_windows_gnu(source, base, ci_registry_image))
-        results.append(await self.test_clippy_aarch64_apple_darwin(source, base, ci_registry_image))
-        results.append(await self.test_clippy_x86_64_unknown_linux_gnu(source, base, ci_registry_image))
-        results.append(await self.test_clippy_x86_64_unknown_linux_gnu_async_std(source, base, ci_registry_image))
-        results.append(await self.test_build_docs(source, base, ci_registry_image))
-        results.append(await self.test_unit_tests_all(source, base, ci_registry_image))
+        results.append(await self.test_msrv_all(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_public_api(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_smoketest_all(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_check_wasm_builds_dart(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_check_wasm_builds_js(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_clippy_wasm32_unknown_unknown(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_clippy_x86_64_pc_windows_gnu(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_clippy_aarch64_apple_darwin(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_clippy_x86_64_unknown_linux_gnu(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_clippy_x86_64_unknown_linux_gnu_async_std(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_build_docs(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_unit_tests_all(source, base, ci_registry_image, cache_tag))
         return "\n\n=== TEST SUMMARY ===\n" + "\n\n".join(results)
 
     @function
-    async def test_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], rust_nightly_version: str , base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def test_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], rust_nightly_version: str , base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Build and test documentation with a specific nightly version (for package testing)"""
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_build_docs.sh", rust_nightly_version]).combined_output()
         return f"Documentation build completed:\n{result}"
 
     @function
-    async def package_test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> str:
+    async def package_test_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Tests to run before packaging releases"""
         results = []
 
         # Test DOCS.RS build with most recent nightly (this will probably install a newer version than what is in the cache, but for this test it is important to use the latest nightly)
-        docs_result = await self.test_docs(source, RUST_PACKAGE_TESTS_NIGHTLY_VERSION, base, ci_registry_image)
+        docs_result = await self.test_docs(source, RUST_PACKAGE_TESTS_NIGHTLY_VERSION, base, ci_registry_image, cache_tag)
         results.append(docs_result)
 
         return "\n\n=== TEST SUMMARY ===\n" + "\n\n".join(results)
 
     @function
-    def package_deb(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], target_arch: str, is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    def package_deb(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], target_arch: str, is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Package DEB files for specified architecture"""
         # Get built binaries
         if target_arch == "amd64":
-            build_dir = self.build_linux_amd64(source)
+            build_dir = self.build_linux_amd64(source, base, ci_registry_image, cache_tag)
             rust_target = "x86_64-unknown-linux-gnu"
         elif target_arch == "arm64":
-            build_dir = self.build_linux_arm64(source)
+            build_dir = self.build_linux_arm64(source, base, ci_registry_image, cache_tag)
             rust_target = "aarch64-unknown-linux-gnu"
         else:
             raise ValueError(f"Unsupported architecture: {target_arch}")
 
         # Start with code-linux for the packaging scripts
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
 
         # Copy build artifacts into container
         container = (
@@ -670,15 +704,15 @@ class Veilid:
         return container.directory("/dpkg/out")
 
     @function
-    def package_rpm(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], target_arch: str, is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    def package_rpm(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], target_arch: str, is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Package RPM files for specified architecture"""
         # Get built binaries
         if target_arch == "x86_64":
-            build_dir = self.build_linux_amd64(source,base,ci_registry_image)
+            build_dir = self.build_linux_amd64(source,base,ci_registry_image, cache_tag)
             rust_target = "x86_64-unknown-linux-gnu"
             platform = "linux/amd64"
         elif target_arch == "aarch64":
-            build_dir = self.build_linux_arm64(source,base,ci_registry_image)
+            build_dir = self.build_linux_arm64(source,base,ci_registry_image, cache_tag)
             rust_target = "aarch64-unknown-linux-gnu"
             platform = "linux/arm64"
         else:
@@ -733,20 +767,20 @@ class Veilid:
         return container.directory(f"/root/rpmbuild/RPMS/{target_arch}")
 
     @function
-    async def package_zip(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], target_arch: str, is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    async def package_zip(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], target_arch: str, is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Package ZIP files for specified architecture"""
         # Get built binaries
         if target_arch == "amd64":
-            build_dir = self.build_windows_amd64(source, base, ci_registry_image)
+            build_dir = self.build_windows_amd64(source, base, ci_registry_image, cache_tag)
             rust_target = "x86_64-pc-windows-gnu"
         # elif target_arch == "arm64":
-        #     build_dir = self.build_windows_arm64(source, base, ci_registry_image)
+        #     build_dir = self.build_windows_arm64(source, base, ci_registry_image, cache_tag)
         #     rust_target = "aarch64-pc-windows-gnullvm"
         else:
             raise ValueError(f"Unsupported architecture: {target_arch}")
 
         # Start with code-linux for the packaging scripts
-        container = self.code_linux(source, base, ci_registry_image)
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
 
         # Copy build artifacts into container
         container = container.with_directory(f"/veilid/target/{rust_target}/release", build_dir)
@@ -784,75 +818,75 @@ class Veilid:
         return container.directory("/out")
 
     @function
-    def package_linux_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    def package_linux_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Package both DEB and RPM for Linux AMD64"""
         # Create a container to collect all packages
         container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get DEB packages
-        deb_dir = self.package_deb(source, "amd64", is_nightly,base,ci_registry_image)
+        deb_dir = self.package_deb(source, "amd64", is_nightly,base,ci_registry_image, cache_tag)
         container = container.with_directory("/packages/deb", deb_dir)
 
         # Get RPM packages
-        rpm_dir = self.package_rpm(source, "x86_64", is_nightly,base,ci_registry_image)
+        rpm_dir = self.package_rpm(source, "x86_64", is_nightly,base,ci_registry_image, cache_tag)
         container = container.with_directory("/packages/rpm", rpm_dir)
 
         return container.directory("/packages")
 
     @function
-    def package_linux_arm64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    def package_linux_arm64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Package both DEB and RPM for Linux ARM64"""
         # Create a container to collect all packages
         container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get DEB packages
-        deb_dir = self.package_deb(source, "arm64", is_nightly, base, ci_registry_image)
+        deb_dir = self.package_deb(source, "arm64", is_nightly, base, ci_registry_image, cache_tag)
         container = container.with_directory("/packages/deb", deb_dir)
 
         # Get RPM packages
-        rpm_dir = self.package_rpm(source, "aarch64", is_nightly, base, ci_registry_image)
+        rpm_dir = self.package_rpm(source, "aarch64", is_nightly, base, ci_registry_image, cache_tag)
         container = container.with_directory("/packages/rpm", rpm_dir)
 
         return container.directory("/packages")
 
 
     @function
-    async def package_linux(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    async def package_linux(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Package for all Linux architectures (AMD64 and ARM64)"""
 
         # Create a container to collect all packages
         container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get AMD64 packages
-        amd64_dir = self.package_linux_amd64(source, is_nightly, base, ci_registry_image)
+        amd64_dir = self.package_linux_amd64(source, is_nightly, base, ci_registry_image, cache_tag)
         container = container.with_directory("/packages/amd64", amd64_dir)
 
         # Get ARM64 packages
-        arm64_dir = self.package_linux_arm64(source, is_nightly, base, ci_registry_image)
+        arm64_dir = self.package_linux_arm64(source, is_nightly, base, ci_registry_image, cache_tag)
         container = container.with_directory("/packages/arm64", arm64_dir)
 
         return container.directory("/packages")
 
     @function
-    async def package_windows_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    async def package_windows_amd64(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Package ZIP for Windows AMD64"""
         # Create a container to collect all packages
         container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get Zip packages
-        zip_dir = await self.package_zip(source, "amd64", is_nightly, base, ci_registry_image)
+        zip_dir = await self.package_zip(source, "amd64", is_nightly, base, ci_registry_image, cache_tag)
         container = container.with_directory("/packages/zip", zip_dir)
 
         return container.directory("/packages")
 
     @function
-    async def package_windows(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO) -> dagger.Directory:
+    async def package_windows(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], is_nightly: bool = False, base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> dagger.Directory:
         """Package for all Windows architectures (AMD64)"""
         # Create a container to collect all packages
         container = dag.container().from_(PACKAGING_IMAGE).with_exec(["mkdir", "-p", "/packages"])
 
         # Get AMD64 packages
-        amd64_dir = await self.package_windows_amd64(source, is_nightly, base, ci_registry_image)
+        amd64_dir = await self.package_windows_amd64(source, is_nightly, base, ci_registry_image, cache_tag)
         container = container.with_directory("/packages/amd64", amd64_dir)
 
         return container.directory("/packages")
