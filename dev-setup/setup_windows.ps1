@@ -362,7 +362,17 @@ if ($Flutter) {
             if ($env:PATH -notmatch [regex]::Escape($fbin)) { $env:PATH = "$fbin;$env:PATH" }
         } else { Write-Warning "  flutter extract failed" }
     }
-    $fv = if (Has "flutter") { (flutter --version 2>$null | Select-String '^Flutter ' | Select-Object -First 1) } else { "" }
+    function FlutterVer {
+        if (-not (Has "flutter")) { return "" }
+        # first-run flutter writes "Building flutter tool..." to stderr; under
+        # $ErrorActionPreference=Stop (CI) those records terminate the script.
+        # Relax EAP for the probe and merge+stringify both streams.
+        $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+        try { $v = (& flutter --version 2>&1 | ForEach-Object { "$_" } | Select-String "^Flutter " | Select-Object -First 1) }
+        finally { $ErrorActionPreference = $eap }
+        return $v
+    }
+    $fv = FlutterVer
     DepMin "flutter" $fv $V.FLUTTER_MIN_VERSION $iFlutter
 }
 
