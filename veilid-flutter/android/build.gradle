@@ -85,7 +85,9 @@ cargo {
     module  = "../rust"
     libname = "veilid_flutter"
     targets = ["arm", "arm64", "x86", "x86_64"]
-    targetDirectory = "../../target"
+    // cargo inherits CARGO_TARGET_DIR from the environment (CI relocates the
+    // target dir to a cacheable path); the plugin's artifact pickup must follow
+    targetDirectory = System.getenv("CARGO_TARGET_DIR") ?: "../../target"
     pythonCommand = "python3"
     prebuiltToolchains = true
     profile = gradle.startParameter.taskNames.any{it.toLowerCase().contains("debug")} ? "debug" : "release"

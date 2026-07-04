@@ -10,6 +10,8 @@ CARGO_DIR=$(dirname $CARGO)
 CARGO_MANIFEST_PATH=$(python3 -c "import os; import json; print(json.loads(os.popen('$CARGO locate-project').read())['root'])")
 CARGO_WORKSPACE_PATH=$(python3 -c "import os; import json; print(json.loads(os.popen('$CARGO locate-project --workspace').read())['root'])")
 TARGET_PATH=$(python3 -c "import os; print(os.path.realpath(\"$CARGO_WORKSPACE_PATH/../target\"))")
+# A relocated cargo target dir (CI caching) moves the lipo inputs with it
+TARGET_PATH="${CARGO_TARGET_DIR:-$TARGET_PATH}"
 PACKAGE_NAME=$1
 shift
 
@@ -32,6 +34,7 @@ set -euxo pipefail
 RUST_ENV=()
 [ -n "${RUSTUP_HOME:-}" ] && RUST_ENV+=("RUSTUP_HOME=$RUSTUP_HOME")
 [ -n "${CARGO_HOME:-}" ] && RUST_ENV+=("CARGO_HOME=$CARGO_HOME")
+[ -n "${CARGO_TARGET_DIR:-}" ] && RUST_ENV+=("CARGO_TARGET_DIR=$CARGO_TARGET_DIR")
 
 LIPOS=""
 for arch in $ARCHS
