@@ -3,7 +3,6 @@ use crate::crypto::tests_crypto::*;
 
 // Mocks used by various tests
 
-#[must_use]
 pub fn fake_latency_stats() -> LatencyStats {
     LatencyStats {
         fastest: TimestampDuration::from(1234),
@@ -16,7 +15,6 @@ pub fn fake_latency_stats() -> LatencyStats {
     }
 }
 
-#[must_use]
 pub fn fake_transfer_stats() -> TransferStats {
     TransferStats {
         total: ByteCount::from(1_000_000),
@@ -26,7 +24,6 @@ pub fn fake_transfer_stats() -> TransferStats {
     }
 }
 
-#[must_use]
 pub fn fake_transfer_stats_down_up() -> TransferStatsDownUp {
     TransferStatsDownUp {
         down: fake_transfer_stats(),
@@ -34,7 +31,6 @@ pub fn fake_transfer_stats_down_up() -> TransferStatsDownUp {
     }
 }
 
-#[must_use]
 pub fn fake_peer_stats() -> PeerStats {
     PeerStats {
         latency: Some(fake_latency_stats()),

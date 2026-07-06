@@ -186,8 +186,8 @@ fn main() -> EyreResult<()> {
     // Check for one-off commands
     #[cfg(debug_assertions)]
     if args.wait_for_debug {
-        use bugsalot::debugger;
-        debugger::wait_until_attached(None).expect("state() not implemented on this platform");
+        veilid_core::tools::wait_until_debugger_attached(None)
+            .expect("debugger state not implemented on this platform");
     }
 
     // Attempt to load configuration

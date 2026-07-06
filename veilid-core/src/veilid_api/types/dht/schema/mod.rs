@@ -7,9 +7,9 @@ pub use dflt::*;
 pub use smpl::*;
 
 /// Enum over all the supported DHT Schemas
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, JsonSchema)]
+#[apply(api_data_enum!)]
+#[api(eq, ord)]
 #[serde(tag = "kind")]
-#[must_use]
 pub enum DHTSchema {
     /// Default schema: a fixed number of owner-writable subkeys.
     DFLT(DHTSchemaDFLT),

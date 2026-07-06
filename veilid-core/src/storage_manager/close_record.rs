@@ -39,6 +39,7 @@ impl StorageManager {
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub async fn close_all_records(&self) -> VeilidAPIResult<()> {
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();

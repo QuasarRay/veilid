@@ -58,6 +58,9 @@ if ($Prefix) {
     $env:CARGO_HOME  = Join-Path $Prefix "cargo"
     $env:RUSTUP_HOME = Join-Path $Prefix "rustup"
     $ToolRoot = $Prefix
+    # Slim caches populated before minimal profile was pinned (docs = ~49k files)
+    Get-ChildItem (Join-Path $env:RUSTUP_HOME "toolchains") -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item (Join-Path $_.FullName "share\doc") -Recurse -Force -ErrorAction SilentlyContinue }
 } else { $ToolRoot = $env:LOCALAPPDATA }
 
 # ---- check/report engine ---------------------------------------------------
@@ -123,6 +126,10 @@ function DlExtract($url, $pattern) {
 # cross-toolchain step below runs in the SAME pass (no "re-run in a fresh shell"); rustup-init also
 # persists PATH for future shells.
 $iRust   = {
+    # Prefix installs pin minimal profile: rust-docs alone is ~49k files, dwarfing
+    # everything else in the CI cache archive. Covers rustup update, cargo-shim
+    # on-demand, and cross-toolchain installs. Personal rustups are left alone.
+    if ($Prefix -and (Has "rustup")) { try { rustup set profile minimal } catch {} }
     if (Has "rustup") { rustup update; return }
     $rsArch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
     $ri = Join-Path $env:TEMP "rustup-init.exe"
@@ -263,7 +270,7 @@ if ($script:Cross -and (Has "rustup")) {
     } elseif ($script:DoInstall) {
         Say "[add]" "rust ($TargetArch)" "installing cross toolchain $tc"
         try {
-            rustup toolchain install $tc --force-non-host
+            rustup toolchain install $tc --force-non-host --profile minimal
             rustup default $tc --force-non-host
             $script:ok++; Write-Host "    default: $((rustc --version) 2>$null)"
         } catch { $script:conflict++; Say "[!!]" "rust ($TargetArch)" "cross toolchain install failed" }

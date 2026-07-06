@@ -888,7 +888,7 @@ impl BucketEntryInner {
             })
             .collect();
         // Sort with newest timestamps
-        out.sort_by_key(|b| std::cmp::Reverse(b.1));
+        out.sort_unstable_by_key(|b| std::cmp::Reverse(b.1));
         out
     }
 
@@ -901,7 +901,7 @@ impl BucketEntryInner {
             return;
         }
         self.envelope_support.push(envelope_version);
-        self.envelope_support.sort_by(|a, b| {
+        self.envelope_support.sort_unstable_by(|a, b| {
             let a_sort = VALID_ENVELOPE_VERSIONS
                 .iter()
                 .position(|x| x == a)
@@ -915,7 +915,7 @@ impl BucketEntryInner {
     }
 
     pub(super) fn set_envelope_support(&mut self, mut envelope_support: Vec<EnvelopeVersion>) {
-        envelope_support.sort();
+        envelope_support.sort_unstable();
         envelope_support.dedup();
         self.envelope_support = envelope_support;
     }
@@ -1305,11 +1305,11 @@ pub(crate) struct BucketEntry {
     // NodeRef tracking lives outside `inner` so track()/untrack() never re-lock it
     // (NodeRefs are constructed/dropped while `inner` is held, e.g. during snapshot).
     // The registry copy lets the leak report log without locking `inner`.
-    #[cfg(feature = "tracking")]
+    #[cfg(all(feature = "tracking", feature = "backtrace"))]
     registry: VeilidComponentRegistry,
     #[cfg(feature = "tracking")]
     next_track_id: AtomicUsize,
-    #[cfg(feature = "tracking")]
+    #[cfg(all(feature = "tracking", feature = "backtrace"))]
     pub(super) node_ref_tracks: Mutex<HashMap<usize, backtrace::Backtrace>>,
 }
 
@@ -1375,12 +1375,12 @@ impl BucketEntry {
     pub(super) fn new_with_inner(inner: BucketEntryInner) -> Self {
         Self {
             ref_count: AtomicU32::new(0),
-            #[cfg(feature = "tracking")]
+            #[cfg(all(feature = "tracking", feature = "backtrace"))]
             registry: inner.registry(),
             inner: RwLock::new(inner),
             #[cfg(feature = "tracking")]
             next_track_id: AtomicUsize::new(0),
-            #[cfg(feature = "tracking")]
+            #[cfg(all(feature = "tracking", feature = "backtrace"))]
             node_ref_tracks: Mutex::new(HashMap::new()),
         }
     }
@@ -1390,6 +1390,7 @@ impl BucketEntry {
     #[cfg(feature = "tracking")]
     pub fn track(&self) -> usize {
         let track_id = self.next_track_id.fetch_add(1, Ordering::AcqRel);
+        #[cfg(feature = "backtrace")]
         self.node_ref_tracks
             .lock()
             .insert(track_id, backtrace::Backtrace::new_unresolved());
@@ -1397,8 +1398,9 @@ impl BucketEntry {
     }
 
     #[cfg(feature = "tracking")]
-    pub fn untrack(&self, track_id: usize) {
-        self.node_ref_tracks.lock().remove(&track_id);
+    pub fn untrack(&self, _track_id: usize) {
+        #[cfg(feature = "backtrace")]
+        self.node_ref_tracks.lock().remove(&_track_id);
     }
 
     /// Create a point-in-time snapshot of mutable fields for sort stability
@@ -1431,7 +1433,7 @@ impl BucketEntry {
 impl Drop for BucketEntry {
     fn drop(&mut self) {
         if self.ref_count.load(Ordering::Acquire) != 0 {
-            #[cfg(feature = "tracking")]
+            #[cfg(all(feature = "tracking", feature = "backtrace"))]
             {
                 let registry = &self.registry;
                 veilid_log!(registry info "NodeRef Tracking");

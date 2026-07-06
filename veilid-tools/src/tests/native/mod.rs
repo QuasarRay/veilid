@@ -3,6 +3,7 @@
 
 mod test_assembly_buffer;
 mod test_async_peek_stream;
+mod test_igd;
 mod test_network_interfaces;
 
 use super::*;
@@ -16,6 +17,10 @@ pub async fn run_all_tests() {
     info!("TEST: test_timestamp");
     test_timestamp::test_get_raw_timestamp();
     test_timestamp::test_sleep().await;
+
+    // IGD parsing tests
+    info!("TEST: test_igd");
+    test_igd::test_all();
 
     // Tools basic tests
     info!("TEST: test_tools_basic");
@@ -241,6 +246,12 @@ cfg_if! {
         fn run_test_tag_lock() {
             setup();
             test_tag_lock::test_all();
+        }
+
+        #[test]
+        fn run_test_igd() {
+            setup();
+            test_igd::test_all();
         }
 
         #[test]

@@ -26,13 +26,20 @@ if [ "$RELEASE" -eq 1 ]; then
     ./wasm_remap_paths.sh cargo build --target wasm32-unknown-unknown --release --no-default-features --features=default-wasm -p veilid-flutter $@
     mkdir -p $OUTPUTDIR
     wasm-bindgen --out-dir $OUTPUTDIR --target web $INPUTDIR/veilid_flutter.wasm
-    wasm-opt -O $OUTPUTDIR/veilid_flutter_bg.wasm -o $OUTPUTDIR/veilid_flutter_bg.wasm.optimized
+    wasm-opt \
+        --converge \
+        --low-memory-unused \
+        --flatten \
+        --rereloop \
+        -Oz \
+        $OUTPUTDIR/veilid_flutter_bg.wasm \
+        -o $OUTPUTDIR/veilid_flutter_bg.wasm.optimized
     mv $OUTPUTDIR/veilid_flutter_bg.wasm.optimized $OUTPUTDIR/veilid_flutter_bg.wasm
 else
     OUTPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/debug/pkg
     INPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/debug
 
-    RUSTFLAGS="-O -g $RUSTFLAGS" cargo build --target wasm32-unknown-unknown --no-default-features --features=default-wasm -p veilid-flutter $@
+    RUSTFLAGS="-O -g $RUSTFLAGS" cargo build --target wasm32-unknown-unknown --no-default-features --features=default-wasm,debug-api -p veilid-flutter $@
     mkdir -p $OUTPUTDIR
     wasm-bindgen --out-dir $OUTPUTDIR --target web --keep-debug --debug $INPUTDIR/veilid_flutter.wasm
 fi

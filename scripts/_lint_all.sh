@@ -4,7 +4,11 @@ set -eou pipefail
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 pushd $SCRIPTDIR/.. >/dev/null
 
-# Rust clippy across all platforms
+# Run one clippy over the workspace with the default host toolchain
+# (may differ from CI pinned toolchain, this step does not run in CI)
+env -u RUSTUP_TOOLCHAIN scripts/_clippy.sh $@
+
+# Rust clippy across all platforms with CI pinned toolchain
 scripts/_clippy_wasm32_unknown_unknown.sh $@
 scripts/_clippy_x86_64_pc_windows_gnu.sh $@
 scripts/_clippy_aarch64_apple_darwin.sh $@

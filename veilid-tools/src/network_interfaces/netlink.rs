@@ -3,11 +3,10 @@
 use super::*;
 
 use futures_util::stream::TryStreamExt;
-use ifstructs::ifreq;
 use libc::{
-    close, if_indextoname, ioctl, socket, AF_INET, IFA_F_DADFAILED, IFA_F_DEPRECATED,
+    close, if_indextoname, ifreq, ioctl, socket, AF_INET, IFA_F_DADFAILED, IFA_F_DEPRECATED,
     IFA_F_OPTIMISTIC, IFA_F_PERMANENT, IFA_F_TEMPORARY, IFA_F_TENTATIVE, IFF_LOOPBACK,
-    IFF_POINTOPOINT, IFF_RUNNING, IF_NAMESIZE, SIOCGIFFLAGS, SOCK_DGRAM,
+    IFF_POINTOPOINT, IFF_RUNNING, IFNAMSIZ, IF_NAMESIZE, SIOCGIFFLAGS, SOCK_DGRAM,
 };
 use netlink_packet_route::address::{AddressAttribute, AddressMessage, CacheInfo};
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
@@ -27,6 +26,18 @@ use std::ffi::CStr;
 use std::io;
 use std::os::raw::c_int;
 use tools::*;
+
+fn ifreq_from_name(ifname: &str) -> io::Result<ifreq> {
+    let name = ifname.as_bytes();
+    if name.len() >= IFNAMSIZ {
+        bail_io_error_other!("interface name too long");
+    }
+    let mut req: ifreq = unsafe { core::mem::zeroed() };
+    for (dst, src) in req.ifr_name.iter_mut().zip(name) {
+        *dst = *src as libc::c_char;
+    }
+    Ok(req)
+}
 
 fn get_interface_name(index: u32) -> io::Result<String> {
     let mut ifnamebuf = [0u8; (IF_NAMESIZE + 1)];
@@ -162,7 +173,7 @@ impl PlatformSupportNetlink {
     }
 
     fn get_interface_flags(&self, ifname: &str) -> io::Result<InterfaceFlags> {
-        let mut req = ifreq::from_name(ifname)?;
+        let mut req = ifreq_from_name(ifname)?;
 
         let sock = unsafe { socket(AF_INET, SOCK_DGRAM, 0) };
         if sock < 0 {
@@ -181,7 +192,7 @@ impl PlatformSupportNetlink {
             return Err(io::Error::last_os_error());
         }
 
-        let flags = req.get_flags() as c_int;
+        let flags = unsafe { req.ifr_ifru.ifru_flags } as c_int;
 
         // Android CLAT (RFC 6877) lives on a virtual interface named `clat4*` or `v4-*`
         let is_clat = ifname.starts_with("clat4") || ifname.starts_with("v4-");

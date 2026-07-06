@@ -130,6 +130,6 @@ fn median_p75_latency(routing_table: &RoutingTable) -> Option<TimestampDuration>
     if p75s.is_empty() {
         return None;
     }
-    p75s.sort();
+    p75s.sort_unstable();
     Some(p75s[p75s.len() / 2])
 }

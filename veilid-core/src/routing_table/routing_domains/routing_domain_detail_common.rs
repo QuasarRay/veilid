@@ -246,7 +246,7 @@ impl RoutingDomainDetailCommon {
         });
 
         if changed {
-            self.dial_info_details.sort();
+            self.dial_info_details.sort_unstable();
             self.dial_info_details.dedup();
 
             self.clear_current_peer_info_cache();
@@ -256,7 +256,7 @@ impl RoutingDomainDetailCommon {
         let changed = !self.dial_info_details.contains(&did);
         if changed {
             self.dial_info_details.push(did);
-            self.dial_info_details.sort();
+            self.dial_info_details.sort_unstable();
             self.dial_info_details.dedup();
 
             self.clear_current_peer_info_cache();

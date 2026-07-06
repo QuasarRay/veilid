@@ -1,13 +1,11 @@
 use super::*;
 
 /// Direct statement blob passed to hosting application for processing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts)]
 pub struct VeilidAppMessage {
     #[serde(with = "as_human_opt_string")]
-    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(optional, type = "string")
@@ -15,7 +13,7 @@ pub struct VeilidAppMessage {
     sender: Option<NodeId>,
 
     #[serde(with = "as_human_opt_string")]
-    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(optional, type = "string")
@@ -26,7 +24,7 @@ pub struct VeilidAppMessage {
         not(all(target_arch = "wasm32", target_os = "unknown")),
         serde(with = "as_human_base64")
     )]
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         serde(with = "serde_bytes"),
@@ -77,18 +75,16 @@ impl fmt::Display for VeilidAppMessage {
 }
 
 /// Direct question blob passed to hosting application for processing to send an eventual AppReply.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts)]
 pub struct VeilidAppCall {
     #[serde(with = "as_human_opt_string")]
-    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
     sender: Option<NodeId>,
 
     #[serde(with = "as_human_opt_string")]
-    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(optional, type = "string")
@@ -99,7 +95,7 @@ pub struct VeilidAppCall {
         not(all(target_arch = "wasm32", target_os = "unknown")),
         serde(with = "as_human_base64")
     )]
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         serde(with = "serde_bytes"),
@@ -108,7 +104,7 @@ pub struct VeilidAppCall {
     message: Vec<u8>,
 
     #[serde(with = "as_human_string")]
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     call_id: OperationId,
 }
 

@@ -19,6 +19,7 @@ path = "src/lib.rs"
 [features]
 default = ["rt-tokio", "veilid-core/default"]
 default-wasm = ["veilid-core/default-wasm"]
+debug-api = ["veilid-core/debug-api"]
 crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
 rt-async-std = ["veilid-core/rt-async-std", "async-std"]
 rt-tokio = ["veilid-core/rt-tokio", "tokio"]
@@ -83,9 +84,8 @@ android_log-sys = { version = "0.3.2", optional = true }
 
 # Dependencies for WASM builds only (dart-flavored wasm-bindgen bindings)
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-veilid-tracing-wasm = "0.2.0"
 js-sys = "0.3.83"
-wasm-bindgen = { version = "0.2.121", features = ["serde-serialize"] }
+wasm-bindgen = "0.2.121"
 wasm-bindgen-futures = "=0.4.71"
 wasm-bindgen-derive = "0.3.0"
 console_error_panic_hook = "0.1.7"

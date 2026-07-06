@@ -1,11 +1,10 @@
 use super::*;
 
 /// Options that override defaults for set_dht_value
-#[derive(Debug, JsonSchema, Serialize, Deserialize, Clone)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
 pub struct SetDHTValueOptions {
     /// Override writer key pair for this operation
-    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
     pub writer: Option<KeyPair>,
     /// Defaults to true. If false, the value will not be written if the node is offline,
     /// and a TryAgain error will be returned.

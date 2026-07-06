@@ -1,15 +1,8 @@
 use super::*;
 
 /// Log level for VeilidCore.
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Serialize, Deserialize, JsonSchema,
-)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(namespace)
-)]
-#[must_use]
+#[apply(api_data_enum!)]
+#[api(eq, copy, ord, ts(namespace))]
 pub enum VeilidLogLevel {
     /// Errors.
     Error = 1,
@@ -146,9 +139,8 @@ impl fmt::Display for VeilidLogLevel {
     }
 }
 /// A VeilidCore log message with optional backtrace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
+#[api(eq, ts)]
 pub struct VeilidLog {
     /// Severity of the message.
     pub log_level: VeilidLogLevel,

@@ -147,6 +147,7 @@ impl AttachmentManager {
         }
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn is_attached(&self) -> bool {
         self.inner.lock().attachment_state.is_attached()
     }
@@ -756,6 +757,7 @@ impl AttachmentManager {
         out.unwrap_or_default()
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn debug_info_nodeinfo(&self) -> String {
         let mut out = String::new();
         out += &format!(

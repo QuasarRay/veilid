@@ -137,7 +137,7 @@ impl InboundTransactions {
             self.record_transactions.len()
         );
         let mut record_transactions_keys = self.record_transactions.keys().collect::<Vec<_>>();
-        record_transactions_keys.sort();
+        record_transactions_keys.sort_unstable();
         for atk in record_transactions_keys {
             let atx = self.record_transactions.get(atk).unwrap_or_log();
             out += &format!("  {}: {:?}\n", atk, atx);

@@ -31,7 +31,7 @@ if [ "$RELEASE" -eq 1 ]; then
     cargo build --target wasm32-unknown-unknown --release "$@"
     WASM_IN="$WORKSPACE_TARGET/release/veilid_wasm.wasm"
 else
-    RUSTFLAGS="-g $RUSTFLAGS" cargo build --target wasm32-unknown-unknown "$@"
+    RUSTFLAGS="-g $RUSTFLAGS" cargo build --target wasm32-unknown-unknown --features debug-api "$@"
     WASM_IN="$WORKSPACE_TARGET/debug/veilid_wasm.wasm"
 fi
 

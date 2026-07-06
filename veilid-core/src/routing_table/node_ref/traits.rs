@@ -189,7 +189,8 @@ pub(crate) trait NodeRefCommonTrait:
             let mut last_flows = e.last_flows(&routing_table, true, filter);
 
             if let Some(sort) = ProtocolType::get_ordering_sort(ordering) {
-                last_flows.sort_by(|a, b| sort(&a.0.protocol_type(), &b.0.protocol_type()));
+                last_flows
+                    .sort_unstable_by(|a, b| sort(&a.0.protocol_type(), &b.0.protocol_type()));
             }
 
             last_flows.first().map(|x| x.0)
@@ -209,7 +210,8 @@ pub(crate) trait NodeRefCommonTrait:
             let mut last_flows = e.last_flows(&routing_table, true, filter);
 
             if let Some(sort) = ProtocolType::get_ordering_sort(ordering) {
-                last_flows.sort_by(|a, b| sort(&a.0.protocol_type(), &b.0.protocol_type()));
+                last_flows
+                    .sort_unstable_by(|a, b| sort(&a.0.protocol_type(), &b.0.protocol_type()));
             }
 
             last_flows.into_iter().map(|x| x.0).collect()

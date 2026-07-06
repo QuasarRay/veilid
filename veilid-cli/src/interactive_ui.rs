@@ -13,7 +13,6 @@ use rustyline_async::SharedWriter;
 use rustyline_async::{Readline, ReadlineError, ReadlineEvent};
 use std::time::SystemTime;
 use stop_token::future::FutureExt as StopTokenFutureExt;
-use stop_token::*;
 
 pub type InteractiveUICallback = Box<dyn FnMut() + Send>;
 

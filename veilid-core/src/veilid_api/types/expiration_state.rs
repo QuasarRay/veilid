@@ -1,10 +1,8 @@
 use super::*;
 
 /// The state of a timestamp, either live (not expired) or dead (expired)
-#[derive(
-    Debug, Default, PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize, JsonSchema, GetSize,
-)]
-#[must_use]
+#[apply(api_data_enum!)]
+#[api(eq, copy, hash, default, get_size)]
 pub enum ExpirationState {
     /// Not expired.
     #[default]

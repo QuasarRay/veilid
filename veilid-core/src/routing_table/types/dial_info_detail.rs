@@ -54,7 +54,7 @@ pub trait HasDialInfoDetailList: fmt::Debug {
     ) -> Option<DialInfoDetail> {
         if let Some(sort) = sort {
             let mut dids = self.dial_info_detail_list().to_vec();
-            dids.sort_by(sort);
+            dids.sort_unstable_by(sort);
             for did in dids {
                 if filter(&did) {
                     return Some(did);
@@ -80,7 +80,7 @@ pub trait HasDialInfoDetailList: fmt::Debug {
 
         if let Some(sort) = sort {
             let mut dids = self.dial_info_detail_list().to_vec();
-            dids.sort_by(sort);
+            dids.sort_unstable_by(sort);
             for did in dids {
                 if filter(&did) {
                     dial_info_detail_list.push(did);

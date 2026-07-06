@@ -9,7 +9,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use stop_token::future::FutureExt as _;
-use stop_token::*;
 use tracing::*;
 use veilid_core::tools::*;
 use veilid_core::*;

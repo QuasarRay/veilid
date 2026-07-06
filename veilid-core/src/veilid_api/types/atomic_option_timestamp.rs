@@ -88,6 +88,8 @@ impl AtomicOptionTimestamp {
     ///
     /// Returns:
     /// - The new optional timestamp if the update was successful, otherwise the current optional timestamp
+    // fetch_update deprecated in newer std; move to try_update when MSRV >= 1.96
+    #[allow(deprecated)]
     pub fn fetch_update(
         &self,
         mut f: impl FnMut(Option<Timestamp>) -> Option<Option<Timestamp>>,

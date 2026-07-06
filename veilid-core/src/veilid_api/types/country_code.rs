@@ -1,9 +1,8 @@
 use super::*;
 
 /// Two-letter country code. Stored in upper case internally.
-#[derive(
-    Copy, Default, Clone, Hash, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Copy, Default, Clone, Hash, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
 pub struct CountryCode([u8; 2]);

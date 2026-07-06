@@ -68,7 +68,8 @@ impl RoutingTable {
             .collect();
 
         // Sort by fastest tm90 reliable
-        all_filtered_nodes.sort_by(|a, b| BucketEntrySnapshot::cmp_fastest_reliable(a, b, &metric));
+        all_filtered_nodes
+            .sort_unstable_by(|a, b| BucketEntrySnapshot::cmp_fastest_reliable(a, b, &metric));
 
         // Get position in list of requested node
         let node_count = all_filtered_nodes.len();

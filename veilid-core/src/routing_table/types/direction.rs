@@ -11,6 +11,7 @@ pub enum Direction {
 }
 
 impl Direction {
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn set_from_str(s: &str) -> VeilidAPIResult<DirectionSet> {
         let s = s.to_ascii_lowercase();
         if s == "all-direection" {

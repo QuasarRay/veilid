@@ -9,7 +9,6 @@ use flexi_logger::writers::LogWriter;
 use flexi_logger::DeferredNow;
 use indent::indent_by;
 use stop_token::future::FutureExt as StopTokenFutureExt;
-use stop_token::*;
 
 pub type LogViewerUICallback = Box<dyn FnMut() + Send>;
 

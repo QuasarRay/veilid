@@ -14,7 +14,7 @@ cfg_if::cfg_if! {
         use tracing_subscriber::*;
         use veilid_core::tools::*;
         use veilid_core::*;
-        use veilid_tracing_wasm::*;
+        use veilid_core::tools::wasm_tracing::*;
         use wasm_bindgen_futures::*;
 
         pub mod dart_wasm;

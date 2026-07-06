@@ -2,7 +2,10 @@
 #[cfg(target_os = "android")]
 pub mod android;
 mod api;
+#[cfg(feature = "debug-api")]
 mod debug;
+#[cfg(not(feature = "debug-api"))]
+mod debug_stub;
 mod dht_transaction;
 mod error;
 mod routing_context;
@@ -29,6 +32,7 @@ use crate::*;
 
 use core_context::{api_shutdown, VeilidCoreContext};
 use routing_table::{AllocateRouteParams, DirectionSet, RouteIdAndKeys, RouteSpecStore};
+#[cfg(feature = "debug-api")]
 use rpc_processor::*;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////

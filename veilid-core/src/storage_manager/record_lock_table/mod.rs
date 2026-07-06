@@ -154,7 +154,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
             .record_fut(
                 async {
                     // Always lock in sorted order to avoid deadlocks
-                    records.sort();
+                    records.sort_unstable();
                     let mode = purpose.record_lock_mode();
 
                     let record_locks = {
@@ -200,7 +200,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
         purpose: R,
     ) -> Option<RecordsLockGuard<R, S>> {
         // Always lock in sorted order to avoid deadlocks
-        records.sort();
+        records.sort_unstable();
         let mode = purpose.record_lock_mode();
 
         let record_locks = {
@@ -235,7 +235,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
         mut records: Vec<OpaqueRecordKey>,
     ) -> Option<PeeksLockGuard<R, S>> {
         // Always lock in sorted order to avoid deadlocks
-        records.sort();
+        records.sort_unstable();
         let mut guards = vec![];
         for record in records {
             let record_lock = self.get_or_create_record_lock(&record);

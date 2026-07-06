@@ -161,9 +161,8 @@ fn real_main() -> Result<(), String> {
 
         #[cfg(debug_assertions)]
         if args.wait_for_debug {
-            use bugsalot::debugger;
-            debugger::wait_until_attached(None)
-                .expect_or_log("state() not implemented on this platform");
+            veilid_tools::wait_until_debugger_attached(None)
+                .expect_or_log("debugger state not implemented on this platform");
         }
 
         setup_tracing(&args.logging)?;

@@ -52,7 +52,7 @@ macro_rules! impl_crypto_typed_group {
                         }
                         self.items.push(typed_key.clone());
                     }
-                    self.items.sort()
+                    self.items.sort_unstable()
                 }
 
                 /// Whether any of the given values is present in the group.
@@ -140,7 +140,7 @@ macro_rules! impl_crypto_typed_group {
                 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(getter, unchecked_return_type = "CryptoKind[]"))]
                 pub fn kinds(&self) -> Vec<CryptoKind> {
                     let mut out = self.items.iter().map(|tk| tk.kind()).collect::<Vec<_>>();
-                    out.sort_by(compare_crypto_kind);
+                    out.sort_unstable_by(compare_crypto_kind);
                     out
                 }
 
@@ -189,7 +189,7 @@ macro_rules! impl_crypto_typed_group {
                         }
                     }
                     self.items.push(typed_key);
-                    self.items.sort()
+                    self.items.sort_unstable()
                 }
 
                 /// Adds or replaces each value by kind, then re-sorts.

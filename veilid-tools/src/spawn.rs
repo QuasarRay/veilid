@@ -180,10 +180,10 @@ cfg_if! {
         /// For heavy cpu-intensive tasks that do not use locks or IO operations > (100us)
         pub async fn cpu_yielding<R: Send + 'static>(x: impl FnOnce() -> R + Send + 'static) -> R {
             let (tx, rx) = flume::bounded(1);
-            rayon::spawn_fifo(move || {
+            cpu_pool_spawn_fifo(Box::new(move || {
                 let result = x();
                 let _ = tx.send(result);
-            });
+            }));
             rx.recv_async().await.unwrap_or_log()
         }
 

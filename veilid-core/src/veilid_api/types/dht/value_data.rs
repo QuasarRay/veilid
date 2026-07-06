@@ -2,7 +2,8 @@ use super::*;
 use veilid_api::VeilidAPIResult;
 
 /// A DHT value and its metadata
-#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
@@ -19,7 +20,7 @@ pub struct ValueData {
         not(all(target_arch = "wasm32", target_os = "unknown")),
         serde(with = "as_human_base64")
     )]
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(type = "Uint8Array")
@@ -27,7 +28,7 @@ pub struct ValueData {
     data: Bytes,
 
     /// The public identity key of the writer of the data
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     #[serde(with = "public_key_try_untyped_vld0")]
     writer: PublicKey,
 }

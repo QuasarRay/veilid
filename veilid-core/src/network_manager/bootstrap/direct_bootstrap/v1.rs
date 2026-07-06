@@ -64,7 +64,7 @@ impl NetworkManager {
         }
 
         let mut records = txt_strings_set.into_iter().collect::<Vec<_>>();
-        records.sort();
+        records.sort_unstable();
 
         // Add peer infos if we have them, only for the peers present in the records
         let routing_table = self.routing_table();

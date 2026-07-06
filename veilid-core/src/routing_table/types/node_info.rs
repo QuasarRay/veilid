@@ -52,11 +52,11 @@ impl NodeInfo {
         mut dial_info_detail_list: Vec<DialInfoDetail>,
         mut relay_info_list: Vec<RelayInfo>,
     ) -> Self {
-        envelope_support.sort();
-        crypto_info_list.sort();
-        capabilities.sort();
-        dial_info_detail_list.sort();
-        relay_info_list.sort();
+        envelope_support.sort_unstable();
+        crypto_info_list.sort_unstable();
+        capabilities.sort_unstable();
+        dial_info_detail_list.sort_unstable();
+        relay_info_list.sort_unstable();
         Self {
             timestamp,
             envelope_support,

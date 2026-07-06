@@ -132,7 +132,7 @@ where
             .iter()
             .map(|x| (*x.0, x.1.timestamp))
             .collect();
-        opids.sort_by_key(|a| a.1);
+        opids.sort_unstable_by_key(|a| a.1);
         opids.into_iter().map(|x| x.0).collect()
     }
 

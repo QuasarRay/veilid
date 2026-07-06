@@ -1,7 +1,5 @@
-use curve25519_dalek::digest::generic_array::{typenum::U64, GenericArray};
-use curve25519_dalek::digest::{
-    Digest, FixedOutput, FixedOutputReset, Output, OutputSizeUser, Reset, Update,
-};
+use digest::array::{typenum::U64, Array};
+use digest::{Digest, FixedOutput, FixedOutputReset, Output, OutputSizeUser, Reset, Update};
 
 /// A BLAKE3 hasher exposing a fixed 64-byte (512-bit) output via the RustCrypto `Digest` traits.
 ///
@@ -66,7 +64,7 @@ impl Digest for Blake3Digest512 {
     fn finalize(self) -> Output<Self> {
         let mut b = [0u8; 64];
         self.dig.finalize_xof().fill(&mut b);
-        let mut out = GenericArray::<u8, U64>::default();
+        let mut out = Array::<u8, U64>::default();
         out[0..64].copy_from_slice(&b[0..64]);
         out
     }
@@ -74,7 +72,7 @@ impl Digest for Blake3Digest512 {
     fn finalize_reset(&mut self) -> Output<Self> {
         let mut b = [0u8; 64];
         self.dig.finalize_xof().fill(&mut b);
-        let mut out = GenericArray::<u8, U64>::default();
+        let mut out = Array::<u8, U64>::default();
         out[0..64].copy_from_slice(&b[0..64]);
         self.dig.reset();
         out
@@ -89,7 +87,7 @@ impl Digest for Blake3Digest512 {
         dig.update(data.as_ref());
         let mut b = [0u8; 64];
         dig.finalize_xof().fill(&mut b);
-        let mut out = GenericArray::<u8, U64>::default();
+        let mut out = Array::<u8, U64>::default();
         out[0..64].copy_from_slice(&b[0..64]);
         out
     }

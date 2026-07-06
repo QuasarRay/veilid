@@ -68,7 +68,7 @@ impl LocalNetworkRoutingDomainDetail {
     pub fn set_interface_addresses(&mut self, mut interface_addresses: Vec<IfAddr>) -> bool {
         // Filter out any networks that are publicly routable as the routing domains should not overlap
         interface_addresses.retain(|x| Address::from_ip_addr(x.ip()).is_local());
-        interface_addresses.sort();
+        interface_addresses.sort_unstable();
         if interface_addresses == self.interface_addresses {
             return false;
         }

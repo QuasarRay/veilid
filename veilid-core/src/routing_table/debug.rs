@@ -421,7 +421,7 @@ impl RoutingTable {
     pub fn debug_info_entry(&self, node_ref: NodeRef) -> String {
         let ref_count = node_ref.entry().ref_count.load(Ordering::Acquire);
 
-        #[cfg(feature = "tracking")]
+        #[cfg(all(feature = "tracking", feature = "backtrace"))]
         let _tracking = {
             let mut tracking = format!("\nNodeRef Tracking:\n\n");
             for (id, bt) in &mut node_ref.entry().node_ref_tracks.lock().iter_mut() {
@@ -431,7 +431,7 @@ impl RoutingTable {
             tracking
         };
 
-        #[cfg(not(feature = "tracking"))]
+        #[cfg(not(all(feature = "tracking", feature = "backtrace")))]
         let _tracking = "";
 
         node_ref.operate(|e| format!("{:#}\nref_count: {}{}", e, ref_count, _tracking))

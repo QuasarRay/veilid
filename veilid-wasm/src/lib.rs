@@ -20,9 +20,9 @@ use serde::*;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::*;
 use tsify::*;
+use veilid_core::tools::wasm_tracing::*;
 use veilid_core::*;
 use veilid_core::{tools::*, VeilidAPIError};
-use veilid_tracing_wasm::*;
 
 /// API singleton storage and accessors.
 pub mod veilid_api_js;

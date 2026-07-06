@@ -86,7 +86,7 @@ impl fmt::Display for OutboundTransactionManager {
         let mut out = format!("transactions({}): [\n", self.transactions.len());
         {
             let mut keys = self.transactions.keys().cloned().collect::<Vec<_>>();
-            keys.sort();
+            keys.sort_unstable();
 
             for k in keys {
                 let v = self.transactions.get(&k).unwrap_or_log();

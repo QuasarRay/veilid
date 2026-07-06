@@ -26,7 +26,9 @@ debug-locks = ["veilid-core/debug-locks"]
 path = "src/lib.rs"
 
 [dependencies]
-veilid-core = { version = "0.5.5", path = "../veilid-core", default-features = false }
+veilid-core = { version = "0.5.5", path = "../veilid-core", default-features = false, features = [
+    "schemars",
+] }
 
 tracing = { version = "0.1.44", features = ["log", "attributes"] }
 serde = { version = "1.0.218", features = ["derive", "rc"] }

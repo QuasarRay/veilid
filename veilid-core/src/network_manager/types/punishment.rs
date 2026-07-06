@@ -3,6 +3,10 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PunishmentReason {
     // Manually added punishment
+    #[cfg_attr(
+        not(any(feature = "debug-api", feature = "test-util")),
+        expect(dead_code)
+    )]
     Manual,
     // IP-level punishments
     FailedToDecryptEnvelopeBody,

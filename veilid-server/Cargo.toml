@@ -88,7 +88,7 @@ clap = { version = "4.5.39", features = ["derive", "string", "wrap_help"] }
 directories = "6.0.0"
 parking_lot = "0.12.5"
 config = { version = "0.15.21", default-features = false, features = ["yaml"] }
-cfg-if = "1.0.0"
+cfg-if = "1.0.4"
 serde = "1.0.218"
 serde_derive = "1.0.218"
 serde_ignored = "0.1.14"
@@ -100,11 +100,9 @@ futures-util = { version = "0.3.32", default-features = false, features = [
 ] }
 url = "2.5.2"
 lazy_static = "^1"
-bugsalot = { package = "veilid-bugsalot", version = "0.2.0" }
 flume = { version = "0.12.0", features = ["async"] }
 rpassword = "7.0.0"
 hostname = "0.4.2"
-stop-token = { version = "0.7.0", default-features = false }
 sysinfo = { version = "0.38.4", default-features = false, features = [
     "system",
     "disk",

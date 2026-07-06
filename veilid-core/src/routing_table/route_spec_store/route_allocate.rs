@@ -130,7 +130,7 @@ impl RouteSpecStore {
         }
 
         // Ensure best crypto kind is first
-        params.crypto_kinds.sort();
+        params.crypto_kinds.sort_unstable();
 
         // Get our peer info
         let cur_ts = Timestamp::now();
@@ -698,7 +698,7 @@ impl RouteSpecStore {
             move |all_entries: &mut Vec<Option<BucketEntrySnapshot>>, _cur_ts: Timestamp| {
                 // Remove the slowest (100% - ALLOCATION_HIGH_PASS_FILTER_FACTOR) of the entries from consideration
                 let mut sorted_entry_indices = (0..all_entries.len()).collect::<Vec<_>>();
-                sorted_entry_indices.sort_by(|i1, i2| {
+                sorted_entry_indices.sort_unstable_by(|i1, i2| {
                     let snap1 = all_entries[*i1].as_ref().unwrap_or_log();
                     let snap2 = all_entries[*i2].as_ref().unwrap_or_log();
 

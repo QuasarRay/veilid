@@ -121,7 +121,7 @@ impl RoutingTableSnapshot {
 
         // Sort by preference for returning nodes
         // Snapshots are immutable — no total-order violation possible
-        nodes.sort_by(|a, b| compare(a, b, cur_ts));
+        nodes.sort_unstable_by(|a, b| compare(a, b, cur_ts));
 
         // Return transformed vector for filtered+sorted nodes
         nodes.into_iter().take(node_count).map(transform).collect()

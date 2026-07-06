@@ -97,7 +97,7 @@ impl PublicInternetRoutingDomainController {
                     .collect();
 
                 // Sort by most reliable first, then fastest
-                filtered.sort_by(|a, b| {
+                filtered.sort_unstable_by(|a, b| {
                     BucketEntrySnapshot::cmp_fastest_reliable(a, b, |ls| ls.average)
                 });
 

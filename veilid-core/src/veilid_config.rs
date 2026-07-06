@@ -2,17 +2,7 @@ use crate::*;
 
 cfg_if::cfg_if! {
     if #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))] {
-        use sysinfo::System;
-        use lazy_static::*;
         use directories::ProjectDirs;
-
-        lazy_static! {
-            static ref SYSTEM:System = {
-                sysinfo::System::new_with_specifics(
-                    sysinfo::RefreshKind::nothing().with_memory(sysinfo::MemoryRefreshKind::everything()),
-                )
-            };
-        }
     }
 }
 
@@ -40,14 +30,8 @@ cfg_if::cfg_if! {
 ///     public_address: ''
 /// ```
 ///
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigUDP {
     /// Enable the UDP protocol.
     pub enabled: bool,
@@ -84,14 +68,8 @@ impl Default for VeilidConfigUDP {
 ///     listen_address: ':5150'
 ///     public_address: ''
 ///
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigTCP {
     /// Allow outbound TCP connections.
     pub connect: bool,
@@ -134,14 +112,8 @@ impl Default for VeilidConfigTCP {
 ///     path: 'ws'
 ///     url: 'ws://localhost:5150/ws'
 ///
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigWS {
     /// Allow outbound WebSocket connections.
     pub connect: bool,
@@ -187,15 +159,9 @@ impl Default for VeilidConfigWS {
 ///     path: 'ws'
 ///     url: ''
 ///
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
 #[cfg(feature = "enable-protocol-wss")]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigWSS {
     /// Allow outbound secure WebSocket connections.
     pub connect: bool,
@@ -230,14 +196,8 @@ impl Default for VeilidConfigWSS {
 /// All protocols are available by default, and the Veilid node will
 /// sort out which protocol is used for each peer connection.
 ///
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigProtocol {
     /// UDP protocol configuration.
     pub udp: VeilidConfigUDP,
@@ -257,14 +217,13 @@ pub struct VeilidConfigProtocol {
 ///     require_inbound_relay: false
 ///     country_code_denylist: [] # only with `--features=geolocation`
 /// ```
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[apply(api_data_struct!)]
+#[api(eq, default)]
 #[cfg_attr(
     target_arch = "wasm32",
     derive(Tsify),
     tsify(into_wasm_abi, from_wasm_abi)
 )]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
 pub struct VeilidConfigPrivacy {
     /// Always use an inbound relay; never accept direct inbound connections.
     pub require_inbound_relay: bool,
@@ -281,14 +240,13 @@ pub struct VeilidConfigPrivacy {
 ///     server_address: ""
 /// ```
 #[cfg(feature = "virtual-network")]
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[apply(api_data_struct!)]
+#[api(eq, default)]
 #[cfg_attr(
     target_arch = "wasm32",
     derive(Tsify),
     tsify(into_wasm_abi, from_wasm_abi)
 )]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
 pub struct VeilidConfigVirtualNetwork {
     /// Route all networking through the virtual network server.
     pub enabled: bool,
@@ -304,14 +262,8 @@ pub struct VeilidConfigVirtualNetwork {
 ///     private_key_path: /path/to/private/key
 ///     connection_initial_timeout_ms: 2000
 ///
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigTLS {
     /// Path to the TLS certificate (PEM) for inbound TLS protocols.
     pub certificate_path: String,
@@ -361,14 +313,8 @@ pub fn get_default_ssl_directory(
 /// Defaults should be used here unless you are absolutely sure you know what you're doing.
 /// If you change the count/fanout/timeout parameters, you may render your node inoperable
 /// for correct DHT operations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigDHT {
     /// Number of subkeys cached for locally-created DHT records.
     pub local_subkey_cache_size: u32,
@@ -410,17 +356,15 @@ impl Default for VeilidConfigDHT {
                 let remote_max_storage_space_mb = 128;
             } else {
                 let local_subkey_cache_size = 1024;
-                let local_max_subkey_cache_memory_mb = if sysinfo::IS_SUPPORTED_SYSTEM {
-                    (SYSTEM.total_memory() / 32u64 / (1024u64 * 1024u64)) as u32
-                } else {
-                    256
+                let local_max_subkey_cache_memory_mb = match total_memory_bytes() {
+                    Some(mem) => (mem / 32u64 / (1024u64 * 1024u64)) as u32,
+                    None => 256,
                 };
                 let remote_subkey_cache_size = 128;
                 let remote_max_records = 128;
-                let remote_max_subkey_cache_memory_mb = if sysinfo::IS_SUPPORTED_SYSTEM {
-                    (SYSTEM.total_memory() / 32u64 / (1024u64 * 1024u64)) as u32
-                } else {
-                    256
+                let remote_max_subkey_cache_memory_mb = match total_memory_bytes() {
+                    Some(mem) => (mem / 32u64 / (1024u64 * 1024u64)) as u32,
+                    None => 256,
                 };
                 let remote_max_storage_space_mb = 256;
             }
@@ -442,14 +386,8 @@ impl Default for VeilidConfigDHT {
 
 /// Configure RPC.
 ///
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigRPC {
     /// Default number of hops used when allocating private routes.
     pub default_route_hop_count: u8,
@@ -465,24 +403,18 @@ impl Default for VeilidConfigRPC {
 
 /// Configure the network routing table.
 ///
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigRoutingTable {
     /// This node's identity public keys, by crypto kind (empty = generate fresh).
-    #[schemars(with = "Vec<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(type = "string[]")
     )]
     pub public_keys: PublicKeyGroup,
     /// Node identity secret keys matching `public_keys` (empty = generate fresh).
-    #[schemars(with = "Vec<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(type = "string[]")
@@ -491,7 +423,7 @@ pub struct VeilidConfigRoutingTable {
     /// Bootstrap server hostnames/URLs used to join the network.
     pub bootstrap: Vec<String>,
     /// Public keys trusted to sign bootstrap records.
-    #[schemars(with = "Vec<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(type = "string[]")
@@ -529,15 +461,8 @@ impl Default for VeilidConfigRoutingTable {
 }
 
 /// An IP address family (IP version) the node may use.
-#[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize, JsonSchema,
-)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(namespace, into_wasm_abi, from_wasm_abi)
-)]
-#[must_use]
+#[apply(api_data_enum!)]
+#[api(eq, copy, ord, hash, ts(namespace, into_wasm_abi, from_wasm_abi))]
 pub enum VeilidConfigAddressType {
     /// IPv4 (32-bit) addresses.
     #[serde(rename = "IPV4", alias = "ipv4", alias = "v4", alias = "4")]
@@ -567,15 +492,9 @@ impl FromStr for VeilidConfigAddressType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 /// Network subsystem configuration: connections, routing table, RPC, DHT, transports, and privacy.
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigNetwork {
     /// Maximum total simultaneous connections across all protocols.
     /// Range: native 32-512, wasm32/browser 16-64.
@@ -628,15 +547,9 @@ impl Default for VeilidConfigNetwork {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 /// Table store configuration: the encrypted key-value database backing node state.
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigTableStore {
     /// Directory holding the table store database (empty = platform default).
     pub directory: String,
@@ -685,15 +598,9 @@ fn get_default_store_path(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 /// Block store configuration: content-addressed block storage.
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigBlockStore {
     /// Directory holding the block store (empty = platform default).
     pub directory: String,
@@ -710,15 +617,9 @@ impl Default for VeilidConfigBlockStore {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 /// Protected store configuration: where secrets such as the device encryption key are kept.
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigProtectedStore {
     /// Fall back to insecure file storage if no OS keychain/keyring is available.
     pub allow_insecure_fallback: bool,
@@ -749,30 +650,16 @@ impl Default for VeilidConfigProtectedStore {
 }
 
 /// Capabilities advertised by this node.
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigCapabilities {
     /// Capabilities to disable (advertised as unavailable).
     pub disable: Vec<VeilidCapability>,
 }
 
 /// Logging level threshold (`Off` disables logging).
-#[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize, JsonSchema,
-)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(namespace, into_wasm_abi, from_wasm_abi)
-)]
-#[must_use]
-#[derive(Default)]
+#[apply(api_data_enum!)]
+#[api(eq, copy, ord, default, ts(namespace, into_wasm_abi, from_wasm_abi))]
 pub enum VeilidConfigLogLevel {
     /// Logging disabled.
     #[default]
@@ -921,42 +808,24 @@ impl fmt::Display for VeilidConfigLogLevel {
 }
 
 /// Internal "footgun" UDP configuration. See [VeilidConfigInternal].
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigInternalUDP {
     /// Number of UDP sockets in the send/receive pool (0 = automatic).
     pub socket_pool_size: u32,
 }
 
 /// Internal "footgun" per-protocol configuration. See [VeilidConfigInternal].
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigInternalProtocol {
     /// Internal UDP tuning.
     pub udp: VeilidConfigInternalUDP,
 }
 
 /// Internal "footgun" RPC configuration. See [VeilidConfigInternal].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigInternalRPC {
     /// Number of concurrent RPC worker tasks (0 = automatic).
     pub concurrency: u32,
@@ -989,14 +858,8 @@ impl Default for VeilidConfigInternalRPC {
 /// Internal "footgun" DHT configuration. See [VeilidConfigInternal].
 /// Changing the count/fanout/timeout parameters may render your node inoperable for
 /// correct DHT operations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigInternalDHT {
     /// Maximum number of nodes returned by a FindNode query.
     pub max_find_node_count: u32,
@@ -1064,14 +927,8 @@ impl Default for VeilidConfigInternalDHT {
 }
 
 /// Internal "footgun" network configuration. See [VeilidConfigInternal].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigInternalNetwork {
     /// Timeout to establish a new connection, in milliseconds.
     pub connection_initial_timeout_ms: u32,
@@ -1127,28 +984,16 @@ impl Default for VeilidConfigInternalNetwork {
 /// Changing them from the defaults can render a node inoperable. They are only honored when
 /// veilid-core is built with the `footgun-config` feature; without it, any non-default values
 /// here are reset to defaults at startup (with a warning).
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfigInternal {
     /// Internal network tuning.
     pub network: VeilidConfigInternalNetwork,
 }
 
 /// Top level of the Veilid configuration tree
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
 pub struct VeilidConfig {
     /// An identifier used to describe the program using veilid-core.
     /// Used to partition storage locations in places like the ProtectedStore.
@@ -1315,17 +1160,46 @@ impl VeilidConfig {
         }
     }
 
+    // Rejects illegal/control chars, Windows-reserved names, trailing dot/space, len > 255
+    fn is_valid_filename(s: &str) -> bool {
+        if s.len() > 255 {
+            return false;
+        }
+        if s.chars().any(|c| {
+            matches!(c, '/' | '?' | '<' | '>' | '\\' | ':' | '*' | '|' | '"')
+                || c <= '\u{1f}'
+                || ('\u{80}'..='\u{9f}').contains(&c)
+        }) {
+            return false;
+        }
+        if !s.is_empty() && s.bytes().all(|b| b == b'.') {
+            return false;
+        }
+        if s.ends_with('.') || s.ends_with(' ') {
+            return false;
+        }
+        let base = s.split('.').next().unwrap_or_default().as_bytes();
+        match base.len() {
+            3 => {
+                !(base.eq_ignore_ascii_case(b"con")
+                    || base.eq_ignore_ascii_case(b"prn")
+                    || base.eq_ignore_ascii_case(b"aux")
+                    || base.eq_ignore_ascii_case(b"nul"))
+            }
+            4 => {
+                !((base[..3].eq_ignore_ascii_case(b"com")
+                    || base[..3].eq_ignore_ascii_case(b"lpt"))
+                    && base[3].is_ascii_digit())
+            }
+            _ => true,
+        }
+    }
+
     fn validate_program_name(program_name: &str) -> VeilidAPIResult<()> {
         if program_name.is_empty() {
             apibail_generic!("Program name must not be empty in 'program_name'");
         }
-        if !sanitize_filename::is_sanitized_with_options(
-            program_name,
-            sanitize_filename::OptionsForCheck {
-                windows: true,
-                truncate: true,
-            },
-        ) {
+        if !Self::is_valid_filename(program_name) {
             apibail_generic!("'program_name' must not be an invalid filename");
         }
         Ok(())
@@ -1335,13 +1209,7 @@ impl VeilidConfig {
         if namespace.is_empty() {
             return Ok(());
         }
-        if !sanitize_filename::is_sanitized_with_options(
-            namespace,
-            sanitize_filename::OptionsForCheck {
-                windows: true,
-                truncate: true,
-            },
-        ) {
+        if !Self::is_valid_filename(namespace) {
             apibail_generic!("'namespace' must not be an invalid filename");
         }
 

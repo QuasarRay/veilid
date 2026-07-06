@@ -137,7 +137,7 @@ impl LatencyStatsAccounting {
         }
 
         let mut sorted_latencies: Vec<_> = self.rolling_latencies.iter().copied().collect();
-        sorted_latencies.sort();
+        sorted_latencies.sort_unstable();
 
         let tm90 = Self::get_tm_n(&sorted_latencies, 90).unwrap_or(average);
         let tm75 = Self::get_tm_n(&sorted_latencies, 75).unwrap_or(average);

@@ -1051,7 +1051,7 @@ where
         let st_xact = self.unlocked_inner.subkey_table.transact();
 
         // Sort the record index by reverse last touched time (newest first)
-        record_index_sorted.sort_by_key(|b| std::cmp::Reverse(b.1.last_touched()));
+        record_index_sorted.sort_unstable_by_key(|b| std::cmp::Reverse(b.1.last_touched()));
 
         // Truncate the record list to the max record count
         let record_index_limit = self.record_cache.capacity();

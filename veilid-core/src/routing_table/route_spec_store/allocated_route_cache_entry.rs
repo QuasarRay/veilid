@@ -134,6 +134,8 @@ impl AllocatedRouteCacheEntry {
     }
     /// Release `count` in-flight set-level uses, saturating at zero
     pub(super) fn unlock(&self, count: usize) {
+        // fetch_update deprecated in newer std; move to try_update when MSRV >= 1.96
+        #[allow(deprecated)]
         let _ = self
             .lock_count
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |c| {
@@ -152,6 +154,8 @@ impl AllocatedRouteCacheEntry {
     /// No-op if `key` is not in the set.
     pub(super) fn unlock_route(&self, key: &PublicKey, count: usize) {
         if let Some(c) = self.per_route_lock_counts.get(key) {
+            // fetch_update deprecated in newer std; move to try_update when MSRV >= 1.96
+            #[allow(deprecated)]
             let _ = c.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
                 Some(v.saturating_sub(count))
             });

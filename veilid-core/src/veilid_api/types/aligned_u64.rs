@@ -18,9 +18,9 @@ macro_rules! aligned_u64_type {
             Hash,
             Serialize,
             Deserialize,
-            JsonSchema,
             GetSize,
         )]
+        #[cfg_attr(feature = "schemars", derive(JsonSchema))]
         #[cfg_attr(
             all(target_arch = "wasm32", target_os = "unknown"),
             derive(Tsify),
@@ -33,7 +33,7 @@ macro_rules! aligned_u64_type {
         /// 8-byte-aligned `u64` newtype that serializes as a string for JSON safety.
         pub struct $name(
             #[serde(with = "as_human_string")]
-            #[schemars(with = "String")]
+            #[cfg_attr(feature = "schemars", schemars(with = "String"))]
             #[cfg_attr(
                 all(target_arch = "wasm32", target_os = "unknown"),
                 tsify(type = "string")

@@ -182,7 +182,7 @@ impl RouteSpecStore {
         }
 
         // Don't trust the order of the blob
-        out.sort_by(|a, b| a.public_key.cmp(&b.public_key));
+        out.sort_unstable_by(|a, b| a.public_key.cmp(&b.public_key));
 
         Ok(out)
     }

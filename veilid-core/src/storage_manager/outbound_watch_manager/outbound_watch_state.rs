@@ -44,7 +44,7 @@ impl fmt::Display for OutboundWatchState {
             .iter()
             .map(|x| x.to_string())
             .collect::<Vec<_>>();
-        value_changed_routes.sort();
+        value_changed_routes.sort_unstable();
 
         write!(
             f,

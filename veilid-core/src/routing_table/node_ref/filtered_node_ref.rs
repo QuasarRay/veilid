@@ -95,6 +95,7 @@ impl FilteredNodeRef {
         self.sequencing = sequencing;
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn parse<S: AsRef<str>>(
         routing_table: &RoutingTable,
         s: S,

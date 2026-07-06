@@ -115,7 +115,7 @@ impl OutboundTransactionState {
             .iter()
             .map(|x| x.record_key().opaque())
             .collect::<Vec<_>>();
-        keys.sort();
+        keys.sort_unstable();
         keys
     }
 

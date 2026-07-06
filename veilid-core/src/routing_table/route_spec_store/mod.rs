@@ -241,7 +241,7 @@ impl RouteSpecStore {
         let cache = self.cache.read();
         let mut out = Vec::with_capacity(cache.get_allocated_route_count());
         let mut entries = cache.iter_allocated_routes().collect::<Vec<_>>();
-        entries.sort_by(|a, b| {
+        entries.sort_unstable_by(|a, b| {
             let cmp_hop_count = a.1.hop_count().cmp(&b.1.hop_count());
             if cmp_hop_count != cmp::Ordering::Equal {
                 return cmp_hop_count;
@@ -376,6 +376,7 @@ impl RouteSpecStore {
     }
 
     /// Display debugging for routes by their route id
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn display_route_by_id(&self, id: &RouteId) -> String {
         let cache = self.cache.read();
 
@@ -395,6 +396,7 @@ impl RouteSpecStore {
     }
 
     /// Debug debugging for routes by their public key
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn debug_route_by_key(&self, key: &PublicKey) -> String {
         // Careful with locking order here, we need to lock the content before the cache
         let content = self.content.read();
@@ -435,6 +437,7 @@ impl RouteSpecStore {
     }
 
     /// Debug debugging for routes by their route id
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn debug_route_by_id(&self, id: &RouteId) -> String {
         // Careful with locking order here, we need to lock the content before the cache
         let content = self.content.read();

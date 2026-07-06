@@ -34,8 +34,8 @@ cfg_if! {
         #[allow(dead_code)]
         pub fn wait_for_debugger() {
             eprintln!("Waiting for debugger: pid={}", std::process::id());
-            use bugsalot::debugger;
-            debugger::wait_until_attached(None).expect("state() not implemented on this platform");
+            veilid_tools::wait_until_debugger_attached(None)
+                .expect("debugger state not implemented on this platform");
             eprintln!("Debugger attached");
         }
 

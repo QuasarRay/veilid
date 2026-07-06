@@ -23,7 +23,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 //////////////////////////////////////////////////////////////
 struct Dirty<T>
@@ -645,15 +645,13 @@ impl CursiveUI {
         }
     }
 
-    fn on_submit_peers_table_view(s: &mut Cursive, _row: Option<usize>, index: Option<usize>) {
-        if let Some(index) = index {
-            let peers_table_view = CursiveUI::peers(s);
-            let node_id = peers_table_view
-                .borrow_item(index)
-                .map(|j| j["node_ids"][0].to_string());
-            if let Some(node_id) = node_id {
-                Self::copy_to_clipboard(s, node_id);
-            }
+    fn on_submit_peers_table_view(s: &mut Cursive, _row: usize, index: usize) {
+        let peers_table_view = CursiveUI::peers(s);
+        let node_id = peers_table_view
+            .borrow_item(index)
+            .map(|j| j["node_ids"][0].to_string());
+        if let Some(node_id) = node_id {
+            Self::copy_to_clipboard(s, node_id);
         }
     }
 
@@ -1105,9 +1103,7 @@ impl CursiveUI {
         // Instantiate the cursive runnable
         let runnable = CursiveRunnable::new(
             || -> Result<Box<dyn cursive::backend::Backend>, Box<DumbError>> {
-                let backend = cursive::backends::crossterm::Backend::init().unwrap_or_log();
-                let buffered_backend = cursive_buffered_backend::BufferedBackend::new(backend);
-                Ok(Box::new(buffered_backend))
+                Ok(cursive::backends::crossterm::Backend::init().unwrap_or_log())
             },
         );
 
@@ -1186,17 +1182,24 @@ impl CursiveUI {
             LinearLayout::horizontal()
                 .child(TextView::new(command))
                 .child(
-                    EditView::new()
-                        .on_submit(CursiveUI::on_command_line_entered)
-                        .on_edit(CursiveUI::on_command_line_edit)
-                        .on_up_down(CursiveUI::on_command_line_history)
-                        .style(ColorStyle::new(
-                            PaletteColor::Background,
-                            PaletteColor::Secondary,
-                        ))
-                        .with_name("command-line")
-                        .full_screen()
-                        .fixed_height(1),
+                    OnEventView::new(
+                        EditView::new()
+                            .on_submit(CursiveUI::on_command_line_entered)
+                            .on_edit(CursiveUI::on_command_line_edit)
+                            .style(ColorStyle::new(
+                                PaletteColor::Background,
+                                PaletteColor::Secondary,
+                            ))
+                            .with_name("command-line"),
+                    )
+                    .on_event(Event::Key(Key::Up), |s| {
+                        CursiveUI::on_command_line_history(s, false)
+                    })
+                    .on_event(Event::Key(Key::Down), |s| {
+                        CursiveUI::on_command_line_history(s, true)
+                    })
+                    .full_screen()
+                    .fixed_height(1),
                 )
                 .child(
                     Button::new("Attach", |s| {
@@ -1211,9 +1214,8 @@ impl CursiveUI {
             ColorStyle::highlight_inactive(),
         );
 
-        mainlayout.add_child(
+        mainlayout.add_child(Layer::with_color(
             LinearLayout::horizontal()
-                .color(Some(ColorStyle::highlight_inactive()))
                 .child(
                     TextView::new("")
                         .with_name("status-bar")
@@ -1221,7 +1223,8 @@ impl CursiveUI {
                         .fixed_height(1),
                 )
                 .child(TextView::new(version)),
-        );
+            ColorStyle::highlight_inactive(),
+        ));
 
         this.siv
             .add_fullscreen_layer(mainlayout.with_name("main-layout"));
@@ -1248,7 +1251,36 @@ impl UI for CursiveUI {
     // Note: Cursive is not re-entrant, can't borrow_mut self.siv again after this
     fn run_async<'a>(&'a mut self) -> Pin<Box<dyn core::future::Future<Output = ()> + 'a>> {
         Box::pin(async {
-            self.siv.run_async().await;
+            const INPUT_POLL_DELAY_MS: u64 = 30;
+            let mut runner = self.siv.try_runner().expect("backend init failed");
+            runner.refresh();
+            let mut boring_frame_count: u32 = 0;
+            while runner.is_running() {
+                let received = runner.process_events();
+                let boring = !received;
+                let draw = !boring
+                    || runner
+                        .fps()
+                        .map(|fps| 1000 / INPUT_POLL_DELAY_MS as u32 / fps.get())
+                        .map(|repeats| boring_frame_count >= repeats)
+                        .unwrap_or(false);
+                if draw {
+                    if boring {
+                        runner.on_event(Event::Refresh);
+                    }
+                    runner.refresh();
+                }
+                if boring {
+                    cfg_if! {
+                        if #[cfg(feature = "rt-tokio")] {
+                            tokio::time::sleep(Duration::from_millis(INPUT_POLL_DELAY_MS)).await;
+                        } else if #[cfg(feature = "rt-async-std")] {
+                            async_std::task::sleep(Duration::from_millis(INPUT_POLL_DELAY_MS)).await;
+                        }
+                    }
+                    boring_frame_count += 1;
+                }
+            }
         })
     }
 }

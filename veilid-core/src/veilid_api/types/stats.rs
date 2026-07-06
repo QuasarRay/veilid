@@ -1,9 +1,8 @@
 use super::*;
 
 /// Measurement of communications latency to this node over all RPC questions
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct LatencyStats {
     /// fastest latency in the ROLLING_LATENCIES_SIZE last latencies
     pub fastest: TimestampDuration,
@@ -43,9 +42,8 @@ impl fmt::Display for LatencyStats {
 }
 
 /// Measurement of how much data has transferred to or from this node over a time span
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct TransferStats {
     /// total amount transferred ever
     pub total: ByteCount,
@@ -81,9 +79,8 @@ impl fmt::Display for TransferStats {
 
 /// Transfer statistics in both directions: from a node to us (down) and from us
 /// to the node (up).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct TransferStatsDownUp {
     /// Transfer from the node to us.
     pub down: TransferStats,
@@ -103,9 +100,8 @@ impl fmt::Display for TransferStatsDownUp {
 }
 
 /// API-visible statistics for a peer in the routing table
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct PeerStats {
     #[serde(default)]
     /// latency stats for this peer

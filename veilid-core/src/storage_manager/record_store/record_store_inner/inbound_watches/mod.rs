@@ -70,7 +70,7 @@ impl InboundWatches {
 
     pub fn take_changed_records(&mut self) -> Vec<RecordTableKey> {
         let mut out = self.changed_records.drain().collect::<Vec<_>>();
-        out.sort();
+        out.sort_unstable();
         out
     }
 
@@ -143,7 +143,7 @@ impl InboundWatches {
             self.record_watches.len()
         );
         let mut watches_keys = self.record_watches.keys().collect::<Vec<_>>();
-        watches_keys.sort();
+        watches_keys.sort_unstable();
         for rtk in watches_keys {
             let inbound_watch_list = self.record_watches.get(rtk).unwrap_or_log();
             out += &format!("  {}: {:?}\n", rtk, inbound_watch_list);

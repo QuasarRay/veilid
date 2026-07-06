@@ -1,6 +1,7 @@
 mod close_record;
 mod constants;
 mod create_record;
+#[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
 mod debug;
 mod delete_record;
 mod flush_record;
@@ -826,7 +827,7 @@ impl StorageManager {
                     .iter()
                     .map(|kv| (kv.0.clone(), kv.1.last_seen))
                     .collect::<Vec<_>>();
-                nodes_ts.sort_by(|a, b| {
+                nodes_ts.sort_unstable_by(|a, b| {
                     // Timestamp is first metric
                     let res = b.1.cmp(&a.1);
                     if res != cmp::Ordering::Equal {

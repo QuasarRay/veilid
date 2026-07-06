@@ -5,16 +5,14 @@ impl_veilid_log_facility!("veilid_api");
 ///////////////////////////////////////////////////////////////////////////////////////
 
 /// Valid destinations for a message sent over a routing context.
-#[derive(
-    Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
-)]
-#[must_use]
+#[apply(api_data_enum!)]
+#[api(eq, ord, hash)]
 pub enum Target {
     /// Node by its node id
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     NodeId(NodeId),
     /// Remote private route by its id.
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     RouteId(RouteId),
 }
 

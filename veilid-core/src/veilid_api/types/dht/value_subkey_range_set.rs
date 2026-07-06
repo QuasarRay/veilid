@@ -2,30 +2,19 @@ use super::*;
 use core::ops::{Deref, DerefMut};
 use range_set_blaze::*;
 
-#[derive(
-    Clone,
-    Default,
-    Hash,
-    PartialOrd,
-    PartialEq,
-    Eq,
-    Ord,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    GetSize,
-)]
+/// A set of DHT subkeys stored as inclusive ranges of [ValueSubkey]
+#[derive(Clone, Default, Hash, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize, GetSize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
     tsify(from_wasm_abi, into_wasm_abi)
 )]
-/// A set of DHT subkeys stored as inclusive ranges of [ValueSubkey]
 #[serde(transparent)]
 #[must_use]
 pub struct ValueSubkeyRangeSet {
     #[serde(with = "serialize_range_set_blaze")]
-    #[schemars(with = "Vec<(u32,u32)>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Vec<(u32,u32)>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(type = "Array<[ValueSubkey, ValueSubkey]>")

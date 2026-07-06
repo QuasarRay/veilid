@@ -844,6 +844,7 @@ impl ConnectionManager {
                 }));
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn debug_print(&self) -> String {
         format!(
             "Connection Table:\n{}",

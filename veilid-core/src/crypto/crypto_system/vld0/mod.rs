@@ -3,7 +3,10 @@ mod sizes;
 use super::*;
 
 use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt, SaltString},
+    password_hash::{
+        phc::{PasswordHash, Salt},
+        PasswordHasher, PasswordVerifier,
+    },
     Argon2,
 };
 use chacha20::cipher::{KeyIvInit, StreamCipher};
@@ -110,15 +113,12 @@ impl CryptoSystem for CryptoSystemVLD0 {
             apibail_generic!("invalid salt length");
         }
 
-        // Hash password to PHC string ($argon2id$v=19$...)
-        let salt = SaltString::encode_b64(salt)
-            .map_err(|e| VeilidAPIError::parse_error(e.to_string(), salt))?;
-
         // Argon2 with default params (Argon2id v19)
         let argon2 = Argon2::default();
 
+        // Hash password to PHC string ($argon2id$v=19$...)
         let password_hash = argon2
-            .hash_password(password, &salt)
+            .hash_password_with_salt(password, salt)
             .map_err(|e| VeilidAPIError::generic(e.to_string()))?
             .to_string();
         Ok(password_hash)

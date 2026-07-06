@@ -252,7 +252,7 @@ impl RouteSpecStore {
         }
 
         // Sort the routes by preference
-        routes.sort_by(|a, b| {
+        routes.sort_unstable_by(|a, b| {
             // Prefer routes that don't need testing
             let a_needs_testing = a.2.needs_testing(a.1.orderings(), cur_ts);
             let b_needs_testing = b.2.needs_testing(b.1.orderings(), cur_ts);

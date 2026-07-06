@@ -2,21 +2,19 @@ use super::*;
 pub use crate::storage_manager::MEMBER_ID_LENGTH;
 
 /// Simple DHT Schema (SMPL) Member
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[must_use]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
+#[api(eq, ord)]
 pub struct DHTSchemaSMPLMember {
     /// Member key
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     pub m_key: BareMemberId,
     /// Member subkey count
     pub m_cnt: u16,
 }
 
 /// Simple DHT Schema (SMPL)
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, JsonSchema)]
-#[must_use]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
+#[api(eq, ord)]
 pub struct DHTSchemaSMPL {
     /// Owner subkey count
     o_cnt: u16,

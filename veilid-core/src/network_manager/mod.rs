@@ -1362,6 +1362,7 @@ impl NetworkManager {
         }
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn restart_network(&self) {
         self.net().restart_network();
     }

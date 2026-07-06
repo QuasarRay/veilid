@@ -6,27 +6,16 @@ use super::*;
 ///   * `Sequencing::EnsureOrdered`: only `SequenceOrdering::Ordered` is acceptable, and if not available, the route will not be created or the message will not be sent
 ///
 /// No sequencing preference guarantees delivery under all conditions, as there is no queuing/buffering in the network
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    GetSize,
+#[apply(api_data_enum!)]
+#[api(
+    eq,
+    copy,
+    ord,
+    hash,
+    default,
+    get_size,
+    ts(from_wasm_abi, into_wasm_abi, namespace)
 )]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi, namespace)
-)]
-#[must_use]
 // Ordering here matters, >= is used to check strength of sequencing requirement
 pub enum Sequencing {
     /// Any `SequenceOrdering` is acceptable, but `SequenceOrdering::Unordered` will be chosen if available
@@ -101,9 +90,8 @@ impl FromStr for Sequencing {
 ///
 /// Neither SequenceOrdering guarantees delivery under all conditions, as there is no queuing/buffering in the network
 #[allow(clippy::derived_hash_with_manual_eq)]
-#[derive(
-    Debug, Default, PartialOrd, Ord, EnumSetType, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Debug, Default, PartialOrd, Ord, EnumSetType, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
@@ -185,27 +173,16 @@ pub type SequenceOrderingSet = EnumSet<SequenceOrdering>;
 /// Choice of nodes to include in allocated routes
 /// * `Stability::LowLatency`: prefer nodes with low latency, but may be unreliable and require route reallocation
 /// * `Stability::Reliable`: prefer nodes with reliable uptime, but may have higher latency
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    GetSize,
+#[apply(api_data_enum!)]
+#[api(
+    eq,
+    copy,
+    ord,
+    hash,
+    default,
+    get_size,
+    ts(from_wasm_abi, into_wasm_abi, namespace)
 )]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi, namespace)
-)]
-#[must_use]
 // Ordering here matters, >= is used to check strength of stability requirement
 pub enum Stability {
     /// Prefer nodes with low latency, but may be unreliable and require route reallocation
@@ -251,10 +228,8 @@ impl FromStr for Stability {
 /// The choice of safety route to include in compiled routes.
 /// * `SafetySelection::Unsafe`: don't use a safety route, only specify the sequencing preference
 /// * `SafetySelection::Safe`: use a safety route and parameters specified by a SafetySpec.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, GetSize,
-)]
-#[must_use]
+#[apply(api_data_enum!)]
+#[api(eq, ord, hash, get_size)]
 pub enum SafetySelection {
     /// Don't use a safety route, only specify the sequencing preference.
     Unsafe(Sequencing),
@@ -289,25 +264,11 @@ impl fmt::Display for SafetySelection {
 }
 
 /// Options for safety routes (sender privacy).
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    GetSize,
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ord, hash, default, get_size)]
 pub struct SafetySpec {
     /// Preferred safety route set id if it still exists.
-    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
     #[serde(default)]
     pub preferred_route: Option<RouteId>,
     /// If zero this will be set to to the default route hop count
@@ -357,22 +318,8 @@ impl fmt::Display for SafetySpec {
 }
 
 /// Options for private routes (receiver privacy).
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    GetSize,
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ord, hash, default, get_size)]
 pub struct PrivateSpec {
     /// Empty value here will use all the available crypto kinds
     #[serde(default)]

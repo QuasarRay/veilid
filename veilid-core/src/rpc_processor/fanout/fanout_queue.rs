@@ -313,7 +313,7 @@ impl<'a> FanoutQueue<'a> {
         }
 
         // Sort the node list
-        self.sorted_nodes.sort_by(&self.node_sort);
+        self.sorted_nodes.sort_unstable_by(&self.node_sort);
 
         // Disqualify any nodes that can be
         self.disqualify(cur_ts);

@@ -50,7 +50,7 @@ impl RelayRequirements {
 
         // Get the dial info list in preferred deterministic order
         let mut dial_info_list = rdd.dial_info_details().clone();
-        dial_info_list.sort_by(DialInfoDetail::ordered_sequencing_sort);
+        dial_info_list.sort_unstable_by(DialInfoDetail::ordered_sequencing_sort);
 
         // Start with all possible combinations we might need to have relays for
         let mut need_relay_transports = HashSet::<TransportType>::new();
@@ -175,7 +175,7 @@ impl RelayCompiler {
 
         // For all for the relay's dial info, see if it matches a protocol+address type we need covered
         let mut dial_info_list = relay_peer_info.node_info().dial_info_detail_list().to_vec();
-        dial_info_list.sort_by(DialInfoDetail::ordered_sequencing_sort);
+        dial_info_list.sort_unstable_by(DialInfoDetail::ordered_sequencing_sort);
 
         // Determine for this relay, if there are dialinfo that are reachable with our node's
         // dialinfo filter, and which ordering modes can be satisfied by those flows

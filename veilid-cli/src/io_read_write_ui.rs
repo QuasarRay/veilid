@@ -10,7 +10,6 @@ use futures_util::{
 };
 use indent::indent_by;
 use stop_token::future::FutureExt as StopTokenFutureExt;
-use stop_token::*;
 use veilid_tools::AsyncMutex;
 
 use flexi_logger::writers::LogWriter;

@@ -34,9 +34,15 @@ pub mod async_peek_stream;
 pub mod bytes_writer;
 /// Broadcast stream that hands each subscriber its own clone of every item.
 pub mod clone_stream;
+/// Dedicated FIFO thread pool for heavy CPU work.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod cpu_pool;
 /// parking_lot deadlock-detector watchdog (enabled by the `debug-locks` feature).
 #[cfg(feature = "debug-locks")]
 pub mod deadlock_detector;
+/// Debugger attachment detection and wait-for-attach.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod debugging;
 /// Runs futures to completion in the background and routes their results to a stream.
 pub mod deferred_stream_processor;
 /// Subscribe/publish event bus for type-keyed events.
@@ -57,6 +63,9 @@ pub mod formatting;
 pub mod future_queue;
 /// Pool that races spawned futures and optionally reports their completion.
 pub mod future_race_completion;
+/// UPnP gateway discovery and port mapping.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod igd;
 /// Periodic interval timer driving an async callback.
 pub mod interval;
 /// IP address paired with a port.
@@ -98,6 +107,11 @@ pub mod split_url;
 pub mod startup_lock;
 /// Interning of borrowed strings into `&'static str`.
 pub mod static_string_table;
+/// Drop-triggered cancellation tokens and deadline-bounded future combinators.
+pub mod stop_token;
+/// Total system memory query.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod system_info;
 /// Per-tag lock table serializing access by key.
 pub mod tag_lock;
 /// Self-rescheduling periodic task with single-instance run guarantees.
@@ -111,6 +125,7 @@ pub mod tools;
 /// `parking_lot::Mutex` wrapper that records the holder for debugging.
 pub mod tracked_mutex;
 /// Backtrace capture that trims runtime frames and shortens paths.
+#[cfg(feature = "backtrace")]
 pub mod trim_backtrace;
 /// In-process simulated network for deterministic testing.
 #[cfg(feature = "virtual-network")]
@@ -118,6 +133,9 @@ pub mod virtual_network;
 /// Browser/WASM environment and address-family detection.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub mod wasm_tools;
+/// Tracing layer reporting to the browser console and performance timeline.
+#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "tracing"))]
+pub mod wasm_tracing;
 
 ///////////////////////////////////////////////////////////////
 // Veilid-tools Prelude
@@ -208,9 +226,15 @@ pub use async_peek_stream::*;
 pub use bytes_writer::*;
 #[doc(inline)]
 pub use clone_stream::*;
+#[doc(inline)]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use cpu_pool::*;
 #[cfg(feature = "debug-locks")]
 #[doc(inline)]
 pub use deadlock_detector::*;
+#[doc(inline)]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use debugging::*;
 #[doc(inline)]
 pub use deferred_stream_processor::*;
 #[doc(inline)]
@@ -273,6 +297,11 @@ pub use startup_lock::*;
 #[doc(inline)]
 pub use static_string_table::*;
 #[doc(inline)]
+pub use stop_token::{StopSource, StopToken, TimedOutError};
+#[doc(inline)]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use system_info::*;
+#[doc(inline)]
 pub use tag_lock::*;
 #[doc(inline)]
 pub use tick_task::*;
@@ -285,6 +314,7 @@ pub use tools::*;
 #[doc(inline)]
 pub use tracked_mutex::*;
 #[doc(inline)]
+#[cfg(feature = "backtrace")]
 pub use trim_backtrace::*;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub use wasm_tools::*;
@@ -315,7 +345,6 @@ use bytes::*;
 use cfg_if::*;
 use futures_util::{AsyncRead, AsyncWrite};
 use parking_lot::*;
-use stop_token::*;
 use thiserror::Error as ThisError;
 
 // Re-exports for other crates

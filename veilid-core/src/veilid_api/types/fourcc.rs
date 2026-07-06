@@ -15,9 +15,9 @@ macro_rules! fourcc_type {
                 Eq,
                 Serialize,
                 Deserialize,
-                JsonSchema,
                 GetSize,
             )]
+            #[cfg_attr(feature = "schemars", derive(JsonSchema))]
             #[serde(try_from = "String", into = "String")]
             #[must_use]
             #[cfg_attr(

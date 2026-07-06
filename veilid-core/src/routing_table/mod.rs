@@ -1,6 +1,7 @@
 mod bucket;
 mod bucket_entry;
 mod bucket_entry_snapshot;
+#[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
 mod debug;
 mod find_nodes;
 #[cfg(feature = "geolocation")]
@@ -1039,6 +1040,7 @@ impl RoutingTable {
 
     /// Attempt to empty the routing table
     /// May not empty buckets completely if there are existing node_refs
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub async fn purge_buckets(&self) -> EyreResult<()> {
         // Purge route spec store too because it refers to noderefs
         self.route_spec_store().purge().await?;
@@ -1063,6 +1065,7 @@ impl RoutingTable {
     }
 
     /// Attempt to remove last_connections from entries
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn purge_last_connections(&self) {
         self.inner.write().purge_last_connections();
     }

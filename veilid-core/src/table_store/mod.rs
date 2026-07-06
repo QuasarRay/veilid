@@ -28,19 +28,15 @@ const FLUSH_TABLES_INTERVAL_SECS: u32 = 60;
 const CLEANUP_TABLES_INTERVAL_SECS: u32 = 600;
 
 /// Description of column
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct ColumnInfo {
     pub key_count: AlignedU64,
 }
 
 /// IO Stats for table
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct IOStatsInfo {
     /// Number of transaction.
     pub transactions: AlignedU64,
@@ -74,10 +70,8 @@ pub struct IOStatsInfo {
 }
 
 /// Description of table
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct TableInfo {
     /// Internal table name
     pub table_name: String,

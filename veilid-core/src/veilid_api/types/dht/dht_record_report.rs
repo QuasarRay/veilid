@@ -1,7 +1,8 @@
 use super::*;
 
 /// DHT Record Report
-#[derive(Default, Clone, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Clone, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
@@ -119,24 +120,14 @@ impl fmt::Debug for DHTRecordReport {
 }
 
 /// DHT Record Report Scope
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Default,
-)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi, namespace)
+#[apply(api_data_enum!)]
+#[api(
+    eq,
+    copy,
+    ord,
+    hash,
+    default,
+    ts(from_wasm_abi, into_wasm_abi, namespace)
 )]
 pub enum DHTReportScope {
     /// Return only the local copy sequence numbers

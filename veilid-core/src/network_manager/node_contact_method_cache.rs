@@ -141,7 +141,7 @@ impl NodeContactMethodCache {
             self.cache_stats
         );
         let mut sorted_kinds: Vec<_> = self.contact_method_kind_stats.keys().collect();
-        sorted_kinds.sort();
+        sorted_kinds.sort_unstable();
         for kind in sorted_kinds {
             let kindstats = self.contact_method_kind_stats.get(kind).unwrap_or_log();
             out += &format!("  {:?}: {}\n", kind, kindstats);

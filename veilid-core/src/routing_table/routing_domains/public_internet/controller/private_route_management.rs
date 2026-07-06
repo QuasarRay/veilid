@@ -123,8 +123,8 @@ impl PublicInternetRoutingDomainController {
         });
 
         // Sort automatic routes by speed if we know the speed
-        automatic_safe_routes.sort_by(Self::route_sort_latency_fn);
-        automatic_unsafe_routes.sort_by(Self::route_sort_latency_fn);
+        automatic_safe_routes.sort_unstable_by(Self::route_sort_latency_fn);
+        automatic_unsafe_routes.sort_unstable_by(Self::route_sort_latency_fn);
 
         // Save up to N unpublished routes and test them
         let background_safety_route_count = DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT;

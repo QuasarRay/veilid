@@ -439,7 +439,7 @@ impl StorageManager {
                         .filter(|pnr| pnr.disposition == TransactCommandDisposition::Valid)
                         .filter_map(|pnr| pnr.opt_rtt.map(|rtt| rtt.as_u64()))
                         .collect();
-                    valid_rtts_us.sort();
+                    valid_rtts_us.sort_unstable();
                     let take = params
                         .required_strict_consensus_count
                         .min(valid_rtts_us.len());
@@ -542,7 +542,7 @@ impl StorageManager {
         }
 
         // Sort per node results by distance from record to assist with strict consensus checking
-        per_node_results.sort_by(|a, b| {
+        per_node_results.sort_unstable_by(|a, b| {
             let dist_a = params
                 .opaque_record_key
                 .to_hash_coordinate()

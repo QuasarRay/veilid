@@ -61,7 +61,6 @@ cfg_if! {
         }
     } else {
         use std::time::{SystemTime, UNIX_EPOCH};
-        use chrono::{Datelike, Timelike};
 
         /// Current wall-clock time as microseconds since the Unix epoch.
         #[must_use]
@@ -72,36 +71,66 @@ cfg_if! {
             }
         }
 
+        // Days since 1970-01-01 to (year, month, day); Howard Hinnant's civil_from_days
+        fn civil_from_days(days: i64) -> (i32, u32, u32) {
+            let z = days + 719468;
+            let era = if z >= 0 { z } else { z - 146096 } / 146097;
+            let doe = (z - era * 146097) as u64;
+            let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+            let y = yoe as i64 + era * 400;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+            let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+            ((y + if m <= 2 { 1 } else { 0 }) as i32, m, d)
+        }
+
+        // (year, month, day, hour, minute, second, millisecond) in UTC
+        fn utc_fields(micros: u64) -> (i32, u32, u32, u32, u32, u32, u32) {
+            let secs = micros / 1_000_000;
+            let (year, month, day) = civil_from_days((secs / 86400) as i64);
+            let tod = secs % 86400;
+            (
+                year,
+                month,
+                day,
+                (tod / 3600) as u32,
+                (tod % 3600 / 60) as u32,
+                (tod % 60) as u32,
+                ((micros % 1_000_000) / 1000) as u32,
+            )
+        }
+
         /// Format a microsecond Unix timestamp as a UTC string, omitting date fields that match the current time.
         #[must_use]
         pub fn human_timestamp(ts: u64) -> String {
-            let now = chrono::DateTime::<chrono::Utc>::from(SystemTime::now());
-            let date = chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + Duration::from_micros(ts));
+            let (n_year, n_month, n_day, ..) = utc_fields(get_raw_timestamp());
+            let (year, month, day, hour, minute, second, millis) = utc_fields(ts);
 
-            let show_year = now.year() != date.year();
-            let show_month = show_year || now.month() != date.month();
-            let show_date = show_month || now.day() != date.day();
+            let show_year = n_year != year;
+            let show_month = show_year || n_month != month;
+            let show_date = show_month || n_day != day;
 
             let s_year = if show_year {
-                format!("{:04}/",date.year())
+                format!("{:04}/", year)
             } else {
                 "".to_owned()
             };
             let s_month = if show_month {
-                format!("{:02}/",date.month())
+                format!("{:02}/", month)
             } else {
                 "".to_owned()
             };
             let s_date = if show_date {
-                format!("{:02}-",date.day())
+                format!("{:02}-", day)
             } else {
                 "".to_owned()
             };
             let s_time = format!("{:02}:{:02}:{:02}.{:04}",
-                date.hour(),
-                date.minute(),
-                date.second(),
-                date.nanosecond()/1_000_000
+                hour,
+                minute,
+                second,
+                millis
             );
             format!("{}{}{}{}",
                 s_year,

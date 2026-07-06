@@ -1,14 +1,8 @@
 use super::*;
 
 /// Default DHT Schema (DFLT)
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ord, ts(from_wasm_abi, into_wasm_abi))]
 pub struct DHTSchemaDFLT {
     /// Owner subkey count
     o_cnt: u16,

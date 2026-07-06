@@ -419,7 +419,7 @@ impl StorageManager {
                             .and_then(|nid| rtts_map.get(&nid).copied())
                     })
                     .collect();
-                consensus_rtts.sort();
+                consensus_rtts.sort_unstable();
                 let take = required_strict_consensus_count.min(consensus_rtts.len());
                 let bound_rtt = consensus_rtts
                     .into_iter()

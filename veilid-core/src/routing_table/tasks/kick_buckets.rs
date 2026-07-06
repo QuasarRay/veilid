@@ -52,7 +52,7 @@ impl RoutingTable {
                 // Iterate buckets backward, sort entries by closest distance first
                 'outer: for bucket in buckets.iter().rev() {
                     let mut entries = bucket.entries().collect::<Vec<_>>();
-                    entries.sort_by(|a, b| sort(a.0, b.0));
+                    entries.sort_unstable_by(|a, b| sort(a.0, b.0));
                     for (key, entry) in entries {
                         // See if this entry is a distance-metric capability node
                         // If not, disqualify it from this closest_nodes list

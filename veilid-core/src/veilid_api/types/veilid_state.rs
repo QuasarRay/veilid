@@ -1,13 +1,8 @@
 use super::*;
 
 /// Attachment abstraction for network 'signal strength'.
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(namespace, from_wasm_abi, into_wasm_abi)
-)]
-#[must_use]
+#[apply(api_data_enum!)]
+#[api(eq, copy, default, ts(namespace, from_wasm_abi, into_wasm_abi))]
 pub enum AttachmentState {
     /// Not attached to the network.
     #[default]
@@ -120,10 +115,8 @@ impl TryFrom<&str> for AttachmentState {
 }
 
 /// Describe the attachment state of the Veilid node
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct VeilidStateAttachment {
     /// Overall network quality (signal-strength bars).
     pub state: AttachmentState,
@@ -167,13 +160,11 @@ impl fmt::Display for VeilidStateAttachment {
 }
 
 /// Describe a recently accessed peer
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts)]
 pub struct PeerTableData {
     /// The node ids used by this peer
-    #[schemars(with = "Vec<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(type = "string[]")
@@ -202,10 +193,8 @@ impl fmt::Display for PeerTableData {
 }
 
 /// Describe the current network state of the Veilid node
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct VeilidStateNetwork {
     /// If the network has been started or not.
     pub started: bool,
@@ -217,7 +206,7 @@ pub struct VeilidStateNetwork {
     /// This is not an active connection table, nor is representative of the entire routing table.
     pub peers: Vec<PeerTableData>,
     /// The list of node ids for this node
-    #[schemars(with = "Vec<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
     #[cfg_attr(
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(type = "string[]")
@@ -244,16 +233,14 @@ impl fmt::Display for VeilidStateNetwork {
 }
 
 /// Describe a private or safety route change that has happened
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct VeilidRouteChange {
     /// If an allocated route dies or was released, it is listed here.
-    #[schemars(with = "Vec<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
     pub dead_routes: Vec<RouteId>,
     /// If an imported remote private route has died, it is listed here.
-    #[schemars(with = "Vec<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
     pub dead_remote_routes: Vec<RouteId>,
 }
 
@@ -280,10 +267,8 @@ impl fmt::Display for VeilidRouteChange {
 /// Currently this is only ever emitted once, however we reserve the right to
 /// add the ability to change the configuration or have it changed by the Veilid node
 /// itself during runtime.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
 pub struct VeilidStateConfig {
     /// If the Veilid node configuration has changed the full new config will be here.
     pub config: VeilidConfig,
@@ -296,13 +281,11 @@ impl fmt::Display for VeilidStateConfig {
 }
 
 /// Describe when DHT records have subkey values changed
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, ts)]
 pub struct VeilidValueChange {
     /// The DHT Record key that changed
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     pub key: RecordKey,
     /// The portion of the DHT Record's subkeys that have changed
     /// If the subkey range is empty, any watch present on the value has died.
@@ -332,14 +315,9 @@ impl fmt::Display for VeilidValueChange {
 
 /// An update from the veilid-core to the host application describing a change
 /// to the internal state of the Veilid node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi)
-)]
+#[apply(api_data_enum!)]
+#[api(eq, ts(into_wasm_abi))]
 #[serde(tag = "kind")]
-#[must_use]
 pub enum VeilidUpdate {
     /// A log message emitted by veilid-core.
     Log(Box<VeilidLog>),
@@ -399,14 +377,8 @@ impl fmt::Display for VeilidUpdate {
     }
 }
 /// A queriable state of the internals of veilid-core.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi)
-)]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-#[must_use]
+#[apply(api_data_struct!)]
+#[api(eq, default, ts(into_wasm_abi))]
 pub struct VeilidState {
     /// The current attachment state.
     pub attachment: Box<VeilidStateAttachment>,

@@ -120,17 +120,11 @@ macro_rules! apibail_already_initialized {
     };
 }
 
-#[derive(
-    ThisError, Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize, JsonSchema,
-)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(into_wasm_abi)
-)]
 /// Error type returned by all fallible Veilid API operations.
+#[apply(api_data_enum!)]
+#[api(eq, ord, ts(into_wasm_abi))]
+#[derive(ThisError)]
 #[serde(tag = "kind")]
-#[must_use]
 pub enum VeilidAPIError {
     /// The API was used before [VeilidAPI](crate::VeilidAPI) was attached, or after it was detached.
     #[error("Not initialized")]
@@ -166,7 +160,7 @@ pub enum VeilidAPIError {
     #[error("Key not found: {key}")]
     KeyNotFound {
         /// The record key that was not found.
-        #[schemars(with = "String")]
+        #[cfg_attr(feature = "schemars", schemars(with = "String"))]
         key: OpaqueRecordKey,
     },
     /// An internal invariant was violated; indicates a bug in Veilid itself.

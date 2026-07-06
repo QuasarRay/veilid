@@ -1,3 +1,20 @@
+**UNRELEASED**
+
+- Optimizations:
+  - veilid-wasm and veilid-flutter WASM blob size greatly reduced (-47%)
+  - Duplicated crates consolidated
+  - Compile times improved
+
+- veilid-core:
+  - Capnp updated 0.25 -> 0.26
+  - Macros introduced in veilid-core to visually improve API functions and strip pasted boilerplate
+
+- veilid-tools:
+  - Absorbed unmaintained crates forks: 'igd', 'stop_token', 'tracing_wasm', 'bugsalot'. Stripped out functionality we don't use. 
+
+- veilid-cli:
+  - Forks of `cursive` and related crates eliminated in favor of mainline
+
 **Changed in Veilid 0.5.5**
 
 - Bug Fix Release:

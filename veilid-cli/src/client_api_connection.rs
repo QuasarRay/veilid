@@ -9,7 +9,7 @@ use stop_token::{future::FutureExt as _, StopSource};
 
 cfg_if! {
     if #[cfg(feature="rt-async-std")] {
-        use futures::{AsyncBufReadExt, AsyncWriteExt};
+        use futures_util::io::{AsyncBufReadExt, AsyncWriteExt};
         use async_std::io::BufReader;
     } else if #[cfg(feature="rt-tokio")] {
         use tokio::io::AsyncBufReadExt;

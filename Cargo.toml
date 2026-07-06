@@ -20,8 +20,6 @@ edition = "2021"
 rust-version = "1.89.0"
 
 [patch.crates-io]
-cursive = { git = "https://gitlab.com/veilid/cursive.git" }
-cursive_core = { git = "https://gitlab.com/veilid/cursive.git" }
 
 # For local development
 # keyring-manager = { path = "../keyring-manager" }
@@ -29,11 +27,42 @@ cursive_core = { git = "https://gitlab.com/veilid/cursive.git" }
 # keyvaluedb-memorydb = { path = "../keyvaluedb/keyvaluedb-memorydb" }
 # keyvaluedb-sqlite = { path = "../keyvaluedb/keyvaluedb-sqlite" }
 # keyvaluedb-web = { path = "../keyvaluedb/keyvaluedb-web" }
-# igd = { package = "veilid-igd", path = "../rust-igd" }
 
+# Size-optimized overall; crypto packages below stay at full opt for throughput
 [profile.release]
-opt-level = 3
+opt-level = "z"
 lto = true
+panic = "abort"
+codegen-units = 1
+
+[profile.release.package.curve25519-dalek]
+opt-level = 3
+[profile.release.package.ed25519-dalek]
+opt-level = 3
+[profile.release.package.x25519-dalek]
+opt-level = 3
+[profile.release.package.chacha20poly1305]
+opt-level = 3
+[profile.release.package.chacha20]
+opt-level = 3
+[profile.release.package.poly1305]
+opt-level = 3
+[profile.release.package.blake3]
+opt-level = 3
+[profile.release.package.blake2]
+opt-level = 3
+[profile.release.package.sha2]
+opt-level = 3
+[profile.release.package.argon2]
+opt-level = 3
+[profile.release.package.cipher]
+opt-level = 3
+[profile.release.package.digest]
+opt-level = 3
+[profile.release.package.crypto-common]
+opt-level = 3
+[profile.release.package.generic-array]
+opt-level = 3
 
 [profile.dev.package.backtrace]
 opt-level = 3

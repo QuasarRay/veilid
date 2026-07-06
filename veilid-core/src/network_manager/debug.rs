@@ -16,6 +16,7 @@ impl NetworkManager {
         out
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn debug(&self) -> String {
         let stats = self.get_stats();
 

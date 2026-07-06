@@ -3,10 +3,10 @@ mod sizes;
 
 use super::*;
 
-use argon2::password_hash::Salt;
+use argon2::password_hash::phc::Salt;
 use blake3digest512::Blake3Digest512;
 use data_encoding::BASE64URL_NOPAD;
-use digest::rand_core::RngCore;
+use digest::rand_core::Rng as _;
 use digest::Digest;
 const NONE_AEAD_OVERHEAD: usize = NONE_PUBLIC_KEY_LENGTH;
 /// [`CryptoKind`] fourcc identifying the NONE cryptosystem.

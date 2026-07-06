@@ -12,11 +12,8 @@ pub(in crate::storage_manager) use per_node_key::*;
 
 use super::*;
 
-use serde_with::serde_as;
-
 impl_veilid_log_facility!("stor");
 
-#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundWatchManager {
     // Registry for logging
@@ -26,7 +23,7 @@ pub(in crate::storage_manager) struct OutboundWatchManager {
     #[serde(skip)]
     pub outbound_watches: HashMap<OpaqueRecordKey, OutboundWatch>,
     /// Last known active watch per node+record
-    #[serde_as(as = "Vec<(_, _)>")]
+    #[serde(with = "serialize_hash_map_as_pairs")]
     pub per_node_states: HashMap<PerNodeKey, OutboundWatchPerNodeState>,
     /// Value changed updates that need inpection to determine if they should be reported
     #[serde(skip)]
@@ -38,7 +35,7 @@ impl fmt::Display for OutboundWatchManager {
         let mut out = format!("outbound_watches({}): [\n", self.outbound_watches.len());
         {
             let mut keys = self.outbound_watches.keys().cloned().collect::<Vec<_>>();
-            keys.sort();
+            keys.sort_unstable();
 
             for k in keys {
                 let v = self.outbound_watches.get(&k).unwrap_or_log();
@@ -49,7 +46,7 @@ impl fmt::Display for OutboundWatchManager {
         out += &format!("per_node_states({}): [\n", self.per_node_states.len());
         {
             let mut keys = self.per_node_states.keys().cloned().collect::<Vec<_>>();
-            keys.sort();
+            keys.sort_unstable();
 
             for k in keys {
                 let v = self.per_node_states.get(&k).unwrap_or_log();
@@ -67,7 +64,7 @@ impl fmt::Display for OutboundWatchManager {
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>();
-            keys.sort();
+            keys.sort_unstable();
 
             for k in keys {
                 let v = self.needs_change_inspection.get(&k).unwrap_or_log();

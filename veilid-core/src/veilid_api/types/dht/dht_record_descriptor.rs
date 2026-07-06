@@ -1,19 +1,18 @@
 use super::*;
 
 /// DHT Record Descriptor
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[must_use]
-#[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
+#[apply(api_data_struct!)]
+#[api(eq, ord)]
 pub struct DHTRecordDescriptor {
     /// DHT Key = Hash(ownerKeyKind) of: [ ownerKeyValue, schema ]
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     key: RecordKey,
     /// The public key of the owner
-    #[schemars(with = "String")]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     owner: PublicKey,
     /// If this key is being created: Some(the secret key of the owner)
     /// If this key is just being opened: None
-    #[schemars(with = "Option<String>")]
+    #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
     owner_secret: Option<SecretKey>,
     /// The schema in use associated with the key
     schema: DHTSchema,

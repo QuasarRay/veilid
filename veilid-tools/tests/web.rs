@@ -15,11 +15,10 @@ pub fn setup() -> () {
         console_error_panic_hook::set_once();
         cfg_if! {
             if #[cfg(feature = "tracing")] {
-                let config = veilid_tracing_wasm::WASMLayerConfig::new()
-                    .with_report_logs_in_timings(false);
-                    .with_max_level(Level::INFO);
-                    .with_console_config(veilid_tracing_wasm::ConsoleConfig::ReportWithoutConsoleColor);
-                veilid_tracing_wasm::set_as_global_default_with_config(config);
+                let config = veilid_tools::wasm_tracing::WasmLayerConfig::new()
+                    .remove_timings()
+                    .remove_color();
+                let _ = veilid_tools::wasm_tracing::set_as_global_default_with_config(config);
             } else {
                 wasm_logger::init(wasm_logger::Config::default());
             }

@@ -38,7 +38,7 @@ impl RelayInfo {
         mut dial_info_detail_list: Vec<DialInfoDetail>,
         relay_kind: RelayKind,
     ) -> Self {
-        dial_info_detail_list.sort();
+        dial_info_detail_list.sort_unstable();
 
         // Defensively strip any dial info that requires a signal
         dial_info_detail_list.retain(|did| !did.class.requires_signal());

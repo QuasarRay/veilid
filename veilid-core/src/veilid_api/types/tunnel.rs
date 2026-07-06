@@ -6,18 +6,16 @@ use super::*;
 pub type TunnelId = AlignedU64;
 
 #[cfg(feature = "unstable-tunnels")]
-#[derive(
-    Copy, Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize, JsonSchema,
-)]
+#[apply(api_data_enum!)]
+#[api(eq, copy, ord)]
 pub enum TunnelMode {
     Raw = 0,
     Turn = 1,
 }
 
 #[cfg(feature = "unstable-tunnels")]
-#[derive(
-    Copy, Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize, JsonSchema,
-)]
+#[apply(api_data_enum!)]
+#[api(eq, copy, ord)]
 pub enum TunnelError {
     BadId = 0,        // Tunnel ID was rejected
     NoEndpoint = 1,   // Endpoint was unreachable
@@ -26,7 +24,8 @@ pub enum TunnelError {
 }
 
 #[cfg(feature = "unstable-tunnels")]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct TunnelEndpoint {
     pub mode: TunnelMode,
     pub description: String, // XXX: TODO
@@ -43,7 +42,8 @@ impl Default for TunnelEndpoint {
 }
 
 #[cfg(feature = "unstable-tunnels")]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct FullTunnel {
     pub id: TunnelId,
     pub timeout: TimestampDuration,
@@ -52,7 +52,8 @@ pub struct FullTunnel {
 }
 
 #[cfg(feature = "unstable-tunnels")]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct PartialTunnel {
     pub id: TunnelId,
     pub timeout: TimestampDuration,

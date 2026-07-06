@@ -302,6 +302,7 @@ impl AddressFilter {
         self.is_ip_addr_punished_inner(&inner, ipblock)
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn clear_punishments(&self) {
         let mut inner = self.inner.lock();
         inner.punishments_by_ip4.clear();
@@ -333,6 +334,7 @@ impl AddressFilter {
         };
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn forgive_ip_addr(&self, addr: IpAddr) {
         let mut inner = self.inner.lock();
         self.forgive_ip_addr_inner(&mut inner, addr);
@@ -381,6 +383,7 @@ impl AddressFilter {
             .or_insert(punishment);
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn forgive_node_id(&self, node_id: NodeId) {
         let mut inner = self.inner.lock();
         self.forgive_node_id_inner(&mut inner, node_id)

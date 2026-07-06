@@ -179,7 +179,7 @@ impl Bucket {
                     (k.clone(), v.clone(), state, time_added)
                 })
                 .collect();
-        sorted_entries.sort_by(|a, b| -> core::cmp::Ordering {
+        sorted_entries.sort_unstable_by(|a, b| -> core::cmp::Ordering {
             // If node ids are equal, they are equal
             if a.0 == b.0 {
                 return core::cmp::Ordering::Equal;

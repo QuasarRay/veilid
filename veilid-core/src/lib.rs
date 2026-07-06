@@ -48,6 +48,8 @@ cfg_if::cfg_if! {
 #[macro_use]
 extern crate alloc;
 
+mod macros;
+
 mod attachment_manager;
 #[cfg(feature = "unstable-blockstore")]
 mod block_store;
@@ -174,9 +176,12 @@ use eyre::{bail, eyre, Report as EyreReport, Result as EyreResult, WrapErr};
 use futures_util::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use get_size2::*;
 use indent::*;
+use macro_rules_attribute::apply;
+use macros::*;
+#[cfg(feature = "schemars")]
 use schemars::JsonSchema;
 use serde::*;
-use stop_token::{future::FutureExt as _, *};
+use stop_token::future::FutureExt as _;
 use thiserror::Error as ThisError;
 use tracing::*;
 use veilid_tools::bytes::*;

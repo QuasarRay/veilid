@@ -33,12 +33,20 @@ pub(crate) fn decompress_size_prepended(input: &[u8], max_size: usize) -> Veilid
     match block::decompress(input, uncompressed_size) {
         Ok(v) => Ok(v),
         Err(e) => {
+            #[cfg(feature = "backtrace")]
             apibail_generic!(
                 "failed to decompress: {}:data_len={}\ndata={}\nbacktrace:\n{:#?}",
                 e,
                 input.len(),
                 human_byte_data(input, Some(256)),
                 backtrace::Backtrace::new()
+            );
+            #[cfg(not(feature = "backtrace"))]
+            apibail_generic!(
+                "failed to decompress: {}:data_len={}\ndata={}",
+                e,
+                input.len(),
+                human_byte_data(input, Some(256))
             );
         }
     }

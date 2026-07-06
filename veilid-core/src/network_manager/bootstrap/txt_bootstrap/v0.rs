@@ -75,7 +75,7 @@ impl NetworkManager {
         }
 
         let mut all_records_sorted = all_records.into_iter().collect::<Vec<_>>();
-        all_records_sorted.sort();
+        all_records_sorted.sort_unstable();
 
         Ok(all_records_sorted)
     }

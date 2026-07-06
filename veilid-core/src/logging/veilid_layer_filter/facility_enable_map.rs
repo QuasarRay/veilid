@@ -19,6 +19,7 @@ impl FacilityEnableMap {
     /// Remove all facilities
     pub fn clear(&mut self) {
         self.name_map.clear();
+        self.tag_map.clear();
     }
 
     /// Removes the exact facility name and its `::`-hierarchy descendants.

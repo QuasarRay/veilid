@@ -24,6 +24,9 @@ pub fn veilid_core::public_key_try_untyped_vld0::serialize<S: serde_core::ser::S
 pub mod veilid_core::serialize_arc
 pub fn veilid_core::serialize_arc::deserialize<'de, T: serde_core::de::Deserialize<'de>, D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<alloc::sync::Arc<T>, <D as serde_core::de::Deserializer>::Error>
 pub fn veilid_core::serialize_arc::serialize<T: serde_core::ser::Serialize, S: serde_core::ser::Serializer>(&alloc::sync::Arc<T>, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub mod veilid_core::serialize_hash_map_as_pairs
+pub fn veilid_core::serialize_hash_map_as_pairs::deserialize<'de, K, V, D>(D) -> core::result::Result<std::collections::hash::map::HashMap<K, V>, <D as serde_core::de::Deserializer>::Error> where K: serde_core::de::Deserialize<'de> + core::cmp::Eq + core::hash::Hash, V: serde_core::de::Deserialize<'de>, D: serde_core::de::Deserializer<'de>
+pub fn veilid_core::serialize_hash_map_as_pairs::serialize<K: serde_core::ser::Serialize, V: serde_core::ser::Serialize, S: serde_core::ser::Serializer>(&std::collections::hash::map::HashMap<K, V>, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 pub mod veilid_core::serialize_range_set_blaze
 pub fn veilid_core::serialize_range_set_blaze::deserialize<'de, T: range_set_blaze::integer::Integer + serde_core::de::Deserialize<'de>, D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<range_set_blaze::set::RangeSetBlaze<T>, <D as serde_core::de::Deserializer>::Error>
 pub fn veilid_core::serialize_range_set_blaze::serialize<T: range_set_blaze::integer::Integer + serde_core::ser::Serialize, S: serde_core::ser::Serializer>(&range_set_blaze::set::RangeSetBlaze<T>, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>

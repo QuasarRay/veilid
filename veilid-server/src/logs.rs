@@ -87,7 +87,7 @@ impl Logs {
 
         // Terminal logger
         if settingsr.logging.terminal.enabled {
-            let timer = time::format_description::parse("[hour]:[minute]:[second]")
+            let timer = time::format_description::parse_borrowed::<2>("[hour]:[minute]:[second]")
                 .expect("invalid time format");
 
             // Get time offset for local timezone from UTC

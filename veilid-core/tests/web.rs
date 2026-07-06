@@ -15,11 +15,11 @@ pub fn setup() -> () {
     SETUP_ONCE.call_once(|| {
         console_error_panic_hook::set_once();
 
-        let config = veilid_tracing_wasm::WasmLayerConfig::new()
+        let config = veilid_core::tools::wasm_tracing::WasmLayerConfig::new()
             .remove_timings()
             .with_max_level(Level::INFO)
             .remove_color();
-        let _ = veilid_tracing_wasm::set_as_global_default_with_config(config);
+        let _ = veilid_core::tools::wasm_tracing::set_as_global_default_with_config(config);
     });
 }
 

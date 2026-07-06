@@ -370,6 +370,7 @@ impl Crypto {
         Ok(())
     }
 
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub(crate) fn debug_info_nodeinfo(&self) -> String {
         let inner = self.inner.lock();
         format!(

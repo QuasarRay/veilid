@@ -3,7 +3,6 @@
 use super::*;
 use futures_util::stream::FuturesUnordered;
 use igd_manager::{IGDAddressType, IGDProtocolType};
-use stop_token::future::FutureExt as _;
 
 impl_veilid_log_facility!("net");
 
@@ -372,7 +371,7 @@ impl DiscoveryContext {
         }
 
         // Try to make preferential port come first
-        external_address_infos.sort_by(|a, b| {
+        external_address_infos.sort_unstable_by(|a, b| {
             let acmp = a.address.ip_addr().cmp(&b.address.ip_addr());
             if acmp != cmp::Ordering::Equal {
                 return acmp;

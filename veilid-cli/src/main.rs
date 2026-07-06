@@ -80,9 +80,8 @@ fn main() -> Result<(), String> {
         let args = CmdlineArgs::parse();
 
         if args.wait_for_debug {
-            use bugsalot::debugger;
-            debugger::wait_until_attached(None)
-                .expect_or_log("state() not implemented on this platform");
+            veilid_tools::wait_until_debugger_attached(None)
+                .expect_or_log("debugger state not implemented on this platform");
         }
 
         // Attempt to load configuration
@@ -126,7 +125,7 @@ fn main() -> Result<(), String> {
                 if #[cfg(feature="rt-async-std")] {
                     let (in_obj, out_obj) =
                         if command_file.to_string_lossy() == "-" {
-                            (Box::pin(async_std::io::stdin()) as Pin<Box<dyn futures::AsyncRead + Send>>, async_std::io::stdout())
+                            (Box::pin(async_std::io::stdin()) as Pin<Box<dyn futures_util::AsyncRead + Send>>, async_std::io::stdout())
                         } else {
                             let f = match async_std::fs::File::open(command_file).await {
                                 Ok(v) => v,
@@ -134,7 +133,7 @@ fn main() -> Result<(), String> {
                                     return Err(e.to_string());
                                 }
                             };
-                            (Box::pin(f) as Pin<Box<dyn futures::AsyncRead + Send>>, async_std::io::stdout())
+                            (Box::pin(f) as Pin<Box<dyn futures_util::AsyncRead + Send>>, async_std::io::stdout())
                         };
                 } else if #[cfg(feature="rt-tokio")] {
                     use tokio_util::compat::{TokioAsyncWriteCompatExt, TokioAsyncReadCompatExt};
@@ -164,7 +163,7 @@ fn main() -> Result<(), String> {
             cfg_if! {
                 if #[cfg(feature="rt-async-std")] {
                     let in_str = format!("{}\n", evaluate);
-                    let (in_obj, out_obj) = (futures::io::Cursor::new(in_str), async_std::io::stdout());
+                    let (in_obj, out_obj) = (futures_util::io::Cursor::new(in_str), async_std::io::stdout());
                 } else if #[cfg(feature="rt-tokio")] {
                     use tokio_util::compat::{TokioAsyncWriteCompatExt};
                     let in_str = format!("{}\n", evaluate);
@@ -199,7 +198,6 @@ fn main() -> Result<(), String> {
             specbuilder.default(settings.logging.level.into());
             specbuilder.module("cursive", LevelFilter::Off);
             specbuilder.module("cursive_core", LevelFilter::Off);
-            specbuilder.module("cursive_buffered_backend", LevelFilter::Off);
             specbuilder.module("tokio_util", LevelFilter::Off);
             specbuilder.module("mio", LevelFilter::Off);
             specbuilder.module("async_std", LevelFilter::Off);

@@ -3,6 +3,7 @@ use super::*;
 impl_veilid_log_facility!("net");
 
 impl NetworkManager {
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub async fn debug_info_txtrecord(&self, signing_key_pairs: KeyPairGroup) -> String {
         let routing_table = self.routing_table();
 

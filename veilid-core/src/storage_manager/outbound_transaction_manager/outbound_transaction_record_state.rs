@@ -389,7 +389,7 @@ impl OutboundTransactionRecordState {
 
         // Sort ascending; cutoff at index (m - k). At any T < cutoff, k nodes
         // have expiration > T (alive). At T >= cutoff, fewer than k remain.
-        active.sort();
+        active.sort_unstable();
         DurabilityExpiration::AliveUntil(active[active.len() - k])
     }
 

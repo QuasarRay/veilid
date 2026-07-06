@@ -2,6 +2,7 @@ use super::*;
 
 mod answer;
 mod coders;
+#[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
 mod debug;
 mod descriptor_mode;
 mod destination;
@@ -317,6 +318,7 @@ impl RPCProcessor {
     //////////////////////////////////////////////////////////////////////
 
     /// Get waiting app call id for debugging purposes
+    #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn get_app_call_ids(&self) -> Vec<OperationId> {
         self.waiting_app_call_table.get_operation_ids()
     }

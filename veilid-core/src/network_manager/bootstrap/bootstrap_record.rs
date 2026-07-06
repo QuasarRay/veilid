@@ -19,8 +19,8 @@ impl BootstrapRecord {
         timestamp_secs: Option<u64>,
         extra: Vec<String>,
     ) -> Self {
-        envelope_support.sort();
-        dial_info_details.sort();
+        envelope_support.sort_unstable();
+        dial_info_details.sort_unstable();
 
         Self {
             public_keys,
@@ -53,7 +53,7 @@ impl BootstrapRecord {
         for x in other.envelope_support {
             if !self.envelope_support.contains(&x) {
                 self.envelope_support.push(x);
-                self.envelope_support.sort();
+                self.envelope_support.sort_unstable();
             }
         }
         for did in other.dial_info_details {
@@ -61,7 +61,7 @@ impl BootstrapRecord {
                 self.dial_info_details.push(did);
             }
         }
-        self.dial_info_details.sort();
+        self.dial_info_details.sort_unstable();
         if let Some(ts) = self.timestamp_secs.as_mut() {
             if let Some(other_ts) = other.timestamp_secs {
                 // Use earliest timestamp if merging
@@ -123,7 +123,7 @@ impl BootstrapRecord {
         if some_hostname.is_none() || short_urls.is_empty() {
             bail!("No dial info for bootstrap host");
         }
-        short_urls.sort();
+        short_urls.sort_unstable();
         short_urls.dedup();
 
         let vcommon = format!(
@@ -324,7 +324,7 @@ impl BootstrapRecord {
             };
             envelope_support.push(es);
         }
-        envelope_support.sort();
+        envelope_support.sort_unstable();
         envelope_support.dedup();
 
         // Node Id
@@ -464,7 +464,7 @@ impl BootstrapRecord {
             };
             envelope_support.push(es);
         }
-        envelope_support.sort();
+        envelope_support.sort_unstable();
         envelope_support.dedup();
 
         // Public Keys

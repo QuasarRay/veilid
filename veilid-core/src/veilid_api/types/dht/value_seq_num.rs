@@ -6,9 +6,8 @@ use super::*;
     derive(Tsify),
     tsify(from_wasm_abi, into_wasm_abi)
 )]
-#[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[serde(transparent)]
 pub struct ValueSeqNum(Option<u32>);
 

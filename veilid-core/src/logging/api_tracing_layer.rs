@@ -156,12 +156,15 @@ impl ApiTracingLayer {
             .trim()
             .replace(char::REPLACEMENT_CHARACTER, "");
 
+        #[cfg(feature = "backtrace")]
         let backtrace = if log_level <= VeilidLogLevel::Error {
             let bt = backtrace::Backtrace::new();
             Some(format!("{:?}", bt).replace(char::REPLACEMENT_CHARACTER, ""))
         } else {
             None
         };
+        #[cfg(not(feature = "backtrace"))]
+        let backtrace = None;
 
         let log_update = VeilidUpdate::Log(Box::new(VeilidLog {
             log_level,

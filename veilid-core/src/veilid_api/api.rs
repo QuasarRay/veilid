@@ -6,6 +6,7 @@ impl_veilid_log_facility!("veilid_api");
 
 pub(super) struct VeilidAPIInner {
     context: Option<VeilidCoreContext>,
+    #[cfg(feature = "debug-api")]
     pub(super) debug_cache: debug::DebugCache,
 }
 
@@ -49,6 +50,7 @@ impl VeilidAPI {
         record_duration(|| Self {
             inner: Arc::new(Mutex::new(VeilidAPIInner {
                 context: Some(context),
+                #[cfg(feature = "debug-api")]
                 debug_cache: Default::default(),
             })),
         })
@@ -609,6 +611,7 @@ impl VeilidAPI {
         Ok(context.clone())
     }
 
+    #[cfg(feature = "debug-api")]
     pub(crate) fn with_debug_cache<R, F: FnOnce(&mut debug::DebugCache) -> R>(
         &self,
         callback: F,
