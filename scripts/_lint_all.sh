@@ -6,7 +6,7 @@ pushd $SCRIPTDIR/.. >/dev/null
 
 # Run one clippy over the workspace with the default host toolchain
 # (may differ from CI pinned toolchain, this step does not run in CI)
-env -u RUSTUP_TOOLCHAIN scripts/_clippy.sh $@
+env -u RUSTUP_TOOLCHAIN scripts/_clippy_host.sh $@
 
 # Rust clippy across all platforms with CI pinned toolchain
 scripts/_clippy_wasm32_unknown_unknown.sh $@
