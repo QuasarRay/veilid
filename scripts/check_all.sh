@@ -26,6 +26,15 @@ fi
 export RUSTUP_TOOLCHAIN="$RUST_VERSION"
 echo "Using CI-pinned Rust toolchain $RUST_VERSION."
 
+# The sub-scripts cross-compile (cargo-zigbuild) and check for these targets; install any the
+# pinned toolchain is missing, else the build fails with "can't find crate for core".
+for tgt in aarch64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-gnu wasm32-unknown-unknown; do
+    if ! rustup target list --installed | grep -qx "$tgt"; then
+        echo "Installing missing Rust target $tgt for $RUST_VERSION..."
+        rustup target add "$tgt"
+    fi
+done
+
 # docs.rs and the public-api check use the latest rolling nightly; require it up to date so
 # nightly-only lint/rustdoc drift is caught here rather than in CI.
 NIGHTLY_CHECK="$(rustup check 2>/dev/null | grep '^nightly-' || true)"
