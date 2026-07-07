@@ -176,15 +176,31 @@ if [ "$BUILDONLY" != 1 ] && [ "$INSTALL" = 1 ] && command -v rustup >/dev/null 2
 fi
 
 # Optional Android SDK (only with --android). NDK pinned exact (gradle path).
+# A set-but-empty ANDROID_HOME is bootstrapped from scratch (the SDK is
+# relocatable, no root needed) — CI points it into a cached prefix dir.
 if [ "$ANDROID" = 1 ]; then
     echo "-- Android SDK --"
-    if [ -n "${ANDROID_HOME:-}" ] && [ -d "$ANDROID_HOME" ]; then
+    if [ -n "${ANDROID_HOME:-}" ]; then
         SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-        i_ndk() { "$SDKM" "ndk;$REQ_NDK" "build-tools;$ANDROID_BUILD_TOOLS_VERSION" "cmake;$ANDROID_CMAKE_VERSION" \
-                  "platform-tools" "platforms;android-$ANDROID_PLATFORM_VERSION"; }
-        dep_have  "cmdline-tools" "$([ -x "$SDKM" ] && echo y)"                                  "install Android cmdline-tools"
+        i_clt() {
+            mkdir -p "$ANDROID_HOME/cmdline-tools" \
+            && curl -fsSL -o "/tmp/clt-$$.zip" "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
+            && rm -rf "$ANDROID_HOME/cmdline-tools/latest" \
+            && unzip -q -o "/tmp/clt-$$.zip" -d "$ANDROID_HOME/cmdline-tools" \
+            && rm -f "/tmp/clt-$$.zip" \
+            && mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" \
+            && sdk_accept_licenses
+        }
+        # yes|: a fresh SDK prompts for licenses; harmless on an accepted one. The
+        # subshell drops pipefail so yes's SIGPIPE (sdkmanager closes the pipe first)
+        # doesn't mask sdkmanager's real exit status.
+        sdk_accept_licenses() { ( set +o pipefail; yes | "$SDKM" --licenses >/dev/null ); }
+        i_ndk() { ( set +o pipefail; yes | "$SDKM" "ndk;$REQ_NDK" "build-tools;$ANDROID_BUILD_TOOLS_VERSION" "cmake;$ANDROID_CMAKE_VERSION" \
+                  "platform-tools" "platforms;android-$ANDROID_PLATFORM_VERSION" ); }
+        dep_have  "cmdline-tools" "$([ -x "$SDKM" ] && echo y)"                                  "bootstrap cmdline-tools into \$ANDROID_HOME" i_clt
         dep_exact "Android NDK"   "$([ -f "$ANDROID_HOME/ndk/$REQ_NDK/ndk-build" ] && echo "$REQ_NDK")" "$REQ_NDK" 1 i_ndk
-        dep_have  "adb"           "$(command -v adb)"                                            "add platform-tools to PATH"
+        # gradle builds need no adb on PATH; the SDK's own copy satisfies the check
+        dep_have  "adb"           "$([ -x "$ANDROID_HOME/platform-tools/adb" ] && echo y || command -v adb)" "add platform-tools to PATH"
     else
         dep_have "ANDROID_HOME" "" "install the Android SDK and export ANDROID_HOME (see install_linux_prerequisites notes)"
     fi

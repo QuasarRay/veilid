@@ -55,18 +55,30 @@ elif [[ "$1" == "android" ]]; then
     adb -s $ID wait-for-device
     # Install app
     adb -s $ID install -r ./app/build/outputs/apk/debug/app-debug.apk || { status=$?; popd >/dev/null; popd >/dev/null; exit $status; }
+    # Clear logcat so we only capture this run
+    adb -s $ID logcat -c
     # Start activity
     adb -s $ID shell am start-activity -W $APPID/.$ACTIVITYNAME
-    # Get the pid of the program
-    APP_PID=`adb -s $ID shell pidof -s $APPID`
-    # Print the logcat
-    adb -s $ID shell logcat --pid=$APP_PID veilid_tools:V *:S &
-    # Wait for the pid to be done
+    # Wait for the app process to finish (bounded so a hung test fails instead of blocking)
+    WAITED=0
     while [ "$(adb -s $ID shell pidof -s $APPID)" != "" ]; do
         sleep 1
+        WAITED=$((WAITED + 1))
+        if [ $WAITED -ge 300 ]; then
+            echo "Timed out waiting for tests to finish"
+            break
+        fi
     done
-    # Terminate logcat
-    kill %1
+    # Print the test output (progression + result), then assert on the completion marker
+    ANDROID_LOG="$(adb -s $ID logcat -d)"
+    echo "$ANDROID_LOG" | grep -E "TEST:|Starting unit tests|Finished unit tests|panic|FATAL EXCEPTION|AndroidRuntime" || true
+    if [[ "$ANDROID_LOG" == *"Finished unit tests"* ]]; then
+        echo "Android unit tests PASSED"
+        status=0
+    else
+        echo "Android unit tests FAILED or did not complete"
+        status=1
+    fi
     # Finished
     popd >/dev/null
 

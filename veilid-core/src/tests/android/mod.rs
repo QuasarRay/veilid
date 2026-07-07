@@ -4,14 +4,14 @@ use super::native::*;
 use crate::tests::*;
 use crate::*;
 use backtrace::Backtrace;
-use jni::{objects::JClass, objects::JObject, JNIEnv};
+use jni::{objects::JClass, objects::JObject, EnvUnowned};
 use std::panic;
 use tracing_subscriber::prelude::*;
 
 #[no_mangle]
 #[allow(non_snake_case)]
 pub extern "system" fn Java_com_veilid_veilid_1core_1android_1tests_MainActivity_run_1tests(
-    env: JNIEnv,
+    env: EnvUnowned,
     _class: JClass,
     ctx: JObject,
 ) {
@@ -21,7 +21,7 @@ pub extern "system" fn Java_com_veilid_veilid_1core_1android_1tests_MainActivity
     })
 }
 
-pub fn veilid_core_setup_android_tests(env: JNIEnv, ctx: JObject) {
+pub fn veilid_core_setup_android_tests(env: EnvUnowned, ctx: JObject) {
     veilid_core_setup_android(env, ctx);
 
     // Set up panic hook for backtraces

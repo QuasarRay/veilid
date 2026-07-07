@@ -4,12 +4,12 @@ use super::*;
 use std::backtrace::Backtrace;
 use std::panic;
 
-use jni::{objects::JClass, objects::JObject, JNIEnv};
+use jni::{objects::JClass, objects::JObject, EnvUnowned};
 
 #[no_mangle]
 #[allow(non_snake_case)]
 pub extern "system" fn Java_com_veilid_veilid_1tools_1android_1tests_MainActivity_run_1tests(
-    _env: JNIEnv,
+    _env: EnvUnowned,
     _class: JClass,
     _ctx: JObject,
 ) {

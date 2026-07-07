@@ -206,8 +206,8 @@ pub fn veilid_core::VeilidAPIError::shutdown() -> Self
 pub fn veilid_core::VeilidAPIError::timeout() -> Self
 pub fn veilid_core::VeilidAPIError::try_again<T: veilid_core::ToVeilidAPIErrorArgument>(T) -> Self
 pub fn veilid_core::VeilidAPIError::unimplemented<T: alloc::string::ToString>(T) -> Self
-impl core::convert::From<std::io::error::Error> for veilid_core::VeilidAPIError
-pub fn veilid_core::VeilidAPIError::from(std::io::error::Error) -> Self
+impl core::convert::From<core::io::error::Error> for veilid_core::VeilidAPIError
+pub fn veilid_core::VeilidAPIError::from(core::io::error::Error) -> Self
 pub enum veilid_core::VeilidConfigAddressType
 pub veilid_core::VeilidConfigAddressType::Ipv4
 pub veilid_core::VeilidConfigAddressType::Ipv6

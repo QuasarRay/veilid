@@ -216,7 +216,7 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 ] }
 
 # Data structures
-keyring-manager = "=0.8.2"
+keyring-manager = "=0.8.3"
 keyvaluedb-sqlite = "=0.1.8"
 
 # Network

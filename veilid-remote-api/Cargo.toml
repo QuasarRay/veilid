@@ -23,6 +23,7 @@ rt-async-std = ["veilid-core/default-async-std"]
 debug-locks = ["veilid-core/debug-locks"]
 
 [lib]
+crate-type = ["staticlib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
