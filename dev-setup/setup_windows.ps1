@@ -51,6 +51,13 @@ Get-Content (Join-Path $ScriptDir "..\.dagger\versions.env") | ForEach-Object {
     if ($_ -match '^\s*([A-Z_][A-Z0-9_]*)="?([^"#]*?)"?\s*(#.*)?$') { $V[$Matches[1]] = $Matches[2] }
 }
 
+# Prune docs/man/locales from a PortableGit tree — unused in builds, thousands of tiny files
+function SlimGitTree($root) {
+    foreach ($d in "mingw64\share\doc","mingw64\share\man","mingw64\share\locale","usr\share\doc","usr\share\man","usr\share\locale") {
+        Remove-Item (Join-Path $root $d) -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # -Prefix: contained toolchain root. CARGO_HOME/RUSTUP_HOME steer rustup-init; $ToolRoot
 # replaces LOCALAPPDATA for the veilid-* tool dirs.
 if ($Prefix) {
@@ -61,6 +68,7 @@ if ($Prefix) {
     # Slim caches populated before minimal profile was pinned (docs = ~49k files)
     Get-ChildItem (Join-Path $env:RUSTUP_HOME "toolchains") -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item (Join-Path $_.FullName "share\doc") -Recurse -Force -ErrorAction SilentlyContinue }
+    SlimGitTree (Join-Path $Prefix "veilid-git")
 } else { $ToolRoot = $env:LOCALAPPDATA }
 
 # ---- check/report engine ---------------------------------------------------
@@ -179,6 +187,7 @@ $iGit  = {
         # PortableGit is a 7-Zip SFX; -y -o extracts silently
         Start-Process -Wait -FilePath $exe -ArgumentList "-y", "-o`"$PortableGitRoot`""
         Remove-Item $exe -Force
+        SlimGitTree $PortableGitRoot
     } else { WinPkg "Git.Git" }
 }
 # bash.exe lives in Git\bin (full Git / PortableGit), not Git\cmd — the Windows build
