@@ -385,6 +385,7 @@ impl CursiveUI {
         Self::button_attach(s).set_enabled(enabled);
     }
 
+    #[allow(dead_code)]
     fn display_string_dialog_cb(
         s: &mut Cursive,
         title: String,

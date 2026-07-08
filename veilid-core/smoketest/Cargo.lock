@@ -1938,9 +1938,9 @@ dependencies = [
 
 [[package]]
 name = "keyring-manager"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f098da1134a4012e648acb8035445577e1774594e36a631a18a10de6fa33869"
+checksum = "1c8b77f802180237d8e0e4b3d767bb58d77af03513738ff125bca0261debfb37"
 dependencies = [
  "byteorder",
  "cfg-if",
