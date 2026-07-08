@@ -11,7 +11,9 @@ if [[ "$1" == "wasm" ]]; then
     source "$SCRIPTDIR/../scripts/_chromedriver_helper.sh"
     CHROMEDRIVER="$(chromedriver_binary_path)" || { echo "Failed to resolve chromedriver"; popd >/dev/null; exit 1; }
     export CHROMEDRIVER
-    WASM_BINDGEN_TEST_TIMEOUT=120 cargo nextest run --target wasm32-unknown-unknown --no-default-features --features=default-wasm,test-util,debug-locks
+    # --test-threads=1: each wasm test spawns its own chromedriver+Chrome; running them in
+    # parallel starves Chrome renderer startup ("timed out connecting to Chrome").
+    WASM_BINDGEN_TEST_TIMEOUT=120 cargo nextest run --target wasm32-unknown-unknown --no-default-features --features=default-wasm,test-util,debug-locks --test-threads=1
     status=$?
 elif [[ "$1" == "ios" ]]; then
     SYMROOT=/tmp/testout
