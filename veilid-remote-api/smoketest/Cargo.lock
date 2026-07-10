@@ -3638,7 +3638,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "veilid-core"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -3717,7 +3717,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-remote-api"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "parking_lot",
  "schemars",
@@ -3729,7 +3729,7 @@ dependencies = [
 
 [[package]]
 name = "veilid-tools"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "android_logger",
  "async-io",
