@@ -394,7 +394,10 @@ Arguments:
                     ui.send_callback(callback);
                 }
                 Err(ServerDebugError::NotConnected) => {
-                    ui.add_node_event(Level::Warn, "Server is not connected");
+                    ui.add_node_event(
+                        Level::Warn,
+                        "Server is not connected. Use 'connect' to connect to a server.",
+                    );
                     ui.send_callback(callback);
                 }
                 Err(ServerDebugError::Error(e)) => {
