@@ -80,6 +80,10 @@ impl RPCProcessor {
                         .process_rpc_message(message_encoded).instrument(rpc_request_span)
                         .await
                     {
+                        Err(RPCError::Ignore(e)) => {
+                            veilid_log!(self debug "ignoring rpc message: {}", e);
+                            continue;
+                        }
                         Err(e) => {
                             veilid_log!(self error "couldn't process rpc message: {}", e);
                             continue;

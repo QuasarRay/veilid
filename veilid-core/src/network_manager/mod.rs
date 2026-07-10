@@ -969,34 +969,50 @@ impl NetworkManager {
         // when shutdown is requested. Without this, the enter guard above is held
         // for the full duration of the send, blocking shutdown until each peer
         // round-trip completes (or its RPC timeout fires).
-        let stop_token = self
-            .startup_context
-            .startup_lock
-            .stop_token()
-            .ok_or_else(|| eyre!("network is stopping"))?;
+        let stop_token = match self.startup_context.startup_lock.stop_token() {
+            Some(v) => v,
+            None => {
+                return Ok(SendDataResult::new(
+                    NodeContactMethodResult::NoContactMethod,
+                    NetworkResult::no_connection_other("network is stopping"),
+                ));
+            }
+        };
 
         let best_node_id = node_ref.best_node_id();
 
         // Get node's envelope versions and see if we can send to it
         // and if so, get the max version we can use
         let Some(envelope_version) = node_ref.best_envelope_version() else {
-            bail!(
-                "can't talk to this node {} because we dont support its envelope versions",
-                node_ref
-            );
+            return Ok(SendDataResult::new(
+                NodeContactMethodResult::NoContactMethod,
+                NetworkResult::no_connection_other(format!(
+                    "can't talk to this node {} because we dont support its envelope versions",
+                    node_ref
+                )),
+            ));
         };
 
         // Build the envelope to send
         let timestamp = Timestamp::now_increasing();
-        let out = self
+        let out = match self
             .build_envelope(timestamp, best_node_id, envelope_version, body)
             .measure_limit(
                 TimestampDuration::new_ms(1000),
                 veilid_log_dbg!(self, "NetworkManager::build_envelope slow"),
             )
             .timeout_at(stop_token.clone())
-            .await
-            .map_err(|_| eyre!("network is stopping"))??;
+            .await?
+        {
+            Ok(v) => v,
+            Err(e) => {
+                veilid_log!(self debug "couldn't build envelope: {}", e);
+                return Ok(SendDataResult::new(
+                    NodeContactMethodResult::NoContactMethod,
+                    NetworkResult::no_connection_other("network is stopping"),
+                ));
+            }
+        };
 
         if let Some(dial_info) = &opt_dial_info {
             veilid_log!(self trace
