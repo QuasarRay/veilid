@@ -10,6 +10,9 @@
 - veilid-core:
   - Capnp updated 0.25 -> 0.26
   - Macros introduced in veilid-core to visually improve API functions and strip pasted boilerplate
+  - `debug-api` feature added to remove the `debug()` command. Enabled by default with velid-remote-api
+    and during all debug builds. Disabled by default for release wasm32 builds.
+  - `backtrace` support removed for wasm32 builds due to lack of upstream functionality and wasted space.
 
 - veilid-tools:
   - Absorbed unmaintained crates forks: 'igd', 'stop_token', 'tracing_wasm', 'bugsalot'. Stripped out functionality we don't use. 
