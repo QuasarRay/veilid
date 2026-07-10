@@ -1,9 +1,11 @@
-**UNRELEASED**
+**Changed in Veilid 0.5.6**
 
 - Optimizations:
   - veilid-wasm and veilid-flutter WASM blob size greatly reduced (-47%)
+  - veilid-server 50% smaller, same great taste
   - Duplicated crates consolidated
   - Compile times improved
+  - Improved CI build support
 
 - veilid-core:
   - Capnp updated 0.25 -> 0.26
