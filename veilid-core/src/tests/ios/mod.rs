@@ -21,7 +21,8 @@ pub fn veilid_core_setup_ios_tests() {
     let filter = VeilidLayerFilter::default();
     filter.apply_common_log_level(VeilidConfigLogLevel::Info);
     tracing_subscriber::registry()
-        .with(OsLogger::new("com.veilid.veilid_core_ios_tests", "default").with_filter(filter))
+        // Subsystem matches the test app bundle id; run_tests.sh filters its log stream on it
+        .with(OsLogger::new("com.veilid.veilidcore-tests", "default").with_filter(filter))
         .init();
 
     panic::set_hook(Box::new(|panic_info| {

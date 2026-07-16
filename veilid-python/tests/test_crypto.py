@@ -104,3 +104,54 @@ async def test_generate_shared_secret(api_connection: veilid.VeilidAPI):
 
             assert ssA != ssD
 
+
+@pytest.mark.asyncio
+async def test_hpke_seal_open(api_connection: veilid.VeilidAPI):
+    for kind in await api_connection.valid_crypto_kinds():
+        cs = await api_connection.get_crypto_system(kind)
+        async with cs:
+            kkp1 = await cs.generate_kem_key_pair()
+            kkp2 = await cs.generate_kem_key_pair()
+            assert kkp1 != kkp2
+
+            aad = b"some associated data"
+            plaintext = b"hello hpke"
+
+            sealed = await cs.hpke_seal(kkp1.key(), aad, plaintext)
+            assert await cs.hpke_open(kkp1.secret(), aad, sealed) == plaintext
+
+            # empty aad and empty plaintext round-trip
+            sealed_empty = await cs.hpke_seal(kkp1.key(), b"", b"")
+            assert await cs.hpke_open(kkp1.secret(), b"", sealed_empty) == b""
+
+            # wrong recipient
+            with pytest.raises(veilid.VeilidAPIError):
+                await cs.hpke_open(kkp2.secret(), aad, sealed)
+
+            # mismatched aad
+            with pytest.raises(veilid.VeilidAPIError):
+                await cs.hpke_open(kkp1.secret(), b"other aad", sealed)
+
+            # tampered blob
+            tampered = bytearray(sealed)
+            tampered[-1] ^= 0x80
+            with pytest.raises(veilid.VeilidAPIError):
+                await cs.hpke_open(kkp1.secret(), aad, bytes(tampered))
+
+
+@pytest.mark.asyncio
+async def test_kem_bridge_from_signing_keys(api_connection: veilid.VeilidAPI):
+    for kind in await api_connection.valid_crypto_kinds():
+        cs = await api_connection.get_crypto_system(kind)
+        async with cs:
+            kp = await cs.generate_key_pair()
+
+            ek = await cs.encapsulation_key_from_signing_key(kp.key())
+            dk = await cs.decapsulation_key_from_signing_secret(kp.secret())
+            assert len(ek.value().to_bytes()) == await cs.encapsulation_key_length()
+            assert len(dk.value().to_bytes()) == await cs.decapsulation_key_length()
+
+            # bridged halves form a working KEM pair
+            sealed = await cs.hpke_seal(ek, b"", b"bridged")
+            assert await cs.hpke_open(dk, b"", sealed) == b"bridged"
+

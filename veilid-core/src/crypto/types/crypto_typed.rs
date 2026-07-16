@@ -1,13 +1,15 @@
 /// Defines a `CryptoTyped` newtype that pairs a `Bare<name>` value with its `CryptoKind`.
 ///
 /// Generates ordering by kind then value, `kind:value` display and parsing, and serde-as-string.
+/// Doc attributes on the invocation prepend to the generated type documentation.
 macro_rules! impl_crypto_typed {
-    ($visibility:vis $name:ident) => {
+    ($(#[$attr:meta])* $visibility:vis $name:ident) => {
         pastey::paste! {
 
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
             #[derive(Clone, PartialEq, Eq, Hash, GetSize)]
             #[must_use]
+            $(#[$attr])*
             /// A value tagged with the `CryptoKind` of the cryptosystem it belongs to.
             ///
             /// Ordering compares the kind first (by cryptosystem preference) then the value.

@@ -4,11 +4,11 @@ import {
   LOG_LEVEL,
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
-} from './utils/veilid-config';
+} from './utils/veilid-config.js';
 
 import { VeilidTableDB, veilidClient } from 'veilid-wasm';
-import { textEncoder, textDecoder } from './utils/marshalling-utils';
-import { getLogTimestamp } from './utils/wait-utils';
+import { textEncoder, textDecoder } from './utils/marshalling-utils.js';
+import { getLogTimestamp } from './utils/wait-utils.js';
 
 const TABLE_NAME = 'some-table';
 const TABLE_COLS = 1;

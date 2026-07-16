@@ -262,6 +262,88 @@
           ]
         },
         {
+          "description": "HPKE sealed blob.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "HpkeSeal"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "cs_op"
+          ]
+        },
+        {
+          "description": "HPKE opened plaintext.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "HpkeOpen"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "cs_op"
+          ]
+        },
+        {
           "description": "Random bytes.",
           "type": "object",
           "properties": {
@@ -366,6 +448,46 @@
             "cs_op": {
               "type": "string",
               "const": "SecretKeyLength"
+            },
+            "value": {
+              "description": "Length in bytes.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "cs_op",
+            "value"
+          ]
+        },
+        {
+          "description": "Byte length of a KEM encapsulation key.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "EncapsulationKeyLength"
+            },
+            "value": {
+              "description": "Length in bytes.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "cs_op",
+            "value"
+          ]
+        },
+        {
+          "description": "Byte length of a KEM decapsulation key.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "DecapsulationKeyLength"
             },
             "value": {
               "description": "Length in bytes.",
@@ -860,6 +982,106 @@
           "required": [
             "cs_op",
             "value"
+          ]
+        },
+        {
+          "description": "Generated KEM key pair.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "GenerateKemKeyPair"
+            },
+            "value": {
+              "description": "Generated KEM key pair.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cs_op",
+            "value"
+          ]
+        },
+        {
+          "description": "KEM encapsulation key derived from a signing public key.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "EncapsulationKeyFromSigningKey"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "cs_op"
+          ]
+        },
+        {
+          "description": "KEM decapsulation key derived from a signing secret key.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "DecapsulationKeyFromSigningSecret"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "cs_op"
           ]
         },
         {

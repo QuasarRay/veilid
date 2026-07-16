@@ -728,6 +728,62 @@
           ]
         },
         {
+          "description": "Seal `plaintext` to a recipient KEM encapsulation key with HPKE base mode (RFC 9180), single-shot.",
+          "type": "object",
+          "properties": {
+            "aad": {
+              "description": "Associated data; authenticated but not encrypted.",
+              "type": "string"
+            },
+            "cs_op": {
+              "type": "string",
+              "const": "HpkeSeal"
+            },
+            "plaintext": {
+              "description": "Plaintext to seal.",
+              "type": "string"
+            },
+            "recipient": {
+              "description": "Recipient KEM encapsulation key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cs_op",
+            "recipient",
+            "aad",
+            "plaintext"
+          ]
+        },
+        {
+          "description": "Open a sealed blob produced by `HpkeSeal` with the recipient KEM decapsulation key.",
+          "type": "object",
+          "properties": {
+            "aad": {
+              "description": "Associated data; must match what was supplied at seal.",
+              "type": "string"
+            },
+            "cs_op": {
+              "type": "string",
+              "const": "HpkeOpen"
+            },
+            "sealed": {
+              "description": "Sealed blob.",
+              "type": "string"
+            },
+            "secret": {
+              "description": "Recipient KEM decapsulation key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cs_op",
+            "secret",
+            "aad",
+            "sealed"
+          ]
+        },
+        {
           "description": "Fill `len` bytes from the cryptographic RNG.",
           "type": "object",
           "properties": {
@@ -806,6 +862,32 @@
             "cs_op": {
               "type": "string",
               "const": "SecretKeyLength"
+            }
+          },
+          "required": [
+            "cs_op"
+          ]
+        },
+        {
+          "description": "Byte length of a KEM encapsulation key.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "EncapsulationKeyLength"
+            }
+          },
+          "required": [
+            "cs_op"
+          ]
+        },
+        {
+          "description": "Byte length of a KEM decapsulation key.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "DecapsulationKeyLength"
             }
           },
           "required": [
@@ -1065,6 +1147,55 @@
           },
           "required": [
             "cs_op"
+          ]
+        },
+        {
+          "description": "Generate a fresh random KEM key pair for this cryptosystem.",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "GenerateKemKeyPair"
+            }
+          },
+          "required": [
+            "cs_op"
+          ]
+        },
+        {
+          "description": "Derive the KEM encapsulation key corresponding to a signing public key (VLD0-only bridge).",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "EncapsulationKeyFromSigningKey"
+            },
+            "key": {
+              "description": "Signing public key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cs_op",
+            "key"
+          ]
+        },
+        {
+          "description": "Derive the KEM decapsulation key corresponding to a signing secret key (VLD0-only bridge).",
+          "type": "object",
+          "properties": {
+            "cs_op": {
+              "type": "string",
+              "const": "DecapsulationKeyFromSigningSecret"
+            },
+            "secret": {
+              "description": "Signing secret key.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cs_op",
+            "secret"
           ]
         },
         {

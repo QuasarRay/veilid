@@ -8,8 +8,11 @@ function smoketest() {
     local mode=$1
     shift
 
+    echo "Updating dependencies..."
+    cargo update
+
     echo "Running native smoketest (tokio/$mode)..."
-    cargo run $@
+    cargo run --locked $@
     status=$?
     if [ $status -ne 0 ]; then
         echo "Native smoketest (tokio) failed"
@@ -19,7 +22,7 @@ function smoketest() {
     echo "Native smoketest (tokio/$mode) passed"
 
     echo "Running native smoketest (async-std/$mode)..."
-    cargo run --no-default-features --features=rt-async-std $@
+    cargo run --locked --no-default-features --features=rt-async-std $@
     status=$?
     if [ $status -ne 0 ]; then
         echo "Native smoketest (async-std/$mode) failed"

@@ -1,3 +1,11 @@
+**UNRELEASED**
+
+- veilid-core:
+  - HPKE (RFC 9180, base mode) added as `hpke_seal`/`hpke_open` on `CryptoSystem` and all bindings. Implemented for `VLD0` and `NONE` cryptosystems
+  - `PublicKey`/`SecretKey` are now explicitly intended to be signing keys (VLD0: Ed25519, VLD1: ML-DSA). New types created for HPKE: `EncapsulationKey`/`DecapsulationKey`/`KemKeyPair` (VLD0: DHKEM-X25519, VLD1: ML-KEM), generated with `generate_kem_keypair` or derived from signing keys via the VLD0-only `encapsulation_key_from_signing_key`/`decapsulation_key_from_signing_secret` bridges
+  - `NONE` cryptosystem brought in line with the `CryptoSystem` contract for debugging/testing
+  - Crypto unit tests split per suite, enhanced with data-size sweeps, documented-error coverage, and RFC 9180 known-answer tests
+
 **Changed in Veilid 0.5.6**
 
 - Optimizations:

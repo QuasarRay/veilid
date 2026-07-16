@@ -56,6 +56,7 @@ enable-crypto-vld0 = [
     "chacha20",
     "argon2",
     "blake2",           # To apply optimization for argon2 code size
+    "hpke",
 ]
 enable-crypto-none = [
     "ed25519-dalek",
@@ -64,6 +65,9 @@ enable-crypto-none = [
     "argon2",
     "digest",
     "blake2",           # To apply optimization for argon2 code size
+    "chacha20poly1305",
+    "hpke",
+    "subtle",
 ]
 
 # Protocol support features
@@ -141,18 +145,18 @@ flume = { version = "0.12.0", features = ["async"] }
 arc-swap = { version = "1.8.0" }
 
 # Crypto
-ed25519-dalek = { version = "3.0.0-rc.1", optional = true, default-features = false, features = [
+ed25519-dalek = { version = "3.0.0", optional = true, default-features = false, features = [
     "alloc",
     "rand_core",
     "digest",
     "zeroize",
 ] }
-x25519-dalek = { version = "3.0.0-rc.1", optional = true, default-features = false, features = [
+x25519-dalek = { version = "3.0.0", optional = true, default-features = false, features = [
     "static_secrets",
     "zeroize",
     "precomputed-tables",
 ] }
-curve25519-dalek = { version = "5.0.0-rc.1", optional = true, default-features = false, features = [
+curve25519-dalek = { version = "5.0.0", optional = true, default-features = false, features = [
     "alloc",
     "zeroize",
     "precomputed-tables",
@@ -174,6 +178,12 @@ argon2 = { version = "0.6.0-rc.8", optional = true, default-features = false, fe
     "rand_core",
 ] }
 digest = { version = "0.11", optional = true, features = ["rand_core"] }
+hpke = { version = "0.14.0", optional = true, default-features = false, features = [
+    "alloc",
+    "x25519",
+    "chacha",
+] }
+subtle = { version = "2.6", optional = true, default-features = false }
 
 # Serialization
 capnp = { version = "0.26.1", default-features = false, features = [

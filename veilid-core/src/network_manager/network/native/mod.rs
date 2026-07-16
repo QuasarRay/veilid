@@ -368,7 +368,9 @@ impl PlatformNetwork for NativeNetwork {
                 // Connection-oriented protocols
                 _ => {
                     let pnc = network_result_try!(match dial_info.protocol_type() {
-                        ProtocolType::UDP => bail!("UDP handled by connectionless arm"),
+                        ProtocolType::UDP => {
+                            bail!("UDP handled by connectionless arm");
+                        }
                         ProtocolType::TCP => {
                             let peer_socket_addr = dial_info.to_socket_addr();
                             RawTcpProtocolHandler::connect(

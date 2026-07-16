@@ -54,6 +54,9 @@ pub veilid_remote_api::CryptoSystemRequestOp::CryptNoAuth
 pub veilid_remote_api::CryptoSystemRequestOp::CryptNoAuth::body: alloc::vec::Vec<u8>
 pub veilid_remote_api::CryptoSystemRequestOp::CryptNoAuth::nonce: veilid_core::crypto::types::byte_array_types::Nonce
 pub veilid_remote_api::CryptoSystemRequestOp::CryptNoAuth::shared_secret: veilid_core::crypto::types::SharedSecret
+pub veilid_remote_api::CryptoSystemRequestOp::DecapsulationKeyFromSigningSecret
+pub veilid_remote_api::CryptoSystemRequestOp::DecapsulationKeyFromSigningSecret::secret: veilid_core::crypto::types::SecretKey
+pub veilid_remote_api::CryptoSystemRequestOp::DecapsulationKeyLength
 pub veilid_remote_api::CryptoSystemRequestOp::DecryptAead
 pub veilid_remote_api::CryptoSystemRequestOp::DecryptAead::associated_data: core::option::Option<alloc::vec::Vec<u8>>
 pub veilid_remote_api::CryptoSystemRequestOp::DecryptAead::body: alloc::vec::Vec<u8>
@@ -63,6 +66,9 @@ pub veilid_remote_api::CryptoSystemRequestOp::DefaultSaltLength
 pub veilid_remote_api::CryptoSystemRequestOp::DeriveSharedSecret
 pub veilid_remote_api::CryptoSystemRequestOp::DeriveSharedSecret::password: alloc::vec::Vec<u8>
 pub veilid_remote_api::CryptoSystemRequestOp::DeriveSharedSecret::salt: alloc::vec::Vec<u8>
+pub veilid_remote_api::CryptoSystemRequestOp::EncapsulationKeyFromSigningKey
+pub veilid_remote_api::CryptoSystemRequestOp::EncapsulationKeyFromSigningKey::key: veilid_core::crypto::types::PublicKey
+pub veilid_remote_api::CryptoSystemRequestOp::EncapsulationKeyLength
 pub veilid_remote_api::CryptoSystemRequestOp::EncryptAead
 pub veilid_remote_api::CryptoSystemRequestOp::EncryptAead::associated_data: core::option::Option<alloc::vec::Vec<u8>>
 pub veilid_remote_api::CryptoSystemRequestOp::EncryptAead::body: alloc::vec::Vec<u8>
@@ -70,6 +76,7 @@ pub veilid_remote_api::CryptoSystemRequestOp::EncryptAead::nonce: veilid_core::c
 pub veilid_remote_api::CryptoSystemRequestOp::EncryptAead::shared_secret: veilid_core::crypto::types::SharedSecret
 pub veilid_remote_api::CryptoSystemRequestOp::GenerateHash
 pub veilid_remote_api::CryptoSystemRequestOp::GenerateHash::data: alloc::vec::Vec<u8>
+pub veilid_remote_api::CryptoSystemRequestOp::GenerateKemKeyPair
 pub veilid_remote_api::CryptoSystemRequestOp::GenerateKeyPair
 pub veilid_remote_api::CryptoSystemRequestOp::GenerateSharedSecret
 pub veilid_remote_api::CryptoSystemRequestOp::GenerateSharedSecret::domain: alloc::vec::Vec<u8>
@@ -79,6 +86,14 @@ pub veilid_remote_api::CryptoSystemRequestOp::HashDigestLength
 pub veilid_remote_api::CryptoSystemRequestOp::HashPassword
 pub veilid_remote_api::CryptoSystemRequestOp::HashPassword::password: alloc::vec::Vec<u8>
 pub veilid_remote_api::CryptoSystemRequestOp::HashPassword::salt: alloc::vec::Vec<u8>
+pub veilid_remote_api::CryptoSystemRequestOp::HpkeOpen
+pub veilid_remote_api::CryptoSystemRequestOp::HpkeOpen::aad: alloc::vec::Vec<u8>
+pub veilid_remote_api::CryptoSystemRequestOp::HpkeOpen::sealed: alloc::vec::Vec<u8>
+pub veilid_remote_api::CryptoSystemRequestOp::HpkeOpen::secret: veilid_core::crypto::types::DecapsulationKey
+pub veilid_remote_api::CryptoSystemRequestOp::HpkeSeal
+pub veilid_remote_api::CryptoSystemRequestOp::HpkeSeal::aad: alloc::vec::Vec<u8>
+pub veilid_remote_api::CryptoSystemRequestOp::HpkeSeal::plaintext: alloc::vec::Vec<u8>
+pub veilid_remote_api::CryptoSystemRequestOp::HpkeSeal::recipient: veilid_core::crypto::types::EncapsulationKey
 pub veilid_remote_api::CryptoSystemRequestOp::Kind
 pub veilid_remote_api::CryptoSystemRequestOp::NonceLength
 pub veilid_remote_api::CryptoSystemRequestOp::PublicKeyLength
@@ -128,16 +143,26 @@ pub veilid_remote_api::CryptoSystemResponseOp::ComputeDh
 pub veilid_remote_api::CryptoSystemResponseOp::ComputeDh::result: veilid_remote_api::ApiResultWithString<veilid_core::crypto::types::SharedSecret>
 pub veilid_remote_api::CryptoSystemResponseOp::CryptNoAuth
 pub veilid_remote_api::CryptoSystemResponseOp::CryptNoAuth::result: veilid_remote_api::ApiResultWithVecU8
+pub veilid_remote_api::CryptoSystemResponseOp::DecapsulationKeyFromSigningSecret
+pub veilid_remote_api::CryptoSystemResponseOp::DecapsulationKeyFromSigningSecret::result: veilid_remote_api::ApiResultWithString<veilid_core::crypto::types::DecapsulationKey>
+pub veilid_remote_api::CryptoSystemResponseOp::DecapsulationKeyLength
+pub veilid_remote_api::CryptoSystemResponseOp::DecapsulationKeyLength::value: u32
 pub veilid_remote_api::CryptoSystemResponseOp::DecryptAead
 pub veilid_remote_api::CryptoSystemResponseOp::DecryptAead::result: veilid_remote_api::ApiResultWithVecU8
 pub veilid_remote_api::CryptoSystemResponseOp::DefaultSaltLength
 pub veilid_remote_api::CryptoSystemResponseOp::DefaultSaltLength::value: u32
 pub veilid_remote_api::CryptoSystemResponseOp::DeriveSharedSecret
 pub veilid_remote_api::CryptoSystemResponseOp::DeriveSharedSecret::result: veilid_remote_api::ApiResultWithString<veilid_core::crypto::types::SharedSecret>
+pub veilid_remote_api::CryptoSystemResponseOp::EncapsulationKeyFromSigningKey
+pub veilid_remote_api::CryptoSystemResponseOp::EncapsulationKeyFromSigningKey::result: veilid_remote_api::ApiResultWithString<veilid_core::crypto::types::EncapsulationKey>
+pub veilid_remote_api::CryptoSystemResponseOp::EncapsulationKeyLength
+pub veilid_remote_api::CryptoSystemResponseOp::EncapsulationKeyLength::value: u32
 pub veilid_remote_api::CryptoSystemResponseOp::EncryptAead
 pub veilid_remote_api::CryptoSystemResponseOp::EncryptAead::result: veilid_remote_api::ApiResultWithVecU8
 pub veilid_remote_api::CryptoSystemResponseOp::GenerateHash
 pub veilid_remote_api::CryptoSystemResponseOp::GenerateHash::value: veilid_core::crypto::types::HashDigest
+pub veilid_remote_api::CryptoSystemResponseOp::GenerateKemKeyPair
+pub veilid_remote_api::CryptoSystemResponseOp::GenerateKemKeyPair::value: veilid_core::crypto::types::KemKeyPair
 pub veilid_remote_api::CryptoSystemResponseOp::GenerateKeyPair
 pub veilid_remote_api::CryptoSystemResponseOp::GenerateKeyPair::value: veilid_core::crypto::types::KeyPair
 pub veilid_remote_api::CryptoSystemResponseOp::GenerateSharedSecret
@@ -146,6 +171,10 @@ pub veilid_remote_api::CryptoSystemResponseOp::HashDigestLength
 pub veilid_remote_api::CryptoSystemResponseOp::HashDigestLength::value: u32
 pub veilid_remote_api::CryptoSystemResponseOp::HashPassword
 pub veilid_remote_api::CryptoSystemResponseOp::HashPassword::result: veilid_remote_api::ApiResult<alloc::string::String>
+pub veilid_remote_api::CryptoSystemResponseOp::HpkeOpen
+pub veilid_remote_api::CryptoSystemResponseOp::HpkeOpen::result: veilid_remote_api::ApiResultWithVecU8
+pub veilid_remote_api::CryptoSystemResponseOp::HpkeSeal
+pub veilid_remote_api::CryptoSystemResponseOp::HpkeSeal::result: veilid_remote_api::ApiResultWithVecU8
 pub veilid_remote_api::CryptoSystemResponseOp::InvalidId
 pub veilid_remote_api::CryptoSystemResponseOp::Kind
 pub veilid_remote_api::CryptoSystemResponseOp::Kind::value: veilid_core::crypto::types::CryptoKind

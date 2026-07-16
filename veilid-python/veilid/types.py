@@ -167,12 +167,22 @@ class EncodedString(str):
         return cls(urlsafe_b64encode_no_pad(b))
 
 class BarePublicKey(EncodedString):
-    """Untyped public key, carrying no cryptosystem kind."""
+    """Untyped signing public key, carrying no cryptosystem kind."""
 
     pass
 
 class BareSecretKey(EncodedString):
-    """Untyped secret key, carrying no cryptosystem kind."""
+    """Untyped signing secret key, carrying no cryptosystem kind."""
+
+    pass
+
+class BareEncapsulationKey(EncodedString):
+    """Untyped KEM encapsulation key, carrying no cryptosystem kind."""
+
+    pass
+
+class BareDecapsulationKey(EncodedString):
+    """Untyped KEM decapsulation key, carrying no cryptosystem kind."""
 
     pass
 
@@ -261,6 +271,24 @@ class BareKeyPair(str):
         """The secret key."""
         return BareSecretKey(self.split(":", 1)[1])
 
+class BareKemKeyPair(str):
+    """Untyped KEM key pair, carrying no cryptosystem kind. Encodes as `<encapsulation>:<decapsulation>`."""
+
+    @classmethod
+    def from_parts(cls, key: BareEncapsulationKey, secret: BareDecapsulationKey) -> Self:
+        """Build a KEM key pair from an encapsulation key and its decapsulation key."""
+        assert isinstance(key, BareEncapsulationKey)
+        assert isinstance(secret, BareDecapsulationKey)
+        return cls(f"{key}:{secret}")
+
+    def key(self) -> BareEncapsulationKey:
+        """The encapsulation key."""
+        return BareEncapsulationKey(self.split(":", 1)[0])
+
+    def secret(self) -> BareDecapsulationKey:
+        """The decapsulation key."""
+        return BareDecapsulationKey(self.split(":", 1)[1])
+
 class CryptoTyped(str):
     """A value tagged with the `CryptoKind` of the cryptosystem it belongs to. Encodes as `kind:value`."""
 
@@ -323,7 +351,7 @@ class HashDigest(CryptoTyped):
         return BareHashDigest(self._value())
 
 class PublicKey(CryptoTyped):
-    """Kinded public key."""
+    """Kinded signing public key: verification, identity, and node ids. KEM encryption to a key uses EncapsulationKey."""
 
     @classmethod
     def from_value(cls, kind: CryptoKind, value: BarePublicKey) -> Self:
@@ -338,7 +366,7 @@ class PublicKey(CryptoTyped):
 
 
 class SecretKey(CryptoTyped):
-    """Kinded secret key."""
+    """Kinded signing secret key. KEM decryption uses DecapsulationKey."""
 
     @classmethod
     def from_value(cls, kind: CryptoKind, value: BareSecretKey) -> Self:
@@ -350,6 +378,36 @@ class SecretKey(CryptoTyped):
     def value(self) -> BareSecretKey:
         """The untagged secret key."""
         return BareSecretKey(self._value())
+
+
+class EncapsulationKey(CryptoTyped):
+    """Kinded KEM encapsulation key, sealed to with hpke_seal. Signing uses PublicKey."""
+
+    @classmethod
+    def from_value(cls, kind: CryptoKind, value: BareEncapsulationKey) -> Self:
+        """Pair a bare encapsulation key with the cryptosystem kind it belongs to."""
+        assert isinstance(kind, CryptoKind)
+        assert isinstance(value, BareEncapsulationKey)
+        return cls(f"{kind}:{value}")
+
+    def value(self) -> BareEncapsulationKey:
+        """The untagged encapsulation key."""
+        return BareEncapsulationKey(self._value())
+
+
+class DecapsulationKey(CryptoTyped):
+    """Kinded KEM decapsulation key, opening blobs with hpke_open. Signing uses SecretKey."""
+
+    @classmethod
+    def from_value(cls, kind: CryptoKind, value: BareDecapsulationKey) -> Self:
+        """Pair a bare decapsulation key with the cryptosystem kind it belongs to."""
+        assert isinstance(kind, CryptoKind)
+        assert isinstance(value, BareDecapsulationKey)
+        return cls(f"{kind}:{value}")
+
+    def value(self) -> BareDecapsulationKey:
+        """The untagged decapsulation key."""
+        return BareDecapsulationKey(self._value())
 
 
 class KeyPair(CryptoTyped):
@@ -373,6 +431,28 @@ class KeyPair(CryptoTyped):
     def secret(self) -> SecretKey:
         """The kinded secret key."""
         return SecretKey.from_value(kind=self.kind(), value=self.value().secret())
+
+class KemKeyPair(CryptoTyped):
+    """Kinded KEM key pair for HPKE seal/open. Signing key pairs use KeyPair."""
+
+    @classmethod
+    def from_value(cls, kind: CryptoKind, value: BareKemKeyPair) -> Self:
+        """Pair a bare KEM key pair with the cryptosystem kind it belongs to."""
+        assert isinstance(kind, CryptoKind)
+        assert isinstance(value, BareKemKeyPair)
+        return cls(f"{kind}:{value}")
+
+    def value(self) -> BareKemKeyPair:
+        """The untagged KEM key pair."""
+        return BareKemKeyPair(self._value())
+
+    def key(self) -> EncapsulationKey:
+        """The kinded encapsulation key."""
+        return EncapsulationKey.from_value(kind=self.kind(), value=self.value().key())
+
+    def secret(self) -> DecapsulationKey:
+        """The kinded decapsulation key."""
+        return DecapsulationKey.from_value(kind=self.kind(), value=self.value().secret())
 
 class Signature(CryptoTyped):
     """Kinded signature."""

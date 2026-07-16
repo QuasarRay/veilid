@@ -13,7 +13,6 @@ use tracing::*;
 use veilid_core::tools::*;
 use veilid_core::*;
 use veilid_remote_api::JsonRequestProcessor;
-use wg::future::WaitGroup;
 
 const MAX_NON_JSON_LOGGING: usize = 50;
 
@@ -121,8 +120,8 @@ impl ClientApi {
         // Process the incoming accept stream
         let mut incoming_stream = listener.incoming()?;
 
-        // Make wait group for all incoming connections
-        let awg = WaitGroup::new();
+        // Make rwlock wait group for all incoming connections
+        let awg = Arc::new(AsyncRwLock::<()>::new(()));
 
         let stop_token = match self.inner.lock().stop.as_ref() {
             Some(stop) => stop.token(),
@@ -138,8 +137,7 @@ impl ClientApi {
             let stream = stream_result?;
 
             // Increment wait group
-            awg.add(1);
-            let t_awg = awg.clone();
+            let t_awg = awg.read_arc().await;
 
             // Process the connection
             spawn(
@@ -149,8 +147,8 @@ impl ClientApi {
             .detach();
         }
 
-        // Wait for all connections to terminate
-        awg.wait().await;
+        // Wait for all connections to terminate (dropping all read locks to get write lock)
+        let _ = awg.write().await;
 
         Ok(())
     }
@@ -163,8 +161,8 @@ impl ClientApi {
         // Process the incoming accept stream
         let mut incoming_stream = async_tcp_listener_incoming(listener);
 
-        // Make wait group for all incoming connections
-        let awg = WaitGroup::new();
+        // Make rwlock for all incoming connections
+        let awg = Arc::new(AsyncRwLock::<()>::new(()));
 
         let stop_token = match self.inner.lock().stop.as_ref() {
             Some(stop) => stop.token(),
@@ -181,8 +179,7 @@ impl ClientApi {
             stream.set_nodelay(true)?;
 
             // Increment wait group
-            awg.add(1);
-            let t_awg = awg.clone();
+            let t_awg = awg.read_arc().await;
 
             // Process the connection
             spawn(
@@ -192,8 +189,8 @@ impl ClientApi {
             .detach();
         }
 
-        // Wait for all connections to terminate
-        awg.wait().await;
+        // Wait for all connections to terminate (dropping all read locks to get write lock)
+        let _ = awg.write().await;
 
         Ok(())
     }
@@ -435,7 +432,7 @@ impl ClientApi {
         self.inner.lock().update_channels.remove(&id);
     }
 
-    pub async fn handle_tcp_connection(self, stream: TcpStream, awg: WaitGroup) {
+    pub async fn handle_tcp_connection(self, stream: TcpStream, awg: AsyncRwLockReadGuardArc<()>) {
         // Get address of peer
         let peer_addr = match stream.peer_addr() {
             Ok(v) => v,
@@ -482,10 +479,11 @@ impl ClientApi {
             peer_addr, local_addr
         );
 
-        awg.done();
+        // Explicit drop of read guard to decrement the wait group
+        drop(awg);
     }
 
-    pub async fn handle_ipc_connection(self, stream: IpcStream, awg: WaitGroup) {
+    pub async fn handle_ipc_connection(self, stream: IpcStream, awg: AsyncRwLockReadGuardArc<()>) {
         // Get connection tuple
         debug!("Accepted IPC Client API Connection");
 
@@ -510,7 +508,8 @@ impl ClientApi {
 
         debug!("Closed IPC Client API Connection",);
 
-        awg.done();
+        // Explicit drop of read guard to decrement the wait group
+        drop(awg);
     }
 
     pub fn handle_update(&self, veilid_update: veilid_core::VeilidUpdate) {

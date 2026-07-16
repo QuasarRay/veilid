@@ -346,7 +346,9 @@ impl ConnectionManager {
         // Wrap with NetworkConnection object to start the connection processing loop
         let stop_token = match &inner.stop_source {
             Some(ss) => ss.token(),
-            None => bail!("not creating connection because we are stopping"),
+            None => {
+                bail!("not creating connection because we are stopping");
+            }
         };
 
         let mut conn = NetworkConnection::from_protocol(

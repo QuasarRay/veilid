@@ -175,9 +175,83 @@ impl AsyncCryptoSystemGuard<'_> {
         ))
     }
 
+    /// Seal a plaintext to a recipient KEM encapsulation key with HPKE base mode (RFC 9180),
+    /// single-shot. `aad` is authenticated but not encrypted. Returns a self-describing sealed blob.
+    ///
+    /// Sealing is one-way: only the recipient can open the blob, and the sealer cannot decrypt
+    /// what it just sealed, unlike the DH shared-secret pattern. Callers who already share a
+    /// symmetric key want [`encrypt_aead`](Self::encrypt_aead) instead.
+    ///
+    /// Local CPU only, offloaded to the rayon thread pool off-WASM (a KEM encapsulation always runs).
+    ///
+    /// Errors `VeilidAPIError::InvalidArgument` if `recipient` is not a valid key,
+    /// `VeilidAPIError::Generic` if encapsulation fails (including a low-order key).
+    pub async fn hpke_seal(
+        &self,
+        recipient: &EncapsulationKey,
+        aad: Bytes,
+        plaintext: Bytes,
+    ) -> VeilidAPIResult<Bytes> {
+        let cs = self.guard.clone_arc();
+        let recipient = recipient.clone();
+        cpu_yielding(move || Ok(cs.hpke_seal(&recipient, &aad, &plaintext)?.into())).await
+    }
+
+    /// Open a sealed blob produced by [`hpke_seal`](Self::hpke_seal) with the recipient KEM
+    /// decapsulation key. `aad` must match what was supplied at seal. Only the recipient can
+    /// open a sealed blob; the sealer cannot.
+    ///
+    /// Local CPU only, offloaded to the rayon thread pool off-WASM (a KEM decapsulation always runs).
+    ///
+    /// Errors `VeilidAPIError::ParseError` if the blob is truncated or its version is unknown,
+    /// `VeilidAPIError::InvalidArgument` if the blob's kind is not this cryptosystem's kind or
+    /// `secret` is not a valid key, `VeilidAPIError::Generic` if decryption fails (tampered blob,
+    /// wrong recipient, or mismatched `aad`).
+    pub async fn hpke_open(
+        &self,
+        secret: &DecapsulationKey,
+        aad: Bytes,
+        sealed: Bytes,
+    ) -> VeilidAPIResult<Bytes> {
+        let cs = self.guard.clone_arc();
+        let secret = secret.clone();
+        cpu_yielding(move || Ok(cs.hpke_open(&secret, &aad, &sealed)?.into())).await
+    }
+
     /// Generate a new keypair.
     pub async fn generate_keypair(&self) -> KeyPair {
         yielding(|| self.guard.generate_keypair()).await
+    }
+
+    /// Generate a new KEM key pair.
+    pub async fn generate_kem_keypair(&self) -> KemKeyPair {
+        yielding(|| self.guard.generate_kem_keypair()).await
+    }
+
+    /// Derive the KEM encapsulation key corresponding to a signing public key.
+    ///
+    /// VLD0-only bridge (ed25519 to x25519); kinds whose signing and KEM keys are unrelated error
+    /// `VeilidAPIError::Unimplemented`.
+    ///
+    /// Errors `VeilidAPIError::InvalidArgument` if `key` is not a valid signing public key.
+    pub async fn encapsulation_key_from_signing_key(
+        &self,
+        key: &PublicKey,
+    ) -> VeilidAPIResult<EncapsulationKey> {
+        yielding(|| self.guard.encapsulation_key_from_signing_key(key)).await
+    }
+
+    /// Derive the KEM decapsulation key corresponding to a signing secret key.
+    ///
+    /// VLD0-only bridge (ed25519 to x25519); kinds whose signing and KEM keys are unrelated error
+    /// `VeilidAPIError::Unimplemented`.
+    ///
+    /// Errors `VeilidAPIError::InvalidArgument` if `secret` is not a valid signing secret key.
+    pub async fn decapsulation_key_from_signing_secret(
+        &self,
+        secret: &SecretKey,
+    ) -> VeilidAPIResult<DecapsulationKey> {
+        yielding(|| self.guard.decapsulation_key_from_signing_secret(secret)).await
     }
 
     /// Hash a byte buffer.
@@ -221,6 +295,16 @@ impl AsyncCryptoSystemGuard<'_> {
     #[must_use]
     pub fn secret_key_length(&self) -> usize {
         self.guard.secret_key_length()
+    }
+    /// Length in bytes of a KEM encapsulation key.
+    #[must_use]
+    pub fn encapsulation_key_length(&self) -> usize {
+        self.guard.encapsulation_key_length()
+    }
+    /// Length in bytes of a KEM decapsulation key.
+    #[must_use]
+    pub fn decapsulation_key_length(&self) -> usize {
+        self.guard.decapsulation_key_length()
     }
     /// Length in bytes of a signature.
     #[must_use]
@@ -272,6 +356,13 @@ impl AsyncCryptoSystemGuard<'_> {
     /// Errors `VeilidAPIError::Generic` if `signature` has the wrong kind or length.
     pub fn check_signature(&self, signature: &Signature) -> VeilidAPIResult<()> {
         self.guard.check_signature(signature)
+    }
+    /// Validate that a keypair is well-formed for this cryptosystem. Structural check only; see
+    /// [`validate_keypair`](Self::validate_keypair).
+    ///
+    /// Errors `VeilidAPIError::Generic` if the pair or either key has the wrong kind or length.
+    pub fn check_keypair(&self, keypair: &KeyPair) -> VeilidAPIResult<()> {
+        self.guard.check_keypair(keypair)
     }
     /// Check that a public key and secret key form a valid keypair.
     ///

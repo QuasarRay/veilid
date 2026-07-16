@@ -532,6 +532,72 @@ class CryptoSystem(ABC):
         pass
 
     @abstractmethod
+    async def hpke_seal(
+        self, recipient: types.EncapsulationKey, aad: bytes, plaintext: bytes
+    ) -> bytes:
+        """Seal plaintext to a recipient KEM encapsulation key with HPKE base mode (RFC 9180), single-shot.
+
+        aad is authenticated but not encrypted. Returns a self-describing sealed blob.
+
+        Sealing is one-way: only the holder of the recipient DecapsulationKey can open
+        the blob, and the sealer cannot decrypt what it just sealed. This differs from
+        the DH pattern, where the shared secret let the encrypting party decrypt its own
+        blobs. A sealer that needs to re-read stored blobs must also seal them to its own
+        key. Callers who already share a symmetric key want encrypt_aead instead; HPKE is
+        for encrypting to a recipient's key when no shared secret exists.
+
+        Raises VeilidAPIErrorInvalidArgument if recipient is not a valid key,
+        VeilidAPIErrorGeneric if encapsulation fails (including a low-order key).
+        """
+        pass
+
+    @abstractmethod
+    async def hpke_open(
+        self, secret: types.DecapsulationKey, aad: bytes, sealed: bytes
+    ) -> bytes:
+        """Open a sealed blob produced by hpke_seal with the recipient KEM decapsulation key.
+
+        aad must match what was supplied at seal. Only the recipient can open a sealed
+        blob; the sealer cannot.
+
+        Raises VeilidAPIErrorParseError if the blob is truncated or its version is unknown,
+        VeilidAPIErrorInvalidArgument if the blob's kind is not this cryptosystem's kind or
+        secret is not a valid key, VeilidAPIErrorGeneric if decryption fails.
+        """
+        pass
+
+    @abstractmethod
+    async def generate_kem_key_pair(self) -> types.KemKeyPair:
+        """Generate a fresh random KEM key pair for this cryptosystem."""
+        pass
+
+    @abstractmethod
+    async def encapsulation_key_from_signing_key(
+        self, key: types.PublicKey
+    ) -> types.EncapsulationKey:
+        """Derive the KEM encapsulation key corresponding to a signing public key.
+
+        VLD0-only bridge (ed25519 to x25519): kinds whose signing and KEM keys are
+        unrelated raise VeilidAPIErrorUnimplemented.
+
+        Raises VeilidAPIErrorInvalidArgument if key is not a valid signing public key.
+        """
+        pass
+
+    @abstractmethod
+    async def decapsulation_key_from_signing_secret(
+        self, secret: types.SecretKey
+    ) -> types.DecapsulationKey:
+        """Derive the KEM decapsulation key corresponding to a signing secret key.
+
+        VLD0-only bridge (ed25519 to x25519): kinds whose signing and KEM keys are
+        unrelated raise VeilidAPIErrorUnimplemented.
+
+        Raises VeilidAPIErrorInvalidArgument if secret is not a valid signing secret key.
+        """
+        pass
+
+    @abstractmethod
     async def random_bytes(self, len: int) -> bytes:
         """Return len bytes from the cryptographic RNG."""
         pass
@@ -559,6 +625,16 @@ class CryptoSystem(ABC):
     @abstractmethod
     async def secret_key_length(self) -> int:
         """Byte length of a secret key."""
+        pass
+
+    @abstractmethod
+    async def encapsulation_key_length(self) -> int:
+        """Byte length of a KEM encapsulation key."""
+        pass
+
+    @abstractmethod
+    async def decapsulation_key_length(self) -> int:
+        """Byte length of a KEM decapsulation key."""
         pass
 
     @abstractmethod

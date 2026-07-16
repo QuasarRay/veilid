@@ -122,6 +122,10 @@ sealed class EncodedString extends Equatable {
         return Nonce.fromBytes(bytes) as T;
       case const (BareSecretKey):
         return BareSecretKey.fromBytes(bytes) as T;
+      case const (BareEncapsulationKey):
+        return BareEncapsulationKey.fromBytes(bytes) as T;
+      case const (BareDecapsulationKey):
+        return BareDecapsulationKey.fromBytes(bytes) as T;
       case const (BareHashDigest):
         return BareHashDigest.fromBytes(bytes) as T;
       case const (BareOpaqueRecordKey):
@@ -153,6 +157,10 @@ sealed class EncodedString extends Equatable {
         return Nonce.fromString(s) as T;
       case const (BareSecretKey):
         return BareSecretKey.fromString(s) as T;
+      case const (BareEncapsulationKey):
+        return BareEncapsulationKey.fromString(s) as T;
+      case const (BareDecapsulationKey):
+        return BareDecapsulationKey.fromString(s) as T;
       case const (BareHashDigest):
         return BareHashDigest.fromString(s) as T;
       case const (BareOpaqueRecordKey):
@@ -185,6 +193,10 @@ sealed class EncodedString extends Equatable {
         return Nonce.fromJson(json) as T;
       case const (BareSecretKey):
         return BareSecretKey.fromJson(json) as T;
+      case const (BareEncapsulationKey):
+        return BareEncapsulationKey.fromJson(json) as T;
+      case const (BareDecapsulationKey):
+        return BareDecapsulationKey.fromJson(json) as T;
       case const (BareHashDigest):
         return BareHashDigest.fromJson(json) as T;
       case const (BareOpaqueRecordKey):
@@ -260,6 +272,34 @@ class BareSecretKey extends EncodedString {
   /// Constructs from its JSON form. Throws [TypeError] if not a [String], or
   /// [FormatException] if not valid base64url.
   BareSecretKey.fromJson(super.json) : super._fromJson();
+}
+
+/// A crypto-kind-agnostic KEM encapsulation key.
+class BareEncapsulationKey extends EncodedString {
+  /// Constructs from raw bytes.
+  BareEncapsulationKey.fromBytes(super.bytes) : super._fromBytes();
+
+  /// Constructs from a base64url string. Throws [FormatException] if not valid
+  /// base64url.
+  BareEncapsulationKey.fromString(super.s) : super._fromString();
+
+  /// Constructs from its JSON form. Throws [TypeError] if not a [String], or
+  /// [FormatException] if not valid base64url.
+  BareEncapsulationKey.fromJson(super.json) : super._fromJson();
+}
+
+/// A crypto-kind-agnostic KEM decapsulation key.
+class BareDecapsulationKey extends EncodedString {
+  /// Constructs from raw bytes.
+  BareDecapsulationKey.fromBytes(super.bytes) : super._fromBytes();
+
+  /// Constructs from a base64url string. Throws [FormatException] if not valid
+  /// base64url.
+  BareDecapsulationKey.fromString(super.s) : super._fromString();
+
+  /// Constructs from its JSON form. Throws [TypeError] if not a [String], or
+  /// [FormatException] if not valid base64url.
+  BareDecapsulationKey.fromJson(super.json) : super._fromJson();
 }
 
 /// A crypto-kind-agnostic hash digest.

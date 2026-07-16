@@ -23,11 +23,14 @@ from .operations import (
 from .state import VeilidState, VeilidUpdate
 from .types import (
     CryptoKind,
+    DecapsulationKey,
     DHTRecordDescriptor,
     DHTRecordReport,
     DHTReportScope,
     DHTSchema,
+    EncapsulationKey,
     HashDigest,
+    KemKeyPair,
     KeyPair,
     RouteBlob,
     Nonce,
@@ -1416,6 +1419,94 @@ class _JsonCryptoSystem(CryptoSystem):
             )
         )
 
+    async def hpke_seal(
+        self, recipient: EncapsulationKey, aad: bytes, plaintext: bytes
+    ) -> bytes:
+        assert isinstance(recipient, EncapsulationKey)
+        assert isinstance(aad, bytes)
+        assert isinstance(plaintext, bytes)
+
+        return urlsafe_b64decode_no_pad(
+            raise_api_result(
+                await self.api.send_ndjson_request(
+                    Operation.CRYPTO_SYSTEM,
+                    validate=validate_cs_op,
+                    cs_id=self.cs_id,
+                    cs_op=CryptoSystemOperation.HPKE_SEAL,
+                    recipient=recipient,
+                    aad=aad,
+                    plaintext=plaintext,
+                )
+            )
+        )
+
+    async def hpke_open(
+        self, secret: DecapsulationKey, aad: bytes, sealed: bytes
+    ) -> bytes:
+        assert isinstance(secret, DecapsulationKey)
+        assert isinstance(aad, bytes)
+        assert isinstance(sealed, bytes)
+
+        return urlsafe_b64decode_no_pad(
+            raise_api_result(
+                await self.api.send_ndjson_request(
+                    Operation.CRYPTO_SYSTEM,
+                    validate=validate_cs_op,
+                    cs_id=self.cs_id,
+                    cs_op=CryptoSystemOperation.HPKE_OPEN,
+                    secret=secret,
+                    aad=aad,
+                    sealed=sealed,
+                )
+            )
+        )
+
+    async def generate_kem_key_pair(self) -> KemKeyPair:
+        return KemKeyPair(
+            raise_api_result(
+                await self.api.send_ndjson_request(
+                    Operation.CRYPTO_SYSTEM,
+                    validate=validate_cs_op,
+                    cs_id=self.cs_id,
+                    cs_op=CryptoSystemOperation.GENERATE_KEM_KEY_PAIR,
+                )
+            )
+        )
+
+    async def encapsulation_key_from_signing_key(
+        self, key: PublicKey
+    ) -> EncapsulationKey:
+        assert isinstance(key, PublicKey)
+
+        return EncapsulationKey(
+            raise_api_result(
+                await self.api.send_ndjson_request(
+                    Operation.CRYPTO_SYSTEM,
+                    validate=validate_cs_op,
+                    cs_id=self.cs_id,
+                    cs_op=CryptoSystemOperation.ENCAPSULATION_KEY_FROM_SIGNING_KEY,
+                    key=key,
+                )
+            )
+        )
+
+    async def decapsulation_key_from_signing_secret(
+        self, secret: SecretKey
+    ) -> DecapsulationKey:
+        assert isinstance(secret, SecretKey)
+
+        return DecapsulationKey(
+            raise_api_result(
+                await self.api.send_ndjson_request(
+                    Operation.CRYPTO_SYSTEM,
+                    validate=validate_cs_op,
+                    cs_id=self.cs_id,
+                    cs_op=CryptoSystemOperation.DECAPSULATION_KEY_FROM_SIGNING_SECRET,
+                    secret=secret,
+                )
+            )
+        )
+
     async def random_bytes(self, len: int) -> bytes:
         assert isinstance(len, int)
 
@@ -1478,6 +1569,26 @@ class _JsonCryptoSystem(CryptoSystem):
                 validate=validate_cs_op,
                 cs_id=self.cs_id,
                 cs_op=CryptoSystemOperation.SECRET_KEY_LENGTH,
+            )
+        )
+
+    async def encapsulation_key_length(self) -> int:
+        return raise_api_result(
+            await self.api.send_ndjson_request(
+                Operation.CRYPTO_SYSTEM,
+                validate=validate_cs_op,
+                cs_id=self.cs_id,
+                cs_op=CryptoSystemOperation.ENCAPSULATION_KEY_LENGTH,
+            )
+        )
+
+    async def decapsulation_key_length(self) -> int:
+        return raise_api_result(
+            await self.api.send_ndjson_request(
+                Operation.CRYPTO_SYSTEM,
+                validate=validate_cs_op,
+                cs_id=self.cs_id,
+                cs_op=CryptoSystemOperation.DECAPSULATION_KEY_LENGTH,
             )
         )
 

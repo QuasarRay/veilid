@@ -259,6 +259,112 @@ class KeyPair extends Equatable implements TypedCryptoKey<BareKeyPair> {
       BareKeyPair(key: key.value, secret: secret.value);
 }
 
+/// Untyped KEM encapsulation/decapsulation key pair, carrying no cryptosystem
+/// kind. Encodes as `<encapsulation>:<decapsulation>`.
+@immutable
+class BareKemKeyPair extends Equatable {
+  /// The encapsulation key.
+  final BareEncapsulationKey key;
+
+  /// The decapsulation key.
+  final BareDecapsulationKey secret;
+
+  /// Builds a KEM key pair from an encapsulation key and its decapsulation key.
+  const BareKemKeyPair({required this.key, required this.secret});
+
+  /// Decodes a pair from an `<encapsulation>:<decapsulation>` string. Throws
+  /// [FormatException] if malformed.
+  factory BareKemKeyPair.fromString(String s) {
+    final parts = s.split(':');
+    if (parts.length != 2) {
+      throw const FormatException('malformed string');
+    }
+    final key = BareEncapsulationKey.fromString(parts[0]);
+    final secret = BareDecapsulationKey.fromString(parts[1]);
+    return BareKemKeyPair(key: key, secret: secret);
+  }
+
+  /// Decodes a pair from a JSON `<encapsulation>:<decapsulation>` string.
+  factory BareKemKeyPair.fromJson(dynamic json) =>
+      BareKemKeyPair.fromString(json as String);
+
+  @override
+  List<Object> get props => [key, secret];
+
+  @override
+  String toString() => '$key:$secret';
+
+  /// The `<encapsulation>:<decapsulation>` string form.
+  String toJson() => toString();
+}
+
+/// A KEM key pair tagged with its [CryptoKind], for HPKE seal/open. Signing
+/// key pairs use [KeyPair]. Encodes as `kind:encapsulation:decapsulation`.
+@immutable
+class KemKeyPair extends Equatable implements TypedCryptoKey<BareKemKeyPair> {
+  /// The kinded encapsulation key.
+  final EncapsulationKey key;
+
+  /// The kinded decapsulation key.
+  final DecapsulationKey secret;
+
+  /// Builds a KEM key pair from kinded keys, which must share a kind.
+  KemKeyPair({required this.key, required this.secret})
+    : assert(key.kind == secret.kind, 'keypair parts must have same kind');
+
+  /// Parses a `kind:encapsulation:decapsulation` string. Throws
+  /// [VeilidAPIExceptionInvalidArgument] if malformed.
+  factory KemKeyPair.fromString(String s) {
+    final parts = s.split(':');
+    if (parts.length != 3 || parts[0].codeUnits.length != 4) {
+      throw VeilidAPIExceptionInvalidArgument('malformed string', 's', s);
+    }
+    final kind = CryptoKind.fromString(parts[0]);
+    final key = EncapsulationKey(
+      kind: kind,
+      value: BareEncapsulationKey.fromString(parts[1]),
+    );
+    final secret = DecapsulationKey(
+      kind: kind,
+      value: BareDecapsulationKey.fromString(parts[2]),
+    );
+    return KemKeyPair(key: key, secret: secret);
+  }
+
+  /// Parses a JSON `kind:encapsulation:decapsulation` string.
+  factory KemKeyPair.fromJson(dynamic json) =>
+      KemKeyPair.fromString(json as String);
+
+  /// Tags a [BareKemKeyPair] with [kind].
+  factory KemKeyPair.fromBareKemKeyPair(
+    CryptoKind kind,
+    BareKemKeyPair keyPair,
+  ) => KemKeyPair(
+    key: EncapsulationKey(kind: kind, value: keyPair.key),
+    secret: DecapsulationKey(kind: kind, value: keyPair.secret),
+  );
+
+  @override
+  CryptoKind get kind => key.kind;
+
+  @override
+  BareKemKeyPair get value =>
+      BareKemKeyPair(key: key.value, secret: secret.value);
+
+  @override
+  List<Object> get props => [key, secret];
+
+  @override
+  String toString() => '${key.kind}:${key.value}:${secret.value}';
+
+  /// The `kind:encapsulation:decapsulation` string form.
+  String toJson() => toString();
+
+  /// Drops the kind, returning the untyped pair.
+  BareKemKeyPair toBareKemKeyPair() =>
+      BareKemKeyPair(key: key.value, secret: secret.value);
+}
+
 /// Untyped DHT record key: an opaque record key with an optional record
 /// encryption secret. Encodes as `<key>` or `<key>:<encryptionKey>`.
 @immutable
@@ -409,14 +515,24 @@ class RecordKey extends Equatable implements TypedCryptoKey<BareRecordKey> {
   }
 }
 
-/// A public key tagged with its [CryptoKind].
+/// A signing public key tagged with its [CryptoKind]: verification, identity,
+/// and node ids. KEM encryption to a key uses [EncapsulationKey].
 typedef PublicKey = Typed<BarePublicKey>;
 
 /// A signature tagged with its [CryptoKind].
 typedef Signature = Typed<BareSignature>;
 
-/// A secret key tagged with its [CryptoKind].
+/// A signing secret key tagged with its [CryptoKind]. KEM decryption uses
+/// [DecapsulationKey].
 typedef SecretKey = Typed<BareSecretKey>;
+
+/// A KEM encapsulation key tagged with its [CryptoKind], sealed to with
+/// [VeilidCryptoSystem.hpkeSeal]. Signing uses [PublicKey].
+typedef EncapsulationKey = Typed<BareEncapsulationKey>;
+
+/// A KEM decapsulation key tagged with its [CryptoKind], opening blobs with
+/// [VeilidCryptoSystem.hpkeOpen]. Signing uses [SecretKey].
+typedef DecapsulationKey = Typed<BareDecapsulationKey>;
 
 /// A hash digest tagged with its [CryptoKind].
 typedef HashDigest = Typed<BareHashDigest>;
@@ -513,8 +629,64 @@ abstract class VeilidCryptoSystem {
     Uint8List domain,
   );
 
+  /// Seal [plaintext] to [recipient] with HPKE base mode (RFC 9180), single-shot.
+  /// [aad] is authenticated but not encrypted. Returns a self-describing sealed
+  /// blob.
+  ///
+  /// Sealing is one-way: only the holder of the recipient's [DecapsulationKey]
+  /// can open the blob, and the sealer cannot decrypt what it just sealed. This
+  /// differs from the DH pattern, where the shared secret let the encrypting
+  /// party decrypt its own blobs. A sealer that needs to re-read stored blobs
+  /// must also seal them to its own key. Callers who already share a symmetric
+  /// key want [encryptAead] instead; HPKE is for encrypting to a recipient's
+  /// key when no shared secret exists.
+  ///
+  /// Throws [VeilidAPIExceptionInvalidArgument] if [recipient] is not a valid
+  /// key, [VeilidAPIExceptionGeneric] if encapsulation fails (including a
+  /// low-order key).
+  Future<Uint8List> hpkeSeal(
+    EncapsulationKey recipient,
+    Uint8List aad,
+    Uint8List plaintext,
+  );
+
+  /// Open a sealed blob produced by [hpkeSeal] with the recipient [secret].
+  /// [aad] must match what was supplied at seal. Only the recipient can open a
+  /// sealed blob; the sealer cannot.
+  ///
+  /// Throws [VeilidAPIExceptionParseError] if the blob is truncated or its
+  /// version is unknown, [VeilidAPIExceptionInvalidArgument] if the blob's kind
+  /// is not this cryptosystem's kind or [secret] is not a valid key,
+  /// [VeilidAPIExceptionGeneric] if decryption fails.
+  Future<Uint8List> hpkeOpen(
+    DecapsulationKey secret,
+    Uint8List aad,
+    Uint8List sealed,
+  );
+
   /// Generate a fresh random signing key pair for this cryptosystem.
   Future<KeyPair> generateKeyPair();
+
+  /// Generate a fresh random KEM key pair for this cryptosystem.
+  Future<KemKeyPair> generateKemKeyPair();
+
+  /// Derive the KEM encapsulation key corresponding to a signing public key.
+  ///
+  /// VLD0-only bridge (ed25519 to x25519): kinds whose signing and KEM keys are
+  /// unrelated throw [VeilidAPIExceptionUnimplemented].
+  ///
+  /// Throws [VeilidAPIExceptionInvalidArgument] if [key] is not a valid signing
+  /// public key.
+  Future<EncapsulationKey> encapsulationKeyFromSigningKey(PublicKey key);
+
+  /// Derive the KEM decapsulation key corresponding to a signing secret key.
+  ///
+  /// VLD0-only bridge (ed25519 to x25519): kinds whose signing and KEM keys are
+  /// unrelated throw [VeilidAPIExceptionUnimplemented].
+  ///
+  /// Throws [VeilidAPIExceptionInvalidArgument] if [secret] is not a valid
+  /// signing secret key.
+  Future<DecapsulationKey> decapsulationKeyFromSigningSecret(SecretKey secret);
 
   /// Hash a byte slice, returning a digest tagged with this cryptosystem's kind.
   Future<HashDigest> generateHash(Uint8List data);
@@ -536,6 +708,12 @@ abstract class VeilidCryptoSystem {
 
   /// Byte length of a secret key.
   Future<int> secretKeyLength();
+
+  /// Byte length of a KEM encapsulation key.
+  Future<int> encapsulationKeyLength();
+
+  /// Byte length of a KEM decapsulation key.
+  Future<int> decapsulationKeyLength();
 
   /// Byte length of a signature.
   Future<int> signatureLength();

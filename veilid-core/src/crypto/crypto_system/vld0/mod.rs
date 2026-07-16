@@ -2,6 +2,8 @@ mod sizes;
 
 use super::*;
 
+use super::hpke::{build_sealed, hpke_info, hpke_open_core, hpke_seal_core, parse_sealed};
+
 use argon2::{
     password_hash::{
         phc::{PasswordHash, Salt},
@@ -62,6 +64,20 @@ pub(crate) fn vld0_generate_keypair() -> KeyPair {
     let secret_key = BareSecretKey::new(&signing_key.to_bytes());
 
     KeyPair::new(CRYPTO_KIND_VLD0, BareKeyPair::new(public_key, secret_key))
+}
+
+pub(crate) fn vld0_generate_kem_keypair() -> KemKeyPair {
+    use ::hpke::{Kem as _, Serializable as _};
+    // RFC 9180 DeriveKeyPair(random ikm), the same path seal/open use
+    let (sk, pk) = ::hpke::kem::X25519HkdfSha256::gen_keypair_with_rng(&mut VeilidRng {});
+
+    KemKeyPair::new(
+        CRYPTO_KIND_VLD0,
+        BareKemKeyPair::new(
+            BareEncapsulationKey::new(&pk.to_bytes()),
+            BareDecapsulationKey::new(&sk.to_bytes()),
+        ),
+    )
 }
 
 /// V0 CryptoSystem
@@ -207,8 +223,106 @@ impl CryptoSystem for CryptoSystemVLD0 {
         feature = "instrument",
         instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
     )]
+    fn hpke_seal(
+        &self,
+        recipient: &EncapsulationKey,
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> VeilidAPIResult<Vec<u8>> {
+        let (enc, ciphertext) = hpke_seal_core::<::hpke::kem::X25519HkdfSha256>(
+            recipient.ref_value(),
+            &hpke_info(CRYPTO_KIND_VLD0),
+            aad,
+            plaintext,
+            &mut VeilidRng {},
+        )?;
+        Ok(build_sealed(CRYPTO_KIND_VLD0, &enc, &ciphertext))
+    }
+
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
+    )]
+    fn hpke_open(
+        &self,
+        secret: &DecapsulationKey,
+        aad: &[u8],
+        sealed: &[u8],
+    ) -> VeilidAPIResult<Vec<u8>> {
+        let (enc, ciphertext) = parse_sealed(CRYPTO_KIND_VLD0, VLD0_HPKE_ENC_LENGTH, sealed)?;
+        hpke_open_core::<::hpke::kem::X25519HkdfSha256>(
+            secret.ref_value(),
+            enc,
+            &hpke_info(CRYPTO_KIND_VLD0),
+            aad,
+            ciphertext,
+        )
+    }
+
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
+    )]
     fn generate_keypair(&self) -> KeyPair {
         vld0_generate_keypair()
+    }
+
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
+    )]
+    fn generate_kem_keypair(&self) -> KemKeyPair {
+        vld0_generate_kem_keypair()
+    }
+
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
+    )]
+    fn encapsulation_key_from_signing_key(
+        &self,
+        key: &PublicKey,
+    ) -> VeilidAPIResult<EncapsulationKey> {
+        let pk_xd = public_to_x25519_pk(key).map_err(|e| {
+            VeilidAPIError::invalid_argument(
+                "encapsulation_key_from_signing_key",
+                "key",
+                map_to_string(e),
+            )
+        })?;
+        Ok(EncapsulationKey::new(
+            CRYPTO_KIND_VLD0,
+            BareEncapsulationKey::new(pk_xd.as_bytes()),
+        ))
+    }
+
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
+    )]
+    fn decapsulation_key_from_signing_secret(
+        &self,
+        secret: &SecretKey,
+    ) -> VeilidAPIResult<DecapsulationKey> {
+        // The sha512 conversion accepts any input length; enforce the ed25519 one
+        if secret.ref_value().len() != VLD0_SECRET_KEY_LENGTH {
+            apibail_invalid_argument!(
+                "decapsulation_key_from_signing_secret",
+                "secret",
+                secret.ref_value().len()
+            );
+        }
+        let sk_xd = secret_to_x25519_sk(secret).map_err(|e| {
+            VeilidAPIError::invalid_argument(
+                "decapsulation_key_from_signing_secret",
+                "secret",
+                map_to_string(e),
+            )
+        })?;
+        Ok(DecapsulationKey::new(
+            CRYPTO_KIND_VLD0,
+            BareDecapsulationKey::new(&sk_xd.to_bytes()),
+        ))
     }
 
     #[cfg_attr(
@@ -250,6 +364,12 @@ impl CryptoSystem for CryptoSystemVLD0 {
     }
     fn secret_key_length(&self) -> usize {
         VLD0_SECRET_KEY_LENGTH
+    }
+    fn encapsulation_key_length(&self) -> usize {
+        VLD0_ENCAPSULATION_KEY_LENGTH
+    }
+    fn decapsulation_key_length(&self) -> usize {
+        VLD0_DECAPSULATION_KEY_LENGTH
     }
     fn signature_length(&self) -> usize {
         VLD0_SIGNATURE_LENGTH

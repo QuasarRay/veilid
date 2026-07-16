@@ -1,13 +1,16 @@
 mod blake3digest512;
+mod none_kem;
 mod sizes;
 
 use super::*;
 
+use super::hpke::{build_sealed, hpke_info, hpke_open_core, hpke_seal_core, parse_sealed};
 use argon2::password_hash::phc::Salt;
 use blake3digest512::Blake3Digest512;
 use data_encoding::BASE64URL_NOPAD;
 use digest::rand_core::Rng as _;
 use digest::Digest;
+use none_kem::NoneKem;
 const NONE_AEAD_OVERHEAD: usize = NONE_PUBLIC_KEY_LENGTH;
 /// [`CryptoKind`] fourcc identifying the NONE cryptosystem.
 pub const CRYPTO_KIND_NONE: CryptoKind = CryptoKind::new(*b"NONE");
@@ -28,6 +31,23 @@ pub(crate) fn none_generate_keypair() -> KeyPair {
     KeyPair::new(CRYPTO_KIND_NONE, BareKeyPair::new(dht_key, dht_key_secret))
 }
 
+pub(crate) fn none_generate_kem_keypair() -> KemKeyPair {
+    let mut csprng = VeilidRng {};
+    let mut ek_bytes = [0u8; NONE_ENCAPSULATION_KEY_LENGTH];
+    let mut dk_bytes = [0u8; NONE_DECAPSULATION_KEY_LENGTH];
+    csprng.fill_bytes(&mut ek_bytes);
+    for n in 0..NONE_ENCAPSULATION_KEY_LENGTH {
+        dk_bytes[n] = !ek_bytes[n];
+    }
+    KemKeyPair::new(
+        CRYPTO_KIND_NONE,
+        BareKemKeyPair::new(
+            BareEncapsulationKey::new(&ek_bytes),
+            BareDecapsulationKey::new(&dk_bytes),
+        ),
+    )
+}
+
 fn do_xor_32(a: &[u8], b: &[u8]) -> VeilidAPIResult<[u8; 32]> {
     if a.len() != 32 || b.len() != 32 {
         apibail_generic!("wrong key length");
@@ -40,7 +60,7 @@ fn do_xor_32(a: &[u8], b: &[u8]) -> VeilidAPIResult<[u8; 32]> {
 }
 
 fn do_xor_inplace(a: &mut [u8], key: &[u8]) -> VeilidAPIResult<()> {
-    if a.len() != 32 || key.is_empty() {
+    if key.len() != 32 {
         apibail_generic!("wrong key length");
     }
     for n in 0..a.len() {
@@ -51,8 +71,11 @@ fn do_xor_inplace(a: &mut [u8], key: &[u8]) -> VeilidAPIResult<()> {
 }
 
 fn do_xor_b2b(a: &[u8], b: &mut [u8], key: &[u8]) -> VeilidAPIResult<()> {
-    if a.len() != 32 || b.len() != 32 || key.is_empty() {
+    if key.len() != 32 {
         apibail_generic!("wrong key length");
+    }
+    if b.len() < a.len() {
+        apibail_generic!("output buffer too small");
     }
 
     for n in 0..a.len() {
@@ -60,6 +83,22 @@ fn do_xor_b2b(a: &[u8], b: &mut [u8], key: &[u8]) -> VeilidAPIResult<()> {
     }
 
     Ok(())
+}
+
+// Fold associated data into the keyblob so a mismatched aad fails the tag check
+fn do_aead_keyblob(
+    nonce: &Nonce,
+    shared_secret: &SharedSecret,
+    associated_data: Option<&[u8]>,
+) -> VeilidAPIResult<[u8; 32]> {
+    let mut blob = nonce.to_vec();
+    blob.extend_from_slice(&[0u8; 8]);
+    let mut blob = do_xor_32(&blob, shared_secret.ref_value())?;
+    let ad_hash = blake3::hash(associated_data.unwrap_or(b""));
+    for n in 0..32 {
+        blob[n] ^= ad_hash.as_bytes()[n];
+    }
+    Ok(blob)
 }
 
 fn is_bytes_eq_32(a: &[u8], v: u8) -> VeilidAPIResult<bool> {
@@ -121,10 +160,10 @@ impl CryptoSystem for CryptoSystemNONE {
     }
     fn verify_password(&self, password: &[u8], password_hash: &str) -> VeilidAPIResult<bool> {
         let Some((salt, _)) = password_hash.split_once(":") else {
-            apibail_generic!("invalid format");
+            apibail_parse_error!("invalid format", password_hash);
         };
         let Ok(salt) = BASE64URL_NOPAD.decode(salt.as_bytes()) else {
-            apibail_generic!("invalid salt");
+            apibail_parse_error!("invalid salt", password_hash);
         };
         Ok(self.hash_password(password, &salt)? == password_hash)
     }
@@ -153,14 +192,89 @@ impl CryptoSystem for CryptoSystemNONE {
         SharedSecret::new(CRYPTO_KIND_NONE, BareSharedSecret::new(&s))
     }
     fn compute_dh(&self, key: &PublicKey, secret: &SecretKey) -> VeilidAPIResult<SharedSecret> {
+        // Mirror VLD0's low-order-point rejection
+        if is_bytes_eq_32(key.ref_value(), 0u8)? {
+            apibail_generic!("dh was not contributory");
+        }
         let s = do_xor_32(key.ref_value(), secret.ref_value())?;
         Ok(SharedSecret::new(
             CRYPTO_KIND_NONE,
             BareSharedSecret::new(&s),
         ))
     }
+    fn hpke_seal(
+        &self,
+        recipient: &EncapsulationKey,
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> VeilidAPIResult<Vec<u8>> {
+        let (enc, ciphertext) = hpke_seal_core::<NoneKem>(
+            recipient.ref_value(),
+            &hpke_info(CRYPTO_KIND_NONE),
+            aad,
+            plaintext,
+            &mut VeilidRng {},
+        )?;
+        Ok(build_sealed(CRYPTO_KIND_NONE, &enc, &ciphertext))
+    }
+
+    fn hpke_open(
+        &self,
+        secret: &DecapsulationKey,
+        aad: &[u8],
+        sealed: &[u8],
+    ) -> VeilidAPIResult<Vec<u8>> {
+        let (enc, ciphertext) = parse_sealed(CRYPTO_KIND_NONE, NONE_HPKE_ENC_LENGTH, sealed)?;
+        hpke_open_core::<NoneKem>(
+            secret.ref_value(),
+            enc,
+            &hpke_info(CRYPTO_KIND_NONE),
+            aad,
+            ciphertext,
+        )
+    }
+
     fn generate_keypair(&self) -> KeyPair {
         none_generate_keypair()
+    }
+
+    fn generate_kem_keypair(&self) -> KemKeyPair {
+        none_generate_kem_keypair()
+    }
+
+    fn encapsulation_key_from_signing_key(
+        &self,
+        key: &PublicKey,
+    ) -> VeilidAPIResult<EncapsulationKey> {
+        // The pk = !sk convention is shared with NoneKem, so the bytes map directly
+        if key.ref_value().len() != NONE_PUBLIC_KEY_LENGTH {
+            apibail_invalid_argument!(
+                "encapsulation_key_from_signing_key",
+                "key",
+                key.ref_value().len()
+            );
+        }
+        Ok(EncapsulationKey::new(
+            CRYPTO_KIND_NONE,
+            BareEncapsulationKey::new(key.ref_value()),
+        ))
+    }
+
+    fn decapsulation_key_from_signing_secret(
+        &self,
+        secret: &SecretKey,
+    ) -> VeilidAPIResult<DecapsulationKey> {
+        if secret.ref_value().len() != NONE_SECRET_KEY_LENGTH {
+            apibail_invalid_argument!(
+                "decapsulation_key_from_signing_secret",
+                "secret",
+                secret.ref_value().len()
+            );
+        }
+        Ok(DecapsulationKey::new(
+            CRYPTO_KIND_NONE,
+            BareDecapsulationKey::new(secret.ref_value()),
+        ))
     }
     fn generate_hash(&self, data: &[u8]) -> HashDigest {
         HashDigest::new(
@@ -198,6 +312,12 @@ impl CryptoSystem for CryptoSystemNONE {
     }
     fn secret_key_length(&self) -> usize {
         NONE_SECRET_KEY_LENGTH
+    }
+    fn encapsulation_key_length(&self) -> usize {
+        NONE_ENCAPSULATION_KEY_LENGTH
+    }
+    fn decapsulation_key_length(&self) -> usize {
+        NONE_DECAPSULATION_KEY_LENGTH
     }
     fn signature_length(&self) -> usize {
         NONE_SIGNATURE_LENGTH
@@ -283,16 +403,20 @@ impl CryptoSystem for CryptoSystemNONE {
         self.check_secret_key(secret_key)?;
 
         let mut dig = Blake3Digest512::new();
-        dig.update(
-            data.get(range)
-                .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
-        );
+        dig.update(data.get(range.clone()).ok_or_else(|| {
+            VeilidAPIError::invalid_argument("range is out of bounds", "range", range)
+        })?);
         let sig = dig.finalize();
         let in_sig_bytes: [u8; NONE_SIGNATURE_LENGTH] = sig.into();
 
-        data[sig_idx..sig_idx + 32].copy_from_slice(&in_sig_bytes[0..32]);
-        data[sig_idx + 32..sig_idx + 64]
-            .copy_from_slice(&do_xor_32(&in_sig_bytes[32..64], secret_key.ref_value())?);
+        let sig_out = data
+            .get_mut(sig_idx..sig_idx + NONE_SIGNATURE_LENGTH)
+            .ok_or_else(|| {
+                VeilidAPIError::parse_error("signature index is out of bounds", sig_idx)
+            })?;
+        sig_out[0..32].copy_from_slice(&in_sig_bytes[0..32]);
+        let xor_sig = do_xor_32(&in_sig_bytes[32..64], secret_key.ref_value())?;
+        sig_out[32..64].copy_from_slice(&xor_sig);
 
         Ok(())
     }
@@ -376,14 +500,12 @@ impl CryptoSystem for CryptoSystemNONE {
         body: &mut dyn CryptoSystemBuffer,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
-        _associated_data: Option<&[u8]>,
+        associated_data: Option<&[u8]>,
     ) -> VeilidAPIResult<()> {
         self.check_nonce(nonce)?;
         self.check_shared_secret(shared_secret)?;
 
-        let mut blob = nonce.to_vec();
-        blob.extend_from_slice(&[0u8; 8]);
-        let blob = do_xor_32(&blob, shared_secret.ref_value())?;
+        let blob = do_aead_keyblob(nonce, shared_secret, associated_data)?;
 
         if body.len() < NONE_AEAD_OVERHEAD {
             return Err(VeilidAPIError::generic("invalid length"));
@@ -417,14 +539,12 @@ impl CryptoSystem for CryptoSystemNONE {
         body: &mut dyn CryptoSystemBuffer,
         nonce: &Nonce,
         shared_secret: &SharedSecret,
-        _associated_data: Option<&[u8]>,
+        associated_data: Option<&[u8]>,
     ) -> VeilidAPIResult<()> {
         self.check_nonce(nonce)?;
         self.check_shared_secret(shared_secret)?;
 
-        let mut blob = nonce.to_vec();
-        blob.extend_from_slice(&[0u8; 8]);
-        let blob = do_xor_32(&blob, shared_secret.ref_value())?;
+        let blob = do_aead_keyblob(nonce, shared_secret, associated_data)?;
         do_xor_inplace(body.as_mut(), &blob)?;
         body.extend_from_slice(&blob);
         Ok(())

@@ -109,6 +109,48 @@ impl VeilidCrypto {
         })
     }
 
+    /// Seal `plaintext` to `recipient` with HPKE base mode (RFC 9180), single-shot. `aad` is
+    /// authenticated but not encrypted. Returns a self-describing sealed blob.
+    ///
+    /// Sealing is one-way: only the holder of the recipient `DecapsulationKey` can open the
+    /// blob, and the sealer cannot decrypt what it just sealed. This differs from the DH
+    /// pattern, where the shared secret let the encrypting party decrypt its own blobs. A
+    /// sealer that needs to re-read stored blobs must also seal them to its own key. Callers
+    /// who already share a symmetric key want `encryptAead` instead; HPKE is for encrypting to
+    /// a recipient's key when no shared secret exists.
+    ///
+    /// Throws `InvalidArgument` if `recipient` is not a valid key, and `Generic` if encapsulation
+    /// fails (including a low-order key).
+    pub fn hpkeSeal(
+        &self,
+        recipient: &EncapsulationKey,
+        aad: Box<[u8]>,
+        plaintext: Box<[u8]>,
+    ) -> VeilidAPIResult<Box<[u8]>> {
+        self.with_crypto_system(|crypto_system| {
+            let out = crypto_system.hpke_seal(recipient, &aad, &plaintext)?;
+            Ok(out.into_boxed_slice())
+        })
+    }
+
+    /// Open a sealed blob produced by `hpkeSeal` with the recipient `secret`. `aad` must match
+    /// what was supplied at seal. Only the recipient can open a sealed blob; the sealer cannot.
+    ///
+    /// Throws `ParseError` if the blob is truncated or its version is unknown, `InvalidArgument`
+    /// if the blob's kind is not this cryptosystem's kind or `secret` is not a valid key, and
+    /// `Generic` if decryption fails.
+    pub fn hpkeOpen(
+        &self,
+        secret: &DecapsulationKey,
+        aad: Box<[u8]>,
+        sealed: Box<[u8]>,
+    ) -> VeilidAPIResult<Box<[u8]>> {
+        self.with_crypto_system(|crypto_system| {
+            let out = crypto_system.hpke_open(secret, &aad, &sealed)?;
+            Ok(out.into_boxed_slice())
+        })
+    }
+
     /// Fill a new buffer of `len` bytes from the cryptographic RNG.
     pub fn randomBytes(&self, len: usize) -> VeilidAPIResult<Box<[u8]>> {
         self.with_crypto_system(|crypto_system| {
@@ -154,6 +196,22 @@ impl VeilidCrypto {
     pub fn secretKeyLength(&self) -> VeilidAPIResult<usize> {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.secret_key_length();
+            Ok(out)
+        })
+    }
+
+    /// Byte length of a KEM encapsulation key.
+    pub fn encapsulationKeyLength(&self) -> VeilidAPIResult<usize> {
+        self.with_crypto_system(|crypto_system| {
+            let out = crypto_system.encapsulation_key_length();
+            Ok(out)
+        })
+    }
+
+    /// Byte length of a KEM decapsulation key.
+    pub fn decapsulationKeyLength(&self) -> VeilidAPIResult<usize> {
+        self.with_crypto_system(|crypto_system| {
+            let out = crypto_system.decapsulation_key_length();
             Ok(out)
         })
     }
@@ -282,6 +340,40 @@ impl VeilidCrypto {
         self.with_crypto_system(|crypto_system| {
             let out = crypto_system.generate_keypair();
             Ok(out)
+        })
+    }
+
+    /// Generate a fresh random KEM key pair for this cryptosystem.
+    pub fn generateKemKeyPair(&self) -> VeilidAPIResult<KemKeyPair> {
+        self.with_crypto_system(|crypto_system| {
+            let out = crypto_system.generate_kem_keypair();
+            Ok(out)
+        })
+    }
+
+    /// Derive the KEM encapsulation key corresponding to a signing public key.
+    ///
+    /// VLD0-only bridge (ed25519 to x25519): kinds whose signing and KEM keys are unrelated
+    /// throw `Unimplemented`. Throws `InvalidArgument` if `key` is not a valid signing public key.
+    pub fn encapsulationKeyFromSigningKey(
+        &self,
+        key: &PublicKey,
+    ) -> VeilidAPIResult<EncapsulationKey> {
+        self.with_crypto_system(|crypto_system| {
+            crypto_system.encapsulation_key_from_signing_key(key)
+        })
+    }
+
+    /// Derive the KEM decapsulation key corresponding to a signing secret key.
+    ///
+    /// VLD0-only bridge (ed25519 to x25519): kinds whose signing and KEM keys are unrelated
+    /// throw `Unimplemented`. Throws `InvalidArgument` if `secret` is not a valid signing secret key.
+    pub fn decapsulationKeyFromSigningSecret(
+        &self,
+        secret: &SecretKey,
+    ) -> VeilidAPIResult<DecapsulationKey> {
+        self.with_crypto_system(|crypto_system| {
+            crypto_system.decapsulation_key_from_signing_secret(secret)
         })
     }
 

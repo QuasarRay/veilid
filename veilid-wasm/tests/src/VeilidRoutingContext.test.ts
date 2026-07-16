@@ -5,7 +5,7 @@ import {
   STRESS,
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
-} from './utils/veilid-config';
+} from './utils/veilid-config.js';
 
 import {
   DHTRecordDescriptor,
@@ -21,9 +21,9 @@ import {
   veilidClient,
   veilidCrypto
 } from 'veilid-wasm';
-import { textEncoder, textDecoder } from './utils/marshalling-utils';
-import { asyncCallWithTimeout, sendUntilReceived, waitForPublicAttachment as waitForPublicInternetReady, waitForOfflineSubkeyWrite, getLogTimestamp, waitForSingleEvent, waitForDetached } from './utils/wait-utils';
-import { dhtRetry } from './utils/dht-retry';
+import { textEncoder, textDecoder } from './utils/marshalling-utils.js';
+import { asyncCallWithTimeout, sendUntilReceived, waitForPublicAttachment as waitForPublicInternetReady, waitForOfflineSubkeyWrite, getLogTimestamp, waitForSingleEvent, waitForDetached } from './utils/wait-utils.js';
+import { dhtRetry } from './utils/dht-retry.js';
 
 const appMessageEventTarget = new EventTarget();
 const appCallEventTarget = new EventTarget();

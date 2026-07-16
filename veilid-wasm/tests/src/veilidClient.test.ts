@@ -4,12 +4,12 @@ import {
   LOG_LEVEL,
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
-} from './utils/veilid-config';
+} from './utils/veilid-config.js';
 
 import { veilidClient, veilidCrypto, KeyPair, Signature, CryptoKind /*, Sequencing, Stability */ } from 'veilid-wasm';
-import { asyncCallWithTimeout, getLogTimestamp, waitForDetached, waitForPublicAttachment, waitForShutdown } from './utils/wait-utils';
-import { textEncoder } from './utils/marshalling-utils';
-
+import { asyncCallWithTimeout, getLogTimestamp, waitForDetached, waitForPublicAttachment, waitForShutdown } from './utils/wait-utils.js';
+import { textEncoder } from './utils/marshalling-utils.js';
+import { dhtRetry } from './utils/dht-retry.js';
 
 describe('veilidClient', () => {
   before('veilid startup', async () => {
@@ -110,7 +110,10 @@ describe('veilidClient', () => {
     });
 
     it('should create/release a new custom private route with default values', async () => {
-      const routeBlob = await veilidClient.newCustomPrivateRoute({});
+      const routeBlob = await dhtRetry(
+        () => veilidClient.newCustomPrivateRoute({}),
+        { label: 'newCustomPrivateRoute' },
+      );
       await expect(routeBlob).toBeDefined();
       await expect(routeBlob.blob.length).toBeGreaterThan(0);
       await expect(routeBlob.routeId).toBeDefined();
@@ -119,24 +122,30 @@ describe('veilidClient', () => {
     });
 
     it('should create/release a new custom private route with specified values', async () => {
-      let routeBlob = await veilidClient.newCustomPrivateRoute({
-        cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
-        hopCount: 1,
-        stability: "LowLatency",
-        sequencing: "EnsureOrdered",
-      });
+      let routeBlob = await dhtRetry(
+        () => veilidClient.newCustomPrivateRoute({
+          cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
+          hopCount: 1,
+          stability: "LowLatency",
+          sequencing: "EnsureOrdered",
+        }),
+        { label: 'newCustomPrivateRoute with specified values' },
+      );
       await expect(routeBlob).toBeDefined();
       await expect(routeBlob.blob.length).toBeGreaterThan(0);
       await expect(routeBlob.routeId).toBeDefined();
 
       veilidClient.releasePrivateRoute(routeBlob.routeId);
 
-      routeBlob = await veilidClient.newCustomPrivateRoute({
-        cryptoKinds: [],
-        hopCount: 0,
-        stability: "LowLatency",
-        sequencing: "EnsureOrdered",
-      });
+      routeBlob = await dhtRetry(
+        () => veilidClient.newCustomPrivateRoute({
+          cryptoKinds: [],
+          hopCount: 0,
+          stability: "LowLatency",
+          sequencing: "EnsureOrdered",
+        }),
+        { label: 'newCustomPrivateRoute with specified values (no crypto kinds, default hop count)' },
+      );
       await expect(routeBlob).toBeDefined();
       await expect(routeBlob.blob.length).toBeGreaterThan(0);
       await expect(routeBlob.routeId).toBeDefined();
@@ -146,12 +155,15 @@ describe('veilidClient', () => {
 
     it('should fail to create a new custom private route with invalid crypto kind', async () => {
       try {
-        await veilidClient.newCustomPrivateRoute({
-          cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0, "BAAD" as CryptoKind],
-          hopCount: 1,
-          stability: "LowLatency",
-          sequencing: "EnsureOrdered",
-        });
+        await dhtRetry(
+          () => veilidClient.newCustomPrivateRoute({
+            cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0, "BAAD" as CryptoKind],
+            hopCount: 1,
+            stability: "LowLatency",
+            sequencing: "EnsureOrdered",
+          }),
+          { label: 'newCustomPrivateRoute with invalid crypto kind' },
+        );
       } catch (error) {
         await expect(error).toMatchObject({ kind: "Generic" });
       }
@@ -173,12 +185,15 @@ describe('veilidClient', () => {
 
     it('should fail to create a new custom private route with large hop count', async () => {
       try {
-        await veilidClient.newCustomPrivateRoute({
-          cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
-          hopCount: 100,
-          stability: "LowLatency",
-          sequencing: "EnsureOrdered",
-        });
+        await dhtRetry(
+          () => veilidClient.newCustomPrivateRoute({
+            cryptoKinds: [veilidCrypto.CRYPTO_KIND_VLD0],
+            hopCount: 100,
+            stability: "LowLatency",
+            sequencing: "EnsureOrdered",
+          }),
+          { label: 'newCustomPrivateRoute with large hop count' },
+        );
       } catch (error) {
         await expect(error).toMatchObject({ kind: "InvalidArgument" });
       }

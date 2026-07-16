@@ -208,7 +208,7 @@ pub fn veilid_tools::BytesWriter::start(&self) -> usize
 pub fn veilid_tools::BytesWriter::with_capacity(usize) -> Self
 impl core::default::Default for veilid_tools::BytesWriter
 pub fn veilid_tools::BytesWriter::default() -> Self
-impl std::io::Write for veilid_tools::BytesWriter
+impl core::io::write::Write for veilid_tools::BytesWriter
 pub fn veilid_tools::BytesWriter::flush(&mut self) -> core::io::error::Result<()>
 pub fn veilid_tools::BytesWriter::write(&mut self, &[u8]) -> core::io::error::Result<usize>
 pub mod veilid_tools::clone_stream
@@ -1381,7 +1381,7 @@ pub fn veilid_tools::BytesWriter::start(&self) -> usize
 pub fn veilid_tools::BytesWriter::with_capacity(usize) -> Self
 impl core::default::Default for veilid_tools::BytesWriter
 pub fn veilid_tools::BytesWriter::default() -> Self
-impl std::io::Write for veilid_tools::BytesWriter
+impl core::io::write::Write for veilid_tools::BytesWriter
 pub fn veilid_tools::BytesWriter::flush(&mut self) -> core::io::error::Result<()>
 pub fn veilid_tools::BytesWriter::write(&mut self, &[u8]) -> core::io::error::Result<usize>
 pub struct veilid_tools::CloneStream<T> where T: core::marker::Unpin

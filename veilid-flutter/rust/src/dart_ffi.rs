@@ -1654,6 +1654,75 @@ pub extern "C" fn crypto_generate_shared_secret(
 
 #[no_mangle]
 #[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn crypto_hpke_seal(
+    port: i64,
+    kind: u32,
+    recipient: FfiStr,
+    aad: FfiStr,
+    plaintext: FfiStr,
+) {
+    let kind: CryptoKind = CryptoKind::from(kind);
+
+    let recipient: EncapsulationKey =
+        deserialize_opt_json(recipient.into_opt_string()).unwrap_or_log();
+    let aad: Vec<u8> = data_encoding::BASE64URL_NOPAD
+        .decode(aad.into_opt_string().unwrap_or_log().as_bytes())
+        .unwrap_or_log();
+    let plaintext: Vec<u8> = data_encoding::BASE64URL_NOPAD
+        .decode(plaintext.into_opt_string().unwrap_or_log().as_bytes())
+        .unwrap_or_log();
+
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let crypto = veilid_api.crypto()?;
+            let csv = crypto.get(kind).ok_or_else(|| {
+                VeilidAPIError::invalid_argument("crypto_hpke_seal", "kind", kind.to_string())
+            })?;
+            let out = csv.hpke_seal(&recipient, &aad, &plaintext)?;
+            let out = data_encoding::BASE64URL_NOPAD.encode(&out);
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn crypto_hpke_open(
+    port: i64,
+    kind: u32,
+    secret: FfiStr,
+    aad: FfiStr,
+    sealed: FfiStr,
+) {
+    let kind: CryptoKind = CryptoKind::from(kind);
+
+    let secret: DecapsulationKey = deserialize_opt_json(secret.into_opt_string()).unwrap_or_log();
+    let aad: Vec<u8> = data_encoding::BASE64URL_NOPAD
+        .decode(aad.into_opt_string().unwrap_or_log().as_bytes())
+        .unwrap_or_log();
+    let sealed: Vec<u8> = data_encoding::BASE64URL_NOPAD
+        .decode(sealed.into_opt_string().unwrap_or_log().as_bytes())
+        .unwrap_or_log();
+
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let crypto = veilid_api.crypto()?;
+            let csv = crypto.get(kind).ok_or_else(|| {
+                VeilidAPIError::invalid_argument("crypto_hpke_open", "kind", kind.to_string())
+            })?;
+            let out = csv.hpke_open(&secret, &aad, &sealed)?;
+            let out = data_encoding::BASE64URL_NOPAD.encode(&out);
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
 pub extern "C" fn crypto_random_bytes(port: i64, kind: u32, len: u32) {
     let kind: CryptoKind = CryptoKind::from(kind);
 
@@ -1777,6 +1846,52 @@ pub extern "C" fn crypto_secret_key_length(port: i64, kind: u32) {
                 )
             })?;
             let out = csv.secret_key_length();
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn crypto_encapsulation_key_length(port: i64, kind: u32) {
+    let kind: CryptoKind = CryptoKind::from(kind);
+
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let crypto = veilid_api.crypto()?;
+            let csv = crypto.get(kind).ok_or_else(|| {
+                VeilidAPIError::invalid_argument(
+                    "crypto_encapsulation_key_length",
+                    "kind",
+                    kind.to_string(),
+                )
+            })?;
+            let out = csv.encapsulation_key_length();
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn crypto_decapsulation_key_length(port: i64, kind: u32) {
+    let kind: CryptoKind = CryptoKind::from(kind);
+
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let crypto = veilid_api.crypto()?;
+            let csv = crypto.get(kind).ok_or_else(|| {
+                VeilidAPIError::invalid_argument(
+                    "crypto_decapsulation_key_length",
+                    "kind",
+                    kind.to_string(),
+                )
+            })?;
+            let out = csv.decapsulation_key_length();
             VeilidAPIResult::Ok(out)
         }
         .in_current_span(),
@@ -2130,6 +2245,83 @@ pub extern "C" fn crypto_generate_key_pair(port: i64, kind: u32) {
                 )
             })?;
             let out = csv.generate_keypair();
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn crypto_generate_kem_key_pair(port: i64, kind: u32) {
+    let kind: CryptoKind = CryptoKind::from(kind);
+
+    DartIsolateWrapper::new(port).spawn_result_json(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let crypto = veilid_api.crypto()?;
+            let csv = crypto.get(kind).ok_or_else(|| {
+                VeilidAPIError::invalid_argument(
+                    "crypto_generate_kem_key_pair",
+                    "kind",
+                    kind.to_string(),
+                )
+            })?;
+            let out = csv.generate_kem_keypair();
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn crypto_encapsulation_key_from_signing_key(port: i64, kind: u32, key: FfiStr) {
+    let kind: CryptoKind = CryptoKind::from(kind);
+
+    let key: PublicKey = deserialize_opt_json(key.into_opt_string()).unwrap_or_log();
+
+    DartIsolateWrapper::new(port).spawn_result_json(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let crypto = veilid_api.crypto()?;
+            let csv = crypto.get(kind).ok_or_else(|| {
+                VeilidAPIError::invalid_argument(
+                    "crypto_encapsulation_key_from_signing_key",
+                    "kind",
+                    kind.to_string(),
+                )
+            })?;
+            let out = csv.encapsulation_key_from_signing_key(&key)?;
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn crypto_decapsulation_key_from_signing_secret(
+    port: i64,
+    kind: u32,
+    secret: FfiStr,
+) {
+    let kind: CryptoKind = CryptoKind::from(kind);
+
+    let secret: SecretKey = deserialize_opt_json(secret.into_opt_string()).unwrap_or_log();
+
+    DartIsolateWrapper::new(port).spawn_result_json(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let crypto = veilid_api.crypto()?;
+            let csv = crypto.get(kind).ok_or_else(|| {
+                VeilidAPIError::invalid_argument(
+                    "crypto_decapsulation_key_from_signing_secret",
+                    "kind",
+                    kind.to_string(),
+                )
+            })?;
+            let out = csv.decapsulation_key_from_signing_secret(&secret)?;
             VeilidAPIResult::Ok(out)
         }
         .in_current_span(),

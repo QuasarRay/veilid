@@ -205,6 +205,14 @@ typedef _CryptoComputeDHDart =
 //   secret: FfiStr, domain: FfiStr)
 typedef _CryptoGenerateSharedSecretDart =
     void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+// fn crypto_hpke_seal(port: i64, kind: u32, recipient: FfiStr,
+//   aad: FfiStr, plaintext: FfiStr)
+typedef _CryptoHpkeSealDart =
+    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
+// fn crypto_hpke_open(port: i64, kind: u32, secret: FfiStr,
+//   aad: FfiStr, sealed: FfiStr)
+typedef _CryptoHpkeOpenDart =
+    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
 // fn crypto_random_bytes(port: i64, kind: u32, len: u32)
 typedef _CryptoRandomBytesDart = void Function(int, int, int);
 // fn crypto_shared_secret_length(port: i64, kind: u32)
@@ -254,6 +262,20 @@ typedef _CryptoRandomNonceDart = void Function(int, int);
 typedef _CryptoRandomSharedSecretDart = void Function(int, int);
 // fn crypto_generate_key_pair(port: i64, kind: u32)
 typedef _CryptoGenerateKeyPairDart = void Function(int, int);
+// fn crypto_generate_kem_key_pair(port: i64, kind: u32)
+typedef _CryptoGenerateKemKeyPairDart = void Function(int, int);
+// fn crypto_encapsulation_key_from_signing_key(port: i64, kind: u32,
+//    key: FfiStr)
+typedef _CryptoEncapsulationKeyFromSigningKeyDart =
+    void Function(int, int, Pointer<Utf8>);
+// fn crypto_decapsulation_key_from_signing_secret(port: i64, kind: u32,
+//    secret: FfiStr)
+typedef _CryptoDecapsulationKeyFromSigningSecretDart =
+    void Function(int, int, Pointer<Utf8>);
+// fn crypto_encapsulation_key_length(port: i64, kind: u32)
+typedef _CryptoEncapsulationKeyLengthDart = void Function(int, int);
+// fn crypto_decapsulation_key_length(port: i64, kind: u32)
+typedef _CryptoDecapsulationKeyLengthDart = void Function(int, int);
 // fn crypto_generate_hash(port: i64, kind: u32, data: FfiStr)
 typedef _CryptoGenerateHashDart = void Function(int, int, Pointer<Utf8>);
 // fn crypto_validate_key_pair(port: i64,
@@ -1397,6 +1419,52 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   }
 
   @override
+  Future<Uint8List> hpkeSeal(
+    EncapsulationKey recipient,
+    Uint8List aad,
+    Uint8List plaintext,
+  ) async {
+    final nativeRecipient = jsonEncode(recipient).toNativeUtf8();
+    final nativeAad = base64UrlNoPadEncode(aad).toNativeUtf8();
+    final nativePlaintext = base64UrlNoPadEncode(plaintext).toNativeUtf8();
+
+    final recvPort = ReceivePort('crypto_hpke_seal');
+    final sendPort = recvPort.sendPort;
+    _ffi._cryptoHpkeSeal(
+      sendPort.nativePort,
+      _kind,
+      nativeRecipient,
+      nativeAad,
+      nativePlaintext,
+    );
+    final out = await processFuturePlain<String>(recvPort.first);
+    return base64UrlNoPadDecode(out);
+  }
+
+  @override
+  Future<Uint8List> hpkeOpen(
+    DecapsulationKey secret,
+    Uint8List aad,
+    Uint8List sealed,
+  ) async {
+    final nativeSecret = jsonEncode(secret).toNativeUtf8();
+    final nativeAad = base64UrlNoPadEncode(aad).toNativeUtf8();
+    final nativeSealed = base64UrlNoPadEncode(sealed).toNativeUtf8();
+
+    final recvPort = ReceivePort('crypto_hpke_open');
+    final sendPort = recvPort.sendPort;
+    _ffi._cryptoHpkeOpen(
+      sendPort.nativePort,
+      _kind,
+      nativeSecret,
+      nativeAad,
+      nativeSealed,
+    );
+    final out = await processFuturePlain<String>(recvPort.first);
+    return base64UrlNoPadDecode(out);
+  }
+
+  @override
   Future<Uint8List> randomBytes(int len) async {
     final recvPort = ReceivePort('crypto_random_bytes');
     final sendPort = recvPort.sendPort;
@@ -1442,6 +1510,22 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final recvPort = ReceivePort('crypto_secret_key_length');
     final sendPort = recvPort.sendPort;
     _ffi._cryptoSecretKeyLength(sendPort.nativePort, _kind);
+    return processFuturePlain(recvPort.first);
+  }
+
+  @override
+  Future<int> encapsulationKeyLength() {
+    final recvPort = ReceivePort('crypto_encapsulation_key_length');
+    final sendPort = recvPort.sendPort;
+    _ffi._cryptoEncapsulationKeyLength(sendPort.nativePort, _kind);
+    return processFuturePlain(recvPort.first);
+  }
+
+  @override
+  Future<int> decapsulationKeyLength() {
+    final recvPort = ReceivePort('crypto_decapsulation_key_length');
+    final sendPort = recvPort.sendPort;
+    _ffi._cryptoDecapsulationKeyLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1593,6 +1677,46 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final sendPort = recvPort.sendPort;
     _ffi._cryptoGenerateKeyPair(sendPort.nativePort, _kind);
     return processFutureJson(KeyPair.fromJson, recvPort.first);
+  }
+
+  @override
+  Future<KemKeyPair> generateKemKeyPair() {
+    final recvPort = ReceivePort('crypto_generate_kem_key_pair');
+    final sendPort = recvPort.sendPort;
+    _ffi._cryptoGenerateKemKeyPair(sendPort.nativePort, _kind);
+    return processFutureJson(KemKeyPair.fromJson, recvPort.first);
+  }
+
+  @override
+  Future<EncapsulationKey> encapsulationKeyFromSigningKey(PublicKey key) {
+    final nativeKey = jsonEncode(key).toNativeUtf8();
+
+    final recvPort = ReceivePort('crypto_encapsulation_key_from_signing_key');
+    final sendPort = recvPort.sendPort;
+    _ffi._cryptoEncapsulationKeyFromSigningKey(
+      sendPort.nativePort,
+      _kind,
+      nativeKey,
+    );
+    return processFutureJson(EncapsulationKey.fromJson, recvPort.first);
+  }
+
+  @override
+  Future<DecapsulationKey> decapsulationKeyFromSigningSecret(
+    SecretKey secret,
+  ) {
+    final nativeSecret = jsonEncode(secret).toNativeUtf8();
+
+    final recvPort = ReceivePort(
+      'crypto_decapsulation_key_from_signing_secret',
+    );
+    final sendPort = recvPort.sendPort;
+    _ffi._cryptoDecapsulationKeyFromSigningSecret(
+      sendPort.nativePort,
+      _kind,
+      nativeSecret,
+    );
+    return processFutureJson(DecapsulationKey.fromJson, recvPort.first);
   }
 
   @override
@@ -1831,6 +1955,8 @@ class VeilidFFI extends Veilid {
   final _CryptoCachedDHDart _cryptoCachedDH;
   final _CryptoComputeDHDart _cryptoComputeDH;
   final _CryptoGenerateSharedSecretDart _cryptoGenerateSharedSecret;
+  final _CryptoHpkeSealDart _cryptoHpkeSeal;
+  final _CryptoHpkeOpenDart _cryptoHpkeOpen;
 
   final _CryptoRandomBytesDart _cryptoRandomBytes;
   final _CryptoHashPasswordDart _cryptoHashPassword;
@@ -1842,6 +1968,8 @@ class VeilidFFI extends Veilid {
   final _CryptoHashDigestLengthDart _cryptoHashDigestLength;
   final _CryptoPublicKeyLengthDart _cryptoPublicKeyLength;
   final _CryptoSecretKeyLengthDart _cryptoSecretKeyLength;
+  final _CryptoEncapsulationKeyLengthDart _cryptoEncapsulationKeyLength;
+  final _CryptoDecapsulationKeyLengthDart _cryptoDecapsulationKeyLength;
   final _CryptoSignatureLengthDart _cryptoSignatureLength;
   final _CryptoDefaultSaltLengthDart _cryptoDefaultSaltLength;
   final _CryptoAeadOverheadDart _cryptoAeadOverhead;
@@ -1856,6 +1984,11 @@ class VeilidFFI extends Veilid {
   final _CryptoRandomNonceDart _cryptoRandomNonce;
   final _CryptoRandomSharedSecretDart _cryptoRandomSharedSecret;
   final _CryptoGenerateKeyPairDart _cryptoGenerateKeyPair;
+  final _CryptoGenerateKemKeyPairDart _cryptoGenerateKemKeyPair;
+  final _CryptoEncapsulationKeyFromSigningKeyDart
+  _cryptoEncapsulationKeyFromSigningKey;
+  final _CryptoDecapsulationKeyFromSigningSecretDart
+  _cryptoDecapsulationKeyFromSigningSecret;
   final _CryptoGenerateHashDart _cryptoGenerateHash;
   final _CryptoValidateKeyPairDart _cryptoValidateKeyPair;
   final _CryptoValidateHashDart _cryptoValidateHash;
@@ -2219,6 +2352,28 @@ class VeilidFFI extends Veilid {
             ),
             _CryptoGenerateSharedSecretDart
           >('crypto_generate_shared_secret'),
+      _cryptoHpkeSeal = dylib
+          .lookupFunction<
+            Void Function(
+              Int64,
+              Uint32,
+              Pointer<Utf8>,
+              Pointer<Utf8>,
+              Pointer<Utf8>,
+            ),
+            _CryptoHpkeSealDart
+          >('crypto_hpke_seal'),
+      _cryptoHpkeOpen = dylib
+          .lookupFunction<
+            Void Function(
+              Int64,
+              Uint32,
+              Pointer<Utf8>,
+              Pointer<Utf8>,
+              Pointer<Utf8>,
+            ),
+            _CryptoHpkeOpenDart
+          >('crypto_hpke_open'),
       _cryptoSharedSecretLength = dylib
           .lookupFunction<
             Void Function(Int64, Uint32),
@@ -2243,6 +2398,16 @@ class VeilidFFI extends Veilid {
             Void Function(Int64, Uint32),
             _CryptoSecretKeyLengthDart
           >('crypto_secret_key_length'),
+      _cryptoEncapsulationKeyLength = dylib
+          .lookupFunction<
+            Void Function(Int64, Uint32),
+            _CryptoEncapsulationKeyLengthDart
+          >('crypto_encapsulation_key_length'),
+      _cryptoDecapsulationKeyLength = dylib
+          .lookupFunction<
+            Void Function(Int64, Uint32),
+            _CryptoDecapsulationKeyLengthDart
+          >('crypto_decapsulation_key_length'),
       _cryptoSignatureLength = dylib
           .lookupFunction<
             Void Function(Int64, Uint32),
@@ -2322,6 +2487,21 @@ class VeilidFFI extends Veilid {
             Void Function(Int64, Uint32),
             _CryptoGenerateKeyPairDart
           >('crypto_generate_key_pair'),
+      _cryptoGenerateKemKeyPair = dylib
+          .lookupFunction<
+            Void Function(Int64, Uint32),
+            _CryptoGenerateKemKeyPairDart
+          >('crypto_generate_kem_key_pair'),
+      _cryptoEncapsulationKeyFromSigningKey = dylib
+          .lookupFunction<
+            Void Function(Int64, Uint32, Pointer<Utf8>),
+            _CryptoEncapsulationKeyFromSigningKeyDart
+          >('crypto_encapsulation_key_from_signing_key'),
+      _cryptoDecapsulationKeyFromSigningSecret = dylib
+          .lookupFunction<
+            Void Function(Int64, Uint32, Pointer<Utf8>),
+            _CryptoDecapsulationKeyFromSigningSecretDart
+          >('crypto_decapsulation_key_from_signing_secret'),
       _cryptoGenerateHash = dylib
           .lookupFunction<
             Void Function(Int64, Uint32, Pointer<Utf8>),

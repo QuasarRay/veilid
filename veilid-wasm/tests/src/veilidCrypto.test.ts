@@ -4,11 +4,11 @@ import {
   LOG_LEVEL,
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
-} from './utils/veilid-config';
+} from './utils/veilid-config.js';
 
 import { veilidClient, veilidCrypto } from 'veilid-wasm';
-import { textEncoder, unmarshallBytes } from './utils/marshalling-utils';
-import { getLogTimestamp } from './utils/wait-utils';
+import { textEncoder, unmarshallBytes } from './utils/marshalling-utils.js';
+import { getLogTimestamp } from './utils/wait-utils.js';
 
 describe('veilidCrypto', () => {
   before('veilid startup', async () => {
@@ -133,6 +133,56 @@ describe('veilidCrypto', () => {
       );
       await expect(decBody instanceof Uint8Array).toBe(true);
       await expect(body).toEqual(decBody);
+    });
+  }
+  for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
+    it(`should hpke seal and open for ${cryptoKind as string}`, async () => {
+      const vcrypto = veilidClient.getCrypto(cryptoKind)
+      const plaintext = textEncoder.encode('This is a sealed message🔒');
+      const aad = textEncoder.encode('This is data bound to the seal👋');
+
+      const keypair = vcrypto.generateKemKeyPair();
+      const keypair2 = vcrypto.generateKemKeyPair();
+
+      const sealed = vcrypto.hpkeSeal(keypair.key, aad, plaintext);
+      await expect(sealed instanceof Uint8Array).toBe(true);
+
+      const opened = vcrypto.hpkeOpen(keypair.secret, aad, sealed);
+      await expect(opened).toEqual(plaintext);
+
+      // wrong recipient
+      await expect(() =>
+        vcrypto.hpkeOpen(keypair2.secret, aad, sealed)
+      ).toThrow();
+
+      // mismatched aad
+      await expect(() =>
+        vcrypto.hpkeOpen(keypair.secret, plaintext, sealed)
+      ).toThrow();
+
+      // tampered blob
+      const tampered = new Uint8Array(sealed);
+      tampered[tampered.length - 1] ^= 0x80;
+      await expect(() =>
+        vcrypto.hpkeOpen(keypair.secret, aad, tampered)
+      ).toThrow();
+    });
+  }
+  for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
+    it(`should derive kem keys from signing keys for ${cryptoKind as string}`, async () => {
+      const vcrypto = veilidClient.getCrypto(cryptoKind)
+      const plaintext = textEncoder.encode('This is a bridged message🌉');
+
+      const signingKeypair = vcrypto.generateKeyPair();
+      const ek = vcrypto.encapsulationKeyFromSigningKey(signingKeypair.key);
+      const dk = vcrypto.decapsulationKeyFromSigningSecret(
+        signingKeypair.secret
+      );
+
+      // bridged halves form a working KEM pair
+      const sealed = vcrypto.hpkeSeal(ek, new Uint8Array(0), plaintext);
+      const opened = vcrypto.hpkeOpen(dk, new Uint8Array(0), sealed);
+      await expect(opened).toEqual(plaintext);
     });
   }
   for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {

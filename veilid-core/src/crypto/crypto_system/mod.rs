@@ -6,6 +6,8 @@ mod buffer;
 
 pub(crate) use buffer::*;
 
+#[cfg(any(feature = "enable-crypto-vld0", feature = "enable-crypto-none"))]
+pub(crate) mod hpke;
 #[cfg(feature = "enable-crypto-none")]
 pub(crate) mod none;
 #[cfg(feature = "enable-crypto-vld0")]
@@ -103,8 +105,64 @@ pub trait CryptoSystem {
             BareSharedSecret::new(&hash.into_value()),
         ))
     }
+    /// Seal `plaintext` to `recipient` with HPKE base mode (RFC 9180), single-shot. `aad` is
+    /// authenticated but not encrypted, and must be supplied again to open. Returns a
+    /// self-describing sealed blob: a version byte, this cryptosystem's kind fourcc, the
+    /// encapsulated KEM key, and the ciphertext with appended tag.
+    ///
+    /// Sealing is one-way: only the holder of the recipient's [`DecapsulationKey`] can open the
+    /// blob; the sealer cannot decrypt what it just sealed. This differs from the DH pattern,
+    /// where the shared secret let the encrypting party decrypt its own blobs. A sealer that
+    /// needs to re-read stored blobs must also seal them to its own key. Callers who already
+    /// share a symmetric key want [`encrypt_aead`](Self::encrypt_aead) instead; HPKE is for
+    /// encrypting to a recipient's key when no shared secret exists.
+    ///
+    /// Errors `VeilidAPIError::InvalidArgument` if `recipient` is not a valid key,
+    /// `VeilidAPIError::Generic` if encapsulation fails (including a low-order key).
+    fn hpke_seal(
+        &self,
+        recipient: &EncapsulationKey,
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> VeilidAPIResult<Vec<u8>>;
+    /// Open a sealed blob produced by [`hpke_seal`](Self::hpke_seal) with the recipient `secret`,
+    /// returning the plaintext. `aad` must match what was supplied at seal. Only the recipient
+    /// can open a sealed blob; the sealer cannot.
+    ///
+    /// Errors `VeilidAPIError::ParseError` if the blob is truncated or its version is unknown,
+    /// `VeilidAPIError::InvalidArgument` if the blob's kind is not this cryptosystem's kind or
+    /// `secret` is not a valid key, `VeilidAPIError::Generic` if decryption fails (tampered blob,
+    /// wrong recipient, or mismatched `aad`).
+    fn hpke_open(
+        &self,
+        secret: &DecapsulationKey,
+        aad: &[u8],
+        sealed: &[u8],
+    ) -> VeilidAPIResult<Vec<u8>>;
     /// Generate a fresh random signing key pair for this cryptosystem.
     fn generate_keypair(&self) -> KeyPair;
+    /// Generate a fresh random KEM key pair for this cryptosystem.
+    fn generate_kem_keypair(&self) -> KemKeyPair;
+    /// Derive the KEM encapsulation key corresponding to a signing public key.
+    ///
+    /// VLD0-only bridge (ed25519 to x25519): kinds whose signing and KEM keys are unrelated
+    /// (VLD1 ML-DSA/ML-KEM) error `VeilidAPIError::Unimplemented`.
+    ///
+    /// Errors `VeilidAPIError::InvalidArgument` if `key` is not a valid signing public key.
+    fn encapsulation_key_from_signing_key(
+        &self,
+        key: &PublicKey,
+    ) -> VeilidAPIResult<EncapsulationKey>;
+    /// Derive the KEM decapsulation key corresponding to a signing secret key.
+    ///
+    /// VLD0-only bridge (ed25519 to x25519): kinds whose signing and KEM keys are unrelated
+    /// (VLD1 ML-DSA/ML-KEM) error `VeilidAPIError::Unimplemented`.
+    ///
+    /// Errors `VeilidAPIError::InvalidArgument` if `secret` is not a valid signing secret key.
+    fn decapsulation_key_from_signing_secret(
+        &self,
+        secret: &SecretKey,
+    ) -> VeilidAPIResult<DecapsulationKey>;
     /// Hash a byte slice, returning a digest tagged with this cryptosystem's kind.
     fn generate_hash(&self, data: &[u8]) -> HashDigest;
     /// Hash a stream by reading it to end, returning the digest as a `PublicKey` (the digest and
@@ -124,6 +182,10 @@ pub trait CryptoSystem {
     fn public_key_length(&self) -> usize;
     /// Byte length of a secret key.
     fn secret_key_length(&self) -> usize;
+    /// Byte length of a KEM encapsulation key.
+    fn encapsulation_key_length(&self) -> usize;
+    /// Byte length of a KEM decapsulation key.
+    fn decapsulation_key_length(&self) -> usize;
     /// Byte length of a signature.
     fn signature_length(&self) -> usize;
     /// Default salt length in bytes for password hashing and KDF operations.

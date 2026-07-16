@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
@@ -99,5 +100,62 @@ Future<void> testGenerateSharedSecret() async {
         kp3.key, kp1.secret, utf8.encode('abc123'));
 
     expect(ssA, isNot(equals(ssD)));
+  }
+}
+
+Future<void> testHpkeSealOpen() async {
+  for (final kind in Veilid.instance.validCryptoKinds()) {
+    final cs = await Veilid.instance.getCryptoSystem(kind);
+
+    final kkp1 = await cs.generateKemKeyPair();
+    final kkp2 = await cs.generateKemKeyPair();
+    expect(kkp1, isNot(equals(kkp2)));
+    expect(kkp1.key.value.toBytes().length,
+        equals(await cs.encapsulationKeyLength()));
+    expect(kkp1.secret.value.toBytes().length,
+        equals(await cs.decapsulationKeyLength()));
+
+    final aad = utf8.encode('some associated data');
+    final plaintext = utf8.encode('hello hpke');
+
+    final sealed = await cs.hpkeSeal(kkp1.key, aad, plaintext);
+    expect(await cs.hpkeOpen(kkp1.secret, aad, sealed), equals(plaintext));
+
+    // empty aad and empty plaintext round-trip
+    final sealedEmpty =
+        await cs.hpkeSeal(kkp1.key, Uint8List(0), Uint8List(0));
+    expect(await cs.hpkeOpen(kkp1.secret, Uint8List(0), sealedEmpty),
+        equals(Uint8List(0)));
+
+    // wrong recipient
+    await expectLater(() async => cs.hpkeOpen(kkp2.secret, aad, sealed),
+        throwsA(isA<VeilidAPIException>()));
+
+    // mismatched aad
+    await expectLater(
+        () async => cs.hpkeOpen(kkp1.secret, utf8.encode('other aad'), sealed),
+        throwsA(isA<VeilidAPIException>()));
+
+    // tampered blob
+    final tampered = Uint8List.fromList(sealed);
+    tampered[tampered.length - 1] ^= 0x80;
+    await expectLater(() async => cs.hpkeOpen(kkp1.secret, aad, tampered),
+        throwsA(isA<VeilidAPIException>()));
+  }
+}
+
+Future<void> testKemBridgeFromSigningKeys() async {
+  for (final kind in Veilid.instance.validCryptoKinds()) {
+    final cs = await Veilid.instance.getCryptoSystem(kind);
+
+    final kp = await cs.generateKeyPair();
+
+    final ek = await cs.encapsulationKeyFromSigningKey(kp.key);
+    final dk = await cs.decapsulationKeyFromSigningSecret(kp.secret);
+
+    // bridged halves form a working KEM pair
+    final plaintext = utf8.encode('bridged');
+    final sealed = await cs.hpkeSeal(ek, Uint8List(0), plaintext);
+    expect(await cs.hpkeOpen(dk, Uint8List(0), sealed), equals(plaintext));
   }
 }

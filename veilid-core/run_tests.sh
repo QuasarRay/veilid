@@ -18,6 +18,7 @@ if [[ "$1" == "wasm" ]]; then
 elif [[ "$1" == "ios" ]]; then
     SYMROOT=/tmp/testout
     APPNAME=veilidcore-tests
+    # Also the tracing-oslog subsystem, set in src/tests/ios/mod.rs
     BUNDLENAME=com.veilid.veilidcore-tests
     ID="$2"
     if [[ "$ID" == "" ]]; then
@@ -31,11 +32,24 @@ elif [[ "$1" == "ios" ]]; then
 
     # Run in temporary simulator
     xcrun simctl install $ID $SYMROOT/Debug-iphonesimulator/$APPNAME.app || { status=$?; popd >/dev/null; exit $status; }
-    xcrun simctl spawn $ID log stream --level debug --predicate "subsystem == \"$BUNDLENAME\"" &
+    # Capture os_log output; the completion marker only appears there, not on the console
+    IOS_LOG=$(mktemp)
+    xcrun simctl spawn $ID log stream --level debug --predicate "subsystem == \"$BUNDLENAME\"" >"$IOS_LOG" 2>&1 &
+    LOGPID=$!
+    sleep 2 # Let the log stream attach before launching
     xcrun simctl launch --console $ID $BUNDLENAME
-    status=$?
     sleep 1 # Ensure the last log lines print
-    kill -INT %1
+    kill -INT $LOGPID
+    # Print the test progression, then assert on the completion marker
+    grep -E "TEST:|Finished unit tests|panicked|assertion" "$IOS_LOG" || true
+    if grep -q "Finished unit tests" "$IOS_LOG"; then
+        echo "iOS unit tests PASSED"
+        status=0
+    else
+        echo "iOS unit tests FAILED or did not complete"
+        status=1
+    fi
+    rm -f "$IOS_LOG"
 
     # Clean up build output
     rm -rf /tmp/testout

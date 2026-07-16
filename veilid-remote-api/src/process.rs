@@ -564,6 +564,20 @@ impl JsonRequestProcessor {
                 ),
             },
 
+            CryptoSystemRequestOp::HpkeSeal {
+                recipient,
+                aad,
+                plaintext,
+            } => CryptoSystemResponseOp::HpkeSeal {
+                result: to_json_api_result_with_vec_u8(csv.hpke_seal(&recipient, &aad, &plaintext)),
+            },
+            CryptoSystemRequestOp::HpkeOpen {
+                secret,
+                aad,
+                sealed,
+            } => CryptoSystemResponseOp::HpkeOpen {
+                result: to_json_api_result_with_vec_u8(csv.hpke_open(&secret, &aad, &sealed)),
+            },
             CryptoSystemRequestOp::RandomBytes { len } => CryptoSystemResponseOp::RandomBytes {
                 value: csv.random_bytes(len as usize),
             },
@@ -584,6 +598,16 @@ impl JsonRequestProcessor {
             CryptoSystemRequestOp::SecretKeyLength => CryptoSystemResponseOp::SecretKeyLength {
                 value: csv.secret_key_length() as u32,
             },
+            CryptoSystemRequestOp::EncapsulationKeyLength => {
+                CryptoSystemResponseOp::EncapsulationKeyLength {
+                    value: csv.encapsulation_key_length() as u32,
+                }
+            }
+            CryptoSystemRequestOp::DecapsulationKeyLength => {
+                CryptoSystemResponseOp::DecapsulationKeyLength {
+                    value: csv.decapsulation_key_length() as u32,
+                }
+            }
             CryptoSystemRequestOp::SignatureLength => CryptoSystemResponseOp::SignatureLength {
                 value: csv.signature_length() as u32,
             },
@@ -650,6 +674,25 @@ impl JsonRequestProcessor {
             CryptoSystemRequestOp::GenerateKeyPair => CryptoSystemResponseOp::GenerateKeyPair {
                 value: csv.generate_keypair(),
             },
+            CryptoSystemRequestOp::GenerateKemKeyPair => {
+                CryptoSystemResponseOp::GenerateKemKeyPair {
+                    value: csv.generate_kem_keypair(),
+                }
+            }
+            CryptoSystemRequestOp::EncapsulationKeyFromSigningKey { key } => {
+                CryptoSystemResponseOp::EncapsulationKeyFromSigningKey {
+                    result: to_json_api_result_with_string(
+                        csv.encapsulation_key_from_signing_key(&key),
+                    ),
+                }
+            }
+            CryptoSystemRequestOp::DecapsulationKeyFromSigningSecret { secret } => {
+                CryptoSystemResponseOp::DecapsulationKeyFromSigningSecret {
+                    result: to_json_api_result_with_string(
+                        csv.decapsulation_key_from_signing_secret(&secret),
+                    ),
+                }
+            }
             CryptoSystemRequestOp::GenerateHash { data } => CryptoSystemResponseOp::GenerateHash {
                 value: csv.generate_hash(&data),
             },

@@ -1188,6 +1188,64 @@ pub fn crypto_generate_shared_secret(
 }
 
 #[wasm_bindgen()]
+pub fn crypto_hpke_seal(kind: u32, recipient: String, aad: String, plaintext: String) -> Promise {
+    wrap_api_future_plain(async move {
+        let kind: veilid_core::CryptoKind = veilid_core::CryptoKind::from(kind);
+
+        let recipient: veilid_core::EncapsulationKey = veilid_core::deserialize_json(&recipient)?;
+        let aad: Vec<u8> = data_encoding::BASE64URL_NOPAD
+            .decode(aad.as_bytes())
+            .map_err(|e| VeilidAPIError::parse_error("failed to decode aad", e.to_string()))?;
+        let plaintext: Vec<u8> = data_encoding::BASE64URL_NOPAD
+            .decode(plaintext.as_bytes())
+            .map_err(|e| {
+                VeilidAPIError::parse_error("failed to decode plaintext", e.to_string())
+            })?;
+
+        let veilid_api = get_veilid_api()?;
+        let crypto = veilid_api.crypto()?;
+        let csv = crypto.get(kind).ok_or_else(|| {
+            veilid_core::VeilidAPIError::invalid_argument(
+                "crypto_hpke_seal",
+                "kind",
+                kind.to_string(),
+            )
+        })?;
+        let out = csv.hpke_seal(&recipient, &aad, &plaintext)?;
+        let out = data_encoding::BASE64URL_NOPAD.encode(&out);
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn crypto_hpke_open(kind: u32, secret: String, aad: String, sealed: String) -> Promise {
+    wrap_api_future_plain(async move {
+        let kind: veilid_core::CryptoKind = veilid_core::CryptoKind::from(kind);
+
+        let secret: veilid_core::DecapsulationKey = veilid_core::deserialize_json(&secret)?;
+        let aad: Vec<u8> = data_encoding::BASE64URL_NOPAD
+            .decode(aad.as_bytes())
+            .map_err(|e| VeilidAPIError::parse_error("failed to decode aad", e.to_string()))?;
+        let sealed: Vec<u8> = data_encoding::BASE64URL_NOPAD
+            .decode(sealed.as_bytes())
+            .map_err(|e| VeilidAPIError::parse_error("failed to decode sealed", e.to_string()))?;
+
+        let veilid_api = get_veilid_api()?;
+        let crypto = veilid_api.crypto()?;
+        let csv = crypto.get(kind).ok_or_else(|| {
+            veilid_core::VeilidAPIError::invalid_argument(
+                "crypto_hpke_open",
+                "kind",
+                kind.to_string(),
+            )
+        })?;
+        let out = csv.hpke_open(&secret, &aad, &sealed)?;
+        let out = data_encoding::BASE64URL_NOPAD.encode(&out);
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
 pub fn crypto_random_bytes(kind: u32, len: usize) -> Promise {
     let kind: veilid_core::CryptoKind = veilid_core::CryptoKind::from(kind);
 
@@ -1298,6 +1356,44 @@ pub fn crypto_secret_key_length(kind: u32) -> Promise {
             )
         })?;
         let out = csv.secret_key_length();
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn crypto_encapsulation_key_length(kind: u32) -> Promise {
+    let kind: veilid_core::CryptoKind = veilid_core::CryptoKind::from(kind);
+
+    wrap_api_future_plain(async move {
+        let veilid_api = get_veilid_api()?;
+        let crypto = veilid_api.crypto()?;
+        let csv = crypto.get(kind).ok_or_else(|| {
+            veilid_core::VeilidAPIError::invalid_argument(
+                "crypto_encapsulation_key_length",
+                "kind",
+                kind.to_string(),
+            )
+        })?;
+        let out = csv.encapsulation_key_length();
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn crypto_decapsulation_key_length(kind: u32) -> Promise {
+    let kind: veilid_core::CryptoKind = veilid_core::CryptoKind::from(kind);
+
+    wrap_api_future_plain(async move {
+        let veilid_api = get_veilid_api()?;
+        let crypto = veilid_api.crypto()?;
+        let csv = crypto.get(kind).ok_or_else(|| {
+            veilid_core::VeilidAPIError::invalid_argument(
+                "crypto_decapsulation_key_length",
+                "kind",
+                kind.to_string(),
+            )
+        })?;
+        let out = csv.decapsulation_key_length();
         VeilidAPIResult::Ok(out)
     })
 }
@@ -1603,6 +1699,67 @@ pub fn crypto_generate_key_pair(kind: u32) -> Promise {
             )
         })?;
         let out = csv.generate_keypair();
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn crypto_generate_kem_key_pair(kind: u32) -> Promise {
+    let kind: veilid_core::CryptoKind = veilid_core::CryptoKind::from(kind);
+
+    wrap_api_future_json(async move {
+        let veilid_api = get_veilid_api()?;
+        let crypto = veilid_api.crypto()?;
+        let csv = crypto.get(kind).ok_or_else(|| {
+            veilid_core::VeilidAPIError::invalid_argument(
+                "crypto_generate_kem_key_pair",
+                "kind",
+                kind.to_string(),
+            )
+        })?;
+        let out = csv.generate_kem_keypair();
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn crypto_encapsulation_key_from_signing_key(kind: u32, key: String) -> Promise {
+    wrap_api_future_json(async move {
+        let kind: veilid_core::CryptoKind = veilid_core::CryptoKind::from(kind);
+
+        let key: veilid_core::PublicKey = veilid_core::deserialize_json(&key)?;
+
+        let veilid_api = get_veilid_api()?;
+        let crypto = veilid_api.crypto()?;
+        let csv = crypto.get(kind).ok_or_else(|| {
+            veilid_core::VeilidAPIError::invalid_argument(
+                "crypto_encapsulation_key_from_signing_key",
+                "kind",
+                kind.to_string(),
+            )
+        })?;
+        let out = csv.encapsulation_key_from_signing_key(&key)?;
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn crypto_decapsulation_key_from_signing_secret(kind: u32, secret: String) -> Promise {
+    wrap_api_future_json(async move {
+        let kind: veilid_core::CryptoKind = veilid_core::CryptoKind::from(kind);
+
+        let secret: veilid_core::SecretKey = veilid_core::deserialize_json(&secret)?;
+
+        let veilid_api = get_veilid_api()?;
+        let crypto = veilid_api.crypto()?;
+        let csv = crypto.get(kind).ok_or_else(|| {
+            veilid_core::VeilidAPIError::invalid_argument(
+                "crypto_decapsulation_key_from_signing_secret",
+                "kind",
+                kind.to_string(),
+            )
+        })?;
+        let out = csv.decapsulation_key_from_signing_secret(&secret)?;
         VeilidAPIResult::Ok(out)
     })
 }

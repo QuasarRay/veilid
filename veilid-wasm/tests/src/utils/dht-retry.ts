@@ -8,7 +8,7 @@
 // delete) don't need it.
 
 import { VeilidAPIError } from 'veilid-wasm';
-import { waitForPublicAttachment } from './wait-utils';
+import { waitForPublicAttachment } from './wait-utils.js';
 
 export interface DhtRetryOptions {
   timeout?: number;

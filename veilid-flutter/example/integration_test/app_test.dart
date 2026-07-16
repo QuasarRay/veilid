@@ -57,6 +57,11 @@ void main() => runWithIntegrationLog(() {
       test('sign and verify signature', testSignAndVerifySignature);
       test('sign and verify signatures', testSignAndVerifySignatures,
           tags: ['crypto']);
+      test('generate shared secret', testGenerateSharedSecret,
+          tags: ['crypto']);
+      test('hpke seal and open', testHpkeSealOpen, tags: ['crypto']);
+      test('kem bridge from signing keys', testKemBridgeFromSigningKeys,
+          tags: ['crypto']);
     });
 
     group('Table DB', () {

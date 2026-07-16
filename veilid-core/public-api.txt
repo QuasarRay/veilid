@@ -354,6 +354,7 @@ impl veilid_core::AsyncCryptoSystemGuard<'_>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::aead_overhead(&self) -> usize
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::cached_dh(&self, &veilid_core::PublicKey, &veilid_core::SecretKey) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::check_hash_digest(&self, &veilid_core::HashDigest) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::AsyncCryptoSystemGuard<'_>::check_keypair(&self, &veilid_core::KeyPair) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::check_nonce(&self, &veilid_core::Nonce) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::check_public_key(&self, &veilid_core::PublicKey) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::check_secret_key(&self, &veilid_core::SecretKey) -> veilid_core::VeilidAPIResult<()>
@@ -365,18 +366,25 @@ pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::crypt_in_place_no_auth(&se
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::crypt_no_auth_aligned_8(&self, bytes::bytes::Bytes, &veilid_core::Nonce, &veilid_core::SharedSecret) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::crypt_no_auth_unaligned(&self, bytes::bytes::Bytes, &veilid_core::Nonce, &veilid_core::SharedSecret) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::crypto(&self) -> veilid_core::VeilidComponentGuard<'_, veilid_core::Crypto>
+pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::decapsulation_key_from_signing_secret(&self, &veilid_core::SecretKey) -> veilid_core::VeilidAPIResult<veilid_core::DecapsulationKey>
+pub fn veilid_core::AsyncCryptoSystemGuard<'_>::decapsulation_key_length(&self) -> usize
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::decrypt_aead(&self, bytes::bytes::Bytes, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<bytes::bytes::Bytes>) -> veilid_core::VeilidAPIResult<bytes::bytes::Bytes>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::decrypt_in_place_aead(&self, bytes::bytes_mut::BytesMut, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<bytes::bytes::Bytes>) -> veilid_core::VeilidAPIResult<bytes::bytes_mut::BytesMut>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::default_salt_length(&self) -> usize
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::derive_shared_secret(&self, bytes::bytes::Bytes, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>
+pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::encapsulation_key_from_signing_key(&self, &veilid_core::PublicKey) -> veilid_core::VeilidAPIResult<veilid_core::EncapsulationKey>
+pub fn veilid_core::AsyncCryptoSystemGuard<'_>::encapsulation_key_length(&self) -> usize
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::encrypt_aead(&self, bytes::bytes::Bytes, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<bytes::bytes::Bytes>) -> veilid_core::VeilidAPIResult<bytes::bytes::Bytes>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::encrypt_in_place_aead(&self, bytes::bytes_mut::BytesMut, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<bytes::bytes::Bytes>) -> veilid_core::VeilidAPIResult<bytes::bytes_mut::BytesMut>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_hash(&self, bytes::bytes::Bytes) -> veilid_core::HashDigest
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_hash_reader(&self, &mut dyn std::io::Read) -> veilid_core::VeilidAPIResult<veilid_core::PublicKey>
+pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_kem_keypair(&self) -> veilid_core::KemKeyPair
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_keypair(&self) -> veilid_core::KeyPair
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_shared_secret(&self, &veilid_core::PublicKey, &veilid_core::SecretKey, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::hash_digest_length(&self) -> usize
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::hash_password(&self, bytes::bytes::Bytes, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<alloc::string::String>
+pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::hpke_open(&self, &veilid_core::DecapsulationKey, bytes::bytes::Bytes, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<bytes::bytes::Bytes>
+pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::hpke_seal(&self, &veilid_core::EncapsulationKey, bytes::bytes::Bytes, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<bytes::bytes::Bytes>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::kind(&self) -> veilid_core::CryptoKind
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::nonce_length(&self) -> usize
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::public_key_length(&self) -> usize
@@ -602,6 +610,43 @@ impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareHashDigest
 pub fn veilid_core::BareHashDigest::to_veilid_api_error_argument(&self) -> alloc::string::String
 impl<'de> serde_core::de::Deserialize<'de> for veilid_core::BareHashDigest
 pub fn veilid_core::BareHashDigest::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct veilid_core::BareKemKeyPair
+impl veilid_core::BareKemKeyPair
+pub fn veilid_core::BareKemKeyPair::encode(&self) -> alloc::string::String
+pub fn veilid_core::BareKemKeyPair::encoded_len(&self) -> usize
+pub fn veilid_core::BareKemKeyPair::key(&self) -> veilid_core::BareEncapsulationKey
+pub fn veilid_core::BareKemKeyPair::secret(&self) -> veilid_core::BareDecapsulationKey
+pub fn veilid_core::BareKemKeyPair::try_decode(&str) -> veilid_core::VeilidAPIResult<Self>
+pub fn veilid_core::BareKemKeyPair::try_decode_bytes(&[u8]) -> veilid_core::VeilidAPIResult<Self>
+impl veilid_core::BareKemKeyPair
+pub fn veilid_core::BareKemKeyPair::into_split(self) -> (veilid_core::BareEncapsulationKey, veilid_core::BareDecapsulationKey)
+pub fn veilid_core::BareKemKeyPair::new(veilid_core::BareEncapsulationKey, veilid_core::BareDecapsulationKey) -> Self
+pub fn veilid_core::BareKemKeyPair::ref_key(&self) -> &veilid_core::BareEncapsulationKey
+pub fn veilid_core::BareKemKeyPair::ref_secret(&self) -> &veilid_core::BareDecapsulationKey
+pub fn veilid_core::BareKemKeyPair::ref_split(&self) -> (&veilid_core::BareEncapsulationKey, &veilid_core::BareDecapsulationKey)
+pub fn veilid_core::BareKemKeyPair::split(&self) -> (veilid_core::BareEncapsulationKey, veilid_core::BareDecapsulationKey)
+impl core::convert::From<&veilid_core::BareKemKeyPair> for alloc::string::String
+pub fn alloc::string::String::from(&veilid_core::BareKemKeyPair) -> Self
+impl core::convert::TryFrom<&str> for veilid_core::BareKemKeyPair
+pub type veilid_core::BareKemKeyPair::Error = veilid_core::VeilidAPIError
+pub fn veilid_core::BareKemKeyPair::try_from(&str) -> core::result::Result<Self, Self::Error>
+impl core::convert::TryFrom<alloc::string::String> for veilid_core::BareKemKeyPair
+pub type veilid_core::BareKemKeyPair::Error = veilid_core::VeilidAPIError
+pub fn veilid_core::BareKemKeyPair::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for veilid_core::BareKemKeyPair
+pub fn veilid_core::BareKemKeyPair::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for veilid_core::BareKemKeyPair
+pub fn veilid_core::BareKemKeyPair::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for veilid_core::BareKemKeyPair
+pub type veilid_core::BareKemKeyPair::Err = veilid_core::VeilidAPIError
+pub fn veilid_core::BareKemKeyPair::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl get_size2::GetSize for veilid_core::BareKemKeyPair
+pub fn veilid_core::BareKemKeyPair::get_heap_size(&self) -> usize
+pub fn veilid_core::BareKemKeyPair::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
+impl serde_core::ser::Serialize for veilid_core::BareKemKeyPair
+pub fn veilid_core::BareKemKeyPair::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for veilid_core::BareKemKeyPair
+pub fn veilid_core::BareKemKeyPair::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
 pub struct veilid_core::BareKeyPair
 impl veilid_core::BareKeyPair
 pub fn veilid_core::BareKeyPair::encode(&self) -> alloc::string::String
@@ -1204,7 +1249,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -1539,6 +1584,90 @@ pub fn veilid_core::HashDigestGroup::from_str(&str) -> core::result::Result<Self
 impl get_size2::GetSize for veilid_core::HashDigestGroup
 pub fn veilid_core::HashDigestGroup::get_heap_size(&self) -> usize
 pub fn veilid_core::HashDigestGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
+pub struct veilid_core::KemKeyPair
+impl veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::bare_secret(&self) -> veilid_core::BareDecapsulationKey
+pub fn veilid_core::KemKeyPair::key(&self) -> veilid_core::EncapsulationKey
+pub fn veilid_core::KemKeyPair::new_from_parts(veilid_core::EncapsulationKey, veilid_core::BareDecapsulationKey) -> Self
+pub fn veilid_core::KemKeyPair::secret(&self) -> veilid_core::DecapsulationKey
+impl veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::into_split(self) -> (veilid_core::EncapsulationKey, veilid_core::DecapsulationKey)
+pub fn veilid_core::KemKeyPair::ref_bare_secret(&self) -> &veilid_core::BareDecapsulationKey
+impl veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::into_value(self) -> veilid_core::BareKemKeyPair
+pub fn veilid_core::KemKeyPair::new(veilid_core::CryptoKind, veilid_core::BareKemKeyPair) -> Self
+pub fn veilid_core::KemKeyPair::ref_value(&self) -> &veilid_core::BareKemKeyPair
+impl veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::kind(&self) -> veilid_core::CryptoKind
+pub fn veilid_core::KemKeyPair::value(&self) -> veilid_core::BareKemKeyPair
+impl core::cmp::Ord for veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::cmp(&self, &Self) -> core::cmp::Ordering
+impl core::cmp::PartialOrd for veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<veilid_core::KemKeyPair> for veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::from(veilid_core::KemKeyPair) -> Self
+impl core::convert::TryFrom<&str> for veilid_core::KemKeyPair
+pub type veilid_core::KemKeyPair::Error = veilid_core::VeilidAPIError
+pub fn veilid_core::KemKeyPair::try_from(&str) -> core::result::Result<Self, Self::Error>
+impl core::convert::TryFrom<alloc::string::String> for veilid_core::KemKeyPair
+pub type veilid_core::KemKeyPair::Error = veilid_core::VeilidAPIError
+pub fn veilid_core::KemKeyPair::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error>
+impl core::fmt::Display for veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error>
+impl core::str::traits::FromStr for veilid_core::KemKeyPair
+pub type veilid_core::KemKeyPair::Err = veilid_core::VeilidAPIError
+pub fn veilid_core::KemKeyPair::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl get_size2::GetSize for veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::get_heap_size(&self) -> usize
+pub fn veilid_core::KemKeyPair::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
+impl serde_core::ser::Serialize for veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for veilid_core::KemKeyPair
+pub fn veilid_core::KemKeyPair::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct veilid_core::KemKeyPairGroup
+impl veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::add(&mut self, veilid_core::KemKeyPair)
+pub fn veilid_core::KemKeyPairGroup::add_all(&mut self, alloc::vec::Vec<veilid_core::KemKeyPair>)
+pub fn veilid_core::KemKeyPairGroup::clear(&mut self)
+pub fn veilid_core::KemKeyPairGroup::contains(&self, &veilid_core::KemKeyPair) -> bool
+pub fn veilid_core::KemKeyPairGroup::contains_any(&self, alloc::vec::Vec<veilid_core::KemKeyPair>) -> bool
+pub fn veilid_core::KemKeyPairGroup::is_empty(&self) -> bool
+pub fn veilid_core::KemKeyPairGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareKemKeyPair>
+pub fn veilid_core::KemKeyPairGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
+pub fn veilid_core::KemKeyPairGroup::len(&self) -> usize
+pub fn veilid_core::KemKeyPairGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::KemKeyPair>
+impl veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::add_all_from_iter<'a>(&mut self, impl core::iter::traits::collect::IntoIterator<Item = &'a veilid_core::KemKeyPair>)
+pub fn veilid_core::KemKeyPairGroup::contains_any_from_iter<'a>(&self, impl core::iter::traits::collect::IntoIterator<Item = &'a veilid_core::KemKeyPair>) -> bool
+pub fn veilid_core::KemKeyPairGroup::iter(&self) -> core::slice::iter::Iter<'_, veilid_core::KemKeyPair>
+pub fn veilid_core::KemKeyPairGroup::new() -> Self
+pub fn veilid_core::KemKeyPairGroup::with_capacity(usize) -> Self
+impl veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::contains_kind(&self, veilid_core::CryptoKind) -> bool
+pub fn veilid_core::KemKeyPairGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::KemKeyPair>
+pub fn veilid_core::KemKeyPairGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::KemKeyPair>
+pub fn veilid_core::KemKeyPairGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl core::convert::From<&[veilid_core::KemKeyPair]> for veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::from(&[veilid_core::KemKeyPair]) -> Self
+impl core::convert::From<alloc::vec::Vec<veilid_core::KemKeyPair>> for veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::from(alloc::vec::Vec<veilid_core::KemKeyPair>) -> Self
+impl core::convert::From<veilid_core::KemKeyPair> for veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::from(veilid_core::KemKeyPair) -> Self
+impl core::convert::From<veilid_core::KemKeyPairGroup> for alloc::vec::Vec<veilid_core::KemKeyPair>
+pub fn alloc::vec::Vec<veilid_core::KemKeyPair>::from(veilid_core::KemKeyPairGroup) -> Self
+impl core::fmt::Display for veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error>
+impl core::ops::deref::Deref for veilid_core::KemKeyPairGroup
+pub type veilid_core::KemKeyPairGroup::Target = [veilid_core::KemKeyPair]
+pub fn veilid_core::KemKeyPairGroup::deref(&self) -> &[veilid_core::KemKeyPair]
+impl core::str::traits::FromStr for veilid_core::KemKeyPairGroup
+pub type veilid_core::KemKeyPairGroup::Err = veilid_core::VeilidAPIError
+pub fn veilid_core::KemKeyPairGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl get_size2::GetSize for veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::get_heap_size(&self) -> usize
+pub fn veilid_core::KemKeyPairGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::KeyPair
 impl veilid_core::KeyPair
 pub fn veilid_core::KeyPair::bare_secret(&self) -> veilid_core::BareSecretKey
@@ -3218,7 +3347,10 @@ pub const veilid_core::VEILID_CAPABILITY_ROUTE: veilid_core::VeilidCapability
 pub const veilid_core::VEILID_CAPABILITY_SIGNAL: veilid_core::VeilidCapability
 pub const veilid_core::VEILID_CAPABILITY_VALIDATE_DIAL_INFO: veilid_core::VeilidCapability
 pub const veilid_core::VEILID_LOG_KEY_FIELD: &str
+pub const veilid_core::VLD0_DECAPSULATION_KEY_LENGTH: usize
+pub const veilid_core::VLD0_ENCAPSULATION_KEY_LENGTH: usize
 pub const veilid_core::VLD0_HASH_DIGEST_LENGTH: usize
+pub const veilid_core::VLD0_HPKE_ENC_LENGTH: usize
 pub const veilid_core::VLD0_NONCE_LENGTH: usize
 pub const veilid_core::VLD0_PUBLIC_KEY_LENGTH: usize
 pub const veilid_core::VLD0_SECRET_KEY_LENGTH: usize
@@ -3241,18 +3373,25 @@ pub fn veilid_core::CryptoSystem::crypt_in_place_no_auth(&self, &mut [u8], &veil
 pub fn veilid_core::CryptoSystem::crypt_no_auth_aligned_8(&self, &[u8], &veilid_core::Nonce, &veilid_core::SharedSecret) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
 pub fn veilid_core::CryptoSystem::crypt_no_auth_unaligned(&self, &[u8], &veilid_core::Nonce, &veilid_core::SharedSecret) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
 pub fn veilid_core::CryptoSystem::crypto(&self) -> veilid_core::VeilidComponentGuard<'_, veilid_core::Crypto>
+pub fn veilid_core::CryptoSystem::decapsulation_key_from_signing_secret(&self, &veilid_core::SecretKey) -> veilid_core::VeilidAPIResult<veilid_core::DecapsulationKey>
+pub fn veilid_core::CryptoSystem::decapsulation_key_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::decrypt_aead(&self, &[u8], &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
 pub fn veilid_core::CryptoSystem::decrypt_in_place_aead(&self, &mut dyn veilid_core::crypto::crypto_system::buffer::CryptoSystemBuffer, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::CryptoSystem::default_salt_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::derive_shared_secret(&self, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>
+pub fn veilid_core::CryptoSystem::encapsulation_key_from_signing_key(&self, &veilid_core::PublicKey) -> veilid_core::VeilidAPIResult<veilid_core::EncapsulationKey>
+pub fn veilid_core::CryptoSystem::encapsulation_key_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::encrypt_aead(&self, &[u8], &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
 pub fn veilid_core::CryptoSystem::encrypt_in_place_aead(&self, &mut dyn veilid_core::crypto::crypto_system::buffer::CryptoSystemBuffer, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::CryptoSystem::generate_hash(&self, &[u8]) -> veilid_core::HashDigest
 pub fn veilid_core::CryptoSystem::generate_hash_reader(&self, &mut dyn std::io::Read) -> veilid_core::VeilidAPIResult<veilid_core::PublicKey>
+pub fn veilid_core::CryptoSystem::generate_kem_keypair(&self) -> veilid_core::KemKeyPair
 pub fn veilid_core::CryptoSystem::generate_keypair(&self) -> veilid_core::KeyPair
 pub fn veilid_core::CryptoSystem::generate_shared_secret(&self, &veilid_core::PublicKey, &veilid_core::SecretKey, &[u8]) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>
 pub fn veilid_core::CryptoSystem::hash_digest_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::hash_password(&self, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<alloc::string::String>
+pub fn veilid_core::CryptoSystem::hpke_open(&self, &veilid_core::DecapsulationKey, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
+pub fn veilid_core::CryptoSystem::hpke_seal(&self, &veilid_core::EncapsulationKey, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
 pub fn veilid_core::CryptoSystem::kind(&self) -> veilid_core::CryptoKind
 pub fn veilid_core::CryptoSystem::nonce_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::public_key_length(&self) -> usize
