@@ -1036,8 +1036,20 @@ impl StorageManager {
                 }
             }
 
-            // Regardless of result, set our next possible reconciliation time
-            let next_ts = cur_ts.later(RECONCILE_OUTBOUND_WATCHES_INTERVAL);
+            // Regardless of result, set our next possible reconciliation time,
+            // retrying sooner while the watch is below consensus
+            let consensus_count = self.config().internal().network.dht.get_value_count as usize;
+            let below_consensus = inner
+                .outbound_watch_manager
+                .outbound_watches
+                .get(&opaque_record_key)
+                .and_then(|ow| ow.state())
+                .is_none_or(|s| s.nodes().len() < consensus_count);
+            let next_ts = cur_ts.later(if below_consensus {
+                RECONCILE_OUTBOUND_WATCHES_RETRY_INTERVAL
+            } else {
+                RECONCILE_OUTBOUND_WATCHES_INTERVAL
+            });
             inner
                 .outbound_watch_manager
                 .set_next_reconcile_ts(opaque_record_key, next_ts);
@@ -1073,6 +1085,7 @@ impl StorageManager {
 
         let mut added_nodes = Vec::new();
         let mut remove_nodes = BTreeSet::new();
+        let mut did_add_new_nodes = false;
 
         // Handle accepted
         for accepted_watch in owvresult.accepted {
@@ -1098,6 +1111,11 @@ impl StorageManager {
                     .opt_value_changed_route
                     .map(|r| r.route_key().clone());
 
+                // Renewals overwrite existing per-node state; only first registrations count as new
+                did_add_new_nodes |= !inner
+                    .outbound_watch_manager
+                    .per_node_states
+                    .contains_key(&pnk);
                 inner.outbound_watch_manager.per_node_states.insert(
                     pnk.clone(),
                     OutboundWatchPerNodeState {
@@ -1138,8 +1156,6 @@ impl StorageManager {
         }
 
         // Update watch state
-        let did_add_nodes = !added_nodes.is_empty();
-
         state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
             editor.set_params(desired.clone());
             editor.retain_nodes(|x| !remove_nodes.contains(x));
@@ -1147,11 +1163,9 @@ impl StorageManager {
             editor.clear_forced_reconcile();
         });
 
-        // Watch was reconciled, now kick off an inspect to
-        // ensure that any changes online are immediately reported to the app
-        // If the watch parameters changed, or we added new nodes to the watch state
-        // then we should inspect and see if anything changed
-        if opt_old_state_params != Some(desired) || did_add_nodes {
+        // Inspect on params change (includes first establishment) or a first-time
+        // node registration, so changes made while unwatched are reported promptly
+        if opt_old_state_params != Some(desired) || did_add_new_nodes {
             inner
                 .outbound_watch_manager
                 .enqueue_change_inspect(record_key, watch_subkeys);
@@ -1393,8 +1407,20 @@ impl StorageManager {
                 let closure_registry = registry.clone();
                 let closure_record_key = record_key.clone();
                 let closure_subkeys = subkeys.clone();
-                let res = this
-                    .with_background_transaction(
+                let res = async {
+                    // Non-transactional pre-check: skip the transaction when nothing is newer online
+                    let report = this
+                        .inspect_record(
+                            record_key.clone(),
+                            subkeys.clone(),
+                            DHTReportScope::SyncGet,
+                        )
+                        .await?;
+                    if report.newer_online_subkeys().is_empty() {
+                        return VeilidAPIResult::Ok(());
+                    }
+
+                    this.with_background_transaction(
                         record_key.clone(),
                         transaction_membership,
                         move |transaction_handle, _members| async move {
@@ -1409,16 +1435,20 @@ impl StorageManager {
                             VeilidAPIResult::Ok(())
                         },
                     )
-                    .await;
+                    .await
+                }
+                .await;
 
                 match res {
                     Ok(()) => {}
                     Err(VeilidAPIError::TryAgain { .. }) => {
-                        // Contended; re-enqueue and try later
+                        // Contended; re-enqueue with backoff
+                        let not_before =
+                            Timestamp::now_non_decreasing().later(CHANGE_INSPECT_RETRY_INTERVAL);
                         let mut inner = this.inner.lock();
                         inner
                             .outbound_watch_manager
-                            .enqueue_change_inspect(record_key, subkeys);
+                            .enqueue_change_inspect_after(record_key, subkeys, not_before);
                     }
                     Err(e) => {
                         veilid_log!(this debug "transactional change inspection failed: {}", e);

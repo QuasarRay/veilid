@@ -90,14 +90,22 @@ impl StorageManager {
             }
         }
 
-        // Iterate all queued change inspections and do them
-        for (k, v) in inner.outbound_watch_manager.needs_change_inspection.drain() {
-            // Get next work on watch and queue it if we have something to do
+        // Run queued change inspections that are due, leaving backed-off retries queued
+        let nci = &mut inner.outbound_watch_manager.needs_change_inspection;
+        let due_keys = nci
+            .iter()
+            .filter(|(_, (_, not_before))| *not_before <= cur_ts)
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>();
+        for k in due_keys {
+            let Some((subkeys, _)) = nci.remove(&k) else {
+                continue;
+            };
             let op_fut = Self::get_change_inspection_operation_inner(
                 self.registry(),
                 local_record_store.clone(),
                 k,
-                v,
+                subkeys,
             );
             self.background_operation_processor.add_future(op_fut);
         }

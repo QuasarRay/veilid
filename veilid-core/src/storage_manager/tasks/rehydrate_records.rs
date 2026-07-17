@@ -14,9 +14,18 @@ impl StorageManager {
         _last_ts: Timestamp,
         _cur_ts: Timestamp,
     ) -> EyreResult<()> {
+        // Bounded batch per tick so app-open bursts spread out
         let reqs = {
             let mut inner = self.inner.lock();
-            core::mem::take(&mut inner.rehydration_requests)
+            let keys = inner
+                .rehydration_requests
+                .keys()
+                .take(REHYDRATE_REQUESTS_PER_TICK)
+                .cloned()
+                .collect::<Vec<_>>();
+            keys.into_iter()
+                .filter_map(|k| inner.rehydration_requests.remove_entry(&k))
+                .collect::<Vec<_>>()
         };
 
         let mut futs = Vec::new();

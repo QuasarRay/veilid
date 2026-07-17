@@ -37,7 +37,7 @@ impl PingValidationGroup {
         match self {
             Self::RouteTest => 4,
             Self::Keepalive => 4,
-            Self::Reliability => 16,
+            Self::Reliability => 32,
         }
     }
 }

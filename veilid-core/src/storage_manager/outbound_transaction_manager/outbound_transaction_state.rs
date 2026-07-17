@@ -24,6 +24,16 @@ pub(in crate::storage_manager) struct OutboundTransactionStageConsensus {
     pub node_transactions_to_rollback: LocalNodeTransactionIdSet,
 }
 
+/// Whether the application asked for a transaction or an internal task did
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::storage_manager) enum OutboundTransactionKind {
+    /// Requested through the public API; pre-empts background transactions
+    #[default]
+    Foreground,
+    /// Started by internal tasks (rehydration, change inspection); yields to foreground
+    Background,
+}
+
 /// State of a single transaction across multiple records
 #[derive(Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundTransactionState {
@@ -32,6 +42,9 @@ pub(in crate::storage_manager) struct OutboundTransactionState {
     opt_registry: Option<VeilidComponentRegistry>,
     /// The timestamp of when the transaction was created
     created_ts: Timestamp,
+    /// Foreground or background origin, for pre-emption
+    #[serde(default)]
+    kind: OutboundTransactionKind,
     /// State per record
     record_states: Vec<OutboundTransactionRecordState>,
     /// Background operations to join at drop
@@ -92,14 +105,19 @@ impl Drop for OutboundTransactionState {
 }
 
 impl OutboundTransactionState {
-    pub(super) fn new(registry: VeilidComponentRegistry) -> Self {
+    pub(super) fn new(registry: VeilidComponentRegistry, kind: OutboundTransactionKind) -> Self {
         Self {
             opt_registry: Some(registry),
             created_ts: Timestamp::now(),
+            kind,
             record_states: vec![],
             background_tokens: vec![],
             route_refs: Vec::new(),
         }
+    }
+
+    pub fn kind(&self) -> OutboundTransactionKind {
+        self.kind
     }
 
     pub(super) fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) {
@@ -121,6 +139,10 @@ impl OutboundTransactionState {
 
     pub(super) fn merge(&mut self, mut other: OutboundTransactionState) {
         self.created_ts.min_assign(other.created_ts);
+        // Foreground wins so a merged transaction is never pre-empted
+        if other.kind == OutboundTransactionKind::Foreground {
+            self.kind = OutboundTransactionKind::Foreground;
+        }
         self.record_states.append(&mut other.record_states);
         self.background_tokens.append(&mut other.background_tokens);
         self.route_refs.append(&mut other.route_refs);

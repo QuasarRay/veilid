@@ -67,7 +67,7 @@ impl PublicInternetRoutingDomainController {
                     .iter()
                     .filter(|snap| {
                         // Only alive nodes are refresh targets
-                        if snap.state.is_live() {
+                        if !snap.state.is_live() {
                             return false;
                         }
                         // Keep only the entries that contain the crypto kind we're looking for

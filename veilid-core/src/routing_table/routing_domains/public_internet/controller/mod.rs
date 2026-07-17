@@ -11,7 +11,7 @@ mod tasks;
 
 use super::*;
 
-pub use state::NodesNeeded;
+pub use state::*;
 
 impl_veilid_log_facility!("rtab");
 
@@ -68,6 +68,8 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
 
     /// Bootstrap wait detector (to prevent spamming logs)
     bootstrap_wait_detector: AtomicOptionTimestamp,
+    /// Per crypto kind, when we first observed zero responsive connectivity nodes
+    no_responsive_since: Mutex<BTreeMap<CryptoKind, Timestamp>>,
 }
 
 impl fmt::Debug for PublicInternetRoutingDomainControllerUnlockedInner {
@@ -153,6 +155,7 @@ impl PublicInternetRoutingDomainController {
             commit_subscription: Default::default(),
             peer_info_subscription: Default::default(),
             bootstrap_wait_detector: AtomicOptionTimestamp::new(None),
+            no_responsive_since: Default::default(),
         };
         let this = Self {
             unlocked_inner: Arc::new(unlocked_inner),
@@ -199,6 +202,9 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             let peer_info_sub =
                 impl_subscribe_event_bus_async_clone!(self, peer_info_change_event_handler);
             *self.peer_info_subscription.lock() = Some(peer_info_sub);
+
+            // Don't let detached time count toward the fallback-bootstrap delay
+            self.no_responsive_since.lock().clear();
 
             // Publish peer info
             self.publish_peer_info();

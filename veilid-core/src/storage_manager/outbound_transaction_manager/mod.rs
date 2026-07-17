@@ -190,6 +190,7 @@ impl OutboundTransactionManager {
     pub fn new_transaction(
         &mut self,
         record_params: Vec<OutboundTransactionRecordParams>,
+        kind: OutboundTransactionKind,
     ) -> VeilidAPIResult<OutboundTransactionHandle> {
         // Ensure no other transactions are using any of these record keys and make handle
         let mut opaque_record_keys = vec![];
@@ -206,7 +207,7 @@ impl OutboundTransactionManager {
         let transaction_handle = self.allocate_transaction_handle()?;
 
         // Create a new outbound transaction state
-        let mut outbound_transaction_state = OutboundTransactionState::new(self.registry());
+        let mut outbound_transaction_state = OutboundTransactionState::new(self.registry(), kind);
 
         // Add all records
         for rp in record_params {
@@ -557,6 +558,23 @@ impl OutboundTransactionManager {
         opaque_record_key: &OpaqueRecordKey,
     ) -> Option<OutboundTransactionHandle> {
         self.handles_by_key.get(opaque_record_key).cloned()
+    }
+
+    /// Get a transaction's foreground/background kind
+    pub fn get_transaction_kind(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+    ) -> Option<OutboundTransactionKind> {
+        self.transactions
+            .get(&transaction_handle)
+            .map(|tx| tx.kind())
+    }
+
+    /// Check if any foreground transaction is active
+    pub fn has_foreground_transaction(&self) -> bool {
+        self.transactions
+            .values()
+            .any(|tx| tx.kind() == OutboundTransactionKind::Foreground)
     }
 
     /// Check if a transaction exists and return the opaque record keys associated with it if it does

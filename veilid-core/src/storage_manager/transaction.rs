@@ -83,23 +83,48 @@ impl StorageManager {
             );
         }
 
-        // Non-blocking acquire: any contention on the Transaction-mode lock
-        // for any of these records returns TryAgain rather than waiting.
-        // Prevents cross-record deadlocks that could otherwise form if the
-        // caller racily issues overlapping begin_transaction calls.
-        let Some(records_lock) = self.record_lock_table.try_lock_records(
-            record_keys.iter().map(|x| x.opaque()).collect(),
-            StorageManagerRecordLockPurpose::TransactBegin,
-        ) else {
-            // DIAG: which records were contended + whether this begin is foreground
-            // (opened-record) or a background op (stored signers: rehydration/change-inspect)
-            let source = match &signer_source {
-                TransactionSignerSource::OpenedRecord => "opened",
-                TransactionSignerSource::Stored(..) => "background",
-            };
-            veilid_log!(self debug target:"network_result", "transaction begin contended on records: [{}] (source={})",
-                record_keys.iter().map(|x| x.opaque().to_string()).collect::<Vec<_>>().join(", "), source);
-            apibail_try_again!("transaction begin contended");
+        // Foreground begins pre-empt background transactions; background begins
+        // yield on any contention
+        let kind = match &signer_source {
+            TransactionSignerSource::OpenedRecord => OutboundTransactionKind::Foreground,
+            TransactionSignerSource::Stored(..) => OutboundTransactionKind::Background,
+        };
+        // Touched even on failed attempts so app retry gaps stay protected
+        if kind == OutboundTransactionKind::Foreground {
+            self.touch_foreground_transaction_activity();
+        }
+        let opaque_record_keys = record_keys.iter().map(|x| x.opaque()).collect::<Vec<_>>();
+
+        let records_lock = match kind {
+            OutboundTransactionKind::Background => {
+                // Non-blocking acquire: any contention on the Transaction-mode lock
+                // for any of these records returns TryAgain rather than waiting.
+                // Prevents cross-record deadlocks that could otherwise form if the
+                // caller racily issues overlapping begin_transaction calls.
+                let Some(records_lock) = self.record_lock_table.try_lock_records(
+                    opaque_record_keys.clone(),
+                    StorageManagerRecordLockPurpose::TransactBegin,
+                ) else {
+                    veilid_log!(self debug target:"network_result", "transaction begin contended on records: [{}] (source=background)",
+                        opaque_record_keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "));
+                    apibail_try_again!("transaction begin contended");
+                };
+                records_lock
+            }
+            OutboundTransactionKind::Foreground => {
+                // Blocking acquire is deadlock-safe (lock_records sorts) and bounded
+                // by the per-operation lock hold of whatever it waits on
+                let records_lock = self
+                    .record_lock_table
+                    .lock_records(
+                        opaque_record_keys.clone(),
+                        StorageManagerRecordLockPurpose::TransactBegin,
+                    )
+                    .await;
+                self.preempt_background_transactions_locked(&records_lock, &opaque_record_keys)
+                    .await?;
+                records_lock
+            }
         };
         let records_lock = Arc::new(records_lock);
 
@@ -198,7 +223,7 @@ impl StorageManager {
             let otm = &mut inner.outbound_transaction_manager;
 
             // Start a new transaction
-            let transaction_handle = otm.new_transaction(record_params_list)?;
+            let transaction_handle = otm.new_transaction(record_params_list, kind)?;
 
             // Get parameters for beginning a transaction
             let begin_params_list = match otm.prepare_transact_begin_params(transaction_handle) {
@@ -321,6 +346,55 @@ impl StorageManager {
         Ok(transaction_handle)
     }
 
+    /// Roll back and drop any background transactions registered on these records so a
+    /// foreground begin can take them. Waiting out the rollback commands under the held lock
+    /// keeps the re-begin from reaching nodes that still hold the old node-transactions.
+    /// A doomed transaction's records outside this set are freed before their nodes confirm;
+    /// begins landing there see busy nodes and TryAgain.
+    async fn preempt_background_transactions_locked(
+        &self,
+        records_lock: &StorageManagerRecordsLockGuard,
+        opaque_record_keys: &[OpaqueRecordKey],
+    ) -> VeilidAPIResult<()> {
+        let preempt_handles = {
+            let inner = self.inner.lock();
+            let otm = &inner.outbound_transaction_manager;
+            let mut preempt_handles = vec![];
+            for opaque_record_key in opaque_record_keys {
+                let Some(transaction_handle) = otm.get_transaction_by_record(opaque_record_key)
+                else {
+                    continue;
+                };
+                match otm.get_transaction_kind(transaction_handle) {
+                    Some(OutboundTransactionKind::Background) => {
+                        if !preempt_handles.contains(&transaction_handle) {
+                            preempt_handles.push(transaction_handle);
+                        }
+                    }
+                    Some(OutboundTransactionKind::Foreground) => {
+                        veilid_log!(self debug target:"network_result", "transaction begin contended on record {} (foreground holder)", opaque_record_key);
+                        apibail_try_again!("transaction begin contended");
+                    }
+                    None => {}
+                }
+            }
+            preempt_handles
+        };
+
+        for transaction_handle in preempt_handles {
+            veilid_log!(self debug "pre-empting background transaction for foreground begin: {}", transaction_handle);
+            if let Err(e) = self
+                .rollback_transaction_locked(records_lock, transaction_handle)
+                .await
+            {
+                veilid_log!(self debug "pre-empted transaction rollback failed: {}", e);
+            }
+            self.drop_transaction_and_wait_locked(records_lock, transaction_handle)
+                .await;
+        }
+        Ok(())
+    }
+
     /// Run a closure inside a background transaction over a record's stored transaction set.
     ///
     /// Peek-locks the whole set (blocking open/close/delete while still allowing transaction
@@ -345,6 +419,11 @@ impl StorageManager {
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
         };
+
+        // Yield to foreground transaction activity
+        if !self.background_transactions_allowed() {
+            apibail_try_again!("background transaction deferred for foreground activity");
+        }
 
         let local_record_store = self.get_local_record_store()?;
 
@@ -629,14 +708,20 @@ impl StorageManager {
             apibail_try_again!("dht is not online");
         }
 
-        let Some(transaction_keys) = self
-            .inner
-            .lock()
-            .outbound_transaction_manager
-            .get_transaction_keys(transaction_handle)
-        else {
-            return Err(VeilidAPIError::transaction_not_found("missing transaction"));
+        let (transaction_keys, transaction_kind) = {
+            let inner = self.inner.lock();
+            let otm = &inner.outbound_transaction_manager;
+            let Some(transaction_keys) = otm.get_transaction_keys(transaction_handle) else {
+                return Err(VeilidAPIError::transaction_not_found("missing transaction"));
+            };
+            (
+                transaction_keys,
+                otm.get_transaction_kind(transaction_handle),
+            )
         };
+        if transaction_kind == Some(OutboundTransactionKind::Foreground) {
+            self.touch_foreground_transaction_activity();
+        }
 
         let records_lock = Arc::new(
             self.record_lock_table
@@ -999,15 +1084,22 @@ impl StorageManager {
             apibail_not_initialized!();
         };
 
-        let Some(transaction_keys) = self
-            .inner
-            .lock()
-            .outbound_transaction_manager
-            .get_transaction_keys(transaction_handle)
-        else {
-            // Early exit if transaction is already gone
-            return Ok(());
+        let (transaction_keys, transaction_kind) = {
+            let inner = self.inner.lock();
+            let otm = &inner.outbound_transaction_manager;
+            let Some(transaction_keys) = otm.get_transaction_keys(transaction_handle) else {
+                // Early exit if transaction is already gone
+                return Ok(());
+            };
+            (
+                transaction_keys,
+                otm.get_transaction_kind(transaction_handle),
+            )
         };
+        // Background teardown also comes through here; only foreground rollbacks defer background work
+        if transaction_kind == Some(OutboundTransactionKind::Foreground) {
+            self.touch_foreground_transaction_activity();
+        }
 
         let records_lock = self
             .record_lock_table

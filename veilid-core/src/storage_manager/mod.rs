@@ -36,6 +36,7 @@ pub mod tests_storage_manager;
 use super::*;
 
 use hashlink::{LinkedHashMap, LruCache};
+use std::sync::atomic::AtomicU64;
 
 use constants::*;
 use inspect_record::OutboundInspectValueResult;
@@ -170,6 +171,12 @@ pub(crate) struct StorageManager {
     // Online check
     is_online: AtomicBool,
 
+    // Last lag-triggered all-watch change inspection (usec)
+    last_lag_change_inspect_ts: AtomicU64,
+
+    // Last foreground transaction activity, including failed begin attempts (usec)
+    last_foreground_transaction_ts: AtomicU64,
+
     // Per-direction byte budgets + a count cap, shared by all DHT network ops.
     // Bandwidth gates are fed from observed node throughput (raise-only); the
     // concurrency cap is the fairness ceiling. Local-only ops acquire none.
@@ -281,6 +288,8 @@ impl StorageManager {
             anonymous_signing_keys,
             background_operation_processor: DeferredStreamProcessor::new(),
             is_online: AtomicBool::new(false),
+            last_lag_change_inspect_ts: AtomicU64::new(0),
+            last_foreground_transaction_ts: AtomicU64::new(0),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
             upload_bandwidth_gate,
             download_bandwidth_gate,
@@ -693,6 +702,28 @@ impl StorageManager {
 
     fn dht_is_online(&self) -> bool {
         self.is_online.load(Ordering::Acquire)
+    }
+
+    /// Mark foreground transaction activity, deferring background transactions
+    /// for the quiet interval
+    fn touch_foreground_transaction_activity(&self) {
+        self.last_foreground_transaction_ts
+            .store(Timestamp::now_non_decreasing().as_u64(), Ordering::Release);
+    }
+
+    /// Background transactions run only when no foreground transaction is active or recent
+    fn background_transactions_allowed(&self) -> bool {
+        let last_fg_ts =
+            Timestamp::new(self.last_foreground_transaction_ts.load(Ordering::Acquire));
+        if Timestamp::now_non_decreasing() < last_fg_ts.later(BACKGROUND_TRANSACTION_QUIET_INTERVAL)
+        {
+            return false;
+        }
+        !self
+            .inner
+            .lock()
+            .outbound_transaction_manager
+            .has_foreground_transaction()
     }
 
     fn get_local_record_store(&self) -> VeilidAPIResult<RecordStore<LocalRecordDetail>> {

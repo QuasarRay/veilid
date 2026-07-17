@@ -155,9 +155,6 @@ impl OutboundWatchState {
     pub fn next_reconcile_ts(&self) -> Option<Timestamp> {
         self.opt_next_reconcile_ts
     }
-    pub fn last_consensus_node_count(&self) -> Option<usize> {
-        self.opt_last_consensus_node_count
-    }
     pub fn min_expiration(&self) -> Timestamp {
         self.min_expiration
     }

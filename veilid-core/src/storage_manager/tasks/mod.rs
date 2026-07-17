@@ -120,8 +120,8 @@ impl StorageManager {
                 self.offline_subkey_writes_task.tick().await?;
             }
 
-            // Do requested rehydrations
-            if self.has_rehydration_requests() {
+            // Do requested rehydrations, yielding to foreground transaction activity
+            if self.has_rehydration_requests() && self.background_transactions_allowed() {
                 self.rehydrate_records_task.tick().await?;
             }
 
@@ -129,10 +129,18 @@ impl StorageManager {
             self.send_value_changes_task.tick().await?;
         }
 
-        // Change inspection
+        // Poll all watches for missed changes after a processing gap, at most
+        // once per interval so a sustained-lag episode fires a single sweep
         if let Some(lag) = lag {
-            if lag > CHANGE_INSPECT_LAG {
-                self.change_inspect_all_watches();
+            if lag > CHANGE_INSPECT_LAG && self.dht_is_online() {
+                let cur_ts = Timestamp::now_non_decreasing();
+                let last_ts =
+                    Timestamp::new(self.last_lag_change_inspect_ts.load(Ordering::Acquire));
+                if cur_ts >= last_ts.later(CHANGE_INSPECT_LAG_MIN_INTERVAL) {
+                    self.last_lag_change_inspect_ts
+                        .store(cur_ts.as_u64(), Ordering::Release);
+                    self.change_inspect_all_watches();
+                }
             }
         }
 

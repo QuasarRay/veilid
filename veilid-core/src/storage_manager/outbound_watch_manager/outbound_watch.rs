@@ -208,30 +208,6 @@ impl OutboundWatch {
             return true;
         };
 
-        // If we are still working on getting the 'current' state to match
-        // the 'desired' state, then do the reconcile if we are within the timeframe for it
-        if state.nodes().is_empty() {
-            veilid_log!(registry debug target: "watch", "OutboundWatch({}): needs_reconcile because consensus count is zero 0 < {}", self.record_key, consensus_count);
-            return true;
-        }
-        if state.nodes().len() < consensus_count
-            && cur_ts >= state.next_reconcile_ts().unwrap_or_default()
-        {
-            veilid_log!(registry debug target: "watch", "OutboundWatch({}): needs_reconcile because consensus count is too low {} < {}", self.record_key, state.nodes().len(), consensus_count);
-            return true;
-        }
-
-        // Try to reconcile if our number of nodes currently is less than what we got from
-        // the previous reconciliation attempt
-        if let Some(last_consensus_node_count) = state.last_consensus_node_count() {
-            if state.nodes().len() < last_consensus_node_count
-                && state.nodes().len() < consensus_count
-            {
-                veilid_log!(registry debug target: "watch", "OutboundWatch({}): needs_reconcile because node count is less than last consensus {} < {}", self.record_key, state.nodes().len(), last_consensus_node_count);
-                return true;
-            }
-        }
-
         // If we have a consensus, or are not attempting consensus at this time,
         // but need to reconcile because some per-node watches either expired or had their routes die, do it
         if self.wants_per_node_watch_update(registry, state, cur_ts) {
@@ -249,6 +225,19 @@ impl OutboundWatch {
         // to re-establish watch with fresh notification routes
         if state.needs_forced_reconcile() {
             veilid_log!(registry debug target: "watch", "OutboundWatch({}): needs_reconcile because fallback inspection found missed changes", self.record_key);
+            return true;
+        }
+
+        // Below-consensus reconciles wait out the reconcile time so they
+        // retry at a bounded pace instead of every tick
+        if cur_ts < state.next_reconcile_ts().unwrap_or_default() {
+            return false;
+        }
+
+        // If we are still working on getting the 'current' state to match
+        // the 'desired' state, then do the reconcile if we are within the timeframe for it
+        if state.nodes().len() < consensus_count {
+            veilid_log!(registry debug target: "watch", "OutboundWatch({}): needs_reconcile because consensus count is too low {} < {}", self.record_key, state.nodes().len(), consensus_count);
             return true;
         }
 

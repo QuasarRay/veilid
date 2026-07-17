@@ -1,6 +1,7 @@
 pub mod mocks;
 pub mod test_bucket_entry_state;
 pub mod test_network_estimator;
+pub mod test_nodes_needed;
 pub mod test_routing_metrics;
 pub mod test_serialize_routing_table;
 pub mod test_signed_node_info;
@@ -29,6 +30,12 @@ pub async fn test_all() {
     test_network_estimator::test_network_estimator_entered_slot_zeros_old_data();
     test_network_estimator::test_network_estimator_combined_single_kind();
     test_network_estimator::test_network_estimator_clock_backward_ignored();
+    test_nodes_needed::test_nodes_needed_empty_table_bootstraps();
+    test_nodes_needed::test_nodes_needed_stale_table_inflation_capped();
+    test_nodes_needed::test_nodes_needed_fresh_small_table_uses_fraction();
+    test_nodes_needed::test_nodes_needed_low_water_mark_term_capped();
+    test_nodes_needed::test_nodes_needed_fallback_bootstrap_timing();
+    test_nodes_needed::test_nodes_needed_responsive_gates_peer_minimum_refresh();
     test_bucket_entry_state::test_state_punished();
     test_bucket_entry_state::test_state_dead_excessive_unreachable();
     test_bucket_entry_state::test_state_dead_excessive_send_failures();

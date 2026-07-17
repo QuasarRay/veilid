@@ -14,8 +14,11 @@ pub const OFFLINE_SUBKEY_WRITES_SUBKEY_CHUNK_SIZE: u64 = 4;
 pub const SEND_VALUE_CHANGES_INTERVAL_SECS: u32 = 1;
 /// Frequency to check for dead nodes and routes for client-side outbound watches
 pub const CHECK_OUTBOUND_WATCHES_INTERVAL_SECS: u32 = 1;
-/// Frequency to retry reconciliation of watches that are not at consensus
+/// Frequency to reconcile watches that are at consensus
 pub const RECONCILE_OUTBOUND_WATCHES_INTERVAL: TimestampDuration = TimestampDuration::new_secs(60);
+/// Frequency to retry reconciliation of watches that are not at consensus
+pub const RECONCILE_OUTBOUND_WATCHES_RETRY_INTERVAL: TimestampDuration =
+    TimestampDuration::new_secs(5);
 /// How long before expiration to try to renew per-node watches
 pub const RENEW_OUTBOUND_WATCHES_DURATION: TimestampDuration = TimestampDuration::new_secs(30);
 /// Frequency to check for expired server-side watched records
@@ -34,8 +37,16 @@ pub const CHECK_INBOUND_TRANSACTIONS_INTERVAL_SECS: u32 = 1;
 pub const REHYDRATE_RECORDS_INTERVAL_SECS: u32 = 1;
 /// Number of rehydration requests to process in parallel
 pub const REHYDRATE_BATCH_SIZE: usize = 16;
+/// Maximum rehydration requests to start per tick
+pub const REHYDRATE_REQUESTS_PER_TICK: usize = 4;
 /// Maximum 'offline lag' before we decide to poll for changed watches
 pub const CHANGE_INSPECT_LAG: TimestampDuration = TimestampDuration::new_secs(2);
+/// Minimum time between lag-triggered all-watch change inspections
+pub const CHANGE_INSPECT_LAG_MIN_INTERVAL: TimestampDuration = TimestampDuration::new_secs(30);
+/// Delay before retrying a contended change inspection
+pub const CHANGE_INSPECT_RETRY_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
+/// How long after foreground transaction activity background transactions stay deferred
+pub const BACKGROUND_TRANSACTION_QUIET_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
 /// Length of descriptor cache (512 records and 5 nodes per record, roughly 184320 bytes)
 pub const DESCRIPTOR_CACHE_SIZE: usize = 2560;
 /// Table store table for storage manager metadata

@@ -25,9 +25,10 @@ pub(in crate::storage_manager) struct OutboundWatchManager {
     /// Last known active watch per node+record
     #[serde(with = "serialize_hash_map_as_pairs")]
     pub per_node_states: HashMap<PerNodeKey, OutboundWatchPerNodeState>,
-    /// Value changed updates that need inpection to determine if they should be reported
+    /// Value changed updates that need inspection to determine if they should be reported,
+    /// with the earliest time each may run
     #[serde(skip)]
-    pub needs_change_inspection: HashMap<RecordKey, ValueSubkeyRangeSet>,
+    pub needs_change_inspection: HashMap<RecordKey, (ValueSubkeyRangeSet, Timestamp)>,
 }
 
 impl fmt::Display for OutboundWatchManager {
@@ -67,8 +68,8 @@ impl fmt::Display for OutboundWatchManager {
             keys.sort_unstable();
 
             for k in keys {
-                let v = self.needs_change_inspection.get(&k).unwrap_or_log();
-                out += &format!("  {}: {}\n", k, v);
+                let (subkeys, not_before) = self.needs_change_inspection.get(&k).unwrap_or_log();
+                out += &format!("  {}: {} not_before={}\n", k, subkeys, not_before);
             }
         }
         out += "]\n";
@@ -222,7 +223,17 @@ impl OutboundWatchManager {
 
     /// Set a record up to be inspected for changed subkeys
     pub fn enqueue_change_inspect(&mut self, record_key: RecordKey, subkeys: ValueSubkeyRangeSet) {
-        veilid_log!(self debug "change inspect: record_key={} subkeys={}", record_key, subkeys);
+        self.enqueue_change_inspect_after(record_key, subkeys, Timestamp::default());
+    }
+
+    /// Set a record up to be inspected for changed subkeys, no earlier than a given time
+    pub fn enqueue_change_inspect_after(
+        &mut self,
+        record_key: RecordKey,
+        subkeys: ValueSubkeyRangeSet,
+        not_before: Timestamp,
+    ) {
+        veilid_log!(self debug "change inspect: record_key={} subkeys={} not_before={}", record_key, subkeys, not_before);
 
         let opaque_record_key = record_key.opaque();
 
@@ -237,9 +248,13 @@ impl OutboundWatchManager {
             return;
         };
 
+        // Merged entries keep the latest not_before so retry backoff is not defeated
         self.needs_change_inspection
             .entry(record_key)
-            .and_modify(|x| *x = x.union(&subkeys))
-            .or_insert(subkeys);
+            .and_modify(|(sk, nb)| {
+                *sk = sk.union(&subkeys);
+                *nb = (*nb).max(not_before);
+            })
+            .or_insert((subkeys, not_before));
     }
 }
