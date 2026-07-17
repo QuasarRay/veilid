@@ -652,12 +652,8 @@ impl ConnectionManager {
                 };
             }
             ConnectionManagerEvent::Dead(mut conn) => {
-                let _lock_guard = self
-                    .arc
-                    .address_lock_table
-                    .lock_tag(conn.flow().remote_address().socket_addr())
-                    .await;
-
+                // No address lock: the connection is already out of the table, and waiting
+                // here can deadlock behind a queued Accepted event holding the same tag
                 conn.close();
                 conn.await;
             }

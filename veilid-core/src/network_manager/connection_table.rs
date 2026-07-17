@@ -225,6 +225,9 @@ impl ConnectionTable {
 
         let id = *inner.id_by_flow.get(&flow)?;
         let out = inner.conn_by_id.peek(&id).unwrap_or_log();
+        if out.is_dead() {
+            return None;
+        }
         Some(out.get_handle())
     }
 
@@ -307,21 +310,27 @@ impl ConnectionTable {
     ) -> Option<ConnectionHandle> {
         let inner = &mut *self.inner.lock();
 
-        let all_ids_by_remote = inner.ids_by_remote.get(&remote)?;
+        // Skip dead connections; their processor loop has exited and sends would not be drained
+        let live_ids = inner
+            .ids_by_remote
+            .get(&remote)?
+            .iter()
+            .copied()
+            .filter(|id| !inner.conn_by_id.peek(id).unwrap_or_log().is_dead())
+            .collect::<Vec<_>>();
 
-        if all_ids_by_remote.is_empty() {
+        if live_ids.is_empty() {
             // no connections
             return None;
         }
-        if all_ids_by_remote.len() == 1 {
+        if live_ids.len() == 1 {
             // only one connection
-            let id = all_ids_by_remote[0];
-            let nc = inner.conn_by_id.get(&id).unwrap_or_log();
+            let nc = inner.conn_by_id.get(&live_ids[0]).unwrap_or_log();
             return Some(nc.get_handle());
         }
         // multiple connections, find the one that matches the best port, or the most recent
         if let Some(best_port) = best_port {
-            for id in all_ids_by_remote {
+            for id in &live_ids {
                 let nc = inner.conn_by_id.peek(id).unwrap_or_log();
                 if let Some(local_addr) = nc.flow().local() {
                     if local_addr.port() == best_port {
@@ -332,7 +341,7 @@ impl ConnectionTable {
             }
         }
         // just return most recent network connection if a best port match can not be found
-        let best_id = *all_ids_by_remote.last().unwrap_or_log();
+        let best_id = *live_ids.last().unwrap_or_log();
         let nc = inner.conn_by_id.get(&best_id).unwrap_or_log();
         Some(nc.get_handle())
     }

@@ -1,6 +1,7 @@
 **UNRELEASED**
 
 - veilid-core:
+  - SECURITY: Deadlock on remote connection flood fixed in `ConnectionManager`. Thanks to quikchaos for the report. The PoC will be included in the `doc/security/poc` folder after the patched version is deployed.
   - HPKE (RFC 9180, base mode) added as `hpke_seal`/`hpke_open` on `CryptoSystem` and all bindings. Implemented for `VLD0` and `NONE` cryptosystems
   - `PublicKey`/`SecretKey` are now explicitly intended to be signing keys (VLD0: Ed25519, VLD1: ML-DSA). New types created for HPKE: `EncapsulationKey`/`DecapsulationKey`/`KemKeyPair` (VLD0: DHKEM-X25519, VLD1: ML-KEM), generated with `generate_kem_keypair` or derived from signing keys via the VLD0-only `encapsulation_key_from_signing_key`/`decapsulation_key_from_signing_secret` bridges
   - `NONE` cryptosystem brought in line with the `CryptoSystem` contract for debugging/testing

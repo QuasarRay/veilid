@@ -111,6 +111,9 @@ pub(crate) struct NetworkConnection {
     /// Mirrors `protected_nr.is_some()` so the connection-processor loop can skip
     /// inactivity-timeout-driven closure on protected connections without holding a lock.
     is_protected: Arc<AtomicBool>,
+    /// Set when the processor loop exits or close() is called; shared with handles so
+    /// sends fail with NotSent instead of queueing to a channel nothing drains
+    dead: Arc<AtomicBool>,
     /// The number of references to the network connection that exist (handles)
     ref_count: usize,
 }
@@ -168,6 +171,7 @@ impl NetworkConnection {
             stop_source: None,
             protected_nr: None,
             is_protected: Arc::new(AtomicBool::new(false)),
+            dead: Arc::new(AtomicBool::new(false)),
             ref_count: 0,
         }
     }
@@ -196,6 +200,7 @@ impl NetworkConnection {
         let local_stop_token = stop_source.token();
 
         let is_protected = Arc::new(AtomicBool::new(false));
+        let dead = Arc::new(AtomicBool::new(false));
 
         // Spawn connection processor and pass in protocol connection
         let registry = connection_manager.registry();
@@ -211,6 +216,7 @@ impl NetworkConnection {
                 protocol_connection,
                 stats.clone(),
                 is_protected.clone(),
+                dead.clone(),
             ),
         );
 
@@ -227,6 +233,7 @@ impl NetworkConnection {
             stop_source: Some(stop_source),
             protected_nr: None,
             is_protected,
+            dead,
             ref_count: 0,
         }
     }
@@ -252,7 +259,16 @@ impl NetworkConnection {
     }
 
     pub fn get_handle(&self) -> ConnectionHandle {
-        ConnectionHandle::new(self.connection_id, self.flow, self.sender.clone())
+        ConnectionHandle::new(
+            self.connection_id,
+            self.flow,
+            self.sender.clone(),
+            self.dead.clone(),
+        )
+    }
+
+    pub fn is_dead(&self) -> bool {
+        self.dead.load(Ordering::Relaxed)
     }
 
     pub fn is_in_use(&self) -> bool {
@@ -282,6 +298,7 @@ impl NetworkConnection {
     }
 
     pub fn close(&mut self) {
+        self.dead.store(true, Ordering::Relaxed);
         if let Some(stop_source) = self.stop_source.take() {
             // drop the stopper
             drop(stop_source);
@@ -340,6 +357,7 @@ impl NetworkConnection {
         protocol_connection: ProtocolNetworkConnection,
         stats: Arc<Mutex<NetworkConnectionStats>>,
         is_protected: Arc<AtomicBool>,
+        dead: Arc<AtomicBool>,
     ) -> PinBoxFutureStatic<()> {
         Box::pin(async move {
             let registry = connection_manager.registry();
@@ -537,6 +555,9 @@ impl NetworkConnection {
                 }
             }
 
+
+            // Mark dead before removal from the table so handles stop queueing sends
+            dead.store(true, Ordering::Relaxed);
 
             // Let the connection manager know the receive loop exited
             connection_manager

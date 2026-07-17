@@ -124,6 +124,58 @@ pub async fn test_add_get_remove() {
     mock_registry::terminate(registry).await;
 }
 
+pub async fn test_dead_connection_skip() {
+    let registry = mock_registry::init("conn_dead").await;
+
+    let table = ConnectionTable::new(registry.clone());
+
+    // Two connections to the same remote, distinct local addresses
+    let remote_pa = PeerAddress::new(
+        SocketAddress::new(Address::IPV4(Ipv4Addr::new(10, 1, 0, 1)), 8080),
+        ProtocolType::TCP,
+    );
+    let local1 = SocketAddress::new(Address::IPV4(Ipv4Addr::new(10, 1, 0, 2)), 5001);
+    let local2 = SocketAddress::new(Address::IPV4(Ipv4Addr::new(10, 1, 0, 2)), 5002);
+    let f1 = Flow::new(remote_pa, local1);
+    let f2 = Flow::new(remote_pa, local2);
+    let remote = (
+        ProtocolType::TCP.low_level_protocol_type(),
+        *remote_pa.socket_address(),
+    );
+
+    let c1 = NetworkConnection::dummy(registry.clone(), 1.into(), f1);
+    let c1h = c1.get_handle();
+    let mut c2 = NetworkConnection::dummy(registry.clone(), 2.into(), f2);
+    let c2h = c2.get_handle();
+
+    // Dead connections refuse sends even through an existing handle
+    c2.close();
+    assert!(matches!(
+        c2h.send_async(Bytes::new()).await,
+        ConnectionHandleSendResult::NotSent(_)
+    ));
+
+    table.add_connection(c1).unwrap();
+    table.add_connection(c2).unwrap();
+
+    // Selectors skip the dead connection even though it is still in the table
+    assert_eq!(
+        table.get_best_connection_by_remote(None, remote),
+        Some(c1h.clone())
+    );
+    assert_eq!(table.peek_connection_by_flow(f2), None);
+
+    // Kill the last live connection; the remote no longer resolves
+    table.remove_connection_by_id(1.into()).unwrap().close();
+    assert_eq!(table.get_best_connection_by_remote(None, remote), None);
+    assert!(matches!(
+        c1h.send_async(Bytes::new()).await,
+        ConnectionHandleSendResult::NotSent(_)
+    ));
+
+    mock_registry::terminate(registry).await;
+}
+
 // Unique flow per id; distinct remote IP keeps each connection separate and well
 // under the per-ip connection limit.
 fn flow_n(n: u64, protocol_type: ProtocolType) -> Flow {

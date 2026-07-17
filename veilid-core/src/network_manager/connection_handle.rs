@@ -1,10 +1,12 @@
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Debug)]
 pub struct ConnectionHandle {
     connection_id: NetworkConnectionId,
     flow: Flow,
     channel: flume::Sender<(Option<Id>, Bytes)>,
+    dead: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -18,11 +20,13 @@ impl ConnectionHandle {
         connection_id: NetworkConnectionId,
         flow: Flow,
         channel: flume::Sender<(Option<Id>, Bytes)>,
+        dead: Arc<AtomicBool>,
     ) -> Self {
         Self {
             connection_id,
             flow,
             channel,
+            dead,
         }
     }
 
@@ -53,6 +57,10 @@ impl ConnectionHandle {
 
     #[cfg_attr(feature = "instrument", instrument(level="trace", target="net", skip(self, message), fields(message.len = message.len())))]
     pub async fn send_async(&self, message: Bytes) -> ConnectionHandleSendResult {
+        // A dead connection's processor no longer drains the channel; queueing would silently drop
+        if self.dead.load(Ordering::Relaxed) {
+            return ConnectionHandleSendResult::NotSent(message);
+        }
         match self
             .channel
             .send_async((Span::current().id(), message))
