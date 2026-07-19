@@ -172,7 +172,8 @@ impl RouteSpecStore {
             (hop_info, route_hop)
         };
 
-        for (hop_node_id, hop_public_key, hop_peer_info) in hop_info {
+        let num_hops = hop_info.len();
+        for (i, (hop_node_id, hop_public_key, hop_peer_info)) in hop_info.into_iter().enumerate() {
             // Encrypt the previous blob ENC(nonce, DH(PKhop,SKpr))
             let nonce = vcrypto.random_nonce().await;
 
@@ -195,12 +196,15 @@ impl RouteSpecStore {
                 blob: enc_msg_data.into(),
             };
 
+            // The entry hop is resolved by the recipient, who may never have
+            // seen it; NodeId-only there black-holes replies. Temporary until
+            // PR2.0 removes route optimization entirely.
+            let is_entry_hop = i == num_hops - 1;
             route_hop = RouteHop {
-                node: if optimized {
-                    // Optimized, no peer info, just the dht key
+                node: if optimized && !is_entry_hop {
+                    // Optimized, no peer info, just the node id
                     RouteNode::NodeId(hop_node_id)
                 } else {
-                    // Full peer info, required until we are sure the route has been fully established
                     RouteNode::PeerInfo(hop_peer_info)
                 },
                 next_hop: Some(route_hop_data),

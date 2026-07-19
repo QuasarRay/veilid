@@ -1276,55 +1276,67 @@ impl StorageManager {
             async move {
                 let this = registry.storage_manager();
 
-                let report = match this
-                    .inspect_record(record_key.clone(), subkeys.clone(), DHTReportScope::SyncGet)
-                    .await
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        veilid_log!(this debug "Failed to inspect record for changes: {}", e);
-                        return;
+                let res = async {
+                    let report = this
+                        .inspect_record(
+                            record_key.clone(),
+                            subkeys.clone(),
+                            DHTReportScope::SyncGet,
+                        )
+                        .await?;
+                    let mut newer_online_subkeys = report.newer_online_subkeys();
+
+                    // Get changed first changed subkey until we find one to report
+                    let mut n = 0;
+                    while !newer_online_subkeys.is_empty() {
+                        let first_changed_subkey = newer_online_subkeys.first().unwrap_or_log();
+
+                        let value = this
+                            .get_value(record_key.clone(), first_changed_subkey, true)
+                            .await?;
+
+                        if let Some(value) = value {
+                            let local_seq = report.local_seqs()[n];
+                            if value.seq() > local_seq {
+                                // Committed change: get_value already wrote the local store, so we
+                                // don't track a reported seq here.
+                                this.report_change_inspect_value(
+                                    record_key.clone(),
+                                    &opaque_record_key,
+                                    newer_online_subkeys,
+                                    first_changed_subkey,
+                                    value,
+                                    false,
+                                )
+                                .await;
+                                break;
+                            }
+                        }
+
+                        // If we didn't send an update, remove the first changed subkey and try again
+                        newer_online_subkeys.pop_first();
+                        n += 1;
                     }
-                };
-                let mut newer_online_subkeys = report.newer_online_subkeys();
+                    VeilidAPIResult::Ok(())
+                }
+                .await;
 
-                // Get changed first changed subkey until we find one to report
-                let mut n = 0;
-                while !newer_online_subkeys.is_empty() {
-                    let first_changed_subkey = newer_online_subkeys.first().unwrap_or_log();
-
-                    let value = match this
-                        .get_value(record_key.clone(), first_changed_subkey, true)
-                        .await
+                if let Err(e) = res {
+                    // A failed inspection leaves missed value changes missed forever;
+                    // requeue with backoff while the watch still exists
+                    veilid_log!(this debug "Failed to inspect record for changes, will retry: {}", e);
+                    let not_before =
+                        Timestamp::now_non_decreasing().later(CHANGE_INSPECT_RETRY_INTERVAL);
+                    let mut inner = this.inner.lock();
+                    if inner
+                        .outbound_watch_manager
+                        .outbound_watches
+                        .contains_key(&opaque_record_key)
                     {
-                        Ok(v) => v,
-                        Err(e) => {
-                            veilid_log!(this debug "Failed to get changed record: {}", e);
-                            return;
-                        }
-                    };
-
-                    if let Some(value) = value {
-                        let local_seq = report.local_seqs()[n];
-                        if value.seq() > local_seq {
-                            // Committed change: get_value already wrote the local store, so we
-                            // don't track a reported seq here.
-                            this.report_change_inspect_value(
-                                record_key,
-                                &opaque_record_key,
-                                newer_online_subkeys,
-                                first_changed_subkey,
-                                value,
-                                false,
-                            )
-                            .await;
-                            return;
-                        }
+                        inner
+                            .outbound_watch_manager
+                            .enqueue_change_inspect_after(record_key, subkeys, not_before);
                     }
-
-                    // If we didn't send an update, remove the first changed subkey and try again
-                    newer_online_subkeys.pop_first();
-                    n += 1;
                 }
             }
         };

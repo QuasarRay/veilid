@@ -39,6 +39,8 @@ pub const REHYDRATE_RECORDS_INTERVAL_SECS: u32 = 1;
 pub const REHYDRATE_BATCH_SIZE: usize = 16;
 /// Maximum rehydration requests to start per tick
 pub const REHYDRATE_REQUESTS_PER_TICK: usize = 4;
+/// Number of subkey sets to push in parallel during transactional rehydration
+pub const REHYDRATE_SET_CONCURRENCY: usize = 8;
 /// Maximum 'offline lag' before we decide to poll for changed watches
 pub const CHANGE_INSPECT_LAG: TimestampDuration = TimestampDuration::new_secs(2);
 /// Minimum time between lag-triggered all-watch change inspections

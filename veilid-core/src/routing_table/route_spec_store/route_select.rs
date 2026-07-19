@@ -253,6 +253,13 @@ impl RouteSpecStore {
 
         // Sort the routes by preference
         routes.sort_unstable_by(|a, b| {
+            // NOTE: do not rank or exclude on RouteStatsDisposition here.
+            // Blame oscillates (fanouts charge routes for dead targets and any
+            // answer clears it), so it penalizes routes exactly while they
+            // carry traffic and prefers idle/untested ones. Validated 2026-07:
+            // both gating and sort-preference on disposition break routed
+            // answers on the public network. Disposition drives testing only.
+
             // Prefer routes that don't need testing
             let a_needs_testing = a.2.needs_testing(a.1.orderings(), cur_ts);
             let b_needs_testing = b.2.needs_testing(b.1.orderings(), cur_ts);

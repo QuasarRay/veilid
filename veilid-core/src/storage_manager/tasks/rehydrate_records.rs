@@ -30,9 +30,15 @@ impl StorageManager {
 
         let mut futs = Vec::new();
         for req in reqs {
+            let stop_token = stop_token.clone();
             futs.push(async move {
                 let res = self
-                    .rehydrate_record(req.0.clone(), req.1.subkeys.clone(), req.1.consensus_count)
+                    .rehydrate_record(
+                        stop_token,
+                        req.0.clone(),
+                        req.1.subkeys.clone(),
+                        req.1.consensus_count,
+                    )
                     .await;
 
                 let _report = match res {

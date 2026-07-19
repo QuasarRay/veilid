@@ -405,7 +405,8 @@ impl RouteSpecStore {
                         let Some(reply_private_route_id) =
                             cache.get_allocated_route_id_by_key(pr_public_key)
                         else {
-                            apibail_generic!("safety route id missing");
+                            // The reply route died since the op began; a retry re-selects
+                            apibail_try_again!("safety route id missing, try again later");
                         };
                         Some((reply_private_route_id, pr_public_key.clone()))
                     }

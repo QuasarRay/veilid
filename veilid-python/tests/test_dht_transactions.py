@@ -724,6 +724,21 @@ async def test_dht_transaction_integration_writer_reader_fail_commit():
                 await rc1.delete_dht_record(rec1.key)
 
 
+async def next_value_change_for_key(
+    queue: asyncio.Queue, key: RecordKey, timeout: float = 30
+) -> veilid.VeilidUpdate:
+    """Next value change for a specific record, skipping bleed-through from other
+    records (e.g. a prior test's watch-death notification arriving late)."""
+    deadline = time.time() + timeout
+    while True:
+        remaining = deadline - time.time()
+        assert remaining > 0, f"timed out waiting for value change on {key}"
+        upd = await asyncio.wait_for(queue.get(), timeout=remaining)
+        if isinstance(upd.detail, veilid.VeilidValueChange) and upd.detail.key == key:
+            return upd
+        print(f"  skipping stale value change: {VeilidJSONEncoder.dumps(upd)}")
+
+
 @pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
 @pytest.mark.asyncio
 async def test_dht_transaction_watch_values():
@@ -815,7 +830,7 @@ async def test_dht_transaction_watch_values():
                 # ValueChange. The wire notification has no inline value for a
                 # single subkey, so core falls back to a change inspection that
                 # runs on the watch task tick — hence the generous timeout.
-                upd = await asyncio.wait_for(value_change_queue.get(), timeout=30)
+                upd = await next_value_change_for_key(value_change_queue, rec1.key)
                 print(f"transactional value change: {VeilidJSONEncoder.dumps(upd)}")
 
                 assert isinstance(upd.detail, veilid.VeilidValueChange)
@@ -919,16 +934,18 @@ async def test_dht_transaction_watch_values_transactional():
                     await tx.commit()
 
                 # Watcher: receives ValueChange but with NO inline value
-                upd = await asyncio.wait_for(value_change_queue.get(), timeout=30)
+                upd = await next_value_change_for_key(value_change_queue, rec1.key)
                 print(f"transactional value change: {VeilidJSONEncoder.dumps(upd)}")
                 assert isinstance(upd.detail, veilid.VeilidValueChange)
                 assert upd.detail.key == rec1.key
                 assert upd.detail.subkeys == [(3, 3)]
-                # Transactional: inline value is dropped, only subkey range is reported.
-                assert upd.detail.value is None, (
-                    "transactional watch must suppress inline value; "
-                    f"got value={upd.detail.value}"
-                )
+                # Two valid notification forms race here: the raw wire update
+                # (range only, no inline value) and the change-inspection report
+                # (carries the consistent transactional value). Neither commits
+                # locally, which the inspect below verifies.
+                if upd.detail.value is not None:
+                    assert upd.detail.value.data == b"BLAH BLAH"
+                    assert upd.detail.value.seq == 1
 
                 # Watcher: local store stays at seq 0 (no auto-update on the
                 # ValueChanged), so an inspect must show local < network for the

@@ -33,10 +33,10 @@ pub fn test_nodes_needed_stale_table_inflation_capped() {
     };
     let n = needed(counts, None);
     assert!(!n.needs_bootstrap);
-    assert!(n.needs_peer_minimum_refresh);
+    assert!(!n.needs_peer_minimum_refresh);
     assert!(!n.needs_more_tested_nodes);
 
-    // One short of the cap still needs testing
+    // One short of the cap still needs testing, and refresh keeps gathering
     let n = needed(
         KindNodeCounts {
             responsive: 11,
@@ -45,6 +45,7 @@ pub fn test_nodes_needed_stale_table_inflation_capped() {
         None,
     );
     assert!(n.needs_more_tested_nodes);
+    assert!(n.needs_peer_minimum_refresh);
 }
 
 pub fn test_nodes_needed_fresh_small_table_uses_fraction() {
@@ -112,25 +113,38 @@ pub fn test_nodes_needed_fallback_bootstrap_timing() {
     assert!(!n.needs_bootstrap);
 }
 
-pub fn test_nodes_needed_responsive_gates_peer_minimum_refresh() {
-    info!("--- test_nodes_needed_responsive_gates_peer_minimum_refresh ---");
+pub fn test_nodes_needed_peer_minimum_refresh_scoped_to_attach() {
+    info!("--- test_nodes_needed_peer_minimum_refresh_scoped_to_attach ---");
 
-    // maybe_live above min_peer_count no longer suppresses PMR; responsive count rules
+    // Stale attach: below the tested bar fires refresh even with many maybe-live nodes
     let counts = KindNodeCounts {
         maybe_live: 100,
-        responsive: 19,
+        responsive: 5,
         live_external: 100,
         low_water_mark: 0,
     };
     assert!(needed(counts, None).needs_peer_minimum_refresh);
+    // Tested bar met: refresh goes quiet even though responsive < min_peer_count
     assert!(
         !needed(
             KindNodeCounts {
-                responsive: 20,
+                responsive: 12,
                 ..counts
             },
             None
         )
         .needs_peer_minimum_refresh
     );
+    // Small known-node pool still fires refresh regardless of the tested bar
+    let n = needed(
+        KindNodeCounts {
+            maybe_live: 10,
+            responsive: 10,
+            live_external: 10,
+            low_water_mark: 0,
+        },
+        None,
+    );
+    assert!(n.needs_peer_minimum_refresh);
+    assert!(!n.needs_more_tested_nodes);
 }

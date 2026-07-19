@@ -286,12 +286,16 @@ impl StorageManager {
         // Get routing table to see if we still know about these nodes
         let routing_table = self.routing_table();
 
+        let cur_ts = Timestamp::now_non_decreasing();
         let opt_value_nodes = local_record_store.peek_record(opaque_record_key, |r| {
             let d = r.detail();
             d.nodes
                 .keys()
                 .cloned()
                 .filter_map(|nr| routing_table.lookup_node_id(nr).ok().flatten())
+                // A known-dead cached value node wastes a full RPC timeout in
+                // every fanout it seeds; it can re-earn a place via discovery
+                .filter(|nr| nr.state(cur_ts).maybe_live())
                 .collect()
         });
 

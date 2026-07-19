@@ -348,6 +348,7 @@ impl StorageManager {
                                 dest,
                                 descriptor,
                                 opt_begin_rtt: Some(node_elapsed),
+                                begin_seqs: answer.seqs.clone(),
                             })
                             .map_err(|e| RPCError::internal(e.to_string()))?;
                         }

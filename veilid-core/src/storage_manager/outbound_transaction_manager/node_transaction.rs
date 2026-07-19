@@ -12,6 +12,8 @@ pub struct NodeTransactionParams {
     pub expiration: Timestamp,
     /// RTT measured during Begin, used to seed the per-node RTT estimate
     pub opt_initial_rtt: Option<TimestampDuration>,
+    /// Per-subkey seqs this node reported in its Begin answer
+    pub begin_seqs: Vec<ValueSeqNum>,
 }
 
 /// Transaction per node
@@ -41,6 +43,9 @@ pub(super) struct NodeTransaction {
     /// Most recent RTT measured for this node, refreshed on each successful RPC
     #[serde(default)]
     opt_last_rtt: Option<TimestampDuration>,
+    /// Per-subkey seqs this node reported in its Begin answer
+    #[serde(default)]
+    begin_seqs: Vec<ValueSeqNum>,
 }
 
 impl VeilidComponentRegistryAccessor for NodeTransaction {
@@ -56,6 +61,7 @@ impl NodeTransaction {
         node_ref: NodeRef,
         expiration: Timestamp,
         opt_initial_rtt: Option<TimestampDuration>,
+        begin_seqs: Vec<ValueSeqNum>,
     ) -> Self {
         let cur_ts = Timestamp::now();
         Self {
@@ -69,7 +75,16 @@ impl NodeTransaction {
             current_values: Default::default(),
             updated_values: Default::default(),
             opt_last_rtt: opt_initial_rtt,
+            begin_seqs,
         }
+    }
+
+    /// The seq this node reported for a subkey in its Begin answer
+    pub fn begin_seq(&self, subkey: ValueSubkey) -> ValueSeqNum {
+        self.begin_seqs
+            .get(subkey as usize)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub(super) fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) -> bool {

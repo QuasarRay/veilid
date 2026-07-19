@@ -177,8 +177,9 @@ impl NativeNetwork {
     fn create_udp_protocol_handler(&self, addr: SocketAddr) -> EyreResult<bool> {
         veilid_log!(self debug "create_udp_protocol_handler on {:?}", &addr);
 
-        // Create a single-address-family UDP socket with default options bound to an address
-        let Some(udp_socket) = bind_async_udp_socket(addr)? else {
+        // Probed bind: an occupied port must fail here so the port search
+        // advances instead of reuse-binding alongside another process
+        let Some(udp_socket) = bind_async_udp_socket_probed(addr)? else {
             return Ok(false);
         };
         let socket_arc = Arc::new(udp_socket);

@@ -494,6 +494,14 @@ impl OutboundTransactionRecordState {
             .ok_or_else(|| VeilidAPIError::internal("subkey out of range"))
     }
 
+    /// Count begin-set nodes whose Begin answer reported this subkey at or above min_seq
+    pub fn count_begin_holders(&self, subkey: ValueSubkey, min_seq: ValueSeqNum) -> usize {
+        self.node_transactions_by_id
+            .values()
+            .filter(|nt| nt.begin_seq(subkey) >= min_seq)
+            .count()
+    }
+
     pub fn local_snapshot(&self) -> Arc<RecordSnapshot> {
         self.record_params.local_snapshot.clone()
     }
@@ -529,6 +537,7 @@ impl OutboundTransactionRecordState {
                 params.node_ref,
                 params.expiration,
                 params.opt_initial_rtt,
+                params.begin_seqs,
             ))),
             std::collections::btree_map::Entry::Occupied(_) => {
                 Err(VeilidAPIError::internal("node transaction already exists"))

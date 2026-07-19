@@ -35,7 +35,7 @@ pub async fn test_all() {
     test_nodes_needed::test_nodes_needed_fresh_small_table_uses_fraction();
     test_nodes_needed::test_nodes_needed_low_water_mark_term_capped();
     test_nodes_needed::test_nodes_needed_fallback_bootstrap_timing();
-    test_nodes_needed::test_nodes_needed_responsive_gates_peer_minimum_refresh();
+    test_nodes_needed::test_nodes_needed_peer_minimum_refresh_scoped_to_attach();
     test_bucket_entry_state::test_state_punished();
     test_bucket_entry_state::test_state_dead_excessive_unreachable();
     test_bucket_entry_state::test_state_dead_excessive_send_failures();

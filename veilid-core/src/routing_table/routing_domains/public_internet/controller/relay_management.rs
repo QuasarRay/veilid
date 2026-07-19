@@ -35,16 +35,25 @@ impl PublicInternetRoutingDomainController {
             return None;
         }
 
-        // Relay node no longer can relay
+        // Relay node no longer can relay. Tolerate transient unresponsiveness (Missing from a
+        // single lost question): truly dead relays are dropped by the state check above, and
+        // dropping on every blip reselects relays until the flap detector trips.
         let relay_snap = relay_node
             .entry()
             .snapshot(routing_table.registry(), cur_ts);
-        if !relay_node_filter(&relay_snap) {
+        let relay_filter_passes = relay_node_filter(&relay_snap);
+        if !relay_filter_passes {
+            if relay_snap.state.is_responsive() {
+                veilid_log!(routing_table debug
+                    "Relay node can no longer relay, dropping relay {}",
+                    relay.relay_node
+                );
+                return None;
+            }
             veilid_log!(routing_table debug
-                "Relay node can no longer relay, dropping relay {}",
+                "Relay node temporarily unresponsive, keeping relay {}",
                 relay.relay_node
             );
-            return None;
         }
 
         // Pathological: protected connections die too fast on this relay.
@@ -61,9 +70,12 @@ impl PublicInternetRoutingDomainController {
         }
 
         // See if our relay was optimized last long enough ago to consider getting a new one
-        // if it is no longer fast enough
+        // if it is no longer fast enough. A kept-but-unresponsive relay is excluded from the
+        // relative-performance set by the same filter, so optimizing it here would drop it as
+        // "unmeasurable" and undo the retention above every interval; let it recover or die
+        // via the Dead state check instead.
         let last_optimized_duration = cur_ts.duration_since(relay_state.last_optimized);
-        if last_optimized_duration > RELAY_OPTIMIZATION_INTERVAL {
+        if relay_filter_passes && last_optimized_duration > RELAY_OPTIMIZATION_INTERVAL {
             // See what our relay's current percentile is
             if let Some(relay_relative_performance) = routing_table.get_node_relative_performance(
                 relay_node_id,
@@ -257,7 +269,11 @@ impl PublicInternetRoutingDomainController {
                 for rid in relay.relay_node.node_ids().iter() {
                     attempted_relays.insert(rid.clone());
                 }
-                new_relay_compiler.apply_relay(relay);
+                let relay_node = relay.relay_node.clone();
+                if !new_relay_compiler.apply_relay(relay) {
+                    // Silent compilation rejection is the remaining relay-churn source
+                    veilid_log!(self debug "Valid relay no longer useful in compilation, dropping relay {}", relay_node);
+                }
             }
 
             // Allocate new inbound relays as needed

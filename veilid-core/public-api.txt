@@ -377,7 +377,7 @@ pub fn veilid_core::AsyncCryptoSystemGuard<'_>::encapsulation_key_length(&self) 
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::encrypt_aead(&self, bytes::bytes::Bytes, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<bytes::bytes::Bytes>) -> veilid_core::VeilidAPIResult<bytes::bytes::Bytes>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::encrypt_in_place_aead(&self, bytes::bytes_mut::BytesMut, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<bytes::bytes::Bytes>) -> veilid_core::VeilidAPIResult<bytes::bytes_mut::BytesMut>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_hash(&self, bytes::bytes::Bytes) -> veilid_core::HashDigest
-pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_hash_reader(&self, &mut dyn std::io::Read) -> veilid_core::VeilidAPIResult<veilid_core::PublicKey>
+pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_hash_reader(&self, &mut dyn alloc::io::read::Read) -> veilid_core::VeilidAPIResult<veilid_core::PublicKey>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_kem_keypair(&self) -> veilid_core::KemKeyPair
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_keypair(&self) -> veilid_core::KeyPair
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::generate_shared_secret(&self, &veilid_core::PublicKey, &veilid_core::SecretKey, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>
@@ -397,7 +397,7 @@ pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::sign(&self, &veilid_core::
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::sign_in_place(&self, &veilid_core::PublicKey, &veilid_core::SecretKey, bytes::bytes_mut::BytesMut, core::ops::range::Range<usize>, usize) -> veilid_core::VeilidAPIResult<bytes::bytes_mut::BytesMut>
 pub fn veilid_core::AsyncCryptoSystemGuard<'_>::signature_length(&self) -> usize
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::validate_hash(&self, bytes::bytes::Bytes, &veilid_core::HashDigest) -> veilid_core::VeilidAPIResult<bool>
-pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::validate_hash_reader(&self, &mut dyn std::io::Read, &veilid_core::HashDigest) -> veilid_core::VeilidAPIResult<bool>
+pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::validate_hash_reader(&self, &mut dyn alloc::io::read::Read, &veilid_core::HashDigest) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::validate_keypair(&self, &veilid_core::PublicKey, &veilid_core::SecretKey) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::verify(&self, &veilid_core::PublicKey, bytes::bytes::Bytes, &veilid_core::Signature) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::AsyncCryptoSystemGuard<'_>::verify_in_place(&self, &veilid_core::PublicKey, bytes::bytes::Bytes, core::ops::range::Range<usize>, usize) -> veilid_core::VeilidAPIResult<bool>
@@ -3384,7 +3384,7 @@ pub fn veilid_core::CryptoSystem::encapsulation_key_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::encrypt_aead(&self, &[u8], &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
 pub fn veilid_core::CryptoSystem::encrypt_in_place_aead(&self, &mut dyn veilid_core::crypto::crypto_system::buffer::CryptoSystemBuffer, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::CryptoSystem::generate_hash(&self, &[u8]) -> veilid_core::HashDigest
-pub fn veilid_core::CryptoSystem::generate_hash_reader(&self, &mut dyn std::io::Read) -> veilid_core::VeilidAPIResult<veilid_core::PublicKey>
+pub fn veilid_core::CryptoSystem::generate_hash_reader(&self, &mut dyn alloc::io::read::Read) -> veilid_core::VeilidAPIResult<veilid_core::PublicKey>
 pub fn veilid_core::CryptoSystem::generate_kem_keypair(&self) -> veilid_core::KemKeyPair
 pub fn veilid_core::CryptoSystem::generate_keypair(&self) -> veilid_core::KeyPair
 pub fn veilid_core::CryptoSystem::generate_shared_secret(&self, &veilid_core::PublicKey, &veilid_core::SecretKey, &[u8]) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>
@@ -3404,7 +3404,7 @@ pub fn veilid_core::CryptoSystem::sign(&self, &veilid_core::PublicKey, &veilid_c
 pub fn veilid_core::CryptoSystem::sign_in_place(&self, &veilid_core::PublicKey, &veilid_core::SecretKey, &mut [u8], core::ops::range::Range<usize>, usize) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::CryptoSystem::signature_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::validate_hash(&self, &[u8], &veilid_core::HashDigest) -> veilid_core::VeilidAPIResult<bool>
-pub fn veilid_core::CryptoSystem::validate_hash_reader(&self, &mut dyn std::io::Read, &veilid_core::HashDigest) -> veilid_core::VeilidAPIResult<bool>
+pub fn veilid_core::CryptoSystem::validate_hash_reader(&self, &mut dyn alloc::io::read::Read, &veilid_core::HashDigest) -> veilid_core::VeilidAPIResult<bool>
 pub fn veilid_core::CryptoSystem::validate_keypair(&self, &veilid_core::PublicKey, &veilid_core::SecretKey) -> veilid_core::VeilidAPIResult<bool>
 pub fn veilid_core::CryptoSystem::verify(&self, &veilid_core::PublicKey, &[u8], &veilid_core::Signature) -> veilid_core::VeilidAPIResult<bool>
 pub fn veilid_core::CryptoSystem::verify_in_place(&self, &veilid_core::PublicKey, &[u8], core::ops::range::Range<usize>, usize) -> veilid_core::VeilidAPIResult<bool>

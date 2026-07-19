@@ -46,8 +46,6 @@ pub fn nodes_needed_for_counts(
     // Bootstrap when almost nothing is known, or when nothing has responded for too long
     let needs_bootstrap = counts.maybe_live < MIN_BOOTSTRAP_CONNECTIVITY_PEERS
         || no_responsive_elapsed.is_some_and(|d| d >= NO_RESPONSIVE_NODES_BOOTSTRAP_DELAY);
-    // Gather nodes network-wide until enough are proven responsive
-    let needs_peer_minimum_refresh = !needs_bootstrap && counts.responsive < min_peer_count;
     // Require a fraction of known nodes tested, capped so stale entries can't raise the bar
     let required_tested_connectivity_nodes = usize::max(
         (counts.live_external as f32 * ALLOCATION_CONNECTIVITY_NODES_TESTED_FACTOR) as usize,
@@ -55,6 +53,10 @@ pub fn nodes_needed_for_counts(
     )
     .min(MAX_REQUIRED_TESTED_CONNECTIVITY_NODES);
     let needs_more_tested_nodes = counts.responsive < required_tested_connectivity_nodes;
+    // Gather nodes network-wide while below the known-node minimum or still proving the
+    // tested bar; quiet once ready so refresh fanouts don't compete with operations
+    let needs_peer_minimum_refresh =
+        !needs_bootstrap && (counts.maybe_live < min_peer_count || needs_more_tested_nodes);
 
     KindNodesNeeded {
         needs_bootstrap,

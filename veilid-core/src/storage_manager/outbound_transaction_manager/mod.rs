@@ -51,6 +51,8 @@ pub(in crate::storage_manager) struct AddNodeTransactionParams {
     pub descriptor: Arc<SignedValueDescriptor>,
     /// RTT measured during Begin, used to seed the per-node RTT estimate
     pub opt_begin_rtt: Option<TimestampDuration>,
+    /// Per-subkey seqs this node reported in its Begin answer
+    pub begin_seqs: Vec<ValueSeqNum>,
 }
 
 #[derive(Debug, Clone)]
@@ -246,6 +248,7 @@ impl OutboundTransactionManager {
                 node_ref: params.node_ref,
                 expiration: params.expiration,
                 opt_initial_rtt: params.opt_begin_rtt,
+                begin_seqs: params.begin_seqs,
             },
         )?;
         let rnxid = nt.rnxid().clone();
@@ -1526,6 +1529,26 @@ impl OutboundTransactionManager {
     }
 
     /// Get an inspection report for a transaction
+    /// Count begin-set nodes whose Begin answer reported this subkey at or above min_seq
+    pub fn count_begin_holders(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+        opaque_record_key: &OpaqueRecordKey,
+        subkey: ValueSubkey,
+        min_seq: ValueSeqNum,
+    ) -> VeilidAPIResult<usize> {
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
+        let Some(record_state) = outbound_transaction_state.get_record_state(opaque_record_key)
+        else {
+            apibail_invalid_argument!(
+                "record not in transaction",
+                "opaque_record_key",
+                opaque_record_key
+            );
+        };
+        Ok(record_state.count_begin_holders(subkey, min_seq))
+    }
+
     pub fn get_record_report(
         &self,
         transaction_handle: OutboundTransactionHandle,

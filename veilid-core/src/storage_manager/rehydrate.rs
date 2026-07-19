@@ -61,6 +61,7 @@ impl StorageManager {
     )]
     pub(super) async fn rehydrate_record(
         &self,
+        stop_token: StopToken,
         opaque_record_key: OpaqueRecordKey,
         subkeys: ValueSubkeyRangeSet,
         consensus_count: usize,
@@ -90,6 +91,7 @@ impl StorageManager {
         if let Some(membership) = opt_membership {
             return self
                 .rehydrate_record_transactional(
+                    stop_token,
                     opaque_record_key,
                     subkeys,
                     consensus_count,
@@ -352,6 +354,7 @@ impl StorageManager {
     )]
     async fn rehydrate_record_transactional(
         &self,
+        stop_token: StopToken,
         opaque_record_key: OpaqueRecordKey,
         subkeys: ValueSubkeyRangeSet,
         consensus_count: usize,
@@ -373,41 +376,77 @@ impl StorageManager {
                 triggering_record_key,
                 membership,
                 move |transaction_handle, members| async move {
-                    let mut triggering_rehydrated = ValueSubkeyRangeSet::new();
+                    // Collect across the whole set first: a network-newer subkey anywhere means
+                    // our local snapshot is stale, and pushing any of it would publish a mix of
+                    // states no transaction ever committed. All-or-nothing: bail and roll back.
+                    let mut member_values = vec![];
+                    let mut set_has_network_newer = false;
                     for member in &members {
-                        let member_opaque = member.opaque();
-                        let values = self
+                        let (values, has_network_newer) = self
                             .collect_member_rehydration_values(
                                 transaction_handle,
                                 member,
                                 consensus_count,
                             )
                             .await?;
-                        for (subkey, signed_value_data) in values {
-                            let _subkey_lock = self
-                                .record_lock_table
-                                .lock_subkey(
-                                    member_opaque.clone(),
-                                    subkey,
-                                    StorageManagerSubkeyLockPurpose::TransactSet,
-                                )
-                                .await;
-                            self.transaction_set_signed_value_data(
-                                transaction_handle,
-                                member.clone(),
-                                subkey,
-                                signed_value_data,
-                            )
-                            .await?;
-                            if member_opaque == triggering_opaque {
-                                triggering_rehydrated.insert(subkey);
-                            }
+                        set_has_network_newer |= has_network_newer;
+                        member_values.push((member.clone(), values));
+                    }
+                    if set_has_network_newer {
+                        veilid_log!(self debug "Not rehydrating transaction set for {}: network is newer than local", triggering_opaque);
+                        return VeilidAPIResult::Ok(ValueSubkeyRangeSet::new());
+                    }
+
+                    let triggering_rehydrated = Mutex::new(ValueSubkeyRangeSet::new());
+                    for (member, values) in member_values {
+                        let member_opaque = member.opaque();
+                        // Push in parallel; sequential sets make large records take minutes
+                        let set_futs =
+                            values
+                                .into_iter()
+                                .map(|(subkey, signed_value_data)| {
+                                    let member = member.clone();
+                                    let member_opaque = member_opaque.clone();
+                                    async move {
+                                        let _subkey_lock = self
+                                            .record_lock_table
+                                            .lock_subkey(
+                                                member_opaque,
+                                                subkey,
+                                                StorageManagerSubkeyLockPurpose::TransactSet,
+                                            )
+                                            .await;
+                                        self.transaction_set_signed_value_data(
+                                            transaction_handle,
+                                            member,
+                                            subkey,
+                                            signed_value_data,
+                                        )
+                                        .await?;
+                                        VeilidAPIResult::Ok(subkey)
+                                    }
+                                });
+                        let completed = process_batched_future_queue_result(
+                            set_futs,
+                            REHYDRATE_SET_CONCURRENCY,
+                            stop_token.clone(),
+                            |res: VeilidAPIResult<ValueSubkey>| {
+                                let subkey = res?;
+                                if member_opaque == triggering_opaque {
+                                    triggering_rehydrated.lock().insert(subkey);
+                                }
+                                VeilidAPIResult::Ok(())
+                            },
+                        )
+                        .await?;
+                        if !completed {
+                            apibail_try_again!("rehydration stopped, try again later");
                         }
                     }
 
                     // Commit the whole set
                     self.end_and_commit_transaction(transaction_handle).await?;
-                    VeilidAPIResult::Ok(triggering_rehydrated)
+                    VeilidAPIResult::Ok(triggering_rehydrated.into_inner())
                 },
             )
             .await?;
@@ -423,16 +462,16 @@ impl StorageManager {
     /// Determine which of a transaction-set member's subkeys need rehydrating and read their
     /// existing local signed values. Uses the data the begin fanout already gathered (no second
     /// fanout): per-subkey seqs come from the transaction state via `transaction_inspect`, and the
-    /// consensus node count per subkey comes from the local record's `PerNodeRecordDetail` coverage
-    /// that the begin's `process_fanout_results` populated.
+    /// per-subkey holder count comes from each begin-set node's Begin answer seqs. Also reports
+    /// whether the network is newer than local anywhere in this member (a stale local snapshot),
+    /// which disqualifies the whole set from rehydrating.
     async fn collect_member_rehydration_values(
         &self,
         transaction_handle: OutboundTransactionHandle,
         member_record_key: &RecordKey,
         consensus_count: usize,
-    ) -> VeilidAPIResult<Vec<(ValueSubkey, Arc<SignedValueData>)>> {
+    ) -> VeilidAPIResult<(Vec<(ValueSubkey, Arc<SignedValueData>)>, bool)> {
         let opaque_record_key = member_record_key.opaque();
-        let local_record_store = self.get_local_record_store()?;
 
         // Per-subkey local and begin-time network seqs from the transaction state (no fanout)
         let report = self.transaction_inspect(
@@ -442,40 +481,34 @@ impl StorageManager {
             DHTReportScope::SyncGet,
         )?;
 
-        // Per-node subkey coverage gathered by the begin fanout, used to count consensus per
-        // subkey. Only the nodes from the most recent fanout count: those sharing the latest
-        // last_seen timestamp. Older entries are stale and would inflate the consensus count.
-        let node_subkey_sets: Vec<ValueSubkeyRangeSet> = local_record_store
-            .peek_record(&opaque_record_key, |r| {
-                let nodes = &r.detail().nodes;
-                match nodes.values().map(|n| n.last_seen).max() {
-                    Some(latest) => nodes
-                        .values()
-                        .filter(|n| n.last_seen == latest)
-                        .map(|n| n.subkeys.clone())
-                        .collect(),
-                    None => vec![],
-                }
-            })
-            .unwrap_or_default();
-
         let mut values = vec![];
+        let mut has_network_newer = false;
         for (n, subkey) in report.subkeys().iter().enumerate() {
             let local_seq = report.local_seqs()[n];
+            let network_seq = report.network_seqs()[n];
+            if network_seq > local_seq {
+                // Network is ahead of our local copy here; nothing to push for this subkey
+                has_network_newer = true;
+                continue;
+            }
             if local_seq.is_none() {
                 continue;
             }
-            let network_seq = report.network_seqs()[n];
             let needed = if local_seq > network_seq {
                 // Our copy is newer than the network
                 true
             } else {
-                // Equal or older: rehydrate only if fewer than strict consensus nodes have it
-                let node_count = node_subkey_sets
-                    .iter()
-                    .filter(|s| s.contains(subkey))
-                    .count();
-                node_count < consensus_count
+                // Equal: rehydrate only if fewer than strict consensus nodes hold it
+                let holder_count = {
+                    let inner = self.inner.lock();
+                    inner.outbound_transaction_manager.count_begin_holders(
+                        transaction_handle,
+                        &opaque_record_key,
+                        subkey,
+                        local_seq,
+                    )?
+                };
+                holder_count < consensus_count
             };
             if needed {
                 let get_result = self
@@ -486,6 +519,7 @@ impl StorageManager {
                 }
             }
         }
-        Ok(values)
+        veilid_log!(self debug "Rehydration member {}: {} values to push (network_newer={} local_seqs={:?} network_seqs={:?})", opaque_record_key, values.len(), has_network_newer, report.local_seqs(), report.network_seqs());
+        Ok((values, has_network_newer))
     }
 }

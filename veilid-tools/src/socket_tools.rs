@@ -42,6 +42,27 @@ pub fn bind_async_udp_socket(local_address: SocketAddr) -> io::Result<Option<Udp
     Ok(Some(udp_socket))
 }
 
+/// Bind a UDP socket to `local_address`, probing the port with a non-shared
+/// socket first so an occupied port fails instead of silently reuse-binding
+/// alongside another process (which starves both of inbound packets). Use for
+/// inbound listeners found by port search; use [`bind_async_udp_socket`] for
+/// sockets that intentionally share the listener's port.
+///
+/// Returns `Ok(None)` if the address could not be bound (a bind failure is not an error).
+/// Errors only on socket creation or option failures.
+pub fn bind_async_udp_socket_probed(local_address: SocketAddr) -> io::Result<Option<UdpSocket>> {
+    // Create a default non-shared socket and bind it to assert the port is free
+    let Some(socket) = new_bound_default_socket2_udp(local_address)? else {
+        return Ok(None);
+    };
+
+    // Drop the probe so we can make a shared socket in its place
+    drop(socket);
+
+    // The shared socket keeps outbound source binding on this port possible
+    bind_async_udp_socket(local_address)
+}
+
 /// Bind a TCP listener to `local_address`.
 ///
 /// Probes the port with a non-shared socket first, then binds a shared
@@ -212,6 +233,26 @@ fn new_bound_shared_socket2_udp(local_address: SocketAddr) -> io::Result<Option<
     let socket = new_shared_socket2_udp(domain)?;
     let socket2_addr = SockAddr::from(local_address);
 
+    if socket.bind(&socket2_addr).is_err() {
+        return Ok(None);
+    }
+
+    Ok(Some(socket))
+}
+
+fn new_default_socket2_udp(domain: core::ffi::c_int) -> io::Result<Socket> {
+    let domain = Domain::from(domain);
+    let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
+    if domain == Domain::IPV6 {
+        socket.set_only_v6(true)?;
+    }
+    Ok(socket)
+}
+
+fn new_bound_default_socket2_udp(local_address: SocketAddr) -> io::Result<Option<Socket>> {
+    let domain = domain_for_address(local_address);
+    let socket = new_default_socket2_udp(domain)?;
+    let socket2_addr = SockAddr::from(local_address);
     if socket.bind(&socket2_addr).is_err() {
         return Ok(None);
     }
