@@ -52,12 +52,28 @@ struct ConnectionTableInner {
     ids_by_remote: BTreeMap<LowLevelProtocolAddress, Vec<NetworkConnectionId>>,
     // Priority flows, kept from LRU termination; capped at a percentage of max_connections
     priority_flows: LruCache<Flow, ()>,
+    // Cumulative connection-table churn counters
+    #[cfg(feature = "stats")]
+    stats_added: u64,
+    #[cfg(feature = "stats")]
+    stats_evicted: u64,
+    #[cfg(feature = "stats")]
+    stats_rejected_table_full: u64,
 }
 
 #[derive(Debug)]
 pub struct ConnectionTable {
     registry: VeilidComponentRegistry,
     inner: Mutex<ConnectionTableInner>,
+}
+
+#[cfg(feature = "stats")]
+#[derive(Debug, Clone, Default, Serialize)]
+pub(super) struct ConnectionTableStats {
+    pub size: u32,
+    pub added: u64,
+    pub evicted: u64,
+    pub rejected_table_full: u64,
 }
 
 impl_veilid_component_accessors!(ConnectionTable);
@@ -75,6 +91,12 @@ impl ConnectionTable {
                 id_by_flow: BTreeMap::new(),
                 ids_by_remote: BTreeMap::new(),
                 priority_flows: LruCache::new(max_connections * PRIORITY_FLOW_PERCENTAGE / 100),
+                #[cfg(feature = "stats")]
+                stats_added: 0,
+                #[cfg(feature = "stats")]
+                stats_evicted: 0,
+                #[cfg(feature = "stats")]
+                stats_rejected_table_full: 0,
             }),
         }
     }
@@ -144,6 +166,7 @@ impl ConnectionTable {
         };
 
         let dead_conn = self.remove_connection_records_inner(inner, dead_k);
+        veilid_stats!(inner.stats_evicted += 1);
         Ok(Some(dead_conn))
     }
 
@@ -200,6 +223,7 @@ impl ConnectionTable {
         let out_conn = match self.lru_out_connection_inner(&mut inner) {
             Ok(v) => v,
             Err(()) => {
+                veilid_stats!(inner.stats_rejected_table_full += 1);
                 return Err(ConnectionTableAddError::table_full(network_connection));
             }
         };
@@ -207,10 +231,14 @@ impl ConnectionTable {
         // Add the connection to the table
         let res = inner.conn_by_id.insert(id, network_connection);
         debug_assert!(res.is_none());
+        veilid_stats!(inner.stats_added += 1);
 
         // add connection records
         inner.id_by_flow.insert(flow, id);
         inner.ids_by_remote.entry(remote).or_default().push(id);
+
+        #[cfg(feature = "verbose-tracing")]
+        veilid_log!(self debug "ConnTable add: {} count={}", flow, inner.conn_by_id.len());
 
         Ok(out_conn)
     }
@@ -386,6 +414,17 @@ impl ConnectionTable {
         inner.conn_by_id.len()
     }
 
+    #[cfg(feature = "stats")]
+    pub(super) fn stats(&self) -> ConnectionTableStats {
+        let inner = self.inner.lock();
+        ConnectionTableStats {
+            size: inner.conn_by_id.len() as u32,
+            added: inner.stats_added,
+            evicted: inner.stats_evicted,
+            rejected_table_full: inner.stats_rejected_table_full,
+        }
+    }
+
     /// Returns ids of connections whose specific (non-wildcard, non-loopback) local address
     /// is no longer in `valid_local_addresses`.
     pub fn get_dead_connection_ids(
@@ -456,6 +495,10 @@ impl ConnectionTable {
             .address_filter()
             .remove_connection(ip_addr)
             .expect_or_log("Inconsistency in connection table");
+
+        #[cfg(feature = "verbose-tracing")]
+        veilid_log!(self debug "ConnTable remove: {} count={}", flow, inner.conn_by_id.len());
+
         conn
     }
 

@@ -617,6 +617,28 @@ impl Default for VeilidConfigBlockStore {
     }
 }
 
+/// Which storage backend the protected store uses for secrets.
+///
+/// The browser-only variants (`LocalStorage`, `IndexedDb`, `ExtensionStorage`) are rejected on
+/// native platforms. `PlatformDefault` chooses per platform and runtime context: the OS keyring on
+/// native, `localStorage` in a browser Window, IndexedDB in a worker, and extension storage in a
+/// WebExtension.
+#[apply(api_data_enum!)]
+#[api(eq, copy, ord, default, ts(namespace, into_wasm_abi, from_wasm_abi))]
+pub enum VeilidConfigProtectedStoreBackend {
+    /// Choose automatically based on the platform and runtime context.
+    #[default]
+    PlatformDefault,
+    /// Browser `localStorage` (Window contexts only).
+    LocalStorage,
+    /// Browser IndexedDB (available in worker contexts).
+    IndexedDb,
+    /// WebExtension storage (`chrome.storage.local`/`browser.storage.local`).
+    ExtensionStorage,
+    // /// Delegate to a registered secret-resolver callback.
+    // Callback,
+}
+
 /// Protected store configuration: where secrets such as the device encryption key are kept.
 #[apply(api_data_struct!)]
 #[api(eq, ts(into_wasm_abi, from_wasm_abi))]
@@ -634,6 +656,8 @@ pub struct VeilidConfigProtectedStore {
     /// New password to re-encrypt the device encryption key with, triggering a rotation.
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
     pub new_device_encryption_key_password: Option<String>,
+    /// Storage backend for secrets (`PlatformDefault` chooses per platform and runtime context).
+    pub backend: VeilidConfigProtectedStoreBackend,
 }
 
 impl Default for VeilidConfigProtectedStore {
@@ -645,6 +669,7 @@ impl Default for VeilidConfigProtectedStore {
             delete: false,
             device_encryption_key_password: "".to_owned(),
             new_device_encryption_key_password: None,
+            backend: VeilidConfigProtectedStoreBackend::PlatformDefault,
         }
     }
 }
@@ -920,8 +945,8 @@ impl Default for VeilidConfigInternalDHT {
             max_watch_expiration_ms: 600000,
             public_watch_limit: 32,
             member_watch_limit: 8,
-            public_transaction_limit: 4,
-            member_transaction_limit: 1,
+            public_transaction_limit: 8,
+            member_transaction_limit: 4,
         }
     }
 }
@@ -961,7 +986,7 @@ pub struct VeilidConfigInternalNetwork {
 impl Default for VeilidConfigInternalNetwork {
     fn default() -> Self {
         Self {
-            connection_initial_timeout_ms: 2000,
+            connection_initial_timeout_ms: 5000,
             connection_inactivity_timeout_ms: 60000,
             max_connections_per_ip4: 32,
             max_connections_per_ip6_prefix: 32,

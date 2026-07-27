@@ -29,20 +29,22 @@ async def dht_retry(
     op: Callable[[], Awaitable[T]],
     label: Optional[str] = None,
 ) -> T:
-    """Retry a DHT operation that may raise VeilidAPIErrorTryAgain.
+    """Retry a DHT operation that hits a transient network condition.
 
-    `op` is a zero-argument coroutine factory invoked once per attempt.
-    Before each retry, waits for the node to report PublicInternet ready so
-    we don't spin while the network is offline.
+    `op` is a zero-argument coroutine factory invoked once per attempt. Retries on
+    VeilidAPIErrorTryAgain (node not ready) and VeilidAPIErrorTimeout (e.g. a
+    freshly-allocated route still establishing its hop connections). Before each
+    retry, waits for the node to report PublicInternet ready so we don't spin while
+    the network is offline.
     """
     cnt = 0
     while True:
         try:
             return await op()
-        except veilid.VeilidAPIErrorTryAgain as e:
+        except (veilid.VeilidAPIErrorTryAgain, veilid.VeilidAPIErrorTimeout) as e:
             cnt += 1
             tag = label or "dht_retry"
-            print(f"  {tag} retry #{cnt}: {e.message}")
+            print(f"  {tag} retry #{cnt}: {e}")
             await wait_for_public_internet_ready(api)
             continue
 

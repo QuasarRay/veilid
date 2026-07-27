@@ -541,15 +541,13 @@ sealed class TransactDHTRecordsOptions with _$TransactDHTRecordsOptions {
   /// `defaultSigningKeyPair` is used when opening the transaction. It does not
   /// override writer keys used by transaction operations, and only matters for
   /// records in the transaction that are open for reading only.
-  const factory TransactDHTRecordsOptions({KeyPair? defaultSigningKeyPair}) =
-      _TransactDHTRecordsOptions;
+  // Wire name is serde's camelCase of default_signing_keypair — lowercase 'p',
+  // which the Dart-style field name would not produce.
+  const factory TransactDHTRecordsOptions({
+    @JsonKey(name: 'defaultSigningKeypair') KeyPair? defaultSigningKeyPair,
+  }) = _TransactDHTRecordsOptions;
 
   /// Decode a [TransactDHTRecordsOptions] from its JSON representation.
   factory TransactDHTRecordsOptions.fromJson(dynamic json) =>
       _$TransactDHTRecordsOptionsFromJson(json as Map<String, dynamic>);
-
-  @override
-  Map<String, dynamic> toJson() => {
-    'default_signing_keypair': defaultSigningKeyPair,
-  };
 }

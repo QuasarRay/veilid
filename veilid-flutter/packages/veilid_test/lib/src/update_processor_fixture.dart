@@ -33,7 +33,7 @@ class UpdateProcessorFixture implements VeilidProcessorInterface {
     ),
   );
 
-  final _connectionStateController =
+  var _connectionStateController =
       StreamController<ProcessorConnectionState>.broadcast(sync: true);
 
   StreamSubscription<VeilidUpdate>? _updateSubscription;
@@ -46,6 +46,13 @@ class UpdateProcessorFixture implements VeilidProcessorInterface {
 
   Future<void> setUp() async {
     await _fixtureMutex.acquire();
+    // A closed StreamController can never be reused, and this fixture instance
+    // is shared across test groups — so a suite that runs after a tearDown
+    // needs a fresh one, not the dead one.
+    if (_connectionStateController.isClosed) {
+      _connectionStateController =
+          StreamController<ProcessorConnectionState>.broadcast(sync: true);
+    }
     _updateSubscription = veilidFixture.updateStream.listen((update) {
       if (update is VeilidUpdateNetwork) {
         processorConnectionState = processorConnectionState.copyWith(

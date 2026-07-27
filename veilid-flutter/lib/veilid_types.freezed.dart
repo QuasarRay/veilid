@@ -2541,7 +2541,7 @@ as bool?,
 /// @nodoc
 mixin _$TransactDHTRecordsOptions {
 
- KeyPair? get defaultSigningKeyPair;
+@JsonKey(name: 'defaultSigningKeypair') KeyPair? get defaultSigningKeyPair;
 /// Create a copy of TransactDHTRecordsOptions
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -2574,7 +2574,7 @@ abstract mixin class $TransactDHTRecordsOptionsCopyWith<$Res>  {
   factory $TransactDHTRecordsOptionsCopyWith(TransactDHTRecordsOptions value, $Res Function(TransactDHTRecordsOptions) _then) = _$TransactDHTRecordsOptionsCopyWithImpl;
 @useResult
 $Res call({
- KeyPair? defaultSigningKeyPair
+@JsonKey(name: 'defaultSigningKeypair') KeyPair? defaultSigningKeyPair
 });
 
 
@@ -2676,7 +2676,7 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( KeyPair? defaultSigningKeyPair)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'defaultSigningKeypair')  KeyPair? defaultSigningKeyPair)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _TransactDHTRecordsOptions() when $default != null:
 return $default(_that.defaultSigningKeyPair);case _:
@@ -2697,7 +2697,7 @@ return $default(_that.defaultSigningKeyPair);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( KeyPair? defaultSigningKeyPair)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'defaultSigningKeypair')  KeyPair? defaultSigningKeyPair)  $default,) {final _that = this;
 switch (_that) {
 case _TransactDHTRecordsOptions():
 return $default(_that.defaultSigningKeyPair);}
@@ -2714,7 +2714,7 @@ return $default(_that.defaultSigningKeyPair);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( KeyPair? defaultSigningKeyPair)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'defaultSigningKeypair')  KeyPair? defaultSigningKeyPair)?  $default,) {final _that = this;
 switch (_that) {
 case _TransactDHTRecordsOptions() when $default != null:
 return $default(_that.defaultSigningKeyPair);case _:
@@ -2729,10 +2729,10 @@ return $default(_that.defaultSigningKeyPair);case _:
 @JsonSerializable()
 
 class _TransactDHTRecordsOptions implements TransactDHTRecordsOptions {
-  const _TransactDHTRecordsOptions({this.defaultSigningKeyPair});
+  const _TransactDHTRecordsOptions({@JsonKey(name: 'defaultSigningKeypair') this.defaultSigningKeyPair});
   factory _TransactDHTRecordsOptions.fromJson(Map<String, dynamic> json) => _$TransactDHTRecordsOptionsFromJson(json);
 
-@override final  KeyPair? defaultSigningKeyPair;
+@override@JsonKey(name: 'defaultSigningKeypair') final  KeyPair? defaultSigningKeyPair;
 
 /// Create a copy of TransactDHTRecordsOptions
 /// with the given fields replaced by the non-null parameter values.
@@ -2767,7 +2767,7 @@ abstract mixin class _$TransactDHTRecordsOptionsCopyWith<$Res> implements $Trans
   factory _$TransactDHTRecordsOptionsCopyWith(_TransactDHTRecordsOptions value, $Res Function(_TransactDHTRecordsOptions) _then) = __$TransactDHTRecordsOptionsCopyWithImpl;
 @override @useResult
 $Res call({
- KeyPair? defaultSigningKeyPair
+@JsonKey(name: 'defaultSigningKeypair') KeyPair? defaultSigningKeyPair
 });
 
 

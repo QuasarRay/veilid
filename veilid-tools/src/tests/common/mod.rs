@@ -1,3 +1,5 @@
+#[cfg(feature = "aimd")]
+pub mod test_aimd;
 pub mod test_async_keyed_cache;
 pub mod test_async_tag_lock;
 pub mod test_async_weighted_semaphore;

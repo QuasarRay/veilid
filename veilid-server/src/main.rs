@@ -78,6 +78,11 @@ pub struct CmdlineArgs {
     #[arg(long, hide = true, value_name = "PATH", num_args=0..=1, require_equals=true, default_missing_value = "")]
     flame: Option<OsString>,
 
+    /// Turn on stats logging (--stats=<seconds>[,<directory>]; omit directory for the 'stats' log facility)
+    #[cfg(feature = "stats")]
+    #[arg(long, value_name = "SPEC", num_args=0..=1, require_equals=true, default_missing_value = "")]
+    stats: Option<String>,
+
     /// Turn on perfetto tracing (experimental)
     #[cfg(all(unix, feature = "perfetto"))]
     #[arg(long, hide = true, value_name = "PATH", num_args=0..=1, require_equals=true, default_missing_value = "")]
@@ -255,6 +260,28 @@ fn main() -> EyreResult<()> {
         println!("Enabling flamegraph output to {}", flame);
         settingsrw.logging.flame.enabled = true;
         settingsrw.logging.flame.path = flame;
+    }
+    #[cfg(feature = "stats")]
+    if let Some(stats) = args.stats {
+        let (secs_str, dir) = match stats.split_once(',') {
+            Some((s, d)) => (s.trim(), d.trim().to_owned()),
+            None => (stats.trim(), String::new()),
+        };
+        let interval_secs = if secs_str.is_empty() {
+            10
+        } else {
+            secs_str
+                .parse::<u32>()
+                .wrap_err("invalid --stats duration")?
+        };
+        if dir.is_empty() {
+            println!("Enabling stats logging every {interval_secs}s to the 'stats' log facility");
+        } else {
+            println!("Enabling stats logging every {interval_secs}s to {dir}");
+        }
+        settingsrw.logging.stats.enabled = true;
+        settingsrw.logging.stats.interval_secs = interval_secs;
+        settingsrw.logging.stats.directory = dir;
     }
     #[cfg(all(unix, feature = "perfetto"))]
     if let Some(perfetto) = args.perfetto {

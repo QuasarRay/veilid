@@ -191,6 +191,21 @@ impl VeilidClient {
             .try_init()
             .map_err(|e| format!("failed to initialize logging: {}", e))
             .expect_or_log("failed to initalize WASM platform");
+
+        // Stats manager: process-global, under the default log key. Records ride
+        // the "stats" log facility; WASM has no filesystem so no file output.
+        #[cfg(feature = "stats")]
+        {
+            let stats = &platformConfig.logging.stats;
+            veilid_core::StatsManager::init(
+                None,
+                veilid_core::StatsSettings {
+                    enabled: stats.enabled,
+                    interval_secs: stats.interval_secs,
+                    output: veilid_core::StatsOutput::Facility,
+                },
+            );
+        }
     }
 
     /// Initialize a Veilid node, with the configuration in JSON format
@@ -543,6 +558,31 @@ impl VeilidClient {
     pub async fn debug(command: String) -> VeilidAPIResult<String> {
         let veilid_api = get_veilid_api()?;
         veilid_api.debug(command).await
+    }
+
+    /// Save a user secret to the protected store. Returns true if a value already existed.
+    pub async fn saveUserSecret(key: String, value: Vec<u8>) -> VeilidAPIResult<bool> {
+        get_veilid_api()?.save_user_secret(key, value).await
+    }
+
+    /// Load a user secret from the protected store, or `undefined` if not present.
+    pub async fn loadUserSecret(key: String) -> VeilidAPIResult<Option<Vec<u8>>> {
+        get_veilid_api()?.load_user_secret(key).await
+    }
+
+    /// Remove a user secret from the protected store. Returns true if it existed.
+    pub async fn removeUserSecret(key: String) -> VeilidAPIResult<bool> {
+        get_veilid_api()?.remove_user_secret(key).await
+    }
+
+    /// List the key names of the user secrets stored for this node's namespace.
+    pub async fn listUserSecrets() -> VeilidAPIResult<Vec<String>> {
+        get_veilid_api()?.list_user_secrets().await
+    }
+
+    /// Remove every user secret stored for this node's namespace.
+    pub async fn deleteAllUserSecrets() -> VeilidAPIResult<()> {
+        get_veilid_api()?.delete_all_user_secrets().await
     }
 
     /// Return the cargo package version of veilid-core, in object format.

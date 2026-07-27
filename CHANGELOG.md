@@ -1,3 +1,22 @@
+**UNRELEASED**
+
+- veilid-core:
+  - Stats collection, aggregation, and analysis for all subsystems. Robot-generated python script for reviewing the effect of optimizations.
+  - Fix OnlineDetector spurious flap
+  - Properly drop TCP connections when offline condition is detected so they can be recreated in the event of NAT state loss, as is common on cellular
+  - Fix UDP stalls on cellular/CLAT464
+  - Correct timeout for native WS connects
+  - Timeout-bound public internet dial info detection
+  - AIMD experiment for DHT operations. Off by default for now behind `aimd-dht` feature
+  - Fix background transaction pre-empt on foreground record open
+  - ProtectedStore is now exported correctly through the VeilidAPI object and the old reust interface is removed. Switch to accessing ProtectedStore through VeilidAPI.
+
+- veilid-python:
+  - More tests
+
+- veilid-tools:
+  - AIMD congestion control system (behind `aimd` feature)
+
 **Changed in Veilid 0.5.7**
 
 - veilid-core:

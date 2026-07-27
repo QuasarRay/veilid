@@ -51,6 +51,17 @@ pub(crate) fn to_json_api_result_with_vec_u8(
     }
 }
 
+/// Convert a `VeilidAPIResult<Option<Vec<u8>>>` into a JSON `ApiResult` whose ok value serializes as an optional base64 string.
+#[must_use]
+pub(crate) fn to_json_api_result_with_opt_vec_u8(
+    r: VeilidAPIResult<Option<Vec<u8>>>,
+) -> super::ApiResultWithOptVecU8 {
+    match r {
+        Err(e) => super::ApiResultWithOptVecU8::Err { error: e },
+        Ok(v) => super::ApiResultWithOptVecU8::Ok { value: v },
+    }
+}
+
 /// Convert a `VeilidAPIResult<Vec<Vec<u8>>>` into a JSON `ApiResult` whose ok value serializes as a vector of base64 strings.
 #[must_use]
 pub(crate) fn to_json_api_result_with_vec_vec_u8(
@@ -1077,6 +1088,21 @@ impl JsonRequestProcessor {
             },
             RequestOp::Debug { command } => ResponseOp::Debug {
                 result: to_json_api_result(self.api.debug(command).await),
+            },
+            RequestOp::SaveUserSecret { key, value } => ResponseOp::SaveUserSecret {
+                result: to_json_api_result(self.api.save_user_secret(key, value).await),
+            },
+            RequestOp::LoadUserSecret { key } => ResponseOp::LoadUserSecret {
+                result: to_json_api_result_with_opt_vec_u8(self.api.load_user_secret(key).await),
+            },
+            RequestOp::RemoveUserSecret { key } => ResponseOp::RemoveUserSecret {
+                result: to_json_api_result(self.api.remove_user_secret(key).await),
+            },
+            RequestOp::ListUserSecrets => ResponseOp::ListUserSecrets {
+                result: to_json_api_result_with_vec_string(self.api.list_user_secrets().await),
+            },
+            RequestOp::DeleteAllUserSecrets => ResponseOp::DeleteAllUserSecrets {
+                result: to_json_api_result(self.api.delete_all_user_secrets().await),
             },
             RequestOp::VeilidVersionString => ResponseOp::VeilidVersionString {
                 value: veilid_version_string(),

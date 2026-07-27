@@ -43,11 +43,18 @@ impl TableStoreDriver {
         Ok(db)
     }
 
-    /// Delete a TableDB table by name
+    /// Delete a TableDB table by name. Returns whether one was actually removed.
     pub async fn delete(&self, table_name: &str) -> VeilidAPIResult<bool> {
         if is_browser() {
             let namespaced_table_name = self.get_namespaced_table_name(table_name);
-            let out = Database::delete(&namespaced_table_name).await.is_ok();
+            let out = Database::delete(&namespaced_table_name)
+                .await
+                .map_err(|e| {
+                    VeilidAPIError::generic(format!(
+                        "failed to delete table '{}': {}",
+                        namespaced_table_name, e
+                    ))
+                })?;
             if out {
                 veilid_log!(self trace "TableStore::delete {} deleted", namespaced_table_name);
             } else {
@@ -75,8 +82,10 @@ impl TableStoreDriver {
         let mut deleted = 0usize;
         for (name, _ver) in entries {
             match Database::delete(&name).await {
-                Ok(()) => {
-                    deleted += 1;
+                Ok(removed) => {
+                    if removed {
+                        deleted += 1;
+                    }
                     veilid_log!(self debug "delete_all_in_namespace: removed '{}'", name);
                 }
                 Err(e) => {

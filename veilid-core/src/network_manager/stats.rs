@@ -1,3 +1,5 @@
+#[cfg(feature = "stats")]
+use super::connection_table::ConnectionTableStats;
 use super::*;
 
 // Statistics per address
@@ -17,15 +19,15 @@ impl Default for PerAddressStatsKey {
     }
 }
 
-/// Posted each rolling-transfers interval with a snapshot of the node's network stats
+/// Posted each rolling-transfers interval with a snapshot of the node's network accounting
 #[derive(Clone, Debug)]
-pub struct NetworkManagerStatsChangeEvent {
-    pub stats: Arc<RwLock<NetworkManagerStats>>,
+pub struct NetworkManagerAccountingChangeEvent {
+    pub accounting: Arc<RwLock<NetworkManagerAccounting>>,
 }
 
-// Statistics about the low-level network
+// Low-level network transfer and relay accounting
 #[derive(Debug, Clone)]
-pub struct NetworkManagerStats {
+pub struct NetworkManagerAccounting {
     pub self_stats: PerAddressStats,
     pub per_address_stats: hashlink::LruCache<PerAddressStatsKey, PerAddressStats>,
     pub relay_worker_dequeue_latency: LatencyStats,
@@ -34,7 +36,7 @@ pub struct NetworkManagerStats {
     pub relay_worker_process_latency_accounting: LatencyStatsAccounting,
 }
 
-impl Default for NetworkManagerStats {
+impl Default for NetworkManagerAccounting {
     fn default() -> Self {
         Self {
             self_stats: PerAddressStats::default(),
@@ -47,10 +49,29 @@ impl Default for NetworkManagerStats {
     }
 }
 
+#[cfg(feature = "stats")]
+#[derive(Debug, Serialize)]
+pub(super) struct NetworkManagerStats {
+    transfer: TransferStatsDownUp,
+    relay_dequeue_latency: LatencyStats,
+    relay_process_latency: LatencyStats,
+    connections: ConnectionTableStats,
+    public_internet: OnlineDomainStats,
+    local_network: OnlineDomainStats,
+}
+
+#[cfg(feature = "stats")]
+#[derive(Debug, Serialize)]
+struct OnlineDomainStats {
+    online: bool,
+    transitions: u64,
+    time_offline: TimestampDuration,
+}
+
 impl NetworkManager {
     // Callbacks from low level network for statistics gathering
     pub fn stats_packet_sent(&self, addr: IpAddr, bytes: ByteCount) {
-        let mut stats = self.stats.write();
+        let mut stats = self.accounting.write();
         stats.self_stats.transfer_stats_accounting.add_up(bytes);
         #[allow(clippy::unwrap_or_default)]
         stats
@@ -62,7 +83,7 @@ impl NetworkManager {
     }
 
     pub fn stats_packet_rcvd(&self, addr: IpAddr, bytes: ByteCount) {
-        let mut stats = self.stats.write();
+        let mut stats = self.accounting.write();
         stats.self_stats.transfer_stats_accounting.add_down(bytes);
         #[allow(clippy::unwrap_or_default)]
         stats
@@ -78,7 +99,7 @@ impl NetworkManager {
         dequeue_latency: TimestampDuration,
         process_latency: TimestampDuration,
     ) {
-        let mut stats = self.stats.write();
+        let mut stats = self.accounting.write();
         stats.relay_worker_dequeue_latency = stats
             .relay_worker_dequeue_latency_accounting
             .record_latency(dequeue_latency);
@@ -87,8 +108,34 @@ impl NetworkManager {
             .record_latency(process_latency);
     }
 
-    pub fn get_stats(&self) -> NetworkManagerStats {
-        self.stats.read().clone()
+    pub fn get_stats(&self) -> NetworkManagerAccounting {
+        self.accounting.read().clone()
+    }
+
+    #[cfg(feature = "stats")]
+    pub(super) fn stats_impl(&self) -> Option<Box<dyn VeilidComponentStats>> {
+        let s = self.get_stats();
+        let connections = self
+            .opt_connection_manager()
+            .map(|cm| cm.connection_table_stats())
+            .unwrap_or_default();
+        let now = Timestamp::now();
+        let domain_stats = |rd| {
+            let (online, transitions, time_offline) = self.online_detector().online_stats(rd, now);
+            OnlineDomainStats {
+                online,
+                transitions,
+                time_offline,
+            }
+        };
+        Some(Box::new(NetworkManagerStats {
+            transfer: s.self_stats.transfer_stats,
+            relay_dequeue_latency: s.relay_worker_dequeue_latency,
+            relay_process_latency: s.relay_worker_process_latency,
+            connections,
+            public_internet: domain_stats(RoutingDomain::PublicInternet),
+            local_network: domain_stats(RoutingDomain::LocalNetwork),
+        }))
     }
 
     pub fn get_veilid_state(&self) -> Box<VeilidStateNetwork> {
@@ -104,7 +151,7 @@ impl NetworkManager {
         let routing_table = self.routing_table();
 
         let (bps_down, bps_up) = {
-            let stats = self.stats.read();
+            let stats = self.accounting.read();
             (
                 stats.self_stats.transfer_stats.down.average,
                 stats.self_stats.transfer_stats.up.average,

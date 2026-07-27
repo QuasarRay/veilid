@@ -103,6 +103,13 @@ pub async fn run_veilid_server_subnode(
         .get_core_config(subnode, subnode_offset)
         .wrap_err("Mapping to VeilidCore config failed")?;
 
+    // This subnode's log key, computed before core_config is consumed
+    #[cfg(feature = "stats")]
+    let stats_log_key = veilid_core::VeilidLayerFilter::make_veilid_log_key(
+        &core_config.program_name,
+        &core_config.namespace,
+    );
+
     // Start Veilid Core and get API
     let veilid_api = veilid_core::api_startup(update_callback, core_config)
         .await
@@ -110,6 +117,44 @@ pub async fn run_veilid_server_subnode(
             eprintln!("VeilidCore startup failed: {:?}", e);
         })
         .wrap_err("VeilidCore startup failed")?;
+
+    // Enable stats logging for this subnode if configured
+    #[cfg(feature = "stats")]
+    {
+        let (enabled, directory, interval_secs) = {
+            let settingsr = settings.read();
+            (
+                settingsr.logging.stats.enabled,
+                settingsr.logging.stats.directory.clone(),
+                settingsr.logging.stats.interval_secs,
+            )
+        };
+        if enabled {
+            let output = if directory.is_empty() {
+                veilid_core::StatsOutput::Facility
+            } else {
+                let dir = std::path::PathBuf::from(&directory);
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    warn!("stats: could not create directory {}: {}", directory, e);
+                }
+                let filename = if subnode == 0 {
+                    "veilid-server.ndjson".to_owned()
+                } else {
+                    format!("veilid-server-{}.ndjson", subnode)
+                };
+                veilid_core::StatsOutput::File(dir.join(filename))
+            };
+            veilid_core::StatsManager::init(
+                Some(stats_log_key),
+                veilid_core::StatsSettings {
+                    enabled: true,
+                    interval_secs,
+                    output,
+                },
+            );
+            info!("Stats logging enabled every {}s", interval_secs);
+        }
+    }
 
     // Start client api if one is requested
     let capi_enabled = settings_client_api_ipc_enabled || settings_client_api_network_enabled;

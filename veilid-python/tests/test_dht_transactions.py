@@ -627,6 +627,89 @@ async def test_dht_transaction_integration_writer_reader_fail_begin():
 
 @pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
 @pytest.mark.asyncio
+async def test_dht_transaction_integration_anonymous_reader_with_member_writer():
+    """A record opened WITHOUT a writer begins an anonymously-signed transaction,
+    which counts against the per-record public transaction limit instead of the
+    per-signer member limit. So a read-only transaction on one node proceeds
+    while another node holds the member (writer-signed) transaction — while two
+    member transactions with the same writer still exclude each other (see
+    test_dht_transaction_integration_writer_reader_fail_begin)."""
+
+    async def null_update_callback(update: veilid.VeilidUpdate):
+        pass
+
+    try:
+        api0 = await veilid.api_connector(null_update_callback, 0)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 0.")
+        return
+
+    try:
+        api1 = await veilid.api_connector(null_update_callback, 1)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 1.")
+        return
+
+    async with api0, api1:
+        # purge local and remote record stores to ensure we start fresh
+        await api0.debug("record purge local")
+        await api0.debug("record purge remote")
+        await api1.debug("record purge local")
+        await api1.debug("record purge remote")
+
+        # make routing contexts
+        rc0 = await api0.new_routing_context()
+        rc1 = await api1.new_routing_context()
+        async with rc0, rc1:
+            for kind in await api0.valid_crypto_kinds():
+
+                # create a record on server 0 and commit a baseline value
+                rec0 = await rc0.create_dht_record(kind, DHTSchema.dflt(2))
+                rec0_tx = await api0.transact_dht_records([rec0.key], None)
+                async with rec0_tx:
+                    vd = await rec0_tx.set(rec0.key, ValueSubkey(0), b"AAA")
+                    assert vd is None
+                    await rec0_tx.commit()
+
+                # hold a member (writer-signed) transaction open on server 0
+                rec0_tx = await api0.transact_dht_records([rec0.key], None)
+                async with rec0_tx:
+
+                    # open the record on server 1 WITHOUT a writer: transactions
+                    # on it sign anonymously
+                    rec1 = await rc1.open_dht_record(rec0.key)
+
+                    # the anonymous read transaction must begin even though the
+                    # member transaction is still open
+                    rec1_tx = await api1.transact_dht_records([rec1.key], None)
+                    async with rec1_tx:
+                        # stage an uncommitted write on the member transaction
+                        vd = await rec0_tx.set(rec0.key, ValueSubkey(0), b"BBB")
+                        assert vd is None
+
+                        # the anonymous reader sees the committed value only
+                        vd = await rec1_tx.get(rec1.key, ValueSubkey(0))
+                        assert vd is not None and vd.data == b"AAA"
+
+                        await rec1_tx.rollback()
+
+                    # commit the member transaction
+                    await rec0_tx.commit()
+
+                # the committed write is now visible to a fresh anonymous reader
+                rec1_tx = await api1.transact_dht_records([rec1.key], None)
+                async with rec1_tx:
+                    vd = await rec1_tx.get(rec1.key, ValueSubkey(0))
+                    assert vd is not None and vd.data == b"BBB"
+                    await rec1_tx.rollback()
+
+                await rc0.close_dht_record(rec0.key)
+                await rc0.delete_dht_record(rec0.key)
+                await rc1.close_dht_record(rec1.key)
+                await rc1.delete_dht_record(rec1.key)
+
+@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.asyncio
 async def test_dht_transaction_integration_writer_reader_fail_commit():
 
     async def null_update_callback(update: veilid.VeilidUpdate):

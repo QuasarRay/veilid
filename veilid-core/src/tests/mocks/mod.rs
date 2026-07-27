@@ -18,6 +18,7 @@ pub fn fake_veilid_config() -> VeilidConfig {
             delete: true,
             device_encryption_key_password: "1234".to_string(),
             new_device_encryption_key_password: Some("5678".to_string()),
+            backend: VeilidConfigProtectedStoreBackend::default(),
         },
         table_store: VeilidConfigTableStore {
             directory: "Yellow Pages".to_string(),

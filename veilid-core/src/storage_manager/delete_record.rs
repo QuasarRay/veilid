@@ -29,6 +29,10 @@ impl StorageManager {
 
         // Remove the record from the local store
         local_record_store.delete_record(&opaque_record_key).await?;
+        self.inner
+            .lock()
+            .locally_created_records
+            .remove(&opaque_record_key);
 
         let record_locks: StorageManagerRecordsLockGuard = record_lock.into();
 

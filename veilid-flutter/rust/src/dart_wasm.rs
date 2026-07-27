@@ -147,6 +147,21 @@ pub fn initialize_veilid_core(platform_config: String) {
         .try_init()
         .map_err(|e| format!("failed to initialize logging: {}", e))
         .expect_or_log("failed to initalize WASM platform");
+
+    // Stats manager: process-global, under the default log key. WASM has no
+    // filesystem so records ride the "stats" log facility.
+    #[cfg(feature = "stats")]
+    {
+        let stats = &platform_config.logging.stats;
+        veilid_core::StatsManager::init(
+            None,
+            veilid_core::StatsSettings {
+                enabled: stats.enabled,
+                interval_secs: stats.interval_secs,
+                output: veilid_core::StatsOutput::Facility,
+            },
+        );
+    }
 }
 
 #[wasm_bindgen()]
@@ -2053,6 +2068,52 @@ pub fn debug(command: String) -> Promise {
         let veilid_api = get_veilid_api()?;
         let out = veilid_api.debug(command).await?;
         VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn save_user_secret(key: String, value: String) -> Promise {
+    wrap_api_future_plain(async move {
+        let value: Vec<u8> = data_encoding::BASE64URL_NOPAD
+            .decode(value.as_bytes())
+            .map_err(|e| VeilidAPIError::parse_error("failed to decode value", e.to_string()))?;
+        let out = get_veilid_api()?.save_user_secret(key, value).await?;
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn load_user_secret(key: String) -> Promise {
+    wrap_api_future_plain(async move {
+        let out = get_veilid_api()?
+            .load_user_secret(key)
+            .await?
+            .map(|x| data_encoding::BASE64URL_NOPAD.encode(&x));
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn remove_user_secret(key: String) -> Promise {
+    wrap_api_future_plain(async move {
+        let out = get_veilid_api()?.remove_user_secret(key).await?;
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn list_user_secrets() -> Promise {
+    wrap_api_future_json(async move {
+        let out = get_veilid_api()?.list_user_secrets().await?;
+        VeilidAPIResult::Ok(out)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn delete_all_user_secrets() -> Promise {
+    wrap_api_future_void(async move {
+        get_veilid_api()?.delete_all_user_secrets().await?;
+        VeilidAPIResult::Ok(())
     })
 }
 

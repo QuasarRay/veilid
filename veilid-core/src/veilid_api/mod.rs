@@ -22,7 +22,7 @@ pub use block_store::*;
 pub use crypto::*;
 pub use dht_transaction::*;
 pub use error::*;
-pub use protected_store::*;
+pub(crate) use protected_store::*;
 pub use routing_context::*;
 pub use serialize_helpers::*;
 pub use table_store::{TableDB, TableDBTransaction, TableStore};

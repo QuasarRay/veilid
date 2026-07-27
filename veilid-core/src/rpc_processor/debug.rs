@@ -18,7 +18,7 @@ impl RPCProcessor {
         let rpc_message_processing_latency_string = inner
             .rpc_worker_process_latency_and_accounting_by_operation_kind
             .iter()
-            .map(|(k, (ls, _))| format!("{:>16}: {:#}", k, ls))
+            .map(|(k, (ls, _, n))| format!("{:>16}: {:#} (n={})", k, ls, n))
             .collect::<Vec<_>>()
             .join("\n");
 

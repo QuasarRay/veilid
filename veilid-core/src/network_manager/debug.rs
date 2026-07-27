@@ -3,7 +3,7 @@ use super::*;
 impl NetworkManager {
     pub fn debug_info_nodeinfo(&self) -> String {
         let mut out = String::new();
-        let stats = self.stats.read();
+        let stats = self.accounting.read();
         out += &format!(
             "Relay Worker Dequeue Latency:\n{}",
             indent_all_string(format!("{:#}", stats.relay_worker_dequeue_latency))

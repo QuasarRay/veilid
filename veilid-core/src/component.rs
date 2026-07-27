@@ -12,11 +12,67 @@ impl<T: Send + Sync + 'static> AsAnyArcSendSync for T {
     }
 }
 
+// Wraps stats record-site statements so they compile out when the `stats` feature is off
+#[cfg(feature = "stats")]
+macro_rules! veilid_stats {
+    ($($t:tt)*) => {{ $($t)* }};
+}
+#[cfg(not(feature = "stats"))]
+macro_rules! veilid_stats {
+    ($($t:tt)*) => {{}};
+}
+pub(crate) use veilid_stats;
+
+/// A component's optimization stats snapshot. Consumed only by JSON serialization to the stats
+/// log, so any `serde::Serialize` type qualifies via the blanket impl.
+#[cfg(feature = "stats")]
+pub(crate) trait VeilidComponentStats: core::fmt::Debug + Send + Sync {
+    fn to_json_value(&self) -> serde_json::Value;
+}
+
+#[cfg(feature = "stats")]
+impl<T: serde::Serialize + core::fmt::Debug + Send + Sync> VeilidComponentStats for T {
+    fn to_json_value(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    }
+}
+
+// PascalCase component name -> snake_case stats-map key, acronym-aware
+// (RPCProcessor -> rpc_processor). Stats output is always snake_case regardless
+// of json-camel-case: it is debug-only and has no schema, so one parse format
+// beats matching each binding's language convention.
+#[cfg(feature = "stats")]
+fn component_stats_key(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let mut snake = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_ascii_uppercase() {
+            let prev_lower = i > 0 && chars[i - 1].is_ascii_lowercase();
+            let acronym_end = i > 0
+                && chars[i - 1].is_ascii_uppercase()
+                && i + 1 < chars.len()
+                && chars[i + 1].is_ascii_lowercase();
+            if i > 0 && (prev_lower || acronym_end) {
+                snake.push('_');
+            }
+            snake.push(c.to_ascii_lowercase());
+        } else {
+            snake.push(c);
+        }
+    }
+    snake
+}
+
 pub(crate) trait VeilidComponent:
     AsAnyArcSendSync + VeilidComponentRegistryAccessor + core::fmt::Debug
 {
     fn name(&self) -> &'static str;
     fn log_facilities(&self) -> VeilidComponentLogFacilities;
+    /// A JSON-serializable stats snapshot, or None if the component has no stats.
+    #[cfg(feature = "stats")]
+    fn stats(&self) -> Option<Box<dyn VeilidComponentStats>> {
+        None
+    }
     fn init(&self) -> PinBoxFuture<'_, EyreResult<()>>;
     fn post_init(&self) -> PinBoxFuture<'_, EyreResult<()>>;
     fn pre_terminate(&self) -> PinBoxFuture<'_, ()>;
@@ -313,6 +369,18 @@ impl VeilidComponentRegistry {
             .collect::<Vec<_>>()
     }
 
+    // Stats keyed by component name; the registry lock is dropped before each stats() call
+    #[cfg(feature = "stats")]
+    pub(crate) fn component_stats(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        for component in self.get_init_order() {
+            if let Some(stats) = component.stats() {
+                map.insert(component_stats_key(component.name()), stats.to_json_value());
+            }
+        }
+        serde_json::Value::Object(map)
+    }
+
     //////////////////////////////////////////////////////////////
 
     pub fn lookup<'a, T: VeilidComponent + Send + Sync + 'static>(
@@ -366,7 +434,7 @@ pub(crate) use impl_veilid_component_accessors;
 /////////////////////////////////////////////////////////////////////
 
 macro_rules! impl_veilid_component {
-    ($component_name:ty) => {
+    (@inner $component_name:ty, $($stats_method:tt)*) => {
         impl_veilid_component_accessors!($component_name);
 
         impl VeilidComponent for $component_name {
@@ -377,6 +445,8 @@ macro_rules! impl_veilid_component {
             fn log_facilities(&self) -> VeilidComponentLogFacilities {
                 <$component_name>::log_facilities_impl(self)
             }
+
+            $($stats_method)*
 
             fn init(&self) -> PinBoxFuture<'_, EyreResult<()>> {
                 Box::pin(async { self.init_async().await })
@@ -394,6 +464,17 @@ macro_rules! impl_veilid_component {
                 Box::pin(async { self.terminate_async().await })
             }
         }
+    };
+    ($component_name:ty) => {
+        impl_veilid_component!(@inner $component_name,);
+    };
+    ($component_name:ty, stats) => {
+        impl_veilid_component!(@inner $component_name,
+            #[cfg(feature = "stats")]
+            fn stats(&self) -> Option<Box<dyn VeilidComponentStats>> {
+                <$component_name>::stats_impl(self)
+            }
+        );
     };
 }
 

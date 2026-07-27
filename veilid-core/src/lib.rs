@@ -62,6 +62,9 @@ mod protected_store;
 mod routing_table;
 mod rpc_processor;
 mod stats_accounting;
+#[cfg(feature = "stats")]
+mod stats_manager;
+mod stats_mutex;
 mod storage_manager;
 mod table_store;
 mod veilid_api;
@@ -79,6 +82,8 @@ pub use self::logging::{
 };
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub use self::logging::{LogOutput, LogOutputKind, VeilidTracing};
+#[cfg(feature = "stats")]
+pub use self::stats_manager::{StatsManager, StatsOutput, StatsSettings};
 pub use self::veilid_api::*;
 pub use self::veilid_config::*;
 /// Re-exported from `async-trait` crate
@@ -165,6 +170,7 @@ use self::logging::{
     VeilidComponentLogFacilities, VeilidComponentLogFacility, DEBUGWARN,
 };
 use self::stats_accounting::*;
+use self::stats_mutex::*;
 
 use core::future::IntoFuture as _;
 

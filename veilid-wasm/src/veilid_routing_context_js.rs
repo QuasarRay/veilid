@@ -290,7 +290,7 @@ impl VeilidRoutingContext {
     }
 
     /// Add or update a watch to a DHT value that informs the user via an VeilidUpdate::ValueChange callback when the record has subkeys change.
-    /// One remote node will be selected to perform the watch and it will offer an expiration time based on a suggestion, and make an attempt to
+    /// A collection of remote nodes will be selected to perform the watch and they will offer an expiration time based on a suggestion, and make an attempt to
     /// continue to report changes via the callback. Nodes that agree to doing watches will be put on our 'ping' list to ensure they are still around
     /// otherwise the watch will be cancelled and will have to be re-watched.
     ///

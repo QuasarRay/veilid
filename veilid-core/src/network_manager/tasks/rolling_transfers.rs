@@ -12,7 +12,7 @@ impl NetworkManager {
     ) -> EyreResult<()> {
         // veilid_log!(self trace "--- network manager rolling_transfers task");
         {
-            let stats = &mut *self.stats.write();
+            let stats = &mut *self.accounting.write();
 
             // Roll the low level network transfer stats for our address
             stats.self_stats.transfer_stats_accounting.roll_transfers(
@@ -45,8 +45,8 @@ impl NetworkManager {
 
         // Broadcast network stats (cheap shared handle) so other components can react,
         // e.g. the storage manager's operation bandwidth gate
-        if let Err(e) = self.event_bus().post(NetworkManagerStatsChangeEvent {
-            stats: self.stats.clone(),
+        if let Err(e) = self.event_bus().post(NetworkManagerAccountingChangeEvent {
+            accounting: self.accounting.clone(),
         }) {
             veilid_log!(self debug "failed to post network stats change event: {}", e);
         }

@@ -99,6 +99,13 @@ impl VeilidCoreContext {
         // Create component registry
         let registry = VeilidComponentRegistry::new(startup_options);
 
+        // Register non-component "common" log facilities before components initialize
+        VeilidLayerFilter::add_facilities(
+            [],
+            ["stats", "veilid_debug", "veilid_api"],
+            ["#common", "#veilid"],
+        )?;
+
         // Warn if internal "footgun" tuning was provided without the footgun-config feature
         #[cfg(not(feature = "footgun-config"))]
         if registry
@@ -141,6 +148,9 @@ impl VeilidCoreContext {
             AttachmentManager::new,
             AttachmentManagerStartupContext::default(),
         );
+        // Registered last so it can pull snapshots from every other component
+        #[cfg(feature = "stats")]
+        registry.register(StatsManager::new);
 
         // Run initialization
         // This should make the majority of subsystems functional
@@ -209,6 +219,8 @@ pub(crate) trait RegisteredComponents {
     fn network_manager<'a>(&self) -> VeilidComponentGuard<'a, NetworkManager>;
     fn rpc_processor<'a>(&self) -> VeilidComponentGuard<'a, RPCProcessor>;
     fn attachment_manager<'a>(&self) -> VeilidComponentGuard<'a, AttachmentManager>;
+    #[cfg(all(feature = "stats", feature = "debug-api"))]
+    fn stats_manager<'a>(&self) -> VeilidComponentGuard<'a, StatsManager>;
 }
 
 impl<T: VeilidComponentRegistryAccessor + ?Sized> RegisteredComponents for T {
@@ -237,6 +249,10 @@ impl<T: VeilidComponentRegistryAccessor + ?Sized> RegisteredComponents for T {
         self.registry()
             .lookup::<AttachmentManager>()
             .unwrap_or_log()
+    }
+    #[cfg(all(feature = "stats", feature = "debug-api"))]
+    fn stats_manager<'a>(&self) -> VeilidComponentGuard<'a, StatsManager> {
+        self.registry().lookup::<StatsManager>().unwrap_or_log()
     }
 }
 

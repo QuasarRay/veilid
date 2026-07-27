@@ -370,14 +370,25 @@ impl WebsocketProtocolHandler {
         // Resolve remote address
         let remote_address = dial_info.to_socket_addr();
 
+        // One deadline bounds the whole connect; each successive step gets the time remaining
+        let deadline =
+            Timestamp::now_non_decreasing().later(TimestampDuration::new_ms(timeout_ms as u64));
+        let remaining_ms = || {
+            let ms = deadline
+                .duration_since(Timestamp::now_non_decreasing())
+                .millis_u32()
+                .unwrap_or(0);
+            (ms > 0).then_some(ms)
+        };
+
         // Non-blocking connect to remote address
-        let tcp_stream = network_result_try!(connect_async_tcp_stream(
-            local_address,
-            remote_address,
-            timeout_ms
-        )
-        .await
-        .folded()?);
+        let Some(ms) = remaining_ms() else {
+            return Ok(NetworkResult::timeout());
+        };
+        let tcp_stream =
+            network_result_try!(connect_async_tcp_stream(local_address, remote_address, ms)
+                .await
+                .folded()?);
 
         // See what local address we ended up with
         let actual_local_addr = tcp_stream.local_addr()?;
@@ -400,14 +411,26 @@ impl WebsocketProtocolHandler {
 
                     let connector = TlsConnector::from(CLIENT_CONFIG.clone());
                     let server_name = ServerName::try_from(domain.to_string()).map_err(to_io_error_other)?;
-                    let tls_stream = network_result_try!(connector
-                        .connect(server_name, tcp_stream)
-                        .await
-                        .into_network_result()?);
+                    let Some(ms) = remaining_ms() else {
+                        return Ok(NetworkResult::timeout());
+                    };
+                    let tls_stream = network_result_try!(match timeout(
+                        ms,
+                        connector.connect(server_name, tcp_stream)
+                    )
+                    .await
+                    {
+                        Ok(res) => res.into_network_result()?,
+                        Err(_) => NetworkResult::timeout(),
+                    });
+                    let Some(ms) = remaining_ms() else {
+                        return Ok(NetworkResult::timeout());
+                    };
                     let (ws_stream, _response) = network_result_try!(
-                        match Box::pin(client_async(request, tls_stream)).await {
-                            Ok(v) => NetworkResult::Value(v),
-                            Err(e) => ws_error_to_network_result(e),
+                        match timeout(ms, Box::pin(client_async(request, tls_stream))).await {
+                            Ok(Ok(v)) => NetworkResult::Value(v),
+                            Ok(Err(e)) => ws_error_to_network_result(e),
+                            Err(_) => NetworkResult::timeout(),
                         });
 
                     Ok(NetworkResult::Value(Box::new(NativeProtocolNetworkConnection::Wss(
@@ -418,10 +441,14 @@ impl WebsocketProtocolHandler {
                 }
             }
         } else {
+            let Some(ms) = remaining_ms() else {
+                return Ok(NetworkResult::timeout());
+            };
             let (ws_stream, _response) =
-                network_result_try!(match client_async(request, tcp_stream).await {
-                    Ok(v) => NetworkResult::Value(v),
-                    Err(e) => ws_error_to_network_result(e),
+                network_result_try!(match timeout(ms, client_async(request, tcp_stream)).await {
+                    Ok(Ok(v)) => NetworkResult::Value(v),
+                    Ok(Err(e)) => ws_error_to_network_result(e),
+                    Err(_) => NetworkResult::timeout(),
                 });
             Ok(NetworkResult::Value(Box::new(
                 NativeProtocolNetworkConnection::Ws(WebsocketNetworkConnection::new(

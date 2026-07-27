@@ -30,6 +30,8 @@ mod rpc_watch_value;
 mod rpc_worker;
 mod sender_info;
 mod sender_peer_info;
+#[cfg(feature = "stats")]
+mod stats;
 mod waitable_reply;
 
 #[cfg(any(test, feature = "test-util"))]
@@ -136,7 +138,7 @@ struct RPCProcessorInner {
     rpc_worker_process_latency_accounting: LatencyStatsAccounting,
     /// The processing latency stats and accounting for the RPC workers by operation kind
     rpc_worker_process_latency_and_accounting_by_operation_kind:
-        BTreeMap<&'static str, (LatencyStats, LatencyStatsAccounting)>,
+        BTreeMap<&'static str, (LatencyStats, LatencyStatsAccounting, u64)>,
 }
 
 #[derive(Debug)]
@@ -162,7 +164,7 @@ pub(crate) struct RPCProcessor {
     startup_context: RPCProcessorStartupContext,
 }
 
-impl_veilid_component!(RPCProcessor);
+impl_veilid_component!(RPCProcessor, stats);
 
 impl RPCProcessor {
     fn new_inner() -> RPCProcessorInner {
@@ -2497,6 +2499,7 @@ impl RPCProcessor {
                 .or_default();
 
             entry.0 = entry.1.record_latency(latency);
+            entry.2 += 1;
         }
         out
     }

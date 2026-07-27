@@ -71,6 +71,11 @@ pub async fn run_all_tests() {
     test_async_weighted_semaphore::test_all().await;
     info!("TEST: exec_test_tag_lock");
     test_tag_lock::test_all();
+    #[cfg(feature = "aimd")]
+    {
+        info!("TEST: exec_test_aimd");
+        test_aimd::test_all();
+    }
     info!("TEST: exec_test_assembly_buffer");
     test_assembly_buffer::test_all().await;
     info!("TEST: exec_test_tracked_mutex");
@@ -246,6 +251,13 @@ cfg_if! {
         fn run_test_tag_lock() {
             setup();
             test_tag_lock::test_all();
+        }
+
+        #[cfg(feature = "aimd")]
+        #[test]
+        fn run_test_aimd() {
+            setup();
+            test_aimd::test_all();
         }
 
         #[test]

@@ -216,6 +216,29 @@ pub enum RequestOp {
         /// Debug command string.
         command: String,
     },
+    /// Save a user secret to the protected store.
+    SaveUserSecret {
+        /// Secret key name.
+        key: String,
+        /// Secret value bytes.
+        #[serde(with = "as_human_base64")]
+        #[schemars(with = "String")]
+        value: Vec<u8>,
+    },
+    /// Load a user secret from the protected store.
+    LoadUserSecret {
+        /// Secret key name.
+        key: String,
+    },
+    /// Remove a user secret from the protected store.
+    RemoveUserSecret {
+        /// Secret key name.
+        key: String,
+    },
+    /// List stored user secret key names.
+    ListUserSecrets,
+    /// Remove all stored user secrets.
+    DeleteAllUserSecrets,
     /// Get the Veilid version as a string.
     VeilidVersionString,
     /// Get the Veilid version as major/minor/patch numbers.
@@ -402,6 +425,36 @@ pub enum ResponseOp {
         #[serde(flatten)]
         result: ApiResult<String>,
     },
+    /// Result of `SaveUserSecret`.
+    SaveUserSecret {
+        /// Whether a value already existed, or error.
+        #[serde(flatten)]
+        result: ApiResult<bool>,
+    },
+    /// Result of `LoadUserSecret`.
+    LoadUserSecret {
+        /// The secret value bytes (base64) if present, or error.
+        #[serde(flatten)]
+        result: ApiResultWithOptVecU8,
+    },
+    /// Result of `RemoveUserSecret`.
+    RemoveUserSecret {
+        /// Whether the secret existed, or error.
+        #[serde(flatten)]
+        result: ApiResult<bool>,
+    },
+    /// Result of `ListUserSecrets`.
+    ListUserSecrets {
+        /// The stored secret key names, or error.
+        #[serde(flatten)]
+        result: ApiResultWithVecString<Vec<String>>,
+    },
+    /// Result of `DeleteAllUserSecrets`.
+    DeleteAllUserSecrets {
+        /// Success, or error.
+        #[serde(flatten)]
+        result: ApiResult<()>,
+    },
     /// Result of `VeilidVersionString`.
     VeilidVersionString {
         /// Version string.
@@ -490,6 +543,25 @@ pub enum ApiResultWithVecU8 {
         error: VeilidAPIError,
     },
 }
+
+/// An operation result whose `Ok` value is an optional byte buffer.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ApiResultWithOptVecU8 {
+    /// Success value, serialized as a base64 string or null.
+    Ok {
+        /// The returned bytes, if present.
+        #[serde(with = "as_human_opt_base64")]
+        #[schemars(with = "Option<String>")]
+        value: Option<Vec<u8>>,
+    },
+    /// Failure.
+    Err {
+        /// The error.
+        error: VeilidAPIError,
+    },
+}
+
 /// A base64-serialized byte buffer.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]

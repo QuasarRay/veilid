@@ -1,310 +1,334 @@
 use super::*;
-use data_encoding::BASE64URL_NOPAD;
+use js_sys::{global, Function, Object, Reflect};
+use keyvaluedb::{DBTransaction, KeyValueDB as _};
+use keyvaluedb_web::Database;
+use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{Storage, Window};
 
-use web_sys::*;
-
-impl_veilid_log_facility!("pstore");
-
-/// Secure key-value storage for user secrets, backed by the browser's `localStorage`.
-#[derive(Debug)]
-#[must_use]
-pub struct ProtectedStore {
-    registry: VeilidComponentRegistry,
+/// The active protected store backend.
+pub(super) enum ProtectedStoreBackend {
+    LocalStorage(LocalStorageBackend),
+    IndexedDb(IndexedDbBackend),
+    Extension(ExtensionBackend),
 }
 
-impl_veilid_component!(ProtectedStore);
-
-/// Wraps the string description of a failed JavaScript `JsValue` operation.
-#[derive(ThisError, Debug, Clone, Eq, PartialEq)]
-#[error("JsValue error")]
-pub struct JsValueError(String);
-
-/// Convert a JavaScript `JsValue` into a `JsValueError`, using its string form when present.
-#[must_use]
-pub fn map_jsvalue_error(x: JsValue) -> JsValueError {
-    JsValueError(x.as_string().unwrap_or_default())
+impl ProtectedStoreBackend {
+    pub(super) async fn get(&self, key: &str) -> VeilidAPIResult<Option<Zeroizing<String>>> {
+        match self {
+            ProtectedStoreBackend::LocalStorage(b) => b.get(key),
+            ProtectedStoreBackend::IndexedDb(b) => b.get(key).await,
+            ProtectedStoreBackend::Extension(b) => b.get(key).await,
+        }
+    }
+    pub(super) async fn set(&self, key: &str, value: &str) -> VeilidAPIResult<bool> {
+        match self {
+            ProtectedStoreBackend::LocalStorage(b) => b.set(key, value),
+            ProtectedStoreBackend::IndexedDb(b) => b.set(key, value).await,
+            ProtectedStoreBackend::Extension(b) => b.set(key, value).await,
+        }
+    }
+    pub(super) async fn remove(&self, key: &str) -> VeilidAPIResult<bool> {
+        match self {
+            ProtectedStoreBackend::LocalStorage(b) => b.remove(key),
+            ProtectedStoreBackend::IndexedDb(b) => b.remove(key).await,
+            ProtectedStoreBackend::Extension(b) => b.remove(key).await,
+        }
+    }
+    pub(super) async fn list(&self) -> VeilidAPIResult<Vec<String>> {
+        match self {
+            ProtectedStoreBackend::LocalStorage(b) => b.list(),
+            ProtectedStoreBackend::IndexedDb(b) => b.list().await,
+            ProtectedStoreBackend::Extension(b) => b.list().await,
+        }
+    }
 }
 
-fn map_js_error_generic<M: ToString>(message: M) -> impl FnOnce(JsValue) -> VeilidAPIError {
-    move |x| VeilidAPIError::generic(format!("{}: {}", message.to_string(), map_jsvalue_error(x)))
+fn map_js_error<M: ToString>(message: M) -> impl FnOnce(JsValue) -> VeilidAPIError {
+    move |x| {
+        VeilidAPIError::generic(format!(
+            "{}: {}",
+            message.to_string(),
+            x.as_string().unwrap_or_default()
+        ))
+    }
 }
 
-impl ProtectedStore {
-    pub(crate) fn new(registry: VeilidComponentRegistry) -> Self {
-        Self { registry }
+/// Prefix that namespaces this store's keys within a shared browser key-value store.
+fn key_prefix(config: &VeilidConfig) -> String {
+    if config.namespace.is_empty() {
+        "__veilid_protected_store_".to_owned()
+    } else {
+        format!("__veilid_protected_store_{}_", config.namespace)
+    }
+}
+
+/// Protected store backed by browser `localStorage` (Window contexts only).
+pub(super) struct LocalStorageBackend {
+    prefix: String,
+}
+
+impl LocalStorageBackend {
+    fn storage() -> VeilidAPIResult<Storage> {
+        let win = window().ok_or_else(|| VeilidAPIError::generic("no window"))?;
+        win.local_storage()
+            .map_err(map_js_error("failed to get local storage"))?
+            .ok_or_else(|| VeilidAPIError::generic("no local storage"))
     }
 
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
-    /// Remove every known Veilid-managed protected store key, logging any failures.
-    ///
-    /// Idempotent: keys already absent are skipped.
-    pub fn delete_all(&self) {
-        for kpsk in &KNOWN_PROTECTED_STORE_KEYS {
-            if let Err(e) = self.remove_user_secret(kpsk) {
-                veilid_log!(self error "failed to delete protected store key '{}': {}", kpsk, e);
-            } else {
-                veilid_log!(self debug "deleted protected store key '{}'", kpsk);
-            }
+    fn get(&self, key: &str) -> VeilidAPIResult<Option<Zeroizing<String>>> {
+        Ok(Self::storage()?
+            .get_item(&format!("{}{}", self.prefix, key))
+            .map_err(map_js_error("failed to read local storage"))?
+            .map(Zeroizing::new))
+    }
+
+    fn set(&self, key: &str, value: &str) -> VeilidAPIResult<bool> {
+        let ls = Self::storage()?;
+        let vkey = format!("{}{}", self.prefix, key);
+        let existed = ls
+            .get_item(&vkey)
+            .map_err(map_js_error("failed to read local storage"))?
+            .is_some();
+        ls.set_item(&vkey, value)
+            .map_err(map_js_error("failed to write local storage"))?;
+        Ok(existed)
+    }
+
+    fn remove(&self, key: &str) -> VeilidAPIResult<bool> {
+        let ls = Self::storage()?;
+        let vkey = format!("{}{}", self.prefix, key);
+        let existed = ls
+            .get_item(&vkey)
+            .map_err(map_js_error("failed to read local storage"))?
+            .is_some();
+        if existed {
+            ls.delete(&vkey)
+                .map_err(map_js_error("failed to remove from local storage"))?;
         }
+        Ok(existed)
     }
 
-    fn log_facilities_impl(&self) -> VeilidComponentLogFacilities {
-        VeilidComponentLogFacilities::new().with_facility(
-            VeilidComponentLogFacility::try_new_with_tags("pstore", ["#common"]).unwrap(),
-        )
-    }
-
-    #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    #[allow(clippy::unused_async)]
-    async fn init_async(&self) -> EyreResult<()> {
-        if self.config().protected_store.delete {
-            self.delete_all();
-        }
-
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    #[allow(clippy::unused_async)]
-    async fn post_init_async(&self) -> EyreResult<()> {
-        Ok(())
-    }
-
-    #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
-    #[allow(clippy::unused_async)]
-    async fn pre_terminate_async(&self) {}
-
-    #[cfg_attr(feature = "instrument", instrument(level = "debug", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
-    #[allow(clippy::unused_async)]
-    async fn terminate_async(&self) {}
-
-    fn browser_key_name(&self, key: &str) -> String {
-        let config = self.config();
-        if config.namespace.is_empty() {
-            format!("__veilid_protected_store_{}", key)
-        } else {
-            format!("__veilid_protected_store_{}_{}", config.namespace, key)
-        }
-    }
-
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", skip(self, key, value), fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    /// Store a string secret under a key. Returns true if a value already existed for that key.
-    ///
-    /// Overwrites any prior value via `localStorage.setItem`, so re-saving the same key/value is idempotent.
-    ///
-    /// Errors with [VeilidAPIError::Generic] if the window or `localStorage` is unavailable, or if `setItem` throws (e.g. storage quota exceeded). Panics if called outside a browser.
-    pub fn save_user_secret_string<K: AsRef<str> + fmt::Debug, V: AsRef<str> + fmt::Debug>(
-        &self,
-        key: K,
-        value: V,
-    ) -> VeilidAPIResult<bool> {
-        if is_browser() {
-            let win = match window() {
-                Some(w) => w,
-                None => {
-                    apibail_generic!("failed to get window");
-                }
-            };
-
-            let ls = match win
-                .local_storage()
-                .map_err(map_js_error_generic("exception getting local storage"))?
+    fn list(&self) -> VeilidAPIResult<Vec<String>> {
+        let ls = Self::storage()?;
+        let len = ls
+            .length()
+            .map_err(map_js_error("failed to read local storage length"))?;
+        let mut out = Vec::new();
+        for i in 0..len {
+            if let Some(k) = ls
+                .key(i)
+                .map_err(map_js_error("failed to read local storage key"))?
             {
-                Some(l) => l,
-                None => {
-                    apibail_generic!("failed to get local storage");
+                if let Some(logical) = k.strip_prefix(&self.prefix) {
+                    out.push(logical.to_owned());
                 }
-            };
+            }
+        }
+        Ok(out)
+    }
+}
 
-            let vkey = self.browser_key_name(key.as_ref());
+/// Protected store backed by IndexedDB, usable in any worker context.
+pub(super) struct IndexedDbBackend {
+    db: Database,
+}
 
-            let prev = ls
-                .get_item(&vkey)
-                .map_err(map_js_error_generic("exception thrown"))?
-                .is_some();
+impl IndexedDbBackend {
+    async fn open(table_name: &str) -> VeilidAPIResult<Self> {
+        let db = Database::open(table_name, 1, false).await.map_err(|e| {
+            VeilidAPIError::generic(format!("failed to open protected store: {}", e))
+        })?;
+        Ok(Self { db })
+    }
 
-            ls.set_item(&vkey, value.as_ref())
-                .map_err(map_js_error_generic("exception thrown"))?;
-
-            Ok(prev)
-        } else {
-            unimplemented!()
+    async fn get(&self, key: &str) -> VeilidAPIResult<Option<Zeroizing<String>>> {
+        match self
+            .db
+            .get(0, key.as_bytes())
+            .await
+            .map_err(|e| VeilidAPIError::generic(format!("failed to load user secret: {}", e)))?
+        {
+            Some(v) => {
+                let s = String::from_utf8(v.to_vec())
+                    .map_err(|e| VeilidAPIError::generic(format!("invalid utf8: {}", e)))?;
+                Ok(Some(Zeroizing::new(s)))
+            }
+            None => Ok(None),
         }
     }
 
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self, key), fields(__VEILID_LOG_KEY = self.log_key())))]
-    /// Load a string secret by key, or `None` if no value is stored for it.
-    ///
-    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::Generic] if the window or `localStorage` is unavailable, or if `getItem` throws. Panics if called outside a browser.
-    pub fn load_user_secret_string<K: AsRef<str> + fmt::Debug>(
-        &self,
-        key: K,
-    ) -> VeilidAPIResult<Option<String>> {
-        if is_browser() {
-            let win = match window() {
-                Some(w) => w,
-                None => {
-                    apibail_generic!("failed to get window");
-                }
-            };
+    async fn set(&self, key: &str, value: &str) -> VeilidAPIResult<bool> {
+        let existed = self
+            .db
+            .get(0, key.as_bytes())
+            .await
+            .map_err(|e| VeilidAPIError::generic(format!("failed to read protected store: {}", e)))?
+            .is_some();
+        let mut tx = DBTransaction::new();
+        tx.put(0, key.as_bytes(), value.as_bytes());
+        self.db
+            .write(tx)
+            .await
+            .map_err(|e| VeilidAPIError::generic(format!("failed to save user secret: {}", e)))?;
+        Ok(existed)
+    }
 
-            let ls = match win
-                .local_storage()
-                .map_err(map_js_error_generic("exception getting local storage"))?
-            {
-                Some(l) => l,
-                None => {
-                    apibail_generic!("failed to get local storage");
-                }
-            };
+    async fn remove(&self, key: &str) -> VeilidAPIResult<bool> {
+        let existed = self
+            .db
+            .delete(0, key.as_bytes())
+            .await
+            .map_err(|e| VeilidAPIError::generic(format!("failed to remove user secret: {}", e)))?
+            .is_some();
+        Ok(existed)
+    }
 
-            let vkey = self.browser_key_name(key.as_ref());
-            ls.get_item(&vkey)
-                .map_err(map_js_error_generic("exception thrown"))
-        } else {
-            unimplemented!();
+    async fn list(&self) -> VeilidAPIResult<Vec<String>> {
+        let (keys, _) = self
+            .db
+            .iter_keys(0, None, Vec::<String>::new(), |ctx, key| {
+                ctx.push(String::from_utf8_lossy(key).into_owned());
+                Ok::<Option<()>, std::io::Error>(None)
+            })
+            .await
+            .map_err(|e| VeilidAPIError::generic(format!("failed to list user secrets: {}", e)))?;
+        Ok(keys)
+    }
+}
+
+/// Protected store backed by WebExtension storage (`chrome.storage.local`/`browser.storage.local`).
+pub(super) struct ExtensionBackend {
+    prefix: String,
+}
+
+impl ExtensionBackend {
+    /// Resolve `chrome.storage.local` or `browser.storage.local`, whichever the runtime provides.
+    fn storage_area() -> VeilidAPIResult<Object> {
+        for ns in ["chrome", "browser"] {
+            let Ok(root) = Reflect::get(global().as_ref(), &JsValue::from_str(ns)) else {
+                continue;
+            };
+            let Ok(storage) = Reflect::get(&root, &JsValue::from_str("storage")) else {
+                continue;
+            };
+            let Ok(local) = Reflect::get(&storage, &JsValue::from_str("local")) else {
+                continue;
+            };
+            if local.is_object() {
+                return Ok(local.unchecked_into());
+            }
+        }
+        Err(VeilidAPIError::generic("extension storage not available"))
+    }
+
+    async fn call_promise(area: &Object, method: &str, arg: &JsValue) -> VeilidAPIResult<JsValue> {
+        let func: Function = Reflect::get(area, &JsValue::from_str(method))
+            .map_err(map_js_error("extension storage method missing"))?
+            .unchecked_into();
+        let promise = func
+            .call1(area, arg)
+            .map_err(map_js_error("extension storage call failed"))?;
+        JsFuture::from(js_sys::Promise::from(promise))
+            .await
+            .map_err(map_js_error("extension storage rejected"))
+    }
+
+    async fn get(&self, key: &str) -> VeilidAPIResult<Option<Zeroizing<String>>> {
+        let area = Self::storage_area()?;
+        let vkey = format!("{}{}", self.prefix, key);
+        let result = Self::call_promise(&area, "get", &JsValue::from_str(&vkey)).await?;
+        match Reflect::get(&result, &JsValue::from_str(&vkey))
+            .ok()
+            .and_then(|v| v.as_string())
+        {
+            Some(s) => Ok(Some(Zeroizing::new(s))),
+            None => Ok(None),
         }
     }
 
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self, value), fields(__VEILID_LOG_KEY = self.log_key())))]
-    /// Serialize a value to JSON and store it as a secret. Returns true if a value already existed for that key.
-    ///
-    /// Overwrites any prior value.
-    ///
-    /// Errors with [VeilidAPIError::Generic] if `value` fails to serialize, if the window or `localStorage` is unavailable, or if `setItem` throws. Panics if called outside a browser.
-    pub fn save_user_secret_json<K, T>(&self, key: K, value: &T) -> VeilidAPIResult<bool>
-    where
-        K: AsRef<str> + fmt::Debug,
-        T: serde::Serialize,
-    {
-        let v = serde_json::to_vec(value).map_err(VeilidAPIError::generic)?;
-        self.save_user_secret(key, &v)
+    async fn set(&self, key: &str, value: &str) -> VeilidAPIResult<bool> {
+        let area = Self::storage_area()?;
+        let vkey = format!("{}{}", self.prefix, key);
+        let existed = self.get(key).await?.is_some();
+        let obj = Object::new();
+        Reflect::set(&obj, &JsValue::from_str(&vkey), &JsValue::from_str(value))
+            .map_err(map_js_error("failed to build extension storage record"))?;
+        Self::call_promise(&area, "set", obj.as_ref()).await?;
+        Ok(existed)
     }
 
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
-    /// Load a secret by key and deserialize it from JSON, or `None` if no value is stored for it.
-    ///
-    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::Generic] if the stored bytes fail to deserialize or are not a valid buffer, or if `localStorage` access throws. Panics if called outside a browser.
-    pub fn load_user_secret_json<K, T>(&self, key: K) -> VeilidAPIResult<Option<T>>
-    where
-        K: AsRef<str> + fmt::Debug,
-        T: for<'de> serde::de::Deserialize<'de>,
-    {
-        let out = self.load_user_secret(key)?;
-        let b = match out {
-            Some(v) => v,
-            None => {
-                return Ok(None);
-            }
-        };
-
-        let obj = serde_json::from_slice(&b).map_err(VeilidAPIError::generic)?;
-        Ok(Some(obj))
+    async fn remove(&self, key: &str) -> VeilidAPIResult<bool> {
+        let area = Self::storage_area()?;
+        let vkey = format!("{}{}", self.prefix, key);
+        let existed = self.get(key).await?.is_some();
+        Self::call_promise(&area, "remove", &JsValue::from_str(&vkey)).await?;
+        Ok(existed)
     }
 
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", skip(self, value), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    /// Store a byte buffer as a secret. Returns true if a value already existed for that key.
-    ///
-    /// Overwrites any prior value.
-    ///
-    /// Errors with [VeilidAPIError::Generic] if the window or `localStorage` is unavailable, or if `setItem` throws. Panics if called outside a browser.
-    pub fn save_user_secret<K: AsRef<str> + fmt::Debug>(
-        &self,
-        key: K,
-        value: &[u8],
-    ) -> VeilidAPIResult<bool> {
-        let mut s = BASE64URL_NOPAD.encode(value);
-        s.push('!');
-
-        self.save_user_secret_string(key, s.as_str())
-    }
-
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
-    /// Load a byte buffer secret by key, or `None` if no value is stored for it.
-    ///
-    /// A missing key returns `Ok(None)`. Errors with [VeilidAPIError::Generic] if the stored value lacks the buffer marker, fails base64 decode, or if `localStorage` access throws. Panics if called outside a browser.
-    pub fn load_user_secret<K: AsRef<str> + fmt::Debug>(
-        &self,
-        key: K,
-    ) -> VeilidAPIResult<Option<Vec<u8>>> {
-        let mut s = match self.load_user_secret_string(key)? {
-            Some(s) => s,
-            None => {
-                return Ok(None);
-            }
-        };
-
-        if s.pop() != Some('!') {
-            apibail_generic!("User secret is not a buffer");
-        }
-
-        let mut bytes = Vec::<u8>::new();
-        let res = BASE64URL_NOPAD.decode_len(s.len());
-        match res {
-            Ok(l) => {
-                bytes.resize(l, 0u8);
-            }
-            Err(_) => {
-                apibail_generic!("Failed to decode");
+    async fn list(&self) -> VeilidAPIResult<Vec<String>> {
+        let area = Self::storage_area()?;
+        let all = Self::call_promise(&area, "get", &JsValue::NULL).await?;
+        let obj: Object = all.unchecked_into();
+        let mut out = Vec::new();
+        for k in Object::keys(&obj).iter() {
+            if let Some(k) = k.as_string() {
+                if let Some(logical) = k.strip_prefix(&self.prefix) {
+                    out.push(logical.to_owned());
+                }
             }
         }
-
-        let res = BASE64URL_NOPAD.decode_mut(s.as_bytes(), &mut bytes);
-        match res {
-            Ok(_) => Ok(Some(bytes)),
-            Err(_) => apibail_generic!("Failed to decode"),
-        }
+        Ok(out)
     }
+}
 
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", skip(self), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
-    )]
-    /// Remove a secret by key. Returns true if a value was present and deleted.
-    ///
-    /// No-op returning false when the key is absent, so repeated removes are idempotent.
-    ///
-    /// An absent key returns `Ok(false)`. Errors with [VeilidAPIError::Generic] if the window or `localStorage` is unavailable, or if `getItem`/`removeItem` throws. Panics if called outside a browser.
-    pub fn remove_user_secret<K: AsRef<str> + fmt::Debug>(&self, key: K) -> VeilidAPIResult<bool> {
-        if is_browser() {
-            let win = match window() {
-                Some(w) => w,
-                None => {
-                    apibail_generic!("failed to get window");
-                }
-            };
+/// The `Window` scope if present (localStorage requires it).
+fn window() -> Option<Window> {
+    let g: JsValue = global().into();
+    g.dyn_into::<Window>().ok()
+}
 
-            let ls = match win
-                .local_storage()
-                .map_err(map_js_error_generic("exception getting local storage"))?
-            {
-                Some(l) => l,
-                None => {
-                    apibail_generic!("failed to get local storage");
-                }
-            };
+fn resolve_backend(
+    configured: VeilidConfigProtectedStoreBackend,
+) -> VeilidConfigProtectedStoreBackend {
+    use VeilidConfigProtectedStoreBackend::*;
+    if configured != PlatformDefault {
+        return configured;
+    }
+    match wasm_runtime_context() {
+        WasmRuntimeContext::Extension => ExtensionStorage,
+        WasmRuntimeContext::Window => LocalStorage,
+        WasmRuntimeContext::DedicatedWorker
+        | WasmRuntimeContext::SharedWorker
+        | WasmRuntimeContext::ServiceWorker
+        | WasmRuntimeContext::Unknown => IndexedDb,
+    }
+}
 
-            let vkey = self.browser_key_name(key.as_ref());
+pub(super) async fn build_backend(ps: &ProtectedStore) -> VeilidAPIResult<ProtectedStoreBackend> {
+    let config = ps.config();
+    let prefix = key_prefix(&config);
 
-            match ls
-                .get_item(&vkey)
-                .map_err(map_js_error_generic("exception thrown"))?
-            {
-                Some(_) => {
-                    ls.delete(&vkey)
-                        .map_err(map_js_error_generic("exception thrown"))?;
-                    Ok(true)
-                }
-                None => Ok(false),
-            }
-        } else {
-            unimplemented!();
+    match resolve_backend(config.protected_store.backend) {
+        VeilidConfigProtectedStoreBackend::LocalStorage
+        | VeilidConfigProtectedStoreBackend::PlatformDefault => {
+            Ok(ProtectedStoreBackend::LocalStorage(LocalStorageBackend {
+                prefix,
+            }))
+        }
+        VeilidConfigProtectedStoreBackend::IndexedDb => {
+            let table_name = prefix.trim_end_matches('_').to_owned();
+            Ok(ProtectedStoreBackend::IndexedDb(
+                IndexedDbBackend::open(&table_name).await?,
+            ))
+        }
+        // VeilidConfigProtectedStoreBackend::Callback => {
+        //     apibail_generic!("callback protected store backend is not yet implemented");
+        // }
+        VeilidConfigProtectedStoreBackend::ExtensionStorage => {
+            Ok(ProtectedStoreBackend::Extension(ExtensionBackend {
+                prefix,
+            }))
         }
     }
 }

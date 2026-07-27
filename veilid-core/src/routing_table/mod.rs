@@ -15,6 +15,8 @@ mod route_spec_store;
 mod routing_domains;
 mod routing_table_inner;
 mod routing_table_snapshot;
+#[cfg(feature = "stats")]
+mod stats;
 mod stats_accounting;
 mod tasks;
 mod types;
@@ -174,7 +176,7 @@ impl fmt::Debug for RoutingTable {
     }
 }
 
-impl_veilid_component!(RoutingTable);
+impl_veilid_component!(RoutingTable, stats);
 
 impl RoutingTable {
     pub fn new(

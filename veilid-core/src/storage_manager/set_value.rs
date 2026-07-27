@@ -121,11 +121,8 @@ impl StorageManager {
         veilid_log!(self debug "Writing subkey to the network: {}:{} len={}", opaque_record_key, subkey, signed_value_data.value_data().data().len() );
 
         // Gate on concurrency + the upload budget (a set pushes the value up)
-        let set_value_fanout = self.config().internal().network.dht.set_value_fanout as u64;
         let value_bytes = signed_value_data.value_data().data().len() as u64;
-        let _gate_permit = self
-            .acquire_operation_gate(Some(value_bytes.saturating_mul(set_value_fanout)), None)
-            .await;
+        let _gate_permit = self.acquire_gated_set(value_bytes).await;
 
         // Use the safety selection we opened the record with
         let result = match self
@@ -155,6 +152,8 @@ impl StorageManager {
                 return Err(e);
             }
         };
+
+        self.record_gated_fanout_outcome(GatedOperationKind::Set, &result.fanout_result);
 
         let out = self
             .process_outbound_set_value_result_locked(

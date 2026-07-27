@@ -354,6 +354,23 @@ abstract class Veilid {
   /// fails, or [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
   Future<bool> deleteTableDB(String name);
 
+  // ProtectedStore
+
+  /// Save a user secret to the protected store. Returns true if a value already existed.
+  Future<bool> saveUserSecret(String key, Uint8List value);
+
+  /// Load a user secret from the protected store, or null if not present.
+  Future<Uint8List?> loadUserSecret(String key);
+
+  /// Remove a user secret from the protected store. Returns true if it existed.
+  Future<bool> removeUserSecret(String key);
+
+  /// List the key names of the user secrets stored for this node's namespace.
+  Future<List<String>> listUserSecrets();
+
+  /// Remove every user secret stored for this node's namespace.
+  Future<void> deleteAllUserSecrets();
+
   // Misc
 
   /// Current wall-clock time. May move backward if the system clock is adjusted.

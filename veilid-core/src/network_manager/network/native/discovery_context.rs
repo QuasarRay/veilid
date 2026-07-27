@@ -1026,6 +1026,9 @@ impl DiscoveryContext {
             }
         }
 
+        #[cfg(feature = "verbose-tracing")]
+        veilid_log!(self debug "DialInfo discovery {:?}: {:?}", self.config, opt_best_detection_result.as_ref().map(|r| &r.ddi));
+
         opt_best_detection_result
     }
 }

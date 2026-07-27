@@ -20,7 +20,7 @@ path = "src/lib.rs"
 
 [features]
 
-default = ["default-tokio", "debug-api", "backtrace"]
+default = ["default-tokio", "debug-api", "backtrace", "stats"]
 
 # Common features
 default-tokio = ["enable-crypto-vld0", "rt-tokio"]
@@ -29,6 +29,7 @@ default-async-std = [
     "rt-async-std",
     "debug-api",
     "backtrace",
+    "stats",
 ]
 default-wasm = ["enable-crypto-vld0", "rt-wasm-bindgen"]
 
@@ -38,8 +39,14 @@ backtrace = ["dep:backtrace", "veilid-tools/backtrace"]
 # Text debug-command interface (VeilidAPI::debug); without it debug commands return ""
 debug-api = ["dep:clap", "dep:bytesize"]
 
+# Always-on internal metrics (StatsManager); compiled out when disabled
+stats = []
+
 # JsonSchema derives on API types, for veilid-remote-api schema generation
 schemars = ["dep:schemars"]
+
+# Adaptive AIMD byte budgets on the DHT operation gate; off = budgets never bind
+aimd-dht = ["veilid-tools/aimd"]
 
 # Runtimes
 rt-async-std = ["async-std", "veilid-tools/rt-async-std"]
@@ -130,7 +137,7 @@ thiserror = "2.0.18"
 
 # Data structures
 enumset = { version = "1.1.10", features = ["serde"] }
-keyvaluedb = "=0.1.8"
+keyvaluedb = "=0.2.0"
 range-set-blaze = "0.6.0"
 weak-table = "0.3.2"
 hashlink = { package = "veilid-hashlink", version = "=0.1.3", features = [
@@ -194,6 +201,7 @@ serde = { version = "1.0.218", features = ["derive", "rc"] }
 serde_ignored = "0.1.14"
 serde_json = { version = "1.0.149" }
 data-encoding = { version = "2.8.0" }
+zeroize = { version = "1" }
 schemars = { version = "1.0.3", optional = true }
 lz4_flex = { version = "0.13.1", default-features = false, features = [
     "safe-encode",
@@ -226,8 +234,8 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 ] }
 
 # Data structures
-keyring-manager = "=0.8.3"
-keyvaluedb-sqlite = "=0.1.8"
+keyring-manager = "=0.9.0"
+keyvaluedb-sqlite = "=0.2.0"
 
 # Network
 async-tungstenite = { version = "0.34.0" }
@@ -246,6 +254,7 @@ getrandom = { version = "0.4.2", features = ["wasm_js"] }
 # System
 js-sys = "0.3.83"
 wasm-bindgen = "0.2.121"
+wasm-bindgen-futures = "0.4.58"
 gloo-events = { version = "0.3.0" }
 
 send_wrapper = { version = "0.6.0", features = ["futures"] }
@@ -259,7 +268,7 @@ serde-wasm-bindgen = "0.6.5"
 ws_stream_wasm = "0.7.4"
 
 # Data Structures
-keyvaluedb-web = "=0.1.8"
+keyvaluedb-web = "=0.2.0"
 
 ### Configuration for WASM32 'web-sys' crate
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies.web-sys]

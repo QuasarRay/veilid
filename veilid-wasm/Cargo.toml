@@ -19,6 +19,7 @@ path = "src/lib.rs"
 [features]
 default = ["enable-crypto-vld0"]
 debug-api = ["veilid-core/debug-api"]
+stats = ["veilid-core/stats"]
 enable-crypto-vld0 = ["veilid-core/enable-crypto-vld0"]
 # enable-crypto-vld1 = ["veilid-core/enable-crypto-vld1"]
 enable-crypto-none = ["veilid-core/enable-crypto-none"]

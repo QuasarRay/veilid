@@ -1,4 +1,6 @@
 mod attachment_level_calculator;
+#[cfg(feature = "stats")]
+mod stats;
 
 #[cfg(any(test, feature = "test-util"))]
 #[doc(hidden)]
@@ -66,6 +68,9 @@ struct AttachmentManagerInner {
     tick_future: Option<PinBoxFutureStatic<()>>,
     /// Subscription to RoutingDomainReadyEvent
     routing_domain_ready_subscription: Option<EventBusSubscription>,
+    /// Attachment state time-in-state and transition accounting
+    #[cfg(feature = "stats")]
+    stats_accounting: stats::AttachmentStatsAccounting,
 }
 
 impl fmt::Debug for AttachmentManagerInner {
@@ -113,7 +118,7 @@ impl fmt::Debug for AttachmentManager {
     }
 }
 
-impl_veilid_component!(AttachmentManager);
+impl_veilid_component!(AttachmentManager, stats);
 
 impl AttachmentManager {
     fn new_inner() -> AttachmentManagerInner {
@@ -129,6 +134,8 @@ impl AttachmentManager {
             bind_retry_ts: None,
             tick_future: None,
             routing_domain_ready_subscription: None,
+            #[cfg(feature = "stats")]
+            stats_accounting: stats::AttachmentStatsAccounting::default(),
         }
     }
     pub fn new(
@@ -591,6 +598,7 @@ impl AttachmentManager {
         let new_state = self.level_calculator.recompute();
         let inputs = self.level_calculator.last_inputs();
         inner.attachment_state = new_state;
+        veilid_stats!(inner.stats_accounting.record_state(now, new_state));
 
         let veilid_state_attachment = Box::new(VeilidStateAttachment {
             state: new_state,
@@ -644,6 +652,7 @@ impl AttachmentManager {
 
         // Update attachment state
         inner.attachment_state = state;
+        veilid_stats!(inner.stats_accounting.record_state(now, state));
         let veilid_state_attachment = Box::new(VeilidStateAttachment {
             state,
             public_internet_ready: false,

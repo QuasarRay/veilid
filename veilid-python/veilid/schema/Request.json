@@ -541,6 +541,91 @@
       ]
     },
     {
+      "description": "Save a user secret to the protected store.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "Secret key name.",
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "const": "SaveUserSecret"
+        },
+        "value": {
+          "description": "Secret value bytes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "key",
+        "value"
+      ]
+    },
+    {
+      "description": "Load a user secret from the protected store.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "Secret key name.",
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "const": "LoadUserSecret"
+        }
+      },
+      "required": [
+        "op",
+        "key"
+      ]
+    },
+    {
+      "description": "Remove a user secret from the protected store.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "Secret key name.",
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "const": "RemoveUserSecret"
+        }
+      },
+      "required": [
+        "op",
+        "key"
+      ]
+    },
+    {
+      "description": "List stored user secret key names.",
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "ListUserSecrets"
+        }
+      },
+      "required": [
+        "op"
+      ]
+    },
+    {
+      "description": "Remove all stored user secrets.",
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "DeleteAllUserSecrets"
+        }
+      },
+      "required": [
+        "op"
+      ]
+    },
+    {
       "description": "Get the Veilid version as a string.",
       "type": "object",
       "properties": {
@@ -728,7 +813,7 @@
           ]
         },
         {
-          "description": "Seal `plaintext` to a recipient KEM encapsulation key with HPKE base mode (RFC 9180), single-shot.",
+          "description": "Seal `plaintext` to a recipient KEM encapsulation key with HPKE base mode (RFC 9180),\nsingle-shot. Only the recipient can open the blob; the sealer cannot decrypt what it\njust sealed. Callers who already share a symmetric key want `EncryptAead` instead.",
           "type": "object",
           "properties": {
             "aad": {
@@ -756,7 +841,7 @@
           ]
         },
         {
-          "description": "Open a sealed blob produced by `HpkeSeal` with the recipient KEM decapsulation key.",
+          "description": "Open a sealed blob produced by `HpkeSeal` with the recipient KEM decapsulation key.\nOnly the recipient can open a sealed blob; the sealer cannot.",
           "type": "object",
           "properties": {
             "aad": {

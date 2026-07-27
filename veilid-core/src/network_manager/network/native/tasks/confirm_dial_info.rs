@@ -7,6 +7,9 @@ impl_veilid_log_facility!("net");
 
 type InboundProtocolMap = HashMap<(AddressType, LowLevelProtocolType, u16), Vec<ProtocolType>>;
 
+/// Cap on one whole dial-info detection pass across all discovery contexts
+const DIAL_INFO_DETECTION_TIMEOUT_MS: u32 = 60_000;
+
 struct DialInfoConfirmationResult {
     external_address_types: AddressTypeSet,
     dial_info_details: Vec<DialInfoDetail>,
@@ -404,9 +407,20 @@ impl NativeNetwork {
         ));
         editor.commit();
 
-        let opt_confirmation_result = self
-            .do_public_internet_dial_info_detection(stop_token, cur_ts, &inbound_protocol_map)
-            .await?;
+        // Bound the detection so a hung discovery fails instead of wedging this
+        // single-flight task forever
+        let opt_confirmation_result = match timeout(
+            DIAL_INFO_DETECTION_TIMEOUT_MS,
+            self.do_public_internet_dial_info_detection(stop_token, cur_ts, &inbound_protocol_map),
+        )
+        .await
+        {
+            Ok(res) => res?,
+            Err(_) => {
+                veilid_log!(self debug "DialInfo detection timed out after {}ms", DIAL_INFO_DETECTION_TIMEOUT_MS);
+                None
+            }
+        };
 
         let Some(confirmation_result) = opt_confirmation_result else {
             // Revert to last network config

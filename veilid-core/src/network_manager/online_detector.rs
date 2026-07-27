@@ -56,6 +56,12 @@ struct OnlineDetectionPerDomain {
     /// `RELIABLE_PING_INTERVAL_MAX` old. Credits node reliability for time we
     /// couldn't test.
     recent_offline_intervals: VecDeque<(Timestamp, Timestamp)>,
+    /// Cumulative online<->offline transition count
+    #[cfg(feature = "stats")]
+    total_transitions: u64,
+    /// Cumulative time spent offline
+    #[cfg(feature = "stats")]
+    total_time_offline: TimestampDuration,
 }
 
 impl Default for OnlineDetectionPerDomain {
@@ -68,6 +74,10 @@ impl Default for OnlineDetectionPerDomain {
             flap_detector: FlapDetector::new_secs(4.0, 60),
             offline_started_ts: None,
             recent_offline_intervals: VecDeque::new(),
+            #[cfg(feature = "stats")]
+            total_transitions: 0,
+            #[cfg(feature = "stats")]
+            total_time_offline: TimestampDuration::new(0),
         }
     }
 }
@@ -136,9 +146,12 @@ impl OnlineDetector {
         if !Self::uses_ping_detection(routing_domain) {
             return;
         }
-        // Only previously-live nodes count: a dead node we probe timing out isn't evidence
-        // that *we* are offline. Read liveness now, before the caller's lost-answer /
-        // failed-to-send handler clears first_steady_answer_ts.
+        // Only currently-responsive nodes count. A probe timing out to a node that is
+        // Initial/Missing/Dead/Punished is evidence about that node, not about us: a stale
+        // routing table loads entries as Initial while their persisted answer history
+        // survives, so a historical-liveness check would count them and flip us offline
+        // during the attach burst.
+        let cur_ts = Timestamp::now();
         let routing_table = self.routing_table();
         let live_node_ids: Vec<NodeId> = node_ids
             .into_iter()
@@ -147,7 +160,7 @@ impl OnlineDetector {
                     .lookup_node_id(node_id.clone())
                     .ok()
                     .flatten()
-                    .is_some_and(|nr| nr.rpc_stats().first_steady_answer_ts.is_some())
+                    .is_some_and(|nr| nr.state(cur_ts).is_responsive())
             })
             .collect();
         if live_node_ids.is_empty() {
@@ -247,6 +260,29 @@ impl OnlineDetector {
     }
 
     /// Drive the state machine with an event, dispatching to the current state's handler.
+    #[cfg(feature = "stats")]
+    pub(crate) fn online_stats(
+        &self,
+        routing_domain: RoutingDomain,
+        now: Timestamp,
+    ) -> (bool, u64, TimestampDuration) {
+        let inner = self.inner.lock();
+        match inner.get(&routing_domain) {
+            Some(pd) => {
+                let mut time_offline = pd.total_time_offline;
+                if let Some(start) = pd.offline_started_ts {
+                    time_offline = time_offline.saturating_add(now.duration_since(start));
+                }
+                (
+                    matches!(pd.online_state, OnlineState::Online),
+                    pd.total_transitions,
+                    time_offline,
+                )
+            }
+            None => (true, 0, TimestampDuration::new(0)),
+        }
+    }
+
     fn process_event(&self, routing_domain: RoutingDomain, event: OnlineEvent) {
         if !Self::uses_ping_detection(routing_domain) {
             return;
@@ -270,6 +306,11 @@ impl OnlineDetector {
                     OnlineState::Online => {
                         if let Some(start) = pd.offline_started_ts.take() {
                             pd.recent_offline_intervals.push_back((start, now));
+                            veilid_stats!(
+                                pd.total_time_offline = pd
+                                    .total_time_offline
+                                    .saturating_add(now.duration_since(start))
+                            );
                             // Prune intervals older than the reliable ping span.
                             while pd.recent_offline_intervals.front().is_some_and(|(_, e)| {
                                 now.duration_since(*e)
@@ -282,6 +323,7 @@ impl OnlineDetector {
                 }
                 pd.online_state = new_state;
                 pd.last_transition_ts = now;
+                veilid_stats!(pd.total_transitions += 1);
                 // A deliberate detach is a clean break, not network flapping: reset the
                 // flap baseline so pre-detach history doesn't combine with reattach turbulence.
                 if matches!(event, OnlineEvent::Detached) {
@@ -297,6 +339,14 @@ impl OnlineDetector {
         if let Some(new_state) = opt_new_state {
             veilid_log!(self info "{:?} {} detected", routing_domain,
                 if new_state == OnlineState::Online { "online" } else { "offline" });
+
+            // A NAT rebind kills established flows silently; close them so recovery pings
+            // reconnect instead of riding dead ones
+            if new_state == OnlineState::Offline && !matches!(event, OnlineEvent::Detached) {
+                self.network_manager()
+                    .connection_manager()
+                    .close_all_connections();
+            }
         }
         if let Some(penalty) = opt_flap_penalty {
             veilid_log!(self debugwarn "{:?} online state FLAPPING (penalty={:.1})", routing_domain, penalty);

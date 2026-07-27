@@ -63,6 +63,20 @@ class VeilidConfigCapabilities(ConfigBase):
     disable: list[VeilidCapability]
 
 
+class VeilidConfigProtectedStoreBackend(StrEnum):
+    """Which storage backend the protected store keeps secrets in.
+
+    The browser-only backends are rejected on native platforms. `PLATFORM_DEFAULT`
+    chooses per platform and runtime context.
+    """
+
+    PLATFORM_DEFAULT = "PlatformDefault"
+    LOCAL_STORAGE = "LocalStorage"
+    INDEXED_DB = "IndexedDb"
+    EXTENSION_STORAGE = "ExtensionStorage"
+    # CALLBACK = "Callback"
+
+
 @dataclass
 class VeilidConfigProtectedStore(ConfigBase):
     """Protected store: where secrets such as the device encryption key are kept."""
@@ -73,6 +87,7 @@ class VeilidConfigProtectedStore(ConfigBase):
     delete: bool
     device_encryption_key_password: str
     new_device_encryption_key_password: Optional[str]
+    backend: VeilidConfigProtectedStoreBackend
 
 
 @dataclass

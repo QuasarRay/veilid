@@ -2991,6 +2991,214 @@
           ]
         },
         {
+          "description": "Result of `SaveUserSecret`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "SaveUserSecret"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "description": "Result of `LoadUserSecret`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "LoadUserSecret"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value, serialized as a base64 string or null.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned bytes, if present.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "description": "Result of `RemoveUserSecret`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "RemoveUserSecret"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "description": "Result of `ListUserSecrets`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "ListUserSecrets"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value, serialized as a list of strings.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "description": "Result of `DeleteAllUserSecrets`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "DeleteAllUserSecrets"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "null"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
           "description": "Result of `VeilidVersionString`.",
           "type": "object",
           "properties": {
@@ -5346,6 +5554,10 @@
           "description": "Always use insecure file storage, ignoring any OS keychain/keyring.",
           "type": "boolean"
         },
+        "backend": {
+          "description": "Storage backend for secrets (`PlatformDefault` chooses per platform and runtime context).",
+          "$ref": "#/$defs/VeilidConfigProtectedStoreBackend"
+        },
         "delete": {
           "description": "Delete the protected store on startup.",
           "type": "boolean"
@@ -5371,7 +5583,33 @@
         "always_use_insecure_storage",
         "directory",
         "delete",
-        "device_encryption_key_password"
+        "device_encryption_key_password",
+        "backend"
+      ]
+    },
+    "VeilidConfigProtectedStoreBackend": {
+      "description": "Which storage backend the protected store uses for secrets.\n\nThe browser-only variants (`LocalStorage`, `IndexedDb`, `ExtensionStorage`) are rejected on\nnative platforms. `PlatformDefault` chooses per platform and runtime context: the OS keyring on\nnative, `localStorage` in a browser Window, IndexedDB in a worker, and extension storage in a\nWebExtension.",
+      "oneOf": [
+        {
+          "description": "Choose automatically based on the platform and runtime context.",
+          "type": "string",
+          "const": "PlatformDefault"
+        },
+        {
+          "description": "Browser `localStorage` (Window contexts only).",
+          "type": "string",
+          "const": "LocalStorage"
+        },
+        {
+          "description": "Browser IndexedDB (available in worker contexts).",
+          "type": "string",
+          "const": "IndexedDb"
+        },
+        {
+          "description": "WebExtension storage (`chrome.storage.local`/`browser.storage.local`).",
+          "type": "string",
+          "const": "ExtensionStorage"
+        }
       ]
     },
     "VeilidConfigProtocol": {

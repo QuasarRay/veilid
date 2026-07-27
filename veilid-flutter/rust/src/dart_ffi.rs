@@ -135,11 +135,21 @@ pub struct VeilidFFIConfigLoggingFlame {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct VeilidFFIConfigLoggingStats {
+    pub enabled: bool,
+    pub interval_secs: u32,
+    /// Directory or file for NDJSON records; empty routes to the "stats" log facility.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VeilidFFIConfigLogging {
     pub terminal: VeilidFFIConfigLoggingTerminal,
     pub api: VeilidFFIConfigLoggingApi,
     pub otlp: VeilidFFIConfigLoggingOtlp,
     pub flame: VeilidFFIConfigLoggingFlame,
+    pub stats: VeilidFFIConfigLoggingStats,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -394,6 +404,25 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
         .try_init()
         .map_err(|e| format!("failed to initialize logging: {}", e))
         .expect_or_log("failed to initalize ffi platform");
+
+    // Stats manager: process-global, under the default log key
+    #[cfg(feature = "stats")]
+    {
+        let stats = &platform_config.logging.stats;
+        let output = if stats.path.is_empty() {
+            StatsOutput::Facility
+        } else {
+            StatsOutput::File(std::path::PathBuf::from(&stats.path))
+        };
+        StatsManager::init(
+            None,
+            StatsSettings {
+                enabled: stats.enabled,
+                interval_secs: stats.interval_secs,
+                output,
+            },
+        );
+    }
 }
 
 #[no_mangle]
@@ -2620,6 +2649,80 @@ pub extern "C" fn debug(port: i64, command: FfiStr) {
             let veilid_api = get_veilid_api().await?;
             let out = veilid_api.debug(command).await?;
             VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn save_user_secret(port: i64, key: FfiStr, value: FfiStr) {
+    let key = key.into_opt_string().unwrap_or_default();
+    let value: Vec<u8> = BASE64URL_NOPAD
+        .decode(value.into_opt_string().unwrap_or_log().as_bytes())
+        .unwrap_or_log();
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let out = veilid_api.save_user_secret(key, value).await?;
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn load_user_secret(port: i64, key: FfiStr) {
+    let key = key.into_opt_string().unwrap_or_default();
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let out = veilid_api
+                .load_user_secret(key)
+                .await?
+                .map(|x| BASE64URL_NOPAD.encode(&x));
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn remove_user_secret(port: i64, key: FfiStr) {
+    let key = key.into_opt_string().unwrap_or_default();
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let out = veilid_api.remove_user_secret(key).await?;
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn list_user_secrets(port: i64) {
+    DartIsolateWrapper::new(port).spawn_result_json(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            let out = veilid_api.list_user_secrets().await?;
+            VeilidAPIResult::Ok(out)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn delete_all_user_secrets(port: i64) {
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            veilid_api.delete_all_user_secrets().await?;
+            VeilidAPIResult::Ok(())
         }
         .in_current_span(),
     );

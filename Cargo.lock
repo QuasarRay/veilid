@@ -3167,9 +3167,9 @@ checksum = "17ab85f84ca42c5ec520e6f3c9966ba1fd62909ce260f8837e248857d2560509"
 
 [[package]]
 name = "keyring-manager"
-version = "0.8.3"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c8b77f802180237d8e0e4b3d767bb58d77af03513738ff125bca0261debfb37"
+checksum = "6732b8f037812826bd41ba17dd343ee13b5c351c8bb2668e2db62b33955b04d1"
 dependencies = [
  "byteorder",
  "cfg-if",
@@ -3186,15 +3186,15 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb"
-version = "0.1.8"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33948ddb57e176612132deecd3ed175255bbe6b4aaea3036dee4fb0695b62c18"
+checksum = "c129205de4e088848b690986b861b26cdfbd603ade0f0ad9eb0b401f789eed5e"
 
 [[package]]
 name = "keyvaluedb-memorydb"
-version = "0.1.8"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a88430ff75d94d5bd8d273e7e04e9275a09ec39d05d8f13c5110d3666afd4e88"
+checksum = "70f8978bb0ca1a67e8a098dd5034932e7125786c7b932fb8291772538eec0091"
 dependencies = [
  "keyvaluedb",
  "parking_lot",
@@ -3202,9 +3202,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-sqlite"
-version = "0.1.8"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d88bd99fdac73bdb66f87c3dbc6934fe7e444ff6dd981d5ff01b24ef9cab81b"
+checksum = "58de27d39e29886680138ae67b7d98b62fa81e1a75ac9de648f035a7a77c55bd"
 dependencies = [
  "async-sqlite",
  "keyvaluedb",
@@ -3213,9 +3213,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-web"
-version = "0.1.8"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f55b98158bd270bc11089b1d5c7fe50c8ff1bc4406d012e33e4dce194a34a02b"
+checksum = "48282f7be062a9d81a9527d249e1856e403013135f02c3fe98922f2f494441c7"
 dependencies = [
  "flume",
  "futures",
@@ -6179,12 +6179,14 @@ dependencies = [
  "veilid-hashlink",
  "veilid-tools",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "weak-table",
  "web-sys",
  "webpki-roots",
  "ws_stream_wasm",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]

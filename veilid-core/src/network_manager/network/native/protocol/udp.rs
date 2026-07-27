@@ -168,11 +168,22 @@ impl RawUdpProtocolHandler {
                 Ok(NetworkResult::value(()))
             };
 
-            network_result_try!(
+            // A stalled interface parks send_to forever while the ttl lock is held,
+            // serializing every UDP send behind it; bound the fragmented send so it fails
+            let timeout_ms = self.registry.config().internal().network.rpc.timeout_ms;
+            network_result_try!(match timeout(
+                timeout_ms,
                 self.assembly_buffer
                     .split_message(data, remote_addr, sender)
-                    .await?
-            );
+            )
+            .await
+            {
+                Ok(res) => res?,
+                Err(_) => {
+                    veilid_log!(self debug "UDP send timed out: remote_addr={:?}", remote_addr);
+                    return Ok(NetworkResult::timeout());
+                }
+            });
         }
 
         // Return a flow for the sent message

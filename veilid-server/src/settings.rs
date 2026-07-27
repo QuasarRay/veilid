@@ -385,6 +385,30 @@ pub struct Flame {
     pub path: String,
 }
 
+/// Optimization stats logging sink.
+#[cfg(feature = "stats")]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Stats {
+    /// Enable periodic stats logging.
+    pub enabled: bool,
+    /// Directory for per-subnode NDJSON files (empty = the "stats" log facility).
+    pub directory: String,
+    /// Seconds between records.
+    pub interval_secs: u32,
+}
+
+#[cfg(feature = "stats")]
+impl Default for Stats {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            directory: String::new(),
+            interval_secs: 10,
+        }
+    }
+}
+
 /// Perfetto trace output sink.
 #[cfg(all(unix, feature = "perfetto"))]
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -546,6 +570,9 @@ pub struct Logging {
     /// Flamegraph sink.
     #[cfg(feature = "flame")]
     pub flame: Flame,
+    /// Optimization stats logging sink.
+    #[cfg(feature = "stats")]
+    pub stats: Stats,
     /// Perfetto sink.
     #[cfg(all(unix, feature = "perfetto"))]
     pub perfetto: Perfetto,
@@ -1090,6 +1117,8 @@ pub struct ProtectedStore {
     pub device_encryption_key_password: String,
     /// New password to re-encrypt the device encryption key with, triggering a rotation.
     pub new_device_encryption_key_password: Option<String>,
+    /// Storage backend for secrets (`PlatformDefault` chooses the OS keyring on native).
+    pub backend: VeilidConfigProtectedStoreBackend,
 }
 impl Default for ProtectedStore {
     fn default() -> Self {
@@ -1101,6 +1130,7 @@ impl Default for ProtectedStore {
             delete: VeilidConfigProtectedStore::default().delete,
             device_encryption_key_password: String::new(),
             new_device_encryption_key_password: None,
+            backend: VeilidConfigProtectedStoreBackend::default(),
         }
     }
 }
@@ -1519,6 +1549,12 @@ impl Settings {
             set_config_value!(inner.logging.flame.enabled, value);
             set_config_value!(inner.logging.flame.path, value);
         }
+        #[cfg(feature = "stats")]
+        {
+            set_config_value!(inner.logging.stats.enabled, value);
+            set_config_value!(inner.logging.stats.directory, value);
+            set_config_value!(inner.logging.stats.interval_secs, value);
+        }
         #[cfg(all(unix, feature = "perfetto"))]
         {
             set_config_value!(inner.logging.perfetto.enabled, value);
@@ -1770,6 +1806,7 @@ impl Settings {
                     .protected_store
                     .new_device_encryption_key_password
                     .clone(),
+                backend: inner.core.protected_store.backend,
             },
             table_store: VeilidConfigTableStore {
                 directory: inner.core.table_store.directory.clone(),
@@ -2041,6 +2078,12 @@ mod tests {
             assert!(!s.logging.flame.enabled);
             assert_eq!(s.logging.flame.path, "");
         }
+        #[cfg(feature = "stats")]
+        {
+            assert!(!s.logging.stats.enabled);
+            assert_eq!(s.logging.stats.directory, "");
+            assert_eq!(s.logging.stats.interval_secs, 10);
+        }
         #[cfg(all(unix, feature = "perfetto"))]
         {
             assert!(!s.logging.perfetto.enabled);
@@ -2098,7 +2141,7 @@ mod tests {
 
         assert_eq!(
             s.core.internal.network.connection_initial_timeout_ms,
-            2_000u32
+            5_000u32
         );
         assert_eq!(
             s.core.internal.network.connection_inactivity_timeout_ms,
@@ -2199,8 +2242,8 @@ mod tests {
             s.core.internal.network.dht.max_watch_expiration_ms,
             600_000u32
         );
-        assert_eq!(s.core.internal.network.dht.public_transaction_limit, 4u32);
-        assert_eq!(s.core.internal.network.dht.member_transaction_limit, 1u32);
+        assert_eq!(s.core.internal.network.dht.public_transaction_limit, 8u32);
+        assert_eq!(s.core.internal.network.dht.member_transaction_limit, 4u32);
         //
         assert!(!s.core.network.upnp);
         assert_eq!(s.core.network.detect_address_changes, None);

@@ -17,17 +17,20 @@ name = "veilid-server"
 path = "src/main.rs"
 
 [features]
-default = ["rt-tokio", "veilid-core/default", "veilid-remote-api/default"]
+default = ["rt-tokio", "veilid-core/default", "veilid-remote-api/default", "stats"]
 
 default-async-std = [
     "rt-async-std",
     "veilid-core/default-async-std",
     "veilid-remote-api/default-async-std",
+    "stats",
 ]
 
+stats = ["veilid-core/stats"]
 geolocation = ["veilid-core/geolocation"]
 footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
 footgun-settings = ["veilid-core/footgun-config"]
+aimd-dht = ["veilid-core/aimd-dht"]
 
 rt-tokio = ["veilid-core/rt-tokio", "tokio", "tokio-util", "signal-hook-tokio"]
 

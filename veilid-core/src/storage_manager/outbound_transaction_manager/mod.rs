@@ -580,6 +580,18 @@ impl OutboundTransactionManager {
             .any(|tx| tx.kind() == OutboundTransactionKind::Foreground)
     }
 
+    /// (total, foreground) active transaction counts
+    #[cfg(feature = "stats")]
+    pub fn transaction_counts(&self) -> (u32, u32) {
+        let total = self.transactions.len() as u32;
+        let foreground = self
+            .transactions
+            .values()
+            .filter(|tx| tx.kind() == OutboundTransactionKind::Foreground)
+            .count() as u32;
+        (total, foreground)
+    }
+
     /// Check if a transaction exists and return the opaque record keys associated with it if it does
     pub fn get_transaction_keys(
         &self,

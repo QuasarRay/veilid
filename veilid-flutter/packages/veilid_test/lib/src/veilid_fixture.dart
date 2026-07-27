@@ -79,6 +79,14 @@ class DefaultVeilidFixture implements VeilidFixture {
         ? <String>[]
         : otlpDirectivesStr.split(',').map((e) => e.trim()).toList();
 
+    // Stats: STATS=1 enables, STATS_INTERVAL secs (default 10), STATS_PATH file.
+    final statsEnabled = const String.fromEnvironment('STATS').trim() == '1';
+    final statsIntervalStr = const String.fromEnvironment(
+      'STATS_INTERVAL',
+    ).trim();
+    final statsInterval = int.tryParse(statsIntervalStr) ?? 10;
+    final statsPathStr = const String.fromEnvironment('STATS_PATH').trim();
+
     final Map<String, dynamic> platformConfigJson;
     if (kIsWeb) {
       final platformConfig = VeilidWASMConfig(
@@ -98,6 +106,10 @@ class DefaultVeilidFixture implements VeilidFixture {
             // pass through for backwards compatibility
             // ignore: deprecated_member_use
             ignoreLogTargets: ignoreLogTargets,
+          ),
+          stats: VeilidWASMConfigLoggingStats(
+            enabled: statsEnabled,
+            intervalSecs: statsInterval,
           ),
         ),
       );
@@ -134,6 +146,11 @@ class DefaultVeilidFixture implements VeilidFixture {
           flame: VeilidFFIConfigLoggingFlame(
             enabled: flamePathStr.isNotEmpty,
             path: flamePathStr,
+          ),
+          stats: VeilidFFIConfigLoggingStats(
+            enabled: statsEnabled,
+            intervalSecs: statsInterval,
+            path: statsPathStr,
           ),
         ),
       );

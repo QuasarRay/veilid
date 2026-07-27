@@ -197,6 +197,12 @@ enum DebugCommand {
     },
     /// show process and attachment uptime
     Uptime,
+    /// print or reset internal optimization stats
+    #[cfg(feature = "stats")]
+    Stats {
+        #[command(subcommand)]
+        command: Option<DebugStatsSubcommand>,
+    },
     #[cfg(debug_assertions)]
     /// trigger crash behaviors for debug testing
     Die {
@@ -240,6 +246,32 @@ enum DebugNetworkSubcommand {
     /// Print network manager statistics.
     #[command(help_template = DEBUG_HELP_TEMPLATE)]
     Stats,
+}
+
+/// Subcommands supported by `stats`.
+#[cfg(feature = "stats")]
+#[derive(Debug, Subcommand)]
+#[command(
+    help_template = DEBUG_HELP_TEMPLATE,
+    disable_help_subcommand = true
+)]
+enum DebugStatsSubcommand {
+    /// Print current stats as pretty JSON.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Print,
+    /// Reset stats to start a fresh collection window.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Reset,
+    /// Start, reconfigure, or stop periodic stats logging.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Log {
+        /// Seconds between records (default 10), or `off` to stop.
+        #[arg(value_name = "duration")]
+        duration: Option<String>,
+        /// File to append NDJSON to (native only); omit to log to the "stats" facility.
+        #[arg(value_name = "path")]
+        path: Option<String>,
+    },
 }
 
 /// Subcommands supported by `route`.
@@ -2921,7 +2953,7 @@ impl VeilidAPI {
     }
 
     /// Get the help text for 'internal debug' commands.
-    pub fn debug_help(&self) -> VeilidAPIResult<String> {
+    fn debug_help(&self) -> VeilidAPIResult<String> {
         let out = render_parser_help::<DebugCommandParser>();
         let out = out
             .lines()
@@ -2931,8 +2963,66 @@ impl VeilidAPI {
         Ok(out)
     }
 
+    #[cfg(feature = "stats")]
+    #[allow(clippy::unused_async)]
+    async fn debug_stats(&self, command: Option<DebugStatsSubcommand>) -> VeilidAPIResult<String> {
+        let registry = self.core_context()?.registry();
+        match command.unwrap_or(DebugStatsSubcommand::Print) {
+            DebugStatsSubcommand::Print => Ok(registry.stats_manager().print()),
+            DebugStatsSubcommand::Reset => {
+                registry.stats_manager().reset();
+                Ok("Stats reset".to_owned())
+            }
+            DebugStatsSubcommand::Log { duration, path } => {
+                let log_key = registry.log_key();
+                if matches!(duration.as_deref(), Some("off" | "stop" | "none")) {
+                    crate::StatsManager::init(Some(log_key), crate::StatsSettings::default());
+                    return Ok("Stats logging stopped".to_owned());
+                }
+                let interval_secs = match duration.as_deref() {
+                    None => 10u32,
+                    Some(d) => match d.parse::<u32>() {
+                        Ok(v) if v > 0 => v,
+                        _ => apibail_invalid_argument!("debug_stats", "duration", d),
+                    },
+                };
+                let output = if let Some(p) = path {
+                    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+                    {
+                        crate::StatsOutput::File(std::path::PathBuf::from(p))
+                    }
+                    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+                    {
+                        let _ = p;
+                        apibail_invalid_argument!(
+                            "debug_stats",
+                            "path",
+                            "file output unavailable on wasm"
+                        );
+                    }
+                } else {
+                    crate::StatsOutput::Facility
+                };
+                let dest = match &output {
+                    crate::StatsOutput::Facility => "the 'stats' log facility".to_owned(),
+                    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+                    crate::StatsOutput::File(p) => p.display().to_string(),
+                };
+                crate::StatsManager::init(
+                    Some(log_key),
+                    crate::StatsSettings {
+                        enabled: true,
+                        interval_secs,
+                        output,
+                    },
+                );
+                Ok(format!("Stats logging every {interval_secs}s to {dest}"))
+            }
+        }
+    }
+
     /// Get node uptime info.
-    pub async fn debug_uptime(&self) -> VeilidAPIResult<String> {
+    async fn debug_uptime(&self) -> VeilidAPIResult<String> {
         let mut result = String::new();
 
         writeln!(result, "Uptime...").ok();
@@ -2952,7 +3042,7 @@ impl VeilidAPI {
     /// Cause veilid-core to panic via various means
     #[cfg(debug_assertions)]
     #[expect(clippy::unused_async)]
-    pub async fn debug_die(
+    async fn debug_die(
         &self,
         mode: Option<String>,
         message: Vec<String>,
@@ -3093,6 +3183,8 @@ impl VeilidAPI {
                 DebugCommand::Record { command } => self.debug_record(command).await,
                 DebugCommand::Table { command } => self.debug_table(command).await,
                 DebugCommand::Uptime => self.debug_uptime().await,
+                #[cfg(feature = "stats")]
+                DebugCommand::Stats { command } => self.debug_stats(command).await,
                 #[cfg(debug_assertions)]
                 DebugCommand::Die { mode, message } => self.debug_die(mode, message).await,
             }

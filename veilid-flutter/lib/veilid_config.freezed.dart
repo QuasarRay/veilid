@@ -1161,9 +1161,284 @@ as String,
 
 
 /// @nodoc
+mixin _$VeilidFFIConfigLoggingStats implements DiagnosticableTreeMixin {
+
+ bool get enabled; int get intervalSecs; String get path;
+/// Create a copy of VeilidFFIConfigLoggingStats
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidFFIConfigLoggingStatsCopyWith<VeilidFFIConfigLoggingStats> get copyWith => _$VeilidFFIConfigLoggingStatsCopyWithImpl<VeilidFFIConfigLoggingStats>(this as VeilidFFIConfigLoggingStats, _$identity);
+
+  /// Serializes this VeilidFFIConfigLoggingStats to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLoggingStats'))
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('intervalSecs', intervalSecs))..add(DiagnosticsProperty('path', path));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLoggingStats&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.intervalSecs, intervalSecs) || other.intervalSecs == intervalSecs)&&(identical(other.path, path) || other.path == path));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,enabled,intervalSecs,path);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidFFIConfigLoggingStats(enabled: $enabled, intervalSecs: $intervalSecs, path: $path)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidFFIConfigLoggingStatsCopyWith<$Res>  {
+  factory $VeilidFFIConfigLoggingStatsCopyWith(VeilidFFIConfigLoggingStats value, $Res Function(VeilidFFIConfigLoggingStats) _then) = _$VeilidFFIConfigLoggingStatsCopyWithImpl;
+@useResult
+$Res call({
+ bool enabled, int intervalSecs, String path
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidFFIConfigLoggingStatsCopyWithImpl<$Res>
+    implements $VeilidFFIConfigLoggingStatsCopyWith<$Res> {
+  _$VeilidFFIConfigLoggingStatsCopyWithImpl(this._self, this._then);
+
+  final VeilidFFIConfigLoggingStats _self;
+  final $Res Function(VeilidFFIConfigLoggingStats) _then;
+
+/// Create a copy of VeilidFFIConfigLoggingStats
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? intervalSecs = null,Object? path = null,}) {
+  return _then(_self.copyWith(
+enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
+as bool,intervalSecs: null == intervalSecs ? _self.intervalSecs : intervalSecs // ignore: cast_nullable_to_non_nullable
+as int,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidFFIConfigLoggingStats].
+extension VeilidFFIConfigLoggingStatsPatterns on VeilidFFIConfigLoggingStats {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidFFIConfigLoggingStats value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidFFIConfigLoggingStats() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidFFIConfigLoggingStats value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidFFIConfigLoggingStats():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidFFIConfigLoggingStats value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidFFIConfigLoggingStats() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  int intervalSecs,  String path)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidFFIConfigLoggingStats() when $default != null:
+return $default(_that.enabled,_that.intervalSecs,_that.path);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  int intervalSecs,  String path)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidFFIConfigLoggingStats():
+return $default(_that.enabled,_that.intervalSecs,_that.path);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  int intervalSecs,  String path)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidFFIConfigLoggingStats() when $default != null:
+return $default(_that.enabled,_that.intervalSecs,_that.path);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidFFIConfigLoggingStats with DiagnosticableTreeMixin implements VeilidFFIConfigLoggingStats {
+  const _VeilidFFIConfigLoggingStats({this.enabled = false, this.intervalSecs = 10, this.path = ''});
+  factory _VeilidFFIConfigLoggingStats.fromJson(Map<String, dynamic> json) => _$VeilidFFIConfigLoggingStatsFromJson(json);
+
+@override@JsonKey() final  bool enabled;
+@override@JsonKey() final  int intervalSecs;
+@override@JsonKey() final  String path;
+
+/// Create a copy of VeilidFFIConfigLoggingStats
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidFFIConfigLoggingStatsCopyWith<_VeilidFFIConfigLoggingStats> get copyWith => __$VeilidFFIConfigLoggingStatsCopyWithImpl<_VeilidFFIConfigLoggingStats>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidFFIConfigLoggingStatsToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLoggingStats'))
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('intervalSecs', intervalSecs))..add(DiagnosticsProperty('path', path));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLoggingStats&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.intervalSecs, intervalSecs) || other.intervalSecs == intervalSecs)&&(identical(other.path, path) || other.path == path));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,enabled,intervalSecs,path);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidFFIConfigLoggingStats(enabled: $enabled, intervalSecs: $intervalSecs, path: $path)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidFFIConfigLoggingStatsCopyWith<$Res> implements $VeilidFFIConfigLoggingStatsCopyWith<$Res> {
+  factory _$VeilidFFIConfigLoggingStatsCopyWith(_VeilidFFIConfigLoggingStats value, $Res Function(_VeilidFFIConfigLoggingStats) _then) = __$VeilidFFIConfigLoggingStatsCopyWithImpl;
+@override @useResult
+$Res call({
+ bool enabled, int intervalSecs, String path
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidFFIConfigLoggingStatsCopyWithImpl<$Res>
+    implements _$VeilidFFIConfigLoggingStatsCopyWith<$Res> {
+  __$VeilidFFIConfigLoggingStatsCopyWithImpl(this._self, this._then);
+
+  final _VeilidFFIConfigLoggingStats _self;
+  final $Res Function(_VeilidFFIConfigLoggingStats) _then;
+
+/// Create a copy of VeilidFFIConfigLoggingStats
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? intervalSecs = null,Object? path = null,}) {
+  return _then(_VeilidFFIConfigLoggingStats(
+enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
+as bool,intervalSecs: null == intervalSecs ? _self.intervalSecs : intervalSecs // ignore: cast_nullable_to_non_nullable
+as int,path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
 mixin _$VeilidFFIConfigLogging implements DiagnosticableTreeMixin {
 
- VeilidFFIConfigLoggingTerminal get terminal; VeilidFFIConfigLoggingApi get api; VeilidFFIConfigLoggingOtlp get otlp; VeilidFFIConfigLoggingFlame get flame;
+ VeilidFFIConfigLoggingTerminal get terminal; VeilidFFIConfigLoggingApi get api; VeilidFFIConfigLoggingOtlp get otlp; VeilidFFIConfigLoggingFlame get flame; VeilidFFIConfigLoggingStats get stats;
 /// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -1177,21 +1452,21 @@ $VeilidFFIConfigLoggingCopyWith<VeilidFFIConfigLogging> get copyWith => _$Veilid
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLogging'))
-    ..add(DiagnosticsProperty('terminal', terminal))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('otlp', otlp))..add(DiagnosticsProperty('flame', flame));
+    ..add(DiagnosticsProperty('terminal', terminal))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('otlp', otlp))..add(DiagnosticsProperty('flame', flame))..add(DiagnosticsProperty('stats', stats));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLogging&&(identical(other.terminal, terminal) || other.terminal == terminal)&&(identical(other.api, api) || other.api == api)&&(identical(other.otlp, otlp) || other.otlp == otlp)&&(identical(other.flame, flame) || other.flame == flame));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidFFIConfigLogging&&(identical(other.terminal, terminal) || other.terminal == terminal)&&(identical(other.api, api) || other.api == api)&&(identical(other.otlp, otlp) || other.otlp == otlp)&&(identical(other.flame, flame) || other.flame == flame)&&(identical(other.stats, stats) || other.stats == stats));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,terminal,api,otlp,flame);
+int get hashCode => Object.hash(runtimeType,terminal,api,otlp,flame,stats);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLogging(terminal: $terminal, api: $api, otlp: $otlp, flame: $flame)';
+  return 'VeilidFFIConfigLogging(terminal: $terminal, api: $api, otlp: $otlp, flame: $flame, stats: $stats)';
 }
 
 
@@ -1202,11 +1477,11 @@ abstract mixin class $VeilidFFIConfigLoggingCopyWith<$Res>  {
   factory $VeilidFFIConfigLoggingCopyWith(VeilidFFIConfigLogging value, $Res Function(VeilidFFIConfigLogging) _then) = _$VeilidFFIConfigLoggingCopyWithImpl;
 @useResult
 $Res call({
- VeilidFFIConfigLoggingTerminal terminal, VeilidFFIConfigLoggingApi api, VeilidFFIConfigLoggingOtlp otlp, VeilidFFIConfigLoggingFlame flame
+ VeilidFFIConfigLoggingTerminal terminal, VeilidFFIConfigLoggingApi api, VeilidFFIConfigLoggingOtlp otlp, VeilidFFIConfigLoggingFlame flame, VeilidFFIConfigLoggingStats stats
 });
 
 
-$VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal;$VeilidFFIConfigLoggingApiCopyWith<$Res> get api;$VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp;$VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame;
+$VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal;$VeilidFFIConfigLoggingApiCopyWith<$Res> get api;$VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp;$VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame;$VeilidFFIConfigLoggingStatsCopyWith<$Res> get stats;
 
 }
 /// @nodoc
@@ -1219,13 +1494,14 @@ class _$VeilidFFIConfigLoggingCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? terminal = null,Object? api = null,Object? otlp = null,Object? flame = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? terminal = null,Object? api = null,Object? otlp = null,Object? flame = null,Object? stats = null,}) {
   return _then(_self.copyWith(
 terminal: null == terminal ? _self.terminal : terminal // ignore: cast_nullable_to_non_nullable
 as VeilidFFIConfigLoggingTerminal,api: null == api ? _self.api : api // ignore: cast_nullable_to_non_nullable
 as VeilidFFIConfigLoggingApi,otlp: null == otlp ? _self.otlp : otlp // ignore: cast_nullable_to_non_nullable
 as VeilidFFIConfigLoggingOtlp,flame: null == flame ? _self.flame : flame // ignore: cast_nullable_to_non_nullable
-as VeilidFFIConfigLoggingFlame,
+as VeilidFFIConfigLoggingFlame,stats: null == stats ? _self.stats : stats // ignore: cast_nullable_to_non_nullable
+as VeilidFFIConfigLoggingStats,
   ));
 }
 /// Create a copy of VeilidFFIConfigLogging
@@ -1263,6 +1539,15 @@ $VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame {
   
   return $VeilidFFIConfigLoggingFlameCopyWith<$Res>(_self.flame, (value) {
     return _then(_self.copyWith(flame: value));
+  });
+}/// Create a copy of VeilidFFIConfigLogging
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidFFIConfigLoggingStatsCopyWith<$Res> get stats {
+  
+  return $VeilidFFIConfigLoggingStatsCopyWith<$Res>(_self.stats, (value) {
+    return _then(_self.copyWith(stats: value));
   });
 }
 }
@@ -1343,10 +1628,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame,  VeilidFFIConfigLoggingStats stats)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLogging() when $default != null:
-return $default(_that.terminal,_that.api,_that.otlp,_that.flame);case _:
+return $default(_that.terminal,_that.api,_that.otlp,_that.flame,_that.stats);case _:
   return orElse();
 
 }
@@ -1364,10 +1649,10 @@ return $default(_that.terminal,_that.api,_that.otlp,_that.flame);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame,  VeilidFFIConfigLoggingStats stats)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLogging():
-return $default(_that.terminal,_that.api,_that.otlp,_that.flame);}
+return $default(_that.terminal,_that.api,_that.otlp,_that.flame,_that.stats);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -1381,10 +1666,10 @@ return $default(_that.terminal,_that.api,_that.otlp,_that.flame);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidFFIConfigLoggingTerminal terminal,  VeilidFFIConfigLoggingApi api,  VeilidFFIConfigLoggingOtlp otlp,  VeilidFFIConfigLoggingFlame flame,  VeilidFFIConfigLoggingStats stats)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidFFIConfigLogging() when $default != null:
-return $default(_that.terminal,_that.api,_that.otlp,_that.flame);case _:
+return $default(_that.terminal,_that.api,_that.otlp,_that.flame,_that.stats);case _:
   return null;
 
 }
@@ -1396,13 +1681,14 @@ return $default(_that.terminal,_that.api,_that.otlp,_that.flame);case _:
 @JsonSerializable()
 
 class _VeilidFFIConfigLogging with DiagnosticableTreeMixin implements VeilidFFIConfigLogging {
-  const _VeilidFFIConfigLogging({this.terminal = const VeilidFFIConfigLoggingTerminal(enabled: false), this.api = const VeilidFFIConfigLoggingApi(enabled: false), this.otlp = const VeilidFFIConfigLoggingOtlp(enabled: false, grpcEndpoint: '', serviceName: ''), this.flame = const VeilidFFIConfigLoggingFlame(enabled: false, path: '')});
+  const _VeilidFFIConfigLogging({this.terminal = const VeilidFFIConfigLoggingTerminal(enabled: false), this.api = const VeilidFFIConfigLoggingApi(enabled: false), this.otlp = const VeilidFFIConfigLoggingOtlp(enabled: false, grpcEndpoint: '', serviceName: ''), this.flame = const VeilidFFIConfigLoggingFlame(enabled: false, path: ''), this.stats = const VeilidFFIConfigLoggingStats(enabled: false, intervalSecs: 10, path: '')});
   factory _VeilidFFIConfigLogging.fromJson(Map<String, dynamic> json) => _$VeilidFFIConfigLoggingFromJson(json);
 
 @override@JsonKey() final  VeilidFFIConfigLoggingTerminal terminal;
 @override@JsonKey() final  VeilidFFIConfigLoggingApi api;
 @override@JsonKey() final  VeilidFFIConfigLoggingOtlp otlp;
 @override@JsonKey() final  VeilidFFIConfigLoggingFlame flame;
+@override@JsonKey() final  VeilidFFIConfigLoggingStats stats;
 
 /// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
@@ -1418,21 +1704,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidFFIConfigLogging'))
-    ..add(DiagnosticsProperty('terminal', terminal))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('otlp', otlp))..add(DiagnosticsProperty('flame', flame));
+    ..add(DiagnosticsProperty('terminal', terminal))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('otlp', otlp))..add(DiagnosticsProperty('flame', flame))..add(DiagnosticsProperty('stats', stats));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLogging&&(identical(other.terminal, terminal) || other.terminal == terminal)&&(identical(other.api, api) || other.api == api)&&(identical(other.otlp, otlp) || other.otlp == otlp)&&(identical(other.flame, flame) || other.flame == flame));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidFFIConfigLogging&&(identical(other.terminal, terminal) || other.terminal == terminal)&&(identical(other.api, api) || other.api == api)&&(identical(other.otlp, otlp) || other.otlp == otlp)&&(identical(other.flame, flame) || other.flame == flame)&&(identical(other.stats, stats) || other.stats == stats));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,terminal,api,otlp,flame);
+int get hashCode => Object.hash(runtimeType,terminal,api,otlp,flame,stats);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidFFIConfigLogging(terminal: $terminal, api: $api, otlp: $otlp, flame: $flame)';
+  return 'VeilidFFIConfigLogging(terminal: $terminal, api: $api, otlp: $otlp, flame: $flame, stats: $stats)';
 }
 
 
@@ -1443,11 +1729,11 @@ abstract mixin class _$VeilidFFIConfigLoggingCopyWith<$Res> implements $VeilidFF
   factory _$VeilidFFIConfigLoggingCopyWith(_VeilidFFIConfigLogging value, $Res Function(_VeilidFFIConfigLogging) _then) = __$VeilidFFIConfigLoggingCopyWithImpl;
 @override @useResult
 $Res call({
- VeilidFFIConfigLoggingTerminal terminal, VeilidFFIConfigLoggingApi api, VeilidFFIConfigLoggingOtlp otlp, VeilidFFIConfigLoggingFlame flame
+ VeilidFFIConfigLoggingTerminal terminal, VeilidFFIConfigLoggingApi api, VeilidFFIConfigLoggingOtlp otlp, VeilidFFIConfigLoggingFlame flame, VeilidFFIConfigLoggingStats stats
 });
 
 
-@override $VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal;@override $VeilidFFIConfigLoggingApiCopyWith<$Res> get api;@override $VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp;@override $VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame;
+@override $VeilidFFIConfigLoggingTerminalCopyWith<$Res> get terminal;@override $VeilidFFIConfigLoggingApiCopyWith<$Res> get api;@override $VeilidFFIConfigLoggingOtlpCopyWith<$Res> get otlp;@override $VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame;@override $VeilidFFIConfigLoggingStatsCopyWith<$Res> get stats;
 
 }
 /// @nodoc
@@ -1460,13 +1746,14 @@ class __$VeilidFFIConfigLoggingCopyWithImpl<$Res>
 
 /// Create a copy of VeilidFFIConfigLogging
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? terminal = null,Object? api = null,Object? otlp = null,Object? flame = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? terminal = null,Object? api = null,Object? otlp = null,Object? flame = null,Object? stats = null,}) {
   return _then(_VeilidFFIConfigLogging(
 terminal: null == terminal ? _self.terminal : terminal // ignore: cast_nullable_to_non_nullable
 as VeilidFFIConfigLoggingTerminal,api: null == api ? _self.api : api // ignore: cast_nullable_to_non_nullable
 as VeilidFFIConfigLoggingApi,otlp: null == otlp ? _self.otlp : otlp // ignore: cast_nullable_to_non_nullable
 as VeilidFFIConfigLoggingOtlp,flame: null == flame ? _self.flame : flame // ignore: cast_nullable_to_non_nullable
-as VeilidFFIConfigLoggingFlame,
+as VeilidFFIConfigLoggingFlame,stats: null == stats ? _self.stats : stats // ignore: cast_nullable_to_non_nullable
+as VeilidFFIConfigLoggingStats,
   ));
 }
 
@@ -1505,6 +1792,15 @@ $VeilidFFIConfigLoggingFlameCopyWith<$Res> get flame {
   
   return $VeilidFFIConfigLoggingFlameCopyWith<$Res>(_self.flame, (value) {
     return _then(_self.copyWith(flame: value));
+  });
+}/// Create a copy of VeilidFFIConfigLogging
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidFFIConfigLoggingStatsCopyWith<$Res> get stats {
+  
+  return $VeilidFFIConfigLoggingStatsCopyWith<$Res>(_self.stats, (value) {
+    return _then(_self.copyWith(stats: value));
   });
 }
 }
@@ -2680,9 +2976,281 @@ as List<String>,
 
 
 /// @nodoc
+mixin _$VeilidWASMConfigLoggingStats implements DiagnosticableTreeMixin {
+
+ bool get enabled; int get intervalSecs;
+/// Create a copy of VeilidWASMConfigLoggingStats
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidWASMConfigLoggingStatsCopyWith<VeilidWASMConfigLoggingStats> get copyWith => _$VeilidWASMConfigLoggingStatsCopyWithImpl<VeilidWASMConfigLoggingStats>(this as VeilidWASMConfigLoggingStats, _$identity);
+
+  /// Serializes this VeilidWASMConfigLoggingStats to a JSON map.
+  Map<String, dynamic> toJson();
+
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLoggingStats'))
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('intervalSecs', intervalSecs));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidWASMConfigLoggingStats&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.intervalSecs, intervalSecs) || other.intervalSecs == intervalSecs));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,enabled,intervalSecs);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidWASMConfigLoggingStats(enabled: $enabled, intervalSecs: $intervalSecs)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidWASMConfigLoggingStatsCopyWith<$Res>  {
+  factory $VeilidWASMConfigLoggingStatsCopyWith(VeilidWASMConfigLoggingStats value, $Res Function(VeilidWASMConfigLoggingStats) _then) = _$VeilidWASMConfigLoggingStatsCopyWithImpl;
+@useResult
+$Res call({
+ bool enabled, int intervalSecs
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidWASMConfigLoggingStatsCopyWithImpl<$Res>
+    implements $VeilidWASMConfigLoggingStatsCopyWith<$Res> {
+  _$VeilidWASMConfigLoggingStatsCopyWithImpl(this._self, this._then);
+
+  final VeilidWASMConfigLoggingStats _self;
+  final $Res Function(VeilidWASMConfigLoggingStats) _then;
+
+/// Create a copy of VeilidWASMConfigLoggingStats
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? enabled = null,Object? intervalSecs = null,}) {
+  return _then(_self.copyWith(
+enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
+as bool,intervalSecs: null == intervalSecs ? _self.intervalSecs : intervalSecs // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidWASMConfigLoggingStats].
+extension VeilidWASMConfigLoggingStatsPatterns on VeilidWASMConfigLoggingStats {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidWASMConfigLoggingStats value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingStats() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidWASMConfigLoggingStats value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingStats():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidWASMConfigLoggingStats value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingStats() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool enabled,  int intervalSecs)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingStats() when $default != null:
+return $default(_that.enabled,_that.intervalSecs);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool enabled,  int intervalSecs)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingStats():
+return $default(_that.enabled,_that.intervalSecs);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool enabled,  int intervalSecs)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidWASMConfigLoggingStats() when $default != null:
+return $default(_that.enabled,_that.intervalSecs);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidWASMConfigLoggingStats with DiagnosticableTreeMixin implements VeilidWASMConfigLoggingStats {
+  const _VeilidWASMConfigLoggingStats({this.enabled = false, this.intervalSecs = 10});
+  factory _VeilidWASMConfigLoggingStats.fromJson(Map<String, dynamic> json) => _$VeilidWASMConfigLoggingStatsFromJson(json);
+
+@override@JsonKey() final  bool enabled;
+@override@JsonKey() final  int intervalSecs;
+
+/// Create a copy of VeilidWASMConfigLoggingStats
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidWASMConfigLoggingStatsCopyWith<_VeilidWASMConfigLoggingStats> get copyWith => __$VeilidWASMConfigLoggingStatsCopyWithImpl<_VeilidWASMConfigLoggingStats>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidWASMConfigLoggingStatsToJson(this, );
+}
+@override
+void debugFillProperties(DiagnosticPropertiesBuilder properties) {
+  properties
+    ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLoggingStats'))
+    ..add(DiagnosticsProperty('enabled', enabled))..add(DiagnosticsProperty('intervalSecs', intervalSecs));
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidWASMConfigLoggingStats&&(identical(other.enabled, enabled) || other.enabled == enabled)&&(identical(other.intervalSecs, intervalSecs) || other.intervalSecs == intervalSecs));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,enabled,intervalSecs);
+
+@override
+String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+  return 'VeilidWASMConfigLoggingStats(enabled: $enabled, intervalSecs: $intervalSecs)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidWASMConfigLoggingStatsCopyWith<$Res> implements $VeilidWASMConfigLoggingStatsCopyWith<$Res> {
+  factory _$VeilidWASMConfigLoggingStatsCopyWith(_VeilidWASMConfigLoggingStats value, $Res Function(_VeilidWASMConfigLoggingStats) _then) = __$VeilidWASMConfigLoggingStatsCopyWithImpl;
+@override @useResult
+$Res call({
+ bool enabled, int intervalSecs
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidWASMConfigLoggingStatsCopyWithImpl<$Res>
+    implements _$VeilidWASMConfigLoggingStatsCopyWith<$Res> {
+  __$VeilidWASMConfigLoggingStatsCopyWithImpl(this._self, this._then);
+
+  final _VeilidWASMConfigLoggingStats _self;
+  final $Res Function(_VeilidWASMConfigLoggingStats) _then;
+
+/// Create a copy of VeilidWASMConfigLoggingStats
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? enabled = null,Object? intervalSecs = null,}) {
+  return _then(_VeilidWASMConfigLoggingStats(
+enabled: null == enabled ? _self.enabled : enabled // ignore: cast_nullable_to_non_nullable
+as bool,intervalSecs: null == intervalSecs ? _self.intervalSecs : intervalSecs // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
 mixin _$VeilidWASMConfigLogging implements DiagnosticableTreeMixin {
 
- VeilidWASMConfigLoggingPerformance get performance; VeilidWASMConfigLoggingApi get api;
+ VeilidWASMConfigLoggingPerformance get performance; VeilidWASMConfigLoggingApi get api; VeilidWASMConfigLoggingStats get stats;
 /// Create a copy of VeilidWASMConfigLogging
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -2696,21 +3264,21 @@ $VeilidWASMConfigLoggingCopyWith<VeilidWASMConfigLogging> get copyWith => _$Veil
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLogging'))
-    ..add(DiagnosticsProperty('performance', performance))..add(DiagnosticsProperty('api', api));
+    ..add(DiagnosticsProperty('performance', performance))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('stats', stats));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidWASMConfigLogging&&(identical(other.performance, performance) || other.performance == performance)&&(identical(other.api, api) || other.api == api));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidWASMConfigLogging&&(identical(other.performance, performance) || other.performance == performance)&&(identical(other.api, api) || other.api == api)&&(identical(other.stats, stats) || other.stats == stats));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,performance,api);
+int get hashCode => Object.hash(runtimeType,performance,api,stats);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidWASMConfigLogging(performance: $performance, api: $api)';
+  return 'VeilidWASMConfigLogging(performance: $performance, api: $api, stats: $stats)';
 }
 
 
@@ -2721,11 +3289,11 @@ abstract mixin class $VeilidWASMConfigLoggingCopyWith<$Res>  {
   factory $VeilidWASMConfigLoggingCopyWith(VeilidWASMConfigLogging value, $Res Function(VeilidWASMConfigLogging) _then) = _$VeilidWASMConfigLoggingCopyWithImpl;
 @useResult
 $Res call({
- VeilidWASMConfigLoggingPerformance performance, VeilidWASMConfigLoggingApi api
+ VeilidWASMConfigLoggingPerformance performance, VeilidWASMConfigLoggingApi api, VeilidWASMConfigLoggingStats stats
 });
 
 
-$VeilidWASMConfigLoggingPerformanceCopyWith<$Res> get performance;$VeilidWASMConfigLoggingApiCopyWith<$Res> get api;
+$VeilidWASMConfigLoggingPerformanceCopyWith<$Res> get performance;$VeilidWASMConfigLoggingApiCopyWith<$Res> get api;$VeilidWASMConfigLoggingStatsCopyWith<$Res> get stats;
 
 }
 /// @nodoc
@@ -2738,11 +3306,12 @@ class _$VeilidWASMConfigLoggingCopyWithImpl<$Res>
 
 /// Create a copy of VeilidWASMConfigLogging
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? performance = null,Object? api = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? performance = null,Object? api = null,Object? stats = null,}) {
   return _then(_self.copyWith(
 performance: null == performance ? _self.performance : performance // ignore: cast_nullable_to_non_nullable
 as VeilidWASMConfigLoggingPerformance,api: null == api ? _self.api : api // ignore: cast_nullable_to_non_nullable
-as VeilidWASMConfigLoggingApi,
+as VeilidWASMConfigLoggingApi,stats: null == stats ? _self.stats : stats // ignore: cast_nullable_to_non_nullable
+as VeilidWASMConfigLoggingStats,
   ));
 }
 /// Create a copy of VeilidWASMConfigLogging
@@ -2762,6 +3331,15 @@ $VeilidWASMConfigLoggingApiCopyWith<$Res> get api {
   
   return $VeilidWASMConfigLoggingApiCopyWith<$Res>(_self.api, (value) {
     return _then(_self.copyWith(api: value));
+  });
+}/// Create a copy of VeilidWASMConfigLogging
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidWASMConfigLoggingStatsCopyWith<$Res> get stats {
+  
+  return $VeilidWASMConfigLoggingStatsCopyWith<$Res>(_self.stats, (value) {
+    return _then(_self.copyWith(stats: value));
   });
 }
 }
@@ -2842,10 +3420,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidWASMConfigLoggingPerformance performance,  VeilidWASMConfigLoggingApi api)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( VeilidWASMConfigLoggingPerformance performance,  VeilidWASMConfigLoggingApi api,  VeilidWASMConfigLoggingStats stats)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLogging() when $default != null:
-return $default(_that.performance,_that.api);case _:
+return $default(_that.performance,_that.api,_that.stats);case _:
   return orElse();
 
 }
@@ -2863,10 +3441,10 @@ return $default(_that.performance,_that.api);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidWASMConfigLoggingPerformance performance,  VeilidWASMConfigLoggingApi api)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( VeilidWASMConfigLoggingPerformance performance,  VeilidWASMConfigLoggingApi api,  VeilidWASMConfigLoggingStats stats)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLogging():
-return $default(_that.performance,_that.api);}
+return $default(_that.performance,_that.api,_that.stats);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -2880,10 +3458,10 @@ return $default(_that.performance,_that.api);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidWASMConfigLoggingPerformance performance,  VeilidWASMConfigLoggingApi api)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( VeilidWASMConfigLoggingPerformance performance,  VeilidWASMConfigLoggingApi api,  VeilidWASMConfigLoggingStats stats)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidWASMConfigLogging() when $default != null:
-return $default(_that.performance,_that.api);case _:
+return $default(_that.performance,_that.api,_that.stats);case _:
   return null;
 
 }
@@ -2895,11 +3473,12 @@ return $default(_that.performance,_that.api);case _:
 @JsonSerializable()
 
 class _VeilidWASMConfigLogging with DiagnosticableTreeMixin implements VeilidWASMConfigLogging {
-  const _VeilidWASMConfigLogging({this.performance = const VeilidWASMConfigLoggingPerformance(enabled: false), this.api = const VeilidWASMConfigLoggingApi(enabled: false)});
+  const _VeilidWASMConfigLogging({this.performance = const VeilidWASMConfigLoggingPerformance(enabled: false), this.api = const VeilidWASMConfigLoggingApi(enabled: false), this.stats = const VeilidWASMConfigLoggingStats(enabled: false, intervalSecs: 10)});
   factory _VeilidWASMConfigLogging.fromJson(Map<String, dynamic> json) => _$VeilidWASMConfigLoggingFromJson(json);
 
 @override@JsonKey() final  VeilidWASMConfigLoggingPerformance performance;
 @override@JsonKey() final  VeilidWASMConfigLoggingApi api;
+@override@JsonKey() final  VeilidWASMConfigLoggingStats stats;
 
 /// Create a copy of VeilidWASMConfigLogging
 /// with the given fields replaced by the non-null parameter values.
@@ -2915,21 +3494,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidWASMConfigLogging'))
-    ..add(DiagnosticsProperty('performance', performance))..add(DiagnosticsProperty('api', api));
+    ..add(DiagnosticsProperty('performance', performance))..add(DiagnosticsProperty('api', api))..add(DiagnosticsProperty('stats', stats));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidWASMConfigLogging&&(identical(other.performance, performance) || other.performance == performance)&&(identical(other.api, api) || other.api == api));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidWASMConfigLogging&&(identical(other.performance, performance) || other.performance == performance)&&(identical(other.api, api) || other.api == api)&&(identical(other.stats, stats) || other.stats == stats));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,performance,api);
+int get hashCode => Object.hash(runtimeType,performance,api,stats);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidWASMConfigLogging(performance: $performance, api: $api)';
+  return 'VeilidWASMConfigLogging(performance: $performance, api: $api, stats: $stats)';
 }
 
 
@@ -2940,11 +3519,11 @@ abstract mixin class _$VeilidWASMConfigLoggingCopyWith<$Res> implements $VeilidW
   factory _$VeilidWASMConfigLoggingCopyWith(_VeilidWASMConfigLogging value, $Res Function(_VeilidWASMConfigLogging) _then) = __$VeilidWASMConfigLoggingCopyWithImpl;
 @override @useResult
 $Res call({
- VeilidWASMConfigLoggingPerformance performance, VeilidWASMConfigLoggingApi api
+ VeilidWASMConfigLoggingPerformance performance, VeilidWASMConfigLoggingApi api, VeilidWASMConfigLoggingStats stats
 });
 
 
-@override $VeilidWASMConfigLoggingPerformanceCopyWith<$Res> get performance;@override $VeilidWASMConfigLoggingApiCopyWith<$Res> get api;
+@override $VeilidWASMConfigLoggingPerformanceCopyWith<$Res> get performance;@override $VeilidWASMConfigLoggingApiCopyWith<$Res> get api;@override $VeilidWASMConfigLoggingStatsCopyWith<$Res> get stats;
 
 }
 /// @nodoc
@@ -2957,11 +3536,12 @@ class __$VeilidWASMConfigLoggingCopyWithImpl<$Res>
 
 /// Create a copy of VeilidWASMConfigLogging
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? performance = null,Object? api = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? performance = null,Object? api = null,Object? stats = null,}) {
   return _then(_VeilidWASMConfigLogging(
 performance: null == performance ? _self.performance : performance // ignore: cast_nullable_to_non_nullable
 as VeilidWASMConfigLoggingPerformance,api: null == api ? _self.api : api // ignore: cast_nullable_to_non_nullable
-as VeilidWASMConfigLoggingApi,
+as VeilidWASMConfigLoggingApi,stats: null == stats ? _self.stats : stats // ignore: cast_nullable_to_non_nullable
+as VeilidWASMConfigLoggingStats,
   ));
 }
 
@@ -2982,6 +3562,15 @@ $VeilidWASMConfigLoggingApiCopyWith<$Res> get api {
   
   return $VeilidWASMConfigLoggingApiCopyWith<$Res>(_self.api, (value) {
     return _then(_self.copyWith(api: value));
+  });
+}/// Create a copy of VeilidWASMConfigLogging
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$VeilidWASMConfigLoggingStatsCopyWith<$Res> get stats {
+  
+  return $VeilidWASMConfigLoggingStatsCopyWith<$Res>(_self.stats, (value) {
+    return _then(_self.copyWith(stats: value));
   });
 }
 }
@@ -6805,7 +7394,7 @@ as bool,
 /// @nodoc
 mixin _$VeilidConfigProtectedStore implements DiagnosticableTreeMixin {
 
- bool get allowInsecureFallback; bool get alwaysUseInsecureStorage; String get directory; bool get delete; String get deviceEncryptionKeyPassword; String? get newDeviceEncryptionKeyPassword;
+ bool get allowInsecureFallback; bool get alwaysUseInsecureStorage; String get directory; bool get delete; String get deviceEncryptionKeyPassword; VeilidConfigProtectedStoreBackend get backend; String? get newDeviceEncryptionKeyPassword;
 /// Create a copy of VeilidConfigProtectedStore
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -6819,21 +7408,21 @@ $VeilidConfigProtectedStoreCopyWith<VeilidConfigProtectedStore> get copyWith => 
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigProtectedStore'))
-    ..add(DiagnosticsProperty('allowInsecureFallback', allowInsecureFallback))..add(DiagnosticsProperty('alwaysUseInsecureStorage', alwaysUseInsecureStorage))..add(DiagnosticsProperty('directory', directory))..add(DiagnosticsProperty('delete', delete))..add(DiagnosticsProperty('deviceEncryptionKeyPassword', deviceEncryptionKeyPassword))..add(DiagnosticsProperty('newDeviceEncryptionKeyPassword', newDeviceEncryptionKeyPassword));
+    ..add(DiagnosticsProperty('allowInsecureFallback', allowInsecureFallback))..add(DiagnosticsProperty('alwaysUseInsecureStorage', alwaysUseInsecureStorage))..add(DiagnosticsProperty('directory', directory))..add(DiagnosticsProperty('delete', delete))..add(DiagnosticsProperty('deviceEncryptionKeyPassword', deviceEncryptionKeyPassword))..add(DiagnosticsProperty('backend', backend))..add(DiagnosticsProperty('newDeviceEncryptionKeyPassword', newDeviceEncryptionKeyPassword));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigProtectedStore&&(identical(other.allowInsecureFallback, allowInsecureFallback) || other.allowInsecureFallback == allowInsecureFallback)&&(identical(other.alwaysUseInsecureStorage, alwaysUseInsecureStorage) || other.alwaysUseInsecureStorage == alwaysUseInsecureStorage)&&(identical(other.directory, directory) || other.directory == directory)&&(identical(other.delete, delete) || other.delete == delete)&&(identical(other.deviceEncryptionKeyPassword, deviceEncryptionKeyPassword) || other.deviceEncryptionKeyPassword == deviceEncryptionKeyPassword)&&(identical(other.newDeviceEncryptionKeyPassword, newDeviceEncryptionKeyPassword) || other.newDeviceEncryptionKeyPassword == newDeviceEncryptionKeyPassword));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigProtectedStore&&(identical(other.allowInsecureFallback, allowInsecureFallback) || other.allowInsecureFallback == allowInsecureFallback)&&(identical(other.alwaysUseInsecureStorage, alwaysUseInsecureStorage) || other.alwaysUseInsecureStorage == alwaysUseInsecureStorage)&&(identical(other.directory, directory) || other.directory == directory)&&(identical(other.delete, delete) || other.delete == delete)&&(identical(other.deviceEncryptionKeyPassword, deviceEncryptionKeyPassword) || other.deviceEncryptionKeyPassword == deviceEncryptionKeyPassword)&&(identical(other.backend, backend) || other.backend == backend)&&(identical(other.newDeviceEncryptionKeyPassword, newDeviceEncryptionKeyPassword) || other.newDeviceEncryptionKeyPassword == newDeviceEncryptionKeyPassword));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,allowInsecureFallback,alwaysUseInsecureStorage,directory,delete,deviceEncryptionKeyPassword,newDeviceEncryptionKeyPassword);
+int get hashCode => Object.hash(runtimeType,allowInsecureFallback,alwaysUseInsecureStorage,directory,delete,deviceEncryptionKeyPassword,backend,newDeviceEncryptionKeyPassword);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigProtectedStore(allowInsecureFallback: $allowInsecureFallback, alwaysUseInsecureStorage: $alwaysUseInsecureStorage, directory: $directory, delete: $delete, deviceEncryptionKeyPassword: $deviceEncryptionKeyPassword, newDeviceEncryptionKeyPassword: $newDeviceEncryptionKeyPassword)';
+  return 'VeilidConfigProtectedStore(allowInsecureFallback: $allowInsecureFallback, alwaysUseInsecureStorage: $alwaysUseInsecureStorage, directory: $directory, delete: $delete, deviceEncryptionKeyPassword: $deviceEncryptionKeyPassword, backend: $backend, newDeviceEncryptionKeyPassword: $newDeviceEncryptionKeyPassword)';
 }
 
 
@@ -6844,7 +7433,7 @@ abstract mixin class $VeilidConfigProtectedStoreCopyWith<$Res>  {
   factory $VeilidConfigProtectedStoreCopyWith(VeilidConfigProtectedStore value, $Res Function(VeilidConfigProtectedStore) _then) = _$VeilidConfigProtectedStoreCopyWithImpl;
 @useResult
 $Res call({
- bool allowInsecureFallback, bool alwaysUseInsecureStorage, String directory, bool delete, String deviceEncryptionKeyPassword, String? newDeviceEncryptionKeyPassword
+ bool allowInsecureFallback, bool alwaysUseInsecureStorage, String directory, bool delete, String deviceEncryptionKeyPassword, VeilidConfigProtectedStoreBackend backend, String? newDeviceEncryptionKeyPassword
 });
 
 
@@ -6861,14 +7450,15 @@ class _$VeilidConfigProtectedStoreCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigProtectedStore
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? allowInsecureFallback = null,Object? alwaysUseInsecureStorage = null,Object? directory = null,Object? delete = null,Object? deviceEncryptionKeyPassword = null,Object? newDeviceEncryptionKeyPassword = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? allowInsecureFallback = null,Object? alwaysUseInsecureStorage = null,Object? directory = null,Object? delete = null,Object? deviceEncryptionKeyPassword = null,Object? backend = null,Object? newDeviceEncryptionKeyPassword = freezed,}) {
   return _then(_self.copyWith(
 allowInsecureFallback: null == allowInsecureFallback ? _self.allowInsecureFallback : allowInsecureFallback // ignore: cast_nullable_to_non_nullable
 as bool,alwaysUseInsecureStorage: null == alwaysUseInsecureStorage ? _self.alwaysUseInsecureStorage : alwaysUseInsecureStorage // ignore: cast_nullable_to_non_nullable
 as bool,directory: null == directory ? _self.directory : directory // ignore: cast_nullable_to_non_nullable
 as String,delete: null == delete ? _self.delete : delete // ignore: cast_nullable_to_non_nullable
 as bool,deviceEncryptionKeyPassword: null == deviceEncryptionKeyPassword ? _self.deviceEncryptionKeyPassword : deviceEncryptionKeyPassword // ignore: cast_nullable_to_non_nullable
-as String,newDeviceEncryptionKeyPassword: freezed == newDeviceEncryptionKeyPassword ? _self.newDeviceEncryptionKeyPassword : newDeviceEncryptionKeyPassword // ignore: cast_nullable_to_non_nullable
+as String,backend: null == backend ? _self.backend : backend // ignore: cast_nullable_to_non_nullable
+as VeilidConfigProtectedStoreBackend,newDeviceEncryptionKeyPassword: freezed == newDeviceEncryptionKeyPassword ? _self.newDeviceEncryptionKeyPassword : newDeviceEncryptionKeyPassword // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
 }
@@ -6951,10 +7541,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool allowInsecureFallback,  bool alwaysUseInsecureStorage,  String directory,  bool delete,  String deviceEncryptionKeyPassword,  String? newDeviceEncryptionKeyPassword)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool allowInsecureFallback,  bool alwaysUseInsecureStorage,  String directory,  bool delete,  String deviceEncryptionKeyPassword,  VeilidConfigProtectedStoreBackend backend,  String? newDeviceEncryptionKeyPassword)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigProtectedStore() when $default != null:
-return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that.directory,_that.delete,_that.deviceEncryptionKeyPassword,_that.newDeviceEncryptionKeyPassword);case _:
+return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that.directory,_that.delete,_that.deviceEncryptionKeyPassword,_that.backend,_that.newDeviceEncryptionKeyPassword);case _:
   return orElse();
 
 }
@@ -6972,10 +7562,10 @@ return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool allowInsecureFallback,  bool alwaysUseInsecureStorage,  String directory,  bool delete,  String deviceEncryptionKeyPassword,  String? newDeviceEncryptionKeyPassword)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool allowInsecureFallback,  bool alwaysUseInsecureStorage,  String directory,  bool delete,  String deviceEncryptionKeyPassword,  VeilidConfigProtectedStoreBackend backend,  String? newDeviceEncryptionKeyPassword)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigProtectedStore():
-return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that.directory,_that.delete,_that.deviceEncryptionKeyPassword,_that.newDeviceEncryptionKeyPassword);}
+return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that.directory,_that.delete,_that.deviceEncryptionKeyPassword,_that.backend,_that.newDeviceEncryptionKeyPassword);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -6989,10 +7579,10 @@ return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool allowInsecureFallback,  bool alwaysUseInsecureStorage,  String directory,  bool delete,  String deviceEncryptionKeyPassword,  String? newDeviceEncryptionKeyPassword)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool allowInsecureFallback,  bool alwaysUseInsecureStorage,  String directory,  bool delete,  String deviceEncryptionKeyPassword,  VeilidConfigProtectedStoreBackend backend,  String? newDeviceEncryptionKeyPassword)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigProtectedStore() when $default != null:
-return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that.directory,_that.delete,_that.deviceEncryptionKeyPassword,_that.newDeviceEncryptionKeyPassword);case _:
+return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that.directory,_that.delete,_that.deviceEncryptionKeyPassword,_that.backend,_that.newDeviceEncryptionKeyPassword);case _:
   return null;
 
 }
@@ -7004,7 +7594,7 @@ return $default(_that.allowInsecureFallback,_that.alwaysUseInsecureStorage,_that
 @JsonSerializable()
 
 class _VeilidConfigProtectedStore with DiagnosticableTreeMixin implements VeilidConfigProtectedStore {
-  const _VeilidConfigProtectedStore({required this.allowInsecureFallback, required this.alwaysUseInsecureStorage, required this.directory, required this.delete, required this.deviceEncryptionKeyPassword, this.newDeviceEncryptionKeyPassword});
+  const _VeilidConfigProtectedStore({required this.allowInsecureFallback, required this.alwaysUseInsecureStorage, required this.directory, required this.delete, required this.deviceEncryptionKeyPassword, required this.backend, this.newDeviceEncryptionKeyPassword});
   factory _VeilidConfigProtectedStore.fromJson(Map<String, dynamic> json) => _$VeilidConfigProtectedStoreFromJson(json);
 
 @override final  bool allowInsecureFallback;
@@ -7012,6 +7602,7 @@ class _VeilidConfigProtectedStore with DiagnosticableTreeMixin implements Veilid
 @override final  String directory;
 @override final  bool delete;
 @override final  String deviceEncryptionKeyPassword;
+@override final  VeilidConfigProtectedStoreBackend backend;
 @override final  String? newDeviceEncryptionKeyPassword;
 
 /// Create a copy of VeilidConfigProtectedStore
@@ -7028,21 +7619,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigProtectedStore'))
-    ..add(DiagnosticsProperty('allowInsecureFallback', allowInsecureFallback))..add(DiagnosticsProperty('alwaysUseInsecureStorage', alwaysUseInsecureStorage))..add(DiagnosticsProperty('directory', directory))..add(DiagnosticsProperty('delete', delete))..add(DiagnosticsProperty('deviceEncryptionKeyPassword', deviceEncryptionKeyPassword))..add(DiagnosticsProperty('newDeviceEncryptionKeyPassword', newDeviceEncryptionKeyPassword));
+    ..add(DiagnosticsProperty('allowInsecureFallback', allowInsecureFallback))..add(DiagnosticsProperty('alwaysUseInsecureStorage', alwaysUseInsecureStorage))..add(DiagnosticsProperty('directory', directory))..add(DiagnosticsProperty('delete', delete))..add(DiagnosticsProperty('deviceEncryptionKeyPassword', deviceEncryptionKeyPassword))..add(DiagnosticsProperty('backend', backend))..add(DiagnosticsProperty('newDeviceEncryptionKeyPassword', newDeviceEncryptionKeyPassword));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigProtectedStore&&(identical(other.allowInsecureFallback, allowInsecureFallback) || other.allowInsecureFallback == allowInsecureFallback)&&(identical(other.alwaysUseInsecureStorage, alwaysUseInsecureStorage) || other.alwaysUseInsecureStorage == alwaysUseInsecureStorage)&&(identical(other.directory, directory) || other.directory == directory)&&(identical(other.delete, delete) || other.delete == delete)&&(identical(other.deviceEncryptionKeyPassword, deviceEncryptionKeyPassword) || other.deviceEncryptionKeyPassword == deviceEncryptionKeyPassword)&&(identical(other.newDeviceEncryptionKeyPassword, newDeviceEncryptionKeyPassword) || other.newDeviceEncryptionKeyPassword == newDeviceEncryptionKeyPassword));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigProtectedStore&&(identical(other.allowInsecureFallback, allowInsecureFallback) || other.allowInsecureFallback == allowInsecureFallback)&&(identical(other.alwaysUseInsecureStorage, alwaysUseInsecureStorage) || other.alwaysUseInsecureStorage == alwaysUseInsecureStorage)&&(identical(other.directory, directory) || other.directory == directory)&&(identical(other.delete, delete) || other.delete == delete)&&(identical(other.deviceEncryptionKeyPassword, deviceEncryptionKeyPassword) || other.deviceEncryptionKeyPassword == deviceEncryptionKeyPassword)&&(identical(other.backend, backend) || other.backend == backend)&&(identical(other.newDeviceEncryptionKeyPassword, newDeviceEncryptionKeyPassword) || other.newDeviceEncryptionKeyPassword == newDeviceEncryptionKeyPassword));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,allowInsecureFallback,alwaysUseInsecureStorage,directory,delete,deviceEncryptionKeyPassword,newDeviceEncryptionKeyPassword);
+int get hashCode => Object.hash(runtimeType,allowInsecureFallback,alwaysUseInsecureStorage,directory,delete,deviceEncryptionKeyPassword,backend,newDeviceEncryptionKeyPassword);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigProtectedStore(allowInsecureFallback: $allowInsecureFallback, alwaysUseInsecureStorage: $alwaysUseInsecureStorage, directory: $directory, delete: $delete, deviceEncryptionKeyPassword: $deviceEncryptionKeyPassword, newDeviceEncryptionKeyPassword: $newDeviceEncryptionKeyPassword)';
+  return 'VeilidConfigProtectedStore(allowInsecureFallback: $allowInsecureFallback, alwaysUseInsecureStorage: $alwaysUseInsecureStorage, directory: $directory, delete: $delete, deviceEncryptionKeyPassword: $deviceEncryptionKeyPassword, backend: $backend, newDeviceEncryptionKeyPassword: $newDeviceEncryptionKeyPassword)';
 }
 
 
@@ -7053,7 +7644,7 @@ abstract mixin class _$VeilidConfigProtectedStoreCopyWith<$Res> implements $Veil
   factory _$VeilidConfigProtectedStoreCopyWith(_VeilidConfigProtectedStore value, $Res Function(_VeilidConfigProtectedStore) _then) = __$VeilidConfigProtectedStoreCopyWithImpl;
 @override @useResult
 $Res call({
- bool allowInsecureFallback, bool alwaysUseInsecureStorage, String directory, bool delete, String deviceEncryptionKeyPassword, String? newDeviceEncryptionKeyPassword
+ bool allowInsecureFallback, bool alwaysUseInsecureStorage, String directory, bool delete, String deviceEncryptionKeyPassword, VeilidConfigProtectedStoreBackend backend, String? newDeviceEncryptionKeyPassword
 });
 
 
@@ -7070,14 +7661,15 @@ class __$VeilidConfigProtectedStoreCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigProtectedStore
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? allowInsecureFallback = null,Object? alwaysUseInsecureStorage = null,Object? directory = null,Object? delete = null,Object? deviceEncryptionKeyPassword = null,Object? newDeviceEncryptionKeyPassword = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? allowInsecureFallback = null,Object? alwaysUseInsecureStorage = null,Object? directory = null,Object? delete = null,Object? deviceEncryptionKeyPassword = null,Object? backend = null,Object? newDeviceEncryptionKeyPassword = freezed,}) {
   return _then(_VeilidConfigProtectedStore(
 allowInsecureFallback: null == allowInsecureFallback ? _self.allowInsecureFallback : allowInsecureFallback // ignore: cast_nullable_to_non_nullable
 as bool,alwaysUseInsecureStorage: null == alwaysUseInsecureStorage ? _self.alwaysUseInsecureStorage : alwaysUseInsecureStorage // ignore: cast_nullable_to_non_nullable
 as bool,directory: null == directory ? _self.directory : directory // ignore: cast_nullable_to_non_nullable
 as String,delete: null == delete ? _self.delete : delete // ignore: cast_nullable_to_non_nullable
 as bool,deviceEncryptionKeyPassword: null == deviceEncryptionKeyPassword ? _self.deviceEncryptionKeyPassword : deviceEncryptionKeyPassword // ignore: cast_nullable_to_non_nullable
-as String,newDeviceEncryptionKeyPassword: freezed == newDeviceEncryptionKeyPassword ? _self.newDeviceEncryptionKeyPassword : newDeviceEncryptionKeyPassword // ignore: cast_nullable_to_non_nullable
+as String,backend: null == backend ? _self.backend : backend // ignore: cast_nullable_to_non_nullable
+as VeilidConfigProtectedStoreBackend,newDeviceEncryptionKeyPassword: freezed == newDeviceEncryptionKeyPassword ? _self.newDeviceEncryptionKeyPassword : newDeviceEncryptionKeyPassword // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
 }

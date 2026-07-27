@@ -25,6 +25,9 @@
   "scripts": {
     "test": "wdio run ./wdio.conf.ts",
     "test:headless": "WDIO_HEADLESS=true npm run test --",
+    "build:sw": "rm -rf public/service-worker.js public/swassets && vite build --config vite.sw.config.ts",
+    "build:ext": "vite build --config vite.ext.config.ts",
+    "test:ext": "npm run build:ext && wdio run ./wdio.ext.conf.ts",
     "start": "tsc && npm run test:headless"
   }
 }

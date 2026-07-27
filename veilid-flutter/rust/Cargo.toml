@@ -17,9 +17,10 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 path = "src/lib.rs"
 
 [features]
-default = ["rt-tokio", "veilid-core/default"]
+default = ["rt-tokio", "veilid-core/default", "stats"]
 default-wasm = ["veilid-core/default-wasm"]
 debug-api = ["veilid-core/debug-api"]
+stats = ["veilid-core/stats"]
 crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
 rt-async-std = ["veilid-core/rt-async-std", "async-std"]
 rt-tokio = ["veilid-core/rt-tokio", "tokio"]

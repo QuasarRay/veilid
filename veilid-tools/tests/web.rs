@@ -96,6 +96,14 @@ async fn run_test_async_weighted_semaphore() {
     test_async_weighted_semaphore::test_all().await;
 }
 
+#[cfg(feature = "aimd")]
+#[wasm_bindgen_test]
+fn run_test_aimd() {
+    setup();
+
+    test_aimd::test_all();
+}
+
 #[wasm_bindgen_test]
 async fn run_test_startup_lock() {
     setup();

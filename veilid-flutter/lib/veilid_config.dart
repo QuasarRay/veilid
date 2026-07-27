@@ -73,6 +73,20 @@ sealed class VeilidFFIConfigLoggingFlame with _$VeilidFFIConfigLoggingFlame {
       _$VeilidFFIConfigLoggingFlameFromJson(json as Map<String, dynamic>);
 }
 
+/// Internal stats logging configuration; writes NDJSON records to [path] (a
+/// file), or to the "stats" log facility when [path] is empty.
+@freezed
+sealed class VeilidFFIConfigLoggingStats with _$VeilidFFIConfigLoggingStats {
+  const factory VeilidFFIConfigLoggingStats({
+    @Default(false) bool enabled,
+    @Default(10) int intervalSecs,
+    @Default('') String path,
+  }) = _VeilidFFIConfigLoggingStats;
+
+  factory VeilidFFIConfigLoggingStats.fromJson(dynamic json) =>
+      _$VeilidFFIConfigLoggingStatsFromJson(json as Map<String, dynamic>);
+}
+
 /// Native logging configuration across all sinks.
 @freezed
 sealed class VeilidFFIConfigLogging with _$VeilidFFIConfigLogging {
@@ -91,6 +105,8 @@ sealed class VeilidFFIConfigLogging with _$VeilidFFIConfigLogging {
     VeilidFFIConfigLoggingOtlp otlp,
     @Default(VeilidFFIConfigLoggingFlame(enabled: false, path: ''))
     VeilidFFIConfigLoggingFlame flame,
+    @Default(VeilidFFIConfigLoggingStats(enabled: false, intervalSecs: 10, path: ''))
+    VeilidFFIConfigLoggingStats stats,
   }) = _VeilidFFIConfigLogging;
 
   factory VeilidFFIConfigLogging.fromJson(dynamic json) =>
@@ -165,6 +181,19 @@ sealed class VeilidWASMConfigLoggingApi with _$VeilidWASMConfigLoggingApi {
       _$VeilidWASMConfigLoggingApiFromJson(json as Map<String, dynamic>);
 }
 
+/// WASM internal stats logging configuration; records ride the "stats" log
+/// facility (no filesystem in the browser).
+@freezed
+sealed class VeilidWASMConfigLoggingStats with _$VeilidWASMConfigLoggingStats {
+  const factory VeilidWASMConfigLoggingStats({
+    @Default(false) bool enabled,
+    @Default(10) int intervalSecs,
+  }) = _VeilidWASMConfigLoggingStats;
+
+  factory VeilidWASMConfigLoggingStats.fromJson(dynamic json) =>
+      _$VeilidWASMConfigLoggingStatsFromJson(json as Map<String, dynamic>);
+}
+
 /// WASM logging configuration across all sinks.
 @freezed
 sealed class VeilidWASMConfigLogging with _$VeilidWASMConfigLogging {
@@ -173,6 +202,8 @@ sealed class VeilidWASMConfigLogging with _$VeilidWASMConfigLogging {
     VeilidWASMConfigLoggingPerformance performance,
     @Default(VeilidWASMConfigLoggingApi(enabled: false))
     VeilidWASMConfigLoggingApi api,
+    @Default(VeilidWASMConfigLoggingStats(enabled: false, intervalSecs: 10))
+    VeilidWASMConfigLoggingStats stats,
   }) = _VeilidWASMConfigLogging;
 
   factory VeilidWASMConfigLogging.fromJson(dynamic json) =>
@@ -464,6 +495,40 @@ sealed class VeilidConfigBlockStore with _$VeilidConfigBlockStore {
 
 ////////////
 
+/// Which storage backend the protected store uses for secrets.
+///
+/// The browser-only backends are rejected on native platforms. [platformDefault]
+/// chooses per platform and runtime context: the OS keyring on native,
+/// `localStorage` in a browser Window, IndexedDB in a worker, and extension
+/// storage in a WebExtension.
+enum VeilidConfigProtectedStoreBackend {
+  /// Choose automatically based on the platform and runtime context.
+  platformDefault,
+
+  /// Browser `localStorage` (Window contexts only).
+  localStorage,
+
+  /// Browser IndexedDB (available in worker contexts).
+  indexedDb,
+
+  /// WebExtension storage.
+  extensionStorage;
+
+// /// Delegate to a registered secret-resolver callback.
+// callback;
+
+  /// Parse from its JSON (PascalCase) name.
+  factory VeilidConfigProtectedStoreBackend.fromJson(dynamic j) =>
+      VeilidConfigProtectedStoreBackend.values.byName(
+        (j as String).toCamelCase(),
+      );
+
+  /// The PascalCase JSON name.
+  String toJson() => name.toPascalCase();
+}
+
+////////////
+
 /// Protected store configuration: where secrets such as the device encryption
 /// key are kept (keychain/keyring/etc).
 @freezed
@@ -474,6 +539,7 @@ sealed class VeilidConfigProtectedStore with _$VeilidConfigProtectedStore {
     required String directory,
     required bool delete,
     required String deviceEncryptionKeyPassword,
+    required VeilidConfigProtectedStoreBackend backend,
     String? newDeviceEncryptionKeyPassword,
   }) = _VeilidConfigProtectedStore;
 

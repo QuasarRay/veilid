@@ -24,6 +24,9 @@
 #![warn(missing_docs)]
 #![deny(warnings)]
 
+/// Additive-increase/multiplicative-decrease adaptive rate controller.
+#[cfg(feature = "aimd")]
+pub mod aimd;
 /// Packet fragmentation and reassembly for the sender and receiver ends.
 pub mod assembly_buffer;
 /// Debuggable async lock primitives (mutex, rwlock).
@@ -216,6 +219,9 @@ cfg_if! {
     }
 }
 
+#[cfg(feature = "aimd")]
+#[doc(inline)]
+pub use aimd::*;
 #[doc(inline)]
 pub use assembly_buffer::*;
 #[doc(inline)]

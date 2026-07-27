@@ -132,7 +132,9 @@ impl VeilidAPI {
     /// Get the ProtectedStore component.
     ///
     /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
-    pub fn protected_store(&self) -> VeilidAPIResult<VeilidComponentGuard<'_, ProtectedStore>> {
+    pub(crate) fn protected_store(
+        &self,
+    ) -> VeilidAPIResult<VeilidComponentGuard<'_, ProtectedStore>> {
         let inner = self.inner.lock();
         let Some(context) = &inner.context else {
             return Err(VeilidAPIError::NotInitialized);
@@ -141,6 +143,49 @@ impl VeilidAPI {
             .registry()
             .lookup::<ProtectedStore>()
             .ok_or(VeilidAPIError::NotInitialized)
+    }
+
+    /// Save a user secret to the protected store. Returns true if a value already existed.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] for keys veilid reserves for itself.
+    pub async fn save_user_secret(&self, key: String, value: Vec<u8>) -> VeilidAPIResult<bool> {
+        self.protected_store()?
+            .save_user_secret(ProtectedStoreContext::Api, key, &value)
+            .await
+    }
+
+    /// Load a user secret from the protected store, or `None` if not present.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] for keys veilid reserves for itself.
+    pub async fn load_user_secret(&self, key: String) -> VeilidAPIResult<Option<Vec<u8>>> {
+        self.protected_store()?
+            .load_user_secret(ProtectedStoreContext::Api, key)
+            .await
+    }
+
+    /// Remove a user secret from the protected store. Returns true if it existed.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] for keys veilid reserves for itself.
+    pub async fn remove_user_secret(&self, key: String) -> VeilidAPIResult<bool> {
+        self.protected_store()?
+            .remove_user_secret(ProtectedStoreContext::Api, key)
+            .await
+    }
+
+    /// List the key names of the user secrets stored for this node's namespace.
+    ///
+    /// Keys veilid reserves for itself are never listed.
+    pub async fn list_user_secrets(&self) -> VeilidAPIResult<Vec<String>> {
+        self.protected_store()?
+            .list_user_secrets(ProtectedStoreContext::Api)
+            .await
+    }
+
+    /// Remove every user secret stored for this node's namespace, leaving veilid's own keys alone.
+    pub async fn delete_all_user_secrets(&self) -> VeilidAPIResult<()> {
+        self.protected_store()?
+            .delete_all_user_secrets(ProtectedStoreContext::Api)
+            .await
     }
 
     /// Get the BlockStore component.

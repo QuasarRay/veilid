@@ -326,6 +326,16 @@ typedef _CryptoCryptNoAuthDart =
 typedef _NowDart = int Function();
 // fn debug(port: i64, log_level: FfiStr)
 typedef _DebugDart = void Function(int, Pointer<Utf8>);
+// fn save_user_secret(port: i64, key: FfiStr, value: FfiStr)
+typedef _SaveUserSecretDart = void Function(int, Pointer<Utf8>, Pointer<Utf8>);
+// fn load_user_secret(port: i64, key: FfiStr)
+typedef _LoadUserSecretDart = void Function(int, Pointer<Utf8>);
+// fn remove_user_secret(port: i64, key: FfiStr)
+typedef _RemoveUserSecretDart = void Function(int, Pointer<Utf8>);
+// fn list_user_secrets(port: i64)
+typedef _ListUserSecretsDart = void Function(int);
+// fn delete_all_user_secrets(port: i64)
+typedef _DeleteAllUserSecretsDart = void Function(int);
 // fn shutdown_veilid_core(port: i64)
 typedef _ShutdownVeilidCoreDart = void Function(int);
 // fn veilid_version_string() -> *mut c_char
@@ -2002,6 +2012,11 @@ class VeilidFFI extends Veilid {
   final _NowDart _nowNonDecreasing;
   final _NowDart _nowIncreasing;
   final _DebugDart _debug;
+  final _SaveUserSecretDart _saveUserSecret;
+  final _LoadUserSecretDart _loadUserSecret;
+  final _RemoveUserSecretDart _removeUserSecret;
+  final _ListUserSecretsDart _listUserSecrets;
+  final _DeleteAllUserSecretsDart _deleteAllUserSecrets;
   final _VeilidVersionStringDart _veilidVersionString;
   final _VeilidVersionDart _veilidVersion;
   final _DefaultVeilidConfigDart _defaultVeilidConfig;
@@ -2583,6 +2598,28 @@ class VeilidFFI extends Veilid {
           .lookupFunction<Void Function(Int64, Pointer<Utf8>), _DebugDart>(
             'debug',
           ),
+      _saveUserSecret = dylib.lookupFunction<
+        Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>),
+        _SaveUserSecretDart
+      >('save_user_secret'),
+      _loadUserSecret = dylib
+          .lookupFunction<
+            Void Function(Int64, Pointer<Utf8>),
+            _LoadUserSecretDart
+          >('load_user_secret'),
+      _removeUserSecret = dylib
+          .lookupFunction<
+            Void Function(Int64, Pointer<Utf8>),
+            _RemoveUserSecretDart
+          >('remove_user_secret'),
+      _listUserSecrets = dylib
+          .lookupFunction<Void Function(Int64), _ListUserSecretsDart>(
+            'list_user_secrets',
+          ),
+      _deleteAllUserSecrets = dylib
+          .lookupFunction<Void Function(Int64), _DeleteAllUserSecretsDart>(
+            'delete_all_user_secrets',
+          ),
       _veilidVersionString = dylib
           .lookupFunction<Pointer<Utf8> Function(), _VeilidVersionStringDart>(
             'veilid_version_string',
@@ -2923,6 +2960,57 @@ class VeilidFFI extends Veilid {
     final sendPort = recvPort.sendPort;
     _debug(sendPort.nativePort, nativeCommand);
     return processFuturePlain(recvPort.first);
+  }
+
+  @override
+  Future<bool> saveUserSecret(String key, Uint8List value) {
+    final nativeKey = key.toNativeUtf8();
+    final nativeValue = base64UrlNoPadEncode(value).toNativeUtf8();
+    final recvPort = ReceivePort('save_user_secret');
+    final sendPort = recvPort.sendPort;
+    _saveUserSecret(sendPort.nativePort, nativeKey, nativeValue);
+    return processFuturePlain(recvPort.first);
+  }
+
+  @override
+  Future<Uint8List?> loadUserSecret(String key) async {
+    final nativeKey = key.toNativeUtf8();
+    final recvPort = ReceivePort('load_user_secret');
+    final sendPort = recvPort.sendPort;
+    _loadUserSecret(sendPort.nativePort, nativeKey);
+    final out = await processFuturePlain<String?>(recvPort.first);
+    if (out == null) {
+      return null;
+    }
+    return base64UrlNoPadDecode(out);
+  }
+
+  @override
+  Future<bool> removeUserSecret(String key) {
+    final nativeKey = key.toNativeUtf8();
+    final recvPort = ReceivePort('remove_user_secret');
+    final sendPort = recvPort.sendPort;
+    _removeUserSecret(sendPort.nativePort, nativeKey);
+    return processFuturePlain(recvPort.first);
+  }
+
+  @override
+  Future<List<String>> listUserSecrets() {
+    final recvPort = ReceivePort('list_user_secrets');
+    final sendPort = recvPort.sendPort;
+    _listUserSecrets(sendPort.nativePort);
+    return processFutureJson(
+      (j) => (j as List<dynamic>).cast<String>(),
+      recvPort.first,
+    );
+  }
+
+  @override
+  Future<void> deleteAllUserSecrets() {
+    final recvPort = ReceivePort('delete_all_user_secrets');
+    final sendPort = recvPort.sendPort;
+    _deleteAllUserSecrets(sendPort.nativePort);
+    return processFutureVoid(recvPort.first);
   }
 
   @override

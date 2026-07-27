@@ -1268,6 +1268,31 @@ class VeilidAPI(ABC):
         pass
 
     @abstractmethod
+    async def save_user_secret(self, key: str, value: bytes) -> bool:
+        """Save a user secret to the protected store. Returns True if a value already existed."""
+        pass
+
+    @abstractmethod
+    async def load_user_secret(self, key: str) -> Optional[bytes]:
+        """Load a user secret from the protected store, or None if not present."""
+        pass
+
+    @abstractmethod
+    async def remove_user_secret(self, key: str) -> bool:
+        """Remove a user secret from the protected store. Returns True if it existed."""
+        pass
+
+    @abstractmethod
+    async def list_user_secrets(self) -> list[str]:
+        """List the key names of the user secrets stored for this node's namespace."""
+        pass
+
+    @abstractmethod
+    async def delete_all_user_secrets(self) -> None:
+        """Remove every user secret stored for this node's namespace."""
+        pass
+
+    @abstractmethod
     async def veilid_version_string(self) -> str:
         """Return the veilid-core package version as a string."""
         pass

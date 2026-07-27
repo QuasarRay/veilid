@@ -16,30 +16,63 @@ impl StorageManager {
             apibail_not_initialized!();
         };
         let opaque_record_key = record_key.opaque();
-        let record_lock = self
+        let records_lock: StorageManagerRecordsLockGuard = self
             .record_lock_table
             .lock_record(
                 opaque_record_key.clone(),
                 StorageManagerRecordLockPurpose::Open,
             )
-            .await;
+            .await
+            .into();
+        let record_lock = records_lock
+            .record_lock_guards()
+            .next()
+            .expect("record was just locked");
+
+        // Foreground opens take precedence over a background transaction's
+        // temporary open: this open may change the writer and encryption key,
+        // and records can only be opened once. Preempt the background
+        // transaction and close its open so this open starts fresh.
+        let is_background_open = {
+            let inner = self.inner.lock();
+            inner
+                .opened_records
+                .get(&opaque_record_key)
+                .map(|or| or.is_background())
+                .unwrap_or(false)
+        };
+        if is_background_open {
+            self.preempt_background_transactions_locked(
+                &records_lock,
+                std::slice::from_ref(&opaque_record_key),
+            )
+            .await?;
+        }
 
         // See if we have a local record already or not
         if let Some(res) = self.open_existing_record_locked(
-            &record_lock,
+            record_lock,
             record_key.clone(),
             writer.clone(),
             safety_selection.clone(),
         )? {
             // We had an existing record, so check the network to see if we should
-            // update it with what we have here
-            let set_consensus = self.config().internal().network.dht.set_value_count as usize;
+            // update it with what we have here. Records created this session
+            // were just written with consensus, so there is nothing to rehydrate.
+            let locally_created = self
+                .inner
+                .lock()
+                .locally_created_records
+                .contains(&opaque_record_key);
+            if !locally_created {
+                let set_consensus = self.config().internal().network.dht.set_value_count as usize;
 
-            self.add_rehydration_request(
-                opaque_record_key,
-                ValueSubkeyRangeSet::full(),
-                set_consensus,
-            );
+                self.add_rehydration_request(
+                    opaque_record_key,
+                    ValueSubkeyRangeSet::full(),
+                    set_consensus,
+                );
+            }
 
             return Ok(res);
         }
@@ -79,7 +112,7 @@ impl StorageManager {
 
         // Open the new record
         self.open_new_record_locked(
-            &record_lock,
+            record_lock,
             record_key,
             writer,
             outbound_inspect_result,

@@ -351,7 +351,7 @@ impl StorageManager {
     /// keeps the re-begin from reaching nodes that still hold the old node-transactions.
     /// A doomed transaction's records outside this set are freed before their nodes confirm;
     /// begins landing there see busy nodes and TryAgain.
-    async fn preempt_background_transactions_locked(
+    pub(super) async fn preempt_background_transactions_locked(
         &self,
         records_lock: &StorageManagerRecordsLockGuard,
         opaque_record_keys: &[OpaqueRecordKey],
@@ -391,6 +391,22 @@ impl StorageManager {
             }
             self.drop_transaction_and_wait_locked(records_lock, transaction_handle)
                 .await;
+        }
+
+        // Close any background-transaction temporary opens on these records so
+        // a foreground open/begin starts fresh rather than inheriting them.
+        {
+            let mut inner = self.inner.lock();
+            for opaque_record_key in opaque_record_keys {
+                if inner
+                    .opened_records
+                    .get(opaque_record_key)
+                    .map(|or| or.is_background())
+                    .unwrap_or(false)
+                {
+                    inner.opened_records.remove(opaque_record_key);
+                }
+            }
         }
         Ok(())
     }
@@ -501,7 +517,11 @@ impl StorageManager {
                 } else {
                     inner.opened_records.insert(
                         opaque.clone(),
-                        OpenedRecord::new(None, triggering_safety_selection.clone(), None),
+                        OpenedRecord::new_background(
+                            None,
+                            triggering_safety_selection.clone(),
+                            None,
+                        ),
                     );
                     temp_opened.push(opaque.clone());
                     RecordKey::from_opaque(opaque.clone(), None)
@@ -541,11 +561,19 @@ impl StorageManager {
         }
         .await;
 
-        // Restore open state: close the members we temporarily opened.
+        // Restore open state: close the members we temporarily opened, unless a
+        // foreground open preempted us and now owns the entry.
         {
             let mut inner = self.inner.lock();
             for opaque in &temp_opened {
-                inner.opened_records.remove(opaque);
+                if inner
+                    .opened_records
+                    .get(opaque)
+                    .map(|or| or.is_background())
+                    .unwrap_or(false)
+                {
+                    inner.opened_records.remove(opaque);
+                }
             }
         }
 
@@ -1252,9 +1280,10 @@ impl StorageManager {
                 })?
         };
 
-        // Gate on concurrency + the download budget (a get pulls a full value down)
-        let gate_cost = (MAX_SUBKEY_SIZE as u64).saturating_mul(command_params.nodes.len() as u64);
-        let gate_permit = self.acquire_operation_gate(None, Some(gate_cost)).await;
+        // Gate on concurrency + the download budget
+        let gate_permit = self
+            .acquire_gated_transact_get(command_params.nodes.len())
+            .await;
 
         // Send all get commands
         let result = self
@@ -1270,6 +1299,8 @@ impl StorageManager {
             .inspect_err(|e| {
                 veilid_log!(self debug "Transaction get failed: {}", e);
             })?;
+
+        self.record_gated_transact_outcome(GatedOperationKind::TransactGet, &result);
 
         // Done with network access, release the semaphore
         drop(gate_permit);
@@ -1455,9 +1486,10 @@ impl StorageManager {
             })?
         };
 
-        // Gate on concurrency + the upload budget (a set pushes the value up)
-        let gate_cost = set_value_bytes.saturating_mul(command_params.nodes.len() as u64);
-        let gate_permit = self.acquire_operation_gate(Some(gate_cost), None).await;
+        // Gate on concurrency + the upload budget
+        let gate_permit = self
+            .acquire_gated_transact_set(set_value_bytes, command_params.nodes.len())
+            .await;
 
         // Send all set commands
         let result = self
@@ -1473,6 +1505,8 @@ impl StorageManager {
             .inspect_err(|e| {
                 veilid_log!(self debug "Transaction set failed: {}", e);
             })?;
+
+        self.record_gated_transact_outcome(GatedOperationKind::TransactSet, &result);
 
         // Done with network access, release the semaphore
         drop(gate_permit);

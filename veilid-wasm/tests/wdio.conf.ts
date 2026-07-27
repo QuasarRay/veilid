@@ -43,11 +43,10 @@ export const config: Options.Testrunner = {
   // then the current working directory is where your `package.json` resides, so `wdio`
   // will be called from there.
   //
-  specs: ['./src/**/*.test.ts'],
+  // One spec drives whichever context is selected; see harness/select.ts.
+  specs: ['./src/ContextRunner.test.ts'],
   // Patterns to exclude.
-  exclude: [
-    // 'path/to/excluded/files'
-  ],
+  exclude: [],
   //
   // ============
   // Capabilities
@@ -178,8 +177,10 @@ export const config: Options.Testrunner = {
   // See the full list at http://mochajs.org/
   mochaOpts: {
     ui: 'bdd',
-    // Also caps the whole spec file in the browser runner; STRESS suites run past 240s
-    timeout: (process.env.STRESS == '1' || process.env.STRESS == 'true') ? 600000 : 240000,
+    // The whole selection runs once, in one context, and the first case awaits it, so this
+    // bounds an entire context run rather than a single test. Sized for the slow tail of real
+    // networks with every suite selected.
+    timeout: 3600000,
   },
   //
   // =====

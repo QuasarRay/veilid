@@ -100,13 +100,7 @@ impl StorageManager {
             .unwrap_or_default();
 
         // Gate on concurrency + the download budget (a get pulls a full value down)
-        let get_value_fanout = self.config().internal().network.dht.get_value_fanout as u64;
-        let _gate_permit = self
-            .acquire_operation_gate(
-                None,
-                Some((MAX_SUBKEY_SIZE as u64).saturating_mul(get_value_fanout)),
-            )
-            .await;
+        let _gate_permit = self.acquire_gated_get().await;
         let result = self
             .outbound_get_value(
                 opaque_record_key.clone(),
@@ -115,6 +109,8 @@ impl StorageManager {
                 last_get_result,
             )
             .await?;
+
+        self.record_gated_fanout_outcome(GatedOperationKind::Get, &result.fanout_result);
 
         // Process the returned result
         let out_encrypted = self

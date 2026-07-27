@@ -164,13 +164,13 @@ Map<String, dynamic> _$SetDHTValueOptionsToJson(_SetDHTValueOptions instance) =>
 _TransactDHTRecordsOptions _$TransactDHTRecordsOptionsFromJson(
   Map<String, dynamic> json,
 ) => _TransactDHTRecordsOptions(
-  defaultSigningKeyPair: json['defaultSigningKeyPair'] == null
+  defaultSigningKeyPair: json['defaultSigningKeypair'] == null
       ? null
-      : KeyPair.fromJson(json['defaultSigningKeyPair']),
+      : KeyPair.fromJson(json['defaultSigningKeypair']),
 );
 
 Map<String, dynamic> _$TransactDHTRecordsOptionsToJson(
   _TransactDHTRecordsOptions instance,
 ) => <String, dynamic>{
-  'defaultSigningKeyPair': instance.defaultSigningKeyPair?.toJson(),
+  'defaultSigningKeypair': instance.defaultSigningKeyPair?.toJson(),
 };

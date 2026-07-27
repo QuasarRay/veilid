@@ -1,8 +1,12 @@
 import { VeilidWASMConfig, veilidClient, } from 'veilid-wasm';
 
-export const LOG_LEVEL = (process.env.LOG_LEVEL == "info" || process.env.INFO == "1" || process.env.INFO == "true") ? "Info" : (process.env.LOG_LEVEL == "debug" || process.env.DEBUG == "1" || process.env.DEBUG == "true") ? "Debug" : "Off";
-export const DEBUG = process.env.LOG_LEVEL == "debug" || process.env.DEBUG == "1" || process.env.DEBUG == "true";
-export const STRESS = process.env.STRESS == "1" || process.env.STRESS == "true";
+// `process` is undefined in worker/service-worker bundles; fall back to an empty env there.
+const env: Record<string, string | undefined> =
+  typeof process !== 'undefined' && process.env ? process.env : {};
+
+export const LOG_LEVEL = (env.LOG_LEVEL == "info" || env.INFO == "1" || env.INFO == "true") ? "Info" : (env.LOG_LEVEL == "debug" || env.DEBUG == "1" || env.DEBUG == "true") ? "Debug" : "Off";
+export const DEBUG = env.LOG_LEVEL == "debug" || env.DEBUG == "1" || env.DEBUG == "true";
+export const STRESS = env.STRESS == "1" || env.STRESS == "true";
 
 export const veilidCoreInitConfig: VeilidWASMConfig = {
   logging: {
@@ -25,14 +29,14 @@ export const veilidCoreStartupConfig = (() => {
   // console.log("starting config")
   const defaultConfig = veilidClient.defaultConfig();
   defaultConfig.programName = 'veilid-wasm-test';
-  if (process.env.NETWORK_KEY) {
-    defaultConfig.network.networkKeyPassword = process.env.NETWORK_KEY;
+  if (env.NETWORK_KEY) {
+    defaultConfig.network.networkKeyPassword = env.NETWORK_KEY;
   }
-  if (process.env.BOOTSTRAP_KEYS) {
-    defaultConfig.network.routingTable.bootstrapKeys = process.env.BOOTSTRAP_KEYS.split(',')
+  if (env.BOOTSTRAP_KEYS) {
+    defaultConfig.network.routingTable.bootstrapKeys = env.BOOTSTRAP_KEYS.split(',')
   }
-  if (process.env.BOOTSTRAP) {
-    defaultConfig.network.routingTable.bootstrap = process.env.BOOTSTRAP.split(',');
+  if (env.BOOTSTRAP) {
+    defaultConfig.network.routingTable.bootstrap = env.BOOTSTRAP.split(',');
   }
   // Ensure we are starting from scratch
   defaultConfig.tableStore.delete = true;

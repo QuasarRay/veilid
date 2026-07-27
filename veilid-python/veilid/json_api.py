@@ -531,6 +531,38 @@ class _JsonVeilidAPI(VeilidAPI):
         assert isinstance(command, str)
         return raise_api_result(await self.send_ndjson_request(Operation.DEBUG, command=command))
 
+    async def save_user_secret(self, key: str, value: bytes) -> bool:
+        assert isinstance(key, str)
+        assert isinstance(value, bytes)
+        return raise_api_result(
+            await self.send_ndjson_request(
+                Operation.SAVE_USER_SECRET, key=key, value=value
+            )
+        )
+
+    async def load_user_secret(self, key: str) -> Optional[bytes]:
+        assert isinstance(key, str)
+        res = raise_api_result(
+            await self.send_ndjson_request(Operation.LOAD_USER_SECRET, key=key)
+        )
+        return None if res is None else urlsafe_b64decode_no_pad(res)
+
+    async def remove_user_secret(self, key: str) -> bool:
+        assert isinstance(key, str)
+        return raise_api_result(
+            await self.send_ndjson_request(Operation.REMOVE_USER_SECRET, key=key)
+        )
+
+    async def list_user_secrets(self) -> list[str]:
+        return raise_api_result(
+            await self.send_ndjson_request(Operation.LIST_USER_SECRETS)
+        )
+
+    async def delete_all_user_secrets(self) -> None:
+        raise_api_result(
+            await self.send_ndjson_request(Operation.DELETE_ALL_USER_SECRETS)
+        )
+
     async def veilid_version_string(self) -> str:
         return raise_api_result(await self.send_ndjson_request(Operation.VEILID_VERSION_STRING))
 

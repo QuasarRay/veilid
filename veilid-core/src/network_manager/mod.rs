@@ -130,7 +130,7 @@ pub(crate) struct NetworkManager {
     inner: Mutex<NetworkManagerInner>,
 
     // Aggregate network transfer stats, shared so they can be broadcast cheaply
-    stats: Arc<RwLock<NetworkManagerStats>>,
+    accounting: Arc<RwLock<NetworkManagerAccounting>>,
 
     // Address filter
     address_filter: AddressFilter,
@@ -156,7 +156,7 @@ pub(crate) struct NetworkManager {
     queue_size: u32,
 }
 
-impl_veilid_component!(NetworkManager);
+impl_veilid_component!(NetworkManager, stats);
 
 impl fmt::Debug for NetworkManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -251,7 +251,7 @@ impl NetworkManager {
         let this = Self {
             registry,
             inner: Mutex::new(inner),
-            stats: Arc::new(RwLock::new(NetworkManagerStats::default())),
+            accounting: Arc::new(RwLock::new(NetworkManagerAccounting::default())),
             address_filter,
             online_detector,
             components: RwLock::new(None),

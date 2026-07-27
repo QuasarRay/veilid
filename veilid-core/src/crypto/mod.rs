@@ -3,6 +3,8 @@ mod dh_cache;
 mod envelope;
 mod guard;
 mod receipt;
+#[cfg(feature = "stats")]
+mod stats;
 mod types;
 
 #[cfg(any(test, feature = "test-util"))]
@@ -14,6 +16,8 @@ use dh_cache::*;
 pub(crate) use envelope::*;
 pub use guard::*;
 pub(crate) use receipt::*;
+#[cfg(feature = "stats")]
+use stats::{CryptoStatsAccounting, MeteredCryptoSystem};
 pub use types::*;
 
 use super::*;
@@ -81,9 +85,11 @@ pub struct Crypto {
     crypto_vld0: Arc<dyn CryptoSystem + Send + Sync>,
     #[cfg(feature = "enable-crypto-none")]
     crypto_none: Arc<dyn CryptoSystem + Send + Sync>,
+    #[cfg(feature = "stats")]
+    crypto_stats: Arc<CryptoStatsAccounting>,
 }
 
-impl_veilid_component!(Crypto);
+impl_veilid_component!(Crypto, stats);
 
 impl fmt::Debug for Crypto {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -107,13 +113,39 @@ impl Crypto {
     }
 
     pub(crate) fn new(registry: VeilidComponentRegistry) -> Self {
+        #[cfg(feature = "stats")]
+        let crypto_stats = Arc::new(CryptoStatsAccounting::new());
+
+        // With `stats` on, each cryptosystem is wrapped in a metering decorator so
+        // every call path is counted and timed; with it off the bare `Arc` is stored.
+        #[cfg(feature = "enable-crypto-vld0")]
+        let crypto_vld0: Arc<dyn CryptoSystem + Send + Sync> = {
+            let cs: Arc<dyn CryptoSystem + Send + Sync> =
+                Arc::new(vld0::CryptoSystemVLD0::new(registry.clone()));
+            #[cfg(feature = "stats")]
+            let cs: Arc<dyn CryptoSystem + Send + Sync> =
+                Arc::new(MeteredCryptoSystem::new(cs, crypto_stats.clone()));
+            cs
+        };
+        #[cfg(feature = "enable-crypto-none")]
+        let crypto_none: Arc<dyn CryptoSystem + Send + Sync> = {
+            let cs: Arc<dyn CryptoSystem + Send + Sync> =
+                Arc::new(none::CryptoSystemNONE::new(registry.clone()));
+            #[cfg(feature = "stats")]
+            let cs: Arc<dyn CryptoSystem + Send + Sync> =
+                Arc::new(MeteredCryptoSystem::new(cs, crypto_stats.clone()));
+            cs
+        };
+
         Self {
             registry: registry.clone(),
             inner: Mutex::new(Self::new_inner()),
             #[cfg(feature = "enable-crypto-vld0")]
-            crypto_vld0: Arc::new(vld0::CryptoSystemVLD0::new(registry.clone())),
+            crypto_vld0,
             #[cfg(feature = "enable-crypto-none")]
-            crypto_none: Arc::new(none::CryptoSystemNONE::new(registry.clone())),
+            crypto_none,
+            #[cfg(feature = "stats")]
+            crypto_stats,
         }
     }
 

@@ -7,6 +7,8 @@ import pytest
 
 import veilid
 
+from .conftest import dht_retry
+
 
 ##################################################################
 
@@ -244,7 +246,14 @@ async def test_routing_context_app_call_loopback_big_packets():
                         for _ in range(5):
                             # send a random sized random app message to our own private route
                             message = random.randbytes(random.randint(0, 32768))
-                            out_message = await rc.app_call(veilid.TargetRouteId(prr), message)
+                            # A freshly-allocated route establishes its hop connections on
+                            # first use, so an early call can exceed the RPC timeout; dht_retry
+                            # retries the transient timeout (loopback, so resending is harmless).
+                            out_message = await dht_retry(
+                                api,
+                                lambda: rc.app_call(veilid.TargetRouteId(prr), message),
+                                label="app_call",
+                            )
 
                             assert message == out_message
                     finally:

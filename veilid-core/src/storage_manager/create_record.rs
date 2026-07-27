@@ -27,6 +27,12 @@ impl StorageManager {
             .lock_record(key.opaque(), StorageManagerRecordLockPurpose::Create)
             .await;
 
+        // Session-created records skip the open-time rehydration check
+        self.inner
+            .lock()
+            .locally_created_records
+            .insert(key.opaque());
+
         // Now that the record is made we should always succeed to open the existing record
         // The initial writer is the owner of the record
         self.open_existing_record_locked(&records_lock, key, Some(owner), safety_selection)

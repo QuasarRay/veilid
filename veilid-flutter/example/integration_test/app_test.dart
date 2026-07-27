@@ -12,6 +12,7 @@ import 'test_crypto.dart';
 import 'test_dht.dart';
 import 'test_dht_transactions.dart';
 import 'test_dht_transactions_full.dart';
+import 'test_protected_store.dart';
 import 'test_routing_context.dart';
 import 'test_table_db.dart';
 import 'test_veilid_config.dart';
@@ -75,6 +76,22 @@ void main() => runWithIntegrationLog(() {
           testOpenTwiceTableDbStoreDeleteLoad,
           tags: ['table_db']);
       test('resize table db', testResizeTableDb, tags: ['table_db']);
+    });
+
+    group('Protected Store', () {
+      test('save load remove user secret', testSaveLoadRemoveUserSecret,
+          tags: ['protected_store']);
+      test('binary user secret roundtrip', testBinaryUserSecretRoundtrip,
+          tags: ['protected_store']);
+      test('missing user secret', testMissingUserSecret,
+          tags: ['protected_store']);
+      test('list user secrets', testListUserSecrets, tags: ['protected_store']);
+      test('list never returns reserved keys', testListNeverReturnsReservedKeys,
+          tags: ['protected_store']);
+      test('reserved keys are rejected', testReservedKeysAreRejected,
+          tags: ['protected_store']);
+      test('delete all user secrets', testDeleteAllUserSecrets,
+          tags: ['protected_store']);
     });
 
     group('Attached', () {

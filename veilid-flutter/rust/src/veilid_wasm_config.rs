@@ -36,10 +36,21 @@ fn default_veilid_wasm_config_logging_api() -> VeilidWASMConfigLoggingAPI {
     }
 }
 
+fn default_stats_interval_secs() -> u32 {
+    10
+}
+fn default_veilid_wasm_config_logging_stats() -> VeilidWASMConfigLoggingStats {
+    VeilidWASMConfigLoggingStats {
+        enabled: false,
+        interval_secs: default_stats_interval_secs(),
+    }
+}
+
 fn default_veilid_wasm_config_logging() -> VeilidWASMConfigLogging {
     VeilidWASMConfigLogging {
         performance: default_veilid_wasm_config_logging_performance(),
         api: default_veilid_wasm_config_logging_api(),
+        stats: default_veilid_wasm_config_logging_stats(),
     }
 }
 
@@ -111,6 +122,18 @@ pub struct VeilidWASMConfigLoggingAPI {
     pub ignore_log_targets: Vec<String>,
 }
 
+/// Configuration for the internal stats logging. Records ride the "stats" log facility.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VeilidWASMConfigLoggingStats {
+    /// Determines if periodic stats logging is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Seconds between emitted records.
+    #[serde(default = "default_stats_interval_secs")]
+    pub interval_secs: u32,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VeilidWASMConfigLogging {
@@ -118,6 +141,8 @@ pub struct VeilidWASMConfigLogging {
     pub performance: VeilidWASMConfigLoggingPerformance,
     #[serde(default = "default_veilid_wasm_config_logging_api")]
     pub api: VeilidWASMConfigLoggingAPI,
+    #[serde(default = "default_veilid_wasm_config_logging_stats")]
+    pub stats: VeilidWASMConfigLoggingStats,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

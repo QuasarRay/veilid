@@ -105,6 +105,22 @@ Map<String, dynamic> _$VeilidFFIConfigLoggingFlameToJson(
   _VeilidFFIConfigLoggingFlame instance,
 ) => <String, dynamic>{'enabled': instance.enabled, 'path': instance.path};
 
+_VeilidFFIConfigLoggingStats _$VeilidFFIConfigLoggingStatsFromJson(
+  Map<String, dynamic> json,
+) => _VeilidFFIConfigLoggingStats(
+  enabled: json['enabled'] as bool? ?? false,
+  intervalSecs: (json['intervalSecs'] as num?)?.toInt() ?? 10,
+  path: json['path'] as String? ?? '',
+);
+
+Map<String, dynamic> _$VeilidFFIConfigLoggingStatsToJson(
+  _VeilidFFIConfigLoggingStats instance,
+) => <String, dynamic>{
+  'enabled': instance.enabled,
+  'intervalSecs': instance.intervalSecs,
+  'path': instance.path,
+};
+
 _VeilidFFIConfigLogging _$VeilidFFIConfigLoggingFromJson(
   Map<String, dynamic> json,
 ) => _VeilidFFIConfigLogging(
@@ -124,6 +140,13 @@ _VeilidFFIConfigLogging _$VeilidFFIConfigLoggingFromJson(
   flame: json['flame'] == null
       ? const VeilidFFIConfigLoggingFlame(enabled: false, path: '')
       : VeilidFFIConfigLoggingFlame.fromJson(json['flame']),
+  stats: json['stats'] == null
+      ? const VeilidFFIConfigLoggingStats(
+          enabled: false,
+          intervalSecs: 10,
+          path: '',
+        )
+      : VeilidFFIConfigLoggingStats.fromJson(json['stats']),
 );
 
 Map<String, dynamic> _$VeilidFFIConfigLoggingToJson(
@@ -133,6 +156,7 @@ Map<String, dynamic> _$VeilidFFIConfigLoggingToJson(
   'api': instance.api.toJson(),
   'otlp': instance.otlp.toJson(),
   'flame': instance.flame.toJson(),
+  'stats': instance.stats.toJson(),
 };
 
 _VeilidFFIConfig _$VeilidFFIConfigFromJson(Map<String, dynamic> json) =>
@@ -222,6 +246,20 @@ Map<String, dynamic> _$VeilidWASMConfigLoggingApiToJson(
   'ignoreLogTargets': instance.ignoreLogTargets,
 };
 
+_VeilidWASMConfigLoggingStats _$VeilidWASMConfigLoggingStatsFromJson(
+  Map<String, dynamic> json,
+) => _VeilidWASMConfigLoggingStats(
+  enabled: json['enabled'] as bool? ?? false,
+  intervalSecs: (json['intervalSecs'] as num?)?.toInt() ?? 10,
+);
+
+Map<String, dynamic> _$VeilidWASMConfigLoggingStatsToJson(
+  _VeilidWASMConfigLoggingStats instance,
+) => <String, dynamic>{
+  'enabled': instance.enabled,
+  'intervalSecs': instance.intervalSecs,
+};
+
 _VeilidWASMConfigLogging _$VeilidWASMConfigLoggingFromJson(
   Map<String, dynamic> json,
 ) => _VeilidWASMConfigLogging(
@@ -231,6 +269,9 @@ _VeilidWASMConfigLogging _$VeilidWASMConfigLoggingFromJson(
   api: json['api'] == null
       ? const VeilidWASMConfigLoggingApi(enabled: false)
       : VeilidWASMConfigLoggingApi.fromJson(json['api']),
+  stats: json['stats'] == null
+      ? const VeilidWASMConfigLoggingStats(enabled: false, intervalSecs: 10)
+      : VeilidWASMConfigLoggingStats.fromJson(json['stats']),
 );
 
 Map<String, dynamic> _$VeilidWASMConfigLoggingToJson(
@@ -238,6 +279,7 @@ Map<String, dynamic> _$VeilidWASMConfigLoggingToJson(
 ) => <String, dynamic>{
   'performance': instance.performance.toJson(),
   'api': instance.api.toJson(),
+  'stats': instance.stats.toJson(),
 };
 
 _VeilidWASMConfig _$VeilidWASMConfigFromJson(Map<String, dynamic> json) =>
@@ -472,6 +514,7 @@ _VeilidConfigProtectedStore _$VeilidConfigProtectedStoreFromJson(
   directory: json['directory'] as String,
   delete: json['delete'] as bool,
   deviceEncryptionKeyPassword: json['deviceEncryptionKeyPassword'] as String,
+  backend: VeilidConfigProtectedStoreBackend.fromJson(json['backend']),
   newDeviceEncryptionKeyPassword:
       json['newDeviceEncryptionKeyPassword'] as String?,
 );
@@ -484,6 +527,7 @@ Map<String, dynamic> _$VeilidConfigProtectedStoreToJson(
   'directory': instance.directory,
   'delete': instance.delete,
   'deviceEncryptionKeyPassword': instance.deviceEncryptionKeyPassword,
+  'backend': instance.backend.toJson(),
   'newDeviceEncryptionKeyPassword': instance.newDeviceEncryptionKeyPassword,
 };
 

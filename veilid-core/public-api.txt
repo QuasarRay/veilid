@@ -155,6 +155,9 @@ pub fn veilid_core::Stability::from_str(&str) -> core::result::Result<Self, Self
 impl get_size2::GetSize for veilid_core::Stability
 pub fn veilid_core::Stability::get_heap_size(&self) -> usize
 pub fn veilid_core::Stability::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
+pub enum veilid_core::StatsOutput
+pub veilid_core::StatsOutput::Facility
+pub veilid_core::StatsOutput::File(std::path::PathBuf)
 pub enum veilid_core::Target
 pub veilid_core::Target::NodeId(veilid_core::NodeId)
 pub veilid_core::Target::RouteId(veilid_core::RouteId)
@@ -2746,6 +2749,18 @@ pub fn veilid_core::SignatureGroup::from_str(&str) -> core::result::Result<Self,
 impl get_size2::GetSize for veilid_core::SignatureGroup
 pub fn veilid_core::SignatureGroup::get_heap_size(&self) -> usize
 pub fn veilid_core::SignatureGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
+pub struct veilid_core::StatsManager
+impl veilid_core::StatsManager
+pub fn veilid_core::StatsManager::init(core::option::Option<veilid_core::VeilidLogKey>, veilid_core::StatsSettings)
+pub fn veilid_core::StatsManager::uninit(core::option::Option<veilid_core::VeilidLogKey>)
+impl core::fmt::Debug for veilid_core::StatsManager
+pub fn veilid_core::StatsManager::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct veilid_core::StatsSettings
+pub veilid_core::StatsSettings::enabled: bool
+pub veilid_core::StatsSettings::interval_secs: u32
+pub veilid_core::StatsSettings::output: veilid_core::StatsOutput
+impl core::default::Default for veilid_core::StatsSettings
+pub fn veilid_core::StatsSettings::default() -> Self
 pub struct veilid_core::TableDB
 impl veilid_core::TableDB
 pub async fn veilid_core::TableDB::cleanup(&self) -> veilid_core::VeilidAPIResult<()>
@@ -2974,9 +2989,6 @@ pub fn veilid_core::VeilidAPI::table_store(&self) -> veilid_core::VeilidAPIResul
 pub async fn veilid_core::VeilidAPI::transact_dht_records(&self, alloc::vec::Vec<veilid_core::RecordKey>, core::option::Option<veilid_core::TransactDHTRecordsOptions>) -> veilid_core::VeilidAPIResult<veilid_core::DHTTransaction>
 impl veilid_core::VeilidAPI
 pub async fn veilid_core::VeilidAPI::debug(&self, alloc::string::String) -> veilid_core::VeilidAPIResult<alloc::string::String>
-pub async fn veilid_core::VeilidAPI::debug_die(&self, core::option::Option<alloc::string::String>, alloc::vec::Vec<alloc::string::String>) -> veilid_core::VeilidAPIResult<alloc::string::String>
-pub fn veilid_core::VeilidAPI::debug_help(&self) -> veilid_core::VeilidAPIResult<alloc::string::String>
-pub async fn veilid_core::VeilidAPI::debug_uptime(&self) -> veilid_core::VeilidAPIResult<alloc::string::String>
 pub struct veilid_core::VeilidAppCall
 impl veilid_core::VeilidAppCall
 pub fn veilid_core::VeilidAppCall::id(&self) -> veilid_core::OperationId

@@ -61,6 +61,23 @@ impl StorageManager {
             veilid_log!(self debug "Offline subkey write had no descriptor: {}:{}", opaque_record_key, subkey);
             return Ok(OfflineSubkeyWriteResult::Dropped);
         };
+
+        // Admit through the operation gate like a foreground set; its backpressure
+        // paces retries when the network is congested
+        let value_bytes = value.value_data().data().len() as u64;
+        let Ok(_gate_permit) = self
+            .acquire_gated_set(value_bytes)
+            .timeout_at(stop_token.clone())
+            .await
+        else {
+            return Ok(OfflineSubkeyWriteResult::Cancelled);
+        };
+
+        // The network may have gone offline while we waited for admission
+        if !self.dht_is_online() {
+            return Ok(OfflineSubkeyWriteResult::Cancelled);
+        }
+
         veilid_log!(self debug "Offline subkey write: {}:{} len={}", opaque_record_key, subkey, value.value_data().data().len());
         let osvres = self
             .outbound_set_value(
@@ -74,6 +91,8 @@ impl StorageManager {
             .await;
         match osvres {
             Ok(Ok(result)) => {
+                self.record_gated_fanout_outcome(GatedOperationKind::Set, &result.fanout_result);
+
                 // Defensive: outbound_set_value no longer emits partials, but
                 // skip them if reintroduced for some fanout in the future.
                 if result.fanout_result.kind.is_incomplete() {

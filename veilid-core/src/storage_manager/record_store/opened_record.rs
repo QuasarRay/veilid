@@ -14,6 +14,10 @@ pub(in crate::storage_manager) struct OpenedRecord {
 
     /// Encryption key, for newer records
     encryption_key: Option<BareSharedSecret>,
+
+    /// Opened by a background transaction, not the application. Foreground
+    /// opens preempt these.
+    is_background: bool,
 }
 
 impl OpenedRecord {
@@ -26,7 +30,25 @@ impl OpenedRecord {
             writer,
             safety_selection,
             encryption_key,
+            is_background: false,
         }
+    }
+
+    pub fn new_background(
+        writer: Option<KeyPair>,
+        safety_selection: SafetySelection,
+        encryption_key: Option<BareSharedSecret>,
+    ) -> Self {
+        Self {
+            writer,
+            safety_selection,
+            encryption_key,
+            is_background: true,
+        }
+    }
+
+    pub fn is_background(&self) -> bool {
+        self.is_background
     }
 
     pub fn writer(&self) -> Option<&KeyPair> {

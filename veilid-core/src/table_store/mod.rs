@@ -463,7 +463,8 @@ impl TableStore {
     async fn load_device_encryption_key(&self) -> EyreResult<Option<SharedSecret>> {
         let dek_bytes: Option<Vec<u8>> = self
             .protected_store()
-            .load_user_secret("device_encryption_key")?;
+            .load_user_secret(ProtectedStoreContext::Internal, "device_encryption_key")
+            .await?;
         let Some(dek_bytes) = dek_bytes else {
             veilid_log!(self debug "no device encryption key");
             return Ok(None);
@@ -494,7 +495,8 @@ impl TableStore {
             // Remove the device encryption key
             let existed = self
                 .protected_store()
-                .remove_user_secret("device_encryption_key")?;
+                .remove_user_secret(ProtectedStoreContext::Internal, "device_encryption_key")
+                .await?;
             veilid_log!(self debug "removed device encryption key. existed: {}", existed);
             return Ok(());
         };
@@ -529,7 +531,12 @@ impl TableStore {
         // Save the new device encryption key
         let existed = self
             .protected_store()
-            .save_user_secret("device_encryption_key", &dek_bytes)?;
+            .save_user_secret(
+                ProtectedStoreContext::Internal,
+                "device_encryption_key",
+                &dek_bytes,
+            )
+            .await?;
         veilid_log!(self debug "saving device encryption key. existed: {}", existed);
         Ok(())
     }

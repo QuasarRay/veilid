@@ -5,6 +5,9 @@ mod create_record;
 mod debug;
 mod delete_record;
 mod flush_record;
+mod gated_operation;
+#[cfg(feature = "stats")]
+mod gated_operation_accounting;
 mod get_value;
 mod inspect_record;
 mod local_record_detail;
@@ -21,6 +24,8 @@ mod rehydrate;
 mod remote_record_detail;
 mod schema;
 mod set_value;
+#[cfg(feature = "stats")]
+mod stats;
 mod storage_manager_locks;
 mod tasks;
 mod transaction;
@@ -36,9 +41,12 @@ pub mod tests_storage_manager;
 use super::*;
 
 use hashlink::{LinkedHashMap, LruCache};
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 
 use constants::*;
+use gated_operation::*;
+#[cfg(feature = "stats")]
+use gated_operation_accounting::*;
 use inspect_record::OutboundInspectValueResult;
 use local_record_detail::*;
 use offline_subkey_writes::*;
@@ -97,6 +105,9 @@ struct StorageManagerInner {
     pub offline_subkey_writes: LinkedHashMap<OpaqueRecordKey, OfflineSubkeyWrite>,
     /// Records that have pending rehydration requests
     pub rehydration_requests: HashMap<OpaqueRecordKey, RehydrationRequest>,
+    /// Records created by this node this session. Everything in them was just
+    /// written with consensus, so opening them skips the rehydration check.
+    pub locally_created_records: HashSet<OpaqueRecordKey>,
     /// StopSources for callers waiting on flush_record; dropped when offline writes for a key drain
     pub flush_record_waiters: HashMap<OpaqueRecordKey, Vec<StopSource>>,
     /// State management for outbound watches
@@ -139,7 +150,7 @@ impl fmt::Debug for StorageManagerInner {
 
 pub(crate) struct StorageManager {
     registry: VeilidComponentRegistry,
-    inner: TrackedMutex<StorageManagerInner>,
+    inner: StatsMutex<StorageManagerInner>,
     startup_lock: Arc<StartupLock>,
 
     // Background processes
@@ -177,12 +188,17 @@ pub(crate) struct StorageManager {
     // Last foreground transaction activity, including failed begin attempts (usec)
     last_foreground_transaction_ts: AtomicU64,
 
-    // Per-direction byte budgets + a count cap, shared by all DHT network ops.
-    // Bandwidth gates are fed from observed node throughput (raise-only); the
-    // concurrency cap is the fairness ceiling. Local-only ops acquire none.
-    upload_bandwidth_gate: Arc<AsyncWeightedSemaphore>,
-    download_bandwidth_gate: Arc<AsyncWeightedSemaphore>,
-    operation_concurrency: Arc<AsyncSemaphore>,
+    // Per-direction byte budgets (adaptive with aimd-dht, never binding
+    // without) + a count cap, shared by all DHT network ops. Local-only ops
+    // acquire none.
+    upload_budget: GatedOperationBandwidthBudget,
+    download_budget: GatedOperationBandwidthBudget,
+    gated_operation_concurrency: Arc<AsyncSemaphore>,
+    // Ops currently admitted through the gate, for telemetry
+    gate_active: Arc<AtomicUsize>,
+    // Per-kind gate wait/hold telemetry
+    #[cfg(feature = "stats")]
+    gate_accounting: Arc<Mutex<GatedOperationAccounting>>,
 }
 
 impl fmt::Debug for StorageManager {
@@ -202,16 +218,7 @@ impl fmt::Debug for StorageManager {
     }
 }
 
-/// Holds the concurrency permit + per-direction bandwidth budgets acquired for
-/// one DHT network operation; releases all on drop.
-#[allow(dead_code)]
-struct OperationGateGuard {
-    concurrency: AsyncSemaphoreGuardArc,
-    upload: Option<AsyncWeightedSemaphoreGuard>,
-    download: Option<AsyncWeightedSemaphoreGuard>,
-}
-
-impl_veilid_component!(StorageManager);
+impl_veilid_component!(StorageManager, stats);
 
 impl StorageManager {
     pub fn new(registry: VeilidComponentRegistry) -> StorageManager {
@@ -225,29 +232,31 @@ impl StorageManager {
             anonymous_signing_keys.add(kp);
         }
 
-        let upload_bandwidth_gate =
-            AsyncWeightedSemaphore::new(GLOBAL_OPERATION_UPLOAD_BANDWIDTH_DEFAULT_BYTES);
-        let download_bandwidth_gate =
-            AsyncWeightedSemaphore::new(GLOBAL_OPERATION_DOWNLOAD_BANDWIDTH_DEFAULT_BYTES);
-        let operation_concurrency = Arc::new(AsyncSemaphore::new(
+        let upload_budget = GatedOperationBandwidthBudget::new("up", &registry.config());
+        let download_budget = GatedOperationBandwidthBudget::new("down", &registry.config());
+        let gated_operation_concurrency = Arc::new(AsyncSemaphore::new(
             (registry.config().network.dht.max_concurrent_operations as usize).max(1),
         ));
 
         let this = StorageManager {
-            inner: TrackedMutex::new(StorageManagerInner {
-                opened_records: Default::default(),
-                local_record_store: Default::default(),
-                remote_record_store: Default::default(),
-                offline_subkey_writes: Default::default(),
-                rehydration_requests: Default::default(),
-                flush_record_waiters: Default::default(),
-                outbound_watch_manager: Default::default(),
-                outbound_transaction_manager: OutboundTransactionManager::new(registry.clone()),
-                metadata_db: Default::default(),
-                routing_domain_ready_subscription: None,
-                tick_subscription: None,
-                network_stats_change_subscription: None,
-            }),
+            inner: StatsMutex::new(
+                StorageManagerInner {
+                    opened_records: Default::default(),
+                    locally_created_records: Default::default(),
+                    local_record_store: Default::default(),
+                    remote_record_store: Default::default(),
+                    offline_subkey_writes: Default::default(),
+                    rehydration_requests: Default::default(),
+                    flush_record_waiters: Default::default(),
+                    outbound_watch_manager: Default::default(),
+                    outbound_transaction_manager: OutboundTransactionManager::new(registry.clone()),
+                    metadata_db: Default::default(),
+                    routing_domain_ready_subscription: None,
+                    tick_subscription: None,
+                    network_stats_change_subscription: None,
+                },
+                "storage_manager_inner",
+            ),
             registry: registry.clone(),
             startup_lock: Arc::new(StartupLock::new()),
 
@@ -291,61 +300,17 @@ impl StorageManager {
             last_lag_change_inspect_ts: AtomicU64::new(0),
             last_foreground_transaction_ts: AtomicU64::new(0),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
-            upload_bandwidth_gate,
-            download_bandwidth_gate,
-            operation_concurrency,
+            upload_budget,
+            download_budget,
+            gated_operation_concurrency,
+            gate_active: Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "stats")]
+            gate_accounting: Arc::new(Mutex::new(GatedOperationAccounting::default())),
         };
 
         this.setup_tasks();
 
         this
-    }
-
-    /// Raise the per-direction operation bandwidth budgets from observed aggregate node throughput (raise-only)
-    pub(crate) fn update_operation_bandwidth_gates(&self, up_bps: u64, down_bps: u64) {
-        let rpc_timeout_us = ms_to_us(self.config().internal().network.rpc.timeout_ms);
-        let window_us = rpc_timeout_us / OPERATION_BANDWIDTH_QUEUE_TIME_FRACTION;
-        let budget = |bps: u64| bps.saturating_mul(window_us) / 1_000_000;
-        let up_budget = budget(up_bps);
-        let down_budget = budget(down_bps);
-        let _up_prev = self.upload_bandwidth_gate.raise_limit(up_budget);
-        let _down_prev = self.download_bandwidth_gate.raise_limit(down_budget);
-        #[cfg(feature = "verbose-tracing")]
-        veilid_log!(self debug target:"network_result", "operation bandwidth gates: up_bps={} up_limit={}{} down_bps={} down_limit={}{}",
-            up_bps, _up_prev.max(up_budget), if up_budget > _up_prev { " (raised)" } else { "" },
-            down_bps, _down_prev.max(down_budget), if down_budget > _down_prev { " (raised)" } else { "" });
-    }
-
-    /// Acquire the DHT-operation concurrency permit plus the per-direction
-    /// bandwidth budgets this op needs (upload for sets, download for gets); the
-    /// returned guard releases all on drop. Waits if the gates are full.
-    async fn acquire_operation_gate(
-        &self,
-        upload_cost: Option<u64>,
-        download_cost: Option<u64>,
-    ) -> OperationGateGuard {
-        // Budgets are bytes/window, but an op holds its bytes for ~its round trip
-        // (bounded by rpc_timeout), so amortize the per-op cost over that span to
-        // admit a realistic number of ops in flight.
-        let timeout_secs = (self.config().internal().network.rpc.timeout_ms / 1000).max(1) as u64;
-        let amortize = |c: Option<u64>| c.map(|b| (b / timeout_secs).max(1));
-        let upload_cost = amortize(upload_cost);
-        let download_cost = amortize(download_cost);
-
-        let concurrency = self.operation_concurrency.acquire_arc().await;
-        let upload = match upload_cost {
-            Some(cost) => Some(self.upload_bandwidth_gate.acquire(cost).await),
-            None => None,
-        };
-        let download = match download_cost {
-            Some(cost) => Some(self.download_bandwidth_gate.acquire(cost).await),
-            None => None,
-        };
-        OperationGateGuard {
-            concurrency,
-            upload,
-            download,
-        }
     }
 
     pub(crate) fn local_limits_from_config(c: Arc<VeilidConfig>) -> RecordStoreLimits {
@@ -557,6 +522,7 @@ impl StorageManager {
             *inner = StorageManagerInner {
                 outbound_transaction_manager: OutboundTransactionManager::new(self.registry()),
                 opened_records: Default::default(),
+                locally_created_records: Default::default(),
                 local_record_store: Default::default(),
                 remote_record_store: Default::default(),
                 offline_subkey_writes: Default::default(),
@@ -894,7 +860,8 @@ impl StorageManager {
         let now_online = evt.is_ready_inbound && evt.is_ready_outbound;
         let was_online = self.is_online.swap(now_online, Ordering::AcqRel);
         if now_online && !was_online {
-            // Came back online — trigger online updates
+            // A new network invalidates learned budgets
+            self.reset_gated_operation_budgets();
             self.change_inspect_all_watches();
         }
     }
@@ -908,15 +875,15 @@ impl StorageManager {
 
     fn network_stats_change_event_handler(
         &self,
-        evt: Arc<crate::network_manager::NetworkManagerStatsChangeEvent>,
+        evt: Arc<crate::network_manager::NetworkManagerAccountingChangeEvent>,
     ) {
         let (up_bps, down_bps) = {
-            let stats = evt.stats.read();
+            let stats = evt.accounting.read();
             (
                 stats.self_stats.transfer_stats.up.maximum.as_u64(),
                 stats.self_stats.transfer_stats.down.maximum.as_u64(),
             )
         };
-        self.update_operation_bandwidth_gates(up_bps, down_bps);
+        self.step_gated_operation_budgets(up_bps, down_bps);
     }
 }

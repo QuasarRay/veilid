@@ -414,6 +414,11 @@ impl ConnectionManager {
     }
 
     // Returns a network connection if one already is established
+    #[cfg(feature = "stats")]
+    pub(super) fn connection_table_stats(&self) -> ConnectionTableStats {
+        self.arc.connection_table.stats()
+    }
+
     pub fn get_connection(&self, flow: Flow) -> Option<ConnectionHandle> {
         let Ok(_guard) = self.arc.startup_lock.enter() else {
             return None;
@@ -600,12 +605,7 @@ impl ConnectionManager {
         }
     }
 
-    /// Closes connections whose specific local address is no longer in
-    /// `valid_local_addresses`.
-    #[cfg_attr(
-        not(all(target_arch = "wasm32", target_os = "unknown")),
-        expect(dead_code)
-    )]
+    /// Closes every connection in the table
     pub fn close_all_connections(&self) {
         let Ok(_guard) = self.arc.startup_lock.enter() else {
             return;
@@ -614,7 +614,7 @@ impl ConnectionManager {
         if dead_ids.is_empty() {
             return;
         }
-        veilid_log!(self debug "closing {} connections after interface change", dead_ids.len());
+        veilid_log!(self debug "closing all {} connections", dead_ids.len());
         for id in dead_ids {
             self.report_connection_finished(id);
         }
@@ -815,8 +815,16 @@ impl ConnectionManager {
             let _ = sender.send(ConnectionManagerEvent::Dead(Box::new(conn)));
         }
 
-        // If there are no connections left in the table, we may have switched networks and killed off all the connections
-        if self.arc.connection_table.connection_count() == 0 {
+        // If there are no connections left in the table, we may have switched networks and
+        // killed off all the connections. Skip while offline: the purge empties the table
+        // deliberately, and confirmation can't run offline anyway
+        if self.arc.connection_table.connection_count() == 0
+            && self
+                .network_manager()
+                .online_detector()
+                .online_state(RoutingDomain::PublicInternet)
+                == OnlineState::Online
+        {
             veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
             self.network_manager()
                 .net()

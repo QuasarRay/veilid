@@ -66,14 +66,6 @@ pub const REMOTE_POOL_CONCURRENCY_DIVISOR: usize = 4;
 
 // --- Outbound Transaction Manager Constants ---
 
-/// Upload budget floor in bytes. Effectively-unlimited for now: bandwidth gating
-/// awaits the AIMD controller, so the operation_concurrency count cap is the only
-/// active throttle. (raise-only; reset on network change)
-pub const GLOBAL_OPERATION_UPLOAD_BANDWIDTH_DEFAULT_BYTES: u64 = u64::MAX;
-/// Download budget floor in bytes. Effectively-unlimited (see upload).
-pub const GLOBAL_OPERATION_DOWNLOAD_BANDWIDTH_DEFAULT_BYTES: u64 = u64::MAX;
-/// Fraction (1/N) of rpc.timeout_ms that in-flight operation bytes should drain within
-pub const OPERATION_BANDWIDTH_QUEUE_TIME_FRACTION: u64 = 3;
 /// Floor of the keepalive interval as a fraction (1/N) of the server-side TTL.
 pub const KEEPALIVE_INTERVAL_FLOOR_TTL_FRACTION: u64 = 10;
 /// Ceiling of the keepalive interval as a fraction (1/N) of the server-side TTL.

@@ -1189,6 +1189,32 @@ class VeilidJS extends Veilid {
   Future<bool> deleteTableDB(String name) =>
       _wasmPromiseBool('delete_table_db', [name.toJS]);
 
+  // ProtectedStore
+
+  @override
+  Future<bool> saveUserSecret(String key, Uint8List value) => _wasmPromiseBool(
+    'save_user_secret',
+    [key.toJS, base64UrlNoPadEncode(value).toJS],
+  );
+
+  @override
+  Future<Uint8List?> loadUserSecret(String key) =>
+      _wasmPromiseUint8ListOrNull('load_user_secret', [key.toJS]);
+
+  @override
+  Future<bool> removeUserSecret(String key) =>
+      _wasmPromiseBool('remove_user_secret', [key.toJS]);
+
+  @override
+  Future<List<String>> listUserSecrets() => _wasmPromiseJson(
+    'list_user_secrets',
+    (j) => (j as List<dynamic>).cast<String>(),
+  );
+
+  @override
+  Future<void> deleteAllUserSecrets() =>
+      _wasmPromiseVoid('delete_all_user_secrets');
+
   @override
   Timestamp now() => Timestamp.fromString(_wasmCallString('now', []));
 
