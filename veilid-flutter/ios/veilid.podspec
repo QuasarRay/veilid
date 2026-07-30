@@ -29,7 +29,9 @@ Veilid Network Plugin
   cargo_target_dir = File.join(workspace_dir, 'target')
 
   s.xcconfig = { 
-    'OTHER_LDFLAGS' => "-Wl,-force_load,#{File.join(cargo_target_dir, 'lipo-ios', 'libveilid_flutter.a')}",
+    # -export_dynamic: the FFI entry points have no static referrer (Dart resolves them via
+    # dlsym at runtime), so a release -dead_strip drops them unless they are export roots
+    'OTHER_LDFLAGS' => "-Wl,-force_load,#{File.join(cargo_target_dir, 'lipo-ios', 'libveilid_flutter.a')} -Wl,-export_dynamic",
     "LIBRARY_SEARCH_PATHS" => File.join(cargo_target_dir, 'lipo-ios')
   }
 

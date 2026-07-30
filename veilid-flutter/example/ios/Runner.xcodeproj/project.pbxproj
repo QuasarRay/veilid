@@ -384,6 +384,7 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-Wl,-force_load,$(SRCROOT)/../../../target/lipo-ios/libveilid_flutter.a",
+					"-Wl,-export_dynamic",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
@@ -524,6 +525,7 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-Wl,-force_load,$(SRCROOT)/../../../target/lipo-ios/libveilid_flutter.a",
+					"-Wl,-export_dynamic",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
@@ -556,6 +558,7 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-Wl,-force_load,$(SRCROOT)/../../../target/lipo-ios/libveilid_flutter.a",
+					"-Wl,-export_dynamic",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",

@@ -11,6 +11,9 @@
   - Fix background transaction pre-empt on foreground record open
   - ProtectedStore is now exported correctly through the VeilidAPI object and the old reust interface is removed. Switch to accessing ProtectedStore through VeilidAPI.
 
+- veilid-flutter:
+  - Fix missing symbols for iOS release builds.
+
 - veilid-python:
   - More tests
 
