@@ -3167,18 +3167,20 @@ checksum = "17ab85f84ca42c5ec520e6f3c9966ba1fd62909ce260f8837e248857d2560509"
 
 [[package]]
 name = "keyring-manager"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6732b8f037812826bd41ba17dd343ee13b5c351c8bb2668e2db62b33955b04d1"
+checksum = "eb64280c37503e20082203b512ac47f65437a004246560b0b2f371eb90c16496"
 dependencies = [
  "byteorder",
  "cfg-if",
  "ciborium",
+ "core-foundation 0.10.1",
  "dbus-secret-service",
  "directories",
  "jni",
  "log",
  "security-framework",
+ "security-framework-sys",
  "serde",
  "unicode_categories",
  "winapi",

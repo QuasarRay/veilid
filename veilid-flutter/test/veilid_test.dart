@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'test_encoding.dart';
+import 'test_native_asset.dart';
 import 'test_value_subkey_range.dart';
 
 void main() {
@@ -7,6 +8,10 @@ void main() {
 
   setUp(() {});
   tearDown(() {});
+
+  group('native asset', () {
+    test('test FFI entry points resolve', testNativeAssetResolves);
+  });
 
   group('encoding', () {
     test('test encoding known vectors', testEncodingKnownVectors);

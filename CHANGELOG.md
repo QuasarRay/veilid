@@ -12,7 +12,8 @@
   - ProtectedStore is now exported correctly through the VeilidAPI object and the old reust interface is removed. Switch to accessing ProtectedStore through VeilidAPI.
 
 - veilid-flutter:
-  - Fix missing symbols for iOS release builds.
+  - Full conversion to Native Assets and rust build hooks. Your apps will need to remove any extra build steps for building veilid-flutter and linking to the output, it is fully handled by flutter now.
+  - CocoaPods support removed
 
 - veilid-python:
   - More tests

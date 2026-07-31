@@ -18,10 +18,6 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 
-include(./rust.cmake)
-# List of absolute paths to libraries that should be bundled with the plugin
-
-
 function(get_all_targets var)
     set(targets)
     get_all_targets_recursive(targets ${CMAKE_CURRENT_SOURCE_DIR})
@@ -41,7 +37,8 @@ endmacro()
 # get_all_targets(all_targets)
 # message("All targets: ${all_targets}")
 
+# libveilid_flutter.so ships as a Flutter code asset, not a plugin-bundled library.
 set(veilid_bundled_libraries
-  "$<TARGET_FILE:${CRATE_NAME}-shared>"
+  ""
   PARENT_SCOPE
 )

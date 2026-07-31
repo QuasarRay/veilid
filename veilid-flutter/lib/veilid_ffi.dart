@@ -1,10 +1,12 @@
 // ignore_for_file: public_member_api_docs
 // Low-level platform binding to veilid-core; not part of the documented public API.
+// The asset id below must match `assetName` in hook/build.dart.
+@DefaultAsset('package:veilid/veilid_ffi.dart')
+library;
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
-import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -14,332 +16,9 @@ import 'veilid.dart';
 
 //////////////////////////////////////////////////////////
 
-// Load the veilid_flutter library once
-const _base = 'veilid_flutter';
-final _path = Platform.isWindows
-    ? '$_base.dll'
-    : Platform.isMacOS
-    ? 'lib$_base.dylib'
-    : 'lib$_base.so';
-final _dylib = Platform.isIOS
-    ? DynamicLibrary.process()
-    : DynamicLibrary.open(_path);
-
 // Linkage for initialization
 typedef _DartPostCObject =
     NativeFunction<Int8 Function(Int64, Pointer<Dart_CObject>)>;
-// fn free_string(s: *mut std::os::raw::c_char)
-typedef _FreeStringDart = void Function(Pointer<Utf8>);
-// fn initialize_veilid_flutter(
-//    dart_post_c_object_ptr: ffi::DartPostCObjectFnType)
-// fn initialize_veilid_core(platform_config: FfiStr)
-typedef _InitializeVeilidCoreDart = void Function(Pointer<Utf8>);
-// fn change_log_level(layer: FfiStr, log_level: FfiStr)
-typedef _ChangeLogLevelDart = int Function(Pointer<Utf8>, Pointer<Utf8>);
-// fn change_log_ignore(layer: FfiStr, log_ignore: FfiStr)
-typedef _ChangeLogIgnoreDart = void Function(Pointer<Utf8>, Pointer<Utf8>);
-// fn startup_veilid_core(port: i64, config: FfiStr)
-typedef _StartupVeilidCoreDart = void Function(int, int, Pointer<Utf8>);
-// fn get_veilid_state(port: i64)
-typedef _GetVeilidStateDart = void Function(int);
-// fn is_shutdown(port: i64)
-typedef _IsShutdownDart = void Function(int);
-// fn attach(port: i64)
-typedef _AttachDart = void Function(int);
-// fn detach(port: i64)
-typedef _DetachDart = void Function(int);
-
-// fn routing_context(port: i64)
-typedef _RoutingContextDart = void Function(int);
-// fn release_routing_context(id: u32)
-typedef _ReleaseRoutingContextDart = int Function(int);
-// fn routing_context_with_default_safety(id: u32) -> u32
-typedef _RoutingContextWithDefaultSafetyDart = int Function(int);
-// fn routing_context_with_safety(id: u32, stability: FfiStr)
-typedef _RoutingContextWithSafetyDart = int Function(int, Pointer<Utf8>);
-// fn routing_context_with_sequencing(id: u32, sequencing: FfiStr)
-typedef _RoutingContextWithSequencingDart = int Function(int, Pointer<Utf8>);
-// fn routing_context_safety(port: i64,
-//    id: u32)
-typedef _RoutingContextSafetyDart = void Function(int, int);
-// fn routing_context_app_call(port: i64,
-//    id: u32, target: FfiStr, request: FfiStr)
-typedef _RoutingContextAppCallDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn routing_context_app_message(port: i64,
-//    id: u32, target: FfiStr, request: FfiStr)
-typedef _RoutingContextAppMessageDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn routing_context_create_dht_record(port: i64,
-//    id: u32, schema: FfiStr, owner: FfiStr, kind: u32)
-typedef _RoutingContextCreateDHTRecordDart =
-    void Function(int, int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn routing_context_open_dht_record(port: i64,
-//    id: u32, key: FfiStr, writer: FfiStr)
-typedef _RoutingContextOpenDHTRecordDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn routing_context_close_dht_record(port: i64, id: u32, key: FfiStr)
-typedef _RoutingContextCloseDHTRecordDart =
-    void Function(int, int, Pointer<Utf8>);
-// fn routing_context_delete_dht_record(port: i64, id: u32, key: FfiStr)
-typedef _RoutingContextDeleteDHTRecordDart =
-    void Function(int, int, Pointer<Utf8>);
-// fn routing_context_get_dht_value(port: i64,
-//    id: u32, key: FfiStr, subkey: u32, force_refresh: bool)
-typedef _RoutingContextGetDHTValueDart =
-    void Function(int, int, Pointer<Utf8>, int, bool);
-// fn routing_context_set_dht_value(port: i64,
-//    id: u32, key: FfiStr, subkey: u32, data: FfiStr, writer: FfiStr)
-typedef _RoutingContextSetDHTValueDart =
-    void Function(int, int, Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn routing_context_watch_dht_values(port: i64,
-//     id: u32, key: FfiStr, subkeys: FfiStr, expiration: FfiStr, count: u32)
-typedef _RoutingContextWatchDHTValuesDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, int, int);
-// fn routing_context_cancel_dht_watch(port: i64,
-//     id: u32, key: FfiStr, subkeys: FfiStr)
-typedef _RoutingContextCancelDHTWatchDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn routing_context_inspect_dht_record(port: i64,
-//     id: u32, key: FfiStr, subkeys: FfiStr, scope: FfiStr)
-typedef _RoutingContextInspectDHTRecordDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-// fn routing_context_flush_dht_record(port: i64,
-//     id: u32, key: FfiStr, timeout_ms: u64)
-typedef _RoutingContextFlushDHTRecordDart =
-    void Function(int, int, Pointer<Utf8>, int);
-
-// fn generate_member_id(port: i64, writer_key: FfiStr)
-typedef _GenerateMemberIdDart = void Function(int, Pointer<Utf8>);
-// fn get_dht_record_key(port: i64,
-//    schema: FfiStr, owner: FfiStr)
-typedef _GetDHTRecordKeyDart =
-    void Function(int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-// fn transact_dht_records(port: i64, records: FfiStr, default_signing_key: FfiStr)
-typedef _TransactDHTRecordsDart =
-    void Function(int, Pointer<Utf8>, Pointer<Utf8>);
-
-// fn new_private_route(port: i64)
-typedef _NewPrivateRouteDart = void Function(int);
-// fn new_custom_private_route(port: i64, private_spec: FfiStr)
-typedef _NewCustomPrivateRouteDart = void Function(int, Pointer<Utf8>);
-// fn import_remote_private_route(port: i64, blob: FfiStr)
-typedef _ImportRemotePrivateRouteDart = void Function(int, Pointer<Utf8>);
-// fn release_private_route(port:i64, key: FfiStr)
-typedef _ReleasePrivateRouteDart = void Function(int, Pointer<Utf8>);
-
-// fn app_call_reply(port: i64, id: FfiStr, message: FfiStr)
-typedef _AppCallReplyDart = void Function(int, Pointer<Utf8>, Pointer<Utf8>);
-
-// fn open_table_db(port: i64, name: FfiStr, column_count: u32)
-typedef _OpenTableDbDart = void Function(int, Pointer<Utf8>, int);
-// fn release_table_db(id: u32) -> i32
-typedef _ReleaseTableDbDart = int Function(int);
-// fn delete_table_db(port: i64, name: FfiStr)
-typedef _DeleteTableDbDart = void Function(int, Pointer<Utf8>);
-// fn table_db_get_column_count(id: u32) -> u32
-typedef _TableDbGetColumnCountDart = int Function(int);
-// fn table_db_get_keys(port: i64, id: u32, col: u32)
-typedef _TableDbGetKeysDart = Pointer<Utf8> Function(int, int, int);
-// fn table_db_store(port: i64, id: u32, col: u32, key: FfiStr, value: FfiStr)
-typedef _TableDbStoreDart =
-    void Function(int, int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn table_db_load(port: i64, id: u32, col: u32, key: FfiStr)
-typedef _TableDbLoadDart = void Function(int, int, int, Pointer<Utf8>);
-// fn table_db_delete(port: i64, id: u32, col: u32, key: FfiStr)
-typedef _TableDbDeleteDart = void Function(int, int, int, Pointer<Utf8>);
-// fn table_db_transact(id: u32) -> u32
-typedef _TableDbTransactDart = int Function(int);
-// fn release_table_db_transaction(id: u32) -> i32
-typedef _ReleaseTableDbTransactionDart = int Function(int);
-// fn table_db_transaction_commit(port: i64, id: u32)
-typedef _TableDbTransactionCommitDart = void Function(int, int);
-// fn table_db_transaction_rollback(port: i64, id: u32)
-typedef _TableDbTransactionRollbackDart = void Function(int, int);
-// fn table_db_transaction_store(port: i64,
-//  id: u32, col: u32, key: FfiStr, value: FfiStr)
-typedef _TableDbTransactionStoreDart =
-    void Function(int, int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn table_db_transaction_delete(port: i64, id: u32, col: u32, key: FfiStr)
-typedef _TableDbTransactionDeleteDart =
-    void Function(int, int, int, Pointer<Utf8>);
-
-// fn release_dht_transaction(id: u32) -> i32
-typedef _ReleaseDHTTransactionDart = int Function(int);
-// fn dht_transaction_commit(port: i64, id: u32)
-typedef _DHTTransactionCommitDart = void Function(int, int);
-// fn dht_transaction_rollback(port: i64, id: u32)
-typedef _DHTTransactionRollbackDart = void Function(int, int);
-// fn dht_transaction_extend(port: i64, id: u32, record_keys: FfiStr, options: FfiStr)
-typedef _DHTTransactionExtendDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn dht_transaction_get(port: i64, id: u32, key: FfiStr, subkey: u32)
-typedef _DHTTransactionGetDart = void Function(int, int, Pointer<Utf8>, int);
-// fn dht_transaction_set(port: i64, id: u32, key: FfiStr, subkey: u32,
-//   data: FfiStr, writer: FfiStr)
-typedef _DHTTransactionSetDart =
-    void Function(int, int, Pointer<Utf8>, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn dht_transaction_inspect(port: i64, id: u32,
-//     key: FfiStr, subkeys: FfiStr, scope: FfiStr)
-typedef _DHTTransactionInspectDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-
-// fn valid_crypto_kinds() -> *mut c_char
-typedef _ValidCryptoKindsDart = Pointer<Utf8> Function();
-// fn verify_signatures(port: i64,
-//  node_ids: FfiStr, data: FfiStr, signatures: FfiStr)
-typedef _VerifySignaturesDart =
-    void Function(int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-// fn generate_signatures(port: i64, data: FfiStr, key_pairs: FfiStr)
-typedef _GenerateSignaturesDart =
-    void Function(int, Pointer<Utf8>, Pointer<Utf8>);
-// fn generate_key_pair(port: i64, kind: u32) {
-typedef _GenerateKeyPairDart = void Function(int, int);
-// fn crypto_cached_dh(port: i64, kind: u32, key: FfiStr, secret: FfiStr)
-typedef _CryptoCachedDHDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_compute_dh(port: i64, kind: u32, key: FfiStr, secret: FfiStr)
-typedef _CryptoComputeDHDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_generate_shared_secret(port: i64, kind: u32, key: FfiStr,
-//   secret: FfiStr, domain: FfiStr)
-typedef _CryptoGenerateSharedSecretDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_hpke_seal(port: i64, kind: u32, recipient: FfiStr,
-//   aad: FfiStr, plaintext: FfiStr)
-typedef _CryptoHpkeSealDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_hpke_open(port: i64, kind: u32, secret: FfiStr,
-//   aad: FfiStr, sealed: FfiStr)
-typedef _CryptoHpkeOpenDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_random_bytes(port: i64, kind: u32, len: u32)
-typedef _CryptoRandomBytesDart = void Function(int, int, int);
-// fn crypto_shared_secret_length(port: i64, kind: u32)
-typedef _CryptoSharedSecretLengthDart = void Function(int, int);
-// fn crypto_nonce_length(port: i64, kind: u32)
-typedef _CryptoNonceLengthDart = void Function(int, int);
-// fn crypto_hash_digest_length(port: i64, kind: u32)
-typedef _CryptoHashDigestLengthDart = void Function(int, int);
-// fn crypto_public_key_length(port: i64, kind: u32)
-typedef _CryptoPublicKeyLengthDart = void Function(int, int);
-// fn crypto_secret_key_length(port: i64, kind: u32)
-typedef _CryptoSecretKeyLengthDart = void Function(int, int);
-// fn crypto_signature_length(port: i64, kind: u32)
-typedef _CryptoSignatureLengthDart = void Function(int, int);
-// fn crypto_default_salt_length(port: i64, kind: u32)
-typedef _CryptoDefaultSaltLengthDart = void Function(int, int);
-// fn crypto_aead_overhead(port: i64, kind: u32)
-typedef _CryptoAeadOverheadDart = void Function(int, int);
-
-// fn crypto_check_shared_secret(port: i64, kind: u32, secret: FfiStr)
-typedef _CryptoCheckSharedSecretDart = void Function(int, int, Pointer<Utf8>);
-// fn crypto_check_nonce(port: i64, kind: u32, nonce: FfiStr)
-typedef _CryptoCheckNonceDart = void Function(int, int, Pointer<Utf8>);
-// fn crypto_check_hash_digest(port: i64, kind: u32, digest: FfiStr)
-typedef _CryptoCheckHashDigestDart = void Function(int, int, Pointer<Utf8>);
-// fn crypto_check_public_key(port: i64, kind: u32, key: FfiStr)
-typedef _CryptoCheckPublicKeyDart = void Function(int, int, Pointer<Utf8>);
-// fn crypto_check_secret_key(port: i64, kind: u32, key: FfiStr)
-typedef _CryptoCheckSecretKeyDart = void Function(int, int, Pointer<Utf8>);
-// fn crypto_check_signature(port: i64, kind: u32, signature: FfiStr)
-typedef _CryptoCheckSignatureDart = void Function(int, int, Pointer<Utf8>);
-
-// fn crypto_hash_password(port: i64, kind: u32, password: FfiStr, salt: FfiStr)
-typedef _CryptoHashPasswordDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_verify_password(port: i64,
-//    kind: u32, password: FfiStr, password_hash: FfiStr )
-typedef _CryptoVerifyPasswordDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_derive_shared_secret(port: i64,
-//    kind: u32, password: FfiStr, salt: FfiStr )
-typedef _CryptoDeriveSharedSecretDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_random_nonce(port: i64, kind: u32)
-typedef _CryptoRandomNonceDart = void Function(int, int);
-// fn crypto_random_shared_secret(port: i64, kind: u32)
-typedef _CryptoRandomSharedSecretDart = void Function(int, int);
-// fn crypto_generate_key_pair(port: i64, kind: u32)
-typedef _CryptoGenerateKeyPairDart = void Function(int, int);
-// fn crypto_generate_kem_key_pair(port: i64, kind: u32)
-typedef _CryptoGenerateKemKeyPairDart = void Function(int, int);
-// fn crypto_encapsulation_key_from_signing_key(port: i64, kind: u32,
-//    key: FfiStr)
-typedef _CryptoEncapsulationKeyFromSigningKeyDart =
-    void Function(int, int, Pointer<Utf8>);
-// fn crypto_decapsulation_key_from_signing_secret(port: i64, kind: u32,
-//    secret: FfiStr)
-typedef _CryptoDecapsulationKeyFromSigningSecretDart =
-    void Function(int, int, Pointer<Utf8>);
-// fn crypto_encapsulation_key_length(port: i64, kind: u32)
-typedef _CryptoEncapsulationKeyLengthDart = void Function(int, int);
-// fn crypto_decapsulation_key_length(port: i64, kind: u32)
-typedef _CryptoDecapsulationKeyLengthDart = void Function(int, int);
-// fn crypto_generate_hash(port: i64, kind: u32, data: FfiStr)
-typedef _CryptoGenerateHashDart = void Function(int, int, Pointer<Utf8>);
-// fn crypto_validate_key_pair(port: i64,
-//    kind: u32, key: FfiStr, secret: FfiStr)
-typedef _CryptoValidateKeyPairDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_validate_hash(port: i64, kind: u32, data: FfiStr, hash: FfiStr)
-typedef _CryptoValidateHashDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_sign(port: i64,
-//    kind: u32, key: FfiStr, secret: FfiStr, data: FfiStr)
-typedef _CryptoSignDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_verify(port: i64,
-//    kind: u32, key: FfiStr, data: FfiStr, signature: FfiStr)
-typedef _CryptoVerifyDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-// fn crypto_decrypt_aead(port: i64,
-//    kind: u32, body: FfiStr, nonce: FfiStr,
-//    shared_secret: FfiStr, associated_data: FfiStr)
-typedef _CryptoDecryptAeadDart =
-    void Function(
-      int,
-      int,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-    );
-// fn crypto_encrypt_aead(port: i64,
-//    kind: u32, body: FfiStr, nonce: FfiStr,
-//    shared_secret: FfiStr, associated_data: FfiStr)
-typedef _CryptoEncryptAeadDart =
-    void Function(
-      int,
-      int,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-    );
-// fn crypto_crypt_no_auth(port: i64,
-//    kind: u32, body: FfiStr, nonce: FfiStr, shared_secret: FfiStr)
-typedef _CryptoCryptNoAuthDart =
-    void Function(int, int, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
-
-// fn now() -> u64
-typedef _NowDart = int Function();
-// fn debug(port: i64, log_level: FfiStr)
-typedef _DebugDart = void Function(int, Pointer<Utf8>);
-// fn save_user_secret(port: i64, key: FfiStr, value: FfiStr)
-typedef _SaveUserSecretDart = void Function(int, Pointer<Utf8>, Pointer<Utf8>);
-// fn load_user_secret(port: i64, key: FfiStr)
-typedef _LoadUserSecretDart = void Function(int, Pointer<Utf8>);
-// fn remove_user_secret(port: i64, key: FfiStr)
-typedef _RemoveUserSecretDart = void Function(int, Pointer<Utf8>);
-// fn list_user_secrets(port: i64)
-typedef _ListUserSecretsDart = void Function(int);
-// fn delete_all_user_secrets(port: i64)
-typedef _DeleteAllUserSecretsDart = void Function(int);
-// fn shutdown_veilid_core(port: i64)
-typedef _ShutdownVeilidCoreDart = void Function(int);
-// fn veilid_version_string() -> *mut c_char
-typedef _VeilidVersionStringDart = Pointer<Utf8> Function();
 
 // fn veilid_version() -> VeilidVersion
 final class VeilidVersionFFI extends Struct {
@@ -350,14 +29,6 @@ final class VeilidVersionFFI extends Struct {
   @Uint32()
   external int patch;
 }
-
-typedef _VeilidVersionDart = VeilidVersionFFI Function();
-
-// fn default_veilid_config() -> *mut c_char
-typedef _DefaultVeilidConfigDart = Pointer<Utf8> Function();
-
-// fn veilid_features() -> *mut c_char
-typedef _VeilidFeaturesDart = Pointer<Utf8> Function();
 
 // Async message types
 const messageOk = 0;
@@ -371,7 +42,7 @@ const messageStreamAbortJson = 7;
 const messageStreamClose = 8;
 
 // Interface factory for high level Veilid API
-Veilid getVeilid() => VeilidFFI(_dylib);
+Veilid getVeilid() => VeilidFFI();
 
 // Uint8List marshaling
 Uint8List convertUint8ListFromJson(dynamic json) =>
@@ -657,9 +328,8 @@ Stream<T> processStreamJson<T>(
 
 class _Ctx {
   int? id;
-  final VeilidFFI ffi;
 
-  _Ctx(int this.id, this.ffi);
+  _Ctx(int this.id);
 
   void ensureValid() {
     if (id == null) {
@@ -669,7 +339,7 @@ class _Ctx {
 
   void close() {
     if (id != null) {
-      ffi._releaseRoutingContext(id!);
+      VeilidFFI._releaseRoutingContext(id!);
       id = null;
     }
   }
@@ -692,8 +362,8 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
   @override
   VeilidRoutingContextFFI withDefaultSafety({bool closeSelf = false}) {
     _ctx.ensureValid();
-    final newId = _ctx.ffi._routingContextWithDefaultSafety(_ctx.id!);
-    final out = VeilidRoutingContextFFI._(_Ctx(newId, _ctx.ffi));
+    final newId = VeilidFFI._routingContextWithDefaultSafety(_ctx.id!);
+    final out = VeilidRoutingContextFFI._(_Ctx(newId));
     if (closeSelf) {
       close();
     }
@@ -706,11 +376,11 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     bool closeSelf = false,
   }) {
     _ctx.ensureValid();
-    final newId = _ctx.ffi._routingContextWithSafety(
+    final newId = VeilidFFI._routingContextWithSafety(
       _ctx.id!,
       jsonEncode(safetySelection).toNativeUtf8(),
     );
-    final out = VeilidRoutingContextFFI._(_Ctx(newId, _ctx.ffi));
+    final out = VeilidRoutingContextFFI._(_Ctx(newId));
     if (closeSelf) {
       close();
     }
@@ -723,11 +393,11 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     bool closeSelf = false,
   }) {
     _ctx.ensureValid();
-    final newId = _ctx.ffi._routingContextWithSequencing(
+    final newId = VeilidFFI._routingContextWithSequencing(
       _ctx.id!,
       jsonEncode(sequencing).toNativeUtf8(),
     );
-    final out = VeilidRoutingContextFFI._(_Ctx(newId, _ctx.ffi));
+    final out = VeilidRoutingContextFFI._(_Ctx(newId));
     if (closeSelf) {
       close();
     }
@@ -739,7 +409,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     _ctx.ensureValid();
     final recvPort = ReceivePort('routing_context_safety');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextSafety(sendPort.nativePort, _ctx.id!);
+    VeilidFFI._routingContextSafety(sendPort.nativePort, _ctx.id!);
     final out = await processFutureJson<SafetySelection>(
       SafetySelection.fromJson,
       recvPort.first,
@@ -755,7 +425,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
 
     final recvPort = ReceivePort('routing_context_app_call');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextAppCall(
+    VeilidFFI._routingContextAppCall(
       sendPort.nativePort,
       _ctx.id!,
       nativeTarget,
@@ -773,7 +443,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
 
     final recvPort = ReceivePort('routing_context_app_message');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextAppMessage(
+    VeilidFFI._routingContextAppMessage(
       sendPort.nativePort,
       _ctx.id!,
       nativeTarget,
@@ -796,7 +466,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
         : nullptr;
     final recvPort = ReceivePort('routing_context_create_dht_record');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextCreateDHTRecord(
+    VeilidFFI._routingContextCreateDHTRecord(
       sendPort.nativePort,
       _ctx.id!,
       nativeKind,
@@ -822,7 +492,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
         : nullptr;
     final recvPort = ReceivePort('routing_context_open_dht_record');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextOpenDHTRecord(
+    VeilidFFI._routingContextOpenDHTRecord(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -841,7 +511,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     final nativeKey = jsonEncode(key).toNativeUtf8();
     final recvPort = ReceivePort('routing_context_close_dht_record');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextCloseDHTRecord(
+    VeilidFFI._routingContextCloseDHTRecord(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -855,7 +525,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     final nativeKey = jsonEncode(key).toNativeUtf8();
     final recvPort = ReceivePort('routing_context_delete_dht_record');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextDeleteDHTRecord(
+    VeilidFFI._routingContextDeleteDHTRecord(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -873,7 +543,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     final nativeKey = jsonEncode(key).toNativeUtf8();
     final recvPort = ReceivePort('routing_context_get_dht_value');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextGetDHTValue(
+    VeilidFFI._routingContextGetDHTValue(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -903,7 +573,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
 
     final recvPort = ReceivePort('routing_context_set_dht_value');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextSetDHTValue(
+    VeilidFFI._routingContextSetDHTValue(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -936,7 +606,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
 
     final recvPort = ReceivePort('routing_context_watch_dht_values');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextWatchDHTValues(
+    VeilidFFI._routingContextWatchDHTValues(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -961,7 +631,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
 
     final recvPort = ReceivePort('routing_context_cancel_dht_watch');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextCancelDHTWatch(
+    VeilidFFI._routingContextCancelDHTWatch(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -986,7 +656,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
 
     final recvPort = ReceivePort('routing_context_inspect_dht_record');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextInspectDHTRecord(
+    VeilidFFI._routingContextInspectDHTRecord(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -1007,7 +677,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
 
     final recvPort = ReceivePort('routing_context_flush_dht_record');
     final sendPort = recvPort.sendPort;
-    _ctx.ffi._routingContextFlushDHTRecord(
+    VeilidFFI._routingContextFlushDHTRecord(
       sendPort.nativePort,
       _ctx.id!,
       nativeKey,
@@ -1020,9 +690,8 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
 class _TDBT {
   int? id;
   final VeilidTableDBFFI tdbffi;
-  final VeilidFFI ffi;
 
-  _TDBT(int this.id, this.tdbffi, this.ffi);
+  _TDBT(int this.id, this.tdbffi);
 
   void ensureValid() {
     if (id == null) {
@@ -1032,7 +701,7 @@ class _TDBT {
 
   void close() {
     if (id != null) {
-      ffi._releaseTableDbTransaction(id!);
+      VeilidFFI._releaseTableDbTransaction(id!);
       id = null;
     }
   }
@@ -1055,7 +724,7 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
     final id = _dtx.requireId();
     final recvPort = ReceivePort('veilid_dht_transaction_commit');
     final sendPort = recvPort.sendPort;
-    _dtx.ffi._dhtTransactionCommit(sendPort.nativePort, id);
+    VeilidFFI._dhtTransactionCommit(sendPort.nativePort, id);
     await processFutureVoid(recvPort.first);
     _dtx.close();
   }
@@ -1065,7 +734,7 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
     final id = _dtx.requireId();
     final recvPort = ReceivePort('veilid_dht_transaction_rollback');
     final sendPort = recvPort.sendPort;
-    _dtx.ffi._dhtTransactionRollback(sendPort.nativePort, id);
+    VeilidFFI._dhtTransactionRollback(sendPort.nativePort, id);
     await processFutureVoid(recvPort.first);
     _dtx.close();
   }
@@ -1083,7 +752,7 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
 
     final recvPort = ReceivePort('veilid_dht_transaction_extend');
     final sendPort = recvPort.sendPort;
-    _dtx.ffi._dhtTransactionExtend(
+    VeilidFFI._dhtTransactionExtend(
       sendPort.nativePort,
       id,
       nativeRecordKeys,
@@ -1098,7 +767,7 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
     final nativeKey = jsonEncode(key).toNativeUtf8();
     final recvPort = ReceivePort('veilid_dht_transaction_get');
     final sendPort = recvPort.sendPort;
-    _dtx.ffi._dhtTransactionGet(sendPort.nativePort, id, nativeKey, subkey);
+    VeilidFFI._dhtTransactionGet(sendPort.nativePort, id, nativeKey, subkey);
     final valueData = await processFutureOptJson(
       ValueData.fromJson,
       recvPort.first,
@@ -1122,7 +791,7 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
 
     final recvPort = ReceivePort('veilid_dht_transaction_set');
     final sendPort = recvPort.sendPort;
-    _dtx.ffi._dhtTransactionSet(
+    VeilidFFI._dhtTransactionSet(
       sendPort.nativePort,
       id,
       nativeKey,
@@ -1152,7 +821,7 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
 
     final recvPort = ReceivePort('veilid_dht_transaction_inspect');
     final sendPort = recvPort.sendPort;
-    _dtx.ffi._dhtTransactionInspect(
+    VeilidFFI._dhtTransactionInspect(
       sendPort.nativePort,
       id,
       nativeKey,
@@ -1170,9 +839,7 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
 class _DTX {
   int? id;
 
-  final VeilidFFI ffi;
-
-  _DTX(int this.id, this.ffi);
+  _DTX(int this.id);
 
   int requireId() {
     if (id == null) {
@@ -1183,7 +850,7 @@ class _DTX {
 
   void close() {
     if (id != null) {
-      ffi._releaseDHTTransaction(id!);
+      VeilidFFI._releaseDHTTransaction(id!);
       id = null;
     }
   }
@@ -1206,7 +873,7 @@ class VeilidTableDBTransactionFFI extends VeilidTableDBTransaction {
     _tdbt.ensureValid();
     final recvPort = ReceivePort('veilid_table_db_transaction_commit');
     final sendPort = recvPort.sendPort;
-    _tdbt.ffi._tableDbTransactionCommit(sendPort.nativePort, _tdbt.id!);
+    VeilidFFI._tableDbTransactionCommit(sendPort.nativePort, _tdbt.id!);
     await processFutureVoid(recvPort.first);
     _tdbt.close();
   }
@@ -1216,7 +883,7 @@ class VeilidTableDBTransactionFFI extends VeilidTableDBTransaction {
     _tdbt.ensureValid();
     final recvPort = ReceivePort('veilid_table_db_transaction_rollback');
     final sendPort = recvPort.sendPort;
-    _tdbt.ffi._tableDbTransactionRollback(sendPort.nativePort, _tdbt.id!);
+    VeilidFFI._tableDbTransactionRollback(sendPort.nativePort, _tdbt.id!);
     await processFutureVoid(recvPort.first);
     _tdbt.close();
   }
@@ -1229,7 +896,7 @@ class VeilidTableDBTransactionFFI extends VeilidTableDBTransaction {
 
     final recvPort = ReceivePort('veilid_table_db_transaction_store');
     final sendPort = recvPort.sendPort;
-    _tdbt.ffi._tableDbTransactionStore(
+    VeilidFFI._tableDbTransactionStore(
       sendPort.nativePort,
       _tdbt.id!,
       col,
@@ -1246,7 +913,7 @@ class VeilidTableDBTransactionFFI extends VeilidTableDBTransaction {
 
     final recvPort = ReceivePort('veilid_table_db_transaction_delete');
     final sendPort = recvPort.sendPort;
-    _tdbt.ffi._tableDbTransactionDelete(
+    VeilidFFI._tableDbTransactionDelete(
       sendPort.nativePort,
       _tdbt.id!,
       col,
@@ -1258,9 +925,8 @@ class VeilidTableDBTransactionFFI extends VeilidTableDBTransaction {
 
 class _TDB {
   int? id;
-  final VeilidFFI ffi;
 
-  _TDB(int this.id, this.ffi);
+  _TDB(int this.id);
 
   void ensureValid() {
     if (id == null) {
@@ -1270,7 +936,7 @@ class _TDB {
 
   void close() {
     if (id != null) {
-      ffi._releaseTableDb(id!);
+      VeilidFFI._releaseTableDb(id!);
       id = null;
     }
   }
@@ -1293,7 +959,7 @@ class VeilidTableDBFFI extends VeilidTableDB {
   @override
   int get columnCount {
     _tdb.ensureValid();
-    return _tdb.ffi._tableDbGetColumnCount(_tdb.id!);
+    return VeilidFFI._tableDbGetColumnCount(_tdb.id!);
   }
 
   @override
@@ -1303,7 +969,7 @@ class VeilidTableDBFFI extends VeilidTableDB {
     final recvPort = ReceivePort('veilid_table_db_get_keys');
     final sendPort = recvPort.sendPort;
 
-    _tdb.ffi._tableDbGetKeys(sendPort.nativePort, _tdb.id!, col);
+    VeilidFFI._tableDbGetKeys(sendPort.nativePort, _tdb.id!, col);
 
     return processFutureJson(
       jsonListConstructor<Uint8List>(base64UrlNoPadDecodeDynamic),
@@ -1315,8 +981,8 @@ class VeilidTableDBFFI extends VeilidTableDB {
   VeilidTableDBTransaction transact() {
     _tdb.ensureValid();
 
-    final id = _tdb.ffi._tableDbTransact(_tdb.id!);
-    return VeilidTableDBTransactionFFI._(_TDBT(id, this, _tdb.ffi));
+    final id = VeilidFFI._tableDbTransact(_tdb.id!);
+    return VeilidTableDBTransactionFFI._(_TDBT(id, this));
   }
 
   @override
@@ -1328,7 +994,7 @@ class VeilidTableDBFFI extends VeilidTableDB {
 
     final recvPort = ReceivePort('veilid_table_db_store');
     final sendPort = recvPort.sendPort;
-    _tdb.ffi._tableDbStore(
+    VeilidFFI._tableDbStore(
       sendPort.nativePort,
       _tdb.id!,
       col,
@@ -1345,7 +1011,12 @@ class VeilidTableDBFFI extends VeilidTableDB {
 
     final recvPort = ReceivePort('veilid_table_db_load');
     final sendPort = recvPort.sendPort;
-    _tdb.ffi._tableDbLoad(sendPort.nativePort, _tdb.id!, col, nativeEncodedKey);
+    VeilidFFI._tableDbLoad(
+      sendPort.nativePort,
+      _tdb.id!,
+      col,
+      nativeEncodedKey,
+    );
     final out = await processFuturePlain<String?>(recvPort.first);
     if (out == null) {
       return null;
@@ -1360,7 +1031,7 @@ class VeilidTableDBFFI extends VeilidTableDB {
 
     final recvPort = ReceivePort('veilid_table_db_delete');
     final sendPort = recvPort.sendPort;
-    _tdb.ffi._tableDbDelete(
+    VeilidFFI._tableDbDelete(
       sendPort.nativePort,
       _tdb.id!,
       col,
@@ -1377,9 +1048,8 @@ class VeilidTableDBFFI extends VeilidTableDB {
 // FFI implementation of VeilidCryptoSystem
 class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   final int _kind;
-  final VeilidFFI _ffi;
 
-  VeilidCryptoSystemFFI._(this._ffi, this._kind);
+  VeilidCryptoSystemFFI._(this._kind);
 
   @override
   CryptoKind kind() => CryptoKind.fromInt(_kind);
@@ -1391,7 +1061,12 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_cached_dh');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoCachedDH(sendPort.nativePort, _kind, nativeKey, nativeSecret);
+    VeilidFFI._cryptoCachedDH(
+      sendPort.nativePort,
+      _kind,
+      nativeKey,
+      nativeSecret,
+    );
     return processFutureJson(SharedSecret.fromJson, recvPort.first);
   }
 
@@ -1402,7 +1077,12 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_compute_dh');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoComputeDH(sendPort.nativePort, _kind, nativeKey, nativeSecret);
+    VeilidFFI._cryptoComputeDH(
+      sendPort.nativePort,
+      _kind,
+      nativeKey,
+      nativeSecret,
+    );
     return processFutureJson(SharedSecret.fromJson, recvPort.first);
   }
 
@@ -1418,7 +1098,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_generate_shared_secret');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoGenerateSharedSecret(
+    VeilidFFI._cryptoGenerateSharedSecret(
       sendPort.nativePort,
       _kind,
       nativeKey,
@@ -1440,7 +1120,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_hpke_seal');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoHpkeSeal(
+    VeilidFFI._cryptoHpkeSeal(
       sendPort.nativePort,
       _kind,
       nativeRecipient,
@@ -1463,7 +1143,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_hpke_open');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoHpkeOpen(
+    VeilidFFI._cryptoHpkeOpen(
       sendPort.nativePort,
       _kind,
       nativeSecret,
@@ -1478,7 +1158,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<Uint8List> randomBytes(int len) async {
     final recvPort = ReceivePort('crypto_random_bytes');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoRandomBytes(sendPort.nativePort, _kind, len);
+    VeilidFFI._cryptoRandomBytes(sendPort.nativePort, _kind, len);
     final out = await processFuturePlain<String>(recvPort.first);
     return base64UrlNoPadDecode(out);
   }
@@ -1487,7 +1167,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> sharedSecretLength() {
     final recvPort = ReceivePort('crypto_shared_secret_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoSharedSecretLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoSharedSecretLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1495,7 +1175,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> nonceLength() {
     final recvPort = ReceivePort('crypto_nonce_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoNonceLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoNonceLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1503,7 +1183,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> hashDigestLength() {
     final recvPort = ReceivePort('crypto_hash_digest_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoHashDigestLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoHashDigestLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1511,7 +1191,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> publicKeyLength() {
     final recvPort = ReceivePort('crypto_public_key_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoPublicKeyLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoPublicKeyLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1519,7 +1199,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> secretKeyLength() {
     final recvPort = ReceivePort('crypto_secret_key_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoSecretKeyLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoSecretKeyLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1527,7 +1207,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> encapsulationKeyLength() {
     final recvPort = ReceivePort('crypto_encapsulation_key_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoEncapsulationKeyLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoEncapsulationKeyLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1535,7 +1215,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> decapsulationKeyLength() {
     final recvPort = ReceivePort('crypto_decapsulation_key_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoDecapsulationKeyLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoDecapsulationKeyLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1543,7 +1223,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> signatureLength() {
     final recvPort = ReceivePort('crypto_signature_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoSignatureLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoSignatureLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1551,7 +1231,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> defaultSaltLength() {
     final recvPort = ReceivePort('crypto_default_salt_length');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoDefaultSaltLength(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoDefaultSaltLength(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1559,7 +1239,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<int> aeadOverhead() {
     final recvPort = ReceivePort('crypto_aead_overhead');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoAeadOverhead(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoAeadOverhead(sendPort.nativePort, _kind);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1568,7 +1248,11 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final nativeSecret = jsonEncode(secret).toNativeUtf8();
     final recvPort = ReceivePort('crypto_check_shared_secret');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoCheckSharedSecret(sendPort.nativePort, _kind, nativeSecret);
+    VeilidFFI._cryptoCheckSharedSecret(
+      sendPort.nativePort,
+      _kind,
+      nativeSecret,
+    );
     return processFutureVoid(recvPort.first);
   }
 
@@ -1577,7 +1261,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final nativeNonce = jsonEncode(nonce).toNativeUtf8();
     final recvPort = ReceivePort('crypto_check_nonce');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoCheckNonce(sendPort.nativePort, _kind, nativeNonce);
+    VeilidFFI._cryptoCheckNonce(sendPort.nativePort, _kind, nativeNonce);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1586,7 +1270,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final nativeDigest = jsonEncode(digest).toNativeUtf8();
     final recvPort = ReceivePort('crypto_check_hash_digest');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoCheckHashDigest(sendPort.nativePort, _kind, nativeDigest);
+    VeilidFFI._cryptoCheckHashDigest(sendPort.nativePort, _kind, nativeDigest);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1595,7 +1279,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final nativeKey = jsonEncode(key).toNativeUtf8();
     final recvPort = ReceivePort('crypto_check_public_key');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoCheckPublicKey(sendPort.nativePort, _kind, nativeKey);
+    VeilidFFI._cryptoCheckPublicKey(sendPort.nativePort, _kind, nativeKey);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1604,7 +1288,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final nativeKey = jsonEncode(key).toNativeUtf8();
     final recvPort = ReceivePort('crypto_check_secret_key');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoCheckSecretKey(sendPort.nativePort, _kind, nativeKey);
+    VeilidFFI._cryptoCheckSecretKey(sendPort.nativePort, _kind, nativeKey);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1613,7 +1297,11 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final nativeSignature = jsonEncode(signature).toNativeUtf8();
     final recvPort = ReceivePort('crypto_check_signature');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoCheckSignature(sendPort.nativePort, _kind, nativeSignature);
+    VeilidFFI._cryptoCheckSignature(
+      sendPort.nativePort,
+      _kind,
+      nativeSignature,
+    );
     return processFutureVoid(recvPort.first);
   }
 
@@ -1624,7 +1312,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_hash_password');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoHashPassword(
+    VeilidFFI._cryptoHashPassword(
       sendPort.nativePort,
       _kind,
       nativeEncodedPassword,
@@ -1640,7 +1328,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_verify_password');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoVerifyPassword(
+    VeilidFFI._cryptoVerifyPassword(
       sendPort.nativePort,
       _kind,
       nativeEncodedPassword,
@@ -1656,7 +1344,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_derive_shared_secret');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoDeriveSharedSecret(
+    VeilidFFI._cryptoDeriveSharedSecret(
       sendPort.nativePort,
       _kind,
       nativeEncodedPassword,
@@ -1669,7 +1357,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<Nonce> randomNonce() {
     final recvPort = ReceivePort('crypto_random_nonce');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoRandomNonce(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoRandomNonce(sendPort.nativePort, _kind);
     return processFutureJson(Nonce.fromJson, recvPort.first);
   }
 
@@ -1677,7 +1365,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<SharedSecret> randomSharedSecret() {
     final recvPort = ReceivePort('crypto_random_shared_secret');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoRandomSharedSecret(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoRandomSharedSecret(sendPort.nativePort, _kind);
     return processFutureJson(SharedSecret.fromJson, recvPort.first);
   }
 
@@ -1685,7 +1373,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<KeyPair> generateKeyPair() {
     final recvPort = ReceivePort('crypto_generate_key_pair');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoGenerateKeyPair(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoGenerateKeyPair(sendPort.nativePort, _kind);
     return processFutureJson(KeyPair.fromJson, recvPort.first);
   }
 
@@ -1693,7 +1381,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   Future<KemKeyPair> generateKemKeyPair() {
     final recvPort = ReceivePort('crypto_generate_kem_key_pair');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoGenerateKemKeyPair(sendPort.nativePort, _kind);
+    VeilidFFI._cryptoGenerateKemKeyPair(sendPort.nativePort, _kind);
     return processFutureJson(KemKeyPair.fromJson, recvPort.first);
   }
 
@@ -1703,7 +1391,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_encapsulation_key_from_signing_key');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoEncapsulationKeyFromSigningKey(
+    VeilidFFI._cryptoEncapsulationKeyFromSigningKey(
       sendPort.nativePort,
       _kind,
       nativeKey,
@@ -1712,16 +1400,14 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
   }
 
   @override
-  Future<DecapsulationKey> decapsulationKeyFromSigningSecret(
-    SecretKey secret,
-  ) {
+  Future<DecapsulationKey> decapsulationKeyFromSigningSecret(SecretKey secret) {
     final nativeSecret = jsonEncode(secret).toNativeUtf8();
 
     final recvPort = ReceivePort(
       'crypto_decapsulation_key_from_signing_secret',
     );
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoDecapsulationKeyFromSigningSecret(
+    VeilidFFI._cryptoDecapsulationKeyFromSigningSecret(
       sendPort.nativePort,
       _kind,
       nativeSecret,
@@ -1735,7 +1421,11 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_generate_hash');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoGenerateHash(sendPort.nativePort, _kind, nativeEncodedData);
+    VeilidFFI._cryptoGenerateHash(
+      sendPort.nativePort,
+      _kind,
+      nativeEncodedData,
+    );
     return processFutureJson(HashDigest.fromJson, recvPort.first);
   }
 
@@ -1746,7 +1436,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_validate_key_pair');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoValidateKeyPair(
+    VeilidFFI._cryptoValidateKeyPair(
       sendPort.nativePort,
       _kind,
       nativeKey,
@@ -1762,7 +1452,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_validate_hash');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoValidateHash(
+    VeilidFFI._cryptoValidateHash(
       sendPort.nativePort,
       _kind,
       nativeEncodedData,
@@ -1779,7 +1469,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_sign');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoSign(
+    VeilidFFI._cryptoSign(
       sendPort.nativePort,
       _kind,
       nativeKey,
@@ -1797,7 +1487,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_verify');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoVerify(
+    VeilidFFI._cryptoVerify(
       sendPort.nativePort,
       _kind,
       nativeKey,
@@ -1823,7 +1513,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_decrypt_aead');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoDecryptAead(
+    VeilidFFI._cryptoDecryptAead(
       sendPort.nativePort,
       _kind,
       nativeEncodedBody,
@@ -1851,7 +1541,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_encrypt_aead');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoEncryptAead(
+    VeilidFFI._cryptoEncryptAead(
       sendPort.nativePort,
       _kind,
       nativeEncodedBody,
@@ -1875,7 +1565,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
     final recvPort = ReceivePort('crypto_crypt_no_auth');
     final sendPort = recvPort.sendPort;
-    _ffi._cryptoCryptNoAuth(
+    VeilidFFI._cryptoCryptNoAuth(
       sendPort.nativePort,
       _kind,
       nativeEncodedBody,
@@ -1889,766 +1579,798 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
 // FFI implementation of high level Veilid API
 class VeilidFFI extends Veilid {
-  // veilid_core shared library
-  final DynamicLibrary _dylib;
-
   // Shared library functions
-  final _FreeStringDart _freeString;
-  final _InitializeVeilidCoreDart _initializeVeilidCore;
-  final _ChangeLogLevelDart _changeLogLevel;
-  final _ChangeLogIgnoreDart _changeLogIgnore;
-  final _StartupVeilidCoreDart _startupVeilidCore;
-  final _GetVeilidStateDart _getVeilidState;
-  final _IsShutdownDart _isShutdown;
-  final _AttachDart _attach;
-  final _DetachDart _detach;
-  final _ShutdownVeilidCoreDart _shutdownVeilidCore;
+  @Native<Void Function(Pointer<Utf8>)>(symbol: 'free_string')
+  external static void _freeString(Pointer<Utf8> s);
 
-  final _RoutingContextDart _routingContext;
-  final _ReleaseRoutingContextDart _releaseRoutingContext;
-  final _RoutingContextWithDefaultSafetyDart _routingContextWithDefaultSafety;
-  final _RoutingContextWithSafetyDart _routingContextWithSafety;
-  final _RoutingContextWithSequencingDart _routingContextWithSequencing;
-  final _RoutingContextSafetyDart _routingContextSafety;
-  final _RoutingContextAppCallDart _routingContextAppCall;
-  final _RoutingContextAppMessageDart _routingContextAppMessage;
-  final _RoutingContextCreateDHTRecordDart _routingContextCreateDHTRecord;
-  final _RoutingContextOpenDHTRecordDart _routingContextOpenDHTRecord;
-  final _RoutingContextCloseDHTRecordDart _routingContextCloseDHTRecord;
-  final _RoutingContextDeleteDHTRecordDart _routingContextDeleteDHTRecord;
-  final _RoutingContextGetDHTValueDart _routingContextGetDHTValue;
-  final _RoutingContextSetDHTValueDart _routingContextSetDHTValue;
-  final _RoutingContextWatchDHTValuesDart _routingContextWatchDHTValues;
-  final _RoutingContextCancelDHTWatchDart _routingContextCancelDHTWatch;
-  final _RoutingContextInspectDHTRecordDart _routingContextInspectDHTRecord;
-  final _RoutingContextFlushDHTRecordDart _routingContextFlushDHTRecord;
+  @Native<Void Function(Pointer<Utf8>)>(symbol: 'initialize_veilid_core')
+  external static void _initializeVeilidCore(Pointer<Utf8> platformConfig);
 
-  final _GenerateMemberIdDart _generateMemberId;
-  final _GetDHTRecordKeyDart _getDHTRecordKey;
-  final _TransactDHTRecordsDart _transactDHTRecords;
+  @Native<Int32 Function(Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'change_log_level',
+  )
+  external static int _changeLogLevel(
+    Pointer<Utf8> layer,
+    Pointer<Utf8> logLevel,
+  );
 
-  final _NewPrivateRouteDart _newPrivateRoute;
-  final _NewCustomPrivateRouteDart _newCustomPrivateRoute;
-  final _ImportRemotePrivateRouteDart _importRemotePrivateRoute;
-  final _ReleasePrivateRouteDart _releasePrivateRoute;
+  @Native<Void Function(Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'change_log_ignore',
+  )
+  external static void _changeLogIgnore(
+    Pointer<Utf8> layer,
+    Pointer<Utf8> logIgnore,
+  );
 
-  final _AppCallReplyDart _appCallReply;
+  @Native<Void Function(Int64, Int64, Pointer<Utf8>)>(
+    symbol: 'startup_veilid_core',
+  )
+  external static void _startupVeilidCore(
+    int port,
+    int streamPort,
+    Pointer<Utf8> config,
+  );
 
-  final _ReleaseDHTTransactionDart _releaseDHTTransaction;
-  final _DHTTransactionCommitDart _dhtTransactionCommit;
-  final _DHTTransactionRollbackDart _dhtTransactionRollback;
-  final _DHTTransactionExtendDart _dhtTransactionExtend;
-  final _DHTTransactionGetDart _dhtTransactionGet;
-  final _DHTTransactionSetDart _dhtTransactionSet;
-  final _DHTTransactionInspectDart _dhtTransactionInspect;
+  @Native<Void Function(Int64)>(symbol: 'is_shutdown')
+  external static void _isShutdown(int port);
 
-  final _OpenTableDbDart _openTableDb;
-  final _ReleaseTableDbDart _releaseTableDb;
-  final _DeleteTableDbDart _deleteTableDb;
-  final _TableDbGetColumnCountDart _tableDbGetColumnCount;
-  final _TableDbGetKeysDart _tableDbGetKeys;
-  final _TableDbStoreDart _tableDbStore;
-  final _TableDbLoadDart _tableDbLoad;
-  final _TableDbDeleteDart _tableDbDelete;
-  final _TableDbTransactDart _tableDbTransact;
-  final _ReleaseTableDbTransactionDart _releaseTableDbTransaction;
-  final _TableDbTransactionCommitDart _tableDbTransactionCommit;
-  final _TableDbTransactionRollbackDart _tableDbTransactionRollback;
-  final _TableDbTransactionStoreDart _tableDbTransactionStore;
-  final _TableDbTransactionDeleteDart _tableDbTransactionDelete;
+  @Native<Void Function(Int64)>(symbol: 'get_veilid_state')
+  external static void _getVeilidState(int port);
 
-  final _ValidCryptoKindsDart _validCryptoKinds;
-  final _VerifySignaturesDart _verifySignatures;
-  final _GenerateSignaturesDart _generateSignatures;
-  final _GenerateKeyPairDart _generateKeyPair;
+  @Native<Void Function(Int64)>(symbol: 'attach')
+  external static void _attach(int port);
 
-  final _CryptoCachedDHDart _cryptoCachedDH;
-  final _CryptoComputeDHDart _cryptoComputeDH;
-  final _CryptoGenerateSharedSecretDart _cryptoGenerateSharedSecret;
-  final _CryptoHpkeSealDart _cryptoHpkeSeal;
-  final _CryptoHpkeOpenDart _cryptoHpkeOpen;
+  @Native<Void Function(Int64)>(symbol: 'detach')
+  external static void _detach(int port);
 
-  final _CryptoRandomBytesDart _cryptoRandomBytes;
-  final _CryptoHashPasswordDart _cryptoHashPassword;
-  final _CryptoVerifyPasswordDart _cryptoVerifyPassword;
-  final _CryptoDeriveSharedSecretDart _cryptoDeriveSharedSecret;
+  @Native<Void Function(Int64)>(symbol: 'shutdown_veilid_core')
+  external static void _shutdownVeilidCore(int port);
 
-  final _CryptoSharedSecretLengthDart _cryptoSharedSecretLength;
-  final _CryptoNonceLengthDart _cryptoNonceLength;
-  final _CryptoHashDigestLengthDart _cryptoHashDigestLength;
-  final _CryptoPublicKeyLengthDart _cryptoPublicKeyLength;
-  final _CryptoSecretKeyLengthDart _cryptoSecretKeyLength;
-  final _CryptoEncapsulationKeyLengthDart _cryptoEncapsulationKeyLength;
-  final _CryptoDecapsulationKeyLengthDart _cryptoDecapsulationKeyLength;
-  final _CryptoSignatureLengthDart _cryptoSignatureLength;
-  final _CryptoDefaultSaltLengthDart _cryptoDefaultSaltLength;
-  final _CryptoAeadOverheadDart _cryptoAeadOverhead;
+  @Native<Void Function(Int64)>(symbol: 'routing_context')
+  external static void _routingContext(int port);
 
-  final _CryptoCheckSharedSecretDart _cryptoCheckSharedSecret;
-  final _CryptoCheckNonceDart _cryptoCheckNonce;
-  final _CryptoCheckHashDigestDart _cryptoCheckHashDigest;
-  final _CryptoCheckPublicKeyDart _cryptoCheckPublicKey;
-  final _CryptoCheckSecretKeyDart _cryptoCheckSecretKey;
-  final _CryptoCheckSignatureDart _cryptoCheckSignature;
+  @Native<Int32 Function(Uint32)>(symbol: 'release_routing_context')
+  external static int _releaseRoutingContext(int id);
 
-  final _CryptoRandomNonceDart _cryptoRandomNonce;
-  final _CryptoRandomSharedSecretDart _cryptoRandomSharedSecret;
-  final _CryptoGenerateKeyPairDart _cryptoGenerateKeyPair;
-  final _CryptoGenerateKemKeyPairDart _cryptoGenerateKemKeyPair;
-  final _CryptoEncapsulationKeyFromSigningKeyDart
-  _cryptoEncapsulationKeyFromSigningKey;
-  final _CryptoDecapsulationKeyFromSigningSecretDart
-  _cryptoDecapsulationKeyFromSigningSecret;
-  final _CryptoGenerateHashDart _cryptoGenerateHash;
-  final _CryptoValidateKeyPairDart _cryptoValidateKeyPair;
-  final _CryptoValidateHashDart _cryptoValidateHash;
-  final _CryptoSignDart _cryptoSign;
-  final _CryptoVerifyDart _cryptoVerify;
-  final _CryptoDecryptAeadDart _cryptoDecryptAead;
-  final _CryptoEncryptAeadDart _cryptoEncryptAead;
-  final _CryptoCryptNoAuthDart _cryptoCryptNoAuth;
+  @Native<Uint32 Function(Uint32)>(
+    symbol: 'routing_context_with_default_safety',
+  )
+  external static int _routingContextWithDefaultSafety(int id);
 
-  final _NowDart _now;
-  final _NowDart _nowNonDecreasing;
-  final _NowDart _nowIncreasing;
-  final _DebugDart _debug;
-  final _SaveUserSecretDart _saveUserSecret;
-  final _LoadUserSecretDart _loadUserSecret;
-  final _RemoveUserSecretDart _removeUserSecret;
-  final _ListUserSecretsDart _listUserSecrets;
-  final _DeleteAllUserSecretsDart _deleteAllUserSecrets;
-  final _VeilidVersionStringDart _veilidVersionString;
-  final _VeilidVersionDart _veilidVersion;
-  final _DefaultVeilidConfigDart _defaultVeilidConfig;
-  final _VeilidFeaturesDart _veilidFeatures;
+  @Native<Uint32 Function(Uint32, Pointer<Utf8>)>(
+    symbol: 'routing_context_with_safety',
+  )
+  external static int _routingContextWithSafety(
+    int id,
+    Pointer<Utf8> stability,
+  );
 
-  VeilidFFI(DynamicLibrary dylib)
-    : _dylib = dylib,
-      _freeString = dylib
-          .lookupFunction<Void Function(Pointer<Utf8>), _FreeStringDart>(
-            'free_string',
-          ),
-      _initializeVeilidCore = dylib
-          .lookupFunction<
-            Void Function(Pointer<Utf8>),
-            _InitializeVeilidCoreDart
-          >('initialize_veilid_core'),
-      _changeLogLevel = dylib
-          .lookupFunction<
-            Int32 Function(Pointer<Utf8>, Pointer<Utf8>),
-            _ChangeLogLevelDart
-          >('change_log_level'),
-      _changeLogIgnore = dylib
-          .lookupFunction<
-            Void Function(Pointer<Utf8>, Pointer<Utf8>),
-            _ChangeLogIgnoreDart
-          >('change_log_ignore'),
-      _startupVeilidCore = dylib
-          .lookupFunction<
-            Void Function(Int64, Int64, Pointer<Utf8>),
-            _StartupVeilidCoreDart
-          >('startup_veilid_core'),
-      _isShutdown = dylib.lookupFunction<Void Function(Int64), _IsShutdownDart>(
-        'is_shutdown',
-      ),
-      _getVeilidState = dylib
-          .lookupFunction<Void Function(Int64), _GetVeilidStateDart>(
-            'get_veilid_state',
-          ),
-      _attach = dylib.lookupFunction<Void Function(Int64), _AttachDart>(
-        'attach',
-      ),
-      _detach = dylib.lookupFunction<Void Function(Int64), _DetachDart>(
-        'detach',
-      ),
-      _shutdownVeilidCore = dylib
-          .lookupFunction<Void Function(Int64), _ShutdownVeilidCoreDart>(
-            'shutdown_veilid_core',
-          ),
-      _routingContext = dylib
-          .lookupFunction<Void Function(Int64), _RoutingContextDart>(
-            'routing_context',
-          ),
-      _releaseRoutingContext = dylib
-          .lookupFunction<Int32 Function(Uint32), _ReleaseRoutingContextDart>(
-            'release_routing_context',
-          ),
-      _routingContextWithDefaultSafety = dylib
-          .lookupFunction<
-            Uint32 Function(Uint32),
-            _RoutingContextWithDefaultSafetyDart
-          >('routing_context_with_default_safety'),
-      _routingContextWithSafety = dylib
-          .lookupFunction<
-            Uint32 Function(Uint32, Pointer<Utf8>),
-            _RoutingContextWithSafetyDart
-          >('routing_context_with_safety'),
-      _routingContextWithSequencing = dylib
-          .lookupFunction<
-            Uint32 Function(Uint32, Pointer<Utf8>),
-            _RoutingContextWithSequencingDart
-          >('routing_context_with_sequencing'),
-      _routingContextSafety = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _RoutingContextSafetyDart
-          >('routing_context_safety'),
-      _routingContextAppCall = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _RoutingContextAppCallDart
-          >('routing_context_app_call'),
-      _routingContextAppMessage = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _RoutingContextAppMessageDart
-          >('routing_context_app_message'),
-      _routingContextCreateDHTRecord = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _RoutingContextCreateDHTRecordDart
-          >('routing_context_create_dht_record'),
-      _routingContextOpenDHTRecord = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _RoutingContextOpenDHTRecordDart
-          >('routing_context_open_dht_record'),
-      _routingContextCloseDHTRecord = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _RoutingContextCloseDHTRecordDart
-          >('routing_context_close_dht_record'),
-      _routingContextDeleteDHTRecord = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _RoutingContextDeleteDHTRecordDart
-          >('routing_context_delete_dht_record'),
-      _routingContextGetDHTValue = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Uint32, Bool),
-            _RoutingContextGetDHTValueDart
-          >('routing_context_get_dht_value'),
-      _routingContextSetDHTValue = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _RoutingContextSetDHTValueDart
-          >('routing_context_set_dht_value'),
-      _routingContextWatchDHTValues = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Uint64,
-              Uint32,
-            ),
-            _RoutingContextWatchDHTValuesDart
-          >('routing_context_watch_dht_values'),
-      _routingContextCancelDHTWatch = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _RoutingContextCancelDHTWatchDart
-          >('routing_context_cancel_dht_watch'),
-      _routingContextInspectDHTRecord = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _RoutingContextInspectDHTRecordDart
-          >('routing_context_inspect_dht_record'),
-      _routingContextFlushDHTRecord = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Uint64),
-            _RoutingContextFlushDHTRecordDart
-          >('routing_context_flush_dht_record'),
-      _generateMemberId = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>),
-            _GenerateMemberIdDart
-          >('generate_member_id'),
-      _getDHTRecordKey = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>),
-            _GetDHTRecordKeyDart
-          >('get_dht_record_key'),
-      _transactDHTRecords = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>),
-            _TransactDHTRecordsDart
-          >('transact_dht_records'),
-      _newPrivateRoute = dylib
-          .lookupFunction<Void Function(Int64), _NewPrivateRouteDart>(
-            'new_private_route',
-          ),
-      _newCustomPrivateRoute = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>),
-            _NewCustomPrivateRouteDart
-          >('new_custom_private_route'),
-      _importRemotePrivateRoute = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>),
-            _ImportRemotePrivateRouteDart
-          >('import_remote_private_route'),
-      _releasePrivateRoute = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>),
-            _ReleasePrivateRouteDart
-          >('release_private_route'),
-      _appCallReply = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>),
-            _AppCallReplyDart
-          >('app_call_reply'),
+  @Native<Uint32 Function(Uint32, Pointer<Utf8>)>(
+    symbol: 'routing_context_with_sequencing',
+  )
+  external static int _routingContextWithSequencing(
+    int id,
+    Pointer<Utf8> sequencing,
+  );
 
-      _releaseDHTTransaction = dylib
-          .lookupFunction<Int32 Function(Uint32), _ReleaseDHTTransactionDart>(
-            'release_dht_transaction',
-          ),
-      _dhtTransactionCommit = dylib
-          .lookupFunction<
-            Void Function(Uint64, Uint32),
-            _DHTTransactionCommitDart
-          >('dht_transaction_commit'),
-      _dhtTransactionRollback = dylib
-          .lookupFunction<
-            Void Function(Uint64, Uint32),
-            _DHTTransactionRollbackDart
-          >('dht_transaction_rollback'),
-      _dhtTransactionExtend = dylib
-          .lookupFunction<
-            Void Function(Uint64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _DHTTransactionExtendDart
-          >('dht_transaction_extend'),
-      _dhtTransactionGet = dylib
-          .lookupFunction<
-            Void Function(Uint64, Uint32, Pointer<Utf8>, Uint32),
-            _DHTTransactionGetDart
-          >('dht_transaction_get'),
-      _dhtTransactionSet = dylib
-          .lookupFunction<
-            Void Function(
-              Uint64,
-              Uint32,
-              Pointer<Utf8>,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _DHTTransactionSetDart
-          >('dht_transaction_set'),
-      _dhtTransactionInspect = dylib
-          .lookupFunction<
-            Void Function(
-              Uint64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _DHTTransactionInspectDart
-          >('dht_transaction_inspect'),
+  @Native<Void Function(Int64, Uint32)>(symbol: 'routing_context_safety')
+  external static void _routingContextSafety(int port, int id);
 
-      _openTableDb = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>, Uint32),
-            _OpenTableDbDart
-          >('open_table_db'),
-      _releaseTableDb = dylib
-          .lookupFunction<Int32 Function(Uint32), _ReleaseTableDbDart>(
-            'release_table_db',
-          ),
-      _deleteTableDb = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>),
-            _DeleteTableDbDart
-          >('delete_table_db'),
-      _tableDbGetColumnCount = dylib
-          .lookupFunction<Uint32 Function(Uint32), _TableDbGetColumnCountDart>(
-            'table_db_get_column_count',
-          ),
-      _tableDbGetKeys = dylib
-          .lookupFunction<
-            Pointer<Utf8> Function(Uint64, Uint32, Uint32),
-            _TableDbGetKeysDart
-          >('table_db_get_keys'),
-      _tableDbStore = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _TableDbStoreDart
-          >('table_db_store'),
-      _tableDbLoad = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Uint32, Pointer<Utf8>),
-            _TableDbLoadDart
-          >('table_db_load'),
-      _tableDbDelete = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Uint32, Pointer<Utf8>),
-            _TableDbDeleteDart
-          >('table_db_delete'),
-      _tableDbTransact = dylib
-          .lookupFunction<Uint32 Function(Uint32), _TableDbTransactDart>(
-            'table_db_transact',
-          ),
-      _releaseTableDbTransaction = dylib
-          .lookupFunction<
-            Int32 Function(Uint32),
-            _ReleaseTableDbTransactionDart
-          >('release_table_db_transaction'),
-      _tableDbTransactionCommit = dylib
-          .lookupFunction<
-            Void Function(Uint64, Uint32),
-            _TableDbTransactionCommitDart
-          >('table_db_transaction_commit'),
-      _tableDbTransactionRollback = dylib
-          .lookupFunction<
-            Void Function(Uint64, Uint32),
-            _TableDbTransactionRollbackDart
-          >('table_db_transaction_rollback'),
-      _tableDbTransactionStore = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _TableDbTransactionStoreDart
-          >('table_db_transaction_store'),
-      _tableDbTransactionDelete = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Uint32, Pointer<Utf8>),
-            _TableDbTransactionDeleteDart
-          >('table_db_transaction_delete'),
-      _validCryptoKinds = dylib
-          .lookupFunction<Pointer<Utf8> Function(), _ValidCryptoKindsDart>(
-            'valid_crypto_kinds',
-          ),
-      _verifySignatures = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>),
-            _VerifySignaturesDart
-          >('verify_signatures'),
-      _generateSignatures = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>),
-            _GenerateSignaturesDart
-          >('generate_signatures'),
-      _generateKeyPair = dylib
-          .lookupFunction<Void Function(Int64, Uint32), _GenerateKeyPairDart>(
-            'generate_key_pair',
-          ),
-      _cryptoCachedDH = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _CryptoCachedDHDart
-          >('crypto_cached_dh'),
-      _cryptoComputeDH = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _CryptoComputeDHDart
-          >('crypto_compute_dh'),
-      _cryptoGenerateSharedSecret = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _CryptoGenerateSharedSecretDart
-          >('crypto_generate_shared_secret'),
-      _cryptoHpkeSeal = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _CryptoHpkeSealDart
-          >('crypto_hpke_seal'),
-      _cryptoHpkeOpen = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _CryptoHpkeOpenDart
-          >('crypto_hpke_open'),
-      _cryptoSharedSecretLength = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoSharedSecretLengthDart
-          >('crypto_shared_secret_length'),
-      _cryptoNonceLength = dylib
-          .lookupFunction<Void Function(Int64, Uint32), _CryptoNonceLengthDart>(
-            'crypto_nonce_length',
-          ),
-      _cryptoHashDigestLength = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoHashDigestLengthDart
-          >('crypto_hash_digest_length'),
-      _cryptoPublicKeyLength = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoPublicKeyLengthDart
-          >('crypto_public_key_length'),
-      _cryptoSecretKeyLength = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoSecretKeyLengthDart
-          >('crypto_secret_key_length'),
-      _cryptoEncapsulationKeyLength = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoEncapsulationKeyLengthDart
-          >('crypto_encapsulation_key_length'),
-      _cryptoDecapsulationKeyLength = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoDecapsulationKeyLengthDart
-          >('crypto_decapsulation_key_length'),
-      _cryptoSignatureLength = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoSignatureLengthDart
-          >('crypto_signature_length'),
-      _cryptoDefaultSaltLength = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoDefaultSaltLengthDart
-          >('crypto_default_salt_length'),
-      _cryptoAeadOverhead = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoAeadOverheadDart
-          >('crypto_aead_overhead'),
-      _cryptoCheckSharedSecret = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoCheckSharedSecretDart
-          >('crypto_check_shared_secret'),
-      _cryptoCheckNonce = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoCheckNonceDart
-          >('crypto_check_nonce'),
-      _cryptoCheckHashDigest = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoCheckHashDigestDart
-          >('crypto_check_hash_digest'),
-      _cryptoCheckPublicKey = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoCheckPublicKeyDart
-          >('crypto_check_public_key'),
-      _cryptoCheckSecretKey = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoCheckSecretKeyDart
-          >('crypto_check_secret_key'),
-      _cryptoCheckSignature = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoCheckSignatureDart
-          >('crypto_check_signature'),
-      _cryptoRandomBytes = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Uint32),
-            _CryptoRandomBytesDart
-          >('crypto_random_bytes'),
-      _cryptoHashPassword = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _CryptoHashPasswordDart
-          >('crypto_hash_password'),
-      _cryptoVerifyPassword = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _CryptoVerifyPasswordDart
-          >('crypto_verify_password'),
-      _cryptoDeriveSharedSecret = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _CryptoDeriveSharedSecretDart
-          >('crypto_derive_shared_secret'),
-      _cryptoRandomNonce = dylib
-          .lookupFunction<Void Function(Int64, Uint32), _CryptoRandomNonceDart>(
-            'crypto_random_nonce',
-          ),
-      _cryptoRandomSharedSecret = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoRandomSharedSecretDart
-          >('crypto_random_shared_secret'),
-      _cryptoGenerateKeyPair = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoGenerateKeyPairDart
-          >('crypto_generate_key_pair'),
-      _cryptoGenerateKemKeyPair = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32),
-            _CryptoGenerateKemKeyPairDart
-          >('crypto_generate_kem_key_pair'),
-      _cryptoEncapsulationKeyFromSigningKey = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoEncapsulationKeyFromSigningKeyDart
-          >('crypto_encapsulation_key_from_signing_key'),
-      _cryptoDecapsulationKeyFromSigningSecret = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoDecapsulationKeyFromSigningSecretDart
-          >('crypto_decapsulation_key_from_signing_secret'),
-      _cryptoGenerateHash = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>),
-            _CryptoGenerateHashDart
-          >('crypto_generate_hash'),
-      _cryptoValidateKeyPair = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _CryptoValidateKeyPairDart
-          >('crypto_validate_key_pair'),
-      _cryptoValidateHash = dylib
-          .lookupFunction<
-            Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>),
-            _CryptoValidateHashDart
-          >('crypto_validate_hash'),
-      _cryptoSign = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _CryptoSignDart
-          >('crypto_sign'),
-      _cryptoVerify = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _CryptoVerifyDart
-          >('crypto_verify'),
-      _cryptoDecryptAead = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _CryptoDecryptAeadDart
-          >('crypto_decrypt_aead'),
-      _cryptoEncryptAead = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _CryptoEncryptAeadDart
-          >('crypto_encrypt_aead'),
-      _cryptoCryptNoAuth = dylib
-          .lookupFunction<
-            Void Function(
-              Int64,
-              Uint32,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-              Pointer<Utf8>,
-            ),
-            _CryptoCryptNoAuthDart
-          >('crypto_crypt_no_auth'),
-      _now = dylib.lookupFunction<Uint64 Function(), _NowDart>('now'),
-      _nowNonDecreasing = dylib
-          .lookupFunction<Uint64 Function(), _NowDart>('now_non_decreasing'),
-      _nowIncreasing = dylib
-          .lookupFunction<Uint64 Function(), _NowDart>('now_increasing'),
-      _debug = dylib
-          .lookupFunction<Void Function(Int64, Pointer<Utf8>), _DebugDart>(
-            'debug',
-          ),
-      _saveUserSecret = dylib.lookupFunction<
-        Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>),
-        _SaveUserSecretDart
-      >('save_user_secret'),
-      _loadUserSecret = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>),
-            _LoadUserSecretDart
-          >('load_user_secret'),
-      _removeUserSecret = dylib
-          .lookupFunction<
-            Void Function(Int64, Pointer<Utf8>),
-            _RemoveUserSecretDart
-          >('remove_user_secret'),
-      _listUserSecrets = dylib
-          .lookupFunction<Void Function(Int64), _ListUserSecretsDart>(
-            'list_user_secrets',
-          ),
-      _deleteAllUserSecrets = dylib
-          .lookupFunction<Void Function(Int64), _DeleteAllUserSecretsDart>(
-            'delete_all_user_secrets',
-          ),
-      _veilidVersionString = dylib
-          .lookupFunction<Pointer<Utf8> Function(), _VeilidVersionStringDart>(
-            'veilid_version_string',
-          ),
-      _veilidVersion = dylib
-          .lookupFunction<VeilidVersionFFI Function(), _VeilidVersionDart>(
-            'veilid_version',
-          ),
-      _defaultVeilidConfig = dylib
-          .lookupFunction<Pointer<Utf8> Function(), _DefaultVeilidConfigDart>(
-            'default_veilid_config',
-          ),
-      _veilidFeatures = dylib
-          .lookupFunction<Pointer<Utf8> Function(), _VeilidFeaturesDart>(
-            'veilid_features',
-          ) {
-    // Get veilid_flutter initializer
-    final initializeVeilidFlutter = _dylib
-        .lookupFunction<
-          Void Function(Pointer<_DartPostCObject>, Pointer<Utf8>),
-          void Function(Pointer<_DartPostCObject>, Pointer<Utf8>)
-        >('initialize_veilid_flutter');
-    initializeVeilidFlutter(
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'routing_context_app_call',
+  )
+  external static void _routingContextAppCall(
+    int port,
+    int id,
+    Pointer<Utf8> target,
+    Pointer<Utf8> request,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'routing_context_app_message',
+  )
+  external static void _routingContextAppMessage(
+    int port,
+    int id,
+    Pointer<Utf8> target,
+    Pointer<Utf8> request,
+  );
+
+  @Native<Void Function(Int64, Uint32, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'routing_context_create_dht_record',
+  )
+  external static void _routingContextCreateDHTRecord(
+    int port,
+    int id,
+    int kind,
+    Pointer<Utf8> schema,
+    Pointer<Utf8> owner,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'routing_context_open_dht_record',
+  )
+  external static void _routingContextOpenDHTRecord(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    Pointer<Utf8> writer,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'routing_context_close_dht_record',
+  )
+  external static void _routingContextCloseDHTRecord(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'routing_context_delete_dht_record',
+  )
+  external static void _routingContextDeleteDHTRecord(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Uint32, Bool)>(
+    symbol: 'routing_context_get_dht_value',
+  )
+  external static void _routingContextGetDHTValue(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    int subkey,
+    bool forceRefresh,
+  );
+
+  @Native<
+    Void Function(
+      Int64,
+      Uint32,
+      Pointer<Utf8>,
+      Uint32,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+    )
+  >(symbol: 'routing_context_set_dht_value')
+  external static void _routingContextSetDHTValue(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    int subkey,
+    Pointer<Utf8> data,
+    Pointer<Utf8> writer,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Uint64, Uint32)
+  >(symbol: 'routing_context_watch_dht_values')
+  external static void _routingContextWatchDHTValues(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    Pointer<Utf8> subkeys,
+    int expiration,
+    int count,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'routing_context_cancel_dht_watch',
+  )
+  external static void _routingContextCancelDHTWatch(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    Pointer<Utf8> subkeys,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'routing_context_inspect_dht_record')
+  external static void _routingContextInspectDHTRecord(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    Pointer<Utf8> subkeys,
+    Pointer<Utf8> scope,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Uint64)>(
+    symbol: 'routing_context_flush_dht_record',
+  )
+  external static void _routingContextFlushDHTRecord(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    int timeoutMs,
+  );
+
+  @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'generate_member_id')
+  external static void _generateMemberId(int port, Pointer<Utf8> writerKey);
+
+  @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'get_dht_record_key',
+  )
+  external static void _getDHTRecordKey(
+    int port,
+    Pointer<Utf8> schema,
+    Pointer<Utf8> owner,
+    Pointer<Utf8> encryptionKey,
+  );
+
+  @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'transact_dht_records',
+  )
+  external static void _transactDHTRecords(
+    int port,
+    Pointer<Utf8> records,
+    Pointer<Utf8> defaultSigningKey,
+  );
+
+  @Native<Void Function(Int64)>(symbol: 'new_private_route')
+  external static void _newPrivateRoute(int port);
+
+  @Native<Void Function(Int64, Pointer<Utf8>)>(
+    symbol: 'new_custom_private_route',
+  )
+  external static void _newCustomPrivateRoute(
+    int port,
+    Pointer<Utf8> privateSpec,
+  );
+
+  @Native<Void Function(Int64, Pointer<Utf8>)>(
+    symbol: 'import_remote_private_route',
+  )
+  external static void _importRemotePrivateRoute(int port, Pointer<Utf8> blob);
+
+  @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'release_private_route')
+  external static void _releasePrivateRoute(int port, Pointer<Utf8> key);
+
+  @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'app_call_reply',
+  )
+  external static void _appCallReply(
+    int port,
+    Pointer<Utf8> id,
+    Pointer<Utf8> message,
+  );
+
+  @Native<Int32 Function(Uint32)>(symbol: 'release_dht_transaction')
+  external static int _releaseDHTTransaction(int id);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'dht_transaction_commit')
+  external static void _dhtTransactionCommit(int port, int id);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'dht_transaction_rollback')
+  external static void _dhtTransactionRollback(int port, int id);
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'dht_transaction_extend',
+  )
+  external static void _dhtTransactionExtend(
+    int port,
+    int id,
+    Pointer<Utf8> recordKeys,
+    Pointer<Utf8> options,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Uint32)>(
+    symbol: 'dht_transaction_get',
+  )
+  external static void _dhtTransactionGet(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    int subkey,
+  );
+
+  @Native<
+    Void Function(
+      Int64,
+      Uint32,
+      Pointer<Utf8>,
+      Uint32,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+    )
+  >(symbol: 'dht_transaction_set')
+  external static void _dhtTransactionSet(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    int subkey,
+    Pointer<Utf8> data,
+    Pointer<Utf8> options,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'dht_transaction_inspect')
+  external static void _dhtTransactionInspect(
+    int port,
+    int id,
+    Pointer<Utf8> key,
+    Pointer<Utf8> subkeys,
+    Pointer<Utf8> scope,
+  );
+
+  @Native<Void Function(Int64, Pointer<Utf8>, Uint32)>(symbol: 'open_table_db')
+  external static void _openTableDb(
+    int port,
+    Pointer<Utf8> name,
+    int columnCount,
+  );
+
+  @Native<Int32 Function(Uint32)>(symbol: 'release_table_db')
+  external static int _releaseTableDb(int id);
+
+  @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'delete_table_db')
+  external static void _deleteTableDb(int port, Pointer<Utf8> name);
+
+  @Native<Uint32 Function(Uint32)>(symbol: 'table_db_get_column_count')
+  external static int _tableDbGetColumnCount(int id);
+
+  @Native<Void Function(Int64, Uint32, Uint32)>(symbol: 'table_db_get_keys')
+  external static void _tableDbGetKeys(int port, int id, int col);
+
+  @Native<Void Function(Int64, Uint32, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'table_db_store',
+  )
+  external static void _tableDbStore(
+    int port,
+    int id,
+    int col,
+    Pointer<Utf8> key,
+    Pointer<Utf8> value,
+  );
+
+  @Native<Void Function(Int64, Uint32, Uint32, Pointer<Utf8>)>(
+    symbol: 'table_db_load',
+  )
+  external static void _tableDbLoad(
+    int port,
+    int id,
+    int col,
+    Pointer<Utf8> key,
+  );
+
+  @Native<Void Function(Int64, Uint32, Uint32, Pointer<Utf8>)>(
+    symbol: 'table_db_delete',
+  )
+  external static void _tableDbDelete(
+    int port,
+    int id,
+    int col,
+    Pointer<Utf8> key,
+  );
+
+  @Native<Uint32 Function(Uint32)>(symbol: 'table_db_transact')
+  external static int _tableDbTransact(int id);
+
+  @Native<Int32 Function(Uint32)>(symbol: 'release_table_db_transaction')
+  external static int _releaseTableDbTransaction(int id);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'table_db_transaction_commit')
+  external static void _tableDbTransactionCommit(int port, int id);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'table_db_transaction_rollback')
+  external static void _tableDbTransactionRollback(int port, int id);
+
+  @Native<Void Function(Int64, Uint32, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'table_db_transaction_store',
+  )
+  external static void _tableDbTransactionStore(
+    int port,
+    int id,
+    int col,
+    Pointer<Utf8> key,
+    Pointer<Utf8> value,
+  );
+
+  @Native<Void Function(Int64, Uint32, Uint32, Pointer<Utf8>)>(
+    symbol: 'table_db_transaction_delete',
+  )
+  external static void _tableDbTransactionDelete(
+    int port,
+    int id,
+    int col,
+    Pointer<Utf8> key,
+  );
+
+  @Native<Pointer<Utf8> Function()>(symbol: 'valid_crypto_kinds')
+  external static Pointer<Utf8> _validCryptoKinds();
+
+  @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'verify_signatures',
+  )
+  external static void _verifySignatures(
+    int port,
+    Pointer<Utf8> nodeIds,
+    Pointer<Utf8> data,
+    Pointer<Utf8> signatures,
+  );
+
+  @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'generate_signatures',
+  )
+  external static void _generateSignatures(
+    int port,
+    Pointer<Utf8> data,
+    Pointer<Utf8> keyPairs,
+  );
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'generate_key_pair')
+  external static void _generateKeyPair(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'crypto_cached_dh',
+  )
+  external static void _cryptoCachedDH(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+    Pointer<Utf8> secret,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'crypto_compute_dh',
+  )
+  external static void _cryptoComputeDH(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+    Pointer<Utf8> secret,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'crypto_generate_shared_secret')
+  external static void _cryptoGenerateSharedSecret(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+    Pointer<Utf8> secret,
+    Pointer<Utf8> domain,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'crypto_hpke_seal')
+  external static void _cryptoHpkeSeal(
+    int port,
+    int kind,
+    Pointer<Utf8> recipient,
+    Pointer<Utf8> aad,
+    Pointer<Utf8> plaintext,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'crypto_hpke_open')
+  external static void _cryptoHpkeOpen(
+    int port,
+    int kind,
+    Pointer<Utf8> secret,
+    Pointer<Utf8> aad,
+    Pointer<Utf8> sealed,
+  );
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_shared_secret_length')
+  external static void _cryptoSharedSecretLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_nonce_length')
+  external static void _cryptoNonceLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_hash_digest_length')
+  external static void _cryptoHashDigestLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_public_key_length')
+  external static void _cryptoPublicKeyLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_secret_key_length')
+  external static void _cryptoSecretKeyLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(
+    symbol: 'crypto_encapsulation_key_length',
+  )
+  external static void _cryptoEncapsulationKeyLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(
+    symbol: 'crypto_decapsulation_key_length',
+  )
+  external static void _cryptoDecapsulationKeyLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_signature_length')
+  external static void _cryptoSignatureLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_default_salt_length')
+  external static void _cryptoDefaultSaltLength(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_aead_overhead')
+  external static void _cryptoAeadOverhead(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_check_shared_secret',
+  )
+  external static void _cryptoCheckSharedSecret(
+    int port,
+    int kind,
+    Pointer<Utf8> secret,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_check_nonce',
+  )
+  external static void _cryptoCheckNonce(
+    int port,
+    int kind,
+    Pointer<Utf8> nonce,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_check_hash_digest',
+  )
+  external static void _cryptoCheckHashDigest(
+    int port,
+    int kind,
+    Pointer<Utf8> digest,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_check_public_key',
+  )
+  external static void _cryptoCheckPublicKey(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_check_secret_key',
+  )
+  external static void _cryptoCheckSecretKey(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_check_signature',
+  )
+  external static void _cryptoCheckSignature(
+    int port,
+    int kind,
+    Pointer<Utf8> signature,
+  );
+
+  @Native<Void Function(Int64, Uint32, Uint32)>(symbol: 'crypto_random_bytes')
+  external static void _cryptoRandomBytes(int port, int kind, int len);
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'crypto_hash_password',
+  )
+  external static void _cryptoHashPassword(
+    int port,
+    int kind,
+    Pointer<Utf8> password,
+    Pointer<Utf8> salt,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'crypto_verify_password',
+  )
+  external static void _cryptoVerifyPassword(
+    int port,
+    int kind,
+    Pointer<Utf8> password,
+    Pointer<Utf8> passwordHash,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'crypto_derive_shared_secret',
+  )
+  external static void _cryptoDeriveSharedSecret(
+    int port,
+    int kind,
+    Pointer<Utf8> password,
+    Pointer<Utf8> salt,
+  );
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_random_nonce')
+  external static void _cryptoRandomNonce(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_random_shared_secret')
+  external static void _cryptoRandomSharedSecret(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_generate_key_pair')
+  external static void _cryptoGenerateKeyPair(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32)>(symbol: 'crypto_generate_kem_key_pair')
+  external static void _cryptoGenerateKemKeyPair(int port, int kind);
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_encapsulation_key_from_signing_key',
+  )
+  external static void _cryptoEncapsulationKeyFromSigningKey(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_decapsulation_key_from_signing_secret',
+  )
+  external static void _cryptoDecapsulationKeyFromSigningSecret(
+    int port,
+    int kind,
+    Pointer<Utf8> secret,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
+    symbol: 'crypto_generate_hash',
+  )
+  external static void _cryptoGenerateHash(
+    int port,
+    int kind,
+    Pointer<Utf8> data,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'crypto_validate_key_pair',
+  )
+  external static void _cryptoValidateKeyPair(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+    Pointer<Utf8> secret,
+  );
+
+  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'crypto_validate_hash',
+  )
+  external static void _cryptoValidateHash(
+    int port,
+    int kind,
+    Pointer<Utf8> data,
+    Pointer<Utf8> hash,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'crypto_sign')
+  external static void _cryptoSign(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+    Pointer<Utf8> secret,
+    Pointer<Utf8> data,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'crypto_verify')
+  external static void _cryptoVerify(
+    int port,
+    int kind,
+    Pointer<Utf8> key,
+    Pointer<Utf8> data,
+    Pointer<Utf8> signature,
+  );
+
+  @Native<
+    Void Function(
+      Int64,
+      Uint32,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+    )
+  >(symbol: 'crypto_decrypt_aead')
+  external static void _cryptoDecryptAead(
+    int port,
+    int kind,
+    Pointer<Utf8> body,
+    Pointer<Utf8> nonce,
+    Pointer<Utf8> sharedSecret,
+    Pointer<Utf8> associatedData,
+  );
+
+  @Native<
+    Void Function(
+      Int64,
+      Uint32,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+    )
+  >(symbol: 'crypto_encrypt_aead')
+  external static void _cryptoEncryptAead(
+    int port,
+    int kind,
+    Pointer<Utf8> body,
+    Pointer<Utf8> nonce,
+    Pointer<Utf8> sharedSecret,
+    Pointer<Utf8> associatedData,
+  );
+
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'crypto_crypt_no_auth')
+  external static void _cryptoCryptNoAuth(
+    int port,
+    int kind,
+    Pointer<Utf8> body,
+    Pointer<Utf8> nonce,
+    Pointer<Utf8> sharedSecret,
+  );
+
+  @Native<Uint64 Function()>(symbol: 'now')
+  external static int _now();
+
+  @Native<Uint64 Function()>(symbol: 'now_non_decreasing')
+  external static int _nowNonDecreasing();
+
+  @Native<Uint64 Function()>(symbol: 'now_increasing')
+  external static int _nowIncreasing();
+
+  @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'debug')
+  external static void _debug(int port, Pointer<Utf8> logLevel);
+
+  @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'save_user_secret',
+  )
+  external static void _saveUserSecret(
+    int port,
+    Pointer<Utf8> key,
+    Pointer<Utf8> value,
+  );
+
+  @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'load_user_secret')
+  external static void _loadUserSecret(int port, Pointer<Utf8> key);
+
+  @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'remove_user_secret')
+  external static void _removeUserSecret(int port, Pointer<Utf8> key);
+
+  @Native<Void Function(Int64)>(symbol: 'list_user_secrets')
+  external static void _listUserSecrets(int port);
+
+  @Native<Void Function(Int64)>(symbol: 'delete_all_user_secrets')
+  external static void _deleteAllUserSecrets(int port);
+
+  @Native<Pointer<Utf8> Function()>(symbol: 'veilid_version_string')
+  external static Pointer<Utf8> _veilidVersionString();
+
+  @Native<VeilidVersionFFI Function()>(symbol: 'veilid_version')
+  external static VeilidVersionFFI _veilidVersion();
+
+  @Native<Pointer<Utf8> Function()>(symbol: 'default_veilid_config')
+  external static Pointer<Utf8> _defaultVeilidConfig();
+
+  @Native<Pointer<Utf8> Function()>(symbol: 'veilid_features')
+  external static Pointer<Utf8> _veilidFeatures();
+
+  @Native<Void Function(Pointer<_DartPostCObject>, Pointer<Utf8>)>(
+    symbol: 'initialize_veilid_flutter',
+  )
+  external static void _initializeVeilidFlutter(
+    Pointer<_DartPostCObject> dartPostCObject,
+    Pointer<Utf8> crashPath,
+  );
+
+  VeilidFFI() {
+    _initializeVeilidFlutter(
       NativeApi.postCObject,
       // Allow environment to configure
       // ignore: avoid_redundant_argument_values, do_not_use_environment
       const String.fromEnvironment('VEILID_CRASH_PATH').toNativeUtf8(),
     );
   }
+
   @override
   void initializeVeilidCore(Map<String, dynamic> platformConfigJson) {
     final nativePlatformConfig = jsonEncode(platformConfigJson).toNativeUtf8();
@@ -2750,7 +2472,7 @@ class VeilidFFI extends Veilid {
     final sendPort = recvPort.sendPort;
     _routingContext(sendPort.nativePort);
     final id = await processFuturePlain<int>(recvPort.first);
-    return VeilidRoutingContextFFI._(_Ctx(id, this));
+    return VeilidRoutingContextFFI._(_Ctx(id));
   }
 
   @override
@@ -2800,7 +2522,7 @@ class VeilidFFI extends Veilid {
     _transactDHTRecords(sendPort.nativePort, nativeRecordKeys, nativeOptions);
 
     final id = await processFuturePlain<int>(recvPort.first);
-    return VeilidDHTTransactionFFI._(_DTX(id, this));
+    return VeilidDHTTransactionFFI._(_DTX(id));
   }
 
   @override
@@ -2859,7 +2581,7 @@ class VeilidFFI extends Veilid {
     final sendPort = recvPort.sendPort;
     _openTableDb(sendPort.nativePort, name.toNativeUtf8(), columnCount);
     final id = await processFuturePlain<int>(recvPort.first);
-    return VeilidTableDBFFI._(_TDB(id, this));
+    return VeilidTableDBFFI._(_TDB(id));
   }
 
   @override
@@ -2883,7 +2605,7 @@ class VeilidFFI extends Veilid {
     if (!validCryptoKinds().contains(kind)) {
       throw const VeilidAPIExceptionGeneric('unsupported cryptosystem');
     }
-    return VeilidCryptoSystemFFI._(this, kind.toInt());
+    return VeilidCryptoSystemFFI._(kind.toInt());
   }
 
   @override

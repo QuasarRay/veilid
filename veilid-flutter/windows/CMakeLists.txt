@@ -17,9 +17,8 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
 
-include(./rust.cmake)
-# List of absolute paths to libraries that should be bundled with the plugin
+# veilid_flutter.dll ships as a Flutter code asset, not a plugin-bundled library.
 set(veilid_bundled_libraries
-  "$<TARGET_FILE:${CRATE_NAME}-shared>"
+  ""
   PARENT_SCOPE
 )

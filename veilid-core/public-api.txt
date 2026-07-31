@@ -254,6 +254,11 @@ pub fn veilid_core::VeilidConfigLogLevel::fmt(&self, &mut core::fmt::Formatter<'
 impl core::str::traits::FromStr for veilid_core::VeilidConfigLogLevel
 pub type veilid_core::VeilidConfigLogLevel::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::VeilidConfigLogLevel::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub enum veilid_core::VeilidConfigProtectedStoreBackend
+pub veilid_core::VeilidConfigProtectedStoreBackend::ExtensionStorage
+pub veilid_core::VeilidConfigProtectedStoreBackend::IndexedDb
+pub veilid_core::VeilidConfigProtectedStoreBackend::LocalStorage
+pub veilid_core::VeilidConfigProtectedStoreBackend::PlatformDefault
 pub enum veilid_core::VeilidLogKeyFilterMode
 pub veilid_core::VeilidLogKeyFilterMode::All
 pub veilid_core::VeilidLogKeyFilterMode::Filter(veilid_core::VeilidLayerLogKeyFilter)
@@ -1252,7 +1257,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -2172,19 +2177,6 @@ pub fn veilid_core::PrivateSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> co
 impl get_size2::GetSize for veilid_core::PrivateSpec
 pub fn veilid_core::PrivateSpec::get_heap_size(&self) -> usize
 pub fn veilid_core::PrivateSpec::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
-pub struct veilid_core::ProtectedStore
-impl veilid_core::ProtectedStore
-pub fn veilid_core::ProtectedStore::delete_all(&self)
-pub fn veilid_core::ProtectedStore::load_user_secret<K: core::convert::AsRef<str> + core::fmt::Debug>(&self, K) -> veilid_core::VeilidAPIResult<core::option::Option<alloc::vec::Vec<u8>>>
-pub fn veilid_core::ProtectedStore::load_user_secret_json<K, T>(&self, K) -> veilid_core::VeilidAPIResult<core::option::Option<T>> where K: core::convert::AsRef<str> + core::fmt::Debug, T: for<'de> serde_core::de::Deserialize<'de>
-pub fn veilid_core::ProtectedStore::load_user_secret_string<K: core::convert::AsRef<str> + core::fmt::Debug>(&self, K) -> veilid_core::VeilidAPIResult<core::option::Option<alloc::string::String>>
-pub fn veilid_core::ProtectedStore::remove_user_secret<K: core::convert::AsRef<str> + core::fmt::Debug>(&self, K) -> veilid_core::VeilidAPIResult<bool>
-pub fn veilid_core::ProtectedStore::save_user_secret<K: core::convert::AsRef<str> + core::fmt::Debug>(&self, K, &[u8]) -> veilid_core::VeilidAPIResult<bool>
-pub fn veilid_core::ProtectedStore::save_user_secret_json<K, T>(&self, K, &T) -> veilid_core::VeilidAPIResult<bool> where K: core::convert::AsRef<str> + core::fmt::Debug, T: serde_core::ser::Serialize
-pub fn veilid_core::ProtectedStore::save_user_secret_string<K: core::convert::AsRef<str> + core::fmt::Debug, V: core::convert::AsRef<str> + core::fmt::Debug>(&self, K, V) -> veilid_core::VeilidAPIResult<bool>
-pub struct veilid_core::ProtectedStoreInner
-impl core::fmt::Debug for veilid_core::ProtectedStoreInner
-pub fn veilid_core::ProtectedStoreInner::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct veilid_core::PublicKey
 impl veilid_core::PublicKey
 pub fn veilid_core::PublicKey::into_value(self) -> veilid_core::BarePublicKey
@@ -2973,17 +2965,21 @@ pub async fn veilid_core::VeilidAPI::app_call_reply(&self, veilid_core::Operatio
 pub async fn veilid_core::VeilidAPI::attach(&self) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidAPI::config(&self) -> veilid_core::VeilidAPIResult<alloc::sync::Arc<veilid_core::VeilidConfig>>
 pub fn veilid_core::VeilidAPI::crypto(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidComponentGuard<'_, veilid_core::Crypto>>
+pub async fn veilid_core::VeilidAPI::delete_all_user_secrets(&self) -> veilid_core::VeilidAPIResult<()>
 pub async fn veilid_core::VeilidAPI::detach(&self) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidAPI::generate_member_id(&self, &veilid_core::PublicKey) -> veilid_core::VeilidAPIResult<veilid_core::MemberId>
 pub async fn veilid_core::VeilidAPI::get_dht_record_key(&self, veilid_core::DHTSchema, veilid_core::PublicKey, core::option::Option<veilid_core::SharedSecret>) -> veilid_core::VeilidAPIResult<veilid_core::RecordKey>
 pub async fn veilid_core::VeilidAPI::get_state(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidState>
 pub fn veilid_core::VeilidAPI::import_remote_private_route(&self, alloc::vec::Vec<u8>) -> veilid_core::VeilidAPIResult<veilid_core::RouteId>
 pub fn veilid_core::VeilidAPI::is_shutdown(&self) -> bool
+pub async fn veilid_core::VeilidAPI::list_user_secrets(&self) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<alloc::string::String>>
+pub async fn veilid_core::VeilidAPI::load_user_secret(&self, alloc::string::String) -> veilid_core::VeilidAPIResult<core::option::Option<alloc::vec::Vec<u8>>>
 pub async fn veilid_core::VeilidAPI::new_custom_private_route(&self, veilid_core::PrivateSpec) -> veilid_core::VeilidAPIResult<veilid_core::RouteBlob>
 pub async fn veilid_core::VeilidAPI::new_private_route(&self) -> veilid_core::VeilidAPIResult<veilid_core::RouteBlob>
-pub fn veilid_core::VeilidAPI::protected_store(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidComponentGuard<'_, veilid_core::ProtectedStore>>
 pub fn veilid_core::VeilidAPI::release_private_route(&self, veilid_core::RouteId) -> veilid_core::VeilidAPIResult<()>
+pub async fn veilid_core::VeilidAPI::remove_user_secret(&self, alloc::string::String) -> veilid_core::VeilidAPIResult<bool>
 pub fn veilid_core::VeilidAPI::routing_context(&self) -> veilid_core::VeilidAPIResult<veilid_core::RoutingContext>
+pub async fn veilid_core::VeilidAPI::save_user_secret(&self, alloc::string::String, alloc::vec::Vec<u8>) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::VeilidAPI::shutdown(self)
 pub fn veilid_core::VeilidAPI::table_store(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidComponentGuard<'_, veilid_core::TableStore>>
 pub async fn veilid_core::VeilidAPI::transact_dht_records(&self, alloc::vec::Vec<veilid_core::RecordKey>, core::option::Option<veilid_core::TransactDHTRecordsOptions>) -> veilid_core::VeilidAPIResult<veilid_core::DHTTransaction>
@@ -3145,6 +3141,7 @@ pub veilid_core::VeilidConfigPrivacy::require_inbound_relay: bool
 pub struct veilid_core::VeilidConfigProtectedStore
 pub veilid_core::VeilidConfigProtectedStore::allow_insecure_fallback: bool
 pub veilid_core::VeilidConfigProtectedStore::always_use_insecure_storage: bool
+pub veilid_core::VeilidConfigProtectedStore::backend: veilid_core::VeilidConfigProtectedStoreBackend
 pub veilid_core::VeilidConfigProtectedStore::delete: bool
 pub veilid_core::VeilidConfigProtectedStore::device_encryption_key_password: alloc::string::String
 pub veilid_core::VeilidConfigProtectedStore::directory: alloc::string::String
@@ -3368,7 +3365,6 @@ pub const veilid_core::VLD0_PUBLIC_KEY_LENGTH: usize
 pub const veilid_core::VLD0_SECRET_KEY_LENGTH: usize
 pub const veilid_core::VLD0_SHARED_SECRET_LENGTH: usize
 pub const veilid_core::VLD0_SIGNATURE_LENGTH: usize
-pub static veilid_core::KNOWN_PROTECTED_STORE_KEYS: [&str; 2]
 pub trait veilid_core::CryptoSystem
 pub fn veilid_core::CryptoSystem::aead_overhead(&self) -> usize
 pub fn veilid_core::CryptoSystem::cached_dh(&self, &veilid_core::PublicKey, &veilid_core::SecretKey) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>

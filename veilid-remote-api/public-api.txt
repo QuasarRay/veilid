@@ -10,6 +10,11 @@ pub veilid_remote_api::ApiResultWithOptVecString::Err
 pub veilid_remote_api::ApiResultWithOptVecString::Err::error: veilid_core::veilid_api::error::VeilidAPIError
 pub veilid_remote_api::ApiResultWithOptVecString::Ok
 pub veilid_remote_api::ApiResultWithOptVecString::Ok::value: T
+pub enum veilid_remote_api::ApiResultWithOptVecU8
+pub veilid_remote_api::ApiResultWithOptVecU8::Err
+pub veilid_remote_api::ApiResultWithOptVecU8::Err::error: veilid_core::veilid_api::error::VeilidAPIError
+pub veilid_remote_api::ApiResultWithOptVecU8::Ok
+pub veilid_remote_api::ApiResultWithOptVecU8::Ok::value: core::option::Option<alloc::vec::Vec<u8>>
 pub enum veilid_remote_api::ApiResultWithString<T> where T: core::clone::Clone + core::fmt::Debug
 pub veilid_remote_api::ApiResultWithString::Err
 pub veilid_remote_api::ApiResultWithString::Err::error: veilid_core::veilid_api::error::VeilidAPIError
@@ -253,6 +258,7 @@ pub veilid_remote_api::RequestOp::CryptoSystem(veilid_remote_api::CryptoSystemRe
 pub veilid_remote_api::RequestOp::Debug
 pub veilid_remote_api::RequestOp::Debug::command: alloc::string::String
 pub veilid_remote_api::RequestOp::DefaultVeilidConfig
+pub veilid_remote_api::RequestOp::DeleteAllUserSecrets
 pub veilid_remote_api::RequestOp::DeleteTableDb
 pub veilid_remote_api::RequestOp::DeleteTableDb::name: alloc::string::String
 pub veilid_remote_api::RequestOp::Detach
@@ -274,6 +280,9 @@ pub veilid_remote_api::RequestOp::GetState
 pub veilid_remote_api::RequestOp::ImportRemotePrivateRoute
 pub veilid_remote_api::RequestOp::ImportRemotePrivateRoute::blob: alloc::vec::Vec<u8>
 pub veilid_remote_api::RequestOp::IsShutdown
+pub veilid_remote_api::RequestOp::ListUserSecrets
+pub veilid_remote_api::RequestOp::LoadUserSecret
+pub veilid_remote_api::RequestOp::LoadUserSecret::key: alloc::string::String
 pub veilid_remote_api::RequestOp::NewCustomPrivateRoute
 pub veilid_remote_api::RequestOp::NewCustomPrivateRoute::private_spec: veilid_core::veilid_api::types::safety::PrivateSpec
 pub veilid_remote_api::RequestOp::NewPrivateRoute
@@ -286,7 +295,12 @@ pub veilid_remote_api::RequestOp::OpenTableDb::column_count: u32
 pub veilid_remote_api::RequestOp::OpenTableDb::name: alloc::string::String
 pub veilid_remote_api::RequestOp::ReleasePrivateRoute
 pub veilid_remote_api::RequestOp::ReleasePrivateRoute::route_id: veilid_core::crypto::types::RouteId
+pub veilid_remote_api::RequestOp::RemoveUserSecret
+pub veilid_remote_api::RequestOp::RemoveUserSecret::key: alloc::string::String
 pub veilid_remote_api::RequestOp::RoutingContext(veilid_remote_api::RoutingContextRequest)
+pub veilid_remote_api::RequestOp::SaveUserSecret
+pub veilid_remote_api::RequestOp::SaveUserSecret::key: alloc::string::String
+pub veilid_remote_api::RequestOp::SaveUserSecret::value: alloc::vec::Vec<u8>
 pub veilid_remote_api::RequestOp::TableDb(veilid_remote_api::TableDbRequest)
 pub veilid_remote_api::RequestOp::TableDbTransaction(veilid_remote_api::TableDbTransactionRequest)
 pub veilid_remote_api::RequestOp::TransactDhtRecords
@@ -314,6 +328,8 @@ pub veilid_remote_api::ResponseOp::Debug
 pub veilid_remote_api::ResponseOp::Debug::result: veilid_remote_api::ApiResult<alloc::string::String>
 pub veilid_remote_api::ResponseOp::DefaultVeilidConfig
 pub veilid_remote_api::ResponseOp::DefaultVeilidConfig::value: alloc::string::String
+pub veilid_remote_api::ResponseOp::DeleteAllUserSecrets
+pub veilid_remote_api::ResponseOp::DeleteAllUserSecrets::result: veilid_remote_api::ApiResult<()>
 pub veilid_remote_api::ResponseOp::DeleteTableDb
 pub veilid_remote_api::ResponseOp::DeleteTableDb::result: veilid_remote_api::ApiResult<bool>
 pub veilid_remote_api::ResponseOp::Detach
@@ -335,6 +351,10 @@ pub veilid_remote_api::ResponseOp::ImportRemotePrivateRoute
 pub veilid_remote_api::ResponseOp::ImportRemotePrivateRoute::result: veilid_remote_api::ApiResultWithString<veilid_core::crypto::types::RouteId>
 pub veilid_remote_api::ResponseOp::IsShutdown
 pub veilid_remote_api::ResponseOp::IsShutdown::value: bool
+pub veilid_remote_api::ResponseOp::ListUserSecrets
+pub veilid_remote_api::ResponseOp::ListUserSecrets::result: veilid_remote_api::ApiResultWithVecString<alloc::vec::Vec<alloc::string::String>>
+pub veilid_remote_api::ResponseOp::LoadUserSecret
+pub veilid_remote_api::ResponseOp::LoadUserSecret::result: veilid_remote_api::ApiResultWithOptVecU8
 pub veilid_remote_api::ResponseOp::NewCustomPrivateRoute
 pub veilid_remote_api::ResponseOp::NewCustomPrivateRoute::result: veilid_remote_api::ApiResult<veilid_core::veilid_api::types::route_blob::RouteBlob>
 pub veilid_remote_api::ResponseOp::NewPrivateRoute
@@ -351,7 +371,11 @@ pub veilid_remote_api::ResponseOp::OpenTableDb
 pub veilid_remote_api::ResponseOp::OpenTableDb::result: veilid_remote_api::ApiResult<u32>
 pub veilid_remote_api::ResponseOp::ReleasePrivateRoute
 pub veilid_remote_api::ResponseOp::ReleasePrivateRoute::result: veilid_remote_api::ApiResult<()>
+pub veilid_remote_api::ResponseOp::RemoveUserSecret
+pub veilid_remote_api::ResponseOp::RemoveUserSecret::result: veilid_remote_api::ApiResult<bool>
 pub veilid_remote_api::ResponseOp::RoutingContext(alloc::boxed::Box<veilid_remote_api::RoutingContextResponse>)
+pub veilid_remote_api::ResponseOp::SaveUserSecret
+pub veilid_remote_api::ResponseOp::SaveUserSecret::result: veilid_remote_api::ApiResult<bool>
 pub veilid_remote_api::ResponseOp::TableDb(veilid_remote_api::TableDbResponse)
 pub veilid_remote_api::ResponseOp::TableDbTransaction(veilid_remote_api::TableDbTransactionResponse)
 pub veilid_remote_api::ResponseOp::TransactDhtRecords

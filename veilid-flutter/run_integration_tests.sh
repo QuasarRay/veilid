@@ -1,13 +1,8 @@
 #!/bin/bash
 pushd example 2>/dev/null
 
-# Deadlock detection (debug-locks) is opt-in: VEILID_DEBUG_LOCKS=1 enables it.
-# Off by default because its per-lock-acquire overhead inflates latency on these
-# throughput-heavy tests. macos_build.sh / ios_build.sh forward
-# VEILID_CARGO_EXTRA_OPTIONS through to cargo.
-if [ "${VEILID_DEBUG_LOCKS:-}" = "1" ]; then
-    export VEILID_CARGO_EXTRA_OPTIONS="--features=veilid-flutter/debug-locks ${VEILID_CARGO_EXTRA_OPTIONS:-}"
-fi
+# Cargo features come from the `hooks: user_defines:` block in example/pubspec.yaml;
+# hooks run under a fixed environment allowlist, so nothing can be passed from here.
 
 # Default to the #common=debug log tag group unless the caller overrides LOG_DIRECTIVES
 case "$*" in

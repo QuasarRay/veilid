@@ -7,10 +7,14 @@ homepage: https://veilid.com
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 environment:
-  sdk: ">=3.8.0 <4.0.0"
-  flutter: ">=3.41.0"
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.44.0"
 
 dependencies:
+  # hook/build.dart compiles veilid-flutter/rust and delivers it as a code asset
+  code_assets: ^1.2.1
+  hooks: ^2.0.2
+  native_toolchain_rust: ^1.0.4
   change_case: ^2.2.0
   charcode: ^1.4.0
   equatable: ^2.1.0

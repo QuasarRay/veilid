@@ -50,6 +50,14 @@ dev_dependencies:
   veilid_integration_test:
     path: ../packages/veilid_integration_test
 
+# Uncomment for deadlock detection; off by default because the per-lock-acquire overhead
+# inflates latency on these throughput-heavy tests.
+# hooks:
+#   user_defines:
+#     veilid:
+#       features:
+#         - debug-locks
+
 # The following section is specific to Flutter.
 flutter:
   # The following line ensures that the Material Icons font is

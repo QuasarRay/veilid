@@ -63,14 +63,6 @@ if [ "$OS" == "linux" ]; then
     flutter config --enable-linux-desktop --enable-android
 
 elif [ "$OS" == "macos" ]; then
-    # check if cocoapods is installed, if its not, install it
-    if command -v pod &> /dev/null; then
-        echo '[X] CocoaPods is available in the path'
-    else
-        echo 'CocoaPods is not available in the path, installing it now'
-        brew install cocoapods
-    fi
-
     if [ "$(uname -p)" == "arm" ]; then
         sudo softwareupdate --install-rosetta --agree-to-license
     fi

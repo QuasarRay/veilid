@@ -31,7 +31,7 @@ impl Drop for VeilidAPIInner {
 /// * [VeilidConfig] - The Veilid configuration specified at startup time.
 /// * [Crypto] - The available set of cryptosystems provided by Veilid.
 /// * [TableStore] - The Veilid table-based encrypted persistent key-value store.
-/// * [ProtectedStore] - The Veilid abstract of the device's low-level 'protected secret storage'.
+/// * ProtectedStore - The Veilid abstract of the device's low-level 'protected secret storage', via [VeilidAPI::save_user_secret], [VeilidAPI::load_user_secret], etc.
 /// * [VeilidState] - The current state of the Veilid node this API accesses.
 /// * [RoutingContext] - Communication methods between Veilid nodes and private routes.
 /// * Attach and detach from the network.
