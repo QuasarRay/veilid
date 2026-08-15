@@ -1,6 +1,7 @@
 pub mod flush;
 pub mod kick_buckets;
 pub mod ping_validator;
+pub mod update_cm_viability;
 pub mod update_statistics;
 
 use super::*;
@@ -39,6 +40,14 @@ impl RoutingTable {
         // Set kick buckets tick task
         impl_setup_task!(self, Self, kick_buckets_task, kick_buckets_task_routine);
 
+        // Set contact-method viability tick task
+        impl_setup_task!(
+            self,
+            Self,
+            update_cm_viability_task,
+            update_cm_viability_task_routine
+        );
+
         // Note: ping validation processor is spawned in startup(), not as a TickTask
     }
 
@@ -71,6 +80,14 @@ impl RoutingTable {
 
         // Do rolling answers every ROLLING_ANSWER_INTERVAL_SECS secs
         self.rolling_answers_task.tick().await?;
+
+        // Recompute contact-method viability when peerinfo changed on either side
+        if self
+            .cm_viability_dirty
+            .load(core::sync::atomic::Ordering::Acquire)
+        {
+            self.update_cm_viability_task.tick().await?;
+        }
 
         // Kick buckets task
         let kick_bucket_queue_count = self.kick_queue.lock().len();
@@ -111,6 +128,10 @@ impl RoutingTable {
         veilid_log!(self debug "stopping kick buckets task");
         if let Err(e) = self.kick_buckets_task.stop().await {
             veilid_log!(self warn "kick_buckets_task not stopped: {}", e);
+        }
+        veilid_log!(self debug "stopping update cm viability task");
+        if let Err(e) = self.update_cm_viability_task.stop().await {
+            veilid_log!(self warn "update_cm_viability_task not stopped: {}", e);
         }
         veilid_log!(self debug "stopping routing domain controller task");
         for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {

@@ -4,6 +4,7 @@ import {
   KeyPair,
   RecordKey,
   VeilidRoutingContext,
+  veilidClient,
   veilidCrypto,
 } from 'veilid-wasm';
 import { textEncoder, textDecoder } from '../utils/marshalling-utils.js';
@@ -228,6 +229,39 @@ export const dhtSuite: Suite = {
           expect(inspectRes.offlineSubkeys).toEqual([]);
           expect(inspectRes.localSeqs).toEqual([0]);
           expect(inspectRes.networkSeqs).toEqual([undefined]);
+        }),
+      });
+
+      cases.push({
+        name: `should raise the sequence number to minSeqnum for ${cryptoKind}`,
+        run: withRecord(cryptoKind, async ({ expect }, rc, rec) => {
+          const max = veilidClient.VALUE_SEQ_NUM_MAX;
+
+          // max - 1 leaves exactly one write
+          await dhtRetry(
+            () => rc.setDHTValue(rec.key, 0, textEncoder.encode(data), { minSeqnum: max - 1 }),
+            { label: 'setDHTValue with minSeqnum' },
+          );
+
+          let inspectRes = await rc.inspectDHTRecord(rec.key, [[0, 0]], 'Local');
+          expect(inspectRes.localSeqs).toEqual([max - 1]);
+
+          await dhtRetry(() => rc.setDHTValue(rec.key, 0, textEncoder.encode(`${data}👋`)), {
+            label: 'setDHTValue last remaining write',
+          });
+
+          inspectRes = await rc.inspectDHTRecord(rec.key, [[0, 0]], 'Local');
+          expect(inspectRes.localSeqs).toEqual([max]);
+
+          // No retry: we're asserting the out-of-sequence-numbers rejection.
+          let error: { kind?: string; message?: string } | undefined;
+          try {
+            await rc.setDHTValue(rec.key, 0, textEncoder.encode(`${data}🙅`));
+          } catch (e) {
+            error = e as { kind?: string; message?: string };
+          }
+          expect(error?.kind).toEqual('Generic');
+          expect(error?.message?.startsWith('sequence number at max:')).toBe(true);
         }),
       });
 

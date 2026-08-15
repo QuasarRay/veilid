@@ -11,6 +11,19 @@ impl NetworkManager {
             rolling_transfers_task_routine
         );
 
+        // Set transport stats health log task
+        {
+            let registry = self.registry();
+            self.transport_stats_log_task
+                .set_routine(move |_s, _l, _t| {
+                    let registry = registry.clone();
+                    Box::pin(async move {
+                        registry.network_manager().transport_stats().log_health();
+                        Ok(())
+                    })
+                });
+        }
+
         // Set address filter task
         {
             let registry = self.registry();
@@ -51,6 +64,9 @@ impl NetworkManager {
         // Run the address filter task
         self.address_filter_task.tick().await?;
 
+        // Log our own per-transport send health
+        self.transport_stats_log_task.tick().await?;
+
         // Run the low level network tick
         net.tick().await?;
 
@@ -74,6 +90,11 @@ impl NetworkManager {
         veilid_log!(self debug "stopping rolling transfers task");
         if let Err(e) = self.rolling_transfers_task.stop().await {
             veilid_log!(self warn "rolling_transfers_task not stopped: {}", e);
+        }
+
+        veilid_log!(self debug "stopping transport stats log task");
+        if let Err(e) = self.transport_stats_log_task.stop().await {
+            veilid_log!(self warn "transport_stats_log_task not stopped: {}", e);
         }
 
         veilid_log!(self debug "stopping address filter task");

@@ -86,6 +86,9 @@ impl MatchesDialInfoFilter for Flow {
 pub(crate) struct UniqueFlow {
     pub flow: Flow,
     pub connection_id: Option<NetworkConnectionId>,
+    /// Whether this flow is outbound-dial evidence (we used the peer's dial info, or an
+    /// outbound connection) rather than a flow the peer opened to us; UDP always counts
+    pub dialed: bool,
 }
 
 impl fmt::Display for UniqueFlow {

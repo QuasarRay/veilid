@@ -426,10 +426,10 @@ impl StorageManager {
                 attempt_responded_xids.insert(pnr.lnxid);
                 per_node_results.push(pnr);
 
-                // Arm post-consensus deadline once when consensus is first reached.
-                // Bound by max of the fastest required_strict_consensus_count RTTs
-                // among Valid responses we've collected — this keeps a single slow
-                // responder from inflating the deadline to the rpc-timeout cap.
+                // Arm the post-consensus deadline once, at first consensus
+                // - bound: max of the fastest required_strict_consensus_count Valid RTTs
+                // - capped by POST_CONSENSUS_GRACE_MS, for the answer wave trailing
+                //   consensus rather than dead stragglers
                 if !consensus_reached
                     && valid_response_count >= params.required_strict_consensus_count
                 {
@@ -449,7 +449,8 @@ impl StorageManager {
                         .max()
                         .unwrap_or(0)
                         .saturating_mul(POST_CONSENSUS_RTT_FACTOR)
-                        .min(rpc_timeout_us);
+                        .min(rpc_timeout_us)
+                        .min(ms_to_us(POST_CONSENSUS_GRACE_MS as u32));
                     let now = Timestamp::now_non_decreasing();
                     post_consensus_deadline =
                         Some(Timestamp::new(now.as_u64().saturating_add(max_bound_us)));

@@ -519,10 +519,14 @@ impl<'a> FanoutQueue<'a> {
     }
 
     /// Transition InProgress | Queued -> Disqualified if they are too far away from the record key
+    ///
+    /// Width counts only nodes that can still answer, mirroring `evaluate_done`: an
+    /// unreachable closest node must not cull the candidates that could replace it.
     fn disqualify(&mut self, cur_ts: Timestamp) {
         let mut consecutive_rejections = 0usize;
         let mut rejected_consensus = false;
-        for (index, node_id) in self.sorted_nodes.iter().enumerate() {
+        let mut window_slots = 0usize;
+        for node_id in self.sorted_nodes.iter() {
             let node = self.nodes.get_mut(node_id).unwrap_or_log();
 
             // If the node is finished already we don't have to consider it
@@ -533,23 +537,35 @@ impl<'a> FanoutQueue<'a> {
                     if consecutive_rejections >= self.consensus_count {
                         rejected_consensus = true;
                     }
+                    // A rejection holds its slot, it is a live close node's explicit answer
+                    window_slots += 1;
                     continue;
                 } else {
                     consecutive_rejections = 0;
                 }
 
+                if !matches!(
+                    node.status.stage,
+                    FanoutNodeStage::Timeout | FanoutNodeStage::Disqualified
+                ) {
+                    window_slots += 1;
+                }
                 continue;
             }
 
             // If the node is too far away from the key or we have had enough consecutive rejections,
             // cancel it immediately and disqualify it
-            if (self.consensus_width > 0 && index >= self.consensus_width) || rejected_consensus {
+            if (self.consensus_width > 0 && window_slots >= self.consensus_width)
+                || rejected_consensus
+            {
                 node.status
                     .transition(FanoutNodeStage::Disqualified, cur_ts);
                 if let Some(css) = node.lane_stop_source.take() {
                     // Drop the stop source to force the lane to stop processing this node
                     drop(css);
                 }
+            } else {
+                window_slots += 1;
             }
         }
     }

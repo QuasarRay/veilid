@@ -111,12 +111,16 @@ pub mod ts {
     pub struct SetDHTValueOptions {
         /// Override writer key pair for this operation
         #[tsify(type = "KeyPair", optional)]
-        #[serde(with = "serde_wasm_bindgen::preserve")]
+        #[serde(default, with = "serde_wasm_bindgen::preserve")]
         pub writer: JsValue,
         /// Defaults to true. If false, the value will not be written if the node is offline,
         /// and a TryAgain error will be returned.
         #[tsify(optional)]
         pub allow_offline: Option<AllowOffline>,
+        /// Raise the sequence number to at least this, after the automatic increment.
+        /// `veilidClient.VALUE_SEQ_NUM_MAX` minus `n` leaves `n` writes after this one.
+        #[tsify(optional)]
+        pub min_seqnum: Option<ValueSeqNum>,
     }
 
     /// Options that override defaults for transact_dht_records
@@ -133,11 +137,16 @@ pub mod ts {
     /// Options that override defaults for DHTTransaction::set
     #[derive(Serialize, Deserialize, Clone, Tsify)]
     #[tsify(from_wasm_abi, into_wasm_abi)]
+    #[serde(rename_all = "camelCase")]
     pub struct DHTTransactionSetValueOptions {
         /// Override writer key pair for this operation
         #[tsify(type = "KeyPair", optional)]
-        #[serde(with = "serde_wasm_bindgen::preserve")]
+        #[serde(default, with = "serde_wasm_bindgen::preserve")]
         pub writer: JsValue,
+        /// Raise the sequence number to at least this, after the automatic increment.
+        /// `veilidClient.VALUE_SEQ_NUM_MAX` minus `n` leaves `n` writes after this one.
+        #[tsify(optional)]
+        pub min_seqnum: Option<ValueSeqNum>,
     }
 
     /// Simple DHT Schema (SMPL) Member
@@ -315,6 +324,7 @@ impl TryFrom<ts::SetDHTValueOptions> for SetDHTValueOptions {
         Ok(SetDHTValueOptions {
             writer,
             allow_offline,
+            min_seqnum: value.min_seqnum,
         })
     }
 }
@@ -338,7 +348,10 @@ impl TryFrom<ts::DHTTransactionSetValueOptions> for DHTTransactionSetValueOption
     fn try_from(value: ts::DHTTransactionSetValueOptions) -> Result<Self, Self::Error> {
         let writer = ts::try_from_js_option::<KeyPair>(value.writer.clone())
             .map_err(VeilidAPIError::generic)?;
-        Ok(DHTTransactionSetValueOptions { writer })
+        Ok(DHTTransactionSetValueOptions {
+            writer,
+            min_seqnum: value.min_seqnum,
+        })
     }
 }
 

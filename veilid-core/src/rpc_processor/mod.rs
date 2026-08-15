@@ -64,6 +64,12 @@ pub(crate) use destination::*;
 pub(crate) use error::*;
 pub(crate) use fanout::*;
 pub(crate) use rpc_status::StatusResult;
+// Only the native discovery context consumes this
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    expect(unused_imports)
+)]
+pub(crate) use rpc_validate_dial_info::DialInfoValidationOutcome;
 pub(crate) use sender_info::*;
 pub(crate) use waitable_reply::WaitableReplyContext;
 
@@ -150,6 +156,8 @@ pub(crate) struct RPCProcessor {
     inner: Mutex<RPCProcessorInner>,
     /// The timeout for a direct RPC sent to a node with no extra hops
     timeout: TimestampDuration,
+    /// Queue age past which an inbound message is shed: the worst-case routed waiter timeout
+    worker_shed_timeout: TimestampDuration,
     /// The queue length for the RPC send/recv channels
     queue_size: u32,
     /// The number of RPC workers to spin up
@@ -185,7 +193,7 @@ impl RPCProcessor {
         startup_context: RPCProcessorStartupContext,
     ) -> Self {
         // make local copy of node id for easy access
-        let (concurrency, queue_size, timeout_us) = {
+        let (concurrency, queue_size, timeout_us, max_route_hop_count) = {
             let config = registry.config();
 
             // set up channel
@@ -193,6 +201,7 @@ impl RPCProcessor {
             let queue_size = config.internal().network.rpc.queue_size;
             let timeout_us =
                 TimestampDuration::new(ms_to_us(config.internal().network.rpc.timeout_ms));
+            let max_route_hop_count = config.internal().network.rpc.max_route_hop_count;
             if concurrency == 0 {
                 concurrency = get_concurrency();
                 if concurrency == 0 {
@@ -202,8 +211,14 @@ impl RPCProcessor {
                 // Default RPC concurrency is the number of CPUs * 16 rpc workers per core, as a single worker takes about 1% CPU when relaying and 16% is reasonable for baseline plus relay
                 concurrency *= RPC_WORKERS_PER_CORE;
             }
-            (concurrency, queue_size, timeout_us)
+            (concurrency, queue_size, timeout_us, max_route_hop_count)
         };
+
+        // Worst-case waiter: get_safety_selection_timeout at the maximum hop count
+        let worker_shed_timeout = timeout_us.saturating_add(
+            TimestampDuration::new_ms(500)
+                .saturating_mul(((max_route_hop_count as u64) * 2).saturating_sub(4)),
+        );
 
         Self {
             waiting_rpc_table: OperationWaiter::new(registry.clone()),
@@ -212,6 +227,7 @@ impl RPCProcessor {
             registry,
             inner: Mutex::new(Self::new_inner()),
             timeout: timeout_us,
+            worker_shed_timeout,
             queue_size,
             concurrency,
             startup_context,
@@ -605,7 +621,7 @@ impl RPCProcessor {
         }
 
         // Spawn the actual wait into the reply pool so a dropped caller
-        // doesn't cancel the answer wait — the question's outbound RPC
+        // doesn't cancel the answer wait; the question's outbound RPC
         // always completes, even if no one is left listening.
         let waiter = self.waiting_rpc_table.clone();
         let timeout = waitable_reply.context.timeout;
@@ -1178,17 +1194,41 @@ impl RPCProcessor {
         node_ids
     }
 
+    /// Whether our own spread verdict condemns this transport, voiding any blame
+    /// evidence carried over it
+    fn transport_send_suppressed(
+        &self,
+        opt_rd: Option<RoutingDomain>,
+        transport: TransportType,
+    ) -> bool {
+        opt_rd.is_some_and(|rd| {
+            self.network_manager()
+                .transport_stats()
+                .verdict(rd, transport)
+                .is_send_suppressed()
+        })
+    }
+
     /// Record failure to send to node or route
+    ///
+    /// Node blame is suppressed while our own network is degraded or offline, or our
+    /// spread verdict condemns the transport: those failures say nothing about the peer.
+    /// Route stats are exempt from the degraded case, a route is our own resource
+    /// selection and releasing a bad one is recovery, not peer blame. Suppressing it
+    /// would wedge a broken route in place for as long as the losses it causes keep the
+    /// node degraded. A condemned transport still voids them.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
+    #[expect(clippy::too_many_arguments)]
     fn record_send_failure(
         &self,
         rpc_kind: RPCKind,
         send_ts: Timestamp,
         node_ref: FilteredNodeRef,
         opt_transport: Option<TransportType>,
+        dialed: bool,
         safety_route: Option<AllocatedRouteRef>,
         remote_private_route: Option<RemoteRouteRef>,
     ) {
@@ -1223,16 +1263,18 @@ impl RPCProcessor {
             };
             online_detector.record_failure(rd, node_ids, send_ts, transport);
         }
-        let suppress_degradation = opt_rd
-            .map(|rd| online_detector.online_state(rd) == OnlineState::Offline)
-            .unwrap_or(false);
+        let suppress_degradation = opt_rd.is_some_and(|rd| online_detector.blame_suppressed(rd));
+        let transport_suppressed =
+            |transport: TransportType| self.transport_send_suppressed(opt_rd, transport);
 
         // Record for node if this was not sent via a route
         if !is_routed {
             if !suppress_degradation {
                 if let Some(transport) = opt_transport {
-                    // A specific transport failed to send, record it on the transport
-                    node_ref.stats_failed_to_send(send_ts, wants_answer, transport);
+                    if !transport_suppressed(transport) {
+                        // A specific transport failed to send, record it on the transport
+                        node_ref.stats_failed_to_send(send_ts, wants_answer, transport, dialed);
+                    }
                 } else {
                     // Pre-send abort with no transport attempted:
                     // * NoRoutingDomain / NoPeerInfo / NoContactMethod / Punished
@@ -1246,14 +1288,14 @@ impl RPCProcessor {
             return;
         }
 
-        if suppress_degradation {
-            return;
-        }
-
         // Only attribute a route send failure when we know which transport (ordering) was attempted.
-        let Some(ordering) = opt_transport.map(|t| t.sequence_ordering()) else {
+        let Some(transport) = opt_transport else {
             return;
         };
+        if transport_suppressed(transport) {
+            return;
+        }
+        let ordering = transport.sequence_ordering();
         if let Some(sr) = &safety_route {
             // If safety route was in use, record failure to send there
             sr.with_stats_mut(|s| s.record_send_failed(ordering));
@@ -1264,6 +1306,10 @@ impl RPCProcessor {
     }
 
     /// Record question lost to node or route
+    ///
+    /// Suppression follows `record_send_failure`: route stats are exempt from the
+    /// degraded case but not from a condemned transport, and the out-of-band route test
+    /// runs regardless.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -1294,9 +1340,9 @@ impl RPCProcessor {
                 online_detector.record_failure(rd, node_ids, context.send_ts, transport);
             }
         }
-        let suppress_degradation = opt_rd
-            .map(|rd| online_detector.online_state(rd) == OnlineState::Offline)
-            .unwrap_or(false);
+        let suppress_degradation = opt_rd.is_some_and(|rd| online_detector.blame_suppressed(rd));
+        let transport_suppressed =
+            |transport: TransportType| self.transport_send_suppressed(opt_rd, transport);
 
         // Record for node if this was not sent via a route
         if !context.is_routed() {
@@ -1319,7 +1365,12 @@ impl RPCProcessor {
                     .unwrap_or(false);
             if !suppress_degradation && !protect_after_reattach {
                 if let Some(transport) = context.send_data_result.transport_type() {
-                    context.node_ref.stats_lost_question(transport);
+                    if !transport_suppressed(transport) {
+                        context.node_ref.stats_lost_question(
+                            transport,
+                            context.send_data_result.dialed_evidence(),
+                        );
+                    }
                 }
             }
             // Always clear last_flows: the underlying flow is gone or broken regardless.
@@ -1327,12 +1378,12 @@ impl RPCProcessor {
             return;
         }
 
-        if suppress_degradation {
-            return;
-        }
-
         // Ordering the send went out on; attribute the lost question to that ordering on the route.
-        let opt_ordering = context.send_data_result.sequence_ordering();
+        let opt_ordering = context
+            .send_data_result
+            .transport_type()
+            .filter(|transport| !transport_suppressed(*transport))
+            .map(|transport| transport.sequence_ordering());
 
         // If safety route was used, record question lost there
         if let Some(sr) = &context.opt_safety_route_ref {
@@ -1344,11 +1395,14 @@ impl RPCProcessor {
             // get released without waiting for the next regular cycle. The safety
             // route ref is always allocated, so use its set id directly.
             let route_id: RouteId = sr.route_set_id().clone().into();
-            veilid_log!(self debug "scheduling out-of-band route test for {} after %SR timeout", route_id);
             let cur_ts = Timestamp::now();
-            self.routing_table()
-                .enqueue_route_tests(cur_ts, vec![route_id], 0)
+            let enqueued = self
+                .routing_table()
+                .enqueue_route_tests(cur_ts, vec![route_id.clone()], 0)
                 .await;
+            if enqueued > 0 {
+                veilid_log!(self debug "scheduling out-of-band route test for {} after %SR timeout", route_id);
+            }
         }
         // If remote private route was used, record question lost there
         if let Some(pr) = &context.opt_remote_private_route_ref {
@@ -1384,6 +1438,7 @@ impl RPCProcessor {
         safety_route: Option<AllocatedRouteRef>,
         remote_private_route: Option<RemoteRouteRef>,
         transport: TransportType,
+        dialed: bool,
     ) {
         let is_routed = safety_route.is_some() || remote_private_route.is_some();
 
@@ -1393,9 +1448,9 @@ impl RPCProcessor {
             let is_answer = matches!(rpc_kind, RPCKind::Answer);
 
             if is_answer {
-                node_ref.stats_answer_sent(bytes, transport);
+                node_ref.stats_answer_sent(bytes, transport, dialed);
             } else {
-                node_ref.stats_question_sent(send_ts, bytes, wants_answer, transport);
+                node_ref.stats_question_sent(send_ts, bytes, wants_answer, transport, dialed);
             }
             return;
         }
@@ -1452,9 +1507,13 @@ impl RPCProcessor {
             && context.opt_reply_private_route_ref.is_none()
         {
             if let Some(transport) = context.send_data_result.transport_type() {
-                context
-                    .node_ref
-                    .stats_answer_rcvd(context.send_ts, recv_ts, bytes, transport);
+                context.node_ref.stats_answer_rcvd(
+                    context.send_ts,
+                    recv_ts,
+                    bytes,
+                    transport,
+                    context.send_data_result.dialed_evidence(),
+                );
             }
             return;
         }
@@ -1812,6 +1871,7 @@ impl RPCProcessor {
                     send_ts,
                     node_ref.clone(),
                     None,
+                    false,
                     opt_safety_route_ref.clone(),
                     opt_remote_private_route_ref.clone(),
                 );
@@ -1829,6 +1889,7 @@ impl RPCProcessor {
                 send_ts,
                 node_ref.clone(),
                 send_data_result.opt_transport_type(),
+                send_data_result.dialed_evidence(),
                 opt_safety_route_ref,
                 opt_remote_private_route_ref,
             );
@@ -1846,6 +1907,7 @@ impl RPCProcessor {
                 opt_safety_route_ref.clone(),
                 opt_remote_private_route_ref.clone(),
                 transport,
+                send_data_result.dialed_evidence(),
             );
         }
 
@@ -1963,6 +2025,7 @@ impl RPCProcessor {
                     send_ts,
                     node_ref.clone(),
                     None,
+                    false,
                     safety_route.clone(),
                     remote_private_route.clone(),
                 );
@@ -1980,6 +2043,7 @@ impl RPCProcessor {
                 send_ts,
                 node_ref.clone(),
                 send_data_result.opt_transport_type(),
+                send_data_result.dialed_evidence(),
                 safety_route.clone(),
                 remote_private_route.clone(),
             );
@@ -1997,6 +2061,7 @@ impl RPCProcessor {
                 safety_route,
                 remote_private_route,
                 transport,
+                send_data_result.dialed_evidence(),
             );
         }
 
@@ -2092,6 +2157,7 @@ impl RPCProcessor {
                     send_ts,
                     node_ref.clone(),
                     None,
+                    false,
                     safety_route.clone(),
                     remote_private_route.clone(),
                 );
@@ -2109,6 +2175,7 @@ impl RPCProcessor {
                 send_ts,
                 node_ref.clone(),
                 send_data_result.opt_transport_type(),
+                send_data_result.dialed_evidence(),
                 safety_route.clone(),
                 remote_private_route.clone(),
             );
@@ -2126,6 +2193,7 @@ impl RPCProcessor {
                 safety_route,
                 remote_private_route,
                 transport,
+                send_data_result.dialed_evidence(),
             );
         }
 
@@ -2396,6 +2464,34 @@ impl RPCProcessor {
                 veilid_log!(self debug target: "rpc_message", fields: dir = "recv", kind = "answer", ?route_op_id, op_id = msg.operation.op_id().as_u64(), desc, header = ?msg.header, operation = ?msg.operation, signer = ?signer);
             }
         };
+
+        // Shed instead of process when no waiter can still be listening:
+        // - direct question: waiter armed self.timeout
+        // - routed question: waiter armed up to the max-hop routed timeout
+        // - Route statement: mid-route relay, worst case less the hop that reached us
+        // - other statements and answers: nobody waits on us, deliver whenever we can
+        let opt_shed_timeout = match msg.operation.kind() {
+            RPCOperationKind::Question(_) => Some(match &msg.header.detail {
+                RPCMessageHeaderDetail::Direct(_) => self.timeout,
+                RPCMessageHeaderDetail::SafetyRouted(_)
+                | RPCMessageHeaderDetail::PrivateRouted(_) => self.worker_shed_timeout,
+            }),
+            RPCOperationKind::Statement(s) => match s.detail() {
+                RPCStatementDetail::Route(_) => Some(
+                    self.worker_shed_timeout
+                        .saturating_sub(TimestampDuration::new_ms(500)),
+                ),
+                _ => None,
+            },
+            RPCOperationKind::Answer(_) => None,
+        };
+        if let Some(shed_timeout) = opt_shed_timeout {
+            let queue_age = start_ts.duration_since(msg.header.timestamp);
+            if queue_age > shed_timeout {
+                veilid_log!(self debug "shedding stale rpc message: {} age {} > {}", desc, queue_age, shed_timeout);
+                return Err(RPCError::ignore("shed stale rpc message"));
+            }
+        }
 
         // Process specific message kind
         let out = match msg.operation.kind() {

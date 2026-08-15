@@ -19,6 +19,24 @@ pub(super) struct OutboundSetValueResult {
     pub signed_value_data: Arc<SignedValueData>,
 }
 
+/// Whether a set that has run out of sequence numbers may reuse the one already stored
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum SeqReuse {
+    /// A plain set can resend the same bytes until they reach consensus
+    Allowed,
+    /// A transaction only lands with consensus, so a write that cannot raise the seq never commits
+    Denied,
+}
+
+/// How a set chooses the sequence number it writes
+#[derive(Copy, Clone, Debug)]
+pub(super) struct SeqAssignment {
+    /// Raise the sequence number to at least this, after the automatic increment
+    pub min_seqnum: Option<ValueSeqNum>,
+    /// Whether the stored sequence number may be reused when none are left
+    pub reuse: SeqReuse,
+}
+
 /// The result of the inbound_set_value operation
 #[derive(Clone, Debug)]
 pub(crate) enum InboundSetValueResult {
@@ -83,6 +101,7 @@ impl StorageManager {
             .as_ref()
             .and_then(|o| o.writer.clone())
             .or(opt_writer);
+        let min_seqnum = options.as_ref().and_then(|o| o.min_seqnum);
         let allow_offline = options
             .unwrap_or_default()
             .allow_offline
@@ -102,8 +121,22 @@ impl StorageManager {
             .await?;
 
         let (signed_value_data, value_data, descriptor) = self
-            .prepare_set_value_data(&record_key, subkey, data, &writer, last_get_result)
+            .prepare_set_value_data(
+                &record_key,
+                subkey,
+                data,
+                &writer,
+                SeqAssignment {
+                    min_seqnum,
+                    reuse: SeqReuse::Allowed,
+                },
+                last_get_result,
+            )
             .await?;
+
+        // A max-seq write leaves the subkey nothing to write next, so the caller must hear that
+        // consensus was missed rather than assume it can write again
+        let closes_subkey = signed_value_data.value_data().seq().is_max();
 
         // Check if we are offline (this is a race, but an optimization to avoid fanout if it is likely to fail)
         if !self.dht_is_online() {
@@ -166,7 +199,7 @@ impl StorageManager {
             )
             .await;
 
-        if matches!(out, Err(VeilidAPIError::TryAgain { message: _ })) {
+        if !closes_subkey && matches!(out, Err(VeilidAPIError::TryAgain { message: _ })) {
             return Ok(None);
         }
 
@@ -181,8 +214,11 @@ impl StorageManager {
         subkey: ValueSubkey,
         data: Vec<u8>,
         writer: &KeyPair,
+        seq_assignment: SeqAssignment,
         last_get_result: GetResult,
     ) -> VeilidAPIResult<(Arc<SignedValueData>, ValueData, Arc<SignedValueDescriptor>)> {
+        let SeqAssignment { min_seqnum, reuse } = seq_assignment;
+
         // Get cryptosystem
         let crypto = self.crypto();
         let Some(vcrypto) = crypto.get_async(record_key.kind()) else {
@@ -217,9 +253,26 @@ impl StorageManager {
                 seq = last_signed_value_data.value_data().seq();
             } else {
                 // New value is different, increment sequence number
-                seq = last_signed_value_data.value_data().seq().next()?;
+                let last_seq = last_signed_value_data.value_data().seq();
+                seq = match last_seq.next() {
+                    Ok(next) => next,
+                    // A caller whose minimum this seq already satisfies is retrying its own write
+                    Err(_)
+                        if reuse == SeqReuse::Allowed
+                            && min_seqnum.is_some_and(|min_seqnum| last_seq >= min_seqnum) =>
+                    {
+                        last_seq
+                    }
+                    Err(_) => {
+                        apibail_generic!("sequence number at max: {}:{}", record_key, subkey);
+                    }
+                };
             }
         };
+
+        if let Some(min_seqnum) = min_seqnum {
+            seq = seq.max(min_seqnum);
+        }
 
         // Make new subkey data
         let value_data = ValueData::new_with_seq(seq, data, writer.key())?;
@@ -678,6 +731,13 @@ impl StorageManager {
     /// Handle a received 'Set Value' query
     /// Returns a None if the value passed in was set
     /// Returns a Some(current value) if the value was older and the current value was kept
+    ///
+    /// One of the two places a storage node enforces sequence numbers; the other is
+    /// `RecordStoreInner::inbound_transaction_set`, for transactional sets. An inbound value is
+    /// accepted only if its sequence number is greater than the stored one, or equal with
+    /// byte-identical value data. A conflict at an equal sequence number keeps what arrived first.
+    /// Nothing exceeds [ValueSeqNum::MAX], so this node refuses every successor to a subkey stored
+    /// there for as long as it holds the value. A `min_seqnum` of `MAX` rests on that.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "dht", skip_all)

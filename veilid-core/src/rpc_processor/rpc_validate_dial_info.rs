@@ -2,6 +2,20 @@ use super::*;
 
 impl_veilid_log_facility!("rpc");
 
+/// Outcome of asking another node to validate one of our dial infos.
+///
+/// Only a statement that actually went out says anything about whether peers can
+/// reach us; a failure on our own side is no verdict at all.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DialInfoValidationOutcome {
+    /// The receipt came back out-of-band: peers can reach this dial info
+    Reachable,
+    /// The request went out but no receipt arrived: peers cannot reach this dial info
+    Unreachable,
+    /// The request never got out; this says nothing about reachability
+    Inconclusive,
+}
+
 impl RPCProcessor {
     // Can only be sent directly, not via relays or routes
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "rpc", skip(self), ret, err(level=Level::DEBUG)))]
@@ -11,7 +25,7 @@ impl RPCProcessor {
         peer: NodeRef,
         dial_info: DialInfo,
         redirect: bool,
-    ) -> Result<bool, RPCError> {
+    ) -> Result<DialInfoValidationOutcome, RPCError> {
         let _guard = self
             .startup_context
             .startup_lock
@@ -56,7 +70,7 @@ impl RPCProcessor {
             peer.custom_filtered(node_ref_filter).with_sequencing(Sequencing::PreferOrdered),
             None), statement, None, None)
             .await? => [ format!(": peer={} statement={:?}", peer, statement) ] {
-                return Ok(false);
+                return Ok(DialInfoValidationOutcome::Inconclusive);
             }
         );
 
@@ -73,16 +87,17 @@ impl RPCProcessor {
                     ReceiptEvent::ReturnedPrivate { private_route: _ }
                     | ReceiptEvent::ReturnedInBand { inbound_noderef: _ }
                     | ReceiptEvent::ReturnedSafety => {
+                        // Wrong channel, a protocol anomaly rather than evidence either way
                         veilid_log!(self debug "validate_dial_info receipt should be returned out-of-band");
-                        Ok(false)
+                        Ok(DialInfoValidationOutcome::Inconclusive)
                     }
                     ReceiptEvent::ReturnedOutOfBand => {
                         veilid_log!(self debug "validate_dial_info receipt returned");
-                        Ok(true)
+                        Ok(DialInfoValidationOutcome::Reachable)
                     }
                     ReceiptEvent::Expired => {
                         veilid_log!(self debug "validate_dial_info receipt expired");
-                        Ok(false)
+                        Ok(DialInfoValidationOutcome::Unreachable)
                     }
                     ReceiptEvent::Cancelled => {
                         Err(RPCError::internal("receipt was dropped before expiration"))

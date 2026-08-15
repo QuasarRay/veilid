@@ -519,7 +519,8 @@ class ValueSubkey(int):
 class ValueSeqNum(int):
     """Increasing sequence number ordering changes to a DHT subkey."""
 
-    pass
+    MAX = 0xFFFFFFFE
+    """The largest sequence number. Subtract n for a min_seqnum that leaves n writes."""
 
 ####################################################################
 
@@ -800,17 +801,24 @@ class DHTRecordReport:
 
 
 class SetDHTValueOptions:
-    """Options that override defaults for set_dht_value: an override writer and the offline-write policy."""
+    """Options that override defaults for set_dht_value: an override writer, the offline-write policy, and a minimum sequence number."""
 
     writer: Optional[KeyPair]
     allow_offline: Optional[bool]
+    min_seqnum: Optional[ValueSeqNum]
 
-    def __init__(self, writer: Optional[KeyPair] = None, allow_offline: Optional[bool] = None):
+    def __init__(
+        self,
+        writer: Optional[KeyPair] = None,
+        allow_offline: Optional[bool] = None,
+        min_seqnum: Optional[ValueSeqNum] = None,
+    ):
         self.writer = writer
         self.allow_offline = allow_offline
+        self.min_seqnum = min_seqnum
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}(writer={self.writer!r}, allow_offline={self.allow_offline!r})>"
+        return f"<{self.__class__.__name__}(writer={self.writer!r}, allow_offline={self.allow_offline!r}, min_seqnum={self.min_seqnum!r})>"
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -818,6 +826,7 @@ class SetDHTValueOptions:
         return cls(
             KeyPair(j["writer"]) if "writer" in j else None,
             j["allow_offline"] if "allow_offline" in j else None,
+            ValueSeqNum(j["min_seqnum"]) if j.get("min_seqnum") is not None else None,
         )
 
     def to_json(self) -> dict:
@@ -826,21 +835,28 @@ class SetDHTValueOptions:
 
 
 class DHTTransactionSetValueOptions:
-    """Options that override defaults for a transaction set: an override writer key pair."""
+    """Options that override defaults for a transaction set: an override writer key pair and a minimum sequence number."""
 
     writer: Optional[KeyPair]
+    min_seqnum: Optional[ValueSeqNum]
 
-    def __init__(self, writer: Optional[KeyPair] = None):
+    def __init__(
+        self,
+        writer: Optional[KeyPair] = None,
+        min_seqnum: Optional[ValueSeqNum] = None,
+    ):
         self.writer = writer
+        self.min_seqnum = min_seqnum
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}(writer={self.writer!r})>"
+        return f"<{self.__class__.__name__}(writer={self.writer!r}, min_seqnum={self.min_seqnum!r})>"
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
         """Build from its JSON representation."""
         return cls(
             KeyPair(j["writer"]) if "writer" in j else None,
+            ValueSeqNum(j["min_seqnum"]) if j.get("min_seqnum") is not None else None,
         )
 
     def to_json(self) -> dict:

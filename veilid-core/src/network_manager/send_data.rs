@@ -29,10 +29,27 @@ impl NetworkManager {
         );
 
         if let Some(unique_flow) = sdr.unique_flow() {
-            self.set_last_flow(node_ref, unique_flow.flow, Timestamp::now());
+            self.set_last_flow_from_send(node_ref, unique_flow.flow, Timestamp::now());
         }
 
         Ok(sdr)
+    }
+
+    /// Decision-point suppression gate for existing-flow shortcuts; a UDP "existing
+    /// flow" is only a remembered address, so reusing one would bypass suppression.
+    /// Spends the canary when due.
+    fn transport_deprioritized(
+        &self,
+        node_ref: &FilteredNodeRef,
+        transport: TransportType,
+    ) -> bool {
+        node_ref
+            .best_routing_domain()
+            .map(|rd| {
+                self.transport_stats()
+                    .deprioritized_consuming_canary(rd, transport)
+            })
+            .unwrap_or(false)
     }
 
     fn report_contact_method_result(
@@ -86,6 +103,18 @@ impl NetworkManager {
                 data.clone(),
             ))
             .await?;
+
+            // Outbound health only; says nothing about peers reaching us
+            if let (Some(routing_domain), Some(transport)) =
+                (node_ref.best_routing_domain(), sdr.opt_transport_type())
+            {
+                self.transport_stats().record_send(
+                    routing_domain,
+                    transport,
+                    node_ref.best_node_id(),
+                    TransportSendOutcome::from(&sdr),
+                );
+            }
 
             let (ncm_back, nres) = sdr.destructure();
 
@@ -184,7 +213,8 @@ impl NetworkManager {
             // how we can reply to inbound requests for that node.
             NodeContactMethodResult::NoRoutingDomain
             | NodeContactMethodResult::NoPeerInfo
-            | NodeContactMethodResult::NoContactMethod => {
+            | NodeContactMethodResult::NoContactMethod
+            | NodeContactMethodResult::TransportSuppressed => {
                 pin_future_closure!(self.send_data_unreachable(destination_node_ref, data)).await?
             }
             NodeContactMethodResult::Resolved(ContactMethod::Existing) => {
@@ -258,8 +288,11 @@ impl NetworkManager {
         target_node_ref: FilteredNodeRef,
         data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
-        // First try to send data to the last connection we've seen this peer on
-        let Some(flow) = target_node_ref.last_flow() else {
+        // Try the last flow seen for this peer, unless its transport is suppressed
+        let Some(flow) = target_node_ref
+            .last_flow()
+            .filter(|flow| !self.transport_deprioritized(&target_node_ref, flow.transport_type()))
+        else {
             return Ok(NetworkResult::no_connection_other(format!(
                 "node was unreachable: {}",
                 target_node_ref
@@ -277,8 +310,11 @@ impl NetworkManager {
             ))
             .await?
             {
-                SendDataToExistingFlowResult::Sent(unique_flow) => unique_flow,
-                SendDataToExistingFlowResult::NotSent(_) => {
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => unique_flow,
+                NetworkAttempt::Performed(NetworkResult::Timeout) => {
+                    return Ok(NetworkResult::timeout());
+                }
+                _ => {
                     return Ok(NetworkResult::no_connection_other(
                         "failed to send to existing flow",
                     ));
@@ -286,7 +322,7 @@ impl NetworkManager {
             };
 
         // Update timestamp for this last connection since we just sent to it
-        self.set_last_flow(
+        self.set_last_flow_from_send(
             target_node_ref.unfiltered(),
             unique_flow.flow,
             Timestamp::now(),
@@ -329,8 +365,11 @@ impl NetworkManager {
             ))
             .await?
             {
-                SendDataToExistingFlowResult::Sent(unique_flow) => unique_flow,
-                SendDataToExistingFlowResult::NotSent(_) => {
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => unique_flow,
+                NetworkAttempt::Performed(NetworkResult::Timeout) => {
+                    return Ok(NetworkResult::timeout());
+                }
+                _ => {
                     return Ok(NetworkResult::no_connection_other(
                         "failed to send to existing flow",
                     ));
@@ -338,7 +377,7 @@ impl NetworkManager {
             };
 
         // Update timestamp for this last connection since we just sent to it
-        self.set_last_flow(target_node_ref, unique_flow.flow, Timestamp::now());
+        self.set_last_flow_from_send(target_node_ref, unique_flow.flow, Timestamp::now());
 
         Ok(NetworkResult::value(unique_flow))
     }
@@ -359,24 +398,29 @@ impl NetworkManager {
         // as a signalled node gets to choose its own dial info for the reverse connection.
         let seq_target_node_ref = target_node_ref.sequencing_only();
 
-        let data = if let Some(flow) = seq_target_node_ref.last_flow() {
+        let opt_last_flow = seq_target_node_ref.last_flow().filter(|flow| {
+            !self.transport_deprioritized(&seq_target_node_ref, flow.transport_type())
+        });
+        let data = if let Some(flow) = opt_last_flow {
             veilid_log!(self debug target:"contact_method",
                 "ExistingConnection: {:?} for {:?}",
                 flow, seq_target_node_ref
             );
             let net = self.net();
-            match pin_future!(net.send_data_to_existing_flow(flow, data).measure_debug(
-                TimestampDuration::new_secs(1),
-                veilid_log_dbg!(
-                    self,
-                    "NetworkManager::send_data_cm_signal_reverse send_data_to_existing_flow"
-                )
-            ))
+            match pin_future!(net
+                .send_data_to_existing_flow(flow, data.clone())
+                .measure_debug(
+                    TimestampDuration::new_secs(1),
+                    veilid_log_dbg!(
+                        self,
+                        "NetworkManager::send_data_cm_signal_reverse send_data_to_existing_flow"
+                    )
+                ))
             .await?
             {
-                SendDataToExistingFlowResult::Sent(unique_flow) => {
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
                     // Update timestamp for this last connection since we just sent to it
-                    self.set_last_flow(
+                    self.set_last_flow_from_send(
                         target_node_ref.unfiltered(),
                         unique_flow.flow,
                         Timestamp::now(),
@@ -384,11 +428,10 @@ impl NetworkManager {
 
                     return Ok(NetworkResult::value(unique_flow));
                 }
-                SendDataToExistingFlowResult::NotSent(data) => {
-                    // Couldn't send data to existing connection
-                    // so pass the data back out
-                    data
+                NetworkAttempt::Performed(NetworkResult::Timeout) => {
+                    return Ok(NetworkResult::timeout());
                 }
+                _ => data,
             }
         } else {
             // No last connection
@@ -435,24 +478,29 @@ impl NetworkManager {
         target_node_ref: FilteredNodeRef,
         data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
-        let data = if let Some(flow) = target_node_ref.last_flow() {
+        let opt_last_flow = target_node_ref
+            .last_flow()
+            .filter(|flow| !self.transport_deprioritized(&target_node_ref, flow.transport_type()));
+        let data = if let Some(flow) = opt_last_flow {
             veilid_log!(self debug target:"contact_method",
                 "ExistingConnection: {:?} for {:?}",
                 flow, target_node_ref
             );
             let net = self.net();
-            match pin_future!(net.send_data_to_existing_flow(flow, data).measure_debug(
-                TimestampDuration::new_secs(1),
-                veilid_log_dbg!(
-                    self,
-                    "NetworkManager::send_data_cm_signal_hole_punch send_data_to_existing_flow"
-                )
-            ))
+            match pin_future!(net
+                .send_data_to_existing_flow(flow, data.clone())
+                .measure_debug(
+                    TimestampDuration::new_secs(1),
+                    veilid_log_dbg!(
+                        self,
+                        "NetworkManager::send_data_cm_signal_hole_punch send_data_to_existing_flow"
+                    )
+                ))
             .await?
             {
-                SendDataToExistingFlowResult::Sent(unique_flow) => {
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
                     // Update timestamp for this last connection since we just sent to it
-                    self.set_last_flow(
+                    self.set_last_flow_from_send(
                         target_node_ref.unfiltered(),
                         unique_flow.flow,
                         Timestamp::now(),
@@ -460,11 +508,10 @@ impl NetworkManager {
 
                     return Ok(NetworkResult::value(unique_flow));
                 }
-                SendDataToExistingFlowResult::NotSent(data) => {
-                    // Couldn't send data to existing connection
-                    // so pass the data back out
-                    data
+                NetworkAttempt::Performed(NetworkResult::Timeout) => {
+                    return Ok(NetworkResult::timeout());
                 }
+                _ => data,
             }
         } else {
             // No last connection
@@ -517,7 +564,9 @@ impl NetworkManager {
         let filtered_node_ref =
             node_ref.custom_filtered(NodeRefFilter::from(dial_info.make_filter()));
 
-        let opt_last_flow = filtered_node_ref.last_flow();
+        let opt_last_flow = filtered_node_ref.last_flow().filter(|flow| {
+            !self.transport_deprioritized(&filtered_node_ref, flow.transport_type())
+        });
 
         let data = if let Some(flow) = opt_last_flow {
             veilid_log!(self debug target:"contact_method",
@@ -526,22 +575,28 @@ impl NetworkManager {
             );
 
             let net = self.net();
-            match pin_future!(net.send_data_to_existing_flow(flow, data).measure_debug(
-                TimestampDuration::new_secs(1),
-                veilid_log_dbg!(
-                    self,
-                    "NetworkManager::send_data_cm_direct send_data_to_existing_flow"
-                )
-            ))
+            match pin_future!(net
+                .send_data_to_existing_flow(flow, data.clone())
+                .measure_debug(
+                    TimestampDuration::new_secs(1),
+                    veilid_log_dbg!(
+                        self,
+                        "NetworkManager::send_data_cm_direct send_data_to_existing_flow"
+                    )
+                ))
             .await?
             {
-                SendDataToExistingFlowResult::Sent(unique_flow) => {
-                    self.set_last_flow(node_ref, unique_flow.flow, Timestamp::now());
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
+                    self.set_last_flow_from_send(node_ref, unique_flow.flow, Timestamp::now());
                     return Ok(NetworkResult::value(unique_flow));
                 }
-                SendDataToExistingFlowResult::NotSent(d) => {
+                NetworkAttempt::Performed(NetworkResult::Timeout) => {
                     node_ref.clear_last_flow(flow);
-                    d
+                    return Ok(NetworkResult::timeout());
+                }
+                _ => {
+                    node_ref.clear_last_flow(flow);
+                    data
                 }
             }
         } else {
@@ -561,7 +616,7 @@ impl NetworkManager {
             pin_future!(net.send_data_to_dial_info(dial_info.clone(), data)).await?
         );
 
-        self.set_last_flow(node_ref, unique_flow.flow, Timestamp::now());
+        self.set_last_flow_from_send(node_ref, unique_flow.flow, Timestamp::now());
 
         Ok(NetworkResult::value(unique_flow))
     }
@@ -619,9 +674,7 @@ impl NetworkManager {
             target_node_ref_sequencing: target_node_ref.sequencing(),
         };
         if let Some(contact_methods) = self.inner.lock().node_contact_method_cache.get(&ncm_key) {
-            return Ok(NodeContactMethodResult::Resolved(
-                self.pick_contact_method(target_node_ref.clone(), contact_methods)?,
-            ));
+            return self.pick_contact_method(target_node_ref.clone(), contact_methods);
         }
 
         // Determine if the published peer info is the same as our current peer info
@@ -653,39 +706,86 @@ impl NetworkManager {
                 .node_contact_method_cache
                 .insert(ncm_key.clone(), contact_methods.clone());
 
-            NodeContactMethodResult::Resolved(
-                self.pick_contact_method(target_node_ref.clone(), contact_methods)?,
-            )
+            self.pick_contact_method(target_node_ref.clone(), contact_methods)?
         };
 
         Ok(ncm_result)
     }
 
-    /// Pick a contact method from a list of contact methods
+    /// Pick a contact method from a list of contact methods, scored on its first
+    /// wire hop (a relay on a suppressed transport is as doomed as a direct target
+    /// on one) and sorted by, in order:
+    ///   1. our own transport suppressed (aggregated across all peers)
+    ///   2. this peer's transport failing (per-edge evidence)
+    ///   3. address type, IPv4 first
+    ///   4. last failure time, stalest first
     fn pick_contact_method(
         &self,
         target_node_ref: FilteredNodeRef,
         contact_methods: Vec<ContactMethod>,
-    ) -> EyreResult<ContactMethod> {
-        let mut contact_method_map = BTreeMap::<u64, Vec<ContactMethod>>::new();
+    ) -> EyreResult<NodeContactMethodResult> {
+        let opt_routing_domain = target_node_ref.best_routing_domain();
+        let mut contact_method_map = BTreeMap::<(bool, bool, u8, u64), Vec<ContactMethod>>::new();
         for cm in contact_methods {
+            let (suppressed, failing, address_pref) = match cm.opt_transport_type() {
+                Some(transport) => {
+                    let suppressed = opt_routing_domain
+                        .map(|rd| {
+                            self.transport_stats()
+                                .verdict(rd, transport)
+                                .is_deprioritized()
+                        })
+                        .unwrap_or(false);
+                    let failing = target_node_ref.transport_health(transport).is_failing();
+                    // Prefer IPv4; IPv6 fails more often in practice
+                    let address_pref = match transport.address_type() {
+                        AddressType::IPV4 => 0u8,
+                        AddressType::IPV6 => 1u8,
+                    };
+                    (suppressed, failing, address_pref)
+                }
+                None => (false, false, 0u8),
+            };
             let failure_ts = target_node_ref
                 .get_contact_method_failure_ts(&cm)
                 .map(|ts| ts.as_u64())
                 .unwrap_or(0);
-            contact_method_map.entry(failure_ts).or_default().push(cm);
+            contact_method_map
+                .entry((suppressed, failing, address_pref, failure_ts))
+                .or_default()
+                .push(cm);
         }
 
         // Pick the first contact method in sorted order
-        // The least-recently failed contact method will be first
-        let Some(first_contact_method) = contact_method_map.into_values().flatten().next() else {
+        let Some(((suppressed, _, _, _), first_contact_method)) = contact_method_map
+            .into_iter()
+            .flat_map(|(k, cms)| cms.into_iter().map(move |cm| (k, cm)))
+            .next()
+        else {
             bail!(
                 "no contact method found for target node ref {:?}",
                 target_node_ref
             );
         };
 
-        Ok(first_contact_method)
+        let opt_rd_transport = opt_routing_domain.zip(first_contact_method.opt_transport_type());
+
+        // Every method rides a suppressed transport; the caller falls back or gives up
+        if suppressed {
+            if let Some((rd, transport)) = opt_rd_transport {
+                self.transport_stats().record_skip(rd, transport);
+            }
+            return Ok(NodeContactMethodResult::TransportSuppressed);
+        }
+
+        // Spend the canary at decision time when the winner's transport is due one
+        if let Some((rd, transport)) = opt_rd_transport {
+            let _ = self
+                .transport_stats()
+                .deprioritized_consuming_canary(rd, transport);
+        }
+
+        Ok(NodeContactMethodResult::Resolved(first_contact_method))
     }
 
     /// Figure out how to reach a node from our own node over the best routing domain and reference the nodes we want to access
@@ -829,11 +929,12 @@ impl NetworkManager {
         if let Some(flow) = inbound_nr.last_flow() {
             let net = self.net();
             match pin_future!(net.send_data_to_existing_flow(flow, data)).await? {
-                SendDataToExistingFlowResult::Sent(unique_flow) => {
-                    self.set_last_flow(target_nr, unique_flow.flow, Timestamp::now());
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
+                    self.set_last_flow_from_send(target_nr, unique_flow.flow, Timestamp::now());
                     Ok(NetworkResult::value(unique_flow))
                 }
-                SendDataToExistingFlowResult::NotSent(_) => Ok(NetworkResult::no_connection_other(
+                NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
+                _ => Ok(NetworkResult::no_connection_other(
                     "unable to send over reverse connection",
                 )),
             }
@@ -965,11 +1066,12 @@ impl NetworkManager {
         // And now use the existing connection to send over
         if let Some(flow) = inbound_nr.last_flow() {
             match self.net().send_data_to_existing_flow(flow, data).await? {
-                SendDataToExistingFlowResult::Sent(unique_flow) => {
-                    self.set_last_flow(target_nr, unique_flow.flow, Timestamp::now());
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
+                    self.set_last_flow_from_send(target_nr, unique_flow.flow, Timestamp::now());
                     Ok(NetworkResult::value(unique_flow))
                 }
-                SendDataToExistingFlowResult::NotSent(_) => Ok(NetworkResult::no_connection_other(
+                NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
+                _ => Ok(NetworkResult::no_connection_other(
                     "unable to send over hole punch",
                 )),
             }

@@ -1,5 +1,6 @@
 // Builds veilid-flutter/rust as the code asset lib/veilid_ffi.dart resolves against.
 // `assetName` below and that file's @DefaultAsset must move together.
+
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_rust/native_toolchain_rust.dart';

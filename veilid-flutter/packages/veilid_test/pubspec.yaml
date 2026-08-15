@@ -14,6 +14,13 @@ dependencies:
   web: ^1.1.1
   veilid:
     path: ../..
+  # For the unit fixture, which mocks a platform channel and registers test
+  # hooks. This package already depends on veilid, a Flutter plugin, so it was
+  # never usable outside Flutter.
+  flutter:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
 
 dev_dependencies:
   flutter_lints: ^6.0.0

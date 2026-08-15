@@ -59,6 +59,18 @@ impl SendDataResult {
         self.unique_flow().map(|uf| uf.flow.transport_type())
     }
 
+    /// Whether this send is outbound-dial evidence: the flow's own judgment on success,
+    /// else derived from the attempted contact method, where only Existing is not evidence.
+    pub fn dialed_evidence(&self) -> bool {
+        if let NetworkResult::Value(uf) = &self.network_result {
+            return uf.dialed;
+        }
+        !matches!(
+            self.node_contact_method_result,
+            NodeContactMethodResult::Resolved(ContactMethod::Existing)
+        )
+    }
+
     pub fn sequence_ordering(&self) -> Option<SequenceOrdering> {
         self.unique_flow()
             .map(|uf| uf.flow.protocol_type().sequence_ordering())

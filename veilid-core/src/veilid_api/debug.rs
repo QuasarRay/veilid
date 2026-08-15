@@ -99,6 +99,25 @@ enum DebugCommand {
         #[arg(value_name = "relay_token")]
         args: Vec<String>,
     },
+    /// inspect and control low-level transport availability
+    Transport {
+        /// `stats`: dump per-transport send-health windows and disabled set
+        ///
+        /// `clear`: purge all transport stats windows
+        ///
+        /// `enable|disable <selector>...`: set availability. A disabled
+        /// transport's low-level sends and connects fail with NoConnection,
+        /// exercising the normal evidence/suppression machinery.
+        ///
+        /// `toggle <selector>... [duration]`: flip availability, reverting
+        /// after `duration` if given.
+        ///
+        /// `<selector>` is `udp|tcp` (both families), `ipv4|ipv6` (both
+        /// protocols), or `<proto>/<family>` e.g. `udp/ipv6`. TCP covers
+        /// WS/WSS (low-level transport granularity).
+        #[arg(value_name = "transport_token")]
+        args: Vec<String>,
+    },
     /// send a status RPC question to a destination
     Ping {
         /// Destination grammar:
@@ -413,9 +432,10 @@ enum DebugRecordSubcommand {
     #[command(help_template = DEBUG_HELP_TEMPLATE)]
     Set {
         /// Positional form:
-        /// - `[key] <subkey> <data> [writer] [offline|online|true|false]`
+        /// - `[key] <subkey> <data> [writer] [offline|online|true|false] [min_seqnum]`
         /// - if `key` is omitted, the most recently opened record is used
         /// - `<data>` may be plain text, quoted text, or `#`-prefixed hex
+        /// - `min_seqnum` is `max`, `max-<n>` leaving `n` writes, or a sequence number
         #[arg(allow_hyphen_values = true, value_name = "set_arg")]
         params: Vec<String>,
     },
@@ -632,6 +652,51 @@ fn parse_dht_report_scope(text: &str) -> Result<DHTReportScope, String> {
 
 fn get_dht_report_scope(text: &str) -> Option<DHTReportScope> {
     parse_dht_report_scope(text).ok()
+}
+
+fn parse_allow_offline(text: &str) -> Result<AllowOffline, String> {
+    match text.to_ascii_lowercase().trim() {
+        "online" | "false" => Ok(AllowOffline(false)),
+        "offline" | "true" => Ok(AllowOffline(true)),
+        _ => Err(format!("invalid allow_offline: {text}")),
+    }
+}
+
+fn get_allow_offline(text: &str) -> Option<AllowOffline> {
+    parse_allow_offline(text).ok()
+}
+
+/// Accepts `max`, `max-<n>` (leaving `n` writes), or a bare sequence number.
+pub(super) fn parse_value_seq_num(text: &str) -> Result<ValueSeqNum, String> {
+    let text = text.to_ascii_lowercase();
+    let text = text.trim();
+    let Some(remaining) = text.strip_prefix("max") else {
+        return text
+            .parse::<u32>()
+            .map(ValueSeqNum::from)
+            .map_err(|e| format!("invalid sequence number '{text}': {e}"));
+    };
+    if remaining.is_empty() {
+        return Ok(ValueSeqNum::MAX);
+    }
+    let Some(count) = remaining.strip_prefix('-') else {
+        return Err(format!("invalid sequence number: {text}"));
+    };
+    let count = count
+        .parse::<u32>()
+        .map_err(|e| format!("invalid remaining write count '{count}': {e}"))?;
+    let max = u32::from(ValueSeqNum::MAX);
+    max.checked_sub(count)
+        .map(ValueSeqNum::from)
+        .ok_or_else(|| format!("more remaining writes than sequence numbers: {text}"))
+}
+
+fn transport_list(transports: &[LowLevelTransportType]) -> String {
+    transports
+        .iter()
+        .map(|t| t.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 enum PublishedState {
@@ -1264,6 +1329,156 @@ impl VeilidAPI {
         Ok(registry.routing_table().debug_info_entry(node_ref))
     }
 
+    /// Expand a transport selector token into low-level transports.
+    /// `udp`/`tcp` = both families; `ipv4`/`ipv6` = both protocols; `udp/ipv6` = one.
+    fn parse_transport_selector(token: &str) -> Option<Vec<LowLevelTransportType>> {
+        fn proto(s: &str) -> Option<LowLevelProtocolType> {
+            match s {
+                "udp" => Some(LowLevelProtocolType::UDP),
+                "tcp" => Some(LowLevelProtocolType::TCP),
+                _ => None,
+            }
+        }
+        fn family(s: &str) -> Option<AddressType> {
+            match s {
+                "ipv4" | "v4" => Some(AddressType::IPV4),
+                "ipv6" | "v6" => Some(AddressType::IPV6),
+                _ => None,
+            }
+        }
+        let token = token.to_ascii_lowercase();
+        let (protos, families) = if let Some((p, f)) = token.split_once('/') {
+            (vec![proto(p)?], vec![family(f)?])
+        } else if let Some(p) = proto(&token) {
+            (vec![p], vec![AddressType::IPV4, AddressType::IPV6])
+        } else if let Some(f) = family(&token) {
+            (
+                vec![LowLevelProtocolType::UDP, LowLevelProtocolType::TCP],
+                vec![f],
+            )
+        } else {
+            return None;
+        };
+        let mut out = Vec::new();
+        for p in &protos {
+            for f in &families {
+                out.push(LowLevelTransportType {
+                    low_level_protocol_type: *p,
+                    address_type: *f,
+                });
+            }
+        }
+        Some(out)
+    }
+
+    fn debug_transport(&self, args: Vec<String>) -> VeilidAPIResult<String> {
+        let registry = self.core_context()?.registry();
+        let network_manager = registry.network_manager();
+        let transport_stats = network_manager.transport_stats();
+
+        let Some(subcommand) = args.first() else {
+            apibail_missing_argument!("debug_transport", "subcommand");
+        };
+        match subcommand.as_str() {
+            "stats" => Ok(transport_stats.debug_stats()),
+            "clear" => {
+                transport_stats.clear_all_windows();
+                Ok("transport stats cleared".to_owned())
+            }
+            "enable" | "disable" | "toggle" => {
+                let mut selector_args: Vec<&String> = args[1..].iter().collect();
+                let mut opt_duration_us: Option<u64> = None;
+                if *subcommand == "toggle" {
+                    if let Some(last) = selector_args.last() {
+                        if let Some(dur) = parse_duration(last) {
+                            // A token that parses as both stays a selector
+                            if Self::parse_transport_selector(last).is_none() {
+                                opt_duration_us = Some(dur);
+                                selector_args.pop();
+                            }
+                        }
+                    }
+                }
+                if selector_args.is_empty() {
+                    apibail_missing_argument!("debug_transport", "selector");
+                }
+                let mut transports: Vec<LowLevelTransportType> = Vec::new();
+                for token in &selector_args {
+                    let Some(mut tts) = Self::parse_transport_selector(token) else {
+                        apibail_invalid_argument!("debug_transport", "selector", token.to_string());
+                    };
+                    transports.append(&mut tts);
+                }
+                transports.sort();
+                transports.dedup();
+
+                let mut out = String::new();
+                match subcommand.as_str() {
+                    "enable" | "disable" => {
+                        let disable = subcommand.as_str() == "disable";
+                        transport_stats.set_transports_disabled(&transports, disable);
+                        out += &format!(
+                            "{}: {}\n",
+                            if disable { "disabled" } else { "enabled" },
+                            transport_list(&transports)
+                        );
+                    }
+                    "toggle" => {
+                        let currently_disabled = transport_stats.disabled_transports();
+                        let to_enable: Vec<LowLevelTransportType> = transports
+                            .iter()
+                            .filter(|t| currently_disabled.contains(t))
+                            .copied()
+                            .collect();
+                        let to_disable: Vec<LowLevelTransportType> = transports
+                            .iter()
+                            .filter(|t| !currently_disabled.contains(t))
+                            .copied()
+                            .collect();
+                        let mut gen = 0u64;
+                        if !to_enable.is_empty() {
+                            gen = transport_stats.set_transports_disabled(&to_enable, false);
+                        }
+                        if !to_disable.is_empty() {
+                            gen = transport_stats.set_transports_disabled(&to_disable, true);
+                        }
+                        out += &format!(
+                            "toggled: enabled [{}] disabled [{}]\n",
+                            transport_list(&to_enable),
+                            transport_list(&to_disable)
+                        );
+                        // The generation check makes the revert skip anything changed since
+                        if let Some(dur_us) = opt_duration_us {
+                            let registry = registry.clone();
+                            spawn_detached("transport toggle revert", async move {
+                                sleep((dur_us / 1000) as u32).await;
+                                let network_manager = registry.network_manager();
+                                let ts = network_manager.transport_stats();
+                                ts.set_transports_disabled_if_generation(&to_enable, true, gen);
+                                ts.set_transports_disabled_if_generation(&to_disable, false, gen);
+                            });
+                            out += &format!("reverting in {:#}\n", TimestampDuration::new(dur_us));
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                let now_disabled = transport_stats.disabled_transports();
+                out += &format!(
+                    "now disabled: {}\n",
+                    if now_disabled.is_empty() {
+                        "(none)".to_owned()
+                    } else {
+                        transport_list(&now_disabled)
+                    }
+                );
+                Ok(out)
+            }
+            _ => {
+                apibail_invalid_argument!("debug_transport", "subcommand", subcommand.to_string())
+            }
+        }
+    }
+
     async fn debug_relay(&self, args: Vec<String>) -> VeilidAPIResult<String> {
         let registry = self.core_context()?.registry();
 
@@ -1610,7 +1825,7 @@ impl VeilidAPI {
             .await
             .map_err(VeilidAPIError::internal)?;
         match result {
-            StatusResult::Answer { answer, .. } => Ok(format!("{:#?}", answer)),
+            StatusResult::Sent(status_answer) => Ok(format!("{:#?}", status_answer.answer)),
             StatusResult::Failed(sdr) => Ok(format!("send failed: {}", sdr)),
             StatusResult::NotSent(nr) => Ok(format!("not sent: {:?}", nr)),
         }
@@ -2264,29 +2479,31 @@ impl VeilidAPI {
             }
             Err(_) => None,
         };
-        let allow_offline = if args.len() > 2 + opt_arg_add {
-            get_debug_argument_at(
-                &args,
-                2 + opt_arg_add,
-                "debug_record_set",
-                "allow_offline",
-                get_string,
-            )
-            .ok()
-        } else {
-            None
-        };
-
-        let allow_offline = if let Some(allow_offline) = allow_offline {
-            if &allow_offline == "online" || &allow_offline == "false" {
-                Some(AllowOffline(false))
-            } else if &allow_offline == "offline" || &allow_offline == "true" {
-                Some(AllowOffline(true))
-            } else {
-                return Ok(format!("Unknown allow_offline: {}", allow_offline));
+        let allow_offline = match get_debug_argument_at(
+            &args,
+            2 + opt_arg_add,
+            "debug_record_set",
+            "allow_offline",
+            get_allow_offline,
+        ) {
+            Ok(v) => {
+                opt_arg_add += 1;
+                Some(v)
             }
-        } else {
-            None
+            Err(_) => None,
+        };
+        let min_seqnum = match get_debug_argument_at(
+            &args,
+            2 + opt_arg_add,
+            "debug_record_set",
+            "min_seqnum",
+            get_string,
+        ) {
+            Ok(v) => match parse_value_seq_num(&v) {
+                Ok(seq) => Some(seq),
+                Err(e) => return Ok(e),
+            },
+            Err(_) => None,
         };
 
         // Do a record set
@@ -2298,6 +2515,7 @@ impl VeilidAPI {
                 Some(SetDHTValueOptions {
                     writer,
                     allow_offline,
+                    min_seqnum,
                 }),
             )
             .await
@@ -3164,6 +3382,7 @@ impl VeilidAPI {
                 DebugCommand::Punish { command } => self.debug_punish(command),
                 DebugCommand::Txtrecord { keypairs } => self.debug_txtrecord(keypairs).await,
                 DebugCommand::Relay { args } => self.debug_relay(args).await,
+                DebugCommand::Transport { args } => self.debug_transport(args),
                 DebugCommand::Ping { destination } => self.debug_ping(destination).await,
                 DebugCommand::Appmessage { destination, data } => {
                     self.debug_app_message(destination, data).await

@@ -10,8 +10,12 @@ _DHTTransactionSetValueOptions _$DHTTransactionSetValueOptionsFromJson(
   Map<String, dynamic> json,
 ) => _DHTTransactionSetValueOptions(
   writer: json['writer'] == null ? null : KeyPair.fromJson(json['writer']),
+  minSeqnum: (json['minSeqnum'] as num?)?.toInt(),
 );
 
 Map<String, dynamic> _$DHTTransactionSetValueOptionsToJson(
   _DHTTransactionSetValueOptions instance,
-) => <String, dynamic>{'writer': instance.writer?.toJson()};
+) => <String, dynamic>{
+  'writer': instance.writer?.toJson(),
+  'minSeqnum': instance.minSeqnum,
+};

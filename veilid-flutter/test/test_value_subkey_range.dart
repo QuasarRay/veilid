@@ -13,12 +13,14 @@ ValueSubkeyRange? vsrIntersect(ValueSubkeyRange a, ValueSubkeyRange b) =>
     a.intersect(b);
 
 List<ValueSubkeyRange> lvsrUnion(
-        List<ValueSubkeyRange> a, List<ValueSubkeyRange> b) =>
-    a.unionSubkeys(b);
+  List<ValueSubkeyRange> a,
+  List<ValueSubkeyRange> b,
+) => a.unionSubkeys(b);
 
 List<ValueSubkeyRange> lvsrIntersect(
-        List<ValueSubkeyRange> a, List<ValueSubkeyRange> b) =>
-    a.intersectSubkeys(b);
+  List<ValueSubkeyRange> a,
+  List<ValueSubkeyRange> b,
+) => a.intersectSubkeys(b);
 
 Future<void> testValueSubkeyRange() async {
   final a = ValueSubkeyRange.single(1);
@@ -45,7 +47,11 @@ Future<void> testValueSubkeyRangeList() async {
   expectCommute(lvsrUnion, a, a, a);
   expectCommute(lvsrUnion, a, b, [const ValueSubkeyRange(low: 1, high: 3)]);
   expectCommute<List<ValueSubkeyRange>>(
-      lvsrUnion, a, c, ListValueSubkeyRangeExt.fromIntPairs([(1, 1), (3, 4)]));
+    lvsrUnion,
+    a,
+    c,
+    ListValueSubkeyRangeExt.fromIntPairs([(1, 1), (3, 4)]),
+  );
   expectCommute(lvsrUnion, b, c, [const ValueSubkeyRange(low: 2, high: 4)]);
 
   const d = [ValueSubkeyRange(low: 0, high: 3)];
@@ -60,8 +66,12 @@ Future<void> testValueSubkeyRangeList() async {
 
   expectCommute(lvsrUnion, e, f, g);
 
-  final h = ListValueSubkeyRangeExt.fromIntPairs(
-      [(2, 5), (10, 10), (12, 14), (16, 18)]);
+  final h = ListValueSubkeyRangeExt.fromIntPairs([
+    (2, 5),
+    (10, 10),
+    (12, 14),
+    (16, 18),
+  ]);
   expectCommute(lvsrIntersect, e, f, h);
 
   expectCommute<List<ValueSubkeyRange>>(lvsrUnion, [], [], []);

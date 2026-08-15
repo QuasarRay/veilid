@@ -147,6 +147,15 @@ impl VeilidAPI {
 
     /// Save a user secret to the protected store. Returns true if a value already existed.
     ///
+    /// Uses hardware-backed storage and system keychains (iOS Keychain, Android KeyStore, Windows
+    /// Credential Manager) where the platform has them. On devices that have none,
+    /// [VeilidConfigProtectedStore::allow_insecure_fallback] permits less secure storage such as
+    /// owner-readable disk files.
+    ///
+    /// ProtectedStore secrets are size-limited per platform and slow to access. Unless the secret
+    /// must survive uninstalling and reinstalling the app, prefer the `TableStore`, which is
+    /// encrypted with the *device encryption key* that already lives in the `ProtectedStore`.
+    ///
     /// Errors with [VeilidAPIError::InvalidArgument] for keys veilid reserves for itself.
     pub async fn save_user_secret(&self, key: String, value: Vec<u8>) -> VeilidAPIResult<bool> {
         self.protected_store()?

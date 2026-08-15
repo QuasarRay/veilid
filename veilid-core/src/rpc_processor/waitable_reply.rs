@@ -94,25 +94,28 @@ impl WaitableReply {
     }
 }
 
-/// Outcome of `RPCProcessor::question`
+/// Outcome of an RPC send
 #[derive(Debug)]
 #[must_use]
-pub(super) enum QuestionOutcome {
-    /// Envelope sent; caller awaits the WaitableReply for the answer (boxed: much larger than the other variants)
-    Sent(Box<WaitableReply>),
+pub(crate) enum RpcOutcome<T> {
+    /// Sent; carries what the caller waits on or received (boxed: much larger than the other variants)
+    Sent(Box<T>),
     /// Send was attempted but didn't produce a Value; SendDataResult exposes what was tried
     Failed(SendDataResult),
     /// Never made it to send_envelope (render failure, no routing domain, etc.)
     NotSent(NetworkResult<()>),
 }
 
-impl QuestionOutcome {
-    /// Collapse into NetworkResult<WaitableReply> for callers that don't need the SendDataResult
-    pub(super) fn into_network_result(self) -> NetworkResult<WaitableReply> {
+impl<T> RpcOutcome<T> {
+    /// Collapse for callers that don't need the SendDataResult
+    pub(crate) fn into_network_result(self) -> NetworkResult<T> {
         match self {
-            QuestionOutcome::Sent(wr) => NetworkResult::Value(*wr),
-            QuestionOutcome::Failed(sdr) => sdr.into_network_result().map(|_| unreachable!()),
-            QuestionOutcome::NotSent(nr) => nr.map(|_| unreachable!()),
+            RpcOutcome::Sent(v) => NetworkResult::Value(*v),
+            RpcOutcome::Failed(sdr) => sdr.into_network_result().map(|_| unreachable!()),
+            RpcOutcome::NotSent(nr) => nr.map(|_| unreachable!()),
         }
     }
 }
+
+/// Outcome of `RPCProcessor::question`
+pub(super) type QuestionOutcome = RpcOutcome<WaitableReply>;

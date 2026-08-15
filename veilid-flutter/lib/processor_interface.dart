@@ -27,8 +27,9 @@ extension VeilidProcessorRetry on VeilidProcessorInterface {
     if (processorConnectionState.isPublicInternetReady) {
       return;
     }
-    var stream = streamProcessorConnectionState()
-        .where((s) => s.isPublicInternetReady);
+    var stream = streamProcessorConnectionState().where(
+      (s) => s.isPublicInternetReady,
+    );
     if (timeout != null) {
       stream = stream.timeout(timeout);
     }
@@ -50,10 +51,7 @@ extension VeilidProcessorRetry on VeilidProcessorInterface {
   /// Run [closure], retrying VeilidAPI transients per [strategy] (default
   /// [VeilidAPIRetryStrategy], waiting on network readiness before a tryAgain
   /// retry).
-  Future<T> retry<T>(
-    Future<T> Function() closure, {
-    RetryStrategy? strategy,
-  }) =>
+  Future<T> retry<T>(Future<T> Function() closure, {RetryStrategy? strategy}) =>
       (strategy ??
               VeilidAPIRetryStrategy(
                 tryAgainRetry: (attemptNumber) async {

@@ -83,21 +83,31 @@ impl fmt::Display for RelayPing {
 }
 
 /// The routing domain's state tracking for a single relay
-/// Keeps track of when the last keepalive was sent to the relay
-/// and when the last attempt to optimize the relay was made
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct RoutingDomainRelayState {
+    /// When we last sent this relay a keepalive
     pub last_keepalive: Timestamp,
+    /// When we last attempted to optimize this relay
     pub last_optimized: Timestamp,
+    /// When this relay was selected. Never updated while it serves, so
+    /// `now - selected_ts` is how long it has held the job.
+    pub selected_ts: Timestamp,
+    /// Best tm90 seen since this relay settled in, the baseline it is judged against.
+    /// None until the first measurement past the dwell.
+    pub best_tm90: Option<TimestampDuration>,
 }
 
 impl fmt::Display for RoutingDomainRelayState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Keepalive:{}\nOptimized:{}",
+            "Keepalive:{}\nOptimized:{}\nSelected:{}\nBestTm90:{}",
             f.to_string(self.last_keepalive),
-            f.to_string(self.last_optimized)
+            f.to_string(self.last_optimized),
+            f.to_string(self.selected_ts),
+            self.best_tm90
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "none".to_owned())
         )
     }
 }

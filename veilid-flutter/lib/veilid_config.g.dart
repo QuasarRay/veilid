@@ -637,6 +637,7 @@ _VeilidConfigInternalNetwork _$VeilidConfigInternalNetworkFromJson(
 ) => _VeilidConfigInternalNetwork(
   connectionInitialTimeoutMs: (json['connectionInitialTimeoutMs'] as num)
       .toInt(),
+  singleSendTimeoutMs: (json['singleSendTimeoutMs'] as num).toInt(),
   connectionInactivityTimeoutMs: (json['connectionInactivityTimeoutMs'] as num)
       .toInt(),
   maxConnectionsPerIp4: (json['maxConnectionsPerIp4'] as num).toInt(),
@@ -660,6 +661,7 @@ Map<String, dynamic> _$VeilidConfigInternalNetworkToJson(
   _VeilidConfigInternalNetwork instance,
 ) => <String, dynamic>{
   'connectionInitialTimeoutMs': instance.connectionInitialTimeoutMs,
+  'singleSendTimeoutMs': instance.singleSendTimeoutMs,
   'connectionInactivityTimeoutMs': instance.connectionInactivityTimeoutMs,
   'maxConnectionsPerIp4': instance.maxConnectionsPerIp4,
   'maxConnectionsPerIp6Prefix': instance.maxConnectionsPerIp6Prefix,

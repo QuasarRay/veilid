@@ -189,7 +189,13 @@ impl ConnectionManager {
         Ok(())
     }
 
-    pub fn commit_event_handler(&self, _evt: Arc<RoutingDomainCommitEvent>) {
+    pub fn commit_event_handler(&self, evt: Arc<RoutingDomainCommitEvent>) {
+        // We are somewhere else now, so our own transport send history no longer applies
+        if evt.dial_info_changed {
+            self.network_manager()
+                .transport_stats()
+                .reset_routing_domain(evt.routing_domain, "dial info changed");
+        }
         self.update_protections();
     }
 
@@ -750,16 +756,14 @@ impl ConnectionManager {
             // In-use connections will already get reported because they will cause a 'lost_question' stat on the remote node
             if let Some(protect_nr) = conn.protected_node_ref() {
                 // Lifetime: only counts remote-closed protected connections.
-                // Skip recording when we're offline ourselves so peer-side
-                // stats don't get poisoned by our own connectivity loss.
+                // Our own connectivity loss must not poison peer stats
                 let cur_ts = Timestamp::now_non_decreasing();
                 let lifetime = cur_ts.duration_since(conn.established_time());
-                let we_are_online = self
+                let can_blame_peer = !self
                     .network_manager()
                     .online_detector()
-                    .online_state(RoutingDomain::PublicInternet)
-                    == OnlineState::Online;
-                if we_are_online {
+                    .blame_suppressed(RoutingDomain::PublicInternet);
+                if can_blame_peer {
                     protect_nr.record_protected_connection_drop(lifetime);
                     if let Some(penalty) = self
                         .arc
@@ -783,9 +787,12 @@ impl ConnectionManager {
                                 veilid_log!(self debug "== Protected connection dropped (count={}, lifetime={}): {} -> {} for node {}", pa.drops_in_span, lifetime, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
 
                                 if pa.drops_in_span >= PROTECTED_CONNECTION_DROP_COUNT {
-                                    protect_nr.record_protected_connection_dead(
-                                        conn.flow().transport_type(),
-                                    );
+                                    // While degraded the drops are ours: back off, but blame nobody
+                                    if can_blame_peer {
+                                        protect_nr.record_protected_connection_dead(
+                                            conn.flow().transport_type(),
+                                        );
+                                    }
                                     reconnect = false;
 
                                     pa.drops_in_span = 0;
@@ -823,7 +830,7 @@ impl ConnectionManager {
                 .network_manager()
                 .online_detector()
                 .online_state(RoutingDomain::PublicInternet)
-                == OnlineState::Online
+                != OnlineState::Offline
         {
             veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
             self.network_manager()

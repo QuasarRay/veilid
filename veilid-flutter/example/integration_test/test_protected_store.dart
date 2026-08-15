@@ -19,8 +19,7 @@ Future<void> testSaveLoadRemoveUserSecret() async {
   await _cleanup();
 
   // Saving a new secret reports that nothing was there before.
-  expect(
-      await Veilid.instance.saveUserSecret(testKey, utf8.encode('hello')),
+  expect(await Veilid.instance.saveUserSecret(testKey, utf8.encode('hello')),
       isFalse);
   expect(utf8.decode((await Veilid.instance.loadUserSecret(testKey))!),
       equals('hello'));
@@ -54,7 +53,8 @@ Future<void> testBinaryUserSecretRoundtrip() async {
 
 Future<void> testMissingUserSecret() async {
   expect(await Veilid.instance.loadUserSecret('__dart_never_stored'), isNull);
-  expect(await Veilid.instance.removeUserSecret('__dart_never_stored'), isFalse);
+  expect(
+      await Veilid.instance.removeUserSecret('__dart_never_stored'), isFalse);
 }
 
 Future<void> testListUserSecrets() async {
@@ -118,8 +118,8 @@ Future<void> testDeleteAllUserSecrets() async {
   }
 
   // The store is still usable afterwards.
-  expect(await Veilid.instance.saveUserSecret(testKey, utf8.encode('c')),
-      isFalse);
+  expect(
+      await Veilid.instance.saveUserSecret(testKey, utf8.encode('c')), isFalse);
   keys = await Veilid.instance.listUserSecrets();
   expect(keys, contains(testKey));
 

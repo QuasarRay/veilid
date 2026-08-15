@@ -16,6 +16,7 @@ mod relay_worker;
 mod send_data;
 mod stats;
 mod tasks;
+mod transport_stats;
 mod types;
 
 #[cfg(any(test, feature = "test-util"))]
@@ -33,6 +34,7 @@ pub use stats::*;
 pub(crate) use bootstrap::*;
 pub(crate) use node_contact_method_cache::*;
 pub(crate) use online_detector::*;
+pub(crate) use transport_stats::*;
 pub(crate) use types::*;
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -138,12 +140,16 @@ pub(crate) struct NetworkManager {
     // Per-routing-domain online detector
     online_detector: OnlineDetector,
 
+    // Our own outbound send health, per routing domain and transport
+    transport_stats: TransportStats,
+
     // Accessors
     components: RwLock<Option<NetworkComponents>>,
 
     // Background processes
     rolling_transfers_task: TickTask<EyreReport>,
     address_filter_task: TickTask<EyreReport>,
+    transport_stats_log_task: TickTask<EyreReport>,
 
     // Network key
     network_key: Option<BareSharedSecret>,
@@ -247,6 +253,7 @@ impl NetworkManager {
         let inner = Self::new_inner();
         let address_filter = AddressFilter::new(registry.clone());
         let online_detector = OnlineDetector::new(registry.clone());
+        let transport_stats = TransportStats::new(registry.clone());
 
         let this = Self {
             registry,
@@ -254,6 +261,7 @@ impl NetworkManager {
             accounting: Arc::new(RwLock::new(NetworkManagerAccounting::default())),
             address_filter,
             online_detector,
+            transport_stats,
             components: RwLock::new(None),
             rolling_transfers_task: TickTask::new(
                 "rolling_transfers_task",
@@ -262,6 +270,10 @@ impl NetworkManager {
             address_filter_task: TickTask::new(
                 "address_filter_task",
                 ADDRESS_FILTER_TASK_INTERVAL_SECS,
+            ),
+            transport_stats_log_task: TickTask::new(
+                "transport_stats_log_task",
+                TRANSPORT_STATS_LOG_INTERVAL_SECS,
             ),
             network_key,
             startup_context,
@@ -280,6 +292,10 @@ impl NetworkManager {
 
     pub fn online_detector(&self) -> &OnlineDetector {
         &self.online_detector
+    }
+
+    pub fn transport_stats(&self) -> &TransportStats {
+        &self.transport_stats
     }
 
     fn net(&self) -> Network {
@@ -934,13 +950,11 @@ impl NetworkManager {
 
         envelope
             .to_encrypted_data(&crypto, body, &secret_key, &network_key)
-            .measure_limit(
-                TimestampDuration::new_ms(500),
-                veilid_log_dbg!(
-                    registry,
-                    "NetworkManager::build_envelope to_encrypted_data slow"
-                ),
-            )
+            .measure_limit(TimestampDuration::new_ms(500), |duration| {
+                veilid_log!(self debug "NetworkManager::build_envelope to_encrypted_data slow: {:#}", duration);
+                // Encryption this slow ate the timeout budget of everything in flight
+                self.online_detector().record_local_stall(duration);
+            })
             .await
             .wrap_err("envelope failed to encode")
     }
@@ -997,10 +1011,10 @@ impl NetworkManager {
         let timestamp = Timestamp::now_increasing();
         let out = match self
             .build_envelope(timestamp, best_node_id, envelope_version, body)
-            .measure_limit(
-                TimestampDuration::new_ms(1000),
-                veilid_log_dbg!(self, "NetworkManager::build_envelope slow"),
-            )
+            .measure_limit(TimestampDuration::new_ms(1000), |duration| {
+                veilid_log!(self debug "NetworkManager::build_envelope slow: {:#}", duration);
+                self.online_detector().record_local_stall(duration);
+            })
             .timeout_at(stop_token.clone())
             .await?
         {
@@ -1066,10 +1080,15 @@ impl NetworkManager {
         // should not be subject to our ability to decode it
 
         // Send receipt directly
-        network_result_value_or_log!(self self
+        let NetworkAttempt::Performed(attempt) = self
             .net()
-            .send_data_unbound_to_dial_info(dial_info, rcpt_data)
-            .await? => [ format!(": dial_info={}, rcpt_data.len={}", dial_info, rcpt_data.len()) ] {
+            .send_data_unbound_to_dial_info(dial_info.clone(), rcpt_data.clone())
+            .await?
+        else {
+            veilid_log!(self debug "not sending out-of-band receipt to {} because the transport is suppressed", dial_info);
+            return Ok(());
+        };
+        network_result_value_or_log!(self attempt => [ format!(": dial_info={}, rcpt_data.len={}", dial_info, rcpt_data.len()) ] {
                 return Ok(());
             }
         );
@@ -1349,6 +1368,23 @@ impl NetworkManager {
 
         // Inform caller that we dealt with the envelope locally
         Ok(true)
+    }
+
+    /// Record the last flow for a peer after one of OUR sends succeeded.
+    ///
+    /// Skips UDP: a flow we only sent on says nothing the dial info didn't, and remembering
+    /// it lets the existing-flow shortcuts bypass contact method selection. The receive path
+    /// calls `set_last_flow` directly, where a UDP flow does carry information.
+    pub(super) fn set_last_flow_from_send(
+        &self,
+        node_ref: NodeRef,
+        flow: Flow,
+        timestamp: Timestamp,
+    ) {
+        if flow.protocol_type().low_level_protocol_type() == LowLevelProtocolType::UDP {
+            return;
+        }
+        self.set_last_flow(node_ref, flow, timestamp);
     }
 
     /// Record the last flow for a peer in the routing table and the connection table appropriately

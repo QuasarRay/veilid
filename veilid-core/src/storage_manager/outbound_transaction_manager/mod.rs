@@ -8,6 +8,7 @@ mod outbound_transaction_stage;
 mod outbound_transaction_state;
 mod remote_node_transaction_id;
 mod subkey_consensus;
+mod terminal_delivery;
 mod transaction_cleanup;
 
 use super::*;
@@ -61,7 +62,6 @@ struct LocalNodeTransactionMapping {
     opaque_record_key: OpaqueRecordKey,
 }
 
-#[derive(Debug)]
 pub(in crate::storage_manager) struct OutboundTransactionManager {
     /// Registry used for logging
     registry: VeilidComponentRegistry,
@@ -79,6 +79,23 @@ pub(in crate::storage_manager) struct OutboundTransactionManager {
 
     /// Keepalive processor
     opt_keepalive_processor: Option<Arc<OutboundTransactionKeepaliveProcessor>>,
+    /// Runs a `TerminalDelivery` in the background
+    opt_terminal_delivery_spawner: Option<Box<dyn Fn(terminal_delivery::TerminalDelivery) + Send>>,
+}
+
+impl fmt::Debug for OutboundTransactionManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OutboundTransactionManager")
+            .field("handles_by_key", &self.handles_by_key)
+            .field("transactions", &self.transactions)
+            .field("next_txid", &self.next_txid)
+            .field(
+                "local_node_transaction_mappings",
+                &self.local_node_transaction_mappings,
+            )
+            .field("next_lnxid", &self.next_lnxid)
+            .finish_non_exhaustive()
+    }
 }
 
 impl_veilid_component_accessors!(OutboundTransactionManager);
@@ -118,6 +135,7 @@ impl OutboundTransactionManager {
             next_txid: 0u64,
             next_lnxid: 1_000_000_000u64,
             opt_keepalive_processor: None,
+            opt_terminal_delivery_spawner: None,
         }
     }
 
@@ -135,6 +153,16 @@ impl OutboundTransactionManager {
         keepalive_processor.init();
 
         self.opt_keepalive_processor = Some(keepalive_processor);
+    }
+
+    /// Install the closure that runs a terminal delivery in the background.
+    /// The closure must not take the StorageManager inner lock: drop_transaction
+    /// invokes it while holding that lock.
+    pub fn set_terminal_delivery_spawner(
+        &mut self,
+        spawner: Box<dyn Fn(terminal_delivery::TerminalDelivery) + Send>,
+    ) {
+        self.opt_terminal_delivery_spawner = Some(spawner);
     }
 
     pub fn terminate(&mut self) -> OutboundTransactionManagerTerminate {
@@ -528,6 +556,7 @@ impl OutboundTransactionManager {
         veilid_log!(self debug target: "network_result", "Dropping transaction: {:?}", transaction_handle);
 
         let mut unregister_keepalive_lnxids = LocalNodeTransactionIdSet::new();
+        let cur_ts = Timestamp::now();
         for record_state in outbound_transaction_state.get_record_states() {
             let lnxids = record_state.get_node_transaction_ids();
 
@@ -539,6 +568,54 @@ impl OutboundTransactionManager {
             }
 
             unregister_keepalive_lnxids.extend(lnxids);
+
+            // Hand unanswered node transactions to terminal delivery: Commit for an
+            // ended straggler whose record reached commit consensus, Rollback otherwise
+            if let (Some(spawner), Some(descriptor)) = (
+                self.opt_terminal_delivery_spawner.as_ref(),
+                record_state.descriptor(),
+            ) {
+                let record_committed = record_state
+                    .stage_consensus()
+                    .map(|sc| sc.stage == OutboundTransactionStage::Commit)
+                    .unwrap_or(false);
+                for (_lnxid, node_transaction) in record_state.get_node_transactions() {
+                    match node_transaction.stage() {
+                        OutboundTransactionStage::Commit | OutboundTransactionStage::Rollback => {
+                            continue;
+                        }
+                        OutboundTransactionStage::Failed
+                        | OutboundTransactionStage::Begin
+                        | OutboundTransactionStage::End => {}
+                    }
+                    let Some(expiration_ts) = node_transaction.opt_expiration() else {
+                        continue;
+                    };
+                    if expiration_ts <= cur_ts {
+                        continue;
+                    }
+                    let command = if record_committed
+                        && node_transaction.stage() == OutboundTransactionStage::End
+                    {
+                        TransactCommand::Commit
+                    } else {
+                        TransactCommand::Rollback
+                    };
+                    veilid_log!(self debug target: "network_result",
+                        "terminal delivery scheduled: {:?} xid={} node={} record={} stage={:?}",
+                        command, node_transaction.rnxid(), node_transaction.node_ref(),
+                        record_state.record_key().opaque(), node_transaction.stage());
+                    spawner(terminal_delivery::TerminalDelivery {
+                        opaque_record_key: record_state.record_key().opaque(),
+                        rnxid: node_transaction.rnxid().clone(),
+                        node_ref: node_transaction.node_ref(),
+                        safety_selection: record_state.safety_selection().clone(),
+                        descriptor: descriptor.clone(),
+                        command,
+                        expiration_ts,
+                    });
+                }
+            }
 
             self.handles_by_key
                 .remove(&record_state.record_key().opaque());
@@ -1624,7 +1701,7 @@ impl OutboundTransactionManager {
                 }
                 DHTReportScope::UpdateSet => {
                     let network_seq = record_state.begin_network_seq(subkey)?;
-                    local_seq = local_seq.next()?;
+                    local_seq = local_seq.saturating_next();
                     local_seqs.push(local_seq);
                     network_seqs.push(ValueSeqNum::max(local_seq, network_seq));
                 }

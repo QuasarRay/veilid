@@ -12,7 +12,10 @@ use super::*;
 pub struct ValueSeqNum(Option<u32>);
 
 impl ValueSeqNum {
-    /// The largest representable sequence number (`u32::MAX` is reserved to mean [ValueSeqNum::NONE])
+    /// The largest representable sequence number (`u32::MAX` is reserved to mean [ValueSeqNum::NONE]).
+    ///
+    /// A storage node accepts an inbound value only if its sequence number exceeds the one it
+    /// holds, so a subkey written here has no successor a conforming node will take.
     pub const MAX: Self = ValueSeqNum(Some(u32::MAX - 1));
     /// No sequence number, for a subkey that has never been written
     pub const NONE: Self = ValueSeqNum(None);
@@ -31,6 +34,12 @@ impl ValueSeqNum {
         } else {
             Ok(ValueSeqNum(Some(0)))
         }
+    }
+
+    /// The next sequence number, saturating at [ValueSeqNum::MAX] instead of failing.
+    #[must_use]
+    pub fn saturating_next(&self) -> Self {
+        self.next().unwrap_or(ValueSeqNum::MAX)
     }
 
     /// True if this is [ValueSeqNum::MAX]

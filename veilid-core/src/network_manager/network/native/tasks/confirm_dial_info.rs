@@ -174,19 +174,9 @@ impl NativeNetwork {
             return Ok(());
         }
 
-        let confirmed = self
-            .do_dial_info_confirm_public_internet(stop_token, l, t)
+        // The next outbound-only recheck is scheduled inside, where the conclusion is known
+        self.do_dial_info_confirm_public_internet(stop_token, l, t)
             .await?;
-
-        // Done with public dial info check
-        if confirmed {
-            let mut inner = self.inner.lock();
-
-            // Don't try to re-do OutboundOnly dialinfo for another 10 seconds
-            inner.next_outbound_only_dial_info_check = Timestamp::now().later(
-                TimestampDuration::new_secs(UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS),
-            )
-        }
 
         Ok(())
     }
@@ -461,6 +451,8 @@ impl NativeNetwork {
             confirmation_result.external_address_types,
             protocol_config.public_internet_capabilities,
         ));
+        let has_dial_info = !static_dial_info_details.is_empty()
+            || !confirmation_result.dial_info_details.is_empty();
         editor.clear_dial_info_details(None, None);
         for did in static_dial_info_details {
             editor.add_dial_info_detail(did);
@@ -474,6 +466,23 @@ impl NativeNetwork {
 
         // Publish the peer info (idempotent if it hasn't changed)
         rdc.publish_peer_info();
+
+        // A stable symmetric NAT needs no re-proving, so back off while there is no dial info
+        {
+            let mut inner = self.inner.lock();
+            let period_secs = if has_dial_info {
+                inner.outbound_only_dial_info_check_period_secs =
+                    UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS;
+                UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS
+            } else {
+                let period = inner.outbound_only_dial_info_check_period_secs;
+                inner.outbound_only_dial_info_check_period_secs =
+                    (period * 2).min(UPDATE_OUTBOUND_ONLY_DIAL_INFO_MAX_PERIOD_SECS);
+                period
+            };
+            inner.next_outbound_only_dial_info_check =
+                Timestamp::now().later(TimestampDuration::new_secs(period_secs));
+        }
 
         Ok(true)
     }

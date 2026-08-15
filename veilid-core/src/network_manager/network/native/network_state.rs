@@ -102,12 +102,11 @@ impl NetworkState {
         }
     }
 
+    /// True for any address on our interfaces, including the privacy and CLAT addresses
+    /// the published interface address set excludes.
     #[expect(dead_code)]
     pub fn is_interface_ip_addr(&self, addr: IpAddr) -> bool {
-        self.interface_address_state
-            .interface_addresses
-            .iter()
-            .any(|x| x.ip() == addr)
+        self.interface_address_state.is_own_address(addr)
     }
 
     pub fn translate_unspecified_socket_addr(&self, from: SocketAddr) -> Vec<SocketAddr> {
@@ -284,6 +283,9 @@ impl NativeNetwork {
             let routable_addresses_changed = last_routable_addresses != new_routable_addresses;
 
             if routable_addresses_changed {
+                // Our addresses moved, so transport failures we blamed on peers may have been ours
+                self.routing_table().clear_all_transport_evidence();
+
                 let added_addresses = new_routable_addresses
                     .difference(&last_routable_addresses)
                     .copied()
@@ -460,16 +462,12 @@ impl NativeNetwork {
             .gateway_addresses
             .iter()
             .any(|g| matches!(g, IpAddr::V4(_)));
-        let has_v6_default_route = ias
-            .gateway_addresses
-            .iter()
-            .any(|g| matches!(g, IpAddr::V6(_)));
 
         let ipv4_local = allow_v4 && Self::can_bind_v4() && raw.has_non_loopback_ipv4;
         let ipv4_global = ipv4_local && has_v4_default_route;
 
         let ipv6_local = allow_v6 && Self::can_bind_v6() && raw.has_non_loopback_ipv6;
-        let ipv6_global = ipv6_local && has_v6_default_route && raw.has_unicast_global_ipv6;
+        let ipv6_global = ipv6_local && raw.has_unicast_global_ipv6; // TODO: better ipv6 detection for NAT should happen
 
         if ipv4_local {
             veilid_log!(self debug "Local IPV4 detected (interface address present)");
@@ -481,11 +479,7 @@ impl NativeNetwork {
             veilid_log!(self debug "Local IPV6 detected (interface address present)");
         }
         if ipv6_global {
-            veilid_log!(self debug "Global IPV6 detected (unicast-global address + default route)");
-        } else if ipv6_local && !raw.has_unicast_global_ipv6 {
-            veilid_log!(self debug "Skipping global IPV6: no unicast-global address (only link-local/ULA present)");
-        } else if ipv6_local && !has_v6_default_route {
-            veilid_log!(self debug "Skipping global IPV6: no IPv6 default route");
+            veilid_log!(self debug "Global IPV6 detected (unicast-global address)");
         }
 
         AddressConfig {

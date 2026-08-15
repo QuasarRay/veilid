@@ -12,7 +12,7 @@ const knownVectors = [
   ['foo', 'Zm9v'],
   ['foob', 'Zm9vYg'],
   ['fooba', 'Zm9vYmE'],
-  ['foobar', 'Zm9vYmFy']
+  ['foobar', 'Zm9vYmFy'],
 ];
 
 Future<void> _testEncodingKnownVector(Uint8List k, String v) async {

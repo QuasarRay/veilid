@@ -309,6 +309,8 @@ impl RoutingDomainDetailCommon {
                         .or_insert_with(|| RoutingDomainRelayState {
                             last_keepalive: cur_ts,
                             last_optimized: cur_ts,
+                            selected_ts: cur_ts,
+                            best_tm90: None,
                         });
                 }
             }

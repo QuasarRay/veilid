@@ -3,6 +3,65 @@ use super::*;
 impl_veilid_log_facility!("rtab");
 
 //////////////////////////////////////////////////////////////////////////////////////////
+// Per-transport health
+
+/// Consecutive send failures on one transport before it is judged Failing
+pub(crate) const TRANSPORT_FAILING_FAILED_TO_SEND: u32 = 3;
+/// Consecutive lost questions on one transport before it is judged Failing
+pub(crate) const TRANSPORT_FAILING_LOST_QUESTIONS: u32 = 3;
+
+/// Evidence judgment for one node over one transport.
+///
+/// Untried is viable: it can neither disqualify a contact method nor contribute
+/// to node death, so alternates must be tried before a node dies.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TransportHealth {
+    /// No attempts recorded
+    Untried,
+    /// No recent evidence of failure
+    Healthy,
+    /// Recent consecutive failures
+    Failing,
+}
+
+impl TransportHealth {
+    pub fn is_failing(&self) -> bool {
+        matches!(self, TransportHealth::Failing)
+    }
+}
+
+/// Which credit a time span gets when we could not judge the node
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TimeCredit {
+    /// Offline: no test was possible, so the span neither matures nor condemns
+    Untestable,
+    /// Offline or degraded: the online detector suppressed blame, so the span cannot condemn
+    Unblamed,
+}
+
+/// Judge one transport's health for contact method selection. Send failures count
+/// here: whatever caused them, this edge is not working.
+pub(crate) fn transport_health(stats: &RPCStats) -> TransportHealth {
+    if stats.failed_to_send >= TRANSPORT_FAILING_FAILED_TO_SEND
+        || stats.recent_lost_questions >= TRANSPORT_FAILING_LOST_QUESTIONS
+    {
+        TransportHealth::Failing
+    } else {
+        TransportHealth::Healthy
+    }
+}
+
+/// Judge one transport's health for node liveness. Only unanswered questions count:
+/// a failure to send never left our machine and says nothing about the peer.
+pub(crate) fn transport_liveness_health(stats: &RPCStats) -> TransportHealth {
+    if stats.recent_lost_questions >= TRANSPORT_FAILING_LOST_QUESTIONS {
+        TransportHealth::Failing
+    } else {
+        TransportHealth::Healthy
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
 // Reliable state thresholds
 
 /// Reliable pings are done with increased spacing between pings
@@ -34,20 +93,9 @@ pub(crate) const UNRELIABLE_PING_INTERVAL: TimestampDuration = TimestampDuration
 //////////////////////////////////////////////////////////////////////////////////////////
 // Missing state thresholds
 
-/// - Number of consecutive lost questions on an unordered transport
-///   at which time we call something missing
-pub(crate) const MISSING_LOST_QUESTIONS_UNORDERED: u32 = 3;
-/// - Number of consecutive lost questions on an ordered transport
-///   at which time we call something missing
-pub(crate) const MISSING_LOST_QUESTIONS_ORDERED: u32 = 1;
-/// Default missing lost-answers threshold per SequenceOrdering
-/// Will become adaptive later (per-network baseline).
-pub(crate) fn missing_lost_questions_count(sequence_ordering: SequenceOrdering) -> u32 {
-    match sequence_ordering {
-        SequenceOrdering::Unordered => MISSING_LOST_QUESTIONS_UNORDERED,
-        SequenceOrdering::Ordered => MISSING_LOST_QUESTIONS_ORDERED,
-    }
-}
+/// Node-level consecutive lost questions (any transport, reset by any answer)
+/// at which time we call something missing
+pub(crate) const MISSING_LOST_QUESTIONS: u32 = 3;
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // Dead state thresholds
@@ -56,28 +104,74 @@ pub(crate) fn missing_lost_questions_count(sequence_ordering: SequenceOrdering) 
 pub(crate) const DEAD_LOST_QUESTION_SPAN: TimestampDuration = TimestampDuration::new_secs(60);
 /// Failed node-level unreachable attempts (no usable transport) before we call it dead
 pub(crate) const DEAD_UNREACHABLE_COUNT: u32 = 1;
+/// Node-level lost questions before we call a node dead if we have never seen any traffic from it
+pub(crate) const DEAD_NEVER_SEEN_LOST_QUESTIONS: u32 = 3;
 
-/// Number of failed-to-send RPCs to a node over an unordered transport before we call it dead
-pub(crate) const DEAD_FAILED_TO_SEND_UNORDERED: u32 = 9;
-/// Number of failed-to-send RPCs to a node over an ordered transport before we call it dead
-pub(crate) const DEAD_FAILED_TO_SEND_ORDERED: u32 = 3;
-/// Default failed-to-send count per sequence ordering.
-pub(crate) fn dead_failed_to_send_count(sequence_ordering: SequenceOrdering) -> u32 {
-    match sequence_ordering {
-        SequenceOrdering::Unordered => DEAD_FAILED_TO_SEND_UNORDERED,
-        SequenceOrdering::Ordered => DEAD_FAILED_TO_SEND_ORDERED,
-    }
+//////////////////////////////////////////////////////////////////////////////////////////
+// Contact-method viability
+
+/// Reachability inputs for one SequenceOrdering, derived from the entry's current
+/// contact method list by the update_cm_viability task. Direct transports are judged
+/// against live per-transport stats at state computation; indirect contact methods
+/// (existing flow, signal, relay) veto send-failure death, since their failure modes
+/// are covered by unreachable [D1] and steady-lost-question [D4] rules.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OrderingReachability {
+    /// Transports governing Direct contact methods for this ordering
+    pub direct_transports: BTreeSet<TransportType>,
+    /// Whether any non-direct contact methods exist
+    pub has_indirect: bool,
 }
 
-/// Number of lost questions to a node over an unordered transport before we call it dead if we haven't seen any traffic from it yet
-pub(crate) const DEAD_NEVER_SEEN_LOST_QUESTIONS_UNORDERED: u32 = 3;
-/// Number of lost questions to a node over an ordered transport before we call it dead if we haven't seen any traffic from it yet
-pub(crate) const DEAD_NEVER_SEEN_LOST_QUESTIONS_ORDERED: u32 = 1;
-/// Default lost questions count for never-seen nodes per sequence ordering.
-pub(crate) fn dead_never_seen_lost_questions_count(sequence_ordering: SequenceOrdering) -> u32 {
-    match sequence_ordering {
-        SequenceOrdering::Unordered => DEAD_NEVER_SEEN_LOST_QUESTIONS_UNORDERED,
-        SequenceOrdering::Ordered => DEAD_NEVER_SEEN_LOST_QUESTIONS_ORDERED,
+/// Cached per-ordering contact-method viability summary for one entry
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CMViability {
+    /// Reachability inputs keyed by ordering. Orderings with no contact methods are
+    /// absent (vacuous: a WS-only environment lives or dies entirely on Ordered).
+    pub per_ordering: BTreeMap<SequenceOrdering, OrderingReachability>,
+    /// Peer info timestamps this was computed against, per routing domain (ours, theirs)
+    pub basis: BTreeMap<RoutingDomain, (Timestamp, Timestamp)>,
+}
+
+impl CMViability {
+    /// An ordering is fully failing when its only avenues are Direct transports
+    /// and every one of them is currently judged Failing
+    fn ordering_all_failing(
+        reachability: &OrderingReachability,
+        per_transport_stats: &BTreeMap<TransportType, RPCStats>,
+    ) -> bool {
+        if reachability.has_indirect {
+            return false;
+        }
+        !reachability.direct_transports.is_empty()
+            && reachability.direct_transports.iter().all(|t| {
+                per_transport_stats
+                    .get(t)
+                    .map(transport_liveness_health)
+                    .is_some_and(|h| h.is_failing())
+            })
+    }
+
+    /// True if every ordering that has contact methods is fully failing
+    pub fn all_orderings_failing(
+        &self,
+        per_transport_stats: &BTreeMap<TransportType, RPCStats>,
+    ) -> bool {
+        !self.per_ordering.is_empty()
+            && self
+                .per_ordering
+                .values()
+                .all(|r| Self::ordering_all_failing(r, per_transport_stats))
+    }
+
+    /// True if at least one ordering that has contact methods is fully failing
+    pub fn any_ordering_failing(
+        &self,
+        per_transport_stats: &BTreeMap<TransportType, RPCStats>,
+    ) -> bool {
+        self.per_ordering
+            .values()
+            .any(|r| Self::ordering_all_failing(r, per_transport_stats))
     }
 }
 
@@ -86,21 +180,26 @@ impl BucketEntryInner {
     ///
     /// Cold start is Unreliable(Unseen). Pure state-reason computation with no side effects.
     ///
+    /// Send-failure death is judged from contact-method viability: one viable ordering
+    /// vetoes death, and Untried transports are viable, so alternates must accumulate
+    /// failure evidence before a node can die.
+    ///
     /// * Punished:
     ///   - [P1] the node id is punished by the address filter
     /// * Dead: (any of the following are true)
     ///   - [D1] the node has per-entry unreachable >= DEAD_UNREACHABLE_COUNT
-    ///   - [D2] the node has any per-sequence-ordering failed_to_send >= DEAD_FAILED_TO_SEND
-    ///   - [D3] if no transports have been seen (per-transport), and:
-    ///     - the node has any per-sequence-ordering recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
-    ///   - [D4] if any transport has been seen (per-transport), and:
-    ///     - for any sequence-ordering, all of:
-    ///       - first_steady_lost_question_ts is Some
-    ///       - time_since(first_steady_lost_question_ts) >= DEAD_LOST_QUESTION_SPAN
+    ///   - [D2] cm_viability is computed and every ordering with contact methods is
+    ///     fully failing (all Direct transports Failing, no indirect avenue)
+    ///   - [D3] if no transports have been seen, and node-level
+    ///     recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
+    ///   - [D4] if any transport has been seen, and node-level
+    ///     time_since(first_steady_lost_question_ts) >= DEAD_LOST_QUESTION_SPAN
+    ///     (any answer on any transport resets it)
     /// * Missing (any of the following are true):
     ///   - [M1] the node has per-entry unreachable > 0 (only possible if DEAD_UNREACHABLE_COUNT > 1)
-    ///   - [M2] the node has any per-sequence-ordering failed_to_send >= 0 (only possible if DEAD_FAILED_TO_SEND > 1)
-    ///   - [M3] the node has any per-sequence-ordering recent_lost_questions > MISSING_LOST_QUESTIONS
+    ///   - [M2] cm_viability is computed and at least one ordering with contact methods
+    ///     is fully failing
+    ///   - [M3] node-level recent_lost_questions >= MISSING_LOST_QUESTIONS
     /// * Initial:
     ///   - [I1] for all sequence-orderings:
     ///     - first_steady_answer_ts is None (cold start)
@@ -110,18 +209,21 @@ impl BucketEntryInner {
     /// * Reliable:
     ///   - [R1] Any other condition is reliable
     pub(super) fn compute_state_reason(&self, cur_ts: Timestamp) -> BucketEntryStateReason {
-        // Credit reliability windows for time PublicInternet was offline (couldn't
-        // ping). Zero when there's no network manager (early init / tests).
+        // Zero when there's no network manager (early init / tests)
         let opt_nm = self.registry.lookup::<NetworkManager>();
-        let offline_overlap_since = |from: Timestamp| {
+        let credit_since = |from: Timestamp, credit: TimeCredit| {
             opt_nm
                 .as_ref()
                 .map(|nm| {
-                    nm.online_detector().offline_overlap(
-                        RoutingDomain::PublicInternet,
-                        from,
-                        cur_ts,
-                    )
+                    let od = nm.online_detector();
+                    match credit {
+                        TimeCredit::Untestable => {
+                            od.offline_overlap(RoutingDomain::PublicInternet, from, cur_ts)
+                        }
+                        TimeCredit::Unblamed => {
+                            od.blame_suppressed_overlap(RoutingDomain::PublicInternet, from, cur_ts)
+                        }
+                    }
                 })
                 .unwrap_or_else(|| TimestampDuration::new(0))
         };
@@ -131,7 +233,8 @@ impl BucketEntryInner {
             &self.rpc_stats,
             &self.per_sequence_ordering_stats,
             &self.per_transport_stats,
-            offline_overlap_since,
+            self.cm_viability.as_ref(),
+            credit_since,
         )
     }
 
@@ -143,7 +246,8 @@ impl BucketEntryInner {
         rpc_stats: &RPCStats,
         per_sequence_ordering_stats: &BTreeMap<SequenceOrdering, RPCStats>,
         per_transport_stats: &BTreeMap<TransportType, RPCStats>,
-        offline_overlap_since: impl Fn(Timestamp) -> TimestampDuration,
+        cm_viability: Option<&CMViability>,
+        credit_since: impl Fn(Timestamp, TimeCredit) -> TimestampDuration,
     ) -> BucketEntryStateReason {
         // ---===/ Punished /===---
 
@@ -162,42 +266,36 @@ impl BucketEntryInner {
             return BucketEntryStateReason::Dead(BucketEntryStateDeadReason::ExcessiveUnreachable);
         }
 
-        // [D2] Node is dead if it has any per-sequence-ordering failed_to_send >= DEAD_FAILED_TO_SEND
-        if per_sequence_ordering_stats
-            .iter()
-            .any(|(so, stats)| stats.failed_to_send >= dead_failed_to_send_count(*so))
-        {
-            return BucketEntryStateReason::Dead(BucketEntryStateDeadReason::ExcessiveSendFailures);
+        // [D2] every ordering with contact methods is fully failing
+        if let Some(v) = cm_viability {
+            if v.all_orderings_failing(per_transport_stats) {
+                return BucketEntryStateReason::Dead(
+                    BucketEntryStateDeadReason::ExcessiveSendFailures,
+                );
+            }
         }
 
-        // [D3] if no transports have been seen (per-transport), and:
-        //     - the node has any per-sequence-ordering recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
+        // [D3] never seen any transport, and node-level lost questions at threshold
         if per_transport_stats.is_empty()
-            && per_sequence_ordering_stats.iter().any(|(so, stats)| {
-                stats.recent_lost_questions >= dead_never_seen_lost_questions_count(*so)
-            })
+            && rpc_stats.recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
         {
             return BucketEntryStateReason::Dead(
                 BucketEntryStateDeadReason::NeverSeenLostQuestions,
             );
         }
 
-        // [D4] if any transport has been seen (per-transport), and:
-        //   - for any sequence-ordering, all of:
-        //     - cur_ts.since(first_steady_lost_question_ts), minus offline time,
-        //       >= DEAD_LOST_QUESTION_SPAN
+        // [D4] seen a transport, and node-level steady lost questions (reset by any
+        // answer on any transport) span at least DEAD_LOST_QUESTION_SPAN, minus unjudgeable time
         if !per_transport_stats.is_empty()
-            && per_sequence_ordering_stats.values().any(|stats| {
-                stats
-                    .first_steady_lost_question_ts
-                    .map(|ts| {
-                        cur_ts
-                            .duration_since(ts)
-                            .saturating_sub(offline_overlap_since(ts))
-                            >= DEAD_LOST_QUESTION_SPAN
-                    })
-                    .unwrap_or(false)
-            })
+            && rpc_stats
+                .first_steady_lost_question_ts
+                .map(|ts| {
+                    cur_ts
+                        .duration_since(ts)
+                        .saturating_sub(credit_since(ts, TimeCredit::Unblamed))
+                        >= DEAD_LOST_QUESTION_SPAN
+                })
+                .unwrap_or(false)
         {
             return BucketEntryStateReason::Dead(BucketEntryStateDeadReason::SteadyLostQuestions);
         }
@@ -209,19 +307,17 @@ impl BucketEntryInner {
             return BucketEntryStateReason::Missing(BucketEntryStateMissingReason::Unreachable);
         }
 
-        // [M2] the node has any per-sequence-ordering failed_to_send >= 0 (only possible if DEAD_FAILED_TO_SEND > 1)
-        if per_sequence_ordering_stats
-            .values()
-            .any(|stats| stats.failed_to_send > 0)
-        {
-            return BucketEntryStateReason::Missing(BucketEntryStateMissingReason::FailedToSend);
+        // [M2] at least one ordering with contact methods is fully failing
+        if let Some(v) = cm_viability {
+            if v.any_ordering_failing(per_transport_stats) {
+                return BucketEntryStateReason::Missing(
+                    BucketEntryStateMissingReason::FailedToSend,
+                );
+            }
         }
 
-        // [M3] the node has any per-sequence-ordering recent_lost_questions > UNRELIABLE_LOST_QUESTIONS
-        if per_sequence_ordering_stats
-            .iter()
-            .any(|(so, stats)| stats.recent_lost_questions >= missing_lost_questions_count(*so))
-        {
+        // [M3] node-level recent lost questions at threshold
+        if rpc_stats.recent_lost_questions >= MISSING_LOST_QUESTIONS {
             return BucketEntryStateReason::Missing(BucketEntryStateMissingReason::LostQuestions);
         }
 
@@ -246,7 +342,8 @@ impl BucketEntryInner {
                 // Within span by wall-clock → unreliable regardless; otherwise
                 // subtract offline time so we don't grant untested reliability.
                 raw < UNRELIABLE_ANSWER_SPAN
-                    || raw.saturating_sub(offline_overlap_since(ts)) < UNRELIABLE_ANSWER_SPAN
+                    || raw.saturating_sub(credit_since(ts, TimeCredit::Untestable))
+                        < UNRELIABLE_ANSWER_SPAN
             } else {
                 false
             }
@@ -289,6 +386,9 @@ impl BucketEntryInner {
 
     /// If a node is dead or missing, reset it to the 'initial' state to give it another chance.
     /// Called when we get a new peer info for a node so we can try it out.
+    ///
+    /// Per-transport stats and contact method failures survive: they are learned dial
+    /// evidence, pruned only by the update_cm_viability task when the dialinfo changes.
     pub(super) fn revive(&mut self, cur_ts: Timestamp) {
         // Keep the stats lock over this operation so we don't have a race condition
         let mut state_stats_accounting = self.state_stats_accounting.lock();
@@ -304,23 +404,26 @@ impl BucketEntryInner {
             self.rpc_stats.last_seen_ts = None;
             self.rpc_stats.first_steady_answer_ts = None;
             self.rpc_stats.first_steady_lost_question_ts = None;
+            self.rpc_stats.recent_lost_questions = 0;
             self.rpc_stats.failed_to_send = 0;
             self.rpc_stats.unreachable = 0;
 
             // Drop per-sequence-ordering stats so each sequence ordering re-validates.
             self.per_sequence_ordering_stats.clear();
 
-            // Drop per-transport stats so each transport re-validates.
-            self.per_transport_stats.clear();
-
-            // Drop contact method failures so each contact method re-validates.
-            self.contact_method_failures.clear();
-
-            // Should be at the initial state now, or something is very wrong
+            // Initial now, except [M2]/[D2], which derive from retained transport evidence
             let alive_reason =
                 self.compute_and_log_state_reason_inner(cur_ts, &mut state_stats_accounting);
-            if !matches!(alive_reason, BucketEntryStateReason::Initial) {
-                veilid_log!(self error "node was ({:?}) but is ({:?}) after reviving: {}", dead_or_missing_reason, alive_reason, self.best_node_id());
+            match alive_reason {
+                BucketEntryStateReason::Initial => {}
+                BucketEntryStateReason::Missing(BucketEntryStateMissingReason::FailedToSend)
+                | BucketEntryStateReason::Dead(BucketEntryStateDeadReason::ExcessiveSendFailures) =>
+                {
+                    veilid_log!(self debug "node revived with retained transport evidence ({:?}): {}", alive_reason, self.best_node_id());
+                }
+                _ => {
+                    veilid_log!(self error "node was ({:?}) but is ({:?}) after reviving: {}", dead_or_missing_reason, alive_reason, self.best_node_id());
+                }
             }
 
             veilid_log!(self debug target: "rtab::state::node", "Node revived: {:#}", self.best_node_id());

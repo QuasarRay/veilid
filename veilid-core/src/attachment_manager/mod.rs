@@ -351,6 +351,10 @@ impl AttachmentManager {
         if let Some(lag) = last_tick_ts.map(|x| cur_tick_ts.duration_since(x)) {
             if lag > TimestampDuration::new_ms(2 * (TICK_INTERVAL_MSEC as u64)) {
                 veilid_log!(self debug "tick lag: {}", lag);
+                // A stalled executor stalls every in-flight RPC; their timeouts are about us
+                self.network_manager()
+                    .online_detector()
+                    .record_local_stall(lag);
             }
         }
 

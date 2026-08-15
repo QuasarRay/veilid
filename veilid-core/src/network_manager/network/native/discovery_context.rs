@@ -122,8 +122,12 @@ struct DiscoveryContextInner {
 }
 
 pub(super) struct DiscoveryContextUnlockedInner {
+    /// Protocol, address family and port this context probes
     config: DiscoveryContextConfig,
+    /// Publication-quality addresses (privacy/CLAT/CGNAT excluded)
     intf_addrs: BTreeSet<Address>,
+    /// Interface address state, including the addresses we send from but never publish
+    interface_address_state: Arc<NetworkInterfaceAddressState>,
 }
 
 #[derive(Clone)]
@@ -154,10 +158,12 @@ impl DiscoveryContext {
         config: DiscoveryContextConfig,
         stop_token: StopToken,
     ) -> Self {
-        let intf_addrs = network
+        let interface_address_state = network
             .last_network_state()
             .unwrap_or_log()
             .interface_address_state
+            .clone();
+        let intf_addrs = interface_address_state
             .interface_addresses
             .iter()
             .map(|x| Address::from_ip_addr(x.ip()))
@@ -165,7 +171,11 @@ impl DiscoveryContext {
 
         Self {
             network,
-            unlocked_inner: Arc::new(DiscoveryContextUnlockedInner { config, intf_addrs }),
+            unlocked_inner: Arc::new(DiscoveryContextUnlockedInner {
+                config,
+                intf_addrs,
+                interface_address_state,
+            }),
             inner: Arc::new(Mutex::new(DiscoveryContextInner {
                 external_infos: Vec::new(),
                 mapped_dial_info: None,
@@ -193,7 +203,7 @@ impl DiscoveryContext {
         )
         .await
         {
-            Ok(StatusResult::Answer { answer, .. }) => answer,
+            Ok(StatusResult::Sent(status_answer)) => status_answer.answer,
             Ok(other) => {
                 veilid_log!(self debug target: "network_result",
                     "request_public_address {:?}: {:?}",
@@ -400,13 +410,32 @@ impl DiscoveryContext {
         true
     }
 
+    /// Publication-set interface addresses of this context's family: what we can offer
+    /// peers, not what is ours.
+    fn family_intf_addrs(&self) -> impl Iterator<Item = &Address> {
+        let address_type = self.config.address_type;
+        self.intf_addrs
+            .iter()
+            .filter(move |a| a.address_type() == address_type)
+    }
+
+    /// True when the address is ours and in this context's family. Uses the identity set,
+    /// so it matches the RFC 4941 privacy addresses we send from but never publish, which
+    /// is what a peer reports back as our external address.
+    fn is_own_family_address(&self, address: Address) -> bool {
+        address.address_type() == self.config.address_type
+            && self
+                .interface_address_state
+                .is_own_address(address.ip_addr())
+    }
+
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), ret, fields(__VEILID_LOG_KEY = self.log_key())))]
     async fn validate_dial_info(
         &self,
         node_ref: NodeRef,
         dial_info: DialInfo,
         redirect: bool,
-    ) -> bool {
+    ) -> DialInfoValidationOutcome {
         // ask the node to send us a dial info validation receipt
         // no need to clear_last_flows here, because the dial_info is always returned via the
         // send_out_of_band_receipt mechanism, which will always create a new flow
@@ -417,8 +446,9 @@ impl DiscoveryContext {
             .await
         {
             Err(e) => {
+                // Our own RPC failure; says nothing about whether peers can reach us
                 veilid_log!(self trace "failed to send validate_dial_info to {:?}: {}", node_ref, e);
-                false
+                DialInfoValidationOutcome::Inconclusive
             }
             Ok(v) => v,
         }
@@ -503,6 +533,7 @@ impl DiscoveryContext {
                             true,
                         )
                         .await
+                        == DialInfoValidationOutcome::Reachable
                     {
                         veilid_log!(this debug "successfully validated mapped dial info {:?} on node {:?}", mapped_dial_info, external_info.node);
 
@@ -554,8 +585,7 @@ impl DiscoveryContext {
 
             let this = self.clone();
             let do_no_nat_fut: PinBoxFutureStatic<DetectionResultKind> = Box::pin(async move {
-                // Do a validate_dial_info on the external address from a redirected node
-                if this
+                let detected_class = match this
                     .validate_dial_info(
                         external_info.node.clone(),
                         external_info.dial_info.clone(),
@@ -563,35 +593,25 @@ impl DiscoveryContext {
                     )
                     .await
                 {
-                    // Add public dial info with Direct dialinfo class
-                    DetectionResultKind::Result {
-                        possibilities,
-                        result: DetectionResult {
-                            config: this.config,
-                            ddi: DetectedDialInfo::Detected(DialInfoDetail {
-                                dial_info: external_info.dial_info.clone(),
-                                class: DialInfoClass::Direct,
-                            }),
-                            external_address_types: AddressTypeSet::only(
-                                external_info.address.address_type(),
-                            ),
-                        },
+                    DialInfoValidationOutcome::Reachable => DialInfoClass::Direct,
+                    DialInfoValidationOutcome::Unreachable => DialInfoClass::Blocked,
+                    // Blocked here would blame a firewall for our own send failing
+                    DialInfoValidationOutcome::Inconclusive => {
+                        return DetectionResultKind::Failure { possibilities };
                     }
-                } else {
-                    // Add public dial info with Blocked dialinfo class
-                    DetectionResultKind::Result {
-                        possibilities,
-                        result: DetectionResult {
-                            config: this.config,
-                            ddi: DetectedDialInfo::Detected(DialInfoDetail {
-                                dial_info: external_info.dial_info.clone(),
-                                class: DialInfoClass::Blocked,
-                            }),
-                            external_address_types: AddressTypeSet::only(
-                                external_info.address.address_type(),
-                            ),
-                        },
-                    }
+                };
+                DetectionResultKind::Result {
+                    possibilities,
+                    result: DetectionResult {
+                        config: this.config,
+                        ddi: DetectedDialInfo::Detected(DialInfoDetail {
+                            dial_info: external_info.dial_info.clone(),
+                            class: detected_class,
+                        }),
+                        external_address_types: AddressTypeSet::only(
+                            external_info.address.address_type(),
+                        ),
+                    },
                 }
             });
 
@@ -616,11 +636,8 @@ impl DiscoveryContext {
         // If any local interface address of this context's family is a carrier-grade NAT or
         // DS-Lite indicator, classify as Symmetric for this family only. Other families may
         // still be globally reachable.
-        let family_intf_addrs_indicate_cgnat = self
-            .intf_addrs
-            .iter()
-            .filter(|a| a.address_type() == self.config.address_type)
-            .any(|a| a.is_cgnat_indicator());
+        let family_intf_addrs_indicate_cgnat =
+            self.family_intf_addrs().any(|a| a.is_cgnat_indicator());
         if family_intf_addrs_indicate_cgnat {
             let external_address_types =
                 external_info.iter().fold(AddressTypeSet::new(), |acc, ei| {
@@ -745,6 +762,7 @@ impl DiscoveryContext {
                                 true,
                             )
                             .await
+                            == DialInfoValidationOutcome::Reachable
                         {
                             // Add public dial info with Direct dialinfo class
                             return DetectionResultKind::Result {
@@ -791,14 +809,18 @@ impl DiscoveryContext {
                 // Let's see what kind of NAT we have
                 // Does a redirected dial info validation from a different address and a random port find us?
                 loop {
-                    if c_this
+                    let outcome = c_this
                         .validate_dial_info(
                             c_external_1.node.clone(),
                             c_external_1.dial_info.clone(),
                             true,
                         )
-                        .await
-                    {
+                        .await;
+                    // A request that never got out can't discriminate NAT class
+                    if outcome == DialInfoValidationOutcome::Inconclusive {
+                        return DetectionResultKind::Failure { possibilities };
+                    }
+                    if outcome == DialInfoValidationOutcome::Reachable {
                         // Yes, another machine can use the dial info directly, so Full Cone
                         // Add public dial info with full cone NAT network class
 
@@ -846,14 +868,18 @@ impl DiscoveryContext {
 
                     loop {
                         // Do a validate_dial_info on the external address from a random port
-                        if c_this
+                        let outcome = c_this
                             .validate_dial_info(
                                 c_external_2.node.clone(),
                                 c_external_1.dial_info.clone(),
                                 false,
                             )
-                            .await
-                        {
+                            .await;
+                        // Without a request going out we can't tell address- from port-restricted
+                        if outcome == DialInfoValidationOutcome::Inconclusive {
+                            return DetectionResultKind::Failure { possibilities };
+                        }
+                        if outcome == DialInfoValidationOutcome::Reachable {
                             // Got a reply from a non-default port, which means we're only address restricted
                             return DetectionResultKind::Result {
                                 possibilities,
@@ -934,18 +960,14 @@ impl DiscoveryContext {
         // NAT Detection
         ///////////
 
-        // If our local interface list contains any of the external addresses then there is no NAT in place
+        // An external address that is one of our own means no NAT for this family
+        // Family-scoped so a CGNAT'd IPv4 doesn't drag a routable IPv6 onto the NAT path
         let local_address_in_external_info = self
             .inner
             .lock()
             .external_infos
             .iter()
-            .find_map(|ei| {
-                self.intf_addrs
-                    .contains(&ei.address.address())
-                    .then_some(true)
-            })
-            .unwrap_or_default();
+            .any(|ei| self.is_own_family_address(ei.address.address()));
 
         if local_address_in_external_info {
             self.protocol_process_no_nat(&mut all_possibilities, &mut unord);

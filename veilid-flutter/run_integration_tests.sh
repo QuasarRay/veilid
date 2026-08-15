@@ -1,8 +1,8 @@
 #!/bin/bash
 pushd example 2>/dev/null
 
-# Cargo features come from the `hooks: user_defines:` block in example/pubspec.yaml;
-# hooks run under a fixed environment allowlist, so nothing can be passed from here.
+# Set cargo features in example/pubspec.yaml under `hooks: user_defines:`; hooks run
+# under a fixed environment allowlist, so this script cannot pass any through
 
 # Default to the #common=debug log tag group unless the caller overrides LOG_DIRECTIVES
 case "$*" in

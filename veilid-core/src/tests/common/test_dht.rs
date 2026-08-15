@@ -357,6 +357,7 @@ async fn test_open_writer_dht_value(api: VeilidAPI) {
             Some(SetDHTValueOptions {
                 writer: Some(keypair),
                 allow_offline: None,
+                min_seqnum: None,
             }),
         )
         .await;
@@ -393,6 +394,7 @@ pub async fn test_set_dht_value_allow_offline(api: VeilidAPI) {
             Some(SetDHTValueOptions {
                 writer: None,
                 allow_offline: None,
+                min_seqnum: None,
             }),
         )
         .await;
@@ -407,6 +409,7 @@ pub async fn test_set_dht_value_allow_offline(api: VeilidAPI) {
             Some(SetDHTValueOptions {
                 writer: None,
                 allow_offline: Some(AllowOffline(true)),
+                min_seqnum: None,
             }),
         )
         .await;
@@ -421,6 +424,7 @@ pub async fn test_set_dht_value_allow_offline(api: VeilidAPI) {
             Some(SetDHTValueOptions {
                 writer: None,
                 allow_offline: Some(AllowOffline(false)),
+                min_seqnum: None,
             }),
         )
         .await;
@@ -447,6 +451,7 @@ async fn test_flush_dht_record_offline(api: VeilidAPI) {
         Some(SetDHTValueOptions {
             writer: None,
             allow_offline: Some(AllowOffline(true)),
+            min_seqnum: None,
         }),
     )
     .await

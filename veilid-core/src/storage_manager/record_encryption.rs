@@ -10,6 +10,14 @@ impl StorageManager {
         opaque_record_key: &OpaqueRecordKey,
     ) -> VeilidAPIResult<RecordKey> {
         let inner = self.inner.lock();
+        Self::get_record_key_for_opaque_record_key_inner(&inner, opaque_record_key)
+    }
+
+    /// [Self::get_record_key_for_opaque_record_key] for a caller that already holds the inner lock
+    pub(super) fn get_record_key_for_opaque_record_key_inner(
+        inner: &StorageManagerInner,
+        opaque_record_key: &OpaqueRecordKey,
+    ) -> VeilidAPIResult<RecordKey> {
         let Some(opened_record) = inner.opened_records.get(opaque_record_key) else {
             apibail_generic!("record must be open to resolve opaque record key");
         };

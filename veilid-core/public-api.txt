@@ -1326,6 +1326,7 @@ pub async fn veilid_core::DHTTransaction::set(&self, veilid_core::RecordKey, vei
 impl core::fmt::Debug for veilid_core::DHTTransaction
 pub fn veilid_core::DHTTransaction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct veilid_core::DHTTransactionSetValueOptions
+pub veilid_core::DHTTransactionSetValueOptions::min_seqnum: core::option::Option<veilid_core::ValueSeqNum>
 pub veilid_core::DHTTransactionSetValueOptions::writer: core::option::Option<veilid_core::KeyPair>
 pub struct veilid_core::DecapsulationKey
 impl veilid_core::DecapsulationKey
@@ -2562,6 +2563,7 @@ pub fn veilid_core::SecretKeyGroup::get_heap_size(&self) -> usize
 pub fn veilid_core::SecretKeyGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::SetDHTValueOptions
 pub veilid_core::SetDHTValueOptions::allow_offline: core::option::Option<veilid_core::AllowOffline>
+pub veilid_core::SetDHTValueOptions::min_seqnum: core::option::Option<veilid_core::ValueSeqNum>
 pub veilid_core::SetDHTValueOptions::writer: core::option::Option<veilid_core::KeyPair>
 impl core::default::Default for veilid_core::SetDHTValueOptions
 pub fn veilid_core::SetDHTValueOptions::default() -> Self
@@ -2908,6 +2910,7 @@ pub const fn veilid_core::ValueSeqNum::is_max(&self) -> bool
 pub const fn veilid_core::ValueSeqNum::is_none(&self) -> bool
 pub const fn veilid_core::ValueSeqNum::is_some(&self) -> bool
 pub fn veilid_core::ValueSeqNum::next(&self) -> veilid_core::VeilidAPIResult<Self>
+pub fn veilid_core::ValueSeqNum::saturating_next(&self) -> Self
 pub const fn veilid_core::ValueSeqNum::to_option(&self) -> core::option::Option<u32>
 impl core::convert::From<core::option::Option<u32>> for veilid_core::ValueSeqNum
 pub fn veilid_core::ValueSeqNum::from(core::option::Option<u32>) -> Self
@@ -3106,6 +3109,7 @@ pub veilid_core::VeilidConfigInternalNetwork::protocol: veilid_core::VeilidConfi
 pub veilid_core::VeilidConfigInternalNetwork::restricted_nat_retries: u32
 pub veilid_core::VeilidConfigInternalNetwork::reverse_connection_receipt_time_ms: u32
 pub veilid_core::VeilidConfigInternalNetwork::rpc: veilid_core::VeilidConfigInternalRPC
+pub veilid_core::VeilidConfigInternalNetwork::single_send_timeout_ms: u32
 impl core::default::Default for veilid_core::VeilidConfigInternalNetwork
 pub fn veilid_core::VeilidConfigInternalNetwork::default() -> Self
 pub struct veilid_core::VeilidConfigInternalProtocol

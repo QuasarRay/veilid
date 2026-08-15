@@ -539,32 +539,20 @@ async def test_watch_dht_values():
                 assert vd is None
                 await sync(rc1, [rec1])
 
-                # Server 0: Wait for the update
-                upd = await asyncio.wait_for(value_change_queue.get(), timeout=10)
-
-                # Server 0: Verify the update came back with the first changed subkey's data
-                assert isinstance(upd.detail, veilid.VeilidValueChange)
-                assert upd.detail.key == rec0.key
-                assert upd.detail.count == 0xFFFFFFFE
-                assert upd.detail.subkeys == [(3, 3)]
-                assert upd.detail.value is not None
-                assert upd.detail.value.data == b"BLAH BLAH"
+                # Server 0: The change arrives in value or hint form
+                await expect_watched_change(
+                    value_change_queue, rc0, rec0.key, ValueSubkey(3), b"BLAH BLAH"
+                )
 
                 # Server 1: Now set subkey and trigger an update
                 vd = await rc1.set_dht_value(rec1.key, ValueSubkey(4), b"BZORT")
                 assert vd is None
                 await sync(rc1, [rec1])
 
-                # Server 0: Wait for the update
-                upd = await asyncio.wait_for(value_change_queue.get(), timeout=10)
-
-                # Server 0: Verify the update came back with the first changed subkey's data
-                assert isinstance(upd.detail, veilid.VeilidValueChange)
-                assert upd.detail.key == rec0.key
-                assert upd.detail.count == 0xFFFFFFFD
-                assert upd.detail.subkeys == [(4, 4)]
-                assert upd.detail.value is not None
-                assert upd.detail.value.data == b"BZORT"
+                # Server 0: The change arrives in value or hint form
+                await expect_watched_change(
+                    value_change_queue, rc0, rec0.key, ValueSubkey(4), b"BZORT"
+                )
 
                 # Server 0: Cancel some subkeys we don't care about
                 active = await rc0.cancel_dht_watch(rec0.key, [(ValueSubkey(0), ValueSubkey(3))])
@@ -575,26 +563,26 @@ async def test_watch_dht_values():
                 assert vd == [None, None]
                 await sync(rc1, [rec1])
 
-                # Server 0: Wait for the update
-                upd = await asyncio.wait_for(value_change_queue.get(), timeout=10)
+                # Server 0: subkey 3 is in the cancelled range, so only subkey 4 may surface
+                await expect_watched_change(
+                    value_change_queue, rc0, rec0.key, ValueSubkey(4), b"BZORT BZORT"
+                )
 
-                # Server 0: Verify only one update came back
-                assert isinstance(upd.detail, veilid.VeilidValueChange)
-                assert upd.detail.key == rec0.key
-                assert upd.detail.count == 0xFFFFFFFC
-                assert upd.detail.subkeys == [(4, 4)]
-                assert upd.detail.value is not None
-                assert upd.detail.value.data == b"BZORT BZORT"
-
-                # Server 0: Now we should NOT get any other update
-                upd = None
-                try:
-                    upd = await asyncio.wait_for(value_change_queue.get(), timeout=10)
-                except asyncio.TimeoutError:
-                    pass
-                if upd is not None:
-                    print(f"bad update: {VeilidJSONEncoder.dumps(upd)}")
-                assert upd is None
+                # Server 0: a copy that raced the verifying read re-reports once, so
+                # require every straggler to be well-formed and to go quiet promptly
+                for _ in range(6):
+                    try:
+                        upd = await asyncio.wait_for(value_change_queue.get(), timeout=10)
+                    except asyncio.TimeoutError:
+                        break
+                    print(f"settling update: {VeilidJSONEncoder.dumps(upd)}")
+                    assert isinstance(upd.detail, veilid.VeilidValueChange)
+                    assert upd.detail.key == rec0.key
+                    assert upd.detail.subkeys == [(4, 4)]
+                    if upd.detail.value is not None:
+                        assert upd.detail.value.data == b"BZORT BZORT"
+                else:
+                    assert False, "value change updates did not go quiet"
 
                 # Now cancel the update
                 active = await rc0.cancel_dht_watch(rec0.key, [(ValueSubkey(3), ValueSubkey(9))])
@@ -748,6 +736,109 @@ async def test_watch_many_dht_values():
                     await rc1.delete_dht_record(record.key)
                     await rc0.close_dht_record(record.key)
                     await rc0.delete_dht_record(record.key)
+
+
+@pytest.mark.asyncio
+async def test_min_seqnum_dht_value(api_connection: veilid.VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            rec = await rc.create_dht_record(kind, veilid.DHTSchema.dflt(3))
+            record_key = rec.key
+
+            def no_offline(min_seqnum: Optional[ValueSeqNum] = None) -> veilid.SetDHTValueOptions:
+                return veilid.SetDHTValueOptions(None, False, min_seqnum)
+
+            va = b"Qwertyuiop Asdfghjkl Zxcvbnm"
+            vb = b"1234567890"
+
+            # A minimum above the automatic sequence number wins
+            vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(100)))
+            assert vdtemp is None
+
+            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL)
+            assert rr.local_seqs == [100]
+
+            # Identical data already satisfying the minimum keeps the sequence number
+            vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(100)))
+            assert vdtemp is None
+
+            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL)
+            assert rr.local_seqs == [100]
+
+            # Identical data below a raised minimum still gets raised
+            vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(200)))
+            assert vdtemp is None
+
+            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL)
+            assert rr.local_seqs == [200]
+
+            # MAX minus one leaves exactly one write
+            vdtemp = await rc.set_dht_value(record_key, ValueSubkey(1), va, no_offline(ValueSeqNum(ValueSeqNum.MAX - 1)))
+            assert vdtemp is None
+
+            vdtemp = await dht_retry(
+                api_connection,
+                lambda: rc.set_dht_value(record_key, ValueSubkey(1), vb, no_offline()),
+                "last remaining write",
+            )
+            assert vdtemp is None
+
+            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(1), ValueSubkey(1))], veilid.DHTReportScope.LOCAL)
+            assert rr.local_seqs == [ValueSeqNum.MAX]
+
+            # And nothing after it
+            with pytest.raises(veilid.VeilidAPIError):
+                await rc.set_dht_value(record_key, ValueSubkey(1), va, no_offline())
+
+            # An identical rewrite at max is still accepted, since it needs no new sequence number
+            vdtemp = await dht_retry(
+                api_connection,
+                lambda: rc.set_dht_value(record_key, ValueSubkey(1), vb, no_offline()),
+                "identical rewrite at max",
+            )
+            assert vdtemp is None
+
+            # A write straight to max leaves nothing after it
+            vdtemp = await dht_retry(
+                api_connection,
+                lambda: rc.set_dht_value(record_key, ValueSubkey(2), va, no_offline(ValueSeqNum(ValueSeqNum.MAX))),
+                "write straight to max",
+            )
+            assert vdtemp is None
+
+            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(2), ValueSubkey(2))], veilid.DHTReportScope.LOCAL)
+            assert rr.local_seqs == [ValueSeqNum.MAX]
+
+            with pytest.raises(veilid.VeilidAPIError):
+                await rc.set_dht_value(record_key, ValueSubkey(2), vb, no_offline())
+
+            # Re-sending with the same minimum is a retry: it reuses the sequence number instead of failing
+            vdtemp = await dht_retry(
+                api_connection,
+                lambda: rc.set_dht_value(record_key, ValueSubkey(2), va, no_offline(ValueSeqNum(ValueSeqNum.MAX))),
+                "min_seqnum retry",
+            )
+            assert vdtemp is None
+
+            # Core does not check that a retry carries the same data, but the network does:
+            # the value that got there first stands, and the writer is told what it lost to
+            vdtemp = await dht_retry(
+                api_connection,
+                lambda: rc.set_dht_value(record_key, ValueSubkey(2), vb, no_offline(ValueSeqNum(ValueSeqNum.MAX))),
+                "min_seqnum retry with different data",
+            )
+            assert vdtemp is not None
+            assert vdtemp.data == va
+            assert vdtemp.seq == ValueSeqNum.MAX
+
+            # A subkey at max must not break the sequence numbers a set would produce
+            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(0), ValueSubkey(2))], veilid.DHTReportScope.UPDATE_SET)
+            assert rr.local_seqs == [201, ValueSeqNum.MAX, ValueSeqNum.MAX]
+
+            await rc.close_dht_record(record_key)
+            await rc.delete_dht_record(record_key)
+
 
 @pytest.mark.asyncio
 async def test_inspect_dht_record(api_connection: veilid.VeilidAPI):
@@ -1276,6 +1367,50 @@ async def test_close_reopen_subkey_update_race(api_connection: veilid.VeilidAPI)
         raise AssertionError(
             f"{len(failures)}/{ITERATIONS} iterations got stale or null read: {failures}"
         )
+
+
+async def expect_watched_change(
+    queue: asyncio.Queue,
+    rc: veilid.RoutingContext,
+    key,
+    subkey: ValueSubkey,
+    data: bytes,
+):
+    """Wait out one watched change, then read the subkey to verify and re-arm it.
+
+    Several nodes serve a watch and each reports independently, so a change
+    arrives in value form (data inline), range-only hint form (fetch to see it),
+    or both, in either order, and a node that coalesced adjacent changes may
+    report a wider range than the subkey that changed. Only delivery is
+    promised, not form.
+
+    A value-form update may also carry an EARLIER write, a slower node catching
+    up. Skip that straggler and keep waiting for one covering this change.
+    """
+    saw = False
+    while True:
+        try:
+            upd = await asyncio.wait_for(queue.get(), timeout=10)
+        except asyncio.TimeoutError:
+            break
+        assert isinstance(upd.detail, veilid.VeilidValueChange)
+        assert upd.detail.key == key
+        assert len(upd.detail.subkeys) > 0
+        covers = any(a <= subkey <= b for (a, b) in upd.detail.subkeys)
+        if upd.detail.value is not None:
+            assert covers, f"value update for unexpected subkeys: {upd.detail.subkeys}"
+            if upd.detail.value.data != data:
+                continue
+            saw = True
+            break
+        if covers:
+            saw = True
+            break
+    assert saw, "no update covered the changed subkey"
+    # The read consumes the report, re-arming change reporting for the next change
+    vd = await rc.get_dht_value(key, subkey, True)
+    assert vd is not None
+    assert vd.data == data
 
 
 async def sync(rc: veilid.RoutingContext, records: list[veilid.DHTRecordDescriptor]):

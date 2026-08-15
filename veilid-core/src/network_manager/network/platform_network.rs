@@ -14,14 +14,6 @@ pub fn new_platform_network(registry: VeilidComponentRegistry) -> Network {
     }
 }
 
-/// Result of sending data to an existing flow
-pub enum SendDataToExistingFlowResult {
-    /// Data was sent successfully, returning the unique flow used to send the data
-    Sent(UniqueFlow),
-    /// Data was not sent successfully, returning the data that was not sent
-    NotSent(Bytes),
-}
-
 /// Network base implementation trait
 ///
 /// Defines the minimum set of operations required for the NetworkManager component to operate
@@ -84,7 +76,7 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
         &self,
         dial_info: DialInfo,
         data: Bytes,
-    ) -> PinBoxFuture<'_, EyreResult<NetworkResult<()>>>;
+    ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<()>>>;
 
     /// Send and receive data to/from a dial info, unbound, using a new connection from a random port
     ///
@@ -98,7 +90,7 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
         dial_info: DialInfo,
         data: Bytes,
         timeout_ms: u32,
-    ) -> PinBoxFuture<'_, EyreResult<NetworkResult<Bytes>>>;
+    ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<Bytes>>>;
 
     /// Send data to a flow that already exists
     ///
@@ -107,7 +99,7 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
         &self,
         flow: Flow,
         data: Bytes,
-    ) -> PinBoxFuture<'_, EyreResult<SendDataToExistingFlowResult>>;
+    ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<UniqueFlow>>>;
 
     /// Send data directly to a dial info, possibly without knowing which node it is going to
     ///

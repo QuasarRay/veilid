@@ -2,24 +2,35 @@
 
 - veilid-core:
   - Stats collection, aggregation, and analysis for all subsystems. Robot-generated python script for reviewing the effect of optimizations.
-  - Fix OnlineDetector spurious flap
-  - Properly drop TCP connections when offline condition is detected so they can be recreated in the event of NAT state loss, as is common on cellular
-  - Fix UDP stalls on cellular/CLAT464
-  - Correct timeout for native WS connects
-  - Timeout-bound public internet dial info detection
-  - AIMD experiment for DHT operations. Off by default for now behind `aimd-dht` feature
-  - Fix background transaction pre-empt on foreground record open
+  - Fix OnlineDetector spurious flap.
+  - Properly drop TCP connections when offline condition is detected so they can be recreated in the event of NAT state loss, as is common on cellular.
+  - Fix UDP stalls on cellular/CLAT464.
+  - Correct timeout for native WS connects.
+  - Timeout-bound public internet dial info detection.
+  - AIMD experiment for DHT operations. Off by default for now behind `aimd-dht` feature.
+  - Fix background transaction pre-empt on foreground record open.
   - ProtectedStore is now exported correctly through the VeilidAPI object and the old reust interface is removed. Switch to accessing ProtectedStore through VeilidAPI.
+  - Loosen IPv6 detection for environments where the default route might not be enumerable due to sandboxing.
+  - Fix `inspect_dht_record` excessive search duration.
+  - `set_dht_value` and `DHTTransaction::set` options now expose `min_seqnum`, which raises the written sequence number after the automatic increment. `ValueSeqNum::MAX` minus `n` leaves `n` writes on the subkey. `DHTReportScope::UpdateSet` no longer fails on a subkey at the maximum sequence number.
+  - Eliminate locks from holepunching, using best-effort TTL instead.
+  - Fix per-transport statistical suppression so broken protocols stop being selected constantly.
+  - Backoff on 'outbound-only' address change detection frequency.
+  - Rejected/disqualified nodes do not contribute to inspect_dht_record consensus width cap.
+  - Transaction post-consensus grace period reduced to avoid waiting for unnecessary slow additional-consensus nodes.
+  - OnlineDetector now tracks local stalls, and local degradation is no longer blamed on specific nodes.
+  - Better watch reporting coalescing.
 
 - veilid-flutter:
-  - Full conversion to Native Assets and rust build hooks. Your apps will need to remove any extra build steps for building veilid-flutter and linking to the output, it is fully handled by flutter now.
-  - CocoaPods support removed
+  - Full conversion to Native Assets and rust build hooks. Apps must drop any extra build steps for building veilid-flutter and linking its output; Flutter handles it.
+  - CocoaPods support removed.
 
 - veilid-python:
   - More tests
 
 - veilid-tools:
   - AIMD congestion control system (behind `aimd` feature)
+  - socket_tools UDP best-effort send-with-ttl implementation
 
 **Changed in Veilid 0.5.7**
 

@@ -24,11 +24,9 @@ impl NetworkManager {
         // Reply with a chunk of signed routing table
         let net = self.net();
         match pin_future_closure!(net.send_data_to_existing_flow(flow, json_bytes)).await? {
-            SendDataToExistingFlowResult::Sent(_) => {
-                // Bootstrap reply was sent
-                Ok(NetworkResult::value(()))
-            }
-            SendDataToExistingFlowResult::NotSent(_) => Ok(NetworkResult::no_connection_other(
+            NetworkAttempt::Performed(NetworkResult::Value(_)) => Ok(NetworkResult::value(())),
+            NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
+            _ => Ok(NetworkResult::no_connection_other(
                 "bootstrap reply could not be sent",
             )),
         }

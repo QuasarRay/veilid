@@ -29,6 +29,7 @@ enum NodeContactMethodKind {
     NoRoutingDomain,
     NoPeerInfo,
     NoContactMethod,
+    TransportSuppressed,
     Punished,
     Existing,
     Direct,
@@ -43,6 +44,9 @@ impl From<&NodeContactMethodResult> for NodeContactMethodKind {
             NodeContactMethodResult::NoRoutingDomain => NodeContactMethodKind::NoRoutingDomain,
             NodeContactMethodResult::NoPeerInfo => NodeContactMethodKind::NoPeerInfo,
             NodeContactMethodResult::NoContactMethod => NodeContactMethodKind::NoContactMethod,
+            NodeContactMethodResult::TransportSuppressed => {
+                NodeContactMethodKind::TransportSuppressed
+            }
             NodeContactMethodResult::Punished => NodeContactMethodKind::Punished,
             NodeContactMethodResult::Resolved(ContactMethod::Existing) => {
                 NodeContactMethodKind::Existing

@@ -1286,6 +1286,13 @@ impl StorageManager {
                         .await?;
                     let mut newer_online_subkeys = report.newer_online_subkeys();
 
+                    // Telemetry to decide whether the periodic inspection earns its cost
+                    if newer_online_subkeys.is_empty() {
+                        veilid_log!(this debug "change inspect: nothing newer online for {}", record_key);
+                    } else {
+                        veilid_log!(this debug "change inspect: PRODUCTIVE: missed value change on {} subkeys {}", record_key, newer_online_subkeys);
+                    }
+
                     // Get changed first changed subkey until we find one to report
                     let mut n = 0;
                     while !newer_online_subkeys.is_empty() {
@@ -1429,8 +1436,10 @@ impl StorageManager {
                         )
                         .await?;
                     if report.newer_online_subkeys().is_empty() {
+                        veilid_log!(this debug "change inspect: nothing newer online for {}", record_key);
                         return VeilidAPIResult::Ok(());
                     }
+                    veilid_log!(this info "change inspect productive: missed value change on {} subkeys {}", record_key, report.newer_online_subkeys());
 
                     this.with_background_transaction(
                         record_key.clone(),
@@ -1686,7 +1695,7 @@ impl StorageManager {
             per_node_state.count = count;
         }
 
-        // Record that we received a valid ValueChanged — resets fallback inspection timer
+        // A valid ValueChanged resets the fallback inspection timer
         // NOTE: It is possible this should be a per-node state, but for now let's try it on the whole watch
         // Done after per_node_state usage to avoid borrow conflicts with owm.per_node_states
         state.edit(&owm.per_node_states, |editor| {
@@ -1713,32 +1722,14 @@ impl StorageManager {
         )
         .await?;
 
-        // Update the watch state if we're going to report
+        // Mark the report and take the count under one guard
         let remaining_count = {
             let inner = &mut *self.inner.lock();
-
-            // Get the outbound watch
-            if let Some(outbound_watch) = inner
-                .outbound_watch_manager
-                .outbound_watches
-                .get_mut(&opaque_record_key)
-            {
-                if let Some(state) = outbound_watch.state_mut() {
-                    // If we're going to report, update the remaining change count
-                    let remaining_count = state.remaining_count().saturating_sub(1);
-                    state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
-                        editor.set_remaining_count(remaining_count);
-                    });
-
-                    state.remaining_count()
-                } else {
-                    // No outbound watch current state means watch died (no remaining count)
-                    0
-                }
-            } else {
-                // No outbound watch means watch died (no remaining count)
-                0
+            if let Some(state) = Self::watch_state_mut_inner(inner, &opaque_record_key) {
+                // Data in hand: later range-only copies of this change must not re-notify
+                state.mark_value_reported_subkeys(&reportable_subkeys);
             }
+            Self::note_watch_report_inner(inner, &opaque_record_key, None)
         };
 
         // Announce ValueChanged VeilidUpdate
@@ -1760,8 +1751,12 @@ impl StorageManager {
     }
 
     /// Report a value-change to the app as a non-committing hint (no local-store write) and
-    /// decrement the watch count. When a value is present its decrypted form is reported and
-    /// its sequence number recorded so replays/duplicate reports are gated out.
+    /// decrement the watch count. When a value is present its decrypted form is reported and its
+    /// sequence number recorded so replays and duplicate reports are gated out.
+    ///
+    /// One guard covers the whole decision: re-trim to the currently watched range, mark the
+    /// reported subkeys (news-filtering range-only reports), and take the count. Sends nothing
+    /// when no watched subkey remains, the range-only news is empty, or the watch has died.
     async fn report_value_change_hint(
         &self,
         record_lock: StorageManagerRecordLockGuard,
@@ -1770,35 +1765,35 @@ impl StorageManager {
         opt_value: Option<Arc<SignedValueData>>,
     ) -> VeilidAPIResult<()> {
         let opaque_record_key = record_lock.record();
-        let opt_reported = opt_value.as_ref().map(|v| {
-            (
-                reportable_subkeys.first().unwrap_or_log(),
-                v.value_data().seq(),
-            )
-        });
 
-        let remaining_count = {
+        let (subkeys, remaining_count) = {
             let inner = &mut *self.inner.lock();
-            if let Some(outbound_watch) = inner
-                .outbound_watch_manager
-                .outbound_watches
-                .get_mut(&opaque_record_key)
-            {
-                if let Some(state) = outbound_watch.state_mut() {
-                    let rc = state.remaining_count().saturating_sub(1);
-                    state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
-                        editor.set_remaining_count(rc);
-                        if let Some((subkey, seq)) = opt_reported {
-                            editor.set_last_reported_subkey_seq(subkey, seq);
-                        }
-                    });
-                    rc
-                } else {
-                    0
-                }
-            } else {
-                0
+            let Some(watched) = self.get_watched_subkeys_inner(inner, &record_key)? else {
+                return Ok(());
+            };
+            let reportable = reportable_subkeys.intersect(&watched);
+            if reportable.is_empty() {
+                return Ok(());
             }
+            let Some(state) = Self::watch_state_mut_inner(inner, &opaque_record_key) else {
+                return Ok(());
+            };
+            let subkeys = if opt_value.is_some() {
+                state.mark_value_reported_subkeys(&reportable);
+                reportable
+            } else {
+                state.mark_hinted_subkeys(&reportable)
+            };
+            if subkeys.is_empty() {
+                return Ok(());
+            }
+            let opt_reported = opt_value
+                .as_ref()
+                .map(|v| (subkeys.first().unwrap_or_log(), v.value_data().seq()));
+            (
+                subkeys,
+                Self::note_watch_report_inner(inner, &opaque_record_key, opt_reported),
+            )
         };
 
         let opt_value_data = if let Some(value) = &opt_value {
@@ -1813,12 +1808,39 @@ impl StorageManager {
         self.update_callback_value_change(
             record_lock,
             record_key,
-            reportable_subkeys,
+            subkeys,
             remaining_count,
             opt_value_data,
         );
 
         Ok(())
+    }
+
+    /// Decrement and return the watch's remaining change count for a report,
+    /// recording the reported seq that gates transactional hints.
+    fn note_watch_report_inner(
+        inner: &mut StorageManagerInner,
+        opaque_record_key: &OpaqueRecordKey,
+        opt_reported: Option<(ValueSubkey, ValueSeqNum)>,
+    ) -> u32 {
+        if let Some(outbound_watch) = inner
+            .outbound_watch_manager
+            .outbound_watches
+            .get_mut(opaque_record_key)
+        {
+            if let Some(state) = outbound_watch.state_mut() {
+                let rc = state.remaining_count().saturating_sub(1);
+                state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+                    editor.set_remaining_count(rc);
+                    if let Some((subkey, seq)) = opt_reported {
+                        editor.set_last_reported_subkey_seq(subkey, seq);
+                    }
+                });
+                return rc;
+            }
+        }
+        // No outbound watch or state means the watch died (no remaining count)
+        0
     }
 
     /// Handle a received 'Value Changed' statement
@@ -2000,13 +2022,78 @@ impl StorageManager {
                 .await?;
             }
         } else if !reportable_subkeys.is_empty() {
-            // No single reportable value (e.g. multiple subkeys changed): report the changed
-            // range immediately so the app fetches it, rather than deferring a change inspection
+            // No single reportable value (e.g. multiple subkeys changed): report the range so the app fetches it
             self.report_value_change_hint(record_lock, record_key, reportable_subkeys, None)
                 .await?;
         }
 
         Ok(NetworkResult::value(()))
+    }
+
+    /// This record's outbound watch state, if the watch and its state exist.
+    fn watch_state_mut_inner<'a>(
+        inner: &'a mut StorageManagerInner,
+        opaque_record_key: &OpaqueRecordKey,
+    ) -> Option<&'a mut OutboundWatchState> {
+        inner
+            .outbound_watch_manager
+            .outbound_watches
+            .get_mut(opaque_record_key)?
+            .state_mut()
+    }
+
+    /// Consume the report marks for subkeys the app read from the network, so a later change is
+    /// news again. A subkey whose copies were suppressed mid-read queues one repeat hint (the
+    /// racing copy may be a newer change), which the outbound watch check tick sends.
+    pub(super) fn consume_watch_read_subkeys(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+        subkeys: &ValueSubkeyRangeSet,
+    ) {
+        let inner = &mut *self.inner.lock();
+        let Ok(record_key) =
+            Self::get_record_key_for_opaque_record_key_inner(inner, opaque_record_key)
+        else {
+            return;
+        };
+        let Some(owed) = Self::watch_state_mut_inner(inner, opaque_record_key)
+            .map(|state| state.consume_read_subkeys(subkeys))
+        else {
+            return;
+        };
+        if !owed.is_empty() {
+            inner
+                .outbound_watch_manager
+                .pending_rehints
+                .entry(record_key)
+                .and_modify(|s| *s = s.union(&owed))
+                .or_insert(owed);
+        }
+    }
+
+    /// Send any owed repeat hints. Runs from the outbound watch check tick.
+    pub(super) async fn send_pending_rehints(&self) {
+        let rehints: Vec<(RecordKey, ValueSubkeyRangeSet)> = {
+            let mut inner = self.inner.lock();
+            inner
+                .outbound_watch_manager
+                .pending_rehints
+                .drain()
+                .collect()
+        };
+        for (record_key, subkeys) in rehints {
+            // Record lock before inner, as everywhere
+            let record_lock = self
+                .record_lock_table
+                .lock_record(record_key.opaque(), StorageManagerRecordLockPurpose::Watch)
+                .await;
+            if let Err(e) = self
+                .report_value_change_hint(record_lock, record_key, subkeys, None)
+                .await
+            {
+                veilid_log!(self debug "failed to send repeat hint: {}", e);
+            }
+        }
     }
 
     /// Check all watches for changes

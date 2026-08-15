@@ -294,11 +294,13 @@ pub(crate) trait NodeRefCommonTrait:
     }
 
     fn record_protected_connection_dead(&self, transport: TransportType) {
-        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport);
+        // Protected connections are our outbound relay connections: dial evidence
+        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport, true);
     }
 
     fn report_failed_route_test(&self, transport: TransportType) {
-        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport);
+        // Route tests ride our outbound first-hop sends: dial evidence
+        self.stats_failed_to_send(Timestamp::now_non_decreasing(), false, transport, true);
     }
 
     fn report_contact_method_result(&self, cm: &ContactMethod, success: bool) {
@@ -311,16 +313,21 @@ pub(crate) trait NodeRefCommonTrait:
         self.operate(|e| e.get_contact_method_failure_ts(cm))
     }
 
+    fn transport_health(&self, transport: TransportType) -> TransportHealth {
+        self.operate(|e| e.transport_health(transport))
+    }
+
     fn stats_question_sent(
         &self,
         ts: Timestamp,
         bytes: ByteCount,
         expects_answer: bool,
         transport: TransportType,
+        dialed: bool,
     ) {
         self.operate_mut(|e| {
             self.routing_table().record_sent_bytes(bytes);
-            e.question_sent(ts, bytes, expects_answer, transport);
+            e.question_sent(ts, bytes, expects_answer, transport, dialed);
         })
     }
     fn stats_question_rcvd(&self, ts: Timestamp, bytes: ByteCount, transport: TransportType) {
@@ -329,10 +336,10 @@ pub(crate) trait NodeRefCommonTrait:
             e.question_rcvd(ts, bytes, transport);
         })
     }
-    fn stats_answer_sent(&self, bytes: ByteCount, transport: TransportType) {
+    fn stats_answer_sent(&self, bytes: ByteCount, transport: TransportType, dialed: bool) {
         self.routing_table().record_sent_bytes(bytes);
         self.operate_mut(|e| {
-            e.answer_sent(bytes, transport);
+            e.answer_sent(bytes, transport, dialed);
         })
     }
     fn stats_answer_rcvd(
@@ -341,17 +348,18 @@ pub(crate) trait NodeRefCommonTrait:
         recv_ts: Timestamp,
         bytes: ByteCount,
         transport: TransportType,
+        dialed: bool,
     ) {
         self.operate_mut(|e| {
             self.routing_table().record_received_bytes(bytes);
             self.routing_table()
                 .record_latency(recv_ts.duration_since(send_ts));
-            e.answer_rcvd(send_ts, recv_ts, bytes, transport);
+            e.answer_rcvd(send_ts, recv_ts, bytes, transport, dialed);
         })
     }
-    fn stats_lost_question(&self, transport: TransportType) {
+    fn stats_lost_question(&self, transport: TransportType, dialed: bool) {
         self.operate_mut(|e| {
-            e.lost_question(transport);
+            e.lost_question(transport, dialed);
         })
     }
     fn stats_routed_up(&self, key: PublicKey, bytes: ByteCount) {
@@ -366,9 +374,15 @@ pub(crate) trait NodeRefCommonTrait:
     ) {
         self.operate_mut(|e| e.record_routed_round_trip(key, send_ts, recv_ts, bytes))
     }
-    fn stats_failed_to_send(&self, ts: Timestamp, expects_answer: bool, transport: TransportType) {
+    fn stats_failed_to_send(
+        &self,
+        ts: Timestamp,
+        expects_answer: bool,
+        transport: TransportType,
+        dialed: bool,
+    ) {
         self.operate_mut(|e| {
-            e.failed_to_send(ts, expects_answer, transport);
+            e.failed_to_send(ts, expects_answer, transport, dialed);
         })
     }
     fn stats_unreachable(&self) {

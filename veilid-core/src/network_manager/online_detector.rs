@@ -10,10 +10,46 @@ pub const OFFLINE_DETECTION_FAILURE_THRESHOLD_MESSAGE: usize = 4;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 pub enum OnlineState {
+    /// Round trips complete and failure evidence is trustworthy
     #[default]
     Online,
+    /// Round trips complete but failure evidence is about us; blame writers hold fire
+    Degraded,
+    /// Nothing gets through; blame and recovery behaviors both gate
     Offline,
 }
+
+impl OnlineState {
+    /// Whether blame writers should hold fire: in Degraded or Offline the failure
+    /// evidence is about us, not the peer it names.
+    pub fn suppresses_blame(&self) -> bool {
+        !matches!(self, OnlineState::Online)
+    }
+}
+
+/// How long ping-derived offline must persist before it counts as a real outage.
+/// Sub-second blips (missed ping deadlines under load, idle-node sparse probes) carry
+/// no transport information, and the carrier-NAT-flush wedge it must still catch lasts
+/// minutes.
+const OFFLINE_SUSTAINED_SECS: u32 = 5;
+
+/// Sliding window that failure breadth accumulates over for degradation detection (~2x rpc timeout)
+const DEGRADED_EVIDENCE_WINDOW_SECS: u32 = 10;
+
+/// Base clean time after the last degradation evidence before Degraded can end
+pub(crate) const DEGRADED_EXIT_CLEAN_SECS: u32 = 5;
+
+/// Ceiling on the escalated clean window
+pub(crate) const DEGRADED_EXIT_CLEAN_MAX_SECS: u32 = 20;
+
+/// Recovering and degrading again within this is one marginal period, not two
+const DEGRADED_REENTRY_SECS: u32 = 30;
+
+/// Degraded decays after this long without a post-evidence success
+pub(crate) const DEGRADED_MAX_HOLD_SECS: u32 = 60;
+
+/// Local pipeline stalls at or above this consume enough of the rpc timeout to void peer evidence
+const LOCAL_STALL_MIN_MS: u64 = 2500;
 
 /// Failure count threshold for a socket class.
 fn failure_threshold(framing_type: FramingType) -> usize {
@@ -21,6 +57,46 @@ fn failure_threshold(framing_type: FramingType) -> usize {
         FramingType::Connection => OFFLINE_DETECTION_FAILURE_THRESHOLD_CONNECTION,
         FramingType::Message => OFFLINE_DETECTION_FAILURE_THRESHOLD_MESSAGE,
     }
+}
+
+/// Clean window required to leave Degraded, doubled per consecutive rapid re-entry.
+///
+/// A marginal period is evidence with gaps in it, and at the base window those gaps open
+/// brief Online windows for blame to land in. Escalating closes them on a network that
+/// keeps re-degrading; a recovered one stays on the fast path.
+pub(crate) fn degraded_exit_clean_secs(reentries: u32) -> u32 {
+    DEGRADED_EXIT_CLEAN_SECS
+        .saturating_mul(1u32 << reentries.min(16))
+        .min(DEGRADED_EXIT_CLEAN_MAX_SECS)
+}
+
+/// The three-state answer, derived from the stored two-state machine plus
+/// degradation evidence. Pure so the timing rules are testable without a network.
+///
+/// Entry is fast, exit is slow: fresh evidence holds Degraded, and leaving requires a
+/// success AFTER the evidence (an interleaved success is what keeps the offline detector
+/// blind), with the max hold bounding the idle case.
+pub(crate) fn effective_online_state(
+    stored: OnlineState,
+    last_evidence_ts: Option<Timestamp>,
+    last_success_ts: Option<Timestamp>,
+    clean_secs: u32,
+    now: Timestamp,
+) -> OnlineState {
+    if stored == OnlineState::Offline {
+        return OnlineState::Offline;
+    }
+    let Some(ev) = last_evidence_ts else {
+        return OnlineState::Online;
+    };
+    if now < ev.later(TimestampDuration::new_secs(clean_secs)) {
+        return OnlineState::Degraded;
+    }
+    let recovered = last_success_ts.is_some_and(|s| s > ev);
+    if recovered || now >= ev.later(TimestampDuration::new_secs(DEGRADED_MAX_HOLD_SECS)) {
+        return OnlineState::Online;
+    }
+    OnlineState::Degraded
 }
 
 /// Events that drive the online/offline state machine.
@@ -44,6 +120,18 @@ enum OnlineEvent {
 struct OnlineDetectionPerDomain {
     /// Previously-live nodes that failed on each framing type since the last success.
     pending_failures: BTreeMap<FramingType, BTreeSet<NodeId>>,
+    /// The same breadth over a time window, which an interleaved success cannot erase
+    windowed_failures: BTreeMap<FramingType, BTreeMap<NodeId, Timestamp>>,
+    /// Last time the windowed breadth crossed threshold on every enabled framing type
+    last_degraded_evidence_ts: Option<Timestamp>,
+    /// Last completed round trip; exiting Degraded requires one after the evidence
+    last_success_ts: Option<Timestamp>,
+    /// Last committed three-state answer, updated on events and lazily on reads
+    effective_state: OnlineState,
+    /// Consecutive Degraded re-entries within `DEGRADED_REENTRY_SECS`; escalates the exit window
+    degraded_reentries: u32,
+    /// When Degraded last ended, for the rapid-re-entry test
+    degraded_recovered_ts: Option<Timestamp>,
     /// When we last switched online/offline.
     last_transition_ts: Timestamp,
     /// Current state.
@@ -52,46 +140,68 @@ struct OnlineDetectionPerDomain {
     flap_detector: FlapDetector<OnlineState>,
     /// Start of the current offline period, if currently offline.
     offline_started_ts: Option<Timestamp>,
+    /// Whether this offline period's connection purge has already run.
+    offline_purged: bool,
     /// Recently-completed offline intervals (start, end), pruned to
     /// `RELIABLE_PING_INTERVAL_MAX` old. Credits node reliability for time we
     /// couldn't test.
     recent_offline_intervals: VecDeque<(Timestamp, Timestamp)>,
+    /// Start of the current degraded period, if effectively degraded
+    degraded_started_ts: Option<Timestamp>,
+    /// The same for degraded periods, where we could test but must not believe the answer.
+    recent_degraded_intervals: VecDeque<(Timestamp, Timestamp)>,
     /// Cumulative online<->offline transition count
     #[cfg(feature = "stats")]
     total_transitions: u64,
     /// Cumulative time spent offline
     #[cfg(feature = "stats")]
     total_time_offline: TimestampDuration,
+    /// Cumulative time spent degraded
+    #[cfg(feature = "stats")]
+    total_time_degraded: TimestampDuration,
 }
 
 impl Default for OnlineDetectionPerDomain {
     fn default() -> Self {
         Self {
             pending_failures: BTreeMap::new(),
+            windowed_failures: BTreeMap::new(),
+            last_degraded_evidence_ts: None,
+            last_success_ts: None,
+            effective_state: OnlineState::default(),
+            degraded_reentries: 0,
+            degraded_recovered_ts: None,
             last_transition_ts: Timestamp::new(0),
             online_state: OnlineState::default(),
             // 4 online/offline flips within ~60s = flapping
             flap_detector: FlapDetector::new_secs(4.0, 60),
             offline_started_ts: None,
+            offline_purged: false,
             recent_offline_intervals: VecDeque::new(),
+            degraded_started_ts: None,
+            recent_degraded_intervals: VecDeque::new(),
             #[cfg(feature = "stats")]
             total_transitions: 0,
             #[cfg(feature = "stats")]
             total_time_offline: TimestampDuration::new(0),
+            #[cfg(feature = "stats")]
+            total_time_degraded: TimestampDuration::new(0),
         }
     }
 }
 
 /// Detects if our node is online or offline.
 ///
-/// In order to determine if network errors are 'our fault 'or 'the other side's fault', we need to
-/// generally know if we are online or offline, before assigning blame to another node and changing
-/// its state. This
+/// To determine if network errors are 'our fault' or 'the other side's fault', we need to
+/// generally know if we are online or offline, before assigning blame to another node and
+/// changing its state.
 pub struct OnlineDetector {
     registry: VeilidComponentRegistry,
     inner: Mutex<BTreeMap<RoutingDomain, OnlineDetectionPerDomain>>,
     /// Framing types the network uses; only these gate offline detection.
     enabled_framing_types: Mutex<FramingTypeSet>,
+    /// Last local pipeline stall long enough to void timeout evidence; process-wide
+    last_local_stall: Mutex<Option<Timestamp>>,
 }
 
 impl_veilid_component_accessors!(OnlineDetector);
@@ -112,6 +222,7 @@ impl OnlineDetector {
             inner: Mutex::new(BTreeMap::new()),
             // Require both classes until the network reports its protocol config.
             enabled_framing_types: Mutex::new(FramingTypeSet::all()),
+            last_local_stall: Mutex::new(None),
         }
     }
 
@@ -195,17 +306,52 @@ impl OnlineDetector {
         }
     }
 
+    /// Report a measured local pipeline stall (executor tick lag, envelope build).
+    ///
+    /// A peer cannot answer inside a timeout we spent ourselves, so long stalls void
+    /// timeout evidence. Short ones are filtered here, so call sites report unconditionally
+    /// from their slow branches.
+    pub fn record_local_stall(&self, duration: TimestampDuration) {
+        if duration < TimestampDuration::new_ms(LOCAL_STALL_MIN_MS) {
+            return;
+        }
+        let now = Timestamp::now();
+        *self.last_local_stall.lock() = Some(now);
+        // Commit promptly so gates and the transition log fire before the next read
+        for routing_domain in RoutingDomain::all() {
+            if !Self::uses_ping_detection(routing_domain) {
+                continue;
+            }
+            let opt_transition = {
+                let mut inner = self.inner.lock();
+                let pd = inner.entry(routing_domain).or_default();
+                Self::commit_effective(pd, Some(now), now)
+            };
+            self.log_effective_transition(routing_domain, opt_transition, "local stall");
+        }
+    }
+
+    /// Whether blame writers should hold fire for this routing domain.
+    pub fn blame_suppressed(&self, routing_domain: RoutingDomain) -> bool {
+        self.online_state(routing_domain).suppresses_blame()
+    }
+
     /// Current online state for a routing domain.
     pub fn online_state(&self, routing_domain: RoutingDomain) -> OnlineState {
         // Domains without ping detection are always considered online.
         if !Self::uses_ping_detection(routing_domain) {
             return OnlineState::Online;
         }
-        self.inner
-            .lock()
-            .get(&routing_domain)
-            .map(|pd| pd.online_state)
-            .unwrap_or_default()
+        let local_stall_ts = *self.last_local_stall.lock();
+        let now = Timestamp::now();
+        let (state, opt_transition) = {
+            let mut inner = self.inner.lock();
+            let pd = inner.entry(routing_domain).or_default();
+            let opt_transition = Self::commit_effective(pd, local_stall_ts, now);
+            (pd.effective_state, opt_transition)
+        };
+        self.log_effective_transition(routing_domain, opt_transition, "evidence aged");
+        state
     }
 
     /// When this domain last came back online, if within the reliable ping span.
@@ -235,6 +381,30 @@ impl OnlineDetector {
         from: Timestamp,
         to: Timestamp,
     ) -> TimestampDuration {
+        self.interval_overlap(routing_domain, from, to, false)
+    }
+
+    /// The same, plus degraded time, where the blame gates discarded what came back.
+    ///
+    /// Only for spans that condemn. Degraded time still carries positive evidence
+    /// (successes are recorded throughout), so it must not be deducted from how long a
+    /// node has been answering.
+    pub fn blame_suppressed_overlap(
+        &self,
+        routing_domain: RoutingDomain,
+        from: Timestamp,
+        to: Timestamp,
+    ) -> TimestampDuration {
+        self.interval_overlap(routing_domain, from, to, true)
+    }
+
+    fn interval_overlap(
+        &self,
+        routing_domain: RoutingDomain,
+        from: Timestamp,
+        to: Timestamp,
+        include_degraded: bool,
+    ) -> TimestampDuration {
         if !Self::uses_ping_detection(routing_domain) || to <= from {
             return TimestampDuration::new(0);
         }
@@ -242,13 +412,21 @@ impl OnlineDetector {
         let Some(pd) = inner.get(&routing_domain) else {
             return TimestampDuration::new(0);
         };
+        let empty: VecDeque<(Timestamp, Timestamp)> = VecDeque::new();
+        let (degraded_intervals, opt_degraded_started) = if include_degraded {
+            (&pd.recent_degraded_intervals, pd.degraded_started_ts)
+        } else {
+            (&empty, None)
+        };
         let mut overlap = 0u64;
-        // Completed intervals plus any ongoing offline period extended to `to`.
+        // Offline and degraded never overlap: entering one closes the other
         for (s, e) in pd
             .recent_offline_intervals
             .iter()
+            .chain(degraded_intervals.iter())
             .copied()
             .chain(pd.offline_started_ts.map(|s| (s, to)))
+            .chain(opt_degraded_started.map(|s| (s, to)))
         {
             let lo = s.max(from);
             let hi = e.min(to);
@@ -259,13 +437,13 @@ impl OnlineDetector {
         TimestampDuration::new(overlap)
     }
 
-    /// Drive the state machine with an event, dispatching to the current state's handler.
+    /// Stats snapshot: (online, degraded, transitions, time offline, time degraded).
     #[cfg(feature = "stats")]
     pub(crate) fn online_stats(
         &self,
         routing_domain: RoutingDomain,
         now: Timestamp,
-    ) -> (bool, u64, TimestampDuration) {
+    ) -> (bool, bool, u64, TimestampDuration, TimestampDuration) {
         let inner = self.inner.lock();
         match inner.get(&routing_domain) {
             Some(pd) => {
@@ -273,38 +451,144 @@ impl OnlineDetector {
                 if let Some(start) = pd.offline_started_ts {
                     time_offline = time_offline.saturating_add(now.duration_since(start));
                 }
+                let mut time_degraded = pd.total_time_degraded;
+                if let Some(start) = pd.degraded_started_ts {
+                    time_degraded = time_degraded.saturating_add(now.duration_since(start));
+                }
                 (
                     matches!(pd.online_state, OnlineState::Online),
+                    matches!(pd.effective_state, OnlineState::Degraded),
                     pd.total_transitions,
                     time_offline,
+                    time_degraded,
                 )
             }
-            None => (true, 0, TimestampDuration::new(0)),
+            None => (
+                true,
+                false,
+                0,
+                TimestampDuration::new(0),
+                TimestampDuration::new(0),
+            ),
         }
     }
 
+    /// Recompute and commit the effective three-state answer; returns a
+    /// transition for the caller to log outside the lock.
+    fn commit_effective(
+        pd: &mut OnlineDetectionPerDomain,
+        local_stall_ts: Option<Timestamp>,
+        now: Timestamp,
+    ) -> Option<(OnlineState, OnlineState, u32)> {
+        let evidence = pd.last_degraded_evidence_ts.max(local_stall_ts);
+        let clean_secs = degraded_exit_clean_secs(pd.degraded_reentries);
+        let new_state = effective_online_state(
+            pd.online_state,
+            evidence,
+            pd.last_success_ts,
+            clean_secs,
+            now,
+        );
+        let old_state = pd.effective_state;
+        if new_state == old_state {
+            return None;
+        }
+        // Decided on entry, held for the whole degraded period
+        match (old_state, new_state) {
+            (OnlineState::Degraded, _) => pd.degraded_recovered_ts = Some(now),
+            (_, OnlineState::Degraded) => {
+                let rapid = pd.degraded_recovered_ts.is_some_and(|ts| {
+                    now.duration_since(ts) <= TimestampDuration::new_secs(DEGRADED_REENTRY_SECS)
+                });
+                pd.degraded_reentries = if rapid {
+                    pd.degraded_reentries.saturating_add(1)
+                } else {
+                    0
+                };
+            }
+            _ => {}
+        }
+        pd.effective_state = new_state;
+        if new_state == OnlineState::Degraded {
+            pd.degraded_started_ts = Some(now);
+        } else if let Some(start) = pd.degraded_started_ts.take() {
+            veilid_stats!(
+                pd.total_time_degraded = pd
+                    .total_time_degraded
+                    .saturating_add(now.duration_since(start))
+            );
+            pd.recent_degraded_intervals.push_back((start, now));
+            while pd.recent_degraded_intervals.front().is_some_and(|(_, e)| {
+                now.duration_since(*e) > crate::routing_table::RELIABLE_PING_INTERVAL_MAX
+            }) {
+                pd.recent_degraded_intervals.pop_front();
+            }
+        }
+        Some((
+            old_state,
+            new_state,
+            degraded_exit_clean_secs(pd.degraded_reentries),
+        ))
+    }
+
+    /// Degraded transitions log here; online and offline log from the stored machine.
+    fn log_effective_transition(
+        &self,
+        routing_domain: RoutingDomain,
+        opt_transition: Option<(OnlineState, OnlineState, u32)>,
+        why: &str,
+    ) {
+        let Some((old_state, new_state, clean_secs)) = opt_transition else {
+            return;
+        };
+        match (old_state, new_state) {
+            (_, OnlineState::Degraded) => {
+                veilid_log!(self info "{:?} degraded detected ({}): blame suppressed, exit needs {}s clean", routing_domain, why, clean_secs);
+            }
+            (OnlineState::Degraded, OnlineState::Online) => {
+                veilid_log!(self info "{:?} recovered from degraded", routing_domain);
+            }
+            _ => {}
+        }
+    }
+
+    /// Drive the state machine with an event, dispatching to the current state's handler.
     fn process_event(&self, routing_domain: RoutingDomain, event: OnlineEvent) {
         if !Self::uses_ping_detection(routing_domain) {
             return;
         }
         let enabled_framing_types = *self.enabled_framing_types.lock();
+        let local_stall_ts = *self.last_local_stall.lock();
         let now = Timestamp::now();
 
-        let (opt_new_state, opt_flap_penalty) = {
+        let (opt_new_state, opt_flap_penalty, do_purge, purge_reason, do_wipe, opt_eff_transition) = {
             let mut inner = self.inner.lock();
             let pd = inner.entry(routing_domain).or_default();
+            // Exiting Degraded needs a round trip after the evidence, so stamp in every state
+            if matches!(event, OnlineEvent::Success) {
+                pd.last_success_ts = Some(now);
+            }
             let opt_new_state = match pd.online_state {
                 OnlineState::Offline => Self::process_offline_event(&event),
-                OnlineState::Online => {
-                    Self::process_online_event(pd, &event, enabled_framing_types)
+                OnlineState::Online | OnlineState::Degraded => {
+                    Self::process_online_event(pd, &event, enabled_framing_types, now)
                 }
             };
             let mut opt_flap_penalty = None;
+            let mut do_wipe = false;
             if let Some(new_state) = opt_new_state {
                 match new_state {
-                    OnlineState::Offline => pd.offline_started_ts = Some(now),
+                    // The stored machine is two-state; Degraded is the derived overlay
+                    OnlineState::Degraded => unreachable!(),
+                    OnlineState::Offline => {
+                        pd.offline_started_ts = Some(now);
+                        pd.offline_purged = false;
+                    }
                     OnlineState::Online => {
                         if let Some(start) = pd.offline_started_ts.take() {
+                            // Only a sustained outage invalidates transport evidence
+                            do_wipe = now.duration_since(start)
+                                >= TimestampDuration::new_secs(OFFLINE_SUSTAINED_SECS);
                             pd.recent_offline_intervals.push_back((start, now));
                             veilid_stats!(
                                 pd.total_time_offline = pd
@@ -332,21 +616,60 @@ impl OnlineDetector {
                     opt_flap_penalty = pd.flap_detector.record(now.as_u64(), new_state);
                 }
             }
-            (opt_new_state, opt_flap_penalty)
+
+            // Purge policy: a NAT rebind black-holes established flows, so a real outage
+            // must close everything and a blip must not. An interface change is a confirmed
+            // move (purge at once); ping-derived offline must persist first, rechecked
+            // on each event while offline.
+            let mut do_purge = false;
+            let mut purge_reason = "";
+            if pd.online_state == OnlineState::Offline && !matches!(event, OnlineEvent::Detached) {
+                // A move purges even mid-outage: recovery attempts may have opened
+                // fresh connections on the old interface since the last purge
+                let confirmed_move = matches!(event, OnlineEvent::NetworkChange);
+                let sustained = !pd.offline_purged
+                    && pd.offline_started_ts.is_some_and(|start| {
+                        now.duration_since(start)
+                            >= TimestampDuration::new_secs(OFFLINE_SUSTAINED_SECS)
+                    });
+                if confirmed_move || sustained {
+                    pd.offline_purged = true;
+                    do_purge = true;
+                    purge_reason = if confirmed_move {
+                        "interface change"
+                    } else {
+                        "sustained offline"
+                    };
+                }
+            }
+            let opt_eff_transition = Self::commit_effective(pd, local_stall_ts, now);
+            (
+                opt_new_state,
+                opt_flap_penalty,
+                do_purge,
+                purge_reason,
+                do_wipe,
+                opt_eff_transition,
+            )
         };
 
         // Log the transition (and any flapping) outside the lock.
         if let Some(new_state) = opt_new_state {
             veilid_log!(self info "{:?} {} detected", routing_domain,
                 if new_state == OnlineState::Online { "online" } else { "offline" });
-
-            // A NAT rebind kills established flows silently; close them so recovery pings
-            // reconnect instead of riding dead ones
-            if new_state == OnlineState::Offline && !matches!(event, OnlineEvent::Detached) {
-                self.network_manager()
-                    .connection_manager()
-                    .close_all_connections();
-            }
+        }
+        self.log_effective_transition(routing_domain, opt_eff_transition, "broad failures");
+        if do_purge {
+            // close_all_connections is silent on an empty table; log the decision
+            veilid_log!(self debug "{:?} purging connections: {}", routing_domain, purge_reason);
+            self.network_manager()
+                .connection_manager()
+                .close_all_connections();
+        }
+        if do_wipe {
+            self.network_manager()
+                .transport_stats()
+                .reset_routing_domain(routing_domain, "sustained offline ended");
         }
         if let Some(penalty) = opt_flap_penalty {
             veilid_log!(self debugwarn "{:?} online state FLAPPING (penalty={:.1})", routing_domain, penalty);
@@ -369,6 +692,7 @@ impl OnlineDetector {
         pd: &mut OnlineDetectionPerDomain,
         event: &OnlineEvent,
         enabled_framing_types: FramingTypeSet,
+        now: Timestamp,
     ) -> Option<OnlineState> {
         match event {
             OnlineEvent::Success => {
@@ -385,8 +709,23 @@ impl OnlineDetector {
                     return None;
                 }
                 let bucket = pd.pending_failures.entry(*framing_type).or_default();
+                let wbucket = pd.windowed_failures.entry(*framing_type).or_default();
                 for node_id in live_node_ids {
                     bucket.insert(node_id.clone());
+                    wbucket.insert(node_id.clone(), now);
+                }
+                // Windowed breadth survives interleaved successes: the degraded signature
+                let window = TimestampDuration::new_secs(DEGRADED_EVIDENCE_WINDOW_SECS);
+                for wb in pd.windowed_failures.values_mut() {
+                    wb.retain(|_, ts| now.duration_since(*ts) <= window);
+                }
+                let all_windowed = !enabled_framing_types.is_empty()
+                    && enabled_framing_types.iter().all(|ft| {
+                        pd.windowed_failures.get(&ft).map_or(0, BTreeMap::len)
+                            >= failure_threshold(ft)
+                    });
+                if all_windowed {
+                    pd.last_degraded_evidence_ts = Some(now);
                 }
                 // Offline only when every enabled socket class has crossed its threshold, so
                 // localized trouble on one class doesn't drive offline while another works.
@@ -403,6 +742,11 @@ impl OnlineDetector {
             }
             OnlineEvent::NetworkChange | OnlineEvent::Detached => {
                 pd.pending_failures.clear();
+                // Degradation evidence belongs to the network we just left
+                pd.windowed_failures.clear();
+                pd.last_degraded_evidence_ts = None;
+                pd.degraded_reentries = 0;
+                pd.degraded_recovered_ts = None;
                 Some(OnlineState::Offline)
             }
         }

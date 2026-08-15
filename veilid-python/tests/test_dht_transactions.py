@@ -434,6 +434,83 @@ async def test_transact_dht_records_set_commit_get_commit(api_connection: Veilid
 
 
 @pytest.mark.asyncio
+async def test_transact_dht_records_min_seqnum(api_connection: VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            rec = await rc.create_dht_record(kind, DHTSchema.dflt(2))
+
+            # MAX minus one leaves exactly one write
+            rec_tx = await api_connection.transact_dht_records([rec.key], None)
+            async with rec_tx:
+                vd = await rec_tx.set(
+                    rec.key,
+                    ValueSubkey(0),
+                    TEST_MESSAGE_1,
+                    DHTTransactionSetValueOptions(None, ValueSeqNum(ValueSeqNum.MAX - 1)),
+                )
+                assert vd is None
+                await rec_tx.commit()
+
+            report = await rc.inspect_dht_record(rec.key, [(ValueSubkey(0), ValueSubkey(0))], DHTReportScope.LOCAL)
+            assert report.local_seqs == [ValueSeqNum.MAX - 1]
+
+            rec_tx = await api_connection.transact_dht_records([rec.key], None)
+            async with rec_tx:
+                vd = await rec_tx.set(rec.key, ValueSubkey(0), TEST_MESSAGE_2)
+                assert vd is None
+                await rec_tx.commit()
+
+            report = await rc.inspect_dht_record(rec.key, [(ValueSubkey(0), ValueSubkey(0))], DHTReportScope.LOCAL)
+            assert report.local_seqs == [ValueSeqNum.MAX]
+
+            rec_tx = await api_connection.transact_dht_records([rec.key], None)
+            async with rec_tx:
+                # A snapshot subkey at max must not break the sequence numbers a set would produce
+                report = await rec_tx.inspect(rec.key, [(ValueSubkey(0), ValueSubkey(1))], DHTReportScope.UPDATE_SET)
+                assert report.local_seqs == [ValueSeqNum.MAX, 0]
+
+                # And nothing can be written after it. A transaction knows every online sequence
+                # number at begin and only lands with consensus, so unlike a plain set it does not
+                # let a minimum the sequence number already satisfies reuse it.
+                with pytest.raises(VeilidAPIError):
+                    await rec_tx.set(rec.key, ValueSubkey(0), TEST_MESSAGE_1)
+                with pytest.raises(VeilidAPIError):
+                    await rec_tx.set(
+                        rec.key,
+                        ValueSubkey(0),
+                        TEST_MESSAGE_1,
+                        DHTTransactionSetValueOptions(None, ValueSeqNum(ValueSeqNum.MAX)),
+                    )
+                await rec_tx.rollback()
+
+            # PROBE
+            for label, opts, payload in (
+                ("same value, no minimum", None, TEST_MESSAGE_2),
+                ("same value, same minimum", DHTTransactionSetValueOptions(None, ValueSeqNum(ValueSeqNum.MAX)), TEST_MESSAGE_2),
+                ("different value, same minimum", DHTTransactionSetValueOptions(None, ValueSeqNum(ValueSeqNum.MAX)), TEST_MESSAGE_1),
+            ):
+                rec_tx = await api_connection.transact_dht_records([rec.key], None)
+                async with rec_tx:
+                    try:
+                        vd = await rec_tx.set(rec.key, ValueSubkey(0), payload, opts)
+                        print(f"PROBE {label}: set -> {vd!r}")
+                        await rec_tx.commit()
+                        print(f"PROBE {label}: commit ok")
+                    except Exception as e:
+                        print(f"PROBE {label}: RAISED {type(e).__name__} {e}")
+                        try:
+                            await rec_tx.rollback()
+                        except Exception:
+                            pass
+                rr = await rc.inspect_dht_record(rec.key, [(ValueSubkey(0), ValueSubkey(0))], DHTReportScope.LOCAL)
+                print(f"PROBE {label}: local_seqs={rr.local_seqs}")
+
+            await rc.close_dht_record(rec.key)
+            await rc.delete_dht_record(rec.key)
+
+
+@pytest.mark.asyncio
 async def test_transact_dht_records_set_commit_delete_get_rollback(api_connection: VeilidAPI):
     rc = await api_connection.new_routing_context()
     async with rc:

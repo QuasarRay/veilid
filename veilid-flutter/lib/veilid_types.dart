@@ -226,6 +226,9 @@ sealed class ValueData with _$ValueData {
   /// Maximum length in bytes of the data a single subkey may hold.
   static const maxLen = 32768;
 
+  /// The largest sequence number. Subtract n for a `minSeqnum` leaving n writes.
+  static const maxSeqnum = 0xFFFFFFFE;
+
   /// `seq` time-orders changes to the subkey; `writer` is the public identity
   /// key of the writer. In debug builds, throws [AssertionError] if `seq` is
   /// outside `0..=4294967295` or `data` exceeds [maxLen] bytes.
@@ -517,19 +520,18 @@ enum DHTReportScope {
 sealed class SetDHTValueOptions with _$SetDHTValueOptions {
   /// `writer` overrides the writer key pair for the operation. `allowOffline`
   /// defaults to true; when false, an offline node returns a TryAgain error
-  /// instead of writing.
-  const factory SetDHTValueOptions({KeyPair? writer, bool? allowOffline}) =
-      _SetDHTValueOptions;
+  /// instead of writing. `minSeqnum` raises the sequence number to at least
+  /// that value after the automatic increment; [ValueData.maxSeqnum] minus n
+  /// leaves n writes after this one.
+  const factory SetDHTValueOptions({
+    KeyPair? writer,
+    bool? allowOffline,
+    int? minSeqnum,
+  }) = _SetDHTValueOptions;
 
   /// Decode a [SetDHTValueOptions] from its JSON representation.
   factory SetDHTValueOptions.fromJson(dynamic json) =>
       _$SetDHTValueOptionsFromJson(json as Map<String, dynamic>);
-
-  @override
-  Map<String, dynamic> toJson() => {
-    'writer': writer,
-    'allow_offline': allowOffline,
-  };
 }
 
 //////////////////////////////////////

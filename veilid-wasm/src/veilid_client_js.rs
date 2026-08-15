@@ -119,6 +119,13 @@ impl VeilidClient {
         .into()
     }
 
+    /// The largest DHT value sequence number. Subtract `n` for a `minSeqnum` that leaves `n` writes
+    #[wasm_bindgen(getter, unchecked_return_type = "ValueSeqNum")]
+    #[must_use]
+    pub fn VALUE_SEQ_NUM_MAX() -> JsValue {
+        JsValue::from(u32::from(ValueSeqNum::MAX))
+    }
+
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     /// Initialize the WASM platform: panic hook and tracing layers from the platform config.

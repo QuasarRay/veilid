@@ -153,12 +153,14 @@ _SetDHTValueOptions _$SetDHTValueOptionsFromJson(Map<String, dynamic> json) =>
     _SetDHTValueOptions(
       writer: json['writer'] == null ? null : KeyPair.fromJson(json['writer']),
       allowOffline: json['allowOffline'] as bool?,
+      minSeqnum: (json['minSeqnum'] as num?)?.toInt(),
     );
 
 Map<String, dynamic> _$SetDHTValueOptionsToJson(_SetDHTValueOptions instance) =>
     <String, dynamic>{
       'writer': instance.writer?.toJson(),
       'allowOffline': instance.allowOffline,
+      'minSeqnum': instance.minSeqnum,
     };
 
 _TransactDHTRecordsOptions _$TransactDHTRecordsOptionsFromJson(

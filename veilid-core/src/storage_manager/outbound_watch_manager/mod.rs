@@ -29,6 +29,9 @@ pub(in crate::storage_manager) struct OutboundWatchManager {
     /// with the earliest time each may run
     #[serde(skip)]
     pub needs_change_inspection: HashMap<RecordKey, (ValueSubkeyRangeSet, Timestamp)>,
+    /// Subkeys owed a repeat hint per record, drained by the outbound watch check tick
+    #[serde(skip)]
+    pub pending_rehints: HashMap<RecordKey, ValueSubkeyRangeSet>,
 }
 
 impl fmt::Display for OutboundWatchManager {
@@ -97,6 +100,7 @@ impl OutboundWatchManager {
             outbound_watches: HashMap::new(),
             per_node_states: HashMap::new(),
             needs_change_inspection: HashMap::new(),
+            pending_rehints: HashMap::new(),
         }
     }
 

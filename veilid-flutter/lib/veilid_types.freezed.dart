@@ -2281,7 +2281,7 @@ as List<int?>,
 /// @nodoc
 mixin _$SetDHTValueOptions {
 
- KeyPair? get writer; bool? get allowOffline;
+ KeyPair? get writer; bool? get allowOffline; int? get minSeqnum;
 /// Create a copy of SetDHTValueOptions
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -2294,16 +2294,16 @@ $SetDHTValueOptionsCopyWith<SetDHTValueOptions> get copyWith => _$SetDHTValueOpt
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SetDHTValueOptions&&(identical(other.writer, writer) || other.writer == writer)&&(identical(other.allowOffline, allowOffline) || other.allowOffline == allowOffline));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SetDHTValueOptions&&(identical(other.writer, writer) || other.writer == writer)&&(identical(other.allowOffline, allowOffline) || other.allowOffline == allowOffline)&&(identical(other.minSeqnum, minSeqnum) || other.minSeqnum == minSeqnum));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,writer,allowOffline);
+int get hashCode => Object.hash(runtimeType,writer,allowOffline,minSeqnum);
 
 @override
 String toString() {
-  return 'SetDHTValueOptions(writer: $writer, allowOffline: $allowOffline)';
+  return 'SetDHTValueOptions(writer: $writer, allowOffline: $allowOffline, minSeqnum: $minSeqnum)';
 }
 
 
@@ -2314,7 +2314,7 @@ abstract mixin class $SetDHTValueOptionsCopyWith<$Res>  {
   factory $SetDHTValueOptionsCopyWith(SetDHTValueOptions value, $Res Function(SetDHTValueOptions) _then) = _$SetDHTValueOptionsCopyWithImpl;
 @useResult
 $Res call({
- KeyPair? writer, bool? allowOffline
+ KeyPair? writer, bool? allowOffline, int? minSeqnum
 });
 
 
@@ -2331,11 +2331,12 @@ class _$SetDHTValueOptionsCopyWithImpl<$Res>
 
 /// Create a copy of SetDHTValueOptions
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? writer = freezed,Object? allowOffline = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? writer = freezed,Object? allowOffline = freezed,Object? minSeqnum = freezed,}) {
   return _then(_self.copyWith(
 writer: freezed == writer ? _self.writer : writer // ignore: cast_nullable_to_non_nullable
 as KeyPair?,allowOffline: freezed == allowOffline ? _self.allowOffline : allowOffline // ignore: cast_nullable_to_non_nullable
-as bool?,
+as bool?,minSeqnum: freezed == minSeqnum ? _self.minSeqnum : minSeqnum // ignore: cast_nullable_to_non_nullable
+as int?,
   ));
 }
 
@@ -2417,10 +2418,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( KeyPair? writer,  bool? allowOffline)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( KeyPair? writer,  bool? allowOffline,  int? minSeqnum)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SetDHTValueOptions() when $default != null:
-return $default(_that.writer,_that.allowOffline);case _:
+return $default(_that.writer,_that.allowOffline,_that.minSeqnum);case _:
   return orElse();
 
 }
@@ -2438,10 +2439,10 @@ return $default(_that.writer,_that.allowOffline);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( KeyPair? writer,  bool? allowOffline)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( KeyPair? writer,  bool? allowOffline,  int? minSeqnum)  $default,) {final _that = this;
 switch (_that) {
 case _SetDHTValueOptions():
-return $default(_that.writer,_that.allowOffline);}
+return $default(_that.writer,_that.allowOffline,_that.minSeqnum);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -2455,10 +2456,10 @@ return $default(_that.writer,_that.allowOffline);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( KeyPair? writer,  bool? allowOffline)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( KeyPair? writer,  bool? allowOffline,  int? minSeqnum)?  $default,) {final _that = this;
 switch (_that) {
 case _SetDHTValueOptions() when $default != null:
-return $default(_that.writer,_that.allowOffline);case _:
+return $default(_that.writer,_that.allowOffline,_that.minSeqnum);case _:
   return null;
 
 }
@@ -2470,11 +2471,12 @@ return $default(_that.writer,_that.allowOffline);case _:
 @JsonSerializable()
 
 class _SetDHTValueOptions implements SetDHTValueOptions {
-  const _SetDHTValueOptions({this.writer, this.allowOffline});
+  const _SetDHTValueOptions({this.writer, this.allowOffline, this.minSeqnum});
   factory _SetDHTValueOptions.fromJson(Map<String, dynamic> json) => _$SetDHTValueOptionsFromJson(json);
 
 @override final  KeyPair? writer;
 @override final  bool? allowOffline;
+@override final  int? minSeqnum;
 
 /// Create a copy of SetDHTValueOptions
 /// with the given fields replaced by the non-null parameter values.
@@ -2489,16 +2491,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SetDHTValueOptions&&(identical(other.writer, writer) || other.writer == writer)&&(identical(other.allowOffline, allowOffline) || other.allowOffline == allowOffline));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SetDHTValueOptions&&(identical(other.writer, writer) || other.writer == writer)&&(identical(other.allowOffline, allowOffline) || other.allowOffline == allowOffline)&&(identical(other.minSeqnum, minSeqnum) || other.minSeqnum == minSeqnum));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,writer,allowOffline);
+int get hashCode => Object.hash(runtimeType,writer,allowOffline,minSeqnum);
 
 @override
 String toString() {
-  return 'SetDHTValueOptions(writer: $writer, allowOffline: $allowOffline)';
+  return 'SetDHTValueOptions(writer: $writer, allowOffline: $allowOffline, minSeqnum: $minSeqnum)';
 }
 
 
@@ -2509,7 +2511,7 @@ abstract mixin class _$SetDHTValueOptionsCopyWith<$Res> implements $SetDHTValueO
   factory _$SetDHTValueOptionsCopyWith(_SetDHTValueOptions value, $Res Function(_SetDHTValueOptions) _then) = __$SetDHTValueOptionsCopyWithImpl;
 @override @useResult
 $Res call({
- KeyPair? writer, bool? allowOffline
+ KeyPair? writer, bool? allowOffline, int? minSeqnum
 });
 
 
@@ -2526,11 +2528,12 @@ class __$SetDHTValueOptionsCopyWithImpl<$Res>
 
 /// Create a copy of SetDHTValueOptions
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? writer = freezed,Object? allowOffline = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? writer = freezed,Object? allowOffline = freezed,Object? minSeqnum = freezed,}) {
   return _then(_SetDHTValueOptions(
 writer: freezed == writer ? _self.writer : writer // ignore: cast_nullable_to_non_nullable
 as KeyPair?,allowOffline: freezed == allowOffline ? _self.allowOffline : allowOffline // ignore: cast_nullable_to_non_nullable
-as bool?,
+as bool?,minSeqnum: freezed == minSeqnum ? _self.minSeqnum : minSeqnum // ignore: cast_nullable_to_non_nullable
+as int?,
   ));
 }
 

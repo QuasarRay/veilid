@@ -451,26 +451,24 @@ class VeilidCryptoSystemJS extends VeilidCryptoSystem {
     EncapsulationKey recipient,
     Uint8List aad,
     Uint8List plaintext,
-  ) =>
-      _wasmPromiseUint8List('crypto_hpke_seal', [
-        _kind.toJS,
-        jsonEncode(recipient).toJS,
-        base64UrlNoPadEncode(aad).toJS,
-        base64UrlNoPadEncode(plaintext).toJS,
-      ]);
+  ) => _wasmPromiseUint8List('crypto_hpke_seal', [
+    _kind.toJS,
+    jsonEncode(recipient).toJS,
+    base64UrlNoPadEncode(aad).toJS,
+    base64UrlNoPadEncode(plaintext).toJS,
+  ]);
 
   @override
   Future<Uint8List> hpkeOpen(
     DecapsulationKey secret,
     Uint8List aad,
     Uint8List sealed,
-  ) =>
-      _wasmPromiseUint8List('crypto_hpke_open', [
-        _kind.toJS,
-        jsonEncode(secret).toJS,
-        base64UrlNoPadEncode(aad).toJS,
-        base64UrlNoPadEncode(sealed).toJS,
-      ]);
+  ) => _wasmPromiseUint8List('crypto_hpke_open', [
+    _kind.toJS,
+    jsonEncode(secret).toJS,
+    base64UrlNoPadEncode(aad).toJS,
+    base64UrlNoPadEncode(sealed).toJS,
+  ]);
 
   @override
   Future<Uint8List> randomBytes(int len) =>
@@ -603,21 +601,20 @@ class VeilidCryptoSystemJS extends VeilidCryptoSystem {
 
   @override
   Future<EncapsulationKey> encapsulationKeyFromSigningKey(PublicKey key) =>
-      _wasmPromiseJson('crypto_encapsulation_key_from_signing_key',
-          EncapsulationKey.fromJson, [
-        _kind.toJS,
-        jsonEncode(key).toJS,
-      ]);
+      _wasmPromiseJson(
+        'crypto_encapsulation_key_from_signing_key',
+        EncapsulationKey.fromJson,
+        [_kind.toJS, jsonEncode(key).toJS],
+      );
 
   @override
   Future<DecapsulationKey> decapsulationKeyFromSigningSecret(
     SecretKey secret,
-  ) =>
-      _wasmPromiseJson('crypto_decapsulation_key_from_signing_secret',
-          DecapsulationKey.fromJson, [
-        _kind.toJS,
-        jsonEncode(secret).toJS,
-      ]);
+  ) => _wasmPromiseJson(
+    'crypto_decapsulation_key_from_signing_secret',
+    DecapsulationKey.fromJson,
+    [_kind.toJS, jsonEncode(secret).toJS],
+  );
 
   @override
   Future<HashDigest> generateHash(Uint8List data) => _wasmPromiseJson(

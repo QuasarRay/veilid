@@ -16,15 +16,17 @@ part 'veilid_dht_transaction.g.dart';
 sealed class DHTTransactionSetValueOptions
     with _$DHTTransactionSetValueOptions {
   /// Builds set options, optionally overriding the record's default [writer].
-  const factory DHTTransactionSetValueOptions({KeyPair? writer}) =
-      _DHTTransactionSetValueOptions;
+  /// `minSeqnum` raises the sequence number to at least that value after the
+  /// automatic increment; [ValueData.maxSeqnum] minus n leaves n writes after
+  /// this one.
+  const factory DHTTransactionSetValueOptions({
+    KeyPair? writer,
+    int? minSeqnum,
+  }) = _DHTTransactionSetValueOptions;
 
   /// Decodes options from JSON.
   factory DHTTransactionSetValueOptions.fromJson(dynamic json) =>
       _$DHTTransactionSetValueOptionsFromJson(json as Map<String, dynamic>);
-
-  @override
-  Map<String, dynamic> toJson() => {'writer': writer};
 }
 
 //////////////////////////////////////

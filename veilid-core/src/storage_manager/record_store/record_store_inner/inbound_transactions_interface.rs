@@ -524,6 +524,15 @@ where
         ))
     }
 
+    /// Stage a transactional set of a subkey against the transaction's begin-time snapshot.
+    ///
+    /// One of the two places a storage node enforces sequence numbers; the other is
+    /// `StorageManager::inbound_set_value`, for non-transactional sets. This node stages the
+    /// proposed value only if its sequence number is strictly greater than the snapshot's,
+    /// otherwise it leaves the subkey alone and returns the existing value to the writer.
+    /// Nothing exceeds [ValueSeqNum::MAX], so a subkey stored there refuses every successor
+    /// for as long as this node holds the value, which is what a `min_seqnum` of `MAX` rests
+    /// on.
     pub fn inbound_transaction_set(
         &mut self,
         opaque_record_key: &OpaqueRecordKey,

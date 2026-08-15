@@ -7,12 +7,13 @@ pub struct ConnectionHandle {
     flow: Flow,
     channel: flume::Sender<(Option<Id>, Bytes)>,
     dead: Arc<AtomicBool>,
+    dialed: bool,
 }
 
 #[derive(Debug)]
 pub enum ConnectionHandleSendResult {
     Sent,
-    NotSent(Bytes),
+    NotSent,
 }
 
 impl ConnectionHandle {
@@ -21,12 +22,14 @@ impl ConnectionHandle {
         flow: Flow,
         channel: flume::Sender<(Option<Id>, Bytes)>,
         dead: Arc<AtomicBool>,
+        dialed: bool,
     ) -> Self {
         Self {
             connection_id,
             flow,
             channel,
             dead,
+            dialed,
         }
     }
 
@@ -44,6 +47,7 @@ impl ConnectionHandle {
         UniqueFlow {
             flow: self.flow,
             connection_id: Some(self.connection_id),
+            dialed: self.dialed,
         }
     }
 
@@ -51,7 +55,7 @@ impl ConnectionHandle {
     // pub fn send(&self, message: Bytes) -> ConnectionHandleSendResult {
     //     match self.channel.send((Span::current().id(), message)) {
     //         Ok(()) => ConnectionHandleSendResult::Sent,
-    //         Err(e) => ConnectionHandleSendResult::NotSent(e.0 .1),
+    //         Err(_) => ConnectionHandleSendResult::NotSent,
     //     }
     // }
 
@@ -59,7 +63,7 @@ impl ConnectionHandle {
     pub async fn send_async(&self, message: Bytes) -> ConnectionHandleSendResult {
         // A dead connection's processor no longer drains the channel; queueing would silently drop
         if self.dead.load(Ordering::Relaxed) {
-            return ConnectionHandleSendResult::NotSent(message);
+            return ConnectionHandleSendResult::NotSent;
         }
         match self
             .channel
@@ -67,7 +71,7 @@ impl ConnectionHandle {
             .await
         {
             Ok(()) => ConnectionHandleSendResult::Sent,
-            Err(e) => ConnectionHandleSendResult::NotSent(e.0 .1),
+            Err(_) => ConnectionHandleSendResult::NotSent,
         }
     }
 }

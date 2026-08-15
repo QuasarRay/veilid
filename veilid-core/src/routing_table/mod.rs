@@ -57,6 +57,10 @@ const BUCKET_COUNT: usize = HASH_COORDINATE_LENGTH * 8;
 /// How frequently we flush the routing table and route spec store to storage
 const ROUTING_TABLE_FLUSH_INTERVAL_SECS: u32 = 30;
 
+/// Contact-method viability recompute is event-driven (cm_viability_dirty); this
+/// only rate-limits how often the drain can fire
+const UPDATE_CM_VIABILITY_INTERVAL_SECS: u32 = 1;
+
 // Table store keys
 const ALL_ENTRY_BYTES: &[u8] = b"all_entry_bytes";
 const ROUTING_TABLE: &str = "routing_table";
@@ -141,6 +145,11 @@ pub(crate) struct RoutingTable {
     route_spec_store: RouteSpecStore,
     /// Buckets to kick on our next kick task
     kick_queue: Mutex<BTreeSet<BucketIndex>>,
+    /// Set when peerinfo changed on either side; the cm viability task fires only when set
+    cm_viability_dirty: core::sync::atomic::AtomicBool,
+    /// Last route-test enqueue time per route, so a struggling route is not
+    /// re-tested continuously on lossy networks
+    route_test_cooldown: Mutex<BTreeMap<RouteId, Timestamp>>,
     /// Interim accounting mechanism for this node's RPC latency to any other node
     self_latency_stats_accounting: Mutex<(LatencyStatsAccounting, LatencyStats)>,
     /// Interim accounting mechanism for the total bandwidth to/from this node
@@ -162,6 +171,8 @@ pub(crate) struct RoutingTable {
     rolling_answers_task: TickTask<EyreReport>,
     /// Background process to purge dead routing table entries when necessary
     kick_buckets_task: TickTask<EyreReport>,
+    /// Background process to recompute per-entry contact-method viability
+    update_cm_viability_task: TickTask<EyreReport>,
 
     /// Tick subscription
     tick_subscription: Mutex<Option<EventBusSubscription>>,
@@ -200,6 +211,8 @@ impl RoutingTable {
             public_keys: Default::default(),
             secret_keys: Default::default(),
             kick_queue: Default::default(),
+            cm_viability_dirty: core::sync::atomic::AtomicBool::new(true),
+            route_test_cooldown: Default::default(),
             ping_validation_sender: Mutex::new(ping_validation_sender),
             ping_validation_receiver: Mutex::new(Some(ping_validation_receiver)),
             ping_validation_processor_jh: Mutex::new(None),
@@ -224,6 +237,10 @@ impl RoutingTable {
                 ROLLING_ANSWER_INTERVAL_SECS,
             ),
             kick_buckets_task: TickTask::new("kick_buckets_task", 1),
+            update_cm_viability_task: TickTask::new(
+                "update_cm_viability_task",
+                UPDATE_CM_VIABILITY_INTERVAL_SECS,
+            ),
 
             tick_subscription: Default::default(),
         };
@@ -945,7 +962,7 @@ impl RoutingTable {
         //     Option::<()>::None
         // });
 
-        // Per-routing-domain state — failures are non-fatal
+        // Per-routing-domain state; failures are non-fatal
         for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
             if let Err(e) = rdc.load(&db).await {
                 veilid_log!(self warn "failed to load persisted state for {}: {}", rdc.routing_domain(), e);
@@ -1437,7 +1454,7 @@ impl RoutingTable {
         }
 
         // Reject if any of the node's own direct dial info exactly matches any of our own
-        // direct dial info (relay dial info is intentionally excluded — sharing a relay is fine)
+        // direct dial info (relay dial info excluded; sharing a relay is fine)
         let our_addrs = self.own_direct_dial_info_addresses(routing_domain);
         if !our_addrs.is_empty()
             && node_info
@@ -1505,6 +1522,30 @@ impl RoutingTable {
         Ok(nr)
     }
 
+    /// Drop learned per-peer transport evidence table-wide.
+    ///
+    /// Call this only for OUR OWN address changes (a local routable interface address,
+    /// or a detected external address change): failures we blamed on peers' transports
+    /// may have been ours. Never on peer info changes: our peer info carries our relay
+    /// set, a relay swap says nothing about other peers, and clearing would wipe the
+    /// evidence relay candidacy needs.
+    pub(crate) fn clear_all_transport_evidence(&self) {
+        self.inner.write().clear_all_transport_evidence();
+    }
+
+    /// Signal that some peerinfo changed (ours or theirs) so contact-method
+    /// viability gets recomputed; the task's basis check skips unchanged entries
+    pub(crate) fn mark_cm_viability_dirty(&self) {
+        self.cm_viability_dirty
+            .store(true, core::sync::atomic::Ordering::Release);
+    }
+
+    /// Take the viability dirty flag; changes that land during a recompute re-set it
+    pub(crate) fn take_cm_viability_dirty(&self) -> bool {
+        self.cm_viability_dirty
+            .swap(false, core::sync::atomic::Ordering::AcqRel)
+    }
+
     /// Called whenever a routing table entry is:
     /// 1. created or updated with new peer information
     /// 2. has a node id added or removed (per CryptoKind)
@@ -1520,6 +1561,7 @@ impl RoutingTable {
         old_peer_info: Option<Arc<PeerInfo>>,
         new_peer_info: Option<Arc<PeerInfo>>,
     ) {
+        self.mark_cm_viability_dirty();
         let (routing_domain, node_ids) = match (old_peer_info.as_ref(), new_peer_info.as_ref()) {
             (None, None) => {
                 return;

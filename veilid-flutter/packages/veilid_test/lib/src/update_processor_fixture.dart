@@ -11,8 +11,7 @@ class UpdateProcessorFixture implements VeilidProcessorInterface {
   VeilidFixture veilidFixture;
 
   @override
-  ProcessorConnectionState processorConnectionState =
-      ProcessorConnectionState(
+  ProcessorConnectionState processorConnectionState = ProcessorConnectionState(
     attachment: VeilidStateAttachment(
       state: AttachmentState.detached,
       publicInternetReady: false,

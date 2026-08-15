@@ -12,6 +12,17 @@ class TestDHT {
 
   TestDHT(this.cryptoKind);
 
+  // A closing write has no next write to recover with, so it reports TryAgain
+  static final _closingWriteRetry = RetryStrategy(
+    timeout: const Duration(seconds: 30),
+    rules: [
+      RetryRule.delay(
+        matches: (e) => e is VeilidAPIExceptionTryAgain,
+        delay: const Duration(milliseconds: 250),
+      ),
+    ],
+  );
+
   Future<void> setUpAll() async {
     routingContext = await Veilid.instance.routingContext();
   }
@@ -292,6 +303,50 @@ class TestDHT {
     expect(rr2.subkeys, equals([ValueSubkeyRange.make(0, 1)]));
     expect(rr2.localSeqs, equals([0, null]));
     expect(rr2.networkSeqs, equals([0, null]));
+
+    await routingContext.closeDHTRecord(rec.key);
+    await routingContext.deleteDHTRecord(rec.key);
+  }
+
+  Future<void> testMinSeqnumDHTRecord() async {
+    final rec = await routingContext.createDHTRecord(
+        cryptoKind, const DHTSchema.dflt(oCnt: 1));
+
+    const noOffline = SetDHTValueOptions(allowOffline: false);
+    final va = utf8.encode('Qwertyuiop Asdfghjkl Zxcvbnm');
+    final vb = utf8.encode('1234567890');
+
+    // maxSeqnum - 1 leaves exactly one write
+    expect(
+        await routingContext.setDHTValue(rec.key, 0, va,
+            options: noOffline.copyWith(minSeqnum: ValueData.maxSeqnum - 1)),
+        isNull);
+
+    var rr = await routingContext.inspectDHTRecord(rec.key);
+    expect(rr.localSeqs, equals([ValueData.maxSeqnum - 1]));
+
+    expect(
+        await _closingWriteRetry.retry(() =>
+            routingContext.setDHTValue(rec.key, 0, vb, options: noOffline)),
+        isNull);
+
+    rr = await routingContext.inspectDHTRecord(rec.key);
+    expect(rr.localSeqs, equals([ValueData.maxSeqnum]));
+
+    // Nothing writes after maxSeqnum
+    await expectLater(
+        routingContext.setDHTValue(rec.key, 0, va, options: noOffline),
+        throwsA(isA<VeilidAPIExceptionGeneric>()));
+
+    // A resend at the same minimum reuses the seqnum instead of failing
+    expect(
+        await _closingWriteRetry.retry(() => routingContext.setDHTValue(
+            rec.key, 0, vb,
+            options: noOffline.copyWith(minSeqnum: ValueData.maxSeqnum))),
+        isNull);
+
+    rr = await routingContext.inspectDHTRecord(rec.key);
+    expect(rr.localSeqs, equals([ValueData.maxSeqnum]));
 
     await routingContext.closeDHTRecord(rec.key);
     await routingContext.deleteDHTRecord(rec.key);

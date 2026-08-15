@@ -654,6 +654,16 @@ pub fn veilid_tools::MustJoinSingleFuture<T>::new() -> Self
 pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn_local(&self, &str, impl core::future::future::Future<Output = T> + 'static) -> core::result::Result<(core::option::Option<T>, bool), ()>
 impl<T> core::default::Default for veilid_tools::MustJoinSingleFuture<T> where T: 'static
 pub fn veilid_tools::MustJoinSingleFuture<T>::default() -> Self
+pub mod veilid_tools::network_attempt
+pub enum veilid_tools::network_attempt::NetworkAttempt<T>
+pub veilid_tools::network_attempt::NetworkAttempt::Performed(veilid_tools::NetworkResult<T>)
+pub veilid_tools::network_attempt::NetworkAttempt::Skipped
+impl<T> veilid_tools::NetworkAttempt<T>
+pub fn veilid_tools::NetworkAttempt<T>::value(T) -> Self
+impl<T: core::fmt::Debug> core::fmt::Debug for veilid_tools::NetworkAttempt<T>
+pub fn veilid_tools::NetworkAttempt<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::fmt::Display for veilid_tools::NetworkAttempt<T>
+pub fn veilid_tools::NetworkAttempt<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub mod veilid_tools::network_interfaces
 pub enum veilid_tools::network_interfaces::IfAddr
 pub veilid_tools::network_interfaces::IfAddr::V4(veilid_tools::Ifv4Addr)
@@ -736,6 +746,9 @@ pub fn veilid_tools::NetworkInterface::fmt(&self, &mut core::fmt::Formatter<'_>)
 pub struct veilid_tools::network_interfaces::NetworkInterfaceAddressState
 pub veilid_tools::network_interfaces::NetworkInterfaceAddressState::gateway_addresses: alloc::vec::Vec<core::net::ip_addr::IpAddr>
 pub veilid_tools::network_interfaces::NetworkInterfaceAddressState::interface_addresses: alloc::vec::Vec<veilid_tools::IfAddr>
+pub veilid_tools::network_interfaces::NetworkInterfaceAddressState::own_addresses: alloc::vec::Vec<core::net::ip_addr::IpAddr>
+impl veilid_tools::NetworkInterfaceAddressState
+pub fn veilid_tools::NetworkInterfaceAddressState::is_own_address(&self, core::net::ip_addr::IpAddr) -> bool
 pub struct veilid_tools::network_interfaces::NetworkInterfaces
 impl veilid_tools::NetworkInterfaces
 pub fn veilid_tools::NetworkInterfaces::clear(&self)
@@ -861,6 +874,7 @@ pub fn veilid_tools::socket_tools::domain_for_address(core::net::socket_addr::So
 pub fn veilid_tools::socket_tools::new_default_socket2_tcp(core::ffi::primitives::c_int) -> core::io::error::Result<socket2::socket::Socket>
 pub fn veilid_tools::socket_tools::primary_source_ipv4() -> core::option::Option<core::net::ip_addr::Ipv4Addr>
 pub fn veilid_tools::socket_tools::primary_source_ipv6() -> core::option::Option<core::net::ip_addr::Ipv6Addr>
+pub fn veilid_tools::socket_tools::send_udp_datagram_with_ttl<S: std::os::fd::raw::AsRawFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub fn veilid_tools::socket_tools::set_tcp_stream_linger(&tokio::net::tcp::stream::TcpStream, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>
 pub fn veilid_tools::socket_tools::socket2_operation<S: std::os::fd::raw::AsRawFd, F: core::ops::function::FnOnce(&mut socket2::socket::Socket) -> R, R>(&S, F) -> R
 pub fn veilid_tools::socket_tools::split_async_tcp_stream(tokio::net::tcp::stream::TcpStream) -> (veilid_tools::ReadHalf, veilid_tools::WriteHalf)
@@ -1159,6 +1173,15 @@ pub veilid_tools::Ipv6MulticastScope::LinkLocal
 pub veilid_tools::Ipv6MulticastScope::OrganizationLocal
 pub veilid_tools::Ipv6MulticastScope::RealmLocal
 pub veilid_tools::Ipv6MulticastScope::SiteLocal
+pub enum veilid_tools::NetworkAttempt<T>
+pub veilid_tools::NetworkAttempt::Performed(veilid_tools::NetworkResult<T>)
+pub veilid_tools::NetworkAttempt::Skipped
+impl<T> veilid_tools::NetworkAttempt<T>
+pub fn veilid_tools::NetworkAttempt<T>::value(T) -> Self
+impl<T: core::fmt::Debug> core::fmt::Debug for veilid_tools::NetworkAttempt<T>
+pub fn veilid_tools::NetworkAttempt<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::fmt::Display for veilid_tools::NetworkAttempt<T>
+pub fn veilid_tools::NetworkAttempt<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum veilid_tools::NetworkResult<T>
 pub veilid_tools::NetworkResult::AlreadyExists(core::io::error::Error)
 pub veilid_tools::NetworkResult::InvalidMessage(alloc::string::String)
@@ -1661,6 +1684,9 @@ pub fn veilid_tools::NetworkInterface::fmt(&self, &mut core::fmt::Formatter<'_>)
 pub struct veilid_tools::NetworkInterfaceAddressState
 pub veilid_tools::NetworkInterfaceAddressState::gateway_addresses: alloc::vec::Vec<core::net::ip_addr::IpAddr>
 pub veilid_tools::NetworkInterfaceAddressState::interface_addresses: alloc::vec::Vec<veilid_tools::IfAddr>
+pub veilid_tools::NetworkInterfaceAddressState::own_addresses: alloc::vec::Vec<core::net::ip_addr::IpAddr>
+impl veilid_tools::NetworkInterfaceAddressState
+pub fn veilid_tools::NetworkInterfaceAddressState::is_own_address(&self, core::net::ip_addr::IpAddr) -> bool
 pub struct veilid_tools::NetworkInterfaces
 impl veilid_tools::NetworkInterfaces
 pub fn veilid_tools::NetworkInterfaces::clear(&self)
@@ -2031,6 +2057,7 @@ pub fn veilid_tools::random_bytes(&mut [u8])
 pub fn veilid_tools::retry_falloff_log(u64, u64, u64, u64, f64) -> bool
 pub async fn veilid_tools::scaled_yielding<N: core::cmp::PartialOrd, R: core::marker::Send + 'static, T: core::ops::function::FnOnce() -> R + core::marker::Send + 'static>(N, N, N, T) -> R
 pub fn veilid_tools::secs_to_timestamp_duration(f64) -> u64
+pub fn veilid_tools::send_udp_datagram_with_ttl<S: std::os::fd::raw::AsRawFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub fn veilid_tools::set_tcp_stream_linger(&tokio::net::tcp::stream::TcpStream, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>
 pub async fn veilid_tools::sleep(u32)
 pub fn veilid_tools::socket2_operation<S: std::os::fd::raw::AsRawFd, F: core::ops::function::FnOnce(&mut socket2::socket::Socket) -> R, R>(&S, F) -> R

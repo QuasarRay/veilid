@@ -8,20 +8,25 @@ pub struct StatusSenderInfo {
     pub opt_previous_sender_info: Option<SenderInfo>,
 }
 
-/// Outcome of `rpc_call_status`. Callers inspect `send_data_result` (when present)
-/// for the transport that was actually attempted at the first hop.
+/// Answer to a status RPC plus the transport attempt that carried it at the first hop
 #[derive(Debug)]
-pub enum StatusResult {
-    /// Question was sent and an answer was received (boxed: much larger than the other variants).
-    Answer {
-        answer: Box<Answer<StatusSenderInfo>>,
-        send_data_result: SendDataResult,
-    },
-    /// Send was attempted but produced no usable answer (send failure, timeout, bad answer).
-    Failed(SendDataResult),
-    /// Never reached send_envelope (render failure, no routing domain, etc.).
-    NotSent(NetworkResult<()>),
+pub struct StatusAnswer {
+    /// The peer's status answer
+    #[cfg_attr(
+        all(
+            target_arch = "wasm32",
+            target_os = "unknown",
+            not(feature = "debug-api")
+        ),
+        expect(dead_code)
+    )]
+    pub answer: Answer<StatusSenderInfo>,
+    /// The first-hop send attempt that carried the question
+    pub send_data_result: SendDataResult,
 }
+
+/// Outcome of `rpc_call_status`
+pub type StatusResult = RpcOutcome<StatusAnswer>;
 
 impl RPCProcessor {
     // Send StatusQ RPC request, receive StatusA answer
@@ -140,7 +145,30 @@ impl RPCProcessor {
             } => {
                 if matches!(safety_selection, SafetySelection::Unsafe(_)) {
                     if let Some(sender_info) = sender_info {
-                        if send_direct_dial_info.is_some() {
+                        // A Direct send can ride an existing flow to a relay, whose address
+                        // the peer then honestly reports as ours
+                        let sent_to_contact_method_target =
+                            send_direct_dial_info.as_ref().is_some_and(|di| {
+                                di.socket_address() == *send_unique_flow.flow.remote_address()
+                            });
+                        #[cfg(feature = "verbose-tracing")]
+                        if send_direct_dial_info.is_some() && !sent_to_contact_method_target {
+                            veilid_log!(self debug
+                                "ignoring sender info from {}: Direct to {} but sent via {}",
+                                target,
+                                send_direct_dial_info.as_ref().map(|di| di.to_string()).unwrap_or_default(),
+                                send_unique_flow.flow.remote_address()
+                            );
+                        }
+                        if sent_to_contact_method_target {
+                            // Log accepts too, rejections alone can't be told apart from starvation
+                            #[cfg(feature = "verbose-tracing")]
+                            veilid_log!(self debug
+                                "accepting sender info from {}: direct to {}, reports {}",
+                                target,
+                                send_unique_flow.flow.remote_address(),
+                                sender_info.socket_address
+                            );
                             // Directly requested status that actually gets sent directly and not over a relay will tell us what our IP address appears as
                             // If this changes, we'd want to know about that to reset the networking stack
                             opt_previous_sender_info = target.report_sender_info(
@@ -175,16 +203,16 @@ impl RPCProcessor {
                 // sender info is irrelevant over relays and routes
             }
         };
-        Ok(StatusResult::Answer {
-            answer: Box::new(Answer::new(
+        Ok(StatusResult::Sent(Box::new(StatusAnswer {
+            answer: Answer::new(
                 answer_context,
                 StatusSenderInfo {
                     opt_sender_info,
                     opt_previous_sender_info,
                 },
-            )),
+            ),
             send_data_result,
-        })
+        })))
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////

@@ -206,16 +206,18 @@ class RoutingContext(ABC):
     ) -> Optional[types.ValueData]:
         """Push a changed subkey value to the network. The record must first be opened or created.
 
-        The writer in options, if given, overrides the default writer from open. Returns None on
-        success, or the network's ValueData if the value set was older than what is on the network.
+        The writer in options, if given, overrides the default writer from open. min_seqnum, if
+        given, raises the sequence number to at least that after the automatic increment;
+        ValueSeqNum.MAX minus n leaves n writes after this one. Returns None on success, or the
+        network's ValueData if the value set was older than what is on the network.
 
         Raises VeilidAPIErrorInvalidArgument if the record is not open. Raises VeilidAPIErrorGeneric
-        if key is an unsupported kind, the record is not writable, or the value fails schema
-        validation (subkey out of range, data over the per-subkey limit, or wrong writer for the
-        subkey). Raises VeilidAPIErrorTryAgain (retryable) if the record is currently in a
-        transaction, VeilidAPIErrorKeyNotFound if the record no longer exists, and
-        VeilidAPIErrorNotInitialized if the node is shut down. A failed network fanout does not
-        raise; the write is deferred and None is returned.
+        if key is an unsupported kind, the record is not writable, the subkey has no sequence numbers
+        left, or the value fails schema validation (subkey out of range, data over the per-subkey
+        limit, or wrong writer for the subkey). Raises VeilidAPIErrorTryAgain (retryable) if the
+        record is currently in a transaction, VeilidAPIErrorKeyNotFound if the record no longer
+        exists, and VeilidAPIErrorNotInitialized if the node is shut down. A failed network fanout
+        does not raise; the write is deferred and None is returned.
         """
         pass
 
@@ -931,15 +933,17 @@ class DHTTransaction(ABC):
         """Add a set operation to the transaction.
 
         Fails offline and fails if offline writes exist for the record. The writer in options, if
-        given, overrides the default writer from open. Returns None on success, or the network's
-        ValueData if the value set was older than what is on the network.
+        given, overrides the default writer from open. min_seqnum, if given, raises the sequence
+        number to at least that after the automatic increment; ValueSeqNum.MAX minus n leaves n
+        writes after this one. Returns None on success, or the network's ValueData if the value set
+        was older than what is on the network.
 
         Raises VeilidAPIErrorTransactionNotFound if the transaction handle is already completed or no
         longer in the Begin stage, VeilidAPIErrorInvalidArgument if key is not open in the transaction
         or subkey is outside the schema range, VeilidAPIErrorGeneric if key is an unsupported kind or
-        malformed or the subkey has no writer, and VeilidAPIErrorTryAgain (retryable) if the node is
-        offline or write consensus was not reached this round. A non-responding node is retried rather
-        than surfaced as a timeout.
+        malformed or the subkey has no writer or no sequence numbers left, and VeilidAPIErrorTryAgain
+        (retryable) if the node is offline or write consensus was not reached this round. A
+        non-responding node is retried rather than surfaced as a timeout.
         """
         pass
 

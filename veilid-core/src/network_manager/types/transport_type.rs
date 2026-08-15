@@ -38,6 +38,32 @@ impl TransportType {
     }
 }
 
+/// A low-level protocol paired with an address type, naming the network path itself
+/// (e.g. TCP/IPv4) independent of which high-level protocol rides on it.
+///
+/// TCP and WS share one path (as WebTransport's datagram and stream variants will share
+/// UDP's), so this is the granularity for asking whether our packets get out at all.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct LowLevelTransportType {
+    pub low_level_protocol_type: LowLevelProtocolType,
+    pub address_type: AddressType,
+}
+
+impl From<TransportType> for LowLevelTransportType {
+    fn from(tt: TransportType) -> Self {
+        Self {
+            low_level_protocol_type: tt.protocol_type.low_level_protocol_type(),
+            address_type: tt.address_type,
+        }
+    }
+}
+
+impl fmt::Display for LowLevelTransportType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.low_level_protocol_type, self.address_type)
+    }
+}
+
 impl From<&DialInfo> for TransportType {
     fn from(di: &DialInfo) -> Self {
         Self::new(di.protocol_type(), di.address_type())

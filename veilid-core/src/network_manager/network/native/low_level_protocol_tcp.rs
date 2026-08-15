@@ -228,12 +228,14 @@ impl NativeNetwork {
             }
             Ok(None) => {
                 // No protocol handlers matched? drop it.
+                #[cfg(feature = "verbose-tracing")]
                 veilid_log!(self debug "no protocol handler for connection from {:?}", peer_addr);
                 return;
             }
-            Err(e) => {
+            Err(_e) => {
                 // Failed to negotiate connection? drop it.
-                veilid_log!(self debug "failed to negotiate connection from {:?}: {}", peer_addr, e);
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self debug "failed to negotiate connection from {:?}: {}", peer_addr, _e);
                 return;
             }
         };

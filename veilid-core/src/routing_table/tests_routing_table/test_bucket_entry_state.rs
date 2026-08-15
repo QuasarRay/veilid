@@ -17,6 +17,7 @@ fn compute(
     rpc_stats: &RPCStats,
     per_so: &BTreeMap<SequenceOrdering, RPCStats>,
     per_transport: &BTreeMap<TransportType, RPCStats>,
+    cm_viability: Option<&CMViability>,
 ) -> BucketEntryStateReason {
     BucketEntryInner::compute_state_reason_from_stats(
         now(),
@@ -24,15 +25,17 @@ fn compute(
         rpc_stats,
         per_so,
         per_transport,
-        |_| TimestampDuration::new(0),
+        cm_viability,
+        |_, _| TimestampDuration::new(0),
     )
 }
-// As `compute`, but credits `offline_secs` of offline time to every window.
+// As `compute`, but credits `offline_secs` of untestable time to every window.
 fn compute_with_offline(
     punishment: Option<PunishmentReason>,
     rpc_stats: &RPCStats,
     per_so: &BTreeMap<SequenceOrdering, RPCStats>,
     per_transport: &BTreeMap<TransportType, RPCStats>,
+    cm_viability: Option<&CMViability>,
     offline_secs: u32,
 ) -> BucketEntryStateReason {
     BucketEntryInner::compute_state_reason_from_stats(
@@ -41,20 +44,59 @@ fn compute_with_offline(
         rpc_stats,
         per_so,
         per_transport,
-        |_| TimestampDuration::new_secs(offline_secs),
+        cm_viability,
+        |_, _| TimestampDuration::new_secs(offline_secs),
     )
 }
 fn so_map(entries: &[(SequenceOrdering, RPCStats)]) -> BTreeMap<SequenceOrdering, RPCStats> {
     entries.iter().cloned().collect()
 }
+fn udp4() -> TransportType {
+    TransportType::new(ProtocolType::UDP, AddressType::IPV4)
+}
+fn udp6() -> TransportType {
+    TransportType::new(ProtocolType::UDP, AddressType::IPV6)
+}
+fn tcp4() -> TransportType {
+    TransportType::new(ProtocolType::TCP, AddressType::IPV4)
+}
+// Per-transport stats that judge as Failing for liveness (unanswered questions)
+fn failing_stats() -> RPCStats {
+    RPCStats {
+        recent_lost_questions: TRANSPORT_FAILING_LOST_QUESTIONS,
+        ..Default::default()
+    }
+}
+// Send failures alone: Failing for selection, never for liveness
+fn send_failing_stats() -> RPCStats {
+    RPCStats {
+        failed_to_send: TRANSPORT_FAILING_FAILED_TO_SEND,
+        ..Default::default()
+    }
+}
+fn transport_map(entries: &[(TransportType, RPCStats)]) -> BTreeMap<TransportType, RPCStats> {
+    entries.iter().cloned().collect()
+}
 // A non-empty per-transport map; only its emptiness gates [D3]/[D4], contents are irrelevant.
 fn seen_transports() -> BTreeMap<TransportType, RPCStats> {
-    let mut m = BTreeMap::new();
-    m.insert(
-        TransportType::new(ProtocolType::UDP, AddressType::IPV4),
-        RPCStats::default(),
-    );
-    m
+    transport_map(&[(udp4(), RPCStats::default())])
+}
+fn viability(entries: &[(SequenceOrdering, &[TransportType], bool)]) -> CMViability {
+    CMViability {
+        per_ordering: entries
+            .iter()
+            .map(|(so, transports, has_indirect)| {
+                (
+                    *so,
+                    OrderingReachability {
+                        direct_transports: transports.iter().cloned().collect(),
+                        has_indirect: *has_indirect,
+                    },
+                )
+            })
+            .collect(),
+        basis: BTreeMap::new(),
+    }
 }
 
 pub fn test_state_punished() {
@@ -73,7 +115,8 @@ pub fn test_state_punished() {
             Some(PunishmentReason::Manual),
             &RPCStats::default(),
             &reliable,
-            &seen_transports()
+            &seen_transports(),
+            None
         ),
         BucketEntryStateReason::Punished(PunishmentReason::Manual)
     );
@@ -89,7 +132,7 @@ pub fn test_state_dead_excessive_unreachable() {
         ..Default::default()
     };
     assert_eq!(
-        compute(None, &rpc, &BTreeMap::new(), &BTreeMap::new()),
+        compute(None, &rpc, &BTreeMap::new(), &BTreeMap::new(), None),
         BucketEntryStateReason::Dead(BucketEntryStateDeadReason::ExcessiveUnreachable)
     );
 }
@@ -97,74 +140,150 @@ pub fn test_state_dead_excessive_unreachable() {
 pub fn test_state_dead_excessive_send_failures() {
     info!("--- test_state_dead_excessive_send_failures ---");
 
-    // [D2] failed_to_send at/above threshold on any sequence ordering is dead
-    for so in [SequenceOrdering::Unordered, SequenceOrdering::Ordered] {
-        let per_so = so_map(&[(
-            so,
-            RPCStats {
-                failed_to_send: dead_failed_to_send_count(so),
-                ..Default::default()
-            },
-        )]);
-        assert_eq!(
-            compute(None, &RPCStats::default(), &per_so, &BTreeMap::new()),
-            BucketEntryStateReason::Dead(BucketEntryStateDeadReason::ExcessiveSendFailures),
-            "{so:?}"
-        );
-    }
+    // [D2] every ordering's only avenue failing is dead
+    let v = viability(&[
+        (SequenceOrdering::Unordered, &[udp6()], false),
+        (SequenceOrdering::Ordered, &[tcp4()], false),
+    ]);
+    let per_transport = transport_map(&[(udp6(), failing_stats()), (tcp4(), failing_stats())]);
+    assert_eq!(
+        compute(
+            None,
+            &RPCStats::default(),
+            &BTreeMap::new(),
+            &per_transport,
+            Some(&v)
+        ),
+        BucketEntryStateReason::Dead(BucketEntryStateDeadReason::ExcessiveSendFailures)
+    );
+
+    // a single-ordering environment (WS-only wasm peer) dies on that ordering alone
+    let v = viability(&[(SequenceOrdering::Ordered, &[tcp4()], false)]);
+    let per_transport = transport_map(&[(tcp4(), failing_stats())]);
+    assert_eq!(
+        compute(
+            None,
+            &RPCStats::default(),
+            &BTreeMap::new(),
+            &per_transport,
+            Some(&v)
+        ),
+        BucketEntryStateReason::Dead(BucketEntryStateDeadReason::ExcessiveSendFailures)
+    );
+}
+
+pub fn test_state_viable_ordering_vetoes_death() {
+    info!("--- test_state_viable_ordering_vetoes_death ---");
+
+    // one healthy ordering keeps the node alive despite the other fully failing;
+    // the failing ordering makes it Missing, not Dead
+    let v = viability(&[
+        (SequenceOrdering::Unordered, &[udp6()], false),
+        (SequenceOrdering::Ordered, &[tcp4()], false),
+    ]);
+    let per_transport = transport_map(&[(udp6(), failing_stats()), (tcp4(), RPCStats::default())]);
+    assert_eq!(
+        compute(
+            None,
+            &RPCStats::default(),
+            &BTreeMap::new(),
+            &per_transport,
+            Some(&v)
+        ),
+        BucketEntryStateReason::Missing(BucketEntryStateMissingReason::FailedToSend)
+    );
+
+    // an Untried transport in the same ordering vetoes that ordering's failure:
+    // alternates must accumulate evidence before the node can die
+    let v = viability(&[(SequenceOrdering::Unordered, &[udp6(), udp4()], false)]);
+    let per_transport = transport_map(&[(udp6(), failing_stats())]);
+    assert_eq!(
+        compute(
+            None,
+            &RPCStats::default(),
+            &BTreeMap::new(),
+            &per_transport,
+            Some(&v)
+        ),
+        BucketEntryStateReason::Initial
+    );
+
+    // an indirect contact method (relay/signal/existing flow) vetoes send-failure
+    // death for its ordering; relay collapse is covered by [D1] unreachable
+    let v = viability(&[(SequenceOrdering::Unordered, &[udp6()], true)]);
+    let per_transport = transport_map(&[(udp6(), failing_stats())]);
+    assert_eq!(
+        compute(
+            None,
+            &RPCStats::default(),
+            &BTreeMap::new(),
+            &per_transport,
+            Some(&v)
+        ),
+        BucketEntryStateReason::Initial
+    );
+}
+
+pub fn test_state_send_failures_never_kill() {
+    info!("--- test_state_send_failures_never_kill ---");
+
+    // Failures to send are our own fault: they steer selection but must never
+    // make a node Missing or Dead, even as its only transport
+    let v = viability(&[(SequenceOrdering::Unordered, &[udp6()], false)]);
+    let per_transport = transport_map(&[(udp6(), send_failing_stats())]);
+    assert_eq!(
+        compute(
+            None,
+            &RPCStats::default(),
+            &BTreeMap::new(),
+            &per_transport,
+            Some(&v)
+        ),
+        BucketEntryStateReason::Initial
+    );
+    // Selection still judges that transport unusable
+    assert!(transport_health(&send_failing_stats()).is_failing());
 }
 
 pub fn test_state_dead_never_seen_lost_questions() {
     info!("--- test_state_dead_never_seen_lost_questions ---");
 
-    // [D3] never-seen (no per-transport stats) with enough lost questions is dead
-    for so in [SequenceOrdering::Unordered, SequenceOrdering::Ordered] {
-        let per_so = so_map(&[(
-            so,
-            RPCStats {
-                recent_lost_questions: dead_never_seen_lost_questions_count(so),
-                ..Default::default()
-            },
-        )]);
-        // per_transport empty == never seen
-        assert_eq!(
-            compute(None, &RPCStats::default(), &per_so, &BTreeMap::new()),
-            BucketEntryStateReason::Dead(BucketEntryStateDeadReason::NeverSeenLostQuestions),
-            "{so:?}"
-        );
-    }
+    // [D3] never-seen (no per-transport stats) with enough node-level lost questions is dead
+    let rpc = RPCStats {
+        recent_lost_questions: DEAD_NEVER_SEEN_LOST_QUESTIONS,
+        ..Default::default()
+    };
+    assert_eq!(
+        compute(None, &rpc, &BTreeMap::new(), &BTreeMap::new(), None),
+        BucketEntryStateReason::Dead(BucketEntryStateDeadReason::NeverSeenLostQuestions)
+    );
 }
 
 pub fn test_state_dead_steady_lost_questions() {
     info!("--- test_state_dead_steady_lost_questions ---");
 
-    // [D4] seen before, steadily losing questions past the span, is dead
-    let per_so = so_map(&[(
-        SequenceOrdering::Unordered,
-        RPCStats {
-            first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 1)),
-            ..Default::default()
-        },
-    )]);
+    // [D4] seen before, node-level steadily losing questions past the span, is dead
+    let rpc = RPCStats {
+        first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 1)),
+        ..Default::default()
+    };
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &seen_transports()),
+        compute(None, &rpc, &BTreeMap::new(), &seen_transports(), None),
         BucketEntryStateReason::Dead(BucketEntryStateDeadReason::SteadyLostQuestions)
     );
 
     // boundary: a steady lost question newer than the span is not yet dead
-    let per_so = so_map(&[(
-        SequenceOrdering::Unordered,
-        RPCStats {
-            first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) - 1)),
-            ..Default::default()
-        },
-    )]);
+    let rpc = RPCStats {
+        first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) - 1)),
+        ..Default::default()
+    };
     assert_ne!(
         BucketEntryState::from(compute(
             None,
-            &RPCStats::default(),
-            &per_so,
-            &seen_transports()
+            &rpc,
+            &BTreeMap::new(),
+            &seen_transports(),
+            None
         )),
         BucketEntryState::Dead,
         "should not be dead under the span"
@@ -174,41 +293,81 @@ pub fn test_state_dead_steady_lost_questions() {
 pub fn test_state_missing_failed_to_send() {
     info!("--- test_state_missing_failed_to_send ---");
 
-    // [M2] some send failures, but below the dead threshold, is missing
-    assert!(1 < dead_failed_to_send_count(SequenceOrdering::Unordered));
-    let per_so = so_map(&[(
-        SequenceOrdering::Unordered,
+    // [M2] one fully-failing ordering with another still viable is missing
+    let v = viability(&[
+        (SequenceOrdering::Unordered, &[udp6()], false),
+        (SequenceOrdering::Ordered, &[tcp4()], false),
+    ]);
+    let per_transport = transport_map(&[(udp6(), failing_stats()), (tcp4(), RPCStats::default())]);
+    assert_eq!(
+        compute(
+            None,
+            &RPCStats::default(),
+            &BTreeMap::new(),
+            &per_transport,
+            Some(&v)
+        ),
+        BucketEntryStateReason::Missing(BucketEntryStateMissingReason::FailedToSend)
+    );
+
+    // below the transport-failing threshold no ordering is failing
+    let per_transport = transport_map(&[(
+        udp6(),
         RPCStats {
-            failed_to_send: 1,
+            recent_lost_questions: TRANSPORT_FAILING_LOST_QUESTIONS - 1,
             ..Default::default()
         },
     )]);
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &BTreeMap::new()),
-        BucketEntryStateReason::Missing(BucketEntryStateMissingReason::FailedToSend)
+        compute(
+            None,
+            &RPCStats::default(),
+            &BTreeMap::new(),
+            &per_transport,
+            Some(&v)
+        ),
+        BucketEntryStateReason::Initial
     );
 }
 
 pub fn test_state_missing_lost_questions() {
     info!("--- test_state_missing_lost_questions ---");
 
-    // [M3] seen before, lost questions at/above the missing threshold but no
-    // steady span yet, is missing. per_transport is non-empty so [D3] does not apply.
-    for so in [SequenceOrdering::Unordered, SequenceOrdering::Ordered] {
-        let per_so = so_map(&[(
-            so,
-            RPCStats {
-                recent_lost_questions: missing_lost_questions_count(so),
-                first_steady_lost_question_ts: None,
-                ..Default::default()
-            },
-        )]);
-        assert_eq!(
-            compute(None, &RPCStats::default(), &per_so, &seen_transports()),
-            BucketEntryStateReason::Missing(BucketEntryStateMissingReason::LostQuestions),
-            "{so:?}"
-        );
-    }
+    // [M3] seen before, node-level lost questions at the missing threshold but no
+    // steady span yet, is missing; per_transport is non-empty so [D3] does not apply
+    let rpc = RPCStats {
+        recent_lost_questions: MISSING_LOST_QUESTIONS,
+        first_steady_lost_question_ts: None,
+        ..Default::default()
+    };
+    assert_eq!(
+        compute(None, &rpc, &BTreeMap::new(), &seen_transports(), None),
+        BucketEntryStateReason::Missing(BucketEntryStateMissingReason::LostQuestions)
+    );
+}
+
+pub fn test_state_revive_reaches_initial() {
+    info!("--- test_state_revive_reaches_initial ---");
+
+    // revive() clears node-level and per-ordering stats but keeps transport
+    // evidence; that field state must compute Initial or revival is a no-op
+    let rpc = RPCStats {
+        recent_lost_questions: MISSING_LOST_QUESTIONS,
+        first_steady_lost_question_ts: None,
+        ..Default::default()
+    };
+    assert_eq!(
+        compute(None, &rpc, &BTreeMap::new(), &seen_transports(), None),
+        BucketEntryStateReason::Missing(BucketEntryStateMissingReason::LostQuestions)
+    );
+    let revived = RPCStats {
+        recent_lost_questions: 0,
+        ..rpc
+    };
+    assert_eq!(
+        compute(None, &revived, &BTreeMap::new(), &seen_transports(), None),
+        BucketEntryStateReason::Initial
+    );
 }
 
 pub fn test_state_initial() {
@@ -220,7 +379,8 @@ pub fn test_state_initial() {
             None,
             &RPCStats::default(),
             &BTreeMap::new(),
-            &BTreeMap::new()
+            &BTreeMap::new(),
+            None
         ),
         BucketEntryStateReason::Initial
     );
@@ -228,7 +388,13 @@ pub fn test_state_initial() {
     // a sequence ordering tracked but never answered is still initial
     let per_so = so_map(&[(SequenceOrdering::Unordered, RPCStats::default())]);
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &seen_transports()),
+        compute(
+            None,
+            &RPCStats::default(),
+            &per_so,
+            &seen_transports(),
+            None
+        ),
         BucketEntryStateReason::Initial
     );
 }
@@ -245,7 +411,13 @@ pub fn test_state_unreliable() {
         },
     )]);
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &seen_transports()),
+        compute(
+            None,
+            &RPCStats::default(),
+            &per_so,
+            &seen_transports(),
+            None
+        ),
         BucketEntryStateReason::Unreliable
     );
 }
@@ -262,7 +434,13 @@ pub fn test_state_reliable() {
         },
     )]);
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &seen_transports()),
+        compute(
+            None,
+            &RPCStats::default(),
+            &per_so,
+            &seen_transports(),
+            None
+        ),
         BucketEntryStateReason::Reliable
     );
 }
@@ -270,25 +448,24 @@ pub fn test_state_reliable() {
 pub fn test_state_precedence_dead_beats_reliable() {
     info!("--- test_state_precedence_dead_beats_reliable ---");
 
-    // dead on one ordering kills the node even if another ordering is reliable
-    let per_so = so_map(&[
-        (
-            SequenceOrdering::Unordered,
-            RPCStats {
-                first_steady_answer_ts: Some(secs_ago(120)),
-                ..Default::default()
-            },
-        ),
-        (
-            SequenceOrdering::Ordered,
-            RPCStats {
-                failed_to_send: dead_failed_to_send_count(SequenceOrdering::Ordered),
-                ..Default::default()
-            },
-        ),
-    ]);
+    // all orderings failing kills the node even if its answer history is reliable
+    let per_so = so_map(&[(
+        SequenceOrdering::Unordered,
+        RPCStats {
+            first_steady_answer_ts: Some(secs_ago(120)),
+            ..Default::default()
+        },
+    )]);
+    let v = viability(&[(SequenceOrdering::Unordered, &[udp6()], false)]);
+    let per_transport = transport_map(&[(udp6(), failing_stats())]);
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &seen_transports()),
+        compute(
+            None,
+            &RPCStats::default(),
+            &per_so,
+            &per_transport,
+            Some(&v)
+        ),
         BucketEntryStateReason::Dead(BucketEntryStateDeadReason::ExcessiveSendFailures)
     );
 }
@@ -301,12 +478,15 @@ pub fn test_state_transition_reliable_degrades_to_missing() {
         SequenceOrdering::Unordered,
         RPCStats {
             first_steady_answer_ts: Some(secs_ago(120)),
-            recent_lost_questions: missing_lost_questions_count(SequenceOrdering::Unordered),
             ..Default::default()
         },
     )]);
+    let rpc = RPCStats {
+        recent_lost_questions: MISSING_LOST_QUESTIONS,
+        ..Default::default()
+    };
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &seen_transports()),
+        compute(None, &rpc, &per_so, &seen_transports(), None),
         BucketEntryStateReason::Missing(BucketEntryStateMissingReason::LostQuestions)
     );
 }
@@ -315,38 +495,33 @@ pub fn test_state_offline_credit_steady_lost_questions() {
     info!("--- test_state_offline_credit_steady_lost_questions ---");
 
     // [D4] a node losing questions past the dead span is Dead by raw time.
-    let per_so = so_map(&[(
-        SequenceOrdering::Ordered,
-        RPCStats {
-            first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 10)),
-            recent_lost_questions: missing_lost_questions_count(SequenceOrdering::Ordered),
-            ..Default::default()
-        },
-    )]);
+    let rpc = RPCStats {
+        first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 10)),
+        recent_lost_questions: MISSING_LOST_QUESTIONS,
+        ..Default::default()
+    };
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &seen_transports()),
+        compute(None, &rpc, &BTreeMap::new(), &seen_transports(), None),
         BucketEntryStateReason::Dead(BucketEntryStateDeadReason::SteadyLostQuestions)
     );
     // Crediting offline time pulls the effective span under the threshold: not Dead.
     assert_eq!(
-        compute_with_offline(None, &RPCStats::default(), &per_so, &seen_transports(), 20),
+        compute_with_offline(None, &rpc, &BTreeMap::new(), &seen_transports(), None, 20),
         BucketEntryStateReason::Missing(BucketEntryStateMissingReason::LostQuestions)
     );
     // A genuinely long lost span stays Dead despite the same offline credit.
-    let long_lost = so_map(&[(
-        SequenceOrdering::Ordered,
-        RPCStats {
-            first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 200)),
-            recent_lost_questions: missing_lost_questions_count(SequenceOrdering::Ordered),
-            ..Default::default()
-        },
-    )]);
+    let long_lost = RPCStats {
+        first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 200)),
+        recent_lost_questions: MISSING_LOST_QUESTIONS,
+        ..Default::default()
+    };
     assert_eq!(
         compute_with_offline(
             None,
-            &RPCStats::default(),
             &long_lost,
+            &BTreeMap::new(),
             &seen_transports(),
+            None,
             20
         ),
         BucketEntryStateReason::Dead(BucketEntryStateDeadReason::SteadyLostQuestions)
@@ -365,13 +540,26 @@ pub fn test_state_offline_credit_unreliable_answer() {
         },
     )]);
     assert_eq!(
-        compute(None, &RPCStats::default(), &per_so, &seen_transports()),
+        compute(
+            None,
+            &RPCStats::default(),
+            &per_so,
+            &seen_transports(),
+            None
+        ),
         BucketEntryStateReason::Reliable
     );
     // Crediting offline time pulls the effective answer span under the threshold:
     // still Unreliable (we don't grant reliability for time we couldn't test).
     assert_eq!(
-        compute_with_offline(None, &RPCStats::default(), &per_so, &seen_transports(), 20),
+        compute_with_offline(
+            None,
+            &RPCStats::default(),
+            &per_so,
+            &seen_transports(),
+            None,
+            20
+        ),
         BucketEntryStateReason::Unreliable
     );
 }

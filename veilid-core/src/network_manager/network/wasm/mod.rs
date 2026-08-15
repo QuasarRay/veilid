@@ -176,6 +176,13 @@ impl PlatformNetwork for WasmNetwork {
             if address_filter.is_ip_addr_punished(dial_info.address().ip_addr()) {
                 return Ok(NetworkResult::no_connection_other("punished"));
             }
+            // Debug availability override: fail like the network broke it
+            if network_manager.transport_stats().is_transport_disabled(
+                dial_info.protocol_type().low_level_protocol_type(),
+                dial_info.address_type(),
+            ) {
+                return Ok(NetworkResult::no_connection_other("transport disabled"));
+            }
             WasmProtocolNetworkConnection::connect(self.registry(), dial_info, timeout_ms)
                 .await
                 .wrap_err("io error in connect")
@@ -187,7 +194,7 @@ impl PlatformNetwork for WasmNetwork {
         &self,
         dial_info: DialInfo,
         data: Bytes,
-    ) -> PinBoxFuture<'_, EyreResult<NetworkResult<()>>> {
+    ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<()>>> {
         Box::pin(async move {
             let _guard = self.unlocked_inner.startup_lock.enter()?;
 
@@ -204,44 +211,74 @@ impl PlatformNetwork for WasmNetwork {
                 .address_filter()
                 .is_ip_addr_punished(ip_addr)
             {
-                return Ok(NetworkResult::no_connection_other("punished"));
+                return Ok(NetworkAttempt::Performed(
+                    NetworkResult::no_connection_other("punished"),
+                ));
             }
 
-            match dial_info.protocol_type() {
-                ProtocolType::UDP => {
-                    bail!("no support for UDP protocol")
-                }
-                ProtocolType::TCP => {
-                    bail!("no support for TCP protocol")
-                }
-                ProtocolType::WS => {
-                    let pnc = network_result_try!(ws::WebsocketProtocolHandler::connect(
-                        self.registry(),
-                        dial_info,
-                        timeout_ms
-                    )
-                    .await
-                    .wrap_err("connect failure")?);
-                    network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
-                }
-                #[cfg(feature = "enable-protocol-wss")]
-                ProtocolType::WSS => {
-                    let pnc = network_result_try!(ws::WebsocketProtocolHandler::connect(
-                        self.registry(),
-                        dial_info,
-                        timeout_ms
-                    )
-                    .await
-                    .wrap_err("connect failure")?);
-                    network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
-                }
-            };
+            // No contact method selection here to steer around a suppressed transport
+            if self
+                .network_manager()
+                .transport_stats()
+                .unbound_send_deprioritized(&dial_info)
+            {
+                return Ok(NetworkAttempt::Skipped);
+            }
+
+            // The address names the routing domain, so nodeless traffic still counts
+            let stats_dial_info = dial_info.clone();
+            let send_result: EyreResult<NetworkResult<()>> = async {
+                match dial_info.protocol_type() {
+                    ProtocolType::UDP => {
+                        bail!("no support for UDP protocol")
+                    }
+                    ProtocolType::TCP => {
+                        bail!("no support for TCP protocol")
+                    }
+                    ProtocolType::WS => {
+                        let pnc = network_result_try!(ws::WebsocketProtocolHandler::connect(
+                            self.registry(),
+                            dial_info,
+                            timeout_ms
+                        )
+                        .await
+                        .wrap_err("connect failure")?);
+                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                    }
+                    #[cfg(feature = "enable-protocol-wss")]
+                    ProtocolType::WSS => {
+                        let pnc = network_result_try!(ws::WebsocketProtocolHandler::connect(
+                            self.registry(),
+                            dial_info,
+                            timeout_ms
+                        )
+                        .await
+                        .wrap_err("connect failure")?);
+                        network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
+                    }
+                };
+                Ok(NetworkResult::Value(()))
+            }
+            .await;
+
+            if let Ok(nr) = &send_result {
+                self.network_manager()
+                    .transport_stats()
+                    .record_unbound_send(
+                        &stats_dial_info,
+                        TransportSendOutcome::from_network_result(nr),
+                    );
+            }
+            let nr = send_result?;
+            if !matches!(nr, NetworkResult::Value(_)) {
+                return Ok(NetworkAttempt::Performed(nr));
+            }
 
             // Network accounting
             self.network_manager()
                 .stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
 
-            Ok(NetworkResult::Value(()))
+            Ok(NetworkAttempt::Performed(NetworkResult::Value(())))
         })
     }
 
@@ -250,7 +287,7 @@ impl PlatformNetwork for WasmNetwork {
         dial_info: DialInfo,
         data: Bytes,
         timeout_ms: u32,
-    ) -> PinBoxFuture<'_, EyreResult<NetworkResult<Bytes>>> {
+    ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<Bytes>>> {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
 
@@ -267,55 +304,85 @@ impl PlatformNetwork for WasmNetwork {
                 .address_filter()
                 .is_ip_addr_punished(ip_addr)
             {
-                return Ok(NetworkResult::no_connection_other("punished"));
+                return Ok(NetworkAttempt::Performed(
+                    NetworkResult::no_connection_other("punished"),
+                ));
             }
 
-            match dial_info.protocol_type() {
-                ProtocolType::UDP => {
-                    bail!("no support for UDP protocol")
-                }
-                ProtocolType::TCP => {
-                    bail!("no support for TCP protocol")
-                }
-                _ => {
-                    let pnc = network_result_try!(match dial_info.protocol_type() {
-                        ProtocolType::UDP => bail!("no support for UDP protocol"),
-                        ProtocolType::TCP => bail!("no support for TCP protocol"),
-                        ProtocolType::WS => {
-                            ws::WebsocketProtocolHandler::connect(
+            // No contact method selection here to steer around a suppressed transport
+            if network_manager
+                .transport_stats()
+                .unbound_send_deprioritized(&dial_info)
+            {
+                return Ok(NetworkAttempt::Skipped);
+            }
+
+            let result: EyreResult<NetworkResult<Bytes>> = async {
+                match dial_info.protocol_type() {
+                    ProtocolType::UDP => {
+                        bail!("no support for UDP protocol")
+                    }
+                    ProtocolType::TCP => {
+                        bail!("no support for TCP protocol")
+                    }
+                    _ => {
+                        let stats_dial_info = dial_info.clone();
+                        let connect_res = match dial_info.protocol_type() {
+                            ProtocolType::UDP => bail!("no support for UDP protocol"),
+                            ProtocolType::TCP => bail!("no support for TCP protocol"),
+                            ProtocolType::WS => ws::WebsocketProtocolHandler::connect(
                                 self.registry(),
                                 dial_info,
                                 connect_timeout_ms,
                             )
                             .await
-                            .wrap_err("connect failure")?
-                        }
-                        #[cfg(feature = "enable-protocol-wss")]
-                        ProtocolType::WSS => {
-                            ws::WebsocketProtocolHandler::connect(
+                            .wrap_err("connect failure")?,
+                            #[cfg(feature = "enable-protocol-wss")]
+                            ProtocolType::WSS => ws::WebsocketProtocolHandler::connect(
                                 self.registry(),
                                 dial_info,
                                 connect_timeout_ms,
                             )
                             .await
-                            .wrap_err("connect failure")?
-                        }
-                    });
+                            .wrap_err("connect failure")?,
+                        };
+                        // Attribute connect+send only; a missing reply is the peer's silence
+                        let pnc = match connect_res {
+                            NetworkResult::Value(pnc) => pnc,
+                            nr => {
+                                network_manager.transport_stats().record_unbound_send(
+                                    &stats_dial_info,
+                                    TransportSendOutcome::from_network_result(&nr),
+                                );
+                                return Ok(nr.map(|_| unreachable!()));
+                            }
+                        };
+                        let send_res = pnc.send(data).await.wrap_err("send failure")?;
+                        network_manager.transport_stats().record_unbound_send(
+                            &stats_dial_info,
+                            TransportSendOutcome::from_network_result(&send_res),
+                        );
+                        network_result_try!(send_res);
+                        network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
 
-                    network_result_try!(pnc.send(data).await.wrap_err("send failure")?);
-                    network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
-
-                    let out =
-                        network_result_try!(network_result_try!(timeout(timeout_ms, pnc.recv())
-                            .await
-                            .into_network_result())
+                        let out = network_result_try!(network_result_try!(timeout(
+                            timeout_ms,
+                            pnc.recv()
+                        )
+                        .await
+                        .into_network_result())
                         .wrap_err("recv failure")?);
 
-                    network_manager.stats_packet_rcvd(ip_addr, ByteCount::new(out.len() as u64));
+                        network_manager
+                            .stats_packet_rcvd(ip_addr, ByteCount::new(out.len() as u64));
 
-                    Ok(NetworkResult::Value(out))
+                        Ok(NetworkResult::Value(out))
+                    }
                 }
             }
+            .await;
+
+            Ok(NetworkAttempt::Performed(result?))
         })
     }
 
@@ -324,7 +391,7 @@ impl PlatformNetwork for WasmNetwork {
         &self,
         flow: Flow,
         data: Bytes,
-    ) -> PinBoxFuture<'_, EyreResult<SendDataToExistingFlowResult>> {
+    ) -> PinBoxFuture<'_, EyreResult<NetworkAttempt<UniqueFlow>>> {
         Box::pin(async move {
             let _guard = self.startup_lock.enter()?;
 
@@ -346,25 +413,31 @@ impl PlatformNetwork for WasmNetwork {
 
             // Try to send to the exact existing connection if one exists
             if let Some(conn) = network_manager.connection_manager().get_connection(flow) {
-                // connection exists, send over it
-                match conn.send_async(data).await {
-                    ConnectionHandleSendResult::Sent => {
+                // A stalled connection parks channel sends; bound it so it fails
+                let config = self.config();
+                let net_config = &config.internal().network;
+                let timeout_ms = net_config
+                    .rpc
+                    .timeout_ms
+                    .min(net_config.single_send_timeout_ms);
+                match timeout(timeout_ms, conn.send_async(data)).await {
+                    Ok(ConnectionHandleSendResult::Sent) => {
                         // Network accounting
                         network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
 
-                        // Data was consumed
-                        return Ok(SendDataToExistingFlowResult::Sent(conn.unique_flow()));
+                        return Ok(NetworkAttempt::value(conn.unique_flow()));
                     }
-                    ConnectionHandleSendResult::NotSent(data) => {
-                        // Couldn't send
-                        // Pass the data back out so we don't own it any more
-                        return Ok(SendDataToExistingFlowResult::NotSent(data));
+                    Ok(ConnectionHandleSendResult::NotSent) => {
+                        return Ok(NetworkAttempt::Skipped);
+                    }
+                    Err(_) => {
+                        veilid_log!(self debug "connection send timed out: flow={:?}", flow);
+                        return Ok(NetworkAttempt::Performed(NetworkResult::Timeout));
                     }
                 }
             }
             // Connection didn't exist
-            // Pass the data back out so we don't own it any more
-            Ok(SendDataToExistingFlowResult::NotSent(data))
+            Ok(NetworkAttempt::Skipped)
         })
     }
 
@@ -396,11 +469,25 @@ impl PlatformNetwork for WasmNetwork {
                     .await?
             );
 
-            if let ConnectionHandleSendResult::NotSent(_) = conn.send_async(data).await {
-                return Ok(NetworkResult::NoConnection(io::Error::new(
-                    io::ErrorKind::ConnectionReset,
-                    "failed to send",
-                )));
+            // A stalled connection parks channel sends; bound it so it fails
+            let config = self.config();
+            let net_config = &config.internal().network;
+            let timeout_ms = net_config
+                .rpc
+                .timeout_ms
+                .min(net_config.single_send_timeout_ms);
+            match timeout(timeout_ms, conn.send_async(data)).await {
+                Ok(ConnectionHandleSendResult::Sent) => {}
+                Ok(ConnectionHandleSendResult::NotSent) => {
+                    return Ok(NetworkResult::NoConnection(io::Error::new(
+                        io::ErrorKind::ConnectionReset,
+                        "failed to send",
+                    )));
+                }
+                Err(_) => {
+                    veilid_log!(self debug "connection send timed out: dial_info={:?}", conn.unique_flow().flow);
+                    return Ok(NetworkResult::timeout());
+                }
             }
             let unique_flow = conn.unique_flow();
 

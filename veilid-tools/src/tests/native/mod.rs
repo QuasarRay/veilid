@@ -5,6 +5,7 @@ mod test_assembly_buffer;
 mod test_async_peek_stream;
 mod test_igd;
 mod test_network_interfaces;
+mod test_udp_ttl_send;
 
 use super::*;
 
@@ -78,6 +79,8 @@ pub async fn run_all_tests() {
     }
     info!("TEST: exec_test_assembly_buffer");
     test_assembly_buffer::test_all().await;
+    info!("TEST: exec_test_udp_ttl_send");
+    test_udp_ttl_send::test_all().await;
     info!("TEST: exec_test_tracked_mutex");
     test_tracked_mutex::test_all();
 
@@ -271,6 +274,14 @@ cfg_if! {
             setup();
             block_on(async {
                 test_assembly_buffer::test_all().await;
+            });
+        }
+
+        #[test]
+        fn run_test_udp_ttl_send() {
+            setup();
+            block_on(async {
+                test_udp_ttl_send::test_all().await;
             });
         }
 

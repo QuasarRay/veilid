@@ -68,8 +68,8 @@ do
         HOMEBREW_DIR=$(dirname `which brew`)
     fi
 
-    # staticlib alone: built alongside cdylib, LTO internalizes the #[no_mangle] FFI exports out of the archive
-    # (rustc needs one package, so -p selects it out of the virtual workspace manifest; crate name uses dashes)
+    # Build staticlib alone: alongside cdylib, LTO internalizes the #[no_mangle] FFI exports out of the archive
+    # -p picks the one package rustc needs out of the virtual workspace manifest, by its dashed crate name
     env -i PATH=/usr/bin:/bin:$HOMEBREW_DIR:$CARGO_DIR HOME="$HOME" USER="$USER" IPHONEOS_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET" ${RUST_ENV[@]+"${RUST_ENV[@]}"} cargo $CARGO_TOOLCHAIN rustc $EXTRA_CARGO_OPTIONS -p "${PACKAGE_NAME//_/-}" --lib --crate-type staticlib --target $CARGO_TARGET --manifest-path $CARGO_MANIFEST_PATH
 
     LIPOS="$LIPOS $TARGET_PATH/$CARGO_TARGET/$BUILD_MODE/lib$PACKAGE_NAME.a"

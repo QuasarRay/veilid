@@ -24,41 +24,46 @@ Future<VeilidConfig> getDefaultVeilidConfig({
   final defaultConfigStr = Veilid.instance.defaultVeilidConfig();
   final defaultConfig = VeilidConfig.fromJson(jsonDecode(defaultConfigStr));
   return defaultConfig.copyWith(
-      programName: programName,
-      namespace: namespace,
-      tableStore: defaultConfig.tableStore.copyWith(
-        directory: isWeb
-            ? ''
-            : p.join((await getApplicationSupportDirectory()).absolute.path,
-                'table_store'),
+    programName: programName,
+    namespace: namespace,
+    tableStore: defaultConfig.tableStore.copyWith(
+      directory: isWeb
+          ? ''
+          : p.join(
+              (await getApplicationSupportDirectory()).absolute.path,
+              'table_store',
+            ),
+    ),
+    blockStore: defaultConfig.blockStore.copyWith(
+      directory: isWeb
+          ? ''
+          : p.join(
+              (await getApplicationSupportDirectory()).absolute.path,
+              'block_store',
+            ),
+    ),
+    protectedStore: defaultConfig.protectedStore.copyWith(
+      directory: isWeb
+          ? ''
+          : p.join(
+              (await getApplicationSupportDirectory()).absolute.path,
+              'protected_store',
+            ),
+      deviceEncryptionKeyPassword: deviceEncryptionKeyPassword,
+      newDeviceEncryptionKeyPassword: newDeviceEncryptionKeyPassword,
+    ),
+    network: defaultConfig.network.copyWith(
+      networkKeyPassword: networkKeyPassword,
+      routingTable: defaultConfig.network.routingTable.copyWith(
+        bootstrap: bootstrap.isNotEmpty
+            ? bootstrap.split(',')
+            : defaultConfig.network.routingTable.bootstrap,
+        bootstrapKeys: bootstrapKeys != null
+            ? bootstrapKeys.isNotEmpty
+                  ? bootstrapKeys.split(',').map(PublicKey.fromString).toList()
+                  : []
+            : defaultConfig.network.routingTable.bootstrapKeys,
       ),
-      blockStore: defaultConfig.blockStore.copyWith(
-        directory: isWeb
-            ? ''
-            : p.join((await getApplicationSupportDirectory()).absolute.path,
-                'block_store'),
-      ),
-      protectedStore: defaultConfig.protectedStore.copyWith(
-        directory: isWeb
-            ? ''
-            : p.join((await getApplicationSupportDirectory()).absolute.path,
-                'protected_store'),
-        deviceEncryptionKeyPassword: deviceEncryptionKeyPassword,
-        newDeviceEncryptionKeyPassword: newDeviceEncryptionKeyPassword,
-      ),
-      network: defaultConfig.network.copyWith(
-        networkKeyPassword: networkKeyPassword,
-        routingTable: defaultConfig.network.routingTable.copyWith(
-            bootstrap: bootstrap.isNotEmpty
-                ? bootstrap.split(',')
-                : defaultConfig.network.routingTable.bootstrap,
-            bootstrapKeys: bootstrapKeys != null
-                ? bootstrapKeys.isNotEmpty
-                    ? bootstrapKeys
-                        .split(',')
-                        .map(PublicKey.fromString)
-                        .toList()
-                    : []
-                : defaultConfig.network.routingTable.bootstrapKeys),
-      ));
+    ),
+  );
 }

@@ -112,6 +112,9 @@ impl StorageManager {
 
         self.record_gated_fanout_outcome(GatedOperationKind::Get, &result.fanout_result);
 
+        // The read consumes any watch hint; a later change is news again
+        self.consume_watch_read_subkeys(&opaque_record_key, &ValueSubkeyRangeSet::single(subkey));
+
         // Process the returned result
         let out_encrypted = self
             .process_outbound_get_value_result_locked(&subkey_lock, last_seq, result)

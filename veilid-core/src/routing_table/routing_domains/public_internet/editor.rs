@@ -226,6 +226,9 @@ impl<'a> RoutingDomainEditor for RoutingDomainEditorPublicInternet<'a> {
                 .write()
                 .reset_all_updated_since_last_network_change();
 
+            // Our side of every edge changed; recompute contact-method viability
+            routing_table.mark_cm_viability_dirty();
+
             if let Err(e) = self.event_bus().post(RoutingDomainCommitEvent {
                 routing_domain: RoutingDomain::PublicInternet,
                 peer_info_changed: changed.peer_info_changed,

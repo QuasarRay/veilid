@@ -456,7 +456,7 @@ impl InterfaceAddress {
         self.flags.is_preferred
     }
 
-    /// CLAT46 synthesized IPv6 (RFC 6877) — local-only on macOS/iOS
+    /// CLAT46 synthesized IPv6 (RFC 6877), local-only on macOS/iOS
     #[must_use]
     pub fn is_clat(&self) -> bool {
         self.flags.is_clat
@@ -474,7 +474,7 @@ impl InterfaceAddress {
         }
     }
 
-    /// IPv4 link-local / APIPA (169.254.0.0/16) — DHCP-failed fallback, transient
+    /// IPv4 link-local / APIPA (169.254.0.0/16), DHCP-failed fallback, transient
     /// and not reachable by peers; always false for IPv6 (link-local IPv6 is
     /// handled by `ipv6addr_is_global`)
     #[must_use]
@@ -615,13 +615,26 @@ impl NetworkInterface {
     }
 }
 
-/// The best routable gateway and interface addresses distilled from all interfaces.
+/// The gateway, publication and identity addresses distilled from all interfaces.
 #[derive(Clone, Default, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NetworkInterfaceAddressState {
     /// Gateway addresses across all interfaces, sorted and deduplicated.
     pub gateway_addresses: Vec<IpAddr>,
-    /// Best routable interface addresses, sorted by preference and deduplicated.
+    /// PUBLICATION set: best routable interface addresses, sorted by preference and
+    /// deduplicated. Privacy, CLAT and CGNAT addresses are excluded from peer info.
     pub interface_addresses: Vec<IfAddr>,
+    /// IDENTITY set: every address on a running non-loopback interface, sorted and
+    /// deduplicated. Includes the privacy addresses we send from but never publish.
+    pub own_addresses: Vec<IpAddr>,
+}
+
+impl NetworkInterfaceAddressState {
+    /// True when the address belongs to one of our interfaces. Identity, not
+    /// publishability: matches privacy (RFC 4941) and CLAT addresses that publication excludes.
+    #[must_use]
+    pub fn is_own_address(&self, addr: IpAddr) -> bool {
+        self.own_addresses.binary_search(&addr).is_ok()
+    }
 }
 
 /// Which address families are present across the running non-loopback interfaces.
@@ -793,7 +806,7 @@ impl NetworkInterfaces {
     // For each interface, keep only addresses that are either non-global (private/
     // link-local/ULA, needed by LocalNetwork) or match the kernel's primary outbound
     // source for that family. A global address on a non-primary interface is
-    // unreachable from peers — publishing it as our dial info just causes timeouts.
+    // unreachable from peers; publishing it as our dial info causes timeouts.
     // Interfaces that end up with no addresses are dropped entirely.
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -818,6 +831,7 @@ impl NetworkInterfaces {
         // Reduce interfaces to their best routable ip addresses
         let mut intf_addrs = Vec::new();
         let mut gateway_addresses = Vec::new();
+        let mut own_addresses = Vec::new();
         for intf in inner.interfaces.values() {
             // Skip down, loopback, and CLAT virtual interfaces (Android: clat4*/v4-*)
             if !intf.is_running() || intf.is_loopback() || intf.is_clat() {
@@ -825,6 +839,10 @@ impl NetworkInterfaces {
             }
 
             for addr in intf.addresses() {
+                // Identity set keeps what publication filters out below; peers report those
+                // back to us as our external address
+                own_addresses.push(addr.if_addr().ip());
+
                 // Skip RFC 4941 privacy addresses; they rotate and churn published peer info
                 if addr.is_temporary() {
                     continue;
@@ -862,10 +880,14 @@ impl NetworkInterfaces {
         gateway_addresses.sort();
         gateway_addresses.dedup();
 
+        own_addresses.sort();
+        own_addresses.dedup();
+
         // Now export just the addresses
         inner.interface_address_state_cache = Arc::new(NetworkInterfaceAddressState {
             gateway_addresses,
             interface_addresses,
+            own_addresses,
         });
     }
 }

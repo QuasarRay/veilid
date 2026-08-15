@@ -44,10 +44,15 @@ impl NetworkManager {
         // Send boot magic to requested peer address
         let data = Bytes::copy_from_slice(BOOT_MAGIC);
 
-        let out_data = network_result_value_or_log!(self self
+        // Our own transport is suppressed, so this says nothing about the bootstrap node
+        let NetworkAttempt::Performed(attempt) = self
             .net()
-            .send_recv_data_unbound_to_dial_info(dial_info, data, timeout_ms)
-            .await? => [ format!(": dial_info={}, data.len={}", dial_info, data.len()) ]
+            .send_recv_data_unbound_to_dial_info(dial_info.clone(), data.clone(), timeout_ms)
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        let out_data = network_result_value_or_log!(self attempt => [ format!(": dial_info={}, data.len={}", dial_info, data.len()) ]
         {
             return Ok(Vec::new());
         });
@@ -77,10 +82,15 @@ impl NetworkManager {
         // Send boot magic to requested peer address
         let data = Bytes::copy_from_slice(B01T_MAGIC);
 
-        let out_data = network_result_value_or_log!(self self
+        // Our own transport is suppressed, so this says nothing about the bootstrap node
+        let NetworkAttempt::Performed(attempt) = self
             .net()
-            .send_recv_data_unbound_to_dial_info(dial_info, data, timeout_ms)
-            .await? => [ format!(": dial_info={}, data.len={}", dial_info, data.len()) ]
+            .send_recv_data_unbound_to_dial_info(dial_info.clone(), data.clone(), timeout_ms)
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        let out_data = network_result_value_or_log!(self attempt => [ format!(": dial_info={}, data.len={}", dial_info, data.len()) ]
         {
             return Ok(Vec::new());
         });

@@ -152,7 +152,7 @@ pub async fn test_dead_connection_skip() {
     c2.close();
     assert!(matches!(
         c2h.send_async(Bytes::new()).await,
-        ConnectionHandleSendResult::NotSent(_)
+        ConnectionHandleSendResult::NotSent
     ));
 
     table.add_connection(c1).unwrap();
@@ -170,7 +170,7 @@ pub async fn test_dead_connection_skip() {
     assert_eq!(table.get_best_connection_by_remote(None, remote), None);
     assert!(matches!(
         c1h.send_async(Bytes::new()).await,
-        ConnectionHandleSendResult::NotSent(_)
+        ConnectionHandleSendResult::NotSent
     ));
 
     mock_registry::terminate(registry).await;

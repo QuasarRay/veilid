@@ -21,19 +21,16 @@ class RetryRule {
 
   /// Retry up to [maxAttempts] times (null = unbounded), waiting [delay] (or
   /// not, if null) between tries.
-  RetryRule.delay({
-    required this.matches,
-    int? maxAttempts,
-    Duration? delay,
-  }) : beforeRetry = ((n) async {
-          if (maxAttempts != null && n >= maxAttempts) {
-            return false;
-          }
-          if (delay != null) {
-            await Future<void>.delayed(delay);
-          }
-          return true;
-        });
+  RetryRule.delay({required this.matches, int? maxAttempts, Duration? delay})
+    : beforeRetry = ((n) async {
+        if (maxAttempts != null && n >= maxAttempts) {
+          return false;
+        }
+        if (delay != null) {
+          await Future<void>.delayed(delay);
+        }
+        return true;
+      });
 
   /// Retry up to [maxAttempts] times (null = unbounded), awaiting [wait] (e.g.
   /// network readiness) between tries.
@@ -42,20 +39,19 @@ class RetryRule {
     int? maxAttempts,
     required Future<void> Function() wait,
   }) : beforeRetry = ((n) async {
-          if (maxAttempts != null && n >= maxAttempts) {
-            return false;
-          }
-          await wait();
-          return true;
-        });
+         if (maxAttempts != null && n >= maxAttempts) {
+           return false;
+         }
+         await wait();
+         return true;
+       });
 
   /// A copy whose action is [chain], which receives the attempt number and this
   /// rule's current action so it can do its own work and defer to it, e.g.
   /// `rule.withBeforeRetry((n, prev) async { record(); return prev(n); })`.
   RetryRule withBeforeRetry(
     Future<bool> Function(int attemptNumber, RetryAction previous) chain,
-  ) =>
-      RetryRule(matches: matches, beforeRetry: (n) => chain(n, beforeRetry));
+  ) => RetryRule(matches: matches, beforeRetry: (n) => chain(n, beforeRetry));
 
   /// A copy that runs [onRetry] (e.g. telemetry) before this rule's action, or
   /// this rule unchanged if [onRetry] is null.
@@ -127,8 +123,8 @@ class RetryStrategy {
 }
 
 /// VeilidAPI-level policy: retry the transients that clear once online. Each
-/// rule's action defaults to a bounded fixed delay; override either to change
-/// the wait (e.g. block on network readiness) or add telemetry.
+/// rule's action defaults to a bounded doubling delay; override either to
+/// change the wait (e.g. block on network readiness) or add telemetry.
 class VeilidAPIRetryStrategy extends RetryStrategy {
   /// [tryAgainRetry] handles [VeilidAPIExceptionTryAgain]; [transientRetry]
   /// handles timeout and no-connection errors. Either defaults to
@@ -139,27 +135,30 @@ class VeilidAPIRetryStrategy extends RetryStrategy {
     RetryAction? transientRetry,
     Duration? timeout,
   }) : super(
-          rules: [
-            RetryRule(
-              matches: (e) => e is VeilidAPIExceptionTryAgain,
-              beforeRetry: tryAgainRetry ?? defaultRetry,
-            ),
-            RetryRule(
-              matches: (e) =>
-                  e is VeilidAPIExceptionTimeout ||
-                  e is VeilidAPIExceptionNoConnection,
-              beforeRetry: transientRetry ?? defaultRetry,
-            ),
-          ],
-          timeout: timeout,
-        );
+         rules: [
+           RetryRule(
+             matches: (e) => e is VeilidAPIExceptionTryAgain,
+             beforeRetry: tryAgainRetry ?? defaultRetry,
+           ),
+           RetryRule(
+             matches: (e) =>
+                 e is VeilidAPIExceptionTimeout ||
+                 e is VeilidAPIExceptionNoConnection,
+             beforeRetry: transientRetry ?? defaultRetry,
+           ),
+         ],
+         timeout: timeout,
+       );
 
-  /// Up to 3 tries, 250ms apart.
+  /// Up to 3 tries, waiting 500ms then 1s. The delay doubles because a flat one
+  /// re-offers the whole load to a congested network at once.
   static Future<bool> defaultRetry(int attemptNumber) async {
     if (attemptNumber >= 3) {
       return false;
     }
-    await Future<void>.delayed(const Duration(milliseconds: 250));
+    await Future<void>.delayed(
+      Duration(milliseconds: 250 * (1 << attemptNumber)),
+    );
     return true;
   }
 }

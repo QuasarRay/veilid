@@ -407,6 +407,156 @@ pub fn primary_source_ipv6() -> Option<Ipv6Addr> {
     }
 }
 
+// Send a single UDP datagram with a per-packet TTL override
+cfg_if! {
+    if #[cfg(unix)] {
+        /// Send one UDP datagram with a best-effort per-packet TTL (IPv4) or hop
+        /// limit (IPv6) override, never touching the socket's TTL option:
+        /// - IPv6: `IPV6_HOPLIMIT` cmsg (RFC 3542)
+        /// - IPv4 on Linux/Android: `IP_TTL` cmsg
+        /// - IPv4 elsewhere: sent at the socket's default TTL; no per-packet TTL
+        ///   cmsg exists (xnu honors only `IP_PKTINFO`) and a setsockopt swap would
+        ///   race other senders on the shared socket
+        ///
+        /// Single nonblocking attempt; a full send buffer surfaces as `WouldBlock`.
+        pub fn send_udp_datagram_with_ttl<S: std::os::fd::AsRawFd>(
+            socket: &S,
+            data: &[u8],
+            remote_addr: SocketAddr,
+            ttl: u32,
+        ) -> io::Result<usize> {
+            cfg_if! {
+                if #[cfg(any(target_os = "linux", target_os = "android"))] {
+                    let (cmsg_level, cmsg_type) = match remote_addr {
+                        SocketAddr::V4(_) => (libc::IPPROTO_IP, libc::IP_TTL),
+                        SocketAddr::V6(_) => (libc::IPPROTO_IPV6, libc::IPV6_HOPLIMIT),
+                    };
+                    sendmsg_with_ttl_cmsg(socket.as_raw_fd(), data, remote_addr, cmsg_level, cmsg_type, ttl)
+                } else {
+                    match remote_addr {
+                        SocketAddr::V4(_) => socket2_operation(socket, |s| s.send_to(data, &remote_addr.into())),
+                        SocketAddr::V6(_) => sendmsg_with_ttl_cmsg(socket.as_raw_fd(), data, remote_addr, libc::IPPROTO_IPV6, libc::IPV6_HOPLIMIT, ttl),
+                    }
+                }
+            }
+        }
+
+        fn sendmsg_with_ttl_cmsg(
+            fd: std::os::fd::RawFd,
+            data: &[u8],
+            remote_addr: SocketAddr,
+            cmsg_level: libc::c_int,
+            cmsg_type: libc::c_int,
+            ttl: u32,
+        ) -> io::Result<usize> {
+            let sockaddr = SockAddr::from(remote_addr);
+            let mut iov = libc::iovec {
+                iov_base: data.as_ptr() as *mut libc::c_void,
+                iov_len: data.len(),
+            };
+            // u64 array for cmsg alignment; larger than CMSG_SPACE(sizeof(int)) everywhere
+            let mut cmsg_buf = [0u64; 8];
+            unsafe {
+                let mut msg: libc::msghdr = std::mem::zeroed();
+                msg.msg_name = sockaddr.as_ptr() as *mut libc::c_void;
+                msg.msg_namelen = sockaddr.len();
+                msg.msg_iov = &mut iov;
+                msg.msg_iovlen = 1;
+                msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+                msg.msg_controllen = libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as libc::c_uint) as _;
+                let cmsg = libc::CMSG_FIRSTHDR(&msg);
+                (*cmsg).cmsg_level = cmsg_level;
+                (*cmsg).cmsg_type = cmsg_type;
+                (*cmsg).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as libc::c_uint) as _;
+                std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), ttl as libc::c_int);
+                let res = libc::sendmsg(fd, &msg, 0);
+                if res < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(res as usize)
+            }
+        }
+    } else if #[cfg(windows)] {
+        /// Send one UDP datagram with a best-effort per-packet TTL (IPv4) or hop
+        /// limit (IPv6) override, never touching the socket's TTL option:
+        /// - IPv6: `IPV6_HOPLIMIT` cmsg via `WSASendMsg`
+        /// - IPv4: sent at the socket's default TTL; `WSASendMsg` has no TTL cmsg
+        ///   and a setsockopt swap would race other senders on the shared socket
+        ///
+        /// Single nonblocking attempt; a full send buffer surfaces as `WouldBlock`.
+        pub fn send_udp_datagram_with_ttl<S: std::os::windows::io::AsRawSocket>(
+            socket: &S,
+            data: &[u8],
+            remote_addr: SocketAddr,
+            ttl: u32,
+        ) -> io::Result<usize> {
+            match remote_addr {
+                SocketAddr::V4(_) => socket2_operation(socket, |s| s.send_to(data, &remote_addr.into())),
+                SocketAddr::V6(_) => wsasendmsg_with_hoplimit(socket, data, remote_addr, ttl),
+            }
+        }
+
+        fn wsasendmsg_with_hoplimit<S: std::os::windows::io::AsRawSocket>(
+            socket: &S,
+            data: &[u8],
+            remote_addr: SocketAddr,
+            ttl: u32,
+        ) -> io::Result<usize> {
+            use winapi::shared::minwindef::DWORD;
+            use winapi::shared::ws2def::{IPPROTO_IPV6, WSABUF, WSACMSGHDR, WSAMSG};
+            use winapi::shared::ws2ipdef::IPV6_HOPLIMIT;
+            use winapi::um::winsock2::{WSASendMsg, SOCKET, SOCKET_ERROR};
+
+            // WSA_CMSG_SPACE(sizeof(int)) layout by hand; winapi has no cmsg macros
+            #[repr(C)]
+            struct CmsgHopLimit {
+                hdr: WSACMSGHDR,
+                value: i32,
+            }
+
+            let sockaddr = SockAddr::from(remote_addr);
+            let mut wsabuf = WSABUF {
+                len: data.len() as u32,
+                buf: data.as_ptr() as *mut i8,
+            };
+            let mut cmsg = CmsgHopLimit {
+                hdr: WSACMSGHDR {
+                    cmsg_len: std::mem::size_of::<WSACMSGHDR>() + std::mem::size_of::<i32>(),
+                    cmsg_level: IPPROTO_IPV6 as i32,
+                    cmsg_type: IPV6_HOPLIMIT,
+                },
+                value: ttl as i32,
+            };
+            let mut msg = WSAMSG {
+                name: sockaddr.as_ptr() as *mut _,
+                namelen: sockaddr.len(),
+                lpBuffers: &mut wsabuf,
+                dwBufferCount: 1,
+                Control: WSABUF {
+                    len: std::mem::size_of::<CmsgHopLimit>() as u32,
+                    buf: (&mut cmsg as *mut CmsgHopLimit) as *mut i8,
+                },
+                dwFlags: 0,
+            };
+            let mut sent: DWORD = 0;
+            let res = unsafe {
+                WSASendMsg(
+                    socket.as_raw_socket() as SOCKET,
+                    &mut msg,
+                    0,
+                    &mut sent,
+                    std::ptr::null_mut(),
+                    None,
+                )
+            };
+            if res == SOCKET_ERROR {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(sent as usize)
+        }
+    }
+}
+
 // Run operations on underlying socket
 cfg_if! {
     if #[cfg(unix)] {

@@ -122,8 +122,7 @@ Future<void> testHpkeSealOpen() async {
     expect(await cs.hpkeOpen(kkp1.secret, aad, sealed), equals(plaintext));
 
     // empty aad and empty plaintext round-trip
-    final sealedEmpty =
-        await cs.hpkeSeal(kkp1.key, Uint8List(0), Uint8List(0));
+    final sealedEmpty = await cs.hpkeSeal(kkp1.key, Uint8List(0), Uint8List(0));
     expect(await cs.hpkeOpen(kkp1.secret, Uint8List(0), sealedEmpty),
         equals(Uint8List(0)));
 

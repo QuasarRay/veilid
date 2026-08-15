@@ -35,6 +35,11 @@ pub(in crate::storage_manager) struct OutboundWatchState {
     /// Gates hints to be monotonically increasing so replays and duplicate per-node reports are dropped.
     #[serde(default)]
     last_reported_subkey_seqs: BTreeMap<ValueSubkey, ValueSeqNum>,
+    /// Subkeys reported to the app and not yet read back, with a count of range-only copies
+    /// suppressed while unread. Every serving node sends its own ValueChanged per change, and a
+    /// seq-less range report has only consumption to dedup by.
+    #[serde(default, skip)]
+    unread_reported_subkeys: BTreeMap<ValueSubkey, u32>,
 }
 
 impl fmt::Display for OutboundWatchState {
@@ -140,6 +145,7 @@ impl OutboundWatchState {
             last_fallback_inspect_ts: None,
             needs_forced_reconcile: false,
             last_reported_subkey_seqs: BTreeMap::new(),
+            unread_reported_subkeys: BTreeMap::new(),
         }
     }
 
@@ -163,6 +169,46 @@ impl OutboundWatchState {
     }
     pub fn last_reported_subkey_seq(&self, subkey: ValueSubkey) -> Option<ValueSeqNum> {
         self.last_reported_subkey_seqs.get(&subkey).copied()
+    }
+
+    /// Mark `subkeys` hinted to the app and return the unmarked news; an already-marked subkey
+    /// counts the copy instead. Touches no calculated field, so it takes no editor.
+    pub fn mark_hinted_subkeys(&mut self, subkeys: &ValueSubkeyRangeSet) -> ValueSubkeyRangeSet {
+        let mut news = ValueSubkeyRangeSet::new();
+        for subkey in subkeys.iter() {
+            match self.unread_reported_subkeys.entry(subkey) {
+                std::collections::btree_map::Entry::Vacant(v) => {
+                    v.insert(0);
+                    news.insert(subkey);
+                }
+                std::collections::btree_map::Entry::Occupied(mut o) => {
+                    *o.get_mut() = o.get().saturating_add(1);
+                }
+            }
+        }
+        news
+    }
+
+    /// Mark `subkeys` reported with data; fresh data satisfies owed copies, so counts reset.
+    pub fn mark_value_reported_subkeys(&mut self, subkeys: &ValueSubkeyRangeSet) {
+        for subkey in subkeys.iter() {
+            self.unread_reported_subkeys.insert(subkey, 0);
+        }
+    }
+
+    /// Consume the report marks for subkeys the app read from the network, returning those that
+    /// had copies suppressed while unread: a copy racing the read may be a newer change, so the
+    /// watch owes the app one re-report.
+    pub fn consume_read_subkeys(&mut self, subkeys: &ValueSubkeyRangeSet) -> ValueSubkeyRangeSet {
+        let mut owed = ValueSubkeyRangeSet::new();
+        for subkey in subkeys.iter() {
+            if let Some(copies) = self.unread_reported_subkeys.remove(&subkey) {
+                if copies > 0 {
+                    owed.insert(subkey);
+                }
+            }
+        }
+        owed
     }
 
     /// Get the parameters we use if we're updating this state's per node watches

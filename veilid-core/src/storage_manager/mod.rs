@@ -66,6 +66,7 @@ pub(crate) use get_value::InboundGetValueResult;
 pub(crate) use inspect_record::InboundInspectValueResult;
 pub(crate) use outbound_transaction_manager::OutboundTransactionHandle;
 pub(crate) use set_value::InboundSetValueResult;
+use set_value::{SeqAssignment, SeqReuse};
 pub(crate) use transaction_begin::{InboundTransactBeginResult, TransactBeginSuccess};
 pub(crate) use transaction_command::{InboundTransactCommandResult, TransactCommandSuccess};
 pub(crate) use watch_value::{InboundWatchParameters, InboundWatchValueResult};
@@ -411,6 +412,19 @@ impl StorageManager {
 
             // Start up outbound transaction manager
             inner.outbound_transaction_manager.init();
+
+            // Terminal delivery only queues: drop_transaction spawns it while holding
+            // the inner lock
+            let registry = self.registry();
+            inner
+                .outbound_transaction_manager
+                .set_terminal_delivery_spawner(Box::new(move |delivery| {
+                    let registry2 = registry.clone();
+                    registry
+                        .storage_manager()
+                        .background_operation_processor
+                        .add_future(delivery.run(registry2));
+                }));
         }
 
         self.load_metadata().await?;

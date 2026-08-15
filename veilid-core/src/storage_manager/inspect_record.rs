@@ -41,6 +41,10 @@ struct OutboundInspectValueContext {
     pub seqcounts: Vec<SubkeySeqCount>,
     /// The descriptor if we got a fresh one or empty if no descriptor was needed
     pub opt_descriptor_info: Option<InspectDescriptorInfo>,
+    /// Bumped whenever a subkey's seq or consensus set advances
+    pub convergence: usize,
+    /// The convergence counter as of the previous done check
+    pub checked_convergence: usize,
 }
 
 /// The result of the outbound_inspect_value operation
@@ -209,9 +213,7 @@ impl StorageManager {
         // If we're simulating a set, increase the previous sequence number we have by 1
         if matches!(scope, DHTReportScope::UpdateSet) {
             for seq in local_inspect_result.seqs_mut() {
-                if let Ok(next) = seq.next() {
-                    *seq = next;
-                }
+                *seq = seq.saturating_next();
             }
         }
 
@@ -346,6 +348,8 @@ impl StorageManager {
                 })
                 .collect(),
             opt_descriptor_info,
+            convergence: 0,
+            checked_convergence: 0,
         }));
 
         // Routine to call to generate fanout
@@ -482,11 +486,17 @@ impl StorageManager {
                                 .iter()
                                 .map(|s| SubkeySeqCount {
                                     seq: *s,
-                                    // One node has shown us the newest sequence numbers so far
-                                    consensus_nodes: vec![next_node.clone()],
+                                    // Only a returned seq is evidence; a subkey this node
+                                    // had nothing for must not count toward its consensus
+                                    consensus_nodes: if s.is_some() {
+                                        vec![next_node.clone()]
+                                    } else {
+                                        vec![]
+                                    },
                                     value_nodes: vec![next_node.clone()],
                                 })
                                 .collect();
+                            ctx.convergence += 1;
                         } else {
                             if ctx.seqcounts.len() != answer.seqs.len() {
                                 veilid_log!(registry debug target:"network_result", "seqs list length should always be equal by now: {} (wanted {})",
@@ -497,7 +507,10 @@ impl StorageManager {
                                     disposition: FanoutCallDisposition::Invalid,
                                 });
                             }
-                            for pair in ctx.seqcounts.iter_mut().zip(answer.seqs.iter()) {
+                            let mut convergence = 0usize;
+                            for (subkey_index, pair) in
+                                ctx.seqcounts.iter_mut().zip(answer.seqs.iter()).enumerate()
+                            {
                                 let ctx_seqcnt = pair.0;
                                 let answer_seq = *pair.1;
 
@@ -505,6 +518,18 @@ impl StorageManager {
                                 // While we may find a better sequence number if we keep looking, this does not mimic the behavior
                                 // of get and set unless we stop here
                                 if ctx_seqcnt.consensus_nodes.len() >= consensus_count {
+                                    // Unlike get, inspect has no AcceptedNewer restart, so a newer
+                                    // seq dropped here is a change the watch fallback never sees
+                                    if answer_seq > ctx_seqcnt.seq {
+                                        veilid_log!(registry debug
+                                            "InspectValue discarded a newer seq after consensus: {} subkey_index={} consensus_seq={} discarded_seq={} node={}",
+                                            opaque_record_key,
+                                            subkey_index,
+                                            ctx_seqcnt.seq,
+                                            answer_seq,
+                                            next_node
+                                        );
+                                    }
                                     continue;
                                 }
 
@@ -517,13 +542,16 @@ impl StorageManager {
                                         // One node has shown us the latest sequence numbers so far
                                         ctx_seqcnt.seq = answer_seq;
                                         ctx_seqcnt.consensus_nodes = vec![next_node.clone()];
+                                        convergence += 1;
                                     } else if answer_seq == ctx_seqcnt.seq {
                                         // Keep the nodes that showed us the latest values
                                         ctx_seqcnt.consensus_nodes.push(next_node.clone());
+                                        convergence += 1;
                                     }
                                 }
                                 ctx_seqcnt.value_nodes.push(next_node.clone());
                             }
+                            ctx.convergence += convergence;
                         }
 
                         // Return peers if we have some
@@ -552,17 +580,33 @@ impl StorageManager {
         let check_done = {
             let context = context.clone();
             Arc::new(move |_: &FanoutResult| {
-                // If we have reached sufficient consensus on all subkeys, return done
-                let ctx = context.lock();
-                let mut has_consensus = true;
+                let mut ctx = context.lock();
+
+                // An unanswered subkey may still live on nodes further out than we have reached,
+                // so the nodes in hand cannot prove absence:
+                // - stop only once some subkey has consensus, proving these nodes carry the record
+                // - every subkey anyone answered for must have reached full consensus
+                // - the last round must have added nothing
+                let mut any_consensus = false;
+                let mut any_converging = false;
                 for cs in ctx.seqcounts.iter() {
-                    if cs.consensus_nodes.len() < consensus_count {
-                        has_consensus = false;
-                        break;
+                    let count = cs.consensus_nodes.len();
+                    if count >= consensus_count {
+                        any_consensus = true;
+                    } else if count > 0 {
+                        any_converging = true;
                     }
                 }
 
-                if !ctx.seqcounts.is_empty() && ctx.opt_descriptor_info.is_some() && has_consensus {
+                let stalled = ctx.convergence == ctx.checked_convergence;
+                ctx.checked_convergence = ctx.convergence;
+
+                if !ctx.seqcounts.is_empty()
+                    && ctx.opt_descriptor_info.is_some()
+                    && any_consensus
+                    && !any_converging
+                    && stalled
+                {
                     FanoutDoneDisposition::DoneEarly
                 } else {
                     FanoutDoneDisposition::NotDone
@@ -605,12 +649,18 @@ impl StorageManager {
         let mut subkey_fanout_results = vec![];
         for cs in &ctx.seqcounts {
             let has_consensus = cs.consensus_nodes.len() >= consensus_count;
+            let kind = if has_consensus {
+                FanoutResultKind::Consensus
+            } else if cs.consensus_nodes.is_empty()
+                && matches!(fanout_result.kind, FanoutResultKind::Consensus)
+            {
+                // No node answered for this subkey, so its absence is unconfirmed
+                FanoutResultKind::Exhausted
+            } else {
+                fanout_result.kind
+            };
             let subkey_fanout_result = FanoutResult {
-                kind: if has_consensus {
-                    FanoutResultKind::Consensus
-                } else {
-                    fanout_result.kind
-                },
+                kind,
                 consensus_nodes: cs.consensus_nodes.clone(),
                 value_nodes: cs.value_nodes.clone(),
             };

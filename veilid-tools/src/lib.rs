@@ -83,6 +83,8 @@ pub mod log_unwrap;
 pub mod must_join_handle;
 /// Single-slot future runner that joins the prior run before starting the next.
 pub mod must_join_single_future;
+/// Wrapper distinguishing an operation we performed from one we chose not to.
+pub mod network_attempt;
 /// Enumeration of host network interfaces and their addresses.
 pub mod network_interfaces;
 /// Result type distinguishing network-level outcomes from hard errors.
@@ -275,6 +277,8 @@ pub use log_unwrap::*;
 pub use must_join_handle::*;
 #[doc(inline)]
 pub use must_join_single_future::*;
+#[doc(inline)]
+pub use network_attempt::*;
 #[doc(inline)]
 pub use network_interfaces::*;
 #[doc(inline)]

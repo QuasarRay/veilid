@@ -12,8 +12,10 @@ class PeriodicTicker {
   int? _intervalId;
 
   void start(Duration interval, void Function() onTick) {
-    _intervalId = web.window
-        .setInterval((() => onTick()).toJS, interval.inMilliseconds.toJS);
+    _intervalId = web.window.setInterval(
+      (() => onTick()).toJS,
+      interval.inMilliseconds.toJS,
+    );
   }
 
   void stop() {

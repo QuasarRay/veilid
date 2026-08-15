@@ -70,6 +70,14 @@ impl StorageManager {
         // Check for watches that need fallback inspection
         Self::check_fallback_inspections_inner(self.registry(), &mut inner, cur_ts);
 
+        // Send any repeat hints owed from reads that raced suppressed reports
+        if !inner.outbound_watch_manager.pending_rehints.is_empty() {
+            let registry = self.registry();
+            self.background_operation_processor.add_future(async move {
+                registry.storage_manager().send_pending_rehints().await;
+            });
+        }
+
         // Iterate all outbound watches and determine what work needs doing if any
         for outbound_watch in inner.outbound_watch_manager.outbound_watches.values_mut() {
             // Operate on this watch only if it isn't already being operated on.

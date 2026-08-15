@@ -93,7 +93,36 @@ impl PublicInternetRoutingDomainDetail {
         true
     }
 
+    /// Candidate filter: a node must have proven it can carry our traffic before we
+    /// pick it as a relay.
     pub fn make_relay_node_filter(&self) -> impl Fn(&BucketEntrySnapshot) -> bool {
+        let inner = self.make_relay_node_filter_inner(true);
+        move |snap| inner(snap).is_none()
+    }
+
+    /// Retention filter for a relay we already chose. Same disqualifiers, except that
+    /// missing evidence is not one: we only ever dial a relay over the flow we already
+    /// have, so per-transport dial evidence may never appear. Only positive failure
+    /// evidence drops an incumbent.
+    pub fn make_relay_retention_filter(&self) -> impl Fn(&BucketEntrySnapshot) -> bool {
+        let inner = self.make_relay_node_filter_inner(false);
+        move |snap| inner(snap).is_none()
+    }
+
+    /// Why a relay we already chose should be dropped, or None to keep it
+    pub fn make_relay_retention_filter_reason(
+        &self,
+    ) -> impl Fn(&BucketEntrySnapshot) -> Option<&'static str> {
+        self.make_relay_node_filter_inner(false)
+    }
+
+    /// Shared body of the relay filters: the disqualifying reason, or None to accept.
+    /// Transport health keys off last_seen_ts because it is monotone; a streak measure
+    /// would reset on a single lost question and churn relays under congestion.
+    fn make_relay_node_filter_inner(
+        &self,
+        require_evidence: bool,
+    ) -> impl Fn(&BucketEntrySnapshot) -> Option<&'static str> {
         let ip6_prefix_size = self
             .config()
             .internal()
@@ -109,7 +138,7 @@ impl PublicInternetRoutingDomainDetail {
         move |snap: &BucketEntrySnapshot| {
             // Defensively exclude nodes that aren't responsive
             if !snap.state.is_responsive() {
-                return false;
+                return Some("not responsive");
             }
 
             // Ensure this node is not on the local network
@@ -117,24 +146,24 @@ impl PublicInternetRoutingDomainDetail {
                 .routing_domain_set()
                 .contains(RoutingDomain::LocalNetwork)
             {
-                return false;
+                return Some("local network");
             }
 
             // Exclude any nodes that don't have a 'best node id' for our enabled cryptosystems
             if snap.best_node_id().is_none() {
-                return false;
+                return Some("no best node id");
             }
 
             // Exclude nodes whose past protected connections died too fast.
             if let Some(drop_stats) = &snap.connection_stats.protected_drop_span {
                 if drop_stats.tm90 < RELAY_MIN_PROTECTED_CONNECTION_TM90 {
-                    return false;
+                    return Some("protected connections die too fast");
                 }
             }
 
             // Get the public internet peer info so we can validate it
             let Some(peer_info) = snap.get_peer_info(RoutingDomain::PublicInternet) else {
-                return false;
+                return Some("no public internet peer info");
             };
 
             // Exclude any nodes that are relaying directly through us
@@ -142,7 +171,7 @@ impl PublicInternetRoutingDomainDetail {
                 .node_ids()
                 .contains_any_from_iter(peer_info.node_info().relay_ids().iter())
             {
-                return false;
+                return Some("relays through us");
             }
 
             // Disqualify nodes that don't have relay capability
@@ -150,7 +179,7 @@ impl PublicInternetRoutingDomainDetail {
                 .node_info()
                 .has_capability(VEILID_CAPABILITY_RELAY)
             {
-                return false;
+                return Some("no relay capability");
             }
 
             // Disqualify any nodes that don't speak all of the envelope versions we do
@@ -162,11 +191,16 @@ impl PublicInternetRoutingDomainDetail {
                 .copied()
                 .any(|x| !peer_envelope_support.contains(&x))
             {
-                return false;
+                return Some("envelope version mismatch");
             }
 
             // Ensure a transport we can reach this relay through is currently healthy.
+            // Counters record why each candidate transport was rejected, so churn is attributable.
             let mut has_reachable_transport = false;
+            let mut considered = 0usize;
+            let mut no_evidence = 0usize;
+            let mut unreachable = 0usize;
+            let mut failing = 0usize;
             for did in peer_info.node_info().dial_info_detail_list() {
                 if did.class.requires_signal() {
                     continue;
@@ -174,13 +208,26 @@ impl PublicInternetRoutingDomainDetail {
                 if !did.dial_info.matches_filter(&outbound_dif) {
                     continue;
                 }
+                considered += 1;
                 let t: TransportType = (&did.dial_info).into();
-                let healthy = snap.per_transport.get(&t).is_some_and(|stats| {
-                    stats.first_steady_answer_ts.is_some()
-                        && stats.unreachable == 0
-                        && stats.failed_to_send == 0
-                        && stats.recent_lost_questions == 0
-                });
+                let opt_stats = snap.per_transport.get(&t);
+                match opt_stats {
+                    None => no_evidence += 1,
+                    Some(stats) if stats.last_seen_ts.is_none() => no_evidence += 1,
+                    Some(stats) if stats.unreachable != 0 => unreachable += 1,
+                    Some(stats) if transport_health(stats).is_failing() => failing += 1,
+                    _ => {}
+                }
+                // Answered a dialed question here at some point and is not now Failing
+                let healthy = match opt_stats {
+                    // Absent evidence disqualifies a candidate but never an incumbent
+                    None => !require_evidence,
+                    Some(stats) => {
+                        stats.unreachable == 0
+                            && !transport_health(stats).is_failing()
+                            && (!require_evidence || stats.last_seen_ts.is_some())
+                    }
+                };
                 if healthy {
                     has_reachable_transport = true;
                     break;
@@ -188,7 +235,17 @@ impl PublicInternetRoutingDomainDetail {
             }
 
             if !has_reachable_transport {
-                return false;
+                return Some(if considered == 0 {
+                    "no dial info matching our outbound capabilities"
+                } else if require_evidence && no_evidence == considered {
+                    "never dialed on any usable transport"
+                } else if failing > 0 {
+                    "usable transports are failing"
+                } else if unreachable > 0 {
+                    "usable transports unreachable"
+                } else {
+                    "no healthy reachable transport"
+                });
             }
 
             // Exclude any nodes that have our same network block
@@ -196,10 +253,10 @@ impl PublicInternetRoutingDomainDetail {
                 .node_info()
                 .is_on_same_ipblock(peer_info.node_info(), ip6_prefix_size)
             {
-                return false;
+                return Some("same ip block as us");
             }
 
-            true
+            None
         }
     }
 }

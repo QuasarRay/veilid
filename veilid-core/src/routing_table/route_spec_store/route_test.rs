@@ -304,9 +304,8 @@ impl RouteSpecStore {
         let mut probe_transport: Option<TransportType> = None;
         while let Some((is_loopback, res)) = probes.next().await {
             match res? {
-                StatusResult::Answer {
-                    send_data_result, ..
-                } => {
+                StatusResult::Sent(status_answer) => {
+                    let send_data_result = status_answer.send_data_result;
                     if probe_transport.is_none() {
                         probe_transport = send_data_result.opt_transport_type();
                     }
@@ -375,7 +374,7 @@ impl RouteSpecStore {
 
         // Test with double-round trip ping to self
         match Box::pin(self.rpc_processor().rpc_call_status(dest)).await? {
-            StatusResult::Answer { .. } => Ok(Some(true)),
+            StatusResult::Sent(_) => Ok(Some(true)),
             StatusResult::Failed(_) | StatusResult::NotSent(_) => Ok(Some(false)),
         }
     }

@@ -64,8 +64,10 @@ pub(super) struct NetworkManagerStats {
 #[derive(Debug, Serialize)]
 struct OnlineDomainStats {
     online: bool,
+    degraded: bool,
     transitions: u64,
     time_offline: TimestampDuration,
+    time_degraded: TimestampDuration,
 }
 
 impl NetworkManager {
@@ -121,11 +123,14 @@ impl NetworkManager {
             .unwrap_or_default();
         let now = Timestamp::now();
         let domain_stats = |rd| {
-            let (online, transitions, time_offline) = self.online_detector().online_stats(rd, now);
+            let (online, degraded, transitions, time_offline, time_degraded) =
+                self.online_detector().online_stats(rd, now);
             OnlineDomainStats {
                 online,
+                degraded,
                 transitions,
                 time_offline,
+                time_degraded,
             }
         };
         Some(Box::new(NetworkManagerStats {

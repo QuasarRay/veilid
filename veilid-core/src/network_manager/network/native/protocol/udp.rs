@@ -11,12 +11,6 @@ pub struct RawUdpProtocolHandler {
     socket: Arc<UdpSocket>,
     /// Reassembly buffer for fragmented UDP messages
     assembly_buffer: AssemblyBuffer,
-    /// True if `socket` is IPv6, false for IPv4
-    is_ipv6: bool,
-    /// TTL the socket was created with; restored after holepunch sends
-    default_ttl: u32,
-    /// Current TTL on the socket; mutated transiently by `send_hole_punch`
-    current_ttl: Arc<AsyncMutex<u32>>,
     /// Drop to signal cancellation; taken out by `stop()`
     stop_source: Arc<Mutex<Option<StopSource>>>,
     /// Cloned by recv-loops that follow this handler's stop
@@ -26,16 +20,7 @@ pub struct RawUdpProtocolHandler {
 impl_veilid_component_accessors!(RawUdpProtocolHandler);
 
 impl RawUdpProtocolHandler {
-    pub fn new(registry: VeilidComponentRegistry, socket: Arc<UdpSocket>, is_ipv6: bool) -> Self {
-        // Get original TTL
-        let default_ttl = if is_ipv6 {
-            socket2_operation(socket.as_ref(), |s| s.unicast_hops_v6())
-                .expect_or_log("getting IPV6_UNICAST_HOPS should not fail")
-        } else {
-            socket2_operation(socket.as_ref(), |s| s.ttl_v4())
-                .expect_or_log("getting IP_TTL should not fail")
-        };
-
+    pub fn new(registry: VeilidComponentRegistry, socket: Arc<UdpSocket>) -> Self {
         let stop_source = StopSource::new();
         let stop_token = stop_source.token();
 
@@ -43,9 +28,6 @@ impl RawUdpProtocolHandler {
             registry,
             socket,
             assembly_buffer: AssemblyBuffer::new(),
-            is_ipv6,
-            default_ttl,
-            current_ttl: Arc::new(AsyncMutex::new(default_ttl)),
             stop_source: Arc::new(Mutex::new(Some(stop_source))),
             stop_token,
         }
@@ -59,6 +41,18 @@ impl RawUdpProtocolHandler {
     /// Signal cancellation for this handler. Idempotent.
     pub fn stop(&self) {
         *self.stop_source.lock() = None;
+    }
+
+    /// Debug availability override: a suppressed transport must fail like the network broke it
+    fn is_transport_disabled(&self, remote_addr: SocketAddr) -> bool {
+        let address_type = if remote_addr.is_ipv6() {
+            AddressType::IPV6
+        } else {
+            AddressType::IPV4
+        };
+        self.network_manager()
+            .transport_stats()
+            .is_transport_disabled(LowLevelProtocolType::UDP, address_type)
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "protocol", err, skip(self, data), fields(self.socket = ?self.socket, data.len = data.len(), ret.len, ret.flow)))]
@@ -126,11 +120,13 @@ impl RawUdpProtocolHandler {
         Ok((message_len, flow))
     }
 
+    /// Fragment and send a message. `purpose` names the call site in the send-timeout log.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "protocol", err, skip(self, data), fields(self.socket = ?self.socket, data.len = data.len(), ret.flow)))]
     pub async fn send_message(
         &self,
         data: Bytes,
         remote_addr: SocketAddr,
+        purpose: &'static str,
     ) -> io::Result<NetworkResult<Flow>> {
         if data.len() > MAX_MESSAGE_SIZE {
             bail_io_error_other!("sending too large UDP message");
@@ -145,46 +141,44 @@ impl RawUdpProtocolHandler {
             return Ok(NetworkResult::no_connection_other("punished"));
         }
 
-        // Ensure the TTL for sent packets is the default,
-        // then fragment and send the packets
-        {
-            let current_ttl = self.current_ttl.lock().await;
-            if *current_ttl != self.default_ttl {
-                veilid_log!(self error "Incorrect TTL on sent UDP packet ({} != {}): len={}, remote_addr={:?}", *current_ttl, self.default_ttl, data.len(), remote_addr);
+        if self.is_transport_disabled(remote_addr) {
+            return Ok(NetworkResult::no_connection_other("transport disabled"));
+        }
+
+        let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| async move {
+            let len = network_result_try!(self
+                .socket
+                .send_to(&framed_chunk, remote_addr)
+                .await
+                .into_network_result()?);
+            if len != framed_chunk.len() {
+                bail_io_error_other!("UDP partial send")
             }
 
-            // Fragment and send
-            let sender = |framed_chunk: Bytes, remote_addr: SocketAddr| async move {
-                let len = network_result_try!(self
-                    .socket
-                    .send_to(&framed_chunk, remote_addr)
-                    .await
-                    .into_network_result()?);
-                if len != framed_chunk.len() {
-                    bail_io_error_other!("UDP partial send")
-                }
+            veilid_log!(self trace "udp::send_message:chunk(len={}) {:?}", len, remote_addr);
+            Ok(NetworkResult::value(()))
+        };
 
-                veilid_log!(self trace "udp::send_message:chunk(len={}) {:?}", len, remote_addr);
-                Ok(NetworkResult::value(()))
-            };
-
-            // A stalled interface parks send_to forever while the ttl lock is held,
-            // serializing every UDP send behind it; bound the fragmented send so it fails
-            let timeout_ms = self.registry.config().internal().network.rpc.timeout_ms;
-            network_result_try!(match timeout(
-                timeout_ms,
-                self.assembly_buffer
-                    .split_message(data, remote_addr, sender)
-            )
-            .await
-            {
-                Ok(res) => res?,
-                Err(_) => {
-                    veilid_log!(self debug "UDP send timed out: remote_addr={:?}", remote_addr);
-                    return Ok(NetworkResult::timeout());
-                }
-            });
-        }
+        // A stalled interface parks send_to forever; bound the fragmented send so it fails
+        let config = self.registry.config();
+        let net_config = &config.internal().network;
+        let timeout_ms = net_config
+            .rpc
+            .timeout_ms
+            .min(net_config.single_send_timeout_ms);
+        network_result_try!(match timeout(
+            timeout_ms,
+            self.assembly_buffer
+                .split_message(data, remote_addr, sender)
+        )
+        .await
+        {
+            Ok(res) => res?,
+            Err(_) => {
+                veilid_log!(self debug "UDP send timed out: purpose={} remote_addr={:?}", purpose, remote_addr);
+                return Ok(NetworkResult::timeout());
+            }
+        });
 
         // Return a flow for the sent message
         let peer_addr = PeerAddress::new(
@@ -206,7 +200,7 @@ impl RawUdpProtocolHandler {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "protocol", err, skip(self), fields(self.socket = ?self.socket, ret.flow)))]
-    pub async fn send_hole_punch(
+    pub fn send_hole_punch(
         &self,
         remote_addr: SocketAddr,
         ttl: u32,
@@ -220,43 +214,17 @@ impl RawUdpProtocolHandler {
             return Ok(NetworkResult::no_connection_other("punished"));
         }
 
-        // Ensure the TTL for sent packets is the default,
-        // then fragment and send the packets
-        let res = {
-            let mut current_ttl = self.current_ttl.lock().await;
-            if *current_ttl != self.default_ttl {
-                veilid_log!(self error "Incorrect TTL before sending holepunch UDP packet ({} != {}): remote_addr={:?}", *current_ttl, self.default_ttl, remote_addr);
+        if self.is_transport_disabled(remote_addr) {
+            return Ok(NetworkResult::no_connection_other("transport disabled"));
+        }
+
+        // Zero length packet with a best-effort per-packet TTL
+        let res = match send_udp_datagram_with_ttl(self.socket.as_ref(), &[], remote_addr, ttl) {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                veilid_log!(self debug "UDP hole punch send would block: remote_addr={:?}", remote_addr);
+                return Ok(NetworkResult::timeout());
             }
-
-            // Get synchronous socket
-            socket2_operation(self.socket.as_ref(), |s| {
-                // Set TTL
-                let ttl_res = if self.is_ipv6 {
-                    s.set_unicast_hops_v6(ttl)
-                } else {
-                    s.set_ttl_v4(ttl)
-                };
-                ttl_res.inspect_err(|e| {
-                    veilid_log!(self error "Failed to set TTL on holepunch UDP socket: {} remote_addr={:?}", e, remote_addr);
-                })?;
-                *current_ttl = ttl;
-
-                // Send zero length packet
-                let res = s.send_to(&[], &remote_addr.into());
-
-                // Restore TTL immediately
-                let ttl_res = if self.is_ipv6 {
-                    s.set_unicast_hops_v6(self.default_ttl)
-                } else {
-                    s.set_ttl_v4(self.default_ttl)
-                };
-                ttl_res.inspect_err(|e| {
-                    veilid_log!(self error "Failed to reset TTL on holepunch UDP socket: {} remote_addr={:?}", e, remote_addr);
-                })?;
-                *current_ttl = self.default_ttl;
-
-                res
-            })
+            res => res,
         };
 
         // Check for errors
@@ -296,11 +264,7 @@ impl RawUdpProtocolHandler {
         let local_socket_addr = compatible_unspecified_socket_addr(socket_addr);
         let socket = bind_async_udp_socket(local_socket_addr)?
             .ok_or(io::Error::from(io::ErrorKind::AddrInUse))?;
-        Ok(RawUdpProtocolHandler::new(
-            registry,
-            Arc::new(socket),
-            local_socket_addr.is_ipv6(),
-        ))
+        Ok(RawUdpProtocolHandler::new(registry, Arc::new(socket)))
     }
 
     /// Bind a UDP socket to a specific local source address
@@ -314,10 +278,6 @@ impl RawUdpProtocolHandler {
     ) -> io::Result<RawUdpProtocolHandler> {
         let socket = bind_async_udp_socket(local_socket_addr)?
             .ok_or(io::Error::from(io::ErrorKind::AddrInUse))?;
-        Ok(RawUdpProtocolHandler::new(
-            registry,
-            Arc::new(socket),
-            local_socket_addr.is_ipv6(),
-        ))
+        Ok(RawUdpProtocolHandler::new(registry, Arc::new(socket)))
     }
 }

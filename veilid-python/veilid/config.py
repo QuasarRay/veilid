@@ -286,6 +286,7 @@ class VeilidConfigInternalNetwork(ConfigBase):
     """Internal "footgun" network tuning."""
 
     connection_initial_timeout_ms: int
+    single_send_timeout_ms: int
     connection_inactivity_timeout_ms: int
     max_connections_per_ip4: int
     max_connections_per_ip6_prefix: int

@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
 
-// Renaming either side of the @DefaultAsset/assetName pair still compiles, and only
-// fails when the first FFI call runs.
+// Renaming either side of the @DefaultAsset/assetName pair still compiles and
+// fails only at the first FFI call.
 void testNativeAssetResolves() {
   expect(Veilid.instance.veilidVersionString(), isNotEmpty);
   expect(Veilid.instance.veilidFeatures(), isNotEmpty);

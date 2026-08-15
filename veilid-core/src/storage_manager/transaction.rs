@@ -97,19 +97,26 @@ impl StorageManager {
 
         let records_lock = match kind {
             OutboundTransactionKind::Background => {
-                // Non-blocking acquire: any contention on the Transaction-mode lock
-                // for any of these records returns TryAgain rather than waiting.
-                // Prevents cross-record deadlocks that could otherwise form if the
-                // caller racily issues overlapping begin_transaction calls.
-                let Some(records_lock) = self.record_lock_table.try_lock_records(
-                    opaque_record_keys.clone(),
-                    StorageManagerRecordLockPurpose::TransactBegin,
-                ) else {
-                    veilid_log!(self debug target:"network_result", "transaction begin contended on records: [{}] (source=background)",
-                        opaque_record_keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "));
-                    apibail_try_again!("transaction begin contended");
-                };
-                records_lock
+                // Bounded wait instead of storming instant TryAgain retries
+                // - lock_records sorts, so queueing here is deadlock-safe
+                // - the timeout breaks any residual cycle and keeps the TryAgain
+                //   contract for genuinely stuck holders
+                match self
+                    .record_lock_table
+                    .lock_records(
+                        opaque_record_keys.clone(),
+                        StorageManagerRecordLockPurpose::TransactBegin,
+                    )
+                    .timeout_duration(TimestampDuration::new_ms(BACKGROUND_BEGIN_LOCK_TIMEOUT_MS))
+                    .await
+                {
+                    Ok(records_lock) => records_lock,
+                    Err(_) => {
+                        veilid_log!(self debug target:"network_result", "transaction begin contended on records: [{}] (source=background)",
+                            opaque_record_keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "));
+                        apibail_try_again!("transaction begin contended");
+                    }
+                }
             }
             OutboundTransactionKind::Foreground => {
                 // Blocking acquire is deadlock-safe (lock_records sorts) and bounded
@@ -1305,6 +1312,10 @@ impl StorageManager {
         // Done with network access, release the semaphore
         drop(gate_permit);
 
+        // A transactional get is the app reading from the network, so it re-arms watch
+        // reporting like any other read
+        self.consume_watch_read_subkeys(&record_key.opaque(), &ValueSubkeyRangeSet::single(subkey));
+
         let get_signed_value_data = {
             let mut inner = self.inner.lock();
             let otm = &mut inner.outbound_transaction_manager;
@@ -1386,6 +1397,7 @@ impl StorageManager {
         }
 
         // Build the signed value data for this set from the raw data and the record's writer
+        let min_seqnum = options.as_ref().and_then(|o| o.min_seqnum);
         let signed_value_data = {
             let (writer, last_get_result) = {
                 let inner = &*self.inner.lock();
@@ -1427,7 +1439,17 @@ impl StorageManager {
 
             // Make signed value data (encrypted) and value data (unencrypted) and get descriptor for this value
             let (signed_value_data, _, _) = self
-                .prepare_set_value_data(&record_key, subkey, data, &writer, last_get_result)
+                .prepare_set_value_data(
+                    &record_key,
+                    subkey,
+                    data,
+                    &writer,
+                    SeqAssignment {
+                        min_seqnum,
+                        reuse: SeqReuse::Denied,
+                    },
+                    last_get_result,
+                )
                 .await?;
             signed_value_data
         };
@@ -1792,7 +1814,7 @@ impl StorageManager {
     /// Failure-case counterpart to rollback_guard_locked_success.
     ///
     /// Drops local transaction state synchronously, then runs the Rollback RPCs in the background
-    /// holding the records_lock until they finish — so a retry can't re-begin on these records
+    /// holding the records_lock until they finish, so a retry can't re-begin on these records
     /// while their nodes still hold this transaction's node-transactions (which starves begin
     /// consensus).
     fn rollback_guard_locked_failure(

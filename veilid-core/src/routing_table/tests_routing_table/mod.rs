@@ -39,10 +39,13 @@ pub async fn test_all() {
     test_bucket_entry_state::test_state_punished();
     test_bucket_entry_state::test_state_dead_excessive_unreachable();
     test_bucket_entry_state::test_state_dead_excessive_send_failures();
+    test_bucket_entry_state::test_state_viable_ordering_vetoes_death();
+    test_bucket_entry_state::test_state_send_failures_never_kill();
     test_bucket_entry_state::test_state_dead_never_seen_lost_questions();
     test_bucket_entry_state::test_state_dead_steady_lost_questions();
     test_bucket_entry_state::test_state_missing_failed_to_send();
     test_bucket_entry_state::test_state_missing_lost_questions();
+    test_bucket_entry_state::test_state_revive_reaches_initial();
     test_bucket_entry_state::test_state_initial();
     test_bucket_entry_state::test_state_unreliable();
     test_bucket_entry_state::test_state_reliable();

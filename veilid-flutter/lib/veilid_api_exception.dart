@@ -52,22 +52,30 @@ abstract class VeilidAPIException implements Exception {
       case 'Unimplemented':
         {
           return VeilidAPIExceptionUnimplemented(
-              json['unimplemented']! as String);
+            json['unimplemented']! as String,
+          );
         }
       case 'ParseError':
         {
           return VeilidAPIExceptionParseError(
-              json['message']! as String, json['value']! as String);
+            json['message']! as String,
+            json['value']! as String,
+          );
         }
       case 'InvalidArgument':
         {
-          return VeilidAPIExceptionInvalidArgument(json['context']! as String,
-              json['argument']! as String, json['value']! as String);
+          return VeilidAPIExceptionInvalidArgument(
+            json['context']! as String,
+            json['argument']! as String,
+            json['value']! as String,
+          );
         }
       case 'MissingArgument':
         {
           return VeilidAPIExceptionMissingArgument(
-              json['context']! as String, json['argument']! as String);
+            json['context']! as String,
+            json['argument']! as String,
+          );
         }
       case 'Generic':
         {
@@ -76,12 +84,14 @@ abstract class VeilidAPIException implements Exception {
       case 'TransactionNotFound':
         {
           return VeilidAPIExceptionTransactionNotFound(
-              json['message']! as String);
+            json['message']! as String,
+          );
         }
       default:
         {
           throw VeilidAPIExceptionInternal(
-              "Invalid VeilidAPIException type: ${json['kind']! as String}");
+            "Invalid VeilidAPIException type: ${json['kind']! as String}",
+          );
         }
     }
   }
@@ -261,10 +271,14 @@ class VeilidAPIExceptionInvalidArgument implements VeilidAPIException {
 
   /// Construct with the calling context, argument name, and rejected value.
   const VeilidAPIExceptionInvalidArgument(
-      this.context, this.argument, this.value);
+    this.context,
+    this.argument,
+    this.value,
+  );
 
   @override
-  String toString() => 'VeilidAPIException: InvalidArgument'
+  String toString() =>
+      'VeilidAPIException: InvalidArgument'
       ' ($context:$argument)\n    value: $value';
 
   @override

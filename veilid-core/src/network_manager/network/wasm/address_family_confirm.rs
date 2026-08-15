@@ -6,68 +6,10 @@ use super::*;
 
 /// Interval between polling for address family confirmation
 const ADDR_FAMILY_POLL_INTERVAL_MS: u32 = 1000;
-/// Minimum number of nodes to confirm an address family
-const ADDR_FAMILY_MIN_NODES_TO_CONFIRM: usize = 4;
 /// Maximum number of probes per family
 const ADDR_FAMILY_MAX_PROBES: usize = 8;
 /// Maximum number of failures to tolerate before declaring an address family unsupported
 const ADDR_FAMILY_FAILURE_THRESHOLD: usize = 3;
-
-/// Address family probe result
-enum FamilyProbeDisposition {
-    Supported,
-    Unsupported,
-    Inconclusive,
-    Cancelled,
-}
-
-/// Address family confirmation state
-enum AddressFamilyConfirmState {
-    /// No address types are configured for this routing domain
-    NoConfiguredAddressTypes,
-    /// All configured address types have been confirmed
-    AllConfiguredConfirmed,
-    /// Not enough candidates to verify unconfirmed address type
-    NotEnoughCandidates,
-    /// Confirm candidates to determine final set of address types
-    ConfirmCandidates,
-}
-
-/// Address family confirmation state
-struct AddressFamilyConfirmCandidates {
-    /// All address types configured for this routing domain
-    configured_address_types: AddressTypeSet,
-    /// All address types that have been positively seen since we started the confirmation process
-    confirmed_address_types: AddressTypeSet,
-    /// Nodes that can confirm an unconfirmed address type
-    candidates: BTreeMap<AddressType, Vec<NodeRef>>,
-}
-
-impl AddressFamilyConfirmCandidates {
-    /// Determine the current state of the address family confirmation process
-    pub fn state(&self) -> AddressFamilyConfirmState {
-        if self.configured_address_types.is_empty() {
-            AddressFamilyConfirmState::NoConfiguredAddressTypes
-        } else if self.confirmed_address_types == self.configured_address_types {
-            AddressFamilyConfirmState::AllConfiguredConfirmed
-        } else {
-            let missing_address_types =
-                self.configured_address_types - self.confirmed_address_types;
-            for mat in missing_address_types {
-                let candidates = self
-                    .candidates
-                    .get(&mat)
-                    .as_ref()
-                    .map(|c| c.len())
-                    .unwrap_or(0);
-                if candidates < ADDR_FAMILY_MIN_NODES_TO_CONFIRM {
-                    return AddressFamilyConfirmState::NotEnoughCandidates;
-                }
-            }
-            AddressFamilyConfirmState::ConfirmCandidates
-        }
-    }
-}
 
 impl WasmNetwork {
     // Reset address family confirmation state
@@ -226,7 +168,8 @@ impl WasmNetwork {
     }
 
     /// One confirmation pass: probe each allowed family, drop conclusively-unreachable ones,
-    /// then set confirmed=true (mirrors native confirm completion)
+    /// then set confirmed=true. A deferred outcome leaves the domain unconfirmed so the
+    /// worker retries next tick.
     async fn perform_address_family_confirmation_pass(
         &self,
         routing_domain: RoutingDomain,
@@ -236,64 +179,47 @@ impl WasmNetwork {
         let address_family_confirm_candidates =
             self.collect_family_probe_candidates(routing_domain)?;
 
-        match address_family_confirm_candidates.state() {
+        let outcome = match address_family_confirm_candidates.state() {
             AddressFamilyConfirmState::NoConfiguredAddressTypes => {
                 veilid_log!(self debug "no address types configured for routing domain {:#}; confirming no address types", routing_domain);
-                self.confirm_address_families(
-                    routing_domain,
-                    address_family_confirm_candidates.confirmed_address_types,
-                );
-                return Ok(());
+                ConfirmationPassOutcome::Confirm(AddressTypeSet::empty())
             }
             AddressFamilyConfirmState::AllConfiguredConfirmed => {
-                veilid_log!(self debug "all address types confirmed for routing domain {:#}; enabling all configuredaddress types", routing_domain);
-                self.confirm_address_families(
-                    routing_domain,
+                veilid_log!(self debug "all address types confirmed for routing domain {:#}; enabling all configured address types", routing_domain);
+                ConfirmationPassOutcome::Confirm(
                     address_family_confirm_candidates.confirmed_address_types,
-                );
-                return Ok(());
+                )
             }
             AddressFamilyConfirmState::NotEnoughCandidates => {
                 veilid_log!(self debug "not enough candidates to confirm address types for routing domain {:#}; skipping confirmation", routing_domain);
-                return Ok(());
+                ConfirmationPassOutcome::Deferred
             }
             AddressFamilyConfirmState::ConfirmCandidates => {
                 veilid_log!(self debug "Need to confirm address types {:?} for routing domain {:#}", address_family_confirm_candidates.candidates.keys(), routing_domain);
-            }
-        }
 
-        // Keep optimistic; remove only families that fail conclusively (no candidates = keep)
-        let mut confirmed_address_types = address_family_confirm_candidates.confirmed_address_types;
-        for (at, cands) in address_family_confirm_candidates.candidates {
-            if cands.len() < ADDR_FAMILY_MIN_NODES_TO_CONFIRM {
-                veilid_log!(self error "not enough candidates to confirm address type {:#} for routing domain {:#}; skipping confirmation", at, routing_domain);
-                continue;
+                let seen_live = address_family_confirm_candidates.confirmed_address_types;
+                let mut dispositions = Vec::new();
+                for (at, cands) in address_family_confirm_candidates.candidates {
+                    let disposition = self
+                        .probe_address_family(routing_domain, at, cands, stop_token)
+                        .await;
+                    if matches!(disposition, FamilyProbeDisposition::Inconclusive) {
+                        // Unreachable when state() guaranteed enough candidates
+                        veilid_log!(self error "inconclusive result confirming address type {:#} for routing domain {:#}", at, routing_domain);
+                    }
+                    let cancelled = matches!(disposition, FamilyProbeDisposition::Cancelled);
+                    dispositions.push((at, disposition));
+                    if cancelled {
+                        break;
+                    }
+                }
+                resolve_probe_dispositions(seen_live, &dispositions)
             }
-            match self
-                .probe_address_family(routing_domain, at, cands.clone(), stop_token)
-                .await
-            {
-                FamilyProbeDisposition::Unsupported => {
-                    // Definitely not supported, don't add to confirmed set
-                }
-                FamilyProbeDisposition::Cancelled => {
-                    // Bail out immediately because we got the stop token
-                    return Ok(());
-                }
-                FamilyProbeDisposition::Inconclusive => {
-                    // Shouldn't happen because we only get here if there weren't enough candidates
-                    veilid_log!(self error "Inconculsive results confirming address type {:#} for routing domain {:#}; skipping confirmation", at, routing_domain);
-                    continue;
-                }
-                FamilyProbeDisposition::Supported => {
-                    // Record as confirmed
-                    confirmed_address_types.insert(at);
-                }
-            }
-        }
+        };
 
-        // Confirm whatever we got from the probes
-        self.confirm_address_families(routing_domain, confirmed_address_types);
+        if let ConfirmationPassOutcome::Confirm(confirmed_address_types) = outcome {
+            self.confirm_address_families(routing_domain, confirmed_address_types);
+        }
 
         Ok(())
     }
@@ -303,8 +229,8 @@ impl WasmNetwork {
     fn collect_family_probe_candidates(
         &self,
         routing_domain: RoutingDomain,
-    ) -> EyreResult<AddressFamilyConfirmCandidates> {
-        // All possible configures address types we can confirm
+    ) -> EyreResult<AddressFamilyConfirmCandidates<NodeRef>> {
+        // All possible configured address types we can confirm
         let configured_address_types = configured_address_type_set(&self.config());
 
         // List of candidates that can be pinged for positive confirmation of missing address types
@@ -425,7 +351,7 @@ impl WasmNetwork {
                 Err(_) => return FamilyProbeDisposition::Cancelled,
             };
             match res {
-                Ok(StatusResult::Answer { .. }) => return FamilyProbeDisposition::Supported,
+                Ok(StatusResult::Sent(_)) => return FamilyProbeDisposition::Supported,
                 _ => {
                     failures += 1;
                     if failures >= ADDR_FAMILY_FAILURE_THRESHOLD {

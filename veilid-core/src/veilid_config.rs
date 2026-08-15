@@ -957,6 +957,9 @@ impl Default for VeilidConfigInternalDHT {
 pub struct VeilidConfigInternalNetwork {
     /// Timeout to establish a new connection, in milliseconds.
     pub connection_initial_timeout_ms: u32,
+    /// Cap on any single low-level send, in milliseconds, so a send on a wedged
+    /// transport cannot consume the caller's whole RPC timeout budget.
+    pub single_send_timeout_ms: u32,
     /// Idle time before an inactive connection is dropped, in milliseconds.
     pub connection_inactivity_timeout_ms: u32,
     /// Maximum simultaneous connections from a single IPv4 address.
@@ -987,6 +990,7 @@ impl Default for VeilidConfigInternalNetwork {
     fn default() -> Self {
         Self {
             connection_initial_timeout_ms: 5000,
+            single_send_timeout_ms: 2000,
             connection_inactivity_timeout_ms: 60000,
             max_connections_per_ip4: 32,
             max_connections_per_ip6_prefix: 32,

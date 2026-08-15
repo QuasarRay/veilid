@@ -14,6 +14,8 @@ struct OutboundTransactBeginContext {
     pub route_refs: Vec<AllocatedRouteRef>,
     /// Observed RTT per accepted node, used to bound the post-consensus deadline
     pub accepted_rtts: HashMap<NodeId, TimestampDuration>,
+    /// Nodes that answered without giving us a transaction, cancelling the re-plan
+    pub refused_nodes: HashSet<NodeId>,
 }
 
 /// parameters required to begin a transaction
@@ -69,6 +71,15 @@ impl StorageManager {
 
     /// Perform a transact begin query on the network for a single record
     /// This routine uses fanout to find nodes and begin their server-side node transactions
+    ///
+    /// Two rules shape the set this builds:
+    /// - A node that accepts without a transaction id is out of write-transaction slots
+    ///   (`member_transaction_limit`, or `public_transaction_limit` when this node signs
+    ///   anonymously; only sets that take a value count against either). Where a node's
+    ///   limit is 1, the holder is usually another instance of us on the same writer key.
+    /// - The closest nodes own the record. Placing a transaction further out splits its
+    ///   consensus in two, so a busy answer counts as a rejection and cancels the
+    ///   re-plan; the second pass is only for unreachable nodes.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "dht", skip_all, err)
@@ -125,6 +136,7 @@ impl StorageManager {
             seqs: vec![],
             route_refs: Vec::new(),
             accepted_rtts: HashMap::new(),
+            refused_nodes: HashSet::new(),
         }));
 
         let descriptor_cache = self.descriptor_cache.clone();
@@ -258,7 +270,11 @@ impl StorageManager {
 
                         // Get the transaction id
                         let Some(xid) = answer.transaction_id else {
-                            veilid_log!(registry debug target:"network_result", "TransactBegin accepted but returned no transaction id, try again later");
+                            veilid_log!(registry debug target:"network_result", "TransactBegin busy on {}: no transaction id (out of slots, or this record is already transacted with our writer key)", next_node);
+                            // Busy, not unwilling; nothing here for a second pass either
+                            if let Some(node_id) = next_node.node_ids().get(crypto_kind) {
+                                context.lock().refused_nodes.insert(node_id);
+                            }
                             return Ok(FanoutCallOutput {
                                 peer_info_list: answer.peers,
                                 disposition: FanoutCallDisposition::Rejected,
@@ -383,7 +399,8 @@ impl StorageManager {
         // post-consensus deadline keeps gathering accepts up to this cap.
         let safety_count = required_strict_consensus_count
             + (required_strict_consensus_count * CONSENSUS_TRIM_PERCENT).div_ceil(100);
-        let check_done = {
+        // Built from a target count so a re-plan can rebuild it around the deficit
+        let make_check_done = |safety_count: usize| -> FanoutCheckDone {
             Arc::new(
                 move |fanout_result: &FanoutResult| match fanout_result.kind {
                     FanoutResultKind::Incomplete => FanoutDoneDisposition::NotDone,
@@ -400,13 +417,14 @@ impl StorageManager {
                 },
             )
         };
+        let check_done = make_check_done(safety_count);
 
-        // Bound the post-consensus wait by `POST_CONSENSUS_RTT_FACTOR × max(fastest
-        // consensus_count RTTs)` (capped at `rpc.timeout_ms`). Using only the
-        // fastest consensus_count keeps a single slow accepter from inflating
-        // the deadline up to the rpc-timeout cap.
+        // Rolling post-consensus window: POST_CONSENSUS_RTT_FACTOR * max(fastest
+        // consensus_count RTTs), capped by rpc.timeout_ms and POST_CONSENSUS_GRACE_MS.
+        // Only accepts re-arm it, so an arriving wave keeps collecting up to safety_count.
         let rpc_timeout =
             TimestampDuration::new_ms(config.internal().network.rpc.timeout_ms.into());
+        let post_consensus_grace = TimestampDuration::new_ms(POST_CONSENSUS_GRACE_MS);
         let post_consensus_timeout_callback: FanoutPostConsensusTimeoutCallback = {
             let context = context.clone();
             Arc::new(move |result: &FanoutResult| -> TimestampDuration {
@@ -428,18 +446,14 @@ impl StorageManager {
                     .max()
                     .unwrap_or_else(|| TimestampDuration::new_ms(0));
                 let bound = bound_rtt.saturating_mul(POST_CONSENSUS_RTT_FACTOR);
-                if bound < rpc_timeout {
-                    bound
-                } else {
-                    rpc_timeout
-                }
+                bound.min(rpc_timeout).min(post_consensus_grace)
             })
         };
 
         // Call the fanout
         let routing_table = self.routing_table();
         let hash_coordinate = opaque_record_key.to_hash_coordinate();
-        let fanout_call = FanoutCall::new(
+        let mut fanout_call = FanoutCall::new(
             &routing_table,
             FanoutCallParams {
                 name: format!(
@@ -465,13 +479,90 @@ impl StorageManager {
             .stop_token()
             .ok_or_else(VeilidAPIError::not_initialized)?;
 
-        let fanout_result = fanout_call
+        let mut fanout_result = fanout_call
             .run(
                 init_fanout_queue,
                 FanoutQueueMode::ThrottleAtConsensus,
                 shutdown_stop_source,
             )
             .await?;
+
+        // Exhausting the fanout short of consensus means this record's planned set is
+        // unreachable from here, not that the record cannot be written, so re-plan once
+        // over nodes the first pass never tried:
+        // - gated on at least one accept, the only cheap proof our own path out works
+        //   (no accepts is exactly what a dead uplink looks like, and a second pass
+        //   would burn another timeout on nodes that were never at fault)
+        // - asks only for the deficit, since the second pass adds to the first's set
+        // - any refusal cancels it; see this function's header
+        let (held_node_transactions, refused_count) = {
+            let ctx = context.lock();
+            (ctx.accepted_rtts.len(), ctx.refused_nodes.len())
+        };
+        let short_set = matches!(fanout_result.kind, FanoutResultKind::Exhausted)
+            && held_node_transactions > 0
+            && held_node_transactions < required_strict_consensus_count;
+        // Busy answers are common; log what the slot gate costs
+        if short_set && refused_count > 0 {
+            veilid_log!(self debug target: "network_result",
+                "TransactBegin[{}] short at {}/{} but {} node(s) busy, not re-planning",
+                opaque_record_key,
+                held_node_transactions,
+                required_strict_consensus_count,
+                refused_count);
+        }
+        if short_set && refused_count == 0 {
+            let deficit = required_strict_consensus_count - held_node_transactions;
+            let deficit_safety = safety_count
+                .saturating_sub(held_node_transactions)
+                .max(deficit);
+
+            veilid_log!(self debug target: "network_result",
+                "TransactBegin[{}] exhausted at {}/{}, re-planning over untried nodes for the remaining {}",
+                opaque_record_key,
+                held_node_transactions,
+                required_strict_consensus_count,
+                deficit);
+
+            let shutdown_stop_source = self
+                .startup_lock
+                .stop_token()
+                .ok_or_else(VeilidAPIError::not_initialized)?;
+
+            // Exclude first-pass accepters: a second transaction on the same node would
+            // count twice toward a consensus meant to be over distinct nodes
+            let skip_nodes: HashSet<NodeId> =
+                context.lock().accepted_rtts.keys().cloned().collect();
+            let capability_filter = capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]);
+            fanout_call.set_peer_info_filter(Arc::new(move |pi: Arc<PeerInfo>| {
+                if pi
+                    .node_ids()
+                    .iter()
+                    .any(|node_id| skip_nodes.contains(node_id))
+                {
+                    return false;
+                }
+                capability_filter(pi)
+            }));
+            fanout_call.set_seed_untried(true);
+            fanout_call.set_run_target(deficit, make_check_done(deficit_safety));
+            // No seed list: the value nodes are what the first pass already exhausted
+            fanout_result = fanout_call
+                .run(
+                    Vec::new(),
+                    FanoutQueueMode::ThrottleAtConsensus,
+                    shutdown_stop_source,
+                )
+                .await?;
+
+            // The re-plan result counts only the second pass; log the combined set too
+            veilid_log!(self debug target: "network_result",
+                "TransactBegin[{}] re-plan result: {:#}, node transactions now {}/{}",
+                opaque_record_key,
+                fanout_result,
+                context.lock().accepted_rtts.len(),
+                required_strict_consensus_count);
+        }
 
         let mut ctx = context.lock();
 

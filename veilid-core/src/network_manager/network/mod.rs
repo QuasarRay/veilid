@@ -1,3 +1,10 @@
+// Wasm-only in production, but unit-tested on every platform
+#[cfg(any(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    test,
+    feature = "test-util"
+))]
+mod address_family_confirm_logic;
 mod platform_network;
 mod platform_protocol_network_connection;
 
@@ -15,6 +22,12 @@ cfg_if! {
 
 use super::*;
 
+#[cfg(any(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    test,
+    feature = "test-util"
+))]
+pub(crate) use address_family_confirm_logic::*;
 pub use platform_network::*;
 pub use platform_protocol_network_connection::*;
 

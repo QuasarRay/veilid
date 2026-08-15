@@ -4,20 +4,44 @@ impl_veilid_log_facility!("rtab");
 
 /// How frequently we optimize relays
 const RELAY_OPTIMIZATION_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
-/// What percentile to keep our relays optimized to
-const RELAY_OPTIMIZATION_PERCENTILE: f32 = 66.0;
-/// What percentile to choose our relays from (must be greater than RELAY_OPTIMIZATION_PERCENTILE)
-const RELAY_SELECTION_PERCENTILE: f32 = 85.0;
+/// Drop a relay for being slow only once it falls below this percentile and has degraded
+/// against its own baseline. The gap to RELAY_SELECTION_PERCENTILE is the hysteresis dead
+/// band: a freshly chosen relay has that much room to degrade before it re-qualifies for
+/// replacement.
+const RELAY_OPTIMIZATION_PERCENTILE: f32 = 50.0;
+/// Below this the relay is dropped on the percentile alone: the incumbent is the
+/// only candidate carrying our traffic, but down here no amount of load explains it.
+const RELAY_OPTIMIZATION_FLOOR_PERCENTILE: f32 = 10.0;
+/// How much worse than its own best tm90 a relay must get before the percentile test
+/// may drop it. Judging a relay against itself keeps a good relay in a fast fleet,
+/// and re-selection is not free: the flow resettles and our dial info republishes.
+const RELAY_DEGRADATION_MARGIN: u64 = 2;
+/// What percentile to choose our relays from (must be greater than RELAY_OPTIMIZATION_PERCENTILE).
+/// Also the anti-herding knob: selection picks at random from this tier, so a wider tier
+/// spreads load across more nodes.
+const RELAY_SELECTION_PERCENTILE: f32 = 75.0;
+/// How long a newly selected relay is left alone before it can be optimized away.
+/// Optimization only: a disqualified, dead, punished or erroring relay is dropped
+/// immediately however long it has served. Latency right after selection is the least
+/// trustworthy: the flow has not settled and our own traffic load inflates the
+/// incumbent's measurements relative to resting candidates.
+const RELAY_MIN_DWELL_BEFORE_OPTIMIZATION: TimestampDuration = TimestampDuration::new_secs(300);
 
 impl PublicInternetRoutingDomainController {
-    /// Check is a relay is still valid is this routing domain
+    /// Check if a relay is still valid in this routing domain
     /// Does not require access to the routing domain controller itself
+    ///
+    /// Past the dead/punished check, every judgment here reads evidence our own degradation
+    /// can manufacture, so while blame is suppressed the incumbent keeps its job
+    #[expect(clippy::too_many_arguments)]
     fn check_relay_valid(
         routing_table: &RoutingTable,
         cur_ts: Timestamp,
         relay: &RoutingDomainRelay,
         mut relay_state: RoutingDomainRelayState,
         relay_node_filter: &impl Fn(&BucketEntrySnapshot) -> bool,
+        relay_retention_filter: &impl Fn(&BucketEntrySnapshot) -> bool,
+        relay_retention_filter_reason: &impl Fn(&BucketEntrySnapshot) -> Option<&'static str>,
         snapshot: &RoutingTableSnapshot,
     ) -> Option<RoutingDomainRelayState> {
         let relay_node = relay.relay_node.clone();
@@ -35,17 +59,24 @@ impl PublicInternetRoutingDomainController {
             return None;
         }
 
+        let blame_suppressed = routing_table
+            .network_manager()
+            .online_detector()
+            .blame_suppressed(RoutingDomain::PublicInternet);
+
         // Relay node no longer can relay. Tolerate transient unresponsiveness (Missing from a
         // single lost question): truly dead relays are dropped by the state check above, and
         // dropping on every blip reselects relays until the flap detector trips.
         let relay_snap = relay_node
             .entry()
             .snapshot(routing_table.registry(), cur_ts);
-        let relay_filter_passes = relay_node_filter(&relay_snap);
+        // Retention, not candidacy: an incumbent keeps its job unless something is wrong with it
+        let relay_filter_passes = relay_retention_filter(&relay_snap);
         if !relay_filter_passes {
-            if relay_snap.state.is_responsive() {
+            if relay_snap.state.is_responsive() && !blame_suppressed {
                 veilid_log!(routing_table debug
-                    "Relay node can no longer relay, dropping relay {}",
+                    "Relay node can no longer relay ({}), dropping relay {}",
+                    relay_retention_filter_reason(&relay_snap).unwrap_or("unknown"),
                     relay.relay_node
                 );
                 return None;
@@ -57,15 +88,17 @@ impl PublicInternetRoutingDomainController {
         }
 
         // Pathological: protected connections die too fast on this relay.
-        if let Some(drop_stats) = relay_node.connection_stats().protected_drop_span {
-            if drop_stats.tm90 < RELAY_MIN_PROTECTED_CONNECTION_TM90 {
-                veilid_log!(routing_table debug
-                    "Relay protected connection lifetime tm90={} < {}, dropping relay {}",
-                    drop_stats.tm90,
-                    RELAY_MIN_PROTECTED_CONNECTION_TM90,
-                    relay_node
-                );
-                return None;
+        if !blame_suppressed {
+            if let Some(drop_stats) = relay_node.connection_stats().protected_drop_span {
+                if drop_stats.tm90 < RELAY_MIN_PROTECTED_CONNECTION_TM90 {
+                    veilid_log!(routing_table debug
+                        "Relay protected connection lifetime tm90={} < {}, dropping relay {}",
+                        drop_stats.tm90,
+                        RELAY_MIN_PROTECTED_CONNECTION_TM90,
+                        relay_node
+                    );
+                    return None;
+                }
             }
         }
 
@@ -74,8 +107,16 @@ impl PublicInternetRoutingDomainController {
         // relative-performance set by the same filter, so optimizing it here would drop it as
         // "unmeasurable" and undo the retention above every interval; let it recover or die
         // via the Dead state check instead.
+        // Our own traffic concentrates on the incumbent, so congestion sinks its percentile
+        // while resting candidates look fast: above the floor it must also have degraded
+        // against its own settled baseline before we drop it.
         let last_optimized_duration = cur_ts.duration_since(relay_state.last_optimized);
-        if relay_filter_passes && last_optimized_duration > RELAY_OPTIMIZATION_INTERVAL {
+        let dwell_duration = cur_ts.duration_since(relay_state.selected_ts);
+        if relay_filter_passes
+            && !blame_suppressed
+            && last_optimized_duration > RELAY_OPTIMIZATION_INTERVAL
+            && dwell_duration >= RELAY_MIN_DWELL_BEFORE_OPTIMIZATION
+        {
             // See what our relay's current percentile is
             if let Some(relay_relative_performance) = routing_table.get_node_relative_performance(
                 relay_node_id,
@@ -84,38 +125,61 @@ impl PublicInternetRoutingDomainController {
                 |ls| ls.tm90,
             ) {
                 // Get latency numbers
-                let latency_stats = if let Some(latency) = relay_node.peer_stats().latency {
-                    latency.to_string()
-                } else {
-                    "[no stats]".to_owned()
+                let opt_latency = relay_node.peer_stats().latency;
+                let opt_tm90 = opt_latency.as_ref().map(|l| l.tm90);
+                let latency_stats = match &opt_latency {
+                    Some(latency) => latency.to_string(),
+                    None => "[no stats]".to_owned(),
                 };
+
+                // The baseline the margin below is measured against
+                if let Some(tm90) = opt_tm90 {
+                    relay_state.best_tm90 = Some(match relay_state.best_tm90 {
+                        Some(best) => best.min(tm90),
+                        None => tm90,
+                    });
+                }
 
                 // Get current relay reliability
                 let state_reason = relay_node.state_reason(cur_ts);
 
-                if relay_relative_performance.percentile < RELAY_OPTIMIZATION_PERCENTILE {
+                // With no latency stats there is nothing to judge against itself
+                let degraded_from_baseline = match (opt_tm90, relay_state.best_tm90) {
+                    (Some(cur), Some(best)) => cur > best.saturating_mul(RELAY_DEGRADATION_MARGIN),
+                    _ => true,
+                };
+                let below_floor =
+                    relay_relative_performance.percentile < RELAY_OPTIMIZATION_FLOOR_PERCENTILE;
+                let below_bar =
+                    relay_relative_performance.percentile < RELAY_OPTIMIZATION_PERCENTILE;
+
+                if below_floor || (below_bar && degraded_from_baseline) {
                     // Drop the current relay so we can get the best new one
                     veilid_log!(routing_table debug
-                        "Relay tm90 is ({:.2}% < {:.2}%) ({} out of {}) (latency {}, {:?}) optimizing relay {}",
+                        "Relay tm90 is ({:.2}% < {:.2}%) ({} out of {}) (latency {}, best {}, {:?}) optimizing relay {} after serving {:#} ({})",
                         relay_relative_performance.percentile,
-                        RELAY_OPTIMIZATION_PERCENTILE,
+                        if below_floor { RELAY_OPTIMIZATION_FLOOR_PERCENTILE } else { RELAY_OPTIMIZATION_PERCENTILE },
                         relay_relative_performance.node_index,
                         relay_relative_performance.node_count,
                         latency_stats,
+                        relay_state.best_tm90.map(|t| t.to_string()).unwrap_or_else(|| "none".to_owned()),
                         state_reason,
-                        relay_node
+                        relay_node,
+                        dwell_duration,
+                        if below_floor { "below floor" } else { "degraded against its own baseline" }
                     );
                     return None;
                 } else {
                     // Note that we tried to optimize the relay but it was good
                     #[cfg(feature = "verbose-tracing")]
                     veilid_log!(routing_table debug
-                        "Relay tm90 is ({:.2}% >= {:.2}%) ({} out of {}) (latency {}, {:?}) keeping {}",
+                        "Relay tm90 is ({:.2}% vs {:.2}%) ({} out of {}) (latency {}, best {}, {:?}) keeping {}",
                         relay_relative_performance.percentile,
                         RELAY_OPTIMIZATION_PERCENTILE,
                         relay_relative_performance.node_index,
                         relay_relative_performance.node_count,
                         latency_stats,
+                        relay_state.best_tm90.map(|t| t.to_string()).unwrap_or_else(|| "none".to_owned()),
                         state_reason,
                         relay_node
                     );
@@ -162,10 +226,18 @@ impl PublicInternetRoutingDomainController {
             // Pull everything we need from the routing-domain detail under a brief read lock,
             // then drop it before any routing-table or bucket-entry work to avoid a
             // lock-order inversion with last_flows → routing_domain_for_flow.
-            let (opt_last_relay_compilation, relay_node_filter, prefetched_relay_states) = {
+            let (
+                opt_last_relay_compilation,
+                relay_node_filter,
+                relay_retention_filter,
+                relay_retention_filter_reason,
+                prefetched_relay_states,
+            ) = {
                 let detail = self.read();
                 let opt_last_relay_compilation = detail.relay_compilation();
                 let relay_node_filter = detail.make_relay_node_filter();
+                let relay_retention_filter = detail.make_relay_retention_filter();
+                let relay_retention_filter_reason = detail.make_relay_retention_filter_reason();
                 let prefetched_relay_states: BTreeMap<NodeId, RoutingDomainRelayState> =
                     opt_last_relay_compilation
                         .as_ref()
@@ -183,6 +255,8 @@ impl PublicInternetRoutingDomainController {
                 (
                     opt_last_relay_compilation,
                     relay_node_filter,
+                    relay_retention_filter,
+                    relay_retention_filter_reason,
                     prefetched_relay_states,
                 )
             };
@@ -205,6 +279,8 @@ impl PublicInternetRoutingDomainController {
                         relay,
                         relay_state,
                         &relay_node_filter,
+                        &relay_retention_filter,
+                        &relay_retention_filter_reason,
                         &relay_snapshot,
                     ) {
                         if updated_relay_state != relay_state {

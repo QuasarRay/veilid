@@ -5356,10 +5356,17 @@
         "rpc": {
           "description": "Internal RPC tuning.",
           "$ref": "#/$defs/VeilidConfigInternalRPC"
+        },
+        "single_send_timeout_ms": {
+          "description": "Cap on any single low-level send, in milliseconds, so a send on a wedged\ntransport cannot consume the caller's whole RPC timeout budget.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
         }
       },
       "required": [
         "connection_initial_timeout_ms",
+        "single_send_timeout_ms",
         "connection_inactivity_timeout_ms",
         "max_connections_per_ip4",
         "max_connections_per_ip6_prefix",

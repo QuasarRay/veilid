@@ -33,8 +33,7 @@ class LogFixture {
   }
 
   void _log(VeilidConfigLogLevel level, String message) {
-    final line =
-        '${_timestamp()} ${level.name.toUpperCase()} [test] $message';
+    final line = '${_timestamp()} ${level.name.toUpperCase()} [test] $message';
     // ignore: avoid_print
     print(line);
     for (final listener in _listeners) {

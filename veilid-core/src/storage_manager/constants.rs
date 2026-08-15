@@ -29,6 +29,13 @@ pub const CHECK_OUTBOUND_TRANSACTIONS_INTERVAL_SECS: u32 = 1;
 pub const TRANSACTION_TIMEOUT_RPC_MULTIPLIER: u64 = 2;
 /// Multiplier applied to a node's RTT to derive a post-consensus deadline (capped at `rpc.timeout_ms`)
 pub const POST_CONSENSUS_RTT_FACTOR: u64 = 3;
+/// Hard cap on the post-consensus collection window, which is for the answer wave trailing
+/// consensus; under congested RTTs the RTT factor alone degenerates toward the rpc timeout
+/// and waits on dead stragglers
+pub const POST_CONSENSUS_GRACE_MS: u64 = 500;
+/// How long a Background transaction begin queues on the record lock before
+/// yielding TryAgain to the caller's retry loop
+pub const BACKGROUND_BEGIN_LOCK_TIMEOUT_MS: u64 = 2000;
 /// Headroom beyond `consensus_count` (= `set_value_count`) that Begin aims for, as a percentage rounded up
 pub const CONSENSUS_TRIM_PERCENT: usize = 50;
 /// Frequency to check for expired server-side transactions

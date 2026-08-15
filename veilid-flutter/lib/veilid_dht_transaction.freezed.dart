@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$DHTTransactionSetValueOptions {
 
- KeyPair? get writer;
+ KeyPair? get writer; int? get minSeqnum;
 /// Create a copy of DHTTransactionSetValueOptions
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +28,16 @@ $DHTTransactionSetValueOptionsCopyWith<DHTTransactionSetValueOptions> get copyWi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is DHTTransactionSetValueOptions&&(identical(other.writer, writer) || other.writer == writer));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is DHTTransactionSetValueOptions&&(identical(other.writer, writer) || other.writer == writer)&&(identical(other.minSeqnum, minSeqnum) || other.minSeqnum == minSeqnum));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,writer);
+int get hashCode => Object.hash(runtimeType,writer,minSeqnum);
 
 @override
 String toString() {
-  return 'DHTTransactionSetValueOptions(writer: $writer)';
+  return 'DHTTransactionSetValueOptions(writer: $writer, minSeqnum: $minSeqnum)';
 }
 
 
@@ -48,7 +48,7 @@ abstract mixin class $DHTTransactionSetValueOptionsCopyWith<$Res>  {
   factory $DHTTransactionSetValueOptionsCopyWith(DHTTransactionSetValueOptions value, $Res Function(DHTTransactionSetValueOptions) _then) = _$DHTTransactionSetValueOptionsCopyWithImpl;
 @useResult
 $Res call({
- KeyPair? writer
+ KeyPair? writer, int? minSeqnum
 });
 
 
@@ -65,10 +65,11 @@ class _$DHTTransactionSetValueOptionsCopyWithImpl<$Res>
 
 /// Create a copy of DHTTransactionSetValueOptions
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? writer = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? writer = freezed,Object? minSeqnum = freezed,}) {
   return _then(_self.copyWith(
 writer: freezed == writer ? _self.writer : writer // ignore: cast_nullable_to_non_nullable
-as KeyPair?,
+as KeyPair?,minSeqnum: freezed == minSeqnum ? _self.minSeqnum : minSeqnum // ignore: cast_nullable_to_non_nullable
+as int?,
   ));
 }
 
@@ -150,10 +151,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( KeyPair? writer)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( KeyPair? writer,  int? minSeqnum)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _DHTTransactionSetValueOptions() when $default != null:
-return $default(_that.writer);case _:
+return $default(_that.writer,_that.minSeqnum);case _:
   return orElse();
 
 }
@@ -171,10 +172,10 @@ return $default(_that.writer);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( KeyPair? writer)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( KeyPair? writer,  int? minSeqnum)  $default,) {final _that = this;
 switch (_that) {
 case _DHTTransactionSetValueOptions():
-return $default(_that.writer);}
+return $default(_that.writer,_that.minSeqnum);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -188,10 +189,10 @@ return $default(_that.writer);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( KeyPair? writer)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( KeyPair? writer,  int? minSeqnum)?  $default,) {final _that = this;
 switch (_that) {
 case _DHTTransactionSetValueOptions() when $default != null:
-return $default(_that.writer);case _:
+return $default(_that.writer,_that.minSeqnum);case _:
   return null;
 
 }
@@ -203,10 +204,11 @@ return $default(_that.writer);case _:
 @JsonSerializable()
 
 class _DHTTransactionSetValueOptions implements DHTTransactionSetValueOptions {
-  const _DHTTransactionSetValueOptions({this.writer});
+  const _DHTTransactionSetValueOptions({this.writer, this.minSeqnum});
   factory _DHTTransactionSetValueOptions.fromJson(Map<String, dynamic> json) => _$DHTTransactionSetValueOptionsFromJson(json);
 
 @override final  KeyPair? writer;
+@override final  int? minSeqnum;
 
 /// Create a copy of DHTTransactionSetValueOptions
 /// with the given fields replaced by the non-null parameter values.
@@ -221,16 +223,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DHTTransactionSetValueOptions&&(identical(other.writer, writer) || other.writer == writer));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DHTTransactionSetValueOptions&&(identical(other.writer, writer) || other.writer == writer)&&(identical(other.minSeqnum, minSeqnum) || other.minSeqnum == minSeqnum));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,writer);
+int get hashCode => Object.hash(runtimeType,writer,minSeqnum);
 
 @override
 String toString() {
-  return 'DHTTransactionSetValueOptions(writer: $writer)';
+  return 'DHTTransactionSetValueOptions(writer: $writer, minSeqnum: $minSeqnum)';
 }
 
 
@@ -241,7 +243,7 @@ abstract mixin class _$DHTTransactionSetValueOptionsCopyWith<$Res> implements $D
   factory _$DHTTransactionSetValueOptionsCopyWith(_DHTTransactionSetValueOptions value, $Res Function(_DHTTransactionSetValueOptions) _then) = __$DHTTransactionSetValueOptionsCopyWithImpl;
 @override @useResult
 $Res call({
- KeyPair? writer
+ KeyPair? writer, int? minSeqnum
 });
 
 
@@ -258,10 +260,11 @@ class __$DHTTransactionSetValueOptionsCopyWithImpl<$Res>
 
 /// Create a copy of DHTTransactionSetValueOptions
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? writer = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? writer = freezed,Object? minSeqnum = freezed,}) {
   return _then(_DHTTransactionSetValueOptions(
 writer: freezed == writer ? _self.writer : writer // ignore: cast_nullable_to_non_nullable
-as KeyPair?,
+as KeyPair?,minSeqnum: freezed == minSeqnum ? _self.minSeqnum : minSeqnum // ignore: cast_nullable_to_non_nullable
+as int?,
   ));
 }
 

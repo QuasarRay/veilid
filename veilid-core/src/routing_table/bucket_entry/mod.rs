@@ -174,6 +174,9 @@ pub(crate) struct BucketEntryInner {
     /// Per-transport reliability stats used to calculate state
     #[serde(skip)]
     per_transport_stats: BTreeMap<TransportType, RPCStats>,
+    /// Cached per-ordering contact-method viability, recomputed by the update_cm_viability task
+    #[serde(skip)]
+    cm_viability: Option<CMViability>,
     /// Per-local-route stats keyed by local-route pubkey (our outbound SR for outbound,
     /// our inbound reply-PR for inbound answers). Only populated for routed exchanges.
     #[serde(skip, default = "default_per_route_stats")]
@@ -378,6 +381,7 @@ impl<'de> serde::de::Visitor<'de> for BucketEntryInnerVisitor {
             rpc_stats,
             per_sequence_ordering_stats: BTreeMap::new(),
             per_transport_stats: BTreeMap::new(),
+            cm_viability: None,
             per_route_stats: default_per_route_stats(),
             connection_stats: ConnectionStats::default(),
             punishment: None,
@@ -702,7 +706,7 @@ impl BucketEntryInner {
         // over so that connection is still valid.
         if node_info_changed {
             self.clear_last_flows_except_latest();
-            self.contact_method_failures.clear();
+            // The update_cm_viability task prunes dial evidence to the new contact method list
         }
 
         node_info_changed
@@ -1134,10 +1138,13 @@ impl BucketEntryInner {
         bytes: ByteCount,
         expects_answer: bool,
         transport: TransportType,
+        dialed: bool,
     ) {
-        // Update transport stats
-        let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.question_sent(ts, expects_answer);
+        // Only dial evidence goes in the per-transport bucket
+        if dialed {
+            let ts_stats = self.transport_stats_mut(transport);
+            ts_stats.question_sent(ts, expects_answer);
+        }
 
         // Update sequence ordering stats
         let sequence_ordering = transport.sequence_ordering();
@@ -1151,16 +1158,13 @@ impl BucketEntryInner {
         self.transfer_stats_accounting.add_up(bytes);
     }
 
+    /// An inbound question is flow evidence, not dial evidence, so no per-transport update
     pub(super) fn question_rcvd(
         &mut self,
         ts: Timestamp,
         bytes: ByteCount,
         transport: TransportType,
     ) {
-        // Update transport stats
-        let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.question_rcvd(ts);
-
         // Update sequence ordering stats
         let sequence_ordering = transport.sequence_ordering();
         let so_stats = self.sequence_ordering_stats_mut(sequence_ordering);
@@ -1173,10 +1177,12 @@ impl BucketEntryInner {
         self.transfer_stats_accounting.add_down(bytes);
     }
 
-    pub(super) fn answer_sent(&mut self, bytes: ByteCount, transport: TransportType) {
-        // Update transport stats
-        let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.answer_sent();
+    pub(super) fn answer_sent(&mut self, bytes: ByteCount, transport: TransportType, dialed: bool) {
+        // Only dial evidence goes in the per-transport bucket
+        if dialed {
+            let ts_stats = self.transport_stats_mut(transport);
+            ts_stats.answer_sent();
+        }
 
         // Update sequence ordering stats
         let sequence_ordering = transport.sequence_ordering();
@@ -1196,6 +1202,7 @@ impl BucketEntryInner {
         recv_ts: Timestamp,
         bytes: ByteCount,
         transport: TransportType,
+        dialed: bool,
     ) {
         // Update transfer accounting
         self.transfer_stats_accounting.add_down(bytes);
@@ -1206,9 +1213,11 @@ impl BucketEntryInner {
                 .record_latency(recv_ts.duration_since(send_ts)),
         );
 
-        // Update transport stats
-        let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.answer_rcvd(recv_ts);
+        // Only dial evidence goes in the per-transport bucket
+        if dialed {
+            let ts_stats = self.transport_stats_mut(transport);
+            ts_stats.answer_rcvd(recv_ts);
+        }
 
         // Update sequence ordering stats
         let sequence_ordering = transport.sequence_ordering();
@@ -1219,12 +1228,14 @@ impl BucketEntryInner {
         self.rpc_stats.answer_rcvd(recv_ts);
     }
 
-    pub(super) fn lost_question(&mut self, transport: TransportType) {
+    pub(super) fn lost_question(&mut self, transport: TransportType, dialed: bool) {
         let lost_ts = Timestamp::now();
 
-        // Update transport stats
-        let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.lost_question(lost_ts);
+        // Only dial evidence goes in the per-transport bucket
+        if dialed {
+            let ts_stats = self.transport_stats_mut(transport);
+            ts_stats.lost_question(lost_ts);
+        }
 
         // Update sequence ordering stats
         let sequence_ordering = transport.sequence_ordering();
@@ -1240,10 +1251,13 @@ impl BucketEntryInner {
         fail_ts: Timestamp,
         expects_answer: bool,
         transport: TransportType,
+        dialed: bool,
     ) {
-        // Update transport stats
-        let ts_stats = self.transport_stats_mut(transport);
-        ts_stats.failed_to_send(fail_ts, expects_answer);
+        // Only dial evidence goes in the per-transport bucket
+        if dialed {
+            let ts_stats = self.transport_stats_mut(transport);
+            ts_stats.failed_to_send(fail_ts, expects_answer);
+        }
 
         // Update sequence ordering stats
         let sequence_ordering = transport.sequence_ordering();
@@ -1274,6 +1288,46 @@ impl BucketEntryInner {
         } else {
             None
         }
+    }
+
+    /// Health judgment for one transport; no recorded stats means Untried
+    pub fn transport_health(&self, transport: TransportType) -> TransportHealth {
+        self.per_transport_stats
+            .get(&transport)
+            .map(transport_health)
+            .unwrap_or(TransportHealth::Untried)
+    }
+
+    pub fn cm_viability(&self) -> Option<&CMViability> {
+        self.cm_viability.as_ref()
+    }
+
+    pub fn set_cm_viability(&mut self, viability: Option<CMViability>) {
+        self.cm_viability = viability;
+    }
+
+    /// Our own network changed: all learned dial evidence is suspect because the
+    /// failures may have been ours, so the nodes get a fresh chance
+    pub fn clear_transport_evidence(&mut self) {
+        self.per_transport_stats.clear();
+        self.contact_method_failures.clear();
+        self.cm_viability = None;
+    }
+
+    /// Peerinfo changed on either side: keep evidence only for contact methods
+    /// still in the current list
+    pub fn prune_evidence_to_contact_methods(&mut self, contact_methods: &[ContactMethod]) {
+        let transports: BTreeSet<TransportType> = contact_methods
+            .iter()
+            .filter_map(|cm| match cm {
+                ContactMethod::Direct { target_di } => Some(TransportType::from(target_di)),
+                _ => None,
+            })
+            .collect();
+        self.per_transport_stats
+            .retain(|t, _| transports.contains(t));
+        self.contact_method_failures
+            .retain(|cm, _| contact_methods.contains(cm));
     }
 
     pub fn report_contact_method_result(&mut self, cm: &ContactMethod, success: bool) {
@@ -1359,6 +1413,7 @@ impl BucketEntry {
             connection_stats: ConnectionStats::default(),
             per_sequence_ordering_stats: BTreeMap::new(),
             per_transport_stats: BTreeMap::new(),
+            cm_viability: None,
             per_route_stats: LruCache::new(PER_ROUTE_STATS_LRU_SIZE),
             punishment: None,
             contact_method_failures: HashMap::new(),

@@ -104,6 +104,7 @@ pub fn fake_veilid_config() -> VeilidConfig {
         internal: Some(VeilidConfigInternal {
             network: VeilidConfigInternalNetwork {
                 connection_initial_timeout_ms: 1000,
+                single_send_timeout_ms: 2000,
                 connection_inactivity_timeout_ms: 2000,
                 max_connections_per_ip4: 3000,
                 max_connections_per_ip6_prefix: 4000,

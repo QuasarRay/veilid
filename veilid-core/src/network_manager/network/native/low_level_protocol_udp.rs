@@ -185,8 +185,7 @@ impl NativeNetwork {
         let socket_arc = Arc::new(udp_socket);
 
         // Create protocol handler
-        let protocol_handler =
-            RawUdpProtocolHandler::new(self.registry(), socket_arc, addr.is_ipv6());
+        let protocol_handler = RawUdpProtocolHandler::new(self.registry(), socket_arc);
 
         // Record protocol handler
         let mut inner = self.inner.lock();

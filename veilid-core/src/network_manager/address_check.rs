@@ -134,9 +134,10 @@ impl AddressCheck {
 
                 // Clear our history as well now so we start fresh when we get a new peer info
                 self.address_inconsistency_table.remove(&acck);
-                self.last_inbound_triggered_address.remove(&acck);
                 self.address_consistency_table.remove(&acck);
-                self.last_outbound_triggered_address.remove(&acck);
+
+                // Leave the last-triggered dedups alone: re-arming detection on every
+                // publish loops forever on a symmetric NAT's stable address
             }
         }
 
@@ -244,6 +245,18 @@ impl AddressCheck {
             return;
         }
 
+        // sender_info is untrusted, and a report naming a different address family
+        // than its flow cannot describe our address, so counting it re-detects forever
+        if socket_address.address_type() != flow.address_type() {
+            veilid_log!(self debug target:"network_result",
+                "ignoring address report {} on {} flow from {}: address family mismatch",
+                socket_address,
+                flow.address_type(),
+                reporting_peer
+            );
+            return;
+        }
+
         // Get the ip(block) this report is coming from
         let reporting_ipblock =
             ip_to_ipblock(self.config.ip6_prefix_size, flow.remote_address().ip_addr());
@@ -281,6 +294,8 @@ impl AddressCheck {
                 "{:?} address has changed, detecting dial info",
                 routing_domain
             );
+            // Our external address moved, so transport evidence gathered at the old one is stale
+            self.routing_table().clear_all_transport_evidence();
         }
     }
 
@@ -425,9 +440,8 @@ impl AddressCheck {
                 .and_modify(|e| *e += 1)
                 .or_insert(1);
             if count >= ADDRESS_CONSISTENCY_DETECTION_COUNT {
-                // Suppress repeated re-fires for the same stable address. Only fire when
-                // the consistent address actually changes, or after a peer info change
-                // resets state via report_peer_info_change.
+                // Fire once per distinct address: a symmetric NAT reports the same
+                // stable address forever, and detection must conclude exactly once
                 if self.last_outbound_triggered_address.get(&acckey) == Some(&address) {
                     return false;
                 }

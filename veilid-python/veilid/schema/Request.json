@@ -1634,6 +1634,17 @@
       "description": "Options that override defaults for DHTTransaction::set",
       "type": "object",
       "properties": {
+        "min_seqnum": {
+          "description": "Raise the sequence number to at least this, after the automatic increment.\n[ValueSeqNum::MAX] minus `n` leaves `n` writes after this one.\n\nA write whose minimum the subkey's sequence number already satisfies reuses that sequence\nnumber instead of failing, so a write at [ValueSeqNum::MAX] can be retried. Retries must\ncarry the same data and writer to be accepted; that is the caller's responsibility.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueSeqNum"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "writer": {
           "description": "Override writer key pair for this operation",
           "type": [
@@ -2398,6 +2409,17 @@
             }
           ]
         },
+        "min_seqnum": {
+          "description": "Raise the sequence number to at least this, after the automatic increment.\n[ValueSeqNum::MAX] minus `n` leaves `n` writes after this one.\n\nA write whose minimum the subkey's sequence number already satisfies reuses that sequence\nnumber instead of failing, so a write at [ValueSeqNum::MAX] can be retried until it reaches\nconsensus. Retries must carry the same data and writer to be accepted; that is the caller's\nresponsibility, not something this checks.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueSeqNum"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "writer": {
           "description": "Override writer key pair for this operation",
           "type": [
@@ -2723,6 +2745,15 @@
           ]
         }
       }
+    },
+    "ValueSeqNum": {
+      "description": "Value sequence number",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
     },
     "ValueSubkeyRangeSet": {
       "description": "A set of DHT subkeys stored as inclusive ranges of [ValueSubkey]",

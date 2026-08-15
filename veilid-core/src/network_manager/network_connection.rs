@@ -255,6 +255,7 @@ impl NetworkConnection {
         UniqueFlow {
             flow: self.flow,
             connection_id: Some(self.connection_id),
+            dialed: self.opt_dial_info.is_some(),
         }
     }
 
@@ -264,6 +265,8 @@ impl NetworkConnection {
             self.flow,
             self.sender.clone(),
             self.dead.clone(),
+            // Outbound-initiated connections carry the dial info they used
+            self.opt_dial_info.is_some(),
         )
     }
 

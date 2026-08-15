@@ -112,13 +112,15 @@ class TestDHTTransactionsFull {
     // Commit
     final startCommit = Veilid.instance.now();
     await tx.commit();
-    debugPrint('commit transaction: ${Veilid.instance.now().diff(startCommit)}');
+    debugPrint(
+        'commit transaction: ${Veilid.instance.now().diff(startCommit)}');
 
     // Transaction 2
     final startCommit2 = Veilid.instance.now();
     final tx2 = await Veilid.instance.transactDHTRecords(dhtRecords);
     expect(tx2, isInstanceOf<VeilidDHTTransaction>());
-    debugPrint('begin transaction 2: ${Veilid.instance.now().diff(startCommit2)}');
+    debugPrint(
+        'begin transaction 2: ${Veilid.instance.now().diff(startCommit2)}');
 
     // Gets
     for (var subkey = 0; subkey < dhtSubkeyCount; subkey++) {

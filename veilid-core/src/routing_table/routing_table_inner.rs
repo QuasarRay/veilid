@@ -51,6 +51,18 @@ impl RoutingTableInner {
         });
     }
 
+    /// Drop learned dial evidence for every entry. Callers must obey the address-change
+    /// restriction on `RoutingTable::clear_all_transport_evidence`.
+    pub fn clear_all_transport_evidence(&mut self) {
+        let cur_ts = Timestamp::now();
+        self.with_entries(cur_ts, BucketEntryState::Dead, |v| {
+            v.with_mut(|e| {
+                e.clear_transport_evidence();
+            });
+            Option::<()>::None
+        });
+    }
+
     pub(in crate::routing_table) fn bucket_depth(pos: usize) -> usize {
         match pos {
             0 => 256,
@@ -75,7 +87,7 @@ impl RoutingTableInner {
 
     /// Total count of entries across all buckets (any crypto kind) that exceed
     /// their bucket's max depth and haven't been kicked yet. This is "over-attached"
-    /// in the bucket-fill sense — capacity is overrun, lazy kicking will trim later.
+    /// in the bucket-fill sense (capacity is overrun, lazy kicking will trim later)
     pub(in crate::routing_table) fn excess_kickable_count(&self) -> usize {
         let mut total = 0usize;
         for buckets in self.buckets.values() {

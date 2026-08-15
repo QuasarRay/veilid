@@ -105,7 +105,9 @@ sealed class VeilidFFIConfigLogging with _$VeilidFFIConfigLogging {
     VeilidFFIConfigLoggingOtlp otlp,
     @Default(VeilidFFIConfigLoggingFlame(enabled: false, path: ''))
     VeilidFFIConfigLoggingFlame flame,
-    @Default(VeilidFFIConfigLoggingStats(enabled: false, intervalSecs: 10, path: ''))
+    @Default(
+      VeilidFFIConfigLoggingStats(enabled: false, intervalSecs: 10, path: ''),
+    )
     VeilidFFIConfigLoggingStats stats,
   }) = _VeilidFFIConfigLogging;
 
@@ -385,9 +387,8 @@ sealed class VeilidConfigDHT with _$VeilidConfigDHT {
 /// RPC configuration.
 @freezed
 sealed class VeilidConfigRPC with _$VeilidConfigRPC {
-  const factory VeilidConfigRPC({
-    required int defaultRouteHopCount,
-  }) = _VeilidConfigRPC;
+  const factory VeilidConfigRPC({required int defaultRouteHopCount}) =
+      _VeilidConfigRPC;
 
   factory VeilidConfigRPC.fromJson(dynamic json) =>
       _$VeilidConfigRPCFromJson(json as Map<String, dynamic>);
@@ -424,17 +425,16 @@ enum VeilidConfigAddressType {
 
   /// Parse from its JSON name (`IPV4`/`IPV6`).
   factory VeilidConfigAddressType.fromJson(dynamic j) => switch (j as String) {
-        'IPV4' => VeilidConfigAddressType.ipv4,
-        'IPV6' => VeilidConfigAddressType.ipv6,
-        _ =>
-          throw ArgumentError.value(j, 'j', 'invalid VeilidConfigAddressType'),
-      };
+    'IPV4' => VeilidConfigAddressType.ipv4,
+    'IPV6' => VeilidConfigAddressType.ipv6,
+    _ => throw ArgumentError.value(j, 'j', 'invalid VeilidConfigAddressType'),
+  };
 
   /// The JSON name (`IPV4`/`IPV6`).
   String toJson() => switch (this) {
-        VeilidConfigAddressType.ipv4 => 'IPV4',
-        VeilidConfigAddressType.ipv6 => 'IPV6',
-      };
+    VeilidConfigAddressType.ipv4 => 'IPV4',
+    VeilidConfigAddressType.ipv6 => 'IPV6',
+  };
 }
 
 ////////////
@@ -514,8 +514,8 @@ enum VeilidConfigProtectedStoreBackend {
   /// WebExtension storage.
   extensionStorage;
 
-// /// Delegate to a registered secret-resolver callback.
-// callback;
+  // /// Delegate to a registered secret-resolver callback.
+  // callback;
 
   /// Parse from its JSON (PascalCase) name.
   factory VeilidConfigProtectedStoreBackend.fromJson(dynamic j) =>
@@ -566,9 +566,8 @@ sealed class VeilidConfigCapabilities with _$VeilidConfigCapabilities {
 /// Internal "footgun" UDP tuning. See [VeilidConfigInternal].
 @freezed
 sealed class VeilidConfigInternalUDP with _$VeilidConfigInternalUDP {
-  const factory VeilidConfigInternalUDP({
-    required int socketPoolSize,
-  }) = _VeilidConfigInternalUDP;
+  const factory VeilidConfigInternalUDP({required int socketPoolSize}) =
+      _VeilidConfigInternalUDP;
 
   factory VeilidConfigInternalUDP.fromJson(dynamic json) =>
       _$VeilidConfigInternalUDPFromJson(json as Map<String, dynamic>);
@@ -640,6 +639,7 @@ sealed class VeilidConfigInternalDHT with _$VeilidConfigInternalDHT {
 sealed class VeilidConfigInternalNetwork with _$VeilidConfigInternalNetwork {
   const factory VeilidConfigInternalNetwork({
     required int connectionInitialTimeoutMs,
+    required int singleSendTimeoutMs,
     required int connectionInactivityTimeoutMs,
     required int maxConnectionsPerIp4,
     required int maxConnectionsPerIp6Prefix,

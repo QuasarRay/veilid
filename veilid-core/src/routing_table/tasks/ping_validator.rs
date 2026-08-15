@@ -6,6 +6,9 @@ use stop_token::future::FutureExt as _;
 
 impl_veilid_log_facility!("rtab");
 
+/// Minimum seconds between tests of the same route
+const ROUTE_TEST_MIN_INTERVAL_SECS: u32 = 15;
+
 /////////////////////////////////////
 // Priority Groups
 
@@ -407,13 +410,32 @@ impl RoutingTable {
     /// Enqueue route test pings for a set of routes.
     /// Allocated routes: one loopback per SequenceOrdering the route supports.
     /// Remote routes: a single ping.
+    /// Returns the number of routes accepted, which excludes those still in test cooldown.
     pub async fn enqueue_route_tests(
         &self,
         cur_ts: Timestamp,
         route_ids: Vec<RouteId>,
         priority: usize,
-    ) {
+    ) -> usize {
         let rss = self.route_spec_store();
+
+        // Continuous re-testing of a struggling route is churn, not information
+        let route_ids: Vec<RouteId> = {
+            let cooldown = TimestampDuration::new_secs(ROUTE_TEST_MIN_INTERVAL_SECS);
+            let mut recent = self.route_test_cooldown.lock();
+            recent.retain(|_, ts| cur_ts.duration_since(*ts) < cooldown);
+            route_ids
+                .into_iter()
+                .filter(|route_id| {
+                    if recent.contains_key(route_id) {
+                        return false;
+                    }
+                    recent.insert(route_id.clone(), cur_ts);
+                    true
+                })
+                .collect()
+        };
+        let accepted = route_ids.len();
 
         let mut entries = Vec::new();
         for route_id in route_ids {
@@ -447,10 +469,11 @@ impl RoutingTable {
         if !entries.is_empty() {
             self.enqueue_ping_validation_entries("RouteTest".to_owned(), entries);
         }
+        accepted
     }
 
     /// Enqueue per-ordering loopback pings for allocated routes. Same shape as a test,
-    /// driven by the keepalive rate limiter — the entry it produces is identical.
+    /// driven by the keepalive rate limiter; the entry it produces is identical.
     pub async fn enqueue_route_loopback_keepalives(
         &self,
         cur_ts: Timestamp,
@@ -532,8 +555,19 @@ impl RoutingTable {
             return Vec::new();
         };
 
+        // An ordering with no working carrier can only fail, blaming the route for our dead path
+        let network_manager = rss.network_manager();
+        let transport_stats = network_manager.transport_stats();
+        let orderings: Vec<SequenceOrdering> = req
+            .orderings
+            .iter()
+            .filter(|ordering| {
+                transport_stats.ordering_is_viable(RoutingDomain::PublicInternet, *ordering)
+            })
+            .collect();
+
         let mut entries = Vec::new();
-        for (idx, ordering) in req.orderings.iter().enumerate() {
+        for (idx, ordering) in orderings.iter().copied().enumerate() {
             let dest = Self::build_loopback_destination(
                 &req.route_id,
                 private_route.clone(),
@@ -561,8 +595,8 @@ impl RoutingTable {
         }
 
         rss.update_allocated_route_stats(cur_ts, &key, |s| {
-            for ordering in req.orderings.iter() {
-                s.record_loopback_keepalive(cur_ts, ordering);
+            for ordering in orderings.iter() {
+                s.record_loopback_keepalive(cur_ts, *ordering);
             }
             Ok(())
         });
@@ -606,7 +640,7 @@ impl RoutingTable {
                       result: Result<StatusResult, RPCError>|
                       -> Vec<PingValidationEntry> {
                     match result {
-                        Ok(StatusResult::Answer { .. }) => {
+                        Ok(StatusResult::Sent(_)) => {
                             #[cfg(feature = "verbose-tracing")]
                             veilid_log!(registry trace "Remote route test PASSED: {:#}", route_id_clone);
                         }
@@ -615,11 +649,10 @@ impl RoutingTable {
                             let nm = routing_table.network_manager();
                             if nm
                                 .online_detector()
-                                .online_state(RoutingDomain::PublicInternet)
-                                == OnlineState::Offline
+                                .blame_suppressed(RoutingDomain::PublicInternet)
                             {
                                 #[cfg(feature = "verbose-tracing")]
-                                veilid_log!(registry debug "Deferring remote route release (offline detected): {:#}", route_id_clone);
+                                veilid_log!(registry debug "Deferring remote route release (offline/degraded): {:#}", route_id_clone);
                             } else {
                                 veilid_log!(registry debug "Remote route test failed (no response): {:#}", route_id_clone);
                                 routing_table
@@ -640,7 +673,7 @@ impl RoutingTable {
         })
     }
 
-    /// Completion callback for a per-ordering route loopback ping. On Answer we record a
+    /// Completion callback for a per-ordering route loopback ping. On Sent we record a
     /// per-ordering pass on the route (drives last_known_valid_ts / clears failures). On Failed
     /// we record a per-ordering failure on the route (drives the ordering, and eventually the
     /// route, to dead) and attribute failure to the transport actually used at the first hop.
@@ -658,12 +691,10 @@ impl RoutingTable {
                 let routing_table = registry.routing_table();
                 let rss = routing_table.route_spec_store();
                 let sdr = match result {
-                    Ok(StatusResult::Answer {
-                        answer: _answer, ..
-                    }) => {
+                    Ok(StatusResult::Sent(_status_answer)) => {
                         // End-to-end route round-trip (includes inter-hop legs), not a per-node RTT.
                         #[cfg(feature = "verbose-tracing")]
-                        veilid_log!(registry debug "Route loopback rtt: route={:#} ord={:#} rtt={:#} hops={}", route_key, ordering, _answer.answer_context.latency, hops.len());
+                        veilid_log!(registry debug "Route loopback rtt: route={:#} ord={:#} rtt={:#} hops={}", route_key, ordering, _status_answer.answer.answer_context.latency, hops.len());
 
                         let cur_ts = Timestamp::now();
                         rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
@@ -686,12 +717,25 @@ impl RoutingTable {
                 if routing_table
                     .network_manager()
                     .online_detector()
-                    .online_state(RoutingDomain::PublicInternet)
-                    == OnlineState::Offline
+                    .blame_suppressed(RoutingDomain::PublicInternet)
                 {
                     #[cfg(feature = "verbose-tracing")]
-                    veilid_log!(registry debug "Deferring route loopback failure (offline): {:#} ({:#})", route_id, ordering);
+                    veilid_log!(registry debug "Deferring route loopback failure (offline/degraded): {:#} ({:#})", route_id, ordering);
                     return Vec::new();
+                }
+
+                // Neither route nor hops can be blamed for a transport we could not send on
+                let opt_transport = sdr.opt_transport_type();
+                if let Some(transport) = opt_transport {
+                    if routing_table
+                        .network_manager()
+                        .transport_stats()
+                        .verdict(RoutingDomain::PublicInternet, transport)
+                        .is_send_suppressed()
+                    {
+                        veilid_log!(registry debug "Deferring route loopback failure (transport suppressed): {:#} ({:#} via {:#})", route_id, ordering, transport);
+                        return Vec::new();
+                    }
                 }
 
                 // Record a per-ordering failure on the route so repeated loopback failures
@@ -705,7 +749,7 @@ impl RoutingTable {
                 // now (sticky) so it gets released once its refcount drains.
                 rss.mark_allocated_route_for_release_if_dead(&route_key);
 
-                let Some(transport) = sdr.opt_transport_type() else {
+                let Some(transport) = opt_transport else {
                     veilid_log!(registry debug "Route loopback FAILED with no transport recorded: {:#} ({:#})", route_id, ordering);
                     return Vec::new();
                 };

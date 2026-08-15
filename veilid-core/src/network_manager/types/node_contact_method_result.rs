@@ -12,6 +12,9 @@ pub enum NodeContactMethodResult {
     NoPeerInfo,
     /// No compatible contact method could be derived from peer info.
     NoContactMethod,
+    /// Every contact method for this node rides a transport our own send history says is
+    /// dead, and the recovery canary isn't due, so attempting anyway only buys a timeout.
+    TransportSuppressed,
     /// Target node id is administratively punished.
     Punished,
 }
@@ -39,6 +42,7 @@ impl fmt::Display for NodeContactMethodResult {
             NodeContactMethodResult::NoRoutingDomain => write!(f, "NoRoutingDomain"),
             NodeContactMethodResult::NoPeerInfo => write!(f, "NoPeerInfo"),
             NodeContactMethodResult::NoContactMethod => write!(f, "NoContactMethod"),
+            NodeContactMethodResult::TransportSuppressed => write!(f, "TransportSuppressed"),
             NodeContactMethodResult::Punished => write!(f, "Punished"),
         }
     }

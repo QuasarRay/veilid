@@ -162,8 +162,9 @@ void runWithIntegrationLog(void Function() body) {
 }
 
 /// Two-pane debug app for integration tests: scrollable xterm log on top,
-/// test-status pane on the bottom. Call `runApp(const IntegrationLogApp())`
-/// right after `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`.
+/// test-status pane on the bottom, separated by a drag-resizable divider.
+/// Call `runApp(const IntegrationLogApp())` right after
+/// `IntegrationTestWidgetsFlutterBinding.ensureInitialized()`.
 class IntegrationLogApp extends StatefulWidget {
   const IntegrationLogApp({super.key});
 
@@ -172,8 +173,13 @@ class IntegrationLogApp extends StatefulWidget {
 }
 
 class _IntegrationLogAppState extends State<IntegrationLogApp> {
+  static const _statusPaneMinHeight = 48.0;
+  static const _logPaneMinHeight = 64.0;
+  static const _dividerHeight = 5.0;
+
   final _terminalController = TerminalController();
   final _scrollController = ScrollController();
+  double _statusPaneHeight = 180;
 
   @override
   void initState() {
@@ -212,36 +218,83 @@ class _IntegrationLogAppState extends State<IntegrationLogApp> {
     await Clipboard.setData(ClipboardData(text: text));
   }
 
+  Widget _divider(double maxStatusHeight) => MouseRegion(
+    cursor: SystemMouseCursors.resizeRow,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: (details) => setState(() {
+        _statusPaneHeight = (_statusPaneHeight - details.delta.dy).clamp(
+          _statusPaneMinHeight,
+          maxStatusHeight,
+        );
+      }),
+      child: Container(
+        height: _dividerHeight,
+        color: Colors.grey.shade600,
+        alignment: Alignment.center,
+        child: Container(width: 64, height: 2, color: Colors.grey.shade900),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark(),
     home: Scaffold(
-      body: Column(
-        children: [
-          Expanded(
-            child: Scrollbar(
-              controller: _scrollController,
-              thumbVisibility: true,
-              child: TerminalView(
-                IntegrationLogSink.instance.terminal,
-                controller: _terminalController,
-                scrollController: _scrollController,
-                autofocus: true,
-                textStyle: const TerminalStyle(fontSize: 10),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final maxStatusHeight =
+              (constraints.maxHeight - _dividerHeight - _logPaneMinHeight)
+                  .clamp(_statusPaneMinHeight, double.infinity);
+          return Column(
+            children: [
+              Expanded(
+                child: Scrollbar(
+                  controller: _scrollController,
+                  thumbVisibility: true,
+                  child: TerminalView(
+                    IntegrationLogSink.instance.terminal,
+                    controller: _terminalController,
+                    scrollController: _scrollController,
+                    autofocus: true,
+                    textStyle: const TerminalStyle(fontSize: 10),
+                  ),
+                ),
               ),
-            ),
-          ),
-          Container(height: 1, color: Colors.grey.shade800),
-          const SizedBox(height: 180, child: IntegrationTestStatusPane()),
-        ],
+              _divider(maxStatusHeight),
+              SizedBox(
+                // clamp at render so a resize keeps the dragged height
+                height: _statusPaneHeight.clamp(
+                  _statusPaneMinHeight,
+                  maxStatusHeight,
+                ),
+                child: const IntegrationTestStatusPane(),
+              ),
+            ],
+          );
+        },
       ),
     ),
   );
 }
 
-class IntegrationTestStatusPane extends StatelessWidget {
+class IntegrationTestStatusPane extends StatefulWidget {
   const IntegrationTestStatusPane({super.key});
+
+  @override
+  State<IntegrationTestStatusPane> createState() =>
+      _IntegrationTestStatusPaneState();
+}
+
+class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -294,30 +347,36 @@ class IntegrationTestStatusPane extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: ListView.builder(
-                reverse: true,
-                itemCount: sink.results.length,
-                itemBuilder: (context, i) {
-                  final r = sink.results[sink.results.length - 1 - i];
-                  final icon = r.status == TestStatus.passed ? '✓' : '✗';
-                  final color = r.status == TestStatus.passed
-                      ? Colors.greenAccent
-                      : Colors.redAccent;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 1,
-                    ),
-                    child: Text(
-                      '$icon ${r.name}  (${r.elapsedMs}ms)',
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 11,
-                        fontFamily: 'monospace',
+              child: Scrollbar(
+                controller: _scrollController,
+                thumbVisibility: true,
+                child: ListView.builder(
+                  controller: _scrollController,
+                  reverse: true,
+                  primary: false,
+                  itemCount: sink.results.length,
+                  itemBuilder: (context, i) {
+                    final r = sink.results[sink.results.length - 1 - i];
+                    final icon = r.status == TestStatus.passed ? '✓' : '✗';
+                    final color = r.status == TestStatus.passed
+                        ? Colors.greenAccent
+                        : Colors.redAccent;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 1,
                       ),
-                    ),
-                  );
-                },
+                      child: Text(
+                        '$icon ${r.name}  (${r.elapsedMs}ms)',
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ],

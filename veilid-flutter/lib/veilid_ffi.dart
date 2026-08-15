@@ -1,6 +1,6 @@
 // ignore_for_file: public_member_api_docs
 // Low-level platform binding to veilid-core; not part of the documented public API.
-// The asset id below must match `assetName` in hook/build.dart.
+// @DefaultAsset below names the asset hook/build.dart declares as `assetName`.
 @DefaultAsset('package:veilid/veilid_ffi.dart')
 library;
 
@@ -20,7 +20,7 @@ import 'veilid.dart';
 typedef _DartPostCObject =
     NativeFunction<Int8 Function(Int64, Pointer<Dart_CObject>)>;
 
-// fn veilid_version() -> VeilidVersion
+// Return layout of veilid_version()
 final class VeilidVersionFFI extends Struct {
   @Uint32()
   external int major;
@@ -1591,7 +1591,7 @@ class VeilidFFI extends Veilid {
   )
   external static int _changeLogLevel(
     Pointer<Utf8> layer,
-    Pointer<Utf8> logLevel,
+    Pointer<Utf8> directives,
   );
 
   @Native<Void Function(Pointer<Utf8>, Pointer<Utf8>)>(
@@ -1642,7 +1642,7 @@ class VeilidFFI extends Veilid {
   )
   external static int _routingContextWithSafety(
     int id,
-    Pointer<Utf8> stability,
+    Pointer<Utf8> safetySelection,
   );
 
   @Native<Uint32 Function(Uint32, Pointer<Utf8>)>(
@@ -1673,7 +1673,7 @@ class VeilidFFI extends Veilid {
     int port,
     int id,
     Pointer<Utf8> target,
-    Pointer<Utf8> request,
+    Pointer<Utf8> message,
   );
 
   @Native<Void Function(Int64, Uint32, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
@@ -1742,7 +1742,7 @@ class VeilidFFI extends Veilid {
     Pointer<Utf8> key,
     int subkey,
     Pointer<Utf8> data,
-    Pointer<Utf8> writer,
+    Pointer<Utf8> options,
   );
 
   @Native<
@@ -1806,8 +1806,8 @@ class VeilidFFI extends Veilid {
   )
   external static void _transactDHTRecords(
     int port,
-    Pointer<Utf8> records,
-    Pointer<Utf8> defaultSigningKey,
+    Pointer<Utf8> recordKeys,
+    Pointer<Utf8> options,
   );
 
   @Native<Void Function(Int64)>(symbol: 'new_private_route')
@@ -1827,14 +1827,14 @@ class VeilidFFI extends Veilid {
   external static void _importRemotePrivateRoute(int port, Pointer<Utf8> blob);
 
   @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'release_private_route')
-  external static void _releasePrivateRoute(int port, Pointer<Utf8> key);
+  external static void _releasePrivateRoute(int port, Pointer<Utf8> routeId);
 
   @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>)>(
     symbol: 'app_call_reply',
   )
   external static void _appCallReply(
     int port,
-    Pointer<Utf8> id,
+    Pointer<Utf8> callId,
     Pointer<Utf8> message,
   );
 
@@ -2319,7 +2319,7 @@ class VeilidFFI extends Veilid {
   external static int _nowIncreasing();
 
   @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'debug')
-  external static void _debug(int port, Pointer<Utf8> logLevel);
+  external static void _debug(int port, Pointer<Utf8> command);
 
   @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>)>(
     symbol: 'save_user_secret',
