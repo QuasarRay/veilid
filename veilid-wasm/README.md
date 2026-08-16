@@ -20,6 +20,17 @@ Running Veilid in the browser via WebAssembly has some limitations:
 
 Since WSS connections require WSS peers with valid SSL certificates, `veilid-core` plans to implement a feature called Outbound Relays. Outbound Relays will likely be hosted by the same host of the WASM web-app, and must run have valid SSL certificates that are signed by a Certificate Authority that's trusted by browsers. Outbound Relays will allow WASM nodes to communicate to other nodes over TCP/UDP/WS/WSS through the Outbound Relay's connection.
 
+## Loading the package
+
+This package exports a default `init()` function that instantiates the WebAssembly module, and callers must `await` it before using any other export:
+
+```js
+import init, { /* ...API... */ } from "veilid-wasm";
+
+await init();          // instantiate the wasm; call once, before any other API
+// ...the rest of the veilid-wasm API is now usable...
+```
+
 ## Running unit tests
 
 Prerequisites:

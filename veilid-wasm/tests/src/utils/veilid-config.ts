@@ -25,7 +25,7 @@ export const veilidCoreInitConfig: VeilidWASMConfig = {
   },
 };
 
-export const veilidCoreStartupConfig = (() => {
+export const veilidCoreStartupConfig = () => {
   // console.log("starting config")
   const defaultConfig = veilidClient.defaultConfig();
   defaultConfig.programName = 'veilid-wasm-test';
@@ -48,4 +48,4 @@ export const veilidCoreStartupConfig = (() => {
   // console.log("ending config")
 
   return defaultConfig;
-})(); 
+};

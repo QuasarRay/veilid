@@ -14,14 +14,12 @@
   "files": [
     "veilid_wasm_bg.wasm",
     "veilid_wasm.js",
-    "veilid_wasm_bg.js",
     "veilid_wasm.d.ts",
     "LICENSE.md"
   ],
   "main": "veilid_wasm.js",
   "types": "veilid_wasm.d.ts",
   "sideEffects": [
-    "./veilid_wasm.js",
     "./snippets/*"
   ]
 }

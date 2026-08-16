@@ -37,10 +37,11 @@ fi
 
 # --- wasm-bindgen ------------------------------------------------------------
 mkdir -p "$OUTPUTDIR"
+rm -f "$OUTPUTDIR"/*
 if [ "$RELEASE" -eq 1 ]; then
-    wasm-bindgen --target bundler --weak-refs --out-dir "$OUTPUTDIR" "$WASM_IN"
+    wasm-bindgen --target web --weak-refs --out-dir "$OUTPUTDIR" "$WASM_IN"
 else
-    wasm-bindgen --target bundler --weak-refs --out-dir "$OUTPUTDIR" --keep-debug --debug "$WASM_IN"
+    wasm-bindgen --target web --weak-refs --out-dir "$OUTPUTDIR" --keep-debug --debug "$WASM_IN"
 fi
 
 # --- wasm-opt (release only) ------------------------------------------------

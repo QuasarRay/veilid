@@ -1,7 +1,10 @@
+import init from 'veilid-wasm';
 import { driveContext } from './harness/drive.js';
 import { selectedContext, selectedSuiteNames } from './harness/select.js';
 import { suitesByName } from './suites/registry.js';
 import type { CaseResult } from './harness/types.js';
+
+await init();
 
 // One run = one context. The whole selection executes once, in that context, and each case is
 // then reported as its own mocha test so the spec reporter shows what actually ran where.

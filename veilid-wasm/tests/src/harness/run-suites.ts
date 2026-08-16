@@ -1,4 +1,4 @@
-import { veilidClient } from 'veilid-wasm';
+import init, { veilidClient } from 'veilid-wasm';
 import {
   LOG_LEVEL,
   veilidCoreInitConfig,
@@ -22,6 +22,8 @@ import {
 } from './types.js';
 import { suitesByName } from '../suites/registry.js';
 
+let wasmReady: Promise<unknown> | undefined;
+
 // VeilidAPIError is a plain object, not an Error, so String() on it yields "[object Object]".
 function describeError(e: unknown): string {
   if (e instanceof Error) {
@@ -43,6 +45,7 @@ export async function runSuites(
   context: ContextName,
   progress: (step: string) => void = () => {},
 ): Promise<CaseResult[]> {
+  await (wasmReady ??= init());
   const suites: Suite[] = suitesByName(suiteNames);
   const results: CaseResult[] = [];
   const plan: { suite: Suite; cases: ReturnType<Suite['cases']> }[] = suites.map((s) => ({
@@ -88,7 +91,7 @@ export async function runSuites(
     } else if (update.kind === 'AppCall') {
       appCallEventTarget.dispatchEvent(new CustomEvent('appCall', { detail: update }));
     }
-  }, veilidCoreStartupConfig);
+  }, veilidCoreStartupConfig());
 
   const needsNetwork = runnable.some(({ suite, cases }) =>
     cases.some((c) => caseRequiresNetwork(suite, c)),

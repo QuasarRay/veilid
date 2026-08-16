@@ -32,6 +32,9 @@
   - AIMD congestion control system (behind `aimd` feature)
   - socket_tools UDP best-effort send-with-ttl implementation
 
+- veilid-wasm:
+  - BREAKING: veilid-wasm no longer automatically loads the wasm file at import-time, which had used a top-level await. Instead, the default export is now an `init()` function that you await as part of your loading logic for your application: `import init from "veilid-wasm";`. You must call `await init()` at some point before calling any other export.
+
 **Changed in Veilid 0.5.7**
 
 - veilid-core:
