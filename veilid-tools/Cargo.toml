@@ -50,7 +50,7 @@ rt-wasm-bindgen = [
 ]
 
 # Enable tracing instead of log
-tracing = ["dep:tracing", "dep:tracing-subscriber", "tokio/tracing"]
+tracing = ["dep:tracing", "dep:tracing-subscriber", "tokio?/tracing"]
 
 # AIMD adaptive rate controller
 aimd = []
