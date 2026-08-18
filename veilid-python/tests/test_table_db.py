@@ -6,6 +6,7 @@ from veilid.api import CryptoSystem
 
 
 TEST_DB = "__pytest_db"
+TEST_RENAMED_DB = "__pytest_renamed_db"
 TEST_NONEXISTENT_DB = "__pytest_nonexistent_db"
 
 
@@ -30,6 +31,55 @@ async def test_open_delete_table_db(api_connection: veilid.VeilidAPI):
     # now delete should succeed
     deleted = await api_connection.delete_table_db(TEST_DB)
     assert deleted
+
+
+@pytest.mark.asyncio
+async def test_rename_table_db(api_connection: veilid.VeilidAPI):
+    # delete both names if they exist
+    await api_connection.delete_table_db(TEST_DB)
+    await api_connection.delete_table_db(TEST_RENAMED_DB)
+
+    tdb = await api_connection.open_table_db(TEST_DB, 1)
+    async with tdb:
+        await tdb.store(b"foo", b"bar")
+
+    await api_connection.rename_table_db(TEST_DB, TEST_RENAMED_DB)
+
+    # the contents follow the rename
+    tdb = await api_connection.open_table_db(TEST_RENAMED_DB, 1)
+    async with tdb:
+        assert await tdb.load(b"foo") == b"bar"
+
+    # the old name is gone
+    assert not await api_connection.delete_table_db(TEST_DB)
+
+    deleted = await api_connection.delete_table_db(TEST_RENAMED_DB)
+    assert deleted
+
+
+@pytest.mark.asyncio
+async def test_rename_table_db_nonexistent(api_connection: veilid.VeilidAPI):
+    await api_connection.delete_table_db(TEST_RENAMED_DB)
+
+    with pytest.raises(veilid.VeilidAPIErrorGeneric):
+        await api_connection.rename_table_db(TEST_NONEXISTENT_DB, TEST_RENAMED_DB)
+
+
+@pytest.mark.asyncio
+async def test_rename_table_db_onto_existing(api_connection: veilid.VeilidAPI):
+    await api_connection.delete_table_db(TEST_DB)
+    await api_connection.delete_table_db(TEST_RENAMED_DB)
+
+    tdb = await api_connection.open_table_db(TEST_DB, 1)
+    await tdb.release()
+    tdb2 = await api_connection.open_table_db(TEST_RENAMED_DB, 1)
+    await tdb2.release()
+
+    with pytest.raises(veilid.VeilidAPIErrorGeneric):
+        await api_connection.rename_table_db(TEST_DB, TEST_RENAMED_DB)
+
+    assert await api_connection.delete_table_db(TEST_DB)
+    assert await api_connection.delete_table_db(TEST_RENAMED_DB)
 
 
 @pytest.mark.asyncio

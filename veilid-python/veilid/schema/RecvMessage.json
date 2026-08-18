@@ -2639,6 +2639,47 @@
           ]
         },
         {
+          "description": "Result of `RenameTableDb`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "RenameTableDb"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "null"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
           "description": "Result of a table database operation.",
           "type": "object",
           "properties": {

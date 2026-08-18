@@ -354,6 +354,15 @@ abstract class Veilid {
   /// fails, or [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
   Future<bool> deleteTableDB(String name);
 
+  /// Rename the named table database.
+  ///
+  /// Throws [VeilidAPIExceptionInvalidArgument] if either name contains
+  /// characters other than alphanumeric, `_`, or `-`,
+  /// [VeilidAPIExceptionGeneric] if [newName] already exists or [oldName] does
+  /// not exist, or [VeilidAPIExceptionNotInitialized] if Veilid has been shut
+  /// down.
+  Future<void> renameTableDB(String oldName, String newName);
+
   // ProtectedStore
 
   /// Save a user secret to the protected store. Returns true if a value already existed.

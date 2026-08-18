@@ -18,35 +18,71 @@ use super::*;
 /// Main tests entry point for ios, android, and wasm targets
 #[cfg(any(test, feature = "test-util"))]
 pub async fn run_all_tests() {
-    info!("TEST: veilid_core");
-    test_attachment_manager::test_all().await;
+    // Only against the mock: this harness runs one monolithic test, so unlike nextest it cannot
+    // filter the live attach out, and check_all.sh needs this pass to stay offline
+    #[cfg(feature = "mock-api")]
+    {
+        info!("TEST: veilid_core");
+        test_attachment_manager::test_all().await;
+    }
 
-    info!("TEST: attachment_manager");
-    attachment_manager::tests_attachment_manager::test_all().await;
+    #[cfg(not(feature = "mock-api"))]
+    {
+        info!("TEST: attachment_manager");
+        attachment_manager::tests_attachment_manager::test_all().await;
+    }
 
     info!("TEST: crypto");
     crypto::tests_crypto::test_all().await;
 
-    info!("TEST: test_table_store");
-    table_store::tests_table_store::test_all().await;
+    #[cfg(not(feature = "mock-api"))]
+    {
+        info!("TEST: test_table_store");
+        table_store::tests_table_store::test_all().await;
+    }
 
-    info!("TEST: test_protected_store");
-    protected_store::tests_protected_store::test_all().await;
+    #[cfg(not(feature = "mock-api"))]
+    {
+        info!("TEST: test_protected_store");
+        protected_store::tests_protected_store::test_all().await;
+    }
 
     info!("TEST: veilid_api");
     veilid_api::tests_veilid_api::test_all().await;
 
-    info!("TEST: routing_table");
-    routing_table::tests_routing_table::test_all().await;
+    // These need a DHT to talk to, so they run only against the mock
+    #[cfg(feature = "mock-api")]
+    {
+        info!("TEST: test_dht");
+        test_dht::test_all().await;
 
-    info!("TEST: network_manager");
-    network_manager::tests_network_manager::test_all().await;
+        info!("TEST: test_dht_transactions");
+        test_dht_transactions::test_all().await;
+    }
 
-    info!("TEST: storage_manager");
-    storage_manager::tests_storage_manager::test_all().await;
+    #[cfg(not(feature = "mock-api"))]
+    {
+        info!("TEST: routing_table");
+        routing_table::tests_routing_table::test_all().await;
+    }
 
-    info!("TEST: rpc_processor");
-    rpc_processor::tests_rpc_processor::test_all().await;
+    #[cfg(not(feature = "mock-api"))]
+    {
+        info!("TEST: network_manager");
+        network_manager::tests_network_manager::test_all().await;
+    }
+
+    #[cfg(not(feature = "mock-api"))]
+    {
+        info!("TEST: storage_manager");
+        storage_manager::tests_storage_manager::test_all().await;
+    }
+
+    #[cfg(not(feature = "mock-api"))]
+    {
+        info!("TEST: rpc_processor");
+        rpc_processor::tests_rpc_processor::test_all().await;
+    }
 
     info!("Finished unit tests");
 }

@@ -6,7 +6,7 @@ impl_veilid_log_facility!("veilid_api");
 
 pub(super) struct VeilidAPIInner {
     context: Option<VeilidCoreContext>,
-    #[cfg(feature = "debug-api")]
+    #[cfg(all(feature = "debug-api", not(feature = "mock-api")))]
     pub(super) debug_cache: debug::DebugCache,
 }
 
@@ -19,6 +19,8 @@ impl fmt::Debug for VeilidAPIInner {
 impl Drop for VeilidAPIInner {
     fn drop(&mut self) {
         if let Some(context) = self.context.take() {
+            #[cfg(feature = "mock-api")]
+            MockNetwork::unregister(&context.registry());
             spawn_detached("api shutdown", api_shutdown(context));
         }
     }
@@ -30,7 +32,7 @@ impl Drop for VeilidAPIInner {
 ///
 /// * [VeilidConfig] - The Veilid configuration specified at startup time.
 /// * [Crypto] - The available set of cryptosystems provided by Veilid.
-/// * [TableStore] - The Veilid table-based encrypted persistent key-value store.
+/// * TableStore - The Veilid table-based encrypted persistent key-value store, via [VeilidAPI::open_table_db], [VeilidAPI::delete_table_db], etc.
 /// * ProtectedStore - The Veilid abstract of the device's low-level 'protected secret storage', via [VeilidAPI::save_user_secret], [VeilidAPI::load_user_secret], etc.
 /// * [VeilidState] - The current state of the Veilid node this API accesses.
 /// * [RoutingContext] - Communication methods between Veilid nodes and private routes.
@@ -47,10 +49,19 @@ impl VeilidAPI {
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = context.log_key()), skip_all))]
     pub(crate) fn new(context: VeilidCoreContext) -> Self {
         veilid_log!(context debug "VeilidAPI::new()");
+
+        // Join the process-global mock network, so other instances in this process can reach us
+        #[cfg(feature = "mock-api")]
+        {
+            let registry = context.registry();
+            let node_ids = generate_node_ids(&registry.crypto());
+            MockNetwork::register(&registry, node_ids);
+        }
+
         record_duration(|| Self {
             inner: Arc::new(Mutex::new(VeilidAPIInner {
                 context: Some(context),
-                #[cfg(feature = "debug-api")]
+                #[cfg(all(feature = "debug-api", not(feature = "mock-api")))]
                 debug_cache: Default::default(),
             })),
         })
@@ -70,6 +81,8 @@ impl VeilidAPI {
             .record_fut(
                 async {
                     if let Some(context) = context {
+                        #[cfg(feature = "mock-api")]
+                        MockNetwork::unregister(&context.registry());
                         api_shutdown(context).await;
                     }
                 },
@@ -118,7 +131,8 @@ impl VeilidAPI {
     /// Get the TableStore component.
     ///
     /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
-    pub fn table_store(&self) -> VeilidAPIResult<VeilidComponentGuard<'_, TableStore>> {
+    #[cfg(not(feature = "mock-api"))]
+    pub(crate) fn table_store(&self) -> VeilidAPIResult<VeilidComponentGuard<'_, TableStore>> {
         let inner = self.inner.lock();
         let Some(context) = &inner.context else {
             return Err(VeilidAPIError::NotInitialized);
@@ -129,9 +143,92 @@ impl VeilidAPI {
             .ok_or(VeilidAPIError::NotInitialized)
     }
 
+    /// Identify this instance's node in the process-global mock network.
+    #[cfg(feature = "mock-api")]
+    pub(crate) fn mock_key(&self) -> VeilidAPIResult<MockNodeKey> {
+        let inner = self.inner.lock();
+        let Some(context) = &inner.context else {
+            return Err(VeilidAPIError::NotInitialized);
+        };
+        Ok(MockNodeKey::from_registry(&context.registry()))
+    }
+
+    /// Get or create a TableDB database table.
+    ///
+    /// Upgrades the table if `column_count` exceeds the existing column count. Returns a handle the
+    /// caller must drop before the table can be deleted; while any clone is held the table counts
+    /// as opened. Opening the same name again returns a handle to the same shared database.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] if `column_count` is zero or `name` contains
+    /// characters other than alphanumeric, `_`, or `-`; [VeilidAPIError::Generic] if the table is
+    /// already open with a smaller column count than requested or the backing-store open fails; and
+    /// [VeilidAPIError::NotInitialized] if the API has been shut down or stored data fails to
+    /// decrypt.
+    pub async fn open_table_db(&self, name: &str, column_count: u32) -> VeilidAPIResult<TableDB> {
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "open_table_db({}, {})", name, column_count);
+                MockNetwork::with_node(&self.mock_key()?, |node| node.tables.open(name, column_count))?
+            } else {
+                self.table_store()?.open(name, column_count).await
+            }
+        }
+    }
+
+    /// Delete a TableDB database table. Returns false if no table by that name exists.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] if `name` contains characters other than
+    /// alphanumeric, `_`, or `-`; [VeilidAPIError::Generic] if the table is still open (drop all
+    /// handles first) or the backing-store delete fails; and [VeilidAPIError::NotInitialized] if
+    /// the API has been shut down.
+    pub async fn delete_table_db(&self, name: &str) -> VeilidAPIResult<bool> {
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "delete_table_db({})", name);
+                MockNetwork::with_node(&self.mock_key()?, |node| node.tables.delete(name))?
+            } else {
+                self.table_store()?.delete(name).await
+            }
+        }
+    }
+
+    /// Rename a TableDB database table.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] if `old_name` or `new_name` contains
+    /// characters other than alphanumeric, `_`, or `-`; [VeilidAPIError::Generic] if `new_name`
+    /// already exists or `old_name` does not exist; and [VeilidAPIError::NotInitialized] if the API
+    /// has been shut down.
+    pub async fn rename_table_db(&self, old_name: &str, new_name: &str) -> VeilidAPIResult<()> {
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "rename_table_db({}, {})", old_name, new_name);
+                MockNetwork::with_node(&self.mock_key()?, |node| node.tables.rename(old_name, new_name))?
+            } else {
+                self.table_store()?.rename(old_name, new_name).await
+            }
+        }
+    }
+
+    /// List the TableDB tables stored for this node's namespace, as pairs of table name and
+    /// backing-store name.
+    ///
+    /// Reads cached names without blocking on disk. Errors with [VeilidAPIError::NotInitialized]
+    /// if the API has been shut down.
+    pub fn list_table_dbs(&self) -> VeilidAPIResult<Vec<(String, String)>> {
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "list_table_dbs()");
+                MockNetwork::with_node(&self.mock_key()?, |node| node.tables.list_all())
+            } else {
+                Ok(self.table_store()?.list_all())
+            }
+        }
+    }
+
     /// Get the ProtectedStore component.
     ///
     /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
+    #[cfg(not(feature = "mock-api"))]
     pub(crate) fn protected_store(
         &self,
     ) -> VeilidAPIResult<VeilidComponentGuard<'_, ProtectedStore>> {
@@ -158,43 +255,78 @@ impl VeilidAPI {
     ///
     /// Errors with [VeilidAPIError::InvalidArgument] for keys veilid reserves for itself.
     pub async fn save_user_secret(&self, key: String, value: Vec<u8>) -> VeilidAPIResult<bool> {
-        self.protected_store()?
-            .save_user_secret(ProtectedStoreContext::Api, key, &value)
-            .await
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "save_user_secret({})", key);
+                MockNetwork::with_node(&self.mock_key()?, |node| node.secrets.save_user_secret(&key, &value))?
+            } else {
+                self.protected_store()?
+                    .save_user_secret(ProtectedStoreContext::Api, key, &value)
+                    .await
+            }
+        }
     }
 
     /// Load a user secret from the protected store, or `None` if not present.
     ///
     /// Errors with [VeilidAPIError::InvalidArgument] for keys veilid reserves for itself.
     pub async fn load_user_secret(&self, key: String) -> VeilidAPIResult<Option<Vec<u8>>> {
-        self.protected_store()?
-            .load_user_secret(ProtectedStoreContext::Api, key)
-            .await
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "load_user_secret({})", key);
+                MockNetwork::with_node(&self.mock_key()?, |node| node.secrets.load_user_secret(&key))?
+            } else {
+                self.protected_store()?
+                    .load_user_secret(ProtectedStoreContext::Api, key)
+                    .await
+            }
+        }
     }
 
     /// Remove a user secret from the protected store. Returns true if it existed.
     ///
     /// Errors with [VeilidAPIError::InvalidArgument] for keys veilid reserves for itself.
     pub async fn remove_user_secret(&self, key: String) -> VeilidAPIResult<bool> {
-        self.protected_store()?
-            .remove_user_secret(ProtectedStoreContext::Api, key)
-            .await
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "remove_user_secret({})", key);
+                MockNetwork::with_node(&self.mock_key()?, |node| node.secrets.remove_user_secret(&key))?
+            } else {
+                self.protected_store()?
+                    .remove_user_secret(ProtectedStoreContext::Api, key)
+                    .await
+            }
+        }
     }
 
     /// List the key names of the user secrets stored for this node's namespace.
     ///
     /// Keys veilid reserves for itself are never listed.
     pub async fn list_user_secrets(&self) -> VeilidAPIResult<Vec<String>> {
-        self.protected_store()?
-            .list_user_secrets(ProtectedStoreContext::Api)
-            .await
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "list_user_secrets()");
+                MockNetwork::with_node(&self.mock_key()?, |node| node.secrets.list_user_secrets())
+            } else {
+                self.protected_store()?
+                    .list_user_secrets(ProtectedStoreContext::Api)
+                    .await
+            }
+        }
     }
 
     /// Remove every user secret stored for this node's namespace, leaving veilid's own keys alone.
     pub async fn delete_all_user_secrets(&self) -> VeilidAPIResult<()> {
-        self.protected_store()?
-            .delete_all_user_secrets(ProtectedStoreContext::Api)
-            .await
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                veilid_log!(self debug "delete_all_user_secrets()");
+                MockNetwork::with_node(&self.mock_key()?, |node| node.secrets.delete_all_user_secrets())
+            } else {
+                self.protected_store()?
+                    .delete_all_user_secrets(ProtectedStoreContext::Api)
+                    .await
+            }
+        }
     }
 
     /// Get the BlockStore component.
@@ -218,14 +350,31 @@ impl VeilidAPI {
     /// Get a full copy of the current state of Veilid.
     ///
     /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
-    #[expect(clippy::unused_async)]
+    #[cfg_attr(not(feature = "mock-api"), expect(clippy::unused_async))]
     pub async fn get_state(&self) -> VeilidAPIResult<VeilidState> {
-        let attachment_manager = self.core_context()?.attachment_manager();
-        let network_manager = attachment_manager.network_manager();
         let config = self.config()?;
 
-        let attachment = attachment_manager.get_veilid_state();
-        let network = network_manager.get_veilid_state();
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                let (attachment, network) = MockNetwork::with_node(&self.mock_key()?, |node| {
+                    let attachment = node.attachment.to_state();
+                    let network = VeilidStateNetwork {
+                        started: attachment.state.is_attached(),
+                        bps_down: ByteCount::new(0),
+                        bps_up: ByteCount::new(0),
+                        peers: Vec::new(),
+                        node_ids: node.node_ids.clone(),
+                    };
+                    (Box::new(attachment), Box::new(network))
+                })?;
+            } else {
+                let attachment_manager = self.core_context()?.attachment_manager();
+                let network_manager = attachment_manager.network_manager();
+
+                let attachment = attachment_manager.get_veilid_state();
+                let network = network_manager.get_veilid_state();
+            }
+        }
 
         Ok(VeilidState {
             attachment,
@@ -246,22 +395,40 @@ impl VeilidAPI {
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
     pub async fn attach(&self) -> VeilidAPIResult<()> {
         async {
-            let attachment_manager = self.core_context()?.attachment_manager();
-            let recorder = DurationRecorder::new("VeilidAPI::attach", |name, start| {
-                veilid_log!(self debug "{}[start={:#}]()", name, start);
-            });
-            recorder.record_fut(
-                async {
-                    if !Box::pin(attachment_manager.attach()).await {
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    veilid_log!(self debug "attach()");
+                    let key = self.mock_key()?;
+                    // Reports fully ready at once: there is no network to wait for
+                    let (changed, state) = MockNetwork::with_node(&key, |node| {
+                        (node.attachment.attach(), node.attachment.to_state())
+                    })?;
+                    if !changed {
                         apibail_generic!("Already attached");
                     }
+                    MockNetwork::send_update(&key, VeilidUpdate::Attachment(Box::new(state)))?;
+                    // Coming back online is what drains the offline write queue on a real node too
+                    self.mock_drain_all_offline_writes()?;
                     VeilidAPIResult::Ok(())
-                },
-                |name, start, dur, ret| {
-                    veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
-                    ret
-                },
-            ).await
+                } else {
+                    let attachment_manager = self.core_context()?.attachment_manager();
+                    let recorder = DurationRecorder::new("VeilidAPI::attach", |name, start| {
+                        veilid_log!(self debug "{}[start={:#}]()", name, start);
+                    });
+                    recorder.record_fut(
+                        async {
+                            if !Box::pin(attachment_manager.attach()).await {
+                                apibail_generic!("Already attached");
+                            }
+                            VeilidAPIResult::Ok(())
+                        },
+                        |name, start, dur, ret| {
+                            veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                            ret
+                        },
+                    ).await
+                }
+            }
         }
         .await
         .inspect_err(log_veilid_api_error!(self))
@@ -277,22 +444,37 @@ impl VeilidAPI {
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
     pub async fn detach(&self) -> VeilidAPIResult<()> {
         async {
-            let attachment_manager = self.core_context()?.attachment_manager();
-            let recorder = DurationRecorder::new("VeilidAPI::detach", |name, start| {
-                veilid_log!(self debug "{}[start={:#}]()", name, start);
-            });
-            recorder.record_fut(
-                async {
-                    if !Box::pin(attachment_manager.detach()).await {
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    veilid_log!(self debug "detach()");
+                    let key = self.mock_key()?;
+                    let (changed, state) = MockNetwork::with_node(&key, |node| {
+                        (node.attachment.detach(), node.attachment.to_state())
+                    })?;
+                    if !changed {
                         apibail_generic!("Already detached");
                     }
+                    MockNetwork::send_update(&key, VeilidUpdate::Attachment(Box::new(state)))?;
                     VeilidAPIResult::Ok(())
-                },
-                |name, start, dur, ret| {
-                    veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
-                    ret
-                },
-            ).await
+                } else {
+                    let attachment_manager = self.core_context()?.attachment_manager();
+                    let recorder = DurationRecorder::new("VeilidAPI::detach", |name, start| {
+                        veilid_log!(self debug "{}[start={:#}]()", name, start);
+                    });
+                    recorder.record_fut(
+                        async {
+                            if !Box::pin(attachment_manager.detach()).await {
+                                apibail_generic!("Already detached");
+                            }
+                            VeilidAPIResult::Ok(())
+                        },
+                        |name, start, dur, ret| {
+                            veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                            ret
+                        },
+                    ).await
+                }
+            }
         }
         .await
         .inspect_err(log_veilid_api_error!(self))
@@ -338,14 +520,22 @@ impl VeilidAPI {
             if let Some(encryption_key) = encryption_key.as_ref() {
                 self.crypto()?.check_shared_secret(encryption_key)?;
             }
-            let storage_manager = self.core_context()?.storage_manager();
-
             let recorder = DurationRecorder::new("VeilidAPI::get_dht_record_key", |name, start| {
                 veilid_log!(self debug
                     "{}[start={:#}](self: {:?}, schema: {:?}, owner_key: {:?}, encryption_key: {:?})", name, start, self, schema, owner_key, encryption_key);
             });
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    // Shares the real derivation, so a key made here matches one an app derives
+                    let crypto = self.crypto()?;
+                    let fut = dht_record_key(&crypto, schema, &owner_key, encryption_key);
+                } else {
+                    let storage_manager = self.core_context()?.storage_manager();
+                    let fut = storage_manager.get_record_key(schema, &owner_key, encryption_key);
+                }
+            }
             recorder.record_fut(
-                storage_manager.get_record_key(schema, &owner_key, encryption_key),
+                fut,
                 |name, start, dur, ret| {
                     veilid_log!(self debug
                         "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
@@ -366,8 +556,15 @@ impl VeilidAPI {
 
             self.crypto()?.check_public_key(writer_key)?;
 
-            let storage_manager = self.core_context()?.storage_manager();
-            storage_manager.generate_member_id(writer_key)
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    let crypto = self.crypto()?;
+                    generate_member_id(&crypto, writer_key)
+                } else {
+                    let storage_manager = self.core_context()?.storage_manager();
+                    storage_manager.generate_member_id(writer_key)
+                }
+            }
         })
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -396,26 +593,33 @@ impl VeilidAPI {
         options: Option<TransactDHTRecordsOptions>,
     ) -> VeilidAPIResult<DHTTransaction> {
         async {
-            let storage_manager = self.core_context()?.storage_manager();
-            for record_key in &record_keys {
-                storage_manager.check_record_key(record_key)?;
-            }
-
-            let recorder = DurationRecorder::new("VeilidAPI::transact_dht_records", |name, start| {
-                veilid_log!(self debug
-                    "{}[start={:#}](self: {:?}, record_keys: {:?}, options: {:?})", name, start, self, record_keys, options);
-            });
-            recorder.record_fut(
-                async {
-                    let handle = Box::pin(storage_manager.begin_transaction(record_keys, options)).await?;
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    let handle = self.mock_begin_transaction(record_keys, options)?;
                     DHTTransaction::new(self.clone(), handle)
-                },
-                |name, start, dur, ret| {
-                    veilid_log!(self debug
-                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
-                    ret
-                },
-            ).await
+                } else {
+                    let storage_manager = self.core_context()?.storage_manager();
+                    for record_key in &record_keys {
+                        storage_manager.check_record_key(record_key)?;
+                    }
+
+                    let recorder = DurationRecorder::new("VeilidAPI::transact_dht_records", |name, start| {
+                        veilid_log!(self debug
+                            "{}[start={:#}](self: {:?}, record_keys: {:?}, options: {:?})", name, start, self, record_keys, options);
+                    });
+                    recorder.record_fut(
+                        async {
+                            let handle = Box::pin(storage_manager.begin_transaction(record_keys, options)).await?;
+                            DHTTransaction::new(self.clone(), handle)
+                        },
+                        |name, start, dur, ret| {
+                            veilid_log!(self debug
+                                "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                            ret
+                        },
+                    ).await
+                }
+            }
         }.await.inspect_err(log_veilid_api_error!(self))
     }
 
@@ -477,6 +681,11 @@ impl VeilidAPI {
                 private_spec.hop_count = default_route_hop_count;
             }
 
+            #[cfg(feature = "mock-api")]
+            return self.mock_new_private_route().await;
+
+            #[cfg(not(feature = "mock-api"))]
+            {
             let routing_table = self.core_context()?.routing_table();
             let rss = routing_table.route_spec_store();
 
@@ -529,6 +738,7 @@ impl VeilidAPI {
                     ret
                 },
             ).await
+            }
         }
         .await
         .inspect_err(log_veilid_api_error!(self))
@@ -549,9 +759,15 @@ impl VeilidAPI {
         record_duration(|| {
             veilid_log!(self debug
                 "VeilidAPI::import_remote_private_route(blob: {:?})", blob);
-            let routing_table = self.core_context()?.routing_table();
-            let rss = routing_table.route_spec_store();
-            rss.import_remote_route_blob(blob)
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    self.mock_import_remote_private_route(blob)
+                } else {
+                    let routing_table = self.core_context()?.routing_table();
+                    let rss = routing_table.route_spec_store();
+                    rss.import_remote_route_blob(blob)
+                }
+            }
         })
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -572,14 +788,20 @@ impl VeilidAPI {
             veilid_log!(self debug
                 "VeilidAPI::release_private_route(route_id: {:?})", route_id);
 
-            let routing_table = self.core_context()?.routing_table();
-            routing_table.check_route_id(&route_id)?;
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    self.mock_release_private_route(route_id)
+                } else {
+                    let routing_table = self.core_context()?.routing_table();
+                    routing_table.check_route_id(&route_id)?;
 
-            let rss = routing_table.route_spec_store();
-            if !rss.release_route(route_id.clone()) {
-                apibail_invalid_argument!("release_private_route", "key", route_id);
+                    let rss = routing_table.route_spec_store();
+                    if !rss.release_route(route_id.clone()) {
+                        apibail_invalid_argument!("release_private_route", "key", route_id);
+                    }
+                    Ok(())
+                }
             }
-            Ok(())
         })
         .inspect_err(log_veilid_api_error!(self))
     }
@@ -603,24 +825,30 @@ impl VeilidAPI {
         message: Vec<u8>,
     ) -> VeilidAPIResult<()> {
         async {
-            let rpc_processor = self.core_context()?.rpc_processor();
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    self.mock_app_call_reply(call_id, message)
+                } else {
+                    let rpc_processor = self.core_context()?.rpc_processor();
 
-            let message_len = message.len();
-            let recorder = DurationRecorder::new("VeilidAPI::app_call_reply", |name, start| {
-                veilid_log!(self debug
-                    "{}[start={:#}](call_id: {:?}, message_len: {})", name, start, call_id, message_len);
-                veilid_log!(self trace "message: {:?}", message);
-            });
-            recorder.record(
-                || rpc_processor
-                    .app_call_reply(call_id, message.into())
-                    .map_err(|e| e.into()),
-                |name, start, dur, ret| {
-                    veilid_log!(self debug
-                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
-                    ret
-                },
-            )
+                    let message_len = message.len();
+                    let recorder = DurationRecorder::new("VeilidAPI::app_call_reply", |name, start| {
+                        veilid_log!(self debug
+                            "{}[start={:#}](call_id: {:?}, message_len: {})", name, start, call_id, message_len);
+                        veilid_log!(self trace "message: {:?}", message);
+                    });
+                    recorder.record(
+                        || rpc_processor
+                            .app_call_reply(call_id, message.into())
+                            .map_err(|e| e.into()),
+                        |name, start, dur, ret| {
+                            veilid_log!(self debug
+                                "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                            ret
+                        },
+                    )
+                }
+            }
         }.await.inspect_err(log_veilid_api_error!(self))
     }
 
@@ -665,7 +893,7 @@ impl VeilidAPI {
         Ok(context.clone())
     }
 
-    #[cfg(feature = "debug-api")]
+    #[cfg(all(feature = "debug-api", not(feature = "mock-api")))]
     pub(crate) fn with_debug_cache<R, F: FnOnce(&mut debug::DebugCache) -> R>(
         &self,
         callback: F,

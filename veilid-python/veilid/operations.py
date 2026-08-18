@@ -20,6 +20,7 @@ class Operation(StrEnum):
     ROUTING_CONTEXT = "RoutingContext"
     OPEN_TABLE_DB = "OpenTableDb"
     DELETE_TABLE_DB = "DeleteTableDb"
+    RENAME_TABLE_DB = "RenameTableDb"
     TABLE_DB = "TableDb"
     TABLE_DB_TRANSACTION = "TableDbTransaction"
     DHT_TRANSACTION = "DhtTransaction"

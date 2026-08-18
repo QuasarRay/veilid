@@ -22,7 +22,7 @@ pub fn value_seq_num_ordering() {
     assert_eq!(ValueSeqNum::ZERO.max(ValueSeqNum::NONE), ValueSeqNum::ZERO);
 }
 
-#[cfg(feature = "debug-api")]
+#[cfg(all(feature = "debug-api", not(feature = "mock-api")))]
 pub fn value_seq_num_parse() {
     use crate::veilid_api::debug::parse_value_seq_num as parse;
 

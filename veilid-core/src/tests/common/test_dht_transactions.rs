@@ -386,15 +386,15 @@ async fn test_full_records_fill_commit_then_get(api: VeilidAPI) {
     let keys = create_dht_records(&rc, FULL_DHT_RECORD_COUNT, FULL_DHT_SUBKEY_COUNT).await;
     let data = make_test_data(FULL_DHT_RECORD_COUNT, FULL_DHT_SUBKEY_SIZE);
 
-    let start = std::time::Instant::now();
+    let start = Timestamp::now();
     let tx = api
         .transact_dht_records(keys.clone(), None)
         .await
         .expect("should create transaction");
-    info!("begin transaction: {:?}", start.elapsed());
+    info!("begin transaction: {:?}", TimestampDuration::since(start));
 
     for subkey in 0..FULL_DHT_SUBKEY_COUNT {
-        let start_set = std::time::Instant::now();
+        let start_set = Timestamp::now();
         let mut set_futs = Vec::new();
         for rec in 0..FULL_DHT_RECORD_COUNT {
             let tx = tx.clone();
@@ -409,22 +409,32 @@ async fn test_full_records_fill_commit_then_get(api: VeilidAPI) {
                 "set should return None"
             );
         }
-        info!("set subkey {}: {:?}", subkey, start_set.elapsed());
+        info!(
+            "set subkey {}: {:?}",
+            subkey,
+            TimestampDuration::since(start_set)
+        );
     }
 
-    let start_commit = std::time::Instant::now();
+    let start_commit = Timestamp::now();
     tx.commit().await.expect("should commit");
-    info!("commit transaction: {:?}", start_commit.elapsed());
+    info!(
+        "commit transaction: {:?}",
+        TimestampDuration::since(start_commit)
+    );
 
-    let start_begin2 = std::time::Instant::now();
+    let start_begin2 = Timestamp::now();
     let tx2 = api
         .transact_dht_records(keys.clone(), None)
         .await
         .expect("should create transaction 2");
-    info!("begin transaction 2: {:?}", start_begin2.elapsed());
+    info!(
+        "begin transaction 2: {:?}",
+        TimestampDuration::since(start_begin2)
+    );
 
     for subkey in 0..FULL_DHT_SUBKEY_COUNT {
-        let start_get = std::time::Instant::now();
+        let start_get = Timestamp::now();
         let mut get_futs = Vec::new();
         for rec in 0..FULL_DHT_RECORD_COUNT {
             let tx2 = tx2.clone();
@@ -455,12 +465,19 @@ async fn test_full_records_fill_commit_then_get(api: VeilidAPI) {
                 subkey
             );
         }
-        info!("get subkey {}: {:?}", subkey, start_get.elapsed());
+        info!(
+            "get subkey {}: {:?}",
+            subkey,
+            TimestampDuration::since(start_get)
+        );
     }
 
-    let start_rollback = std::time::Instant::now();
+    let start_rollback = Timestamp::now();
     tx2.rollback().await.expect("should rollback tx2");
-    info!("rollback transaction 2: {:?}", start_rollback.elapsed());
+    info!(
+        "rollback transaction 2: {:?}",
+        TimestampDuration::since(start_rollback)
+    );
 
     delete_dht_records(&rc, &keys).await;
 }

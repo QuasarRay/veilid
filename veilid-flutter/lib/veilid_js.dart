@@ -1186,6 +1186,10 @@ class VeilidJS extends Veilid {
   Future<bool> deleteTableDB(String name) =>
       _wasmPromiseBool('delete_table_db', [name.toJS]);
 
+  @override
+  Future<void> renameTableDB(String oldName, String newName) =>
+      _wasmPromiseVoid('rename_table_db', [oldName.toJS, newName.toJS]);
+
   // ProtectedStore
 
   @override

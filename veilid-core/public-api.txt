@@ -2779,19 +2779,6 @@ pub async fn veilid_core::TableDBTransaction::delete(&self, u32, &[u8]) -> veili
 pub fn veilid_core::TableDBTransaction::rollback(self)
 pub async fn veilid_core::TableDBTransaction::store(&self, u32, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<()>
 pub async fn veilid_core::TableDBTransaction::store_json<T>(&self, u32, &[u8], &T) -> veilid_core::VeilidAPIResult<()> where T: serde_core::ser::Serialize
-pub struct veilid_core::TableStore
-impl veilid_core::TableStore
-pub async fn veilid_core::TableStore::delete(&self, &str) -> veilid_core::VeilidAPIResult<bool>
-pub async fn veilid_core::TableStore::delete_all(&self)
-pub async fn veilid_core::TableStore::info(&self, &str) -> veilid_core::VeilidAPIResult<core::option::Option<veilid_core::table_store::TableInfo>>
-pub fn veilid_core::TableStore::list_all(&self) -> alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
-pub async fn veilid_core::TableStore::open(&self, &str, u32) -> veilid_core::VeilidAPIResult<veilid_core::TableDB>
-pub async fn veilid_core::TableStore::open_pooled(&self, &str, u32, usize) -> veilid_core::VeilidAPIResult<veilid_core::TableDB>
-pub async fn veilid_core::TableStore::rename(&self, &str, &str) -> veilid_core::VeilidAPIResult<()>
-impl veilid_core::TableStore
-pub async fn veilid_core::TableStore::tick(&self, core::option::Option<veilid_core::TimestampDuration>) -> eyre::Result<()>
-impl core::fmt::Debug for veilid_core::TableStore
-pub fn veilid_core::TableStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[repr(C, align(8))] pub struct veilid_core::Timestamp(_)
 impl veilid_core::Timestamp
 pub const fn veilid_core::Timestamp::as_u64(self) -> u64
@@ -2969,22 +2956,25 @@ pub async fn veilid_core::VeilidAPI::attach(&self) -> veilid_core::VeilidAPIResu
 pub fn veilid_core::VeilidAPI::config(&self) -> veilid_core::VeilidAPIResult<alloc::sync::Arc<veilid_core::VeilidConfig>>
 pub fn veilid_core::VeilidAPI::crypto(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidComponentGuard<'_, veilid_core::Crypto>>
 pub async fn veilid_core::VeilidAPI::delete_all_user_secrets(&self) -> veilid_core::VeilidAPIResult<()>
+pub async fn veilid_core::VeilidAPI::delete_table_db(&self, &str) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::VeilidAPI::detach(&self) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidAPI::generate_member_id(&self, &veilid_core::PublicKey) -> veilid_core::VeilidAPIResult<veilid_core::MemberId>
 pub async fn veilid_core::VeilidAPI::get_dht_record_key(&self, veilid_core::DHTSchema, veilid_core::PublicKey, core::option::Option<veilid_core::SharedSecret>) -> veilid_core::VeilidAPIResult<veilid_core::RecordKey>
 pub async fn veilid_core::VeilidAPI::get_state(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidState>
 pub fn veilid_core::VeilidAPI::import_remote_private_route(&self, alloc::vec::Vec<u8>) -> veilid_core::VeilidAPIResult<veilid_core::RouteId>
 pub fn veilid_core::VeilidAPI::is_shutdown(&self) -> bool
+pub fn veilid_core::VeilidAPI::list_table_dbs(&self) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
 pub async fn veilid_core::VeilidAPI::list_user_secrets(&self) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<alloc::string::String>>
 pub async fn veilid_core::VeilidAPI::load_user_secret(&self, alloc::string::String) -> veilid_core::VeilidAPIResult<core::option::Option<alloc::vec::Vec<u8>>>
 pub async fn veilid_core::VeilidAPI::new_custom_private_route(&self, veilid_core::PrivateSpec) -> veilid_core::VeilidAPIResult<veilid_core::RouteBlob>
 pub async fn veilid_core::VeilidAPI::new_private_route(&self) -> veilid_core::VeilidAPIResult<veilid_core::RouteBlob>
+pub async fn veilid_core::VeilidAPI::open_table_db(&self, &str, u32) -> veilid_core::VeilidAPIResult<veilid_core::TableDB>
 pub fn veilid_core::VeilidAPI::release_private_route(&self, veilid_core::RouteId) -> veilid_core::VeilidAPIResult<()>
 pub async fn veilid_core::VeilidAPI::remove_user_secret(&self, alloc::string::String) -> veilid_core::VeilidAPIResult<bool>
+pub async fn veilid_core::VeilidAPI::rename_table_db(&self, &str, &str) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidAPI::routing_context(&self) -> veilid_core::VeilidAPIResult<veilid_core::RoutingContext>
 pub async fn veilid_core::VeilidAPI::save_user_secret(&self, alloc::string::String, alloc::vec::Vec<u8>) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::VeilidAPI::shutdown(self)
-pub fn veilid_core::VeilidAPI::table_store(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidComponentGuard<'_, veilid_core::TableStore>>
 pub async fn veilid_core::VeilidAPI::transact_dht_records(&self, alloc::vec::Vec<veilid_core::RecordKey>, core::option::Option<veilid_core::TransactDHTRecordsOptions>) -> veilid_core::VeilidAPIResult<veilid_core::DHTTransaction>
 impl veilid_core::VeilidAPI
 pub async fn veilid_core::VeilidAPI::debug(&self, alloc::string::String) -> veilid_core::VeilidAPIResult<alloc::string::String>
@@ -3345,11 +3335,14 @@ pub const veilid_core::CONNECTIVITY_CAPABILITIES: &[veilid_core::VeilidCapabilit
 pub const veilid_core::CRYPTO_KIND_VLD0: veilid_core::CryptoKind
 pub const veilid_core::CRYPTO_KIND_VLD0_FOURCC: u32
 pub const veilid_core::DISTANCE_METRIC_CAPABILITIES: &[veilid_core::VeilidCapability]
+pub const veilid_core::HASH_COORDINATE_LENGTH: usize
 pub const veilid_core::LOCAL_NETWORK_CAPABILITIES: &[veilid_core::VeilidCapability]
 pub const veilid_core::MAX_CAPABILITIES: usize
 pub const veilid_core::MAX_CONNECTIONS_MAX: u32
 pub const veilid_core::MAX_CONNECTIONS_MIN: u32
 pub const veilid_core::MAX_CRYPTO_KINDS: usize
+pub const veilid_core::MAX_RECORD_DATA_SIZE: usize
+pub const veilid_core::MAX_SUBKEY_SIZE: usize
 pub const veilid_core::MEMBER_ID_LENGTH: usize
 pub const veilid_core::PUBLIC_INTERNET_CAPABILITIES: &[veilid_core::VeilidCapability]
 pub const veilid_core::VALID_CRYPTO_KINDS: [veilid_core::CryptoKind; 1]

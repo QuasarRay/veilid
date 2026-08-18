@@ -49,6 +49,21 @@ if echo "$NIGHTLY_CHECK" | grep -qi "update available"; then
     exit 1
 fi
 
+# Dagger's ignore patterns are generated from the repo's .gitignore files. Regenerating belongs
+# with a push, not with CI, which has nothing to commit the result to.
+if ! command -v uv > /dev/null 2>&1; then
+    echo "uv is not installed (needed to regenerate the dagger ignore patterns). Install it from:"
+    echo "  https://docs.astral.sh/uv/getting-started/installation/"
+    exit 1
+fi
+IGNORE_PATTERNS=.dagger/src/veilid/ignore_patterns.py
+IGNORE_PATTERNS_BEFORE="$(cat $IGNORE_PATTERNS)"
+echo "Updating dagger ignore patterns..."
+./.dagger/update_gitignore_patterns.sh
+if [ "$IGNORE_PATTERNS_BEFORE" != "$(cat $IGNORE_PATTERNS)" ]; then
+    echo "NOTE: $IGNORE_PATTERNS was regenerated and needs committing."
+fi
+
 echo "Running all tests..."
 
 # cargo-public-api (nightly rustdoc) and cargo-msrv (per-crate rust-version) select their own

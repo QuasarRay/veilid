@@ -1,5 +1,4 @@
 use super::*;
-use crate::routing_table::*;
 use core::convert::TryInto;
 
 // Version number of envelope format

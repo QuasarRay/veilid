@@ -51,12 +51,8 @@ impl SignedValueDescriptor {
         let _ = DHTSchema::try_from(self.schema_data.as_ref())?;
 
         // Verify record key matches
-        let verify_key = StorageManager::make_opaque_record_key(
-            vcrypto,
-            self.ref_owner().ref_value(),
-            self.schema_data(),
-        )
-        .await;
+        let verify_key =
+            make_opaque_record_key(vcrypto, self.ref_owner().ref_value(), self.schema_data()).await;
         if opaque_record_key != &verify_key {
             apibail_parse_error!("failed to validate record key match", verify_key);
         }

@@ -9,7 +9,8 @@
   - Timeout-bound public internet dial info detection.
   - AIMD experiment for DHT operations. Off by default for now behind `aimd-dht` feature.
   - Fix background transaction pre-empt on foreground record open.
-  - ProtectedStore is now exported correctly through the VeilidAPI object and the old reust interface is removed. Switch to accessing ProtectedStore through VeilidAPI.
+  - ProtectedStore is now exported correctly through the VeilidAPI object and the old rust interface is removed. Switch to accessing ProtectedStore through VeilidAPI.
+  - TableStore is now exported correctly through the VeilidAPI object and the old rust interface is removed. Switch to accessing TableStore through VeilidAPI.
   - Loosen IPv6 detection for environments where the default route might not be enumerable due to sandboxing.
   - Fix `inspect_dht_record` excessive search duration.
   - `set_dht_value` and `DHTTransaction::set` options now expose `min_seqnum`, which raises the written sequence number after the automatic increment. `ValueSeqNum::MAX` minus `n` leaves `n` writes on the subkey. `DHTReportScope::UpdateSet` no longer fails on a subkey at the maximum sequence number.
@@ -20,6 +21,10 @@
   - Transaction post-consensus grace period reduced to avoid waiting for unnecessary slow additional-consensus nodes.
   - OnlineDetector now tracks local stalls, and local degradation is no longer blamed on specific nodes.
   - Better watch reporting coalescing.
+  - Added `mock-api` feature, which must be used with `--no-default-features`, but enables testing apps against a stubbed-out
+    `VeilidAPI` that performs no network access, and uses in-memory maps for all API functionality. Integration tests should use this
+    so network access does not have to be performed in CI tests for repeatability. It also completely eliminated network latency and
+    returns results immediately, so your tests will complete faster too.
 
 - veilid-flutter:
   - Full conversion to Native Assets and rust build hooks. Apps must drop any extra build steps for building veilid-flutter and linking its output; Flutter handles it.

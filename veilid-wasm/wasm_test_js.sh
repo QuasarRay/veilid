@@ -13,6 +13,7 @@ FEATURE_LIST=""
 TESTS=""
 CONTEXTS=""
 DEBUG_MODE=""
+MOCK_MODE=""
 
 # Parse arguments
 for arg in "$@"; do
@@ -35,6 +36,10 @@ for arg in "$@"; do
       ;;
     --aimd)
       FEATURE_LIST="$FEATURE_LIST,veilid-core/aimd-dht"
+      ;;
+    --mock)
+      FEATURE_LIST="$FEATURE_LIST,mock-api"
+      MOCK_MODE=1
       ;;
     --debug)
       DEBUG_MODE=1
@@ -68,13 +73,16 @@ for arg in "$@"; do
       echo "                      in the service and extension contexts: they have no usable"
       echo "                      WebSocket. Those need a secure context and will be enabled"
       echo "                      when WebTransport support lands."
+      echo "  --mock              Build against the in-process mock instead of the network."
+      echo "                      Every suite runs with no attach, no sockets and no live DHT."
       echo "  --verbose-tracing   Enable verbose-tracing cargo feature"
       echo "  --aimd              Enable the aimd-dht cargo feature"
       echo "  --debug             Set DEBUG=1 environment variable"
       echo "  -- [args]           Pass remaining arguments to wdio"
       echo ""
       echo "Examples:"
-      echo "  $0                                          # All suites, window context"
+      echo "  $0                                          # All suites, window context, live network"
+      echo "  $0 --mock                                   # All suites against the mock"
       echo "  $0 --tests=transactions --debug             # DHT transaction tests, with debug output"
       echo "  $0 --tests=client,crypto                    # Client and crypto suites"
       echo "  $0 --tests=pstore --context=window,dedicated,shared,service,extension"
@@ -168,7 +176,7 @@ export VEILID_TEST_SUITES="$TESTS"
 status=0
 for context in "${CONTEXT_LIST[@]}"; do
   echo ""
-  echo "=== veilid-wasm tests: [$TESTS] in context '$context' ==="
+  echo "=== veilid-wasm tests: [$TESTS] in context '$context'${MOCK_MODE:+ (mock)} ==="
   export VEILID_TEST_CONTEXT="$context"
 
   if [[ "$context" == "extension" ]]; then

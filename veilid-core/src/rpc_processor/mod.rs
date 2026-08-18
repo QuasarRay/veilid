@@ -82,7 +82,6 @@ use rpc_worker::*;
 use sender_peer_info::*;
 use waitable_reply::*;
 
-use crypto::*;
 use network_manager::*;
 use routing_table::*;
 use storage_manager::*;

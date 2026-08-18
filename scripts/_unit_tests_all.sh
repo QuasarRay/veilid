@@ -21,11 +21,25 @@ if [ "$TARGET" = "wasm32-unknown-unknown" ]; then
     echo "Running veilid-tools tests for target $TARGET..."
     ( cd veilid-tools && ./run_tests.sh wasm ) \
         && { echo "Running veilid-core tests for target $TARGET..."; ( cd veilid-core && ./run_tests.sh wasm ); } \
-        && { echo "Running veilid-wasm tests for target $TARGET..."; ( cd veilid-wasm && ./wasm_test_js.sh ); }
+        && { echo "Running veilid-wasm tests for target $TARGET..."; ( cd veilid-wasm && ./wasm_test_js.sh --mock ); }
     status=$?
 else
-    cargo nextest run --tests --target $TARGET --all-targets --locked --features=debug-locks -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api
+    # run_test_attachment_manager is the one native test that reaches the network. The mock pass
+    # below covers the same API lifecycle, so it is excluded here to keep this script offline.
+    echo "Skipping run_test_attachment_manager (needs the network); the mock pass covers it"
+    cargo nextest run --tests --target $TARGET --all-targets --locked --features=debug-locks -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core -p veilid-remote-api \
+        -E 'not test(=tests::native::run_test_attachment_manager)'
     status=$?
+
+    # A second pass over veilid-core against the mock, where the DHT and transaction suites run.
+    # Additive, not a replacement: mock-api compiles out the subsystem unit tests.
+    if [ $status -eq 0 ]; then
+        echo "Running mock-api unit tests for target $TARGET..."
+        cargo nextest run --tests --target $TARGET --all-targets --locked \
+            -p veilid-core --no-default-features \
+            --features=default-tokio,debug-api,backtrace,debug-locks,mock-api
+        status=$?
+    fi
 fi
 if [ $status -eq 0 ]; then
     echo "Finished running unit tests for target $TARGET..."

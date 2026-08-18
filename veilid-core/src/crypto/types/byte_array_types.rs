@@ -308,6 +308,9 @@ byte_array_type!(pub BareMemberId);
 // Untyped nonce (random 24 bytes, no typed variant)
 byte_array_type!(pub Nonce);
 
+/// Fixed length of a hash coordinate in the DHT keyspace, in bytes
+pub const HASH_COORDINATE_LENGTH: usize = 32;
+
 // Internal types
 byte_array_type!(pub(crate) BareHashCoordinate);
 byte_array_type!(pub(crate) HashDistance);

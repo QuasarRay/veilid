@@ -608,6 +608,13 @@ class Veilid:
         return f"Clippy x86_64-unknown-linux-gnu async-std completed:\n{result}"
 
     @function
+    async def test_clippy_mock_api(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
+        """Run clippy for the mock-api configuration"""
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
+        result = await container.with_exec(["./scripts/_clippy_mock_api.sh"]).combined_output()
+        return f"Clippy mock-api completed:\n{result}"
+
+    @function
     async def test_build_docs(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
         """Build documentation"""
         container = self.code_linux(source, base, ci_registry_image, cache_tag)
@@ -635,6 +642,7 @@ class Veilid:
         results.append(await self.test_clippy_aarch64_apple_darwin(source, base, ci_registry_image, cache_tag))
         results.append(await self.test_clippy_x86_64_unknown_linux_gnu(source, base, ci_registry_image, cache_tag))
         results.append(await self.test_clippy_x86_64_unknown_linux_gnu_async_std(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_clippy_mock_api(source, base, ci_registry_image, cache_tag))
         results.append(await self.test_build_docs(source, base, ci_registry_image, cache_tag))
         results.append(await self.test_unit_tests_all(source, base, ci_registry_image, cache_tag))
         return "\n\n=== TEST SUMMARY ===\n" + "\n\n".join(results)

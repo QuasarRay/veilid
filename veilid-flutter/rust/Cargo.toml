@@ -22,6 +22,13 @@ default-wasm = ["veilid-core/default-wasm"]
 debug-api = ["veilid-core/debug-api"]
 stats = ["veilid-core/stats"]
 crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
+
+# Run against the in-process mock instead of the network. Excludes stats, so these need their own
+# default-free feature set:
+#   cargo build -p veilid-flutter --no-default-features --features mock-api
+#   cargo build -p veilid-flutter --no-default-features --features mock-api-wasm --target wasm32-unknown-unknown
+mock-api = ["rt-tokio", "veilid-core/mock-api", "veilid-core/default-tokio", "debug-api"]
+mock-api-wasm = ["default-wasm", "veilid-core/mock-api", "debug-api"]
 rt-async-std = ["veilid-core/rt-async-std", "async-std"]
 rt-tokio = ["veilid-core/rt-tokio", "tokio"]
 debug-load = ["dep:ctor", "dep:libc-print", "dep:android_log-sys"]

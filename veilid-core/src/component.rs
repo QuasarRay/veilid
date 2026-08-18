@@ -1,3 +1,6 @@
+// Shared with the subsystems mock-api compiles out, so some have no caller in a mock build
+#![cfg_attr(feature = "mock-api", allow(unused_macros))]
+
 use super::*;
 
 impl_veilid_log_facility!("registry");

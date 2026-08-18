@@ -1295,8 +1295,7 @@ pub extern "C" fn open_table_db(port: i64, name: FfiStr, column_count: u32) {
     DartIsolateWrapper::new(port).spawn_result(
         async move {
             let veilid_api = get_veilid_api().await?;
-            let tstore = veilid_api.table_store()?;
-            let table_db = tstore.open(&name, column_count).await?;
+            let table_db = veilid_api.open_table_db(&name, column_count).await?;
             let new_id = add_table_db(table_db);
             VeilidAPIResult::Ok(new_id)
         }
@@ -1321,9 +1320,23 @@ pub extern "C" fn delete_table_db(port: i64, name: FfiStr) {
     DartIsolateWrapper::new(port).spawn_result(
         async move {
             let veilid_api = get_veilid_api().await?;
-            let tstore = veilid_api.table_store()?;
-            let deleted = tstore.delete(&name).await?;
+            let deleted = veilid_api.delete_table_db(&name).await?;
             VeilidAPIResult::Ok(deleted)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn rename_table_db(port: i64, old_name: FfiStr, new_name: FfiStr) {
+    let old_name = old_name.into_opt_string().unwrap_or_default();
+    let new_name = new_name.into_opt_string().unwrap_or_default();
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let veilid_api = get_veilid_api().await?;
+            veilid_api.rename_table_db(&old_name, &new_name).await?;
+            VeilidAPIResult::Ok(())
         }
         .in_current_span(),
     );

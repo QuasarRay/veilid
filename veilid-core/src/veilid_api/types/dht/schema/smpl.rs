@@ -1,5 +1,4 @@
 use super::*;
-pub use crate::storage_manager::MEMBER_ID_LENGTH;
 
 /// Simple DHT Schema (SMPL) Member
 #[apply(api_data_struct!)]

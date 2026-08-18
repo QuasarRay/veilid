@@ -41,6 +41,17 @@ rt-async-std = [
 ]
 
 # Debugging and testing features
+
+# Serve the in-process mock instead of the network. Excludes stats, so it needs its own
+# default-free feature set:
+#   cargo run -p veilid-server --no-default-features --features mock-api
+mock-api = [
+    "rt-tokio",
+    "veilid-core/mock-api",
+    "veilid-core/debug-api",
+    "veilid-remote-api/default-tokio",
+]
+
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
 crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
 crypto-test-none = ["rt-tokio", "veilid-core/crypto-test-none"]

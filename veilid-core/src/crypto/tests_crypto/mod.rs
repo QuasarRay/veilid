@@ -4,7 +4,10 @@ mod test_crypto_generation;
 mod test_crypto_hpke;
 mod test_crypto_no_auth;
 mod test_crypto_sign;
+// Envelope and receipt coding carry routing-table types, which mock-api removes
+#[cfg(not(feature = "mock-api"))]
 mod test_envelope_receipt;
+#[cfg(not(feature = "mock-api"))]
 mod test_types;
 
 // 0, 1, some, many, practical-limit data sizes for byte-oriented crypto tests
@@ -35,6 +38,7 @@ async fn crypto_tests_shutdown(api: VeilidAPI) {
 }
 
 pub async fn test_all() {
+    #[cfg(not(feature = "mock-api"))]
     test_types::test_all().await;
     test_crypto_aead::test_all().await;
     test_crypto_no_auth::test_all().await;
@@ -42,5 +46,6 @@ pub async fn test_all() {
     test_crypto_sign::test_all().await;
     test_crypto_generation::test_all().await;
     test_crypto_hpke::test_all().await;
+    #[cfg(not(feature = "mock-api"))]
     test_envelope_receipt::test_all().await;
 }

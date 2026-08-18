@@ -6,6 +6,15 @@ set -o pipefail
 
 pushd "$SCRIPTDIR" >/dev/null || exit 1
 status=0
+
+# --mock swaps in the in-process mock, matching veilid-wasm/wasm_test_js.sh
+WASM_FEATURES="default-wasm,test-util,debug-locks"
+for arg in "$@"; do
+    if [[ "$arg" == "--mock" ]]; then
+        WASM_FEATURES="$WASM_FEATURES,mock-api"
+    fi
+done
+
 if [[ "$1" == "wasm" ]]; then
     # shellcheck disable=SC1091
     source "$SCRIPTDIR/../scripts/_chromedriver_helper.sh"
@@ -13,7 +22,7 @@ if [[ "$1" == "wasm" ]]; then
     export CHROMEDRIVER
     # --test-threads=1: each wasm test spawns its own chromedriver+Chrome; running them in
     # parallel starves Chrome renderer startup ("timed out connecting to Chrome").
-    WASM_BINDGEN_TEST_TIMEOUT=120 cargo nextest run --target wasm32-unknown-unknown --no-default-features --features=default-wasm,test-util,debug-locks --test-threads=1
+    WASM_BINDGEN_TEST_TIMEOUT=120 cargo nextest run --target wasm32-unknown-unknown --no-default-features --features="$WASM_FEATURES" --test-threads=1
     status=$?
 elif [[ "$1" == "ios" ]]; then
     SYMROOT=/tmp/testout

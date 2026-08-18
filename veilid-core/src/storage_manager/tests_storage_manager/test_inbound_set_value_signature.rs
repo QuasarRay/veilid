@@ -33,12 +33,8 @@ pub async fn test_inbound_set_value_rejects_forged_signature() {
     );
 
     // Matching opaque record key, so only the signature check (not the key binding) can reject
-    let opaque_record_key = StorageManager::make_opaque_record_key(
-        &avcrypto,
-        attacker_owner_pk.ref_value(),
-        &schema_data,
-    )
-    .await;
+    let opaque_record_key =
+        make_opaque_record_key(&avcrypto, attacker_owner_pk.ref_value(), &schema_data).await;
 
     let value_data = EncryptedValueData::new(
         ValueSeqNum::from(1),

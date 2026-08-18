@@ -28,6 +28,7 @@ const FLUSH_TABLES_INTERVAL_SECS: u32 = 60;
 const CLEANUP_TABLES_INTERVAL_SECS: u32 = 600;
 
 /// Description of column
+#[cfg(feature = "debug-api")]
 #[apply(api_data_struct!)]
 #[api(eq, default, ts)]
 pub struct ColumnInfo {
@@ -35,6 +36,7 @@ pub struct ColumnInfo {
 }
 
 /// IO Stats for table
+#[cfg(feature = "debug-api")]
 #[apply(api_data_struct!)]
 #[api(eq, default, ts)]
 pub struct IOStatsInfo {
@@ -70,6 +72,7 @@ pub struct IOStatsInfo {
 }
 
 /// Description of table
+#[cfg(feature = "debug-api")]
 #[apply(api_data_struct!)]
 #[api(eq, default, ts)]
 pub struct TableInfo {
@@ -976,6 +979,7 @@ impl TableStore {
     /// Opens the table to read it; blocks on the on-disk open and key-count reads.
     ///
     /// Errors with `VeilidAPIError::NotInitialized` before init or after shutdown, the same errors as `open` (the table is opened to read it), or `VeilidAPIError::Generic` if a column-count or key-count read fails.
+    #[cfg(feature = "debug-api")]
     pub async fn info(&self, name: &str) -> VeilidAPIResult<Option<TableInfo>> {
         let Ok(_startup_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();

@@ -871,8 +871,7 @@ fn add_table_db(table_db: veilid_core::TableDB) -> u32 {
 pub fn open_table_db(name: String, column_count: u32) -> Promise {
     wrap_api_future_plain(async move {
         let veilid_api = get_veilid_api()?;
-        let tstore = veilid_api.table_store()?;
-        let table_db = tstore.open(&name, column_count).await?;
+        let table_db = veilid_api.open_table_db(&name, column_count).await?;
         let new_id = add_table_db(table_db);
         VeilidAPIResult::Ok(new_id)
     })
@@ -892,9 +891,17 @@ pub fn release_table_db(id: u32) -> i32 {
 pub fn delete_table_db(name: String) -> Promise {
     wrap_api_future_plain(async move {
         let veilid_api = get_veilid_api()?;
-        let tstore = veilid_api.table_store()?;
-        let deleted = tstore.delete(&name).await?;
+        let deleted = veilid_api.delete_table_db(&name).await?;
         VeilidAPIResult::Ok(deleted)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn rename_table_db(old_name: String, new_name: String) -> Promise {
+    wrap_api_future_void(async move {
+        let veilid_api = get_veilid_api()?;
+        veilid_api.rename_table_db(&old_name, &new_name).await?;
+        VeilidAPIResult::Ok(())
     })
 }
 

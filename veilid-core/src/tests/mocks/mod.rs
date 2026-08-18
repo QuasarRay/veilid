@@ -1,4 +1,6 @@
 pub mod fixture_veilid_core;
+// Builds the full component set, which mock-api does not compile
+#[cfg(not(feature = "mock-api"))]
 pub mod mock_registry;
 
 use super::*;

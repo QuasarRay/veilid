@@ -16,7 +16,7 @@ pub async fn test_all() {
     test_value_seq_num::value_seq_num_next();
     test_value_seq_num::value_seq_num_saturating_next();
     test_value_seq_num::value_seq_num_ordering();
-    #[cfg(feature = "debug-api")]
+    #[cfg(all(feature = "debug-api", not(feature = "mock-api")))]
     test_value_seq_num::value_seq_num_parse();
     test_config::test_internal_footgun_gate();
 }

@@ -93,7 +93,7 @@ impl StorageManager {
         let encryption_key = Some(vcrypto.random_shared_secret().await.into_value());
 
         // Calculate dht key
-        let record_key = Self::make_record_key(
+        let record_key = make_record_key(
             &vcrypto,
             owner.ref_value().ref_key(),
             &schema_data,

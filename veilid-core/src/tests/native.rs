@@ -105,18 +105,32 @@ cfg_if! {
         }
 
 
-        run_test!(common test_attachment_manager);
-        // run_test!(common test_dht_transactions);
-        // run_test!(common test_dht);
-
         run_test!(component crypto);
-        run_test!(component table_store);
         run_test!(component veilid_api);
+
+        // These need a DHT to talk to, so they run only against the mock
+        #[cfg(feature = "mock-api")]
+        run_test!(common test_dht);
+        #[cfg(feature = "mock-api")]
+        run_test!(common test_dht_transactions);
+
+        // API lifecycle, which the mock implements; check_all.sh runs only the mock copy
+        run_test!(common test_attachment_manager);
+
+        // The rest exercise subsystems mock-api compiles out
+        #[cfg(not(feature = "mock-api"))]
+        run_test!(component table_store);
+        #[cfg(not(feature = "mock-api"))]
         run_test!(component routing_table);
+        #[cfg(not(feature = "mock-api"))]
         run_test!(component network_manager);
+        #[cfg(not(feature = "mock-api"))]
         run_test!(component protected_store);
+        #[cfg(not(feature = "mock-api"))]
         run_test!(component storage_manager);
+        #[cfg(not(feature = "mock-api"))]
         run_test!(component rpc_processor);
+        #[cfg(not(feature = "mock-api"))]
         run_test!(component attachment_manager);
 
     }

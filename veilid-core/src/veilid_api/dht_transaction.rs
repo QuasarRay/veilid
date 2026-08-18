@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(not(feature = "mock-api"))]
 use crate::storage_manager::OutboundTransactionHandle;
 
 impl_veilid_log_facility!("veilid_api");
@@ -46,6 +47,25 @@ impl DHTTransaction {
         })
     }
 
+    /// The handle for an in-progress operation, or an error once the transaction is completed.
+    #[cfg(feature = "mock-api")]
+    fn mock_handle(&self) -> VeilidAPIResult<OutboundTransactionHandle> {
+        self.inner
+            .lock()
+            .opt_transaction_handle
+            .ok_or_else(|| VeilidAPIError::generic("Transaction not found"))
+    }
+
+    /// The handle for a completing operation, which may only be taken once.
+    #[cfg(feature = "mock-api")]
+    fn mock_take_handle(&self) -> VeilidAPIResult<OutboundTransactionHandle> {
+        self.inner
+            .lock()
+            .opt_transaction_handle
+            .take()
+            .ok_or_else(|| VeilidAPIError::generic("Transaction not found"))
+    }
+
     /// Get the [VeilidAPI] object that created this [DHTTransaction].
     pub fn api(&self) -> VeilidAPI {
         self.api.clone()
@@ -67,6 +87,12 @@ impl DHTTransaction {
         record_keys: Vec<RecordKey>,
         options: Option<TransactDHTRecordsOptions>,
     ) -> VeilidAPIResult<()> {
+        #[cfg(feature = "mock-api")]
+        return self
+            .api
+            .mock_extend_transaction(self.mock_handle()?, record_keys, options);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async move {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
@@ -87,7 +113,7 @@ impl DHTTransaction {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Commit the transaction
@@ -98,7 +124,10 @@ impl DHTTransaction {
     /// Errors with [VeilidAPIError::TransactionNotFound] if the transaction was already committed, rolled back, or is unknown, and [VeilidAPIError::TryAgain] (retry) if the node is offline or the end/commit barriers could not reach consensus.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
     pub async fn commit(self) -> VeilidAPIResult<()> {
-        async {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_commit_transaction(self.mock_take_handle()?);
+        #[cfg(not(feature = "mock-api"))]
+        return async {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let mut inner = self.inner.lock();
@@ -124,7 +153,7 @@ impl DHTTransaction {
                 .await
         }
         .await
-        .inspect_err(log_veilid_api_error!(self))
+        .inspect_err(log_veilid_api_error!(self));
     }
 
     /// Rollback the transaction
@@ -135,7 +164,10 @@ impl DHTTransaction {
     /// Errors with [VeilidAPIError::TransactionNotFound] if the transaction was already committed, rolled back, or is unknown, and [VeilidAPIError::TryAgain] (retry) if the node is offline.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key(), transaction_handle), skip(self), ret))]
     pub async fn rollback(self) -> VeilidAPIResult<()> {
-        async {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_rollback_transaction(self.mock_take_handle()?);
+        #[cfg(not(feature = "mock-api"))]
+        return async {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
                 let mut inner = self.inner.lock();
@@ -161,7 +193,7 @@ impl DHTTransaction {
                 .await
         }
         .await
-        .inspect_err(log_veilid_api_error!(self))
+        .inspect_err(log_veilid_api_error!(self));
     }
 
     /// Add a set_dht_value operation to the transaction
@@ -185,6 +217,16 @@ impl DHTTransaction {
         data: Vec<u8>,
         options: Option<DHTTransactionSetValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_transaction_set(
+            self.mock_handle()?,
+            record_key,
+            subkey,
+            data,
+            options,
+        );
+        #[cfg(not(feature = "mock-api"))]
+        return
         async move {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
@@ -215,7 +257,7 @@ impl DHTTransaction {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Perform a get_dht_value operation inside the transaction
@@ -236,6 +278,12 @@ impl DHTTransaction {
         record_key: RecordKey,
         subkey: ValueSubkey,
     ) -> VeilidAPIResult<Option<ValueData>> {
+        #[cfg(feature = "mock-api")]
+        return self
+            .api
+            .mock_transaction_get(self.mock_handle()?, record_key, subkey);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async move {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
@@ -259,7 +307,7 @@ impl DHTTransaction {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Perform a inspect_dht_record operation inside the transaction
@@ -278,6 +326,12 @@ impl DHTTransaction {
         subkeys: Option<ValueSubkeyRangeSet>,
         scope: DHTReportScope,
     ) -> VeilidAPIResult<DHTRecordReport> {
+        #[cfg(feature = "mock-api")]
+        return self
+            .api
+            .mock_transaction_inspect(self.mock_handle()?, record_key, subkeys, scope);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async move {
             let storage_manager = self.api.core_context()?.storage_manager();
             let transaction_handle = {
@@ -301,7 +355,7 @@ impl DHTTransaction {
                     ret
                 },
             )
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 }
 //////////////////////////////////////////////////////////////////////////////////////
@@ -317,8 +371,13 @@ impl Drop for DHTTransactionInner {
             let registry = &self.registry;
             veilid_log!(registry warn "Dropped DHT transaction without commit or rollback");
 
-            let storage_manager = registry.storage_manager();
-            storage_manager.drop_transaction_sync(transaction_handle);
+            #[cfg(not(feature = "mock-api"))]
+            {
+                let storage_manager = registry.storage_manager();
+                storage_manager.drop_transaction_sync(transaction_handle);
+            }
+            #[cfg(feature = "mock-api")]
+            mock_drop_transaction(transaction_handle);
         }
     }
 }

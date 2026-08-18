@@ -346,6 +346,29 @@
       ]
     },
     {
+      "description": "Rename a named table store database.",
+      "type": "object",
+      "properties": {
+        "new_name": {
+          "description": "New database name.",
+          "type": "string"
+        },
+        "old_name": {
+          "description": "Existing database name.",
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "const": "RenameTableDb"
+        }
+      },
+      "required": [
+        "op",
+        "old_name",
+        "new_name"
+      ]
+    },
+    {
       "description": "Operation on an open table store database.",
       "type": "object",
       "properties": {
@@ -1635,7 +1658,7 @@
       "type": "object",
       "properties": {
         "min_seqnum": {
-          "description": "Raise the sequence number to at least this, after the automatic increment.\n[ValueSeqNum::MAX] minus `n` leaves `n` writes after this one.\n\nA write whose minimum the subkey's sequence number already satisfies reuses that sequence\nnumber instead of failing, so a write at [ValueSeqNum::MAX] can be retried. Retries must\ncarry the same data and writer to be accepted; that is the caller's responsibility.",
+          "description": "Raise the sequence number to at least this, after the automatic increment.\n[ValueSeqNum::MAX] minus `n` leaves `n` writes after this one.\n\nIf the subkey already meets the minimum, the write reuses that sequence number instead of\nfailing, so a write at [ValueSeqNum::MAX] can be retried. The caller must send the same data\nand writer on every retry; nothing here enforces that.",
           "anyOf": [
             {
               "$ref": "#/$defs/ValueSeqNum"
@@ -2410,7 +2433,7 @@
           ]
         },
         "min_seqnum": {
-          "description": "Raise the sequence number to at least this, after the automatic increment.\n[ValueSeqNum::MAX] minus `n` leaves `n` writes after this one.\n\nA write whose minimum the subkey's sequence number already satisfies reuses that sequence\nnumber instead of failing, so a write at [ValueSeqNum::MAX] can be retried until it reaches\nconsensus. Retries must carry the same data and writer to be accepted; that is the caller's\nresponsibility, not something this checks.",
+          "description": "Raise the sequence number to at least this, after the automatic increment.\n[ValueSeqNum::MAX] minus `n` leaves `n` writes after this one.\n\nIf the subkey already meets the minimum, the write reuses that sequence number instead of\nfailing, so a write at [ValueSeqNum::MAX] can be retried until it reaches consensus. The\ncaller must send the same data and writer on every retry; nothing here enforces that.",
           "anyOf": [
             {
               "$ref": "#/$defs/ValueSeqNum"

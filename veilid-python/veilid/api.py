@@ -1156,6 +1156,17 @@ class VeilidAPI(ABC):
         pass
 
     @abstractmethod
+    async def rename_table_db(self, old_name: str, new_name: str):
+        """Rename a table store.
+
+        Raises VeilidAPIErrorNotInitialized before init or after shutdown,
+        VeilidAPIErrorInvalidArgument if either name contains characters other than alphanumeric,
+        underscore, or hyphen, and VeilidAPIErrorGeneric if new_name already exists or old_name does
+        not exist.
+        """
+        pass
+
+    @abstractmethod
     async def get_crypto_system(self, kind: types.CryptoKind) -> CryptoSystem:
         """Get the cryptosystem for the given crypto kind.
 

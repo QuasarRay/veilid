@@ -1,3 +1,6 @@
+// Shared with the subsystems mock-api compiles out, so some have no caller in a mock build
+#![cfg_attr(feature = "mock-api", allow(unused_macros))]
+
 /// Sets the default log facility (tracing target) for the current module.
 /// The `veilid_log!` macros emit to this facility unless given an explicit `target:`.
 macro_rules! impl_veilid_log_facility {

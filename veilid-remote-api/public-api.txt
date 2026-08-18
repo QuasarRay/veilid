@@ -297,6 +297,9 @@ pub veilid_remote_api::RequestOp::ReleasePrivateRoute
 pub veilid_remote_api::RequestOp::ReleasePrivateRoute::route_id: veilid_core::crypto::types::RouteId
 pub veilid_remote_api::RequestOp::RemoveUserSecret
 pub veilid_remote_api::RequestOp::RemoveUserSecret::key: alloc::string::String
+pub veilid_remote_api::RequestOp::RenameTableDb
+pub veilid_remote_api::RequestOp::RenameTableDb::new_name: alloc::string::String
+pub veilid_remote_api::RequestOp::RenameTableDb::old_name: alloc::string::String
 pub veilid_remote_api::RequestOp::RoutingContext(veilid_remote_api::RoutingContextRequest)
 pub veilid_remote_api::RequestOp::SaveUserSecret
 pub veilid_remote_api::RequestOp::SaveUserSecret::key: alloc::string::String
@@ -373,6 +376,8 @@ pub veilid_remote_api::ResponseOp::ReleasePrivateRoute
 pub veilid_remote_api::ResponseOp::ReleasePrivateRoute::result: veilid_remote_api::ApiResult<()>
 pub veilid_remote_api::ResponseOp::RemoveUserSecret
 pub veilid_remote_api::ResponseOp::RemoveUserSecret::result: veilid_remote_api::ApiResult<bool>
+pub veilid_remote_api::ResponseOp::RenameTableDb
+pub veilid_remote_api::ResponseOp::RenameTableDb::result: veilid_remote_api::ApiResult<()>
 pub veilid_remote_api::ResponseOp::RoutingContext(alloc::boxed::Box<veilid_remote_api::RoutingContextResponse>)
 pub veilid_remote_api::ResponseOp::SaveUserSecret
 pub veilid_remote_api::ResponseOp::SaveUserSecret::result: veilid_remote_api::ApiResult<bool>

@@ -68,6 +68,44 @@ export const tableSuite: Suite = {
         },
       },
       {
+        name: 'should rename a table, carrying its contents',
+        run: async ({ expect }) => {
+          const oldName = 'rename-me-table';
+          const newName = 'renamed-table';
+
+          const t = new VeilidTableDB(oldName, TABLE_COLS);
+          await t.openTable();
+          await t.store(0, textEncoder.encode('k'), textEncoder.encode('v'));
+
+          await t.renameTable(newName);
+
+          // the handle now points at the new name and the contents followed
+          const stored = await t.load(0, textEncoder.encode('k'));
+          expect(stored).toBeDefined();
+          expect(textDecoder.decode(stored)).toBe('v');
+
+          // the old name is gone
+          const old = new VeilidTableDB(oldName, TABLE_COLS);
+          expect(await old.deleteTable()).toBe(false);
+
+          expect(await t.deleteTable()).toBe(true);
+        },
+      },
+      {
+        name: 'should fail to rename onto an existing table',
+        run: async ({ expect }) => {
+          const a = new VeilidTableDB('rename-conflict-a', TABLE_COLS);
+          await a.openTable();
+          const b = new VeilidTableDB('rename-conflict-b', TABLE_COLS);
+          await b.openTable();
+
+          await expect(() => a.renameTable('rename-conflict-b')).toThrow();
+
+          expect(await a.deleteTable()).toBe(true);
+          expect(await b.deleteTable()).toBe(true);
+        },
+      },
+      {
         name: 'should commit a transaction',
         run: async ({ expect }) => {
           const transaction = await table.createTransaction();

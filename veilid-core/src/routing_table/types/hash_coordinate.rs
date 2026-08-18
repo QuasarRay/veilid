@@ -1,7 +1,5 @@
 use super::*;
 
-pub const HASH_COORDINATE_LENGTH: usize = 32;
-
 // Internal types
 
 pub(crate) trait ToHashCoordinate {

@@ -487,6 +487,48 @@ async fn test_protected_store_delete_no_wipe_returns_not_initialized() {
     );
 }
 
+async fn test_rename(ts: &TableStore) {
+    info!("test_rename");
+
+    let _ = ts.delete("test").await;
+    let _ = ts.delete("test2").await;
+
+    let db = ts.open("test", 3).await.expect("should have opened");
+    assert!(
+        db.store(0, b"foo", b"1234567890").await.is_ok(),
+        "should store new key"
+    );
+    drop(db);
+
+    assert!(
+        ts.rename("test", "test2").await.is_ok(),
+        "should rename to an unused name"
+    );
+
+    let db = ts.open("test2", 3).await.expect("should have opened");
+    assert_eq!(
+        db.load(0, b"foo").await.unwrap(),
+        Some(b"1234567890".to_vec()),
+        "contents should follow the rename"
+    );
+    drop(db);
+
+    assert!(
+        ts.rename("test", "test3").await.is_err(),
+        "should fail because the old name no longer exists"
+    );
+
+    let db = ts.open("test", 3).await.expect("should have opened");
+    drop(db);
+    assert!(
+        ts.rename("test", "test2").await.is_err(),
+        "should fail because the new name already exists"
+    );
+
+    let _ = ts.delete("test").await;
+    let _ = ts.delete("test2").await;
+}
+
 pub async fn test_all() {
     let api = startup().await;
     let crypto = api.crypto().unwrap();
@@ -503,6 +545,7 @@ pub async fn test_all() {
         test_store_delete_load(&ts).await;
         test_transaction(&ts).await;
         test_json(&vcrypto, &ts).await;
+        test_rename(&ts).await;
         let _ = ts.delete("test").await;
     }
 

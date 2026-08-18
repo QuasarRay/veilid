@@ -350,6 +350,9 @@ test-clippy-x86-64-unknown-linux-gnu:
 test-clippy-x86-64-unknown-linux-gnu-async-std:
     FROM +code-linux
     RUN ./scripts/_clippy_x86_64_unknown_linux_gnu_async_std.sh
+test-clippy-mock-api:
+    FROM +code-linux
+    RUN ./scripts/_clippy_mock_api.sh
 test-build-docs:
     FROM +code-linux    
     RUN ./scripts/_build_docs.sh
@@ -367,6 +370,7 @@ test-all:
     BUILD +test-clippy-aarch64-apple-darwin
     BUILD +test-clippy-x86-64-unknown-linux-gnu
     BUILD +test-clippy-x86-64-unknown-linux-gnu-async-std
+    BUILD +test-clippy-mock-api
     BUILD +test-build-docs
     BUILD +test-unit-tests-all
 

@@ -1,5 +1,15 @@
 use super::*;
 
+// Real attachment needs time to progress; the mock reports its final state at once
+#[cfg(not(feature = "mock-api"))]
+const ATTACH_SETTLE_MS: u32 = 5000;
+#[cfg(not(feature = "mock-api"))]
+const DETACH_SETTLE_MS: u32 = 2000;
+#[cfg(feature = "mock-api")]
+const ATTACH_SETTLE_MS: u32 = 0;
+#[cfg(feature = "mock-api")]
+const DETACH_SETTLE_MS: u32 = 0;
+
 async fn test_startup_shutdown() {
     info!("test_startup_shutdown: starting");
     let (update_callback, config) = fixture_veilid_core();
@@ -42,9 +52,9 @@ async fn test_attach_detach() {
         .await
         .expect("startup failed");
     api.attach().await.unwrap();
-    sleep(5000).await;
+    sleep(ATTACH_SETTLE_MS).await;
     api.detach().await.unwrap();
-    sleep(2000).await;
+    sleep(DETACH_SETTLE_MS).await;
     api.shutdown().await;
 
     info!("test_attach_detach: --- test auto detach ---");
@@ -53,7 +63,7 @@ async fn test_attach_detach() {
         .await
         .expect("startup failed");
     api.attach().await.unwrap();
-    sleep(5000).await;
+    sleep(ATTACH_SETTLE_MS).await;
     api.shutdown().await;
 
     info!("test_attach_detach: --- test detach without attach ---");
@@ -116,11 +126,11 @@ async fn test_attach_detach_multiple() {
     for api in &apis {
         api.attach().await.unwrap();
     }
-    sleep(5000).await;
+    sleep(ATTACH_SETTLE_MS).await;
     for api in &apis {
         api.detach().await.unwrap();
     }
-    sleep(2000).await;
+    sleep(DETACH_SETTLE_MS).await;
     for api in apis {
         api.shutdown().await;
     }
@@ -138,7 +148,7 @@ async fn test_attach_detach_multiple() {
     for api in &apis {
         api.attach().await.unwrap();
     }
-    sleep(5000).await;
+    sleep(ATTACH_SETTLE_MS).await;
     for api in apis {
         api.shutdown().await;
     }

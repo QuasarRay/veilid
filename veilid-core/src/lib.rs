@@ -29,6 +29,12 @@
 
 #![warn(missing_docs)]
 #![deny(warnings)]
+// A mock build compiles out most of the crate, leaving shared imports with no users and the API's
+// async signatures with nothing to await. The default build still denies both.
+#![cfg_attr(
+    feature = "mock-api",
+    allow(dead_code, unused_imports, clippy::unused_async)
+)]
 #![recursion_limit = "256"]
 
 cfg_if::cfg_if! {
@@ -45,30 +51,50 @@ cfg_if::cfg_if! {
     }
 }
 
+#[cfg(all(feature = "mock-api", feature = "virtual-network"))]
+compile_error!(
+    "features \"mock-api\" and \"virtual-network\" are mutually exclusive: mock-api replaces the whole API, leaving no network to virtualize"
+);
+
+#[cfg(all(feature = "mock-api", feature = "stats"))]
+compile_error!(
+    "features \"mock-api\" and \"stats\" are mutually exclusive: no subsystem remains to populate stats, so a mock build would only record garbage. Build with --no-default-features and select the runtime explicitly."
+);
+
 #[macro_use]
 extern crate alloc;
 
 mod macros;
 
-mod attachment_manager;
-#[cfg(feature = "unstable-blockstore")]
-mod block_store;
 mod component;
 mod core_context;
 mod crypto;
 mod logging;
-mod network_manager;
-mod protected_store;
-mod routing_table;
-mod rpc_processor;
 mod stats_accounting;
 #[cfg(feature = "stats")]
 mod stats_manager;
 mod stats_mutex;
-mod storage_manager;
-mod table_store;
 mod veilid_api;
 mod veilid_config;
+
+// The subsystems mock-api replaces are not compiled at all, so nothing can bind a socket,
+// open a file or reach a keychain
+#[cfg(not(feature = "mock-api"))]
+mod attachment_manager;
+#[cfg(all(feature = "unstable-blockstore", not(feature = "mock-api")))]
+mod block_store;
+#[cfg(not(feature = "mock-api"))]
+mod network_manager;
+#[cfg(not(feature = "mock-api"))]
+mod protected_store;
+#[cfg(not(feature = "mock-api"))]
+mod routing_table;
+#[cfg(not(feature = "mock-api"))]
+mod rpc_processor;
+#[cfg(not(feature = "mock-api"))]
+mod storage_manager;
+#[cfg(not(feature = "mock-api"))]
+mod table_store;
 
 ////////////////////////////////////////////////////////////////////////////////////////////
 // Public API Exports
@@ -159,6 +185,7 @@ mod veilid_capnp {
     include!("../proto/veilid_capnp.rs");
 }
 
+#[cfg(not(feature = "mock-api"))]
 use self::attachment_manager::TickEvent;
 use self::component::*;
 use self::core_context::RegisteredComponents;

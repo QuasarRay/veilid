@@ -119,10 +119,16 @@ impl RoutingContext {
 
             if let SafetySelection::Safe(safe) = &mut safety_selection {
                 if let Some(preferred_route) = &safe.preferred_route {
-                    self.api
-                        .core_context()?
-                        .routing_table()
-                        .check_route_id(preferred_route)?;
+                    cfg_if! {
+                        if #[cfg(feature = "mock-api")] {
+                            { let crypto = self.api.crypto()?; check_route_id(&crypto, preferred_route)? };
+                        } else {
+                            self.api
+                                .core_context()?
+                                .routing_table()
+                                .check_route_id(preferred_route)?;
+                        }
+                    }
                 }
                 let config = self.api.config()?;
                 let default_route_hop_count = config.network.rpc.default_route_hop_count as usize;
@@ -184,6 +190,9 @@ impl RoutingContext {
         self.api.clone()
     }
 
+    // Resolves to an rpc_processor type, which mock-api does not compile; its only callers are the
+    // app-messaging paths, which the mock serves itself
+    #[cfg(not(feature = "mock-api"))]
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     async fn get_destination(&self, target: Target) -> VeilidAPIResult<rpc_processor::Destination> {
         async {
@@ -218,16 +227,28 @@ impl RoutingContext {
     fn check_target(&self, target: &Target) -> VeilidAPIResult<()> {
         match target {
             Target::NodeId(node_id) => {
-                self.api
-                    .core_context()?
-                    .routing_table()
-                    .check_node_id(node_id)?;
+                cfg_if! {
+                    if #[cfg(feature = "mock-api")] {
+                        { let crypto = self.api.crypto()?; check_node_id(&crypto, node_id)? };
+                    } else {
+                        self.api
+                            .core_context()?
+                            .routing_table()
+                            .check_node_id(node_id)?;
+                    }
+                }
             }
             Target::RouteId(route_id) => {
-                self.api
-                    .core_context()?
-                    .routing_table()
-                    .check_route_id(route_id)?;
+                cfg_if! {
+                    if #[cfg(feature = "mock-api")] {
+                        { let crypto = self.api.crypto()?; check_route_id(&crypto, route_id)? };
+                    } else {
+                        self.api
+                            .core_context()?
+                            .routing_table()
+                            .check_route_id(route_id)?;
+                    }
+                }
             }
         }
         Ok(())
@@ -238,6 +259,16 @@ impl RoutingContext {
 
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(message), fields(duration, __VEILID_LOG_KEY = self.log_key(), message_len = message.len(), ret.len)))]
     async fn internal_app_call(&self, target: Target, message: Bytes) -> VeilidAPIResult<Bytes> {
+        #[cfg(feature = "mock-api")]
+        return {
+            self.check_target(&target)?;
+            self.api
+                .mock_app_call(target, message.to_vec())
+                .await
+                .map(Bytes::from)
+        };
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.check_target(&target)?;
             let rpc_processor = self.api.core_context()?.rpc_processor();
@@ -261,7 +292,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     #[cfg(feature = "footgun-nodeid-target")]
@@ -316,6 +347,13 @@ impl RoutingContext {
 
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", skip(message), fields(duration, __VEILID_LOG_KEY = self.log_key(), message_len = message.len()), ret))]
     async fn internal_app_message(&self, target: Target, message: Bytes) -> VeilidAPIResult<()> {
+        #[cfg(feature = "mock-api")]
+        return {
+            self.check_target(&target)?;
+            self.api.mock_app_message(target, message.to_vec())
+        };
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.check_target(&target)?;
             let rpc_processor = self.api.core_context()?.rpc_processor();
@@ -337,7 +375,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     #[cfg(feature = "footgun-nodeid-target")]
@@ -408,6 +446,10 @@ impl RoutingContext {
         schema: DHTSchema,
         owner: Option<KeyPair>,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_create_dht_record(kind, schema, owner).await;
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             Crypto::validate_crypto_kind(kind)?;
             schema.validate()?;
@@ -433,7 +475,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Opens a DHT record at a specific key.
@@ -462,6 +504,10 @@ impl RoutingContext {
         record_key: RecordKey,
         default_writer: Option<KeyPair>,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_open_dht_record(record_key, default_writer);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.api
                 .core_context()?
@@ -488,7 +534,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Closes a DHT record at a specific key that was opened with create_dht_record or open_dht_record.
@@ -503,7 +549,10 @@ impl RoutingContext {
     /// `::NotInitialized` if the node is shut down. Neither `KeyNotFound` nor these errors are retryable.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn close_dht_record(&self, record_key: RecordKey) -> VeilidAPIResult<()> {
-        async {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_close_dht_record(record_key);
+        #[cfg(not(feature = "mock-api"))]
+        return async {
             self.api
                 .core_context()?
                 .storage_manager()
@@ -527,7 +576,7 @@ impl RoutingContext {
                 .await
         }
         .await
-        .inspect_err(log_veilid_api_error!(self))
+        .inspect_err(log_veilid_api_error!(self));
     }
 
     /// Waits for any pending offline subkey writes for a DHT record to be flushed to the network.
@@ -545,6 +594,10 @@ impl RoutingContext {
         record_key: RecordKey,
         timeout: Option<Duration>,
     ) -> VeilidAPIResult<bool> {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_flush_dht_record(record_key, timeout).await;
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.api
                 .core_context()?
@@ -566,7 +619,7 @@ impl RoutingContext {
             ).await
         }
         .await
-        .inspect_err(log_veilid_api_error!(self))
+        .inspect_err(log_veilid_api_error!(self));
     }
 
     /// Deletes a DHT record at a specific key.
@@ -581,7 +634,10 @@ impl RoutingContext {
     /// if the record is not in the local store, and `::NotInitialized` if the node is shut down. None are retryable.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn delete_dht_record(&self, record_key: RecordKey) -> VeilidAPIResult<()> {
-        async {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_delete_dht_record(record_key);
+        #[cfg(not(feature = "mock-api"))]
+        return async {
             self.api
                 .core_context()?
                 .storage_manager()
@@ -605,7 +661,7 @@ impl RoutingContext {
                 .await
         }
         .await
-        .inspect_err(log_veilid_api_error!(self))
+        .inspect_err(log_veilid_api_error!(self));
     }
 
     /// Gets the latest value of a subkey.
@@ -627,6 +683,12 @@ impl RoutingContext {
         subkey: ValueSubkey,
         force_refresh: bool,
     ) -> VeilidAPIResult<Option<ValueData>> {
+        #[cfg(feature = "mock-api")]
+        return self
+            .api
+            .mock_get_dht_value(record_key, subkey, force_refresh);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.api
                 .core_context()?
@@ -646,7 +708,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Pushes a changed subkey value to the network.
@@ -672,6 +734,12 @@ impl RoutingContext {
         data: Vec<u8>,
         options: Option<SetDHTValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
+        #[cfg(feature = "mock-api")]
+        return self
+            .api
+            .mock_set_dht_value(record_key, subkey, data, options);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.api
                 .core_context()?
@@ -692,7 +760,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Add or update a watch to a DHT value that informs the user via an VeilidUpdate::ValueChange callback when the record has subkeys change.
@@ -736,6 +804,12 @@ impl RoutingContext {
         expiration: Option<Timestamp>,
         count: Option<u32>,
     ) -> VeilidAPIResult<bool> {
+        #[cfg(feature = "mock-api")]
+        return self
+            .api
+            .mock_watch_dht_values(record_key, subkeys, expiration, count);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.api
                 .core_context()?
@@ -758,7 +832,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Cancels a watch early.
@@ -786,6 +860,10 @@ impl RoutingContext {
         record_key: RecordKey,
         subkeys: Option<ValueSubkeyRangeSet>,
     ) -> VeilidAPIResult<bool> {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_cancel_dht_watch(record_key, subkeys);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.api
                 .core_context()?
@@ -806,7 +884,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     /// Inspects a DHT record for subkey state.
@@ -863,6 +941,10 @@ impl RoutingContext {
         subkeys: Option<ValueSubkeyRangeSet>,
         scope: DHTReportScope,
     ) -> VeilidAPIResult<DHTRecordReport> {
+        #[cfg(feature = "mock-api")]
+        return self.api.mock_inspect_dht_record(record_key, subkeys, scope);
+        #[cfg(not(feature = "mock-api"))]
+        return
         async {
             self.api
                 .core_context()?
@@ -883,7 +965,7 @@ impl RoutingContext {
                     ret
                 },
             ).await
-        }.await.inspect_err(log_veilid_api_error!(self))
+        }.await.inspect_err(log_veilid_api_error!(self));
     }
 
     ///////////////////////////////////

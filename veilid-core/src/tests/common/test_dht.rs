@@ -367,12 +367,13 @@ async fn test_open_writer_dht_value(api: VeilidAPI) {
     rc.delete_dht_record(key).await.unwrap();
 }
 
+/// Must run detached: `allow_offline` only decides anything when there is no network to write to.
 pub async fn test_set_dht_value_allow_offline(api: VeilidAPI) {
     let rc = api.routing_context().unwrap();
 
-    // Create a DHT record
+    // Create a DHT record with a subkey per case below
     let rec = rc
-        .create_dht_record(CRYPTO_KIND_VLD0, DHTSchema::dflt(1).unwrap(), None)
+        .create_dht_record(CRYPTO_KIND_VLD0, DHTSchema::dflt(3).unwrap(), None)
         .await
         .unwrap();
     let dht_key = rec.key();
@@ -470,7 +471,7 @@ async fn test_flush_dht_record_offline(api: VeilidAPI) {
         .unwrap();
     assert!(!report.offline_subkeys().is_empty());
 
-    // pending writes should survive close
+    // pending writes should survive close, even though inspecting needs the record open
     rc.close_dht_record(dht_key.clone()).await.unwrap();
 
     assert!(!rc
@@ -478,11 +479,10 @@ async fn test_flush_dht_record_offline(api: VeilidAPI) {
         .await
         .unwrap());
 
-    let report = rc
-        .inspect_dht_record(dht_key.clone(), None, DHTReportScope::Local)
-        .await
-        .unwrap();
-    assert!(!report.offline_subkeys().is_empty());
+    assert_err!(
+        rc.inspect_dht_record(dht_key.clone(), None, DHTReportScope::Local)
+            .await
+    );
 
     rc.delete_dht_record(dht_key).await.unwrap();
 }
@@ -526,7 +526,9 @@ pub async fn test_all() {
         .await
         .expect("startup failed");
 
+    // Detached: these cover the offline write queue, which needs there to be no network
     test_flush_dht_record_offline(api.clone()).await;
+    test_set_dht_value_allow_offline(api.clone()).await;
 
     let _ = api.attach().await;
     fixture_wait_for_public_internet_ready(&api).await;
@@ -541,7 +543,6 @@ pub async fn test_all() {
     test_get_dht_record_key(api.clone()).await;
     test_set_get_dht_value(api.clone()).await;
     test_open_writer_dht_value(api.clone()).await;
-    test_set_dht_value_allow_offline(api.clone()).await;
     test_flush_dht_record(api.clone()).await;
 
     api.shutdown().await;

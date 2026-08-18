@@ -1,13 +1,16 @@
-use crate::attachment_manager::{AttachmentManager, AttachmentManagerStartupContext};
 use crate::crypto::Crypto;
 use crate::logging::*;
-use crate::network_manager::{NetworkManager, NetworkManagerStartupContext};
-use crate::routing_table::{RoutingTable, RoutingTableStartupContext};
-use crate::rpc_processor::{RPCProcessor, RPCProcessorStartupContext};
-use crate::storage_manager::StorageManager;
 use crate::veilid_api::*;
 use crate::veilid_config::*;
 use crate::*;
+#[cfg(not(feature = "mock-api"))]
+use crate::{
+    attachment_manager::{AttachmentManager, AttachmentManagerStartupContext},
+    network_manager::{NetworkManager, NetworkManagerStartupContext},
+    routing_table::{RoutingTable, RoutingTableStartupContext},
+    rpc_processor::{RPCProcessor, RPCProcessorStartupContext},
+    storage_manager::StorageManager,
+};
 
 impl_veilid_log_facility!("corectx");
 
@@ -134,23 +137,33 @@ impl VeilidCoreContext {
         }
 
         // Register all components
-        registry.register(ProtectedStore::new);
+        // Crypto first: it depends on no other component, and everything else may use it
         registry.register(Crypto::new);
-        registry.register(TableStore::new);
-        #[cfg(feature = "unstable-blockstore")]
-        registry.register(BlockStore::new);
-        registry.register_with_context(RoutingTable::new, RoutingTableStartupContext::default());
-        registry.register(StorageManager::new);
-        registry
-            .register_with_context(NetworkManager::new, NetworkManagerStartupContext::default());
-        registry.register_with_context(RPCProcessor::new, RPCProcessorStartupContext::default());
-        registry.register_with_context(
-            AttachmentManager::new,
-            AttachmentManagerStartupContext::default(),
-        );
-        // Registered last so it can pull snapshots from every other component
-        #[cfg(feature = "stats")]
-        registry.register(StatsManager::new);
+        // Under mock-api the rest do not exist: the mock serves every API path, so a registry
+        // holding only Crypto is the whole node
+        #[cfg(not(feature = "mock-api"))]
+        {
+            registry.register(ProtectedStore::new);
+            registry.register(TableStore::new);
+            #[cfg(feature = "unstable-blockstore")]
+            registry.register(BlockStore::new);
+            registry
+                .register_with_context(RoutingTable::new, RoutingTableStartupContext::default());
+            registry.register(StorageManager::new);
+            registry.register_with_context(
+                NetworkManager::new,
+                NetworkManagerStartupContext::default(),
+            );
+            registry
+                .register_with_context(RPCProcessor::new, RPCProcessorStartupContext::default());
+            registry.register_with_context(
+                AttachmentManager::new,
+                AttachmentManagerStartupContext::default(),
+            );
+            // Registered last so it can pull snapshots from every other component
+            #[cfg(feature = "stats")]
+            registry.register(StatsManager::new);
+        }
 
         // Run initialization
         // This should make the majority of subsystems functional
@@ -211,46 +224,60 @@ impl VeilidCoreContext {
 /////////////////////////////////////////////////////////////////////////////
 
 pub(crate) trait RegisteredComponents {
-    fn protected_store<'a>(&self) -> VeilidComponentGuard<'a, ProtectedStore>;
     fn crypto<'a>(&self) -> VeilidComponentGuard<'a, Crypto>;
+    #[cfg(not(feature = "mock-api"))]
+    fn protected_store<'a>(&self) -> VeilidComponentGuard<'a, ProtectedStore>;
+    #[cfg(not(feature = "mock-api"))]
     fn table_store<'a>(&self) -> VeilidComponentGuard<'a, TableStore>;
+    #[cfg(not(feature = "mock-api"))]
     fn storage_manager<'a>(&self) -> VeilidComponentGuard<'a, StorageManager>;
+    #[cfg(not(feature = "mock-api"))]
     fn routing_table<'a>(&self) -> VeilidComponentGuard<'a, RoutingTable>;
+    #[cfg(not(feature = "mock-api"))]
     fn network_manager<'a>(&self) -> VeilidComponentGuard<'a, NetworkManager>;
+    #[cfg(not(feature = "mock-api"))]
     fn rpc_processor<'a>(&self) -> VeilidComponentGuard<'a, RPCProcessor>;
+    #[cfg(not(feature = "mock-api"))]
     fn attachment_manager<'a>(&self) -> VeilidComponentGuard<'a, AttachmentManager>;
-    #[cfg(all(feature = "stats", feature = "debug-api"))]
+    #[cfg(all(feature = "stats", feature = "debug-api", not(feature = "mock-api")))]
     fn stats_manager<'a>(&self) -> VeilidComponentGuard<'a, StatsManager>;
 }
 
 impl<T: VeilidComponentRegistryAccessor + ?Sized> RegisteredComponents for T {
-    fn protected_store<'a>(&self) -> VeilidComponentGuard<'a, ProtectedStore> {
-        self.registry().lookup::<ProtectedStore>().unwrap_or_log()
-    }
     fn crypto<'a>(&self) -> VeilidComponentGuard<'a, Crypto> {
         self.registry().lookup::<Crypto>().unwrap_or_log()
     }
+    #[cfg(not(feature = "mock-api"))]
+    fn protected_store<'a>(&self) -> VeilidComponentGuard<'a, ProtectedStore> {
+        self.registry().lookup::<ProtectedStore>().unwrap_or_log()
+    }
+    #[cfg(not(feature = "mock-api"))]
     fn table_store<'a>(&self) -> VeilidComponentGuard<'a, TableStore> {
         self.registry().lookup::<TableStore>().unwrap_or_log()
     }
+    #[cfg(not(feature = "mock-api"))]
     fn storage_manager<'a>(&self) -> VeilidComponentGuard<'a, StorageManager> {
         self.registry().lookup::<StorageManager>().unwrap_or_log()
     }
+    #[cfg(not(feature = "mock-api"))]
     fn routing_table<'a>(&self) -> VeilidComponentGuard<'a, RoutingTable> {
         self.registry().lookup::<RoutingTable>().unwrap_or_log()
     }
+    #[cfg(not(feature = "mock-api"))]
     fn network_manager<'a>(&self) -> VeilidComponentGuard<'a, NetworkManager> {
         self.registry().lookup::<NetworkManager>().unwrap_or_log()
     }
+    #[cfg(not(feature = "mock-api"))]
     fn rpc_processor<'a>(&self) -> VeilidComponentGuard<'a, RPCProcessor> {
         self.registry().lookup::<RPCProcessor>().unwrap_or_log()
     }
+    #[cfg(not(feature = "mock-api"))]
     fn attachment_manager<'a>(&self) -> VeilidComponentGuard<'a, AttachmentManager> {
         self.registry()
             .lookup::<AttachmentManager>()
             .unwrap_or_log()
     }
-    #[cfg(all(feature = "stats", feature = "debug-api"))]
+    #[cfg(all(feature = "stats", feature = "debug-api", not(feature = "mock-api")))]
     fn stats_manager<'a>(&self) -> VeilidComponentGuard<'a, StatsManager> {
         self.registry().lookup::<StatsManager>().unwrap_or_log()
     }

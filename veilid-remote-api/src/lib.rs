@@ -162,6 +162,13 @@ pub enum RequestOp {
         /// Database name.
         name: String,
     },
+    /// Rename a named table store database.
+    RenameTableDb {
+        /// Existing database name.
+        old_name: String,
+        /// New database name.
+        new_name: String,
+    },
     /// Operation on an open table store database.
     TableDb(TableDbRequest),
     /// Operation on a table store database transaction.
@@ -359,6 +366,12 @@ pub enum ResponseOp {
         /// True if a database was deleted, or error.
         #[serde(flatten)]
         result: ApiResult<bool>,
+    },
+    /// Result of `RenameTableDb`.
+    RenameTableDb {
+        /// Empty on success, or error.
+        #[serde(flatten)]
+        result: ApiResult<()>,
     },
     /// Result of a table database operation.
     TableDb(TableDbResponse),

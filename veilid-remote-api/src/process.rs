@@ -853,7 +853,7 @@ impl JsonRequestProcessor {
     /// matching `InvalidId` sub-response (`RoutingContext`/`TableDb`/`TableDbTransaction`/
     /// `CryptoSystem`/`DhtTransaction`). `Control` always returns `VeilidAPIError::Unimplemented`;
     /// `GetCryptoSystem` with an unsupported `kind` returns `::InvalidArgument`. The
-    /// `OpenTableDb`/`DeleteTableDb`/`GetCryptoSystem`/`VerifySignatures`/`GenerateSignatures` ops
+    /// `OpenTableDb`/`DeleteTableDb`/`RenameTableDb`/`GetCryptoSystem`/`VerifySignatures`/`GenerateSignatures` ops
     /// surface `::NotInitialized` in their `result` when the API has been shut down. Every other
     /// fallible op carries the underlying `VeilidAPI` call's `VeilidAPIError` verbatim in its
     /// `result`. Local ops (`IsShutdown`, `Now*`, version/features/config, `ValidCryptoKinds`) cannot
@@ -929,43 +929,20 @@ impl JsonRequestProcessor {
                         .await,
                 ))
             }
-            RequestOp::OpenTableDb { name, column_count } => {
-                let table_store = match self.api.table_store() {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return Response {
-                            id,
-                            op: ResponseOp::OpenTableDb {
-                                result: to_json_api_result(Err(e)),
-                            },
-                        }
-                    }
-                };
-                ResponseOp::OpenTableDb {
-                    result: to_json_api_result(
-                        table_store
-                            .open(&name, column_count)
-                            .await
-                            .map(|table_db| self.add_table_db(table_db)),
-                    ),
-                }
-            }
-            RequestOp::DeleteTableDb { name } => {
-                let table_store = match self.api.table_store() {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return Response {
-                            id,
-                            op: ResponseOp::DeleteTableDb {
-                                result: to_json_api_result(Err(e)),
-                            },
-                        }
-                    }
-                };
-                ResponseOp::DeleteTableDb {
-                    result: to_json_api_result(table_store.delete(&name).await),
-                }
-            }
+            RequestOp::OpenTableDb { name, column_count } => ResponseOp::OpenTableDb {
+                result: to_json_api_result(
+                    self.api
+                        .open_table_db(&name, column_count)
+                        .await
+                        .map(|table_db| self.add_table_db(table_db)),
+                ),
+            },
+            RequestOp::DeleteTableDb { name } => ResponseOp::DeleteTableDb {
+                result: to_json_api_result(self.api.delete_table_db(&name).await),
+            },
+            RequestOp::RenameTableDb { old_name, new_name } => ResponseOp::RenameTableDb {
+                result: to_json_api_result(self.api.rename_table_db(&old_name, &new_name).await),
+            },
             RequestOp::TableDb(tdr) => {
                 let table_db = match self.lookup_table_db(id, tdr.db_id) {
                     Ok(v) => v,

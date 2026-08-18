@@ -41,7 +41,6 @@ pub(crate) use types::*;
 use address_check::*;
 use address_filter::*;
 use connection_handle::*;
-use crypto::*;
 use relay_worker::*;
 use routing_table::*;
 use rpc_processor::*;

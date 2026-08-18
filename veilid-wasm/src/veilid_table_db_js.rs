@@ -40,8 +40,9 @@ impl VeilidTableDB {
     /// Throws the same error its core twin `TableStore::open` returns: `InvalidArgument` if `columnCount` is zero or `tableName` has characters other than alphanumeric, `_`, or `-`; `Generic` if the table is already open elsewhere with a smaller column count or the backing-store open fails; and `NotInitialized` if the node is not started or stored data fails to decrypt.
     pub async fn openTable(&mut self) -> VeilidAPIResult<()> {
         let veilid_api = get_veilid_api()?;
-        let tstore = veilid_api.table_store()?;
-        let table_db = tstore.open(&self.tableName, self.columnCount).await?;
+        let table_db = veilid_api
+            .open_table_db(&self.tableName, self.columnCount)
+            .await?;
         self.inner_table_db = Some(table_db);
         Ok(())
     }
@@ -55,8 +56,23 @@ impl VeilidTableDB {
         self.inner_table_db = None;
 
         let veilid_api = get_veilid_api()?;
-        let tstore = veilid_api.table_store()?;
-        tstore.delete(&self.tableName).await
+        veilid_api.delete_table_db(&self.tableName).await
+    }
+
+    /// Rename this TableDB.
+    ///
+    /// Drops this object's open handle, renames the table, then points this object at the new name. Awaits a disk flush.
+    ///
+    /// Throws the same error its core twin `TableStore::rename` returns: `InvalidArgument` if either name has characters other than alphanumeric, `_`, or `-`; `Generic` if `newTableName` already exists or this table does not exist; and `NotInitialized` if the node is not started.
+    pub async fn renameTable(&mut self, newTableName: String) -> VeilidAPIResult<()> {
+        self.inner_table_db = None;
+
+        let veilid_api = get_veilid_api()?;
+        veilid_api
+            .rename_table_db(&self.tableName, &newTableName)
+            .await?;
+        self.tableName = newTableName;
+        Ok(())
     }
 
     async fn ensureOpen(&mut self) {

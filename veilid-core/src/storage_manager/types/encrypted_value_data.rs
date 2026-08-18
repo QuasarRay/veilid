@@ -10,7 +10,7 @@ pub struct EncryptedValueData {
 }
 
 impl EncryptedValueData {
-    pub const MAX_LEN: usize = 32768;
+    pub const MAX_LEN: usize = MAX_SUBKEY_SIZE;
 
     pub fn new(
         seq: ValueSeqNum,

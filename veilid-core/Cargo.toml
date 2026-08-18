@@ -45,6 +45,10 @@ stats = []
 # JsonSchema derives on API types, for veilid-remote-api schema generation
 schemars = ["dep:schemars"]
 
+# Replace the whole VeilidAPI with an in-process simulation: no network, no disk, no keychain.
+# Compiles out every subsystem it replaces, leaving Crypto as the only registered component.
+mock-api = []
+
 # Adaptive AIMD byte budgets on the DHT operation gate; off = budgets never bind
 aimd-dht = ["veilid-tools/aimd"]
 

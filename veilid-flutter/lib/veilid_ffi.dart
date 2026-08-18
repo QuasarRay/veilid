@@ -1910,6 +1910,15 @@ class VeilidFFI extends Veilid {
   @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'delete_table_db')
   external static void _deleteTableDb(int port, Pointer<Utf8> name);
 
+  @Native<Void Function(Int64, Pointer<Utf8>, Pointer<Utf8>)>(
+    symbol: 'rename_table_db',
+  )
+  external static void _renameTableDb(
+    int port,
+    Pointer<Utf8> oldName,
+    Pointer<Utf8> newName,
+  );
+
   @Native<Uint32 Function(Uint32)>(symbol: 'table_db_get_column_count')
   external static int _tableDbGetColumnCount(int id);
 
@@ -2590,6 +2599,18 @@ class VeilidFFI extends Veilid {
     final sendPort = recvPort.sendPort;
     _deleteTableDb(sendPort.nativePort, name.toNativeUtf8());
     return processFuturePlain(recvPort.first);
+  }
+
+  @override
+  Future<void> renameTableDB(String oldName, String newName) {
+    final recvPort = ReceivePort('rename_table_db');
+    final sendPort = recvPort.sendPort;
+    _renameTableDb(
+      sendPort.nativePort,
+      oldName.toNativeUtf8(),
+      newName.toNativeUtf8(),
+    );
+    return processFutureVoid(recvPort.first);
   }
 
   @override

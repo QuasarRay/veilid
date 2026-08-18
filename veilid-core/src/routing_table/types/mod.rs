@@ -28,7 +28,7 @@ pub use entry_summary::*;
 pub use events::*;
 #[cfg(feature = "geolocation")]
 pub use geolocation_info::*;
-pub use hash_coordinate::*;
+pub(crate) use hash_coordinate::*;
 pub use low_level_port_info::*;
 pub use node_info::*;
 pub use node_status::*;

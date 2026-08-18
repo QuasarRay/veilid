@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
 
 const testDb = '__dart_test_db';
+const testRenamedDb = '__dart_test_renamed_db';
 const testNonexistentDb = '__dart_test_nonexistent_db';
 
 Future<void> testDeleteTableDbNonExistent() async {
@@ -22,6 +23,55 @@ Future<void> testOpenDeleteTableDb() async {
     tdb.close();
   }
   expect(await Veilid.instance.deleteTableDB(testDb), isTrue);
+}
+
+Future<void> testRenameTableDb() async {
+  // delete both names if they exist
+  await Veilid.instance.deleteTableDB(testDb);
+  await Veilid.instance.deleteTableDB(testRenamedDb);
+
+  final tdb = await Veilid.instance.openTableDB(testDb, 1);
+  try {
+    await tdb.store(0, utf8.encode('foo'), utf8.encode('bar'));
+  } finally {
+    tdb.close();
+  }
+
+  await Veilid.instance.renameTableDB(testDb, testRenamedDb);
+
+  // the contents follow the rename
+  final tdb2 = await Veilid.instance.openTableDB(testRenamedDb, 1);
+  try {
+    expect(await tdb2.load(0, utf8.encode('foo')), equals(utf8.encode('bar')));
+  } finally {
+    tdb2.close();
+  }
+
+  // the old name is gone
+  expect(await Veilid.instance.deleteTableDB(testDb), isFalse);
+  expect(await Veilid.instance.deleteTableDB(testRenamedDb), isTrue);
+}
+
+Future<void> testRenameTableDbNonExistent() async {
+  await Veilid.instance.deleteTableDB(testRenamedDb);
+
+  await expectLater(
+      () => Veilid.instance.renameTableDB(testNonexistentDb, testRenamedDb),
+      throwsA(isA<VeilidAPIException>()));
+}
+
+Future<void> testRenameTableDbOntoExisting() async {
+  await Veilid.instance.deleteTableDB(testDb);
+  await Veilid.instance.deleteTableDB(testRenamedDb);
+
+  (await Veilid.instance.openTableDB(testDb, 1)).close();
+  (await Veilid.instance.openTableDB(testRenamedDb, 1)).close();
+
+  await expectLater(() => Veilid.instance.renameTableDB(testDb, testRenamedDb),
+      throwsA(isA<VeilidAPIException>()));
+
+  expect(await Veilid.instance.deleteTableDB(testDb), isTrue);
+  expect(await Veilid.instance.deleteTableDB(testRenamedDb), isTrue);
 }
 
 Future<void> testOpenTwiceTableDb() async {

@@ -448,6 +448,16 @@ class _JsonVeilidAPI(VeilidAPI):
             await self.send_ndjson_request(Operation.DELETE_TABLE_DB, name=name)
         )
 
+    async def rename_table_db(self, old_name: str, new_name: str):
+        assert isinstance(old_name, str)
+        assert isinstance(new_name, str)
+
+        raise_api_result(
+            await self.send_ndjson_request(
+                Operation.RENAME_TABLE_DB, old_name=old_name, new_name=new_name
+            )
+        )
+
     async def get_crypto_system(self, kind: CryptoKind) -> CryptoSystem:
         assert isinstance(kind, CryptoKind)
 

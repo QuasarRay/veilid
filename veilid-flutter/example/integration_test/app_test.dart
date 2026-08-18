@@ -78,6 +78,11 @@ void main() => runWithIntegrationLog(() {
               testOpenTwiceTableDbStoreDeleteLoad,
               tags: ['table_db']);
           test('resize table db', testResizeTableDb, tags: ['table_db']);
+          test('rename table db', testRenameTableDb, tags: ['table_db']);
+          test('rename table db nonexistent', testRenameTableDbNonExistent,
+              tags: ['table_db']);
+          test('rename table db onto existing', testRenameTableDbOntoExisting,
+              tags: ['table_db']);
         });
 
         group('Protected Store', () {

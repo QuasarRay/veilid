@@ -2,12 +2,16 @@
 #[cfg(target_os = "android")]
 pub mod android;
 mod api;
-#[cfg(feature = "debug-api")]
+// The real debug commands reach into the subsystems mock-api removes; S7 reintroduces the few
+// the tests use as mock-native commands
+#[cfg(all(feature = "debug-api", not(feature = "mock-api")))]
 mod debug;
-#[cfg(not(feature = "debug-api"))]
+#[cfg(all(not(feature = "debug-api"), not(feature = "mock-api")))]
 mod debug_stub;
 mod dht_transaction;
 mod error;
+#[cfg(feature = "mock-api")]
+mod mock;
 mod routing_context;
 mod serialize_helpers;
 mod types;
@@ -22,17 +26,33 @@ pub use block_store::*;
 pub use crypto::*;
 pub use dht_transaction::*;
 pub use error::*;
-pub(crate) use protected_store::*;
 pub use routing_context::*;
 pub use serialize_helpers::*;
-pub use table_store::{TableDB, TableDBTransaction, TableStore};
 pub use types::*;
+
+// The mock supplies the store types the real subsystems would, so every consumer of the public
+// API compiles unchanged against either build
+#[cfg(not(feature = "mock-api"))]
+pub(crate) use protected_store::*;
+#[cfg(not(feature = "mock-api"))]
+pub(crate) use table_store::TableStore;
+#[cfg(not(feature = "mock-api"))]
+pub use table_store::{TableDB, TableDBTransaction};
+
+#[cfg(feature = "mock-api")]
+pub(crate) use mock::{
+    check_node_id, check_route_id, generate_node_ids, mock_drop_transaction, MockNetwork,
+    MockNodeKey, OutboundTransactionHandle,
+};
+#[cfg(feature = "mock-api")]
+pub use mock::{TableDB, TableDBTransaction};
 
 use crate::*;
 
 use core_context::{api_shutdown, VeilidCoreContext};
+#[cfg(not(feature = "mock-api"))]
 use routing_table::{AllocateRouteParams, DirectionSet, RouteIdAndKeys, RouteSpecStore};
-#[cfg(feature = "debug-api")]
+#[cfg(all(feature = "debug-api", not(feature = "mock-api")))]
 use rpc_processor::*;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
