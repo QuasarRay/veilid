@@ -56,7 +56,7 @@ pub(super) struct RecordStoreUnlockedInner {
 
 /// Record detail trait
 pub(super) trait RecordDetail:
-    fmt::Debug + Clone + PartialEq + Eq + Serialize + for<'d> Deserialize<'d> + GetSize
+    fmt::Debug + Clone + PartialEq + Eq + Serialize + for<'d> Deserialize<'d>
 {
     fn is_new(&self) -> bool;
 }

@@ -6,7 +6,7 @@ macro_rules! impl_crypto_typed_group {
         pastey::paste! {
 
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
-            #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, Ord, PartialEq, Eq, Hash, Default, GetSize)]
+            #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, Ord, PartialEq, Eq, Hash, Default)]
             #[serde(from = "Vec<_>", into = "Vec<_>")]
             /// An ordered group of typed values holding at most one entry per `CryptoKind`.
             ///

@@ -25,7 +25,6 @@ struct MockTransactionRecord {
 
 /// A transaction staging writes until commit.
 struct MockTransaction {
-    holder: MockNodeKey,
     records: Vec<MockTransactionRecord>,
     /// Writes waiting for commit, invisible to every other transaction until then
     staged: HashMap<(OpaqueRecordKey, ValueSubkey), ValueData>,
@@ -132,7 +131,6 @@ impl VeilidAPI {
             txns.insert(
                 txid,
                 MockTransaction {
-                    holder: key,
                     records,
                     staged: HashMap::new(),
                     reads: HashMap::new(),
@@ -246,10 +244,18 @@ impl VeilidAPI {
         })?;
 
         let (default_writer, cached) = MockNetwork::with_node(&key, |node| {
-            node.opened_records
+            let writer = node
+                .opened_records
                 .get(&record_key.opaque())
-                .map(|o| (o.writer.clone(), o.local.get(&subkey).cloned()))
-                .ok_or_else(|| VeilidAPIError::generic("record not open"))
+                .map(|o| o.writer.clone())
+                .ok_or_else(|| {
+                    VeilidAPIError::invalid_argument(
+                        "record not open",
+                        "record_key",
+                        record_key.opaque(),
+                    )
+                })?;
+            VeilidAPIResult::Ok((writer, node.local_value(&record_key, subkey)))
         })??;
         let Some(writer) = options.writer.clone().or(default_writer) else {
             apibail_generic!("value is not writable");
@@ -261,8 +267,13 @@ impl VeilidAPI {
                 .map(|r| (r.owner.clone(), r.schema.clone()))
                 .ok_or_else(|| VeilidAPIError::key_not_found(record_key.opaque()))
         })?;
+        // Refused with the same wording as the real set path so callers can classify the failure
         let crypto = self.crypto()?;
-        check_subkey_value_data(&crypto, &schema, &owner, subkey, &writer.key(), data.len())?;
+        if check_subkey_value_data(&crypto, &schema, &owner, subkey, &writer.key(), data.len())
+            .is_err()
+        {
+            apibail_generic!("failed schema validation: {}:{}", record_key, subkey);
+        }
 
         with_transactions(|txns| {
             let tx = txns.get_mut(&handle.txid).ok_or_else(not_found)?;
@@ -280,10 +291,17 @@ impl VeilidAPI {
                 .as_ref()
                 .is_some_and(|b| b.data() == data.as_slice() && b.ref_writer() == &writer.key());
 
+            // No floor-reuse arm here: an identical retry is handled above, and new bytes
+            // under a reused number is exactly what a storage node refuses
             let mut seq = match base.as_ref().map(|b| b.seq()) {
                 None => ValueSeqNum::ZERO,
                 Some(last) if identical => last,
-                Some(last) => last.next()?,
+                Some(last) => match last.next() {
+                    Ok(next) => next,
+                    Err(_) => {
+                        apibail_generic!("sequence number at max: {}:{}", record_key, subkey);
+                    }
+                },
             };
             if min_seqnum.is_some() && seq < min_seqnum {
                 seq = min_seqnum;
@@ -386,12 +404,12 @@ impl VeilidAPI {
         // Local must stay distinct from network, or a watcher could never see it fall behind
         let key = self.mock_key()?;
         let local_seqs: Vec<ValueSeqNum> = MockNetwork::with_node(&key, |node| {
-            let opened = node.opened_records.get(&record_key.opaque());
+            let local = node.local_records.get(&record_key.opaque());
             subkeys
                 .iter()
                 .map(|sk| {
-                    opened
-                        .and_then(|o| o.local.get(&sk))
+                    local
+                        .and_then(|m| m.get(&sk))
                         .map(|v| v.seq())
                         .unwrap_or(ValueSeqNum::NONE)
                 })
@@ -463,16 +481,17 @@ impl VeilidAPI {
 
         for r in &tx.records {
             if let Some(subkeys) = changed.get(&r.record_key.opaque()) {
-                report_value_change(&r.record_key, tx.holder, subkeys);
+                report_value_change(&r.record_key, subkeys);
             }
         }
 
         // The committing node's own cache follows its writes
         MockNetwork::with_node(&key, |node| {
             for ((opaque, subkey), value) in tx.reads.iter().chain(tx.staged.iter()) {
-                if let Some(opened) = node.opened_records.get_mut(opaque) {
-                    opened.local.insert(*subkey, value.clone());
-                }
+                node.local_records
+                    .entry(opaque.clone())
+                    .or_default()
+                    .insert(*subkey, value.clone());
             }
         })?;
         Ok(())

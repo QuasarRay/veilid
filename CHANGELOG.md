@@ -25,6 +25,7 @@
     `VeilidAPI` that performs no network access, and uses in-memory maps for all API functionality. Integration tests should use this
     so network access does not have to be performed in CI tests for repeatability. It also completely eliminated network latency and
     returns results immediately, so your tests will complete faster too.
+  - Strip out 'get-size2' crate and simplify StorageManager calculation of data sizes
 
 - veilid-flutter:
   - Full conversion to Native Assets and rust build hooks. Apps must drop any extra build steps for building veilid-flutter and linking its output; Flutter handles it.

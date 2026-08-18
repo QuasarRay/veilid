@@ -2,7 +2,7 @@ use super::*;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, GetSize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct SignedValueData {
     value_data: EncryptedValueData,
     signature: Signature,
@@ -90,9 +90,11 @@ impl SignedValueData {
         self.value_data.data_size()
     }
 
+    /// In-memory footprint, including the value blob and signature bytes
     pub fn total_size(&self) -> usize {
         (mem::size_of::<Self>() - mem::size_of::<EncryptedValueData>())
             + self.value_data.total_size()
+            + self.signature.ref_value().len()
     }
 
     fn legacy_make_signature_bytes(

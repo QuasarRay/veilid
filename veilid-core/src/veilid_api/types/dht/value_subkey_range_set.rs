@@ -3,7 +3,7 @@ use core::ops::{Deref, DerefMut};
 use range_set_blaze::*;
 
 /// A set of DHT subkeys stored as inclusive ranges of [ValueSubkey]
-#[derive(Clone, Default, Hash, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Default, Hash, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
@@ -19,7 +19,6 @@ pub struct ValueSubkeyRangeSet {
         all(target_arch = "wasm32", target_os = "unknown"),
         tsify(type = "Array<[ValueSubkey, ValueSubkey]>")
     )]
-    #[get_size(size_fn = range_set_blaze_size_helper)]
     data: RangeSetBlaze<ValueSubkey>,
 }
 
@@ -188,8 +187,4 @@ impl fmt::Display for ValueSubkeyRangeSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.data)
     }
-}
-
-fn range_set_blaze_size_helper<T: range_set_blaze::Integer>(rsb: &RangeSetBlaze<T>) -> usize {
-    size_of::<T>() * 2 * rsb.ranges_len()
 }

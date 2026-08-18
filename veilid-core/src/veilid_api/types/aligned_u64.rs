@@ -8,17 +8,7 @@ use super::*;
 macro_rules! aligned_u64_type {
     ($name:ident) => {
         #[derive(
-            Clone,
-            Default,
-            PartialEq,
-            Eq,
-            PartialOrd,
-            Ord,
-            Copy,
-            Hash,
-            Serialize,
-            Deserialize,
-            GetSize,
+            Clone, Default, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Serialize, Deserialize,
         )]
         #[cfg_attr(feature = "schemars", derive(JsonSchema))]
         #[cfg_attr(

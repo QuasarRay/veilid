@@ -1,8 +1,32 @@
 #!/bin/bash
-set -eou pipefail
+# Local pre-push gate: format check, lints, builds, docs and tests, in that order.
+# Every command's status is checked explicitly and the first failure exits with that
+# command's own exit code, so this is safe to wire up as a git pre-push hook.
 
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-pushd $SCRIPTDIR/.. >/dev/null
+if [ -z "$SCRIPTDIR" ]; then
+    echo "check_all: could not resolve script directory" >&2
+    exit 1
+fi
+
+fail() {
+    echo "check_all: $*" >&2
+    exit 1
+}
+
+# Run a command, announce it, and propagate its exit code on failure
+step() {
+    local rc
+    echo "==> $*"
+    "$@"
+    rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "check_all: FAILED (exit $rc): $*" >&2
+        exit $rc
+    fi
+}
+
+cd "$SCRIPTDIR/.." || fail "could not change to the repository root"
 
 if [ $# -ge 1 ] && [ "$1" = "--cleanup" ] ; then
     CLEANUP="--cleanup"
@@ -14,9 +38,8 @@ fi
 # Pin every sub-script's bare cargo/cargo-zigbuild to the CI toolchain so lints match CI.
 # Explicit `+nightly` invocations (docs, nightly unit tests) still override this.
 RUST_VERSION="$(. "$SCRIPTDIR/../.dagger/versions.env" && echo "$RUST_VERSION")"
-if [ -z "$RUST_VERSION" ]; then
-    echo "Could not read RUST_VERSION from .dagger/versions.env"
-    exit 1
+if [ $? -ne 0 ] || [ -z "$RUST_VERSION" ]; then
+    fail "could not read RUST_VERSION from .dagger/versions.env"
 fi
 if ! rustup toolchain list | grep -q "^${RUST_VERSION}-"; then
     echo "CI-pinned Rust toolchain $RUST_VERSION is not installed. Install it with:"
@@ -26,18 +49,34 @@ fi
 export RUSTUP_TOOLCHAIN="$RUST_VERSION"
 echo "Using CI-pinned Rust toolchain $RUST_VERSION."
 
+# The lint and format steps need these components; a --profile minimal install has neither
+INSTALLED_COMPONENTS="$(rustup component list --toolchain "$RUST_VERSION" --installed)"
+if [ $? -ne 0 ]; then
+    fail "could not list the installed Rust components for $RUST_VERSION"
+fi
+for cmp in clippy rustfmt; do
+    if ! echo "$INSTALLED_COMPONENTS" | grep -q "^${cmp}"; then
+        echo "Installing missing Rust component $cmp for $RUST_VERSION..."
+        step rustup component add --toolchain "$RUST_VERSION" "$cmp"
+    fi
+done
+
 # The sub-scripts cross-compile (cargo-zigbuild) and check for these targets; install any the
 # pinned toolchain is missing, else the build fails with "can't find crate for core".
+INSTALLED_TARGETS="$(rustup target list --installed)"
+if [ $? -ne 0 ]; then
+    fail "could not list the installed Rust targets for $RUST_VERSION"
+fi
 for tgt in aarch64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-gnu wasm32-unknown-unknown; do
-    if ! rustup target list --installed | grep -qx "$tgt"; then
+    if ! echo "$INSTALLED_TARGETS" | grep -qx "$tgt"; then
         echo "Installing missing Rust target $tgt for $RUST_VERSION..."
-        rustup target add "$tgt"
+        step rustup target add "$tgt"
     fi
 done
 
 # docs.rs and the public-api check use the latest rolling nightly; require it up to date so
 # nightly-only lint/rustdoc drift is caught here rather than in CI.
-NIGHTLY_CHECK="$(rustup check 2>/dev/null | grep '^nightly-' || true)"
+NIGHTLY_CHECK="$(rustup check 2>/dev/null | grep '^nightly-')"
 if [ -z "$NIGHTLY_CHECK" ]; then
     echo "Rust nightly is not installed (needed for docs and the public-api check). Install it with:"
     echo "  rustup toolchain install nightly --profile minimal"
@@ -49,6 +88,12 @@ if echo "$NIGHTLY_CHECK" | grep -qi "update available"; then
     exit 1
 fi
 
+# Same check CI runs; fail before anything expensive so a reformat is a one-line fix
+echo "Performing format check..."
+if ! cargo fmt --all --check; then
+    fail "cargo fmt --all --check found unformatted code. Run 'cargo fmt --all' and commit the result."
+fi
+
 # Dagger's ignore patterns are generated from the repo's .gitignore files. Regenerating belongs
 # with a push, not with CI, which has nothing to commit the result to.
 if ! command -v uv > /dev/null 2>&1; then
@@ -57,10 +102,17 @@ if ! command -v uv > /dev/null 2>&1; then
     exit 1
 fi
 IGNORE_PATTERNS=.dagger/src/veilid/ignore_patterns.py
-IGNORE_PATTERNS_BEFORE="$(cat $IGNORE_PATTERNS)"
+IGNORE_PATTERNS_BEFORE="$(cat "$IGNORE_PATTERNS")"
+if [ $? -ne 0 ]; then
+    fail "could not read $IGNORE_PATTERNS"
+fi
 echo "Updating dagger ignore patterns..."
-./.dagger/update_gitignore_patterns.sh
-if [ "$IGNORE_PATTERNS_BEFORE" != "$(cat $IGNORE_PATTERNS)" ]; then
+step ./.dagger/update_gitignore_patterns.sh
+IGNORE_PATTERNS_AFTER="$(cat "$IGNORE_PATTERNS")"
+if [ $? -ne 0 ]; then
+    fail "could not read $IGNORE_PATTERNS after regenerating it"
+fi
+if [ "$IGNORE_PATTERNS_BEFORE" != "$IGNORE_PATTERNS_AFTER" ]; then
     echo "NOTE: $IGNORE_PATTERNS was regenerated and needs committing."
 fi
 
@@ -68,14 +120,15 @@ echo "Running all tests..."
 
 # cargo-public-api (nightly rustdoc) and cargo-msrv (per-crate rust-version) select their own
 # toolchains; don't force the pin on them.
-env -u RUSTUP_TOOLCHAIN ./scripts/_check_public_api.sh
-env -u RUSTUP_TOOLCHAIN ./scripts/_msrv_all.sh
-./scripts/_lint_all.sh $CLEANUP
-./scripts/_smoketest_all.sh $CLEANUP --locked
-./scripts/_check_wasm_builds.sh dart # skip cleanup here because WASM is done first in the clippy script and will clean up there
-./scripts/_check_wasm_builds.sh js # skip cleanup here because WASM is done first in the clippy script and will clean up there
-./scripts/_build_docs.sh $CLEANUP
-./scripts/_unit_tests_all.sh
-DEFAULT_CARGO_TARGET=wasm32-unknown-unknown ./scripts/_unit_tests_all.sh 
+step env -u RUSTUP_TOOLCHAIN ./scripts/_check_public_api.sh
+step env -u RUSTUP_TOOLCHAIN ./scripts/_msrv_all.sh
+step ./scripts/_lint_all.sh $CLEANUP
+step ./scripts/_smoketest_all.sh $CLEANUP --locked
+# skip cleanup for WASM here because the clippy script does WASM first and cleans up there
+step ./scripts/_check_wasm_builds.sh dart
+step ./scripts/_check_wasm_builds.sh js
+step ./scripts/_build_docs.sh $CLEANUP
+step ./scripts/_unit_tests_all.sh
+step env DEFAULT_CARGO_TARGET=wasm32-unknown-unknown ./scripts/_unit_tests_all.sh
 
-popd >/dev/null
+echo "check_all: all checks passed."

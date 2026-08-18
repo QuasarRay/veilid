@@ -98,9 +98,6 @@ pub veilid_core::ExpirationState::Dead
 pub veilid_core::ExpirationState::Live
 impl core::fmt::Display for veilid_core::ExpirationState
 pub fn veilid_core::ExpirationState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl get_size2::GetSize for veilid_core::ExpirationState
-pub fn veilid_core::ExpirationState::get_heap_size(&self) -> usize
-pub fn veilid_core::ExpirationState::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub enum veilid_core::LogOutputKind
 pub veilid_core::LogOutputKind::Api
 pub veilid_core::LogOutputKind::File
@@ -115,9 +112,6 @@ pub fn veilid_core::SafetySelection::get_hop_count(&self) -> usize
 pub fn veilid_core::SafetySelection::get_sequencing(&self) -> veilid_core::Sequencing
 impl core::fmt::Display for veilid_core::SafetySelection
 pub fn veilid_core::SafetySelection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl get_size2::GetSize for veilid_core::SafetySelection
-pub fn veilid_core::SafetySelection::get_heap_size(&self) -> usize
-pub fn veilid_core::SafetySelection::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub enum veilid_core::SequenceOrdering
 pub veilid_core::SequenceOrdering::Ordered = 1
 pub veilid_core::SequenceOrdering::Unordered = 0
@@ -141,9 +135,6 @@ pub fn veilid_core::Sequencing::fmt(&self, &mut core::fmt::Formatter<'_>) -> cor
 impl core::str::traits::FromStr for veilid_core::Sequencing
 pub type veilid_core::Sequencing::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::Sequencing::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::Sequencing
-pub fn veilid_core::Sequencing::get_heap_size(&self) -> usize
-pub fn veilid_core::Sequencing::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub enum veilid_core::Stability
 pub veilid_core::Stability::LowLatency = 0
 pub veilid_core::Stability::Reliable = 1
@@ -152,9 +143,6 @@ pub fn veilid_core::Stability::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::Stability
 pub type veilid_core::Stability::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::Stability::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::Stability
-pub fn veilid_core::Stability::get_heap_size(&self) -> usize
-pub fn veilid_core::Stability::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub enum veilid_core::StatsOutput
 pub veilid_core::StatsOutput::Facility
 pub veilid_core::StatsOutput::File(std::path::PathBuf)
@@ -324,9 +312,6 @@ pub fn veilid_core::AlignedU64::fmt(&self, &mut core::fmt::Formatter<'_>) -> cor
 impl core::str::traits::FromStr for veilid_core::AlignedU64
 pub type veilid_core::AlignedU64::Err = <u64 as core::str::traits::FromStr>::Err
 pub fn veilid_core::AlignedU64::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::AlignedU64
-pub fn veilid_core::AlignedU64::get_heap_size(&self) -> usize
-pub fn veilid_core::AlignedU64::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl<Rhs: core::convert::Into<u64>> core::ops::arith::Add<Rhs> for veilid_core::AlignedU64
 pub type veilid_core::AlignedU64::Output = veilid_core::AlignedU64
 pub fn veilid_core::AlignedU64::add(self, Rhs) -> Self
@@ -435,9 +420,6 @@ impl core::convert::From<veilid_core::Timestamp> for veilid_core::AtomicOptionTi
 pub fn veilid_core::AtomicOptionTimestamp::from(veilid_core::Timestamp) -> Self
 impl core::fmt::Display for veilid_core::AtomicOptionTimestamp
 pub fn veilid_core::AtomicOptionTimestamp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl get_size2::GetSize for veilid_core::AtomicOptionTimestamp
-pub fn veilid_core::AtomicOptionTimestamp::get_heap_size(&self) -> usize
-pub fn veilid_core::AtomicOptionTimestamp::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::AtomicTimestamp(_)
 impl veilid_core::AtomicTimestamp
 pub fn veilid_core::AtomicTimestamp::expiration_state(&self, veilid_core::Timestamp, veilid_core::TimestampDuration) -> veilid_core::ExpirationState
@@ -460,9 +442,6 @@ impl core::convert::From<veilid_core::Timestamp> for veilid_core::AtomicTimestam
 pub fn veilid_core::AtomicTimestamp::from(veilid_core::Timestamp) -> Self
 impl core::fmt::Display for veilid_core::AtomicTimestamp
 pub fn veilid_core::AtomicTimestamp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl get_size2::GetSize for veilid_core::AtomicTimestamp
-pub fn veilid_core::AtomicTimestamp::get_heap_size(&self) -> usize
-pub fn veilid_core::AtomicTimestamp::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::BareDecapsulationKey
 impl veilid_core::BareDecapsulationKey
 pub fn veilid_core::BareDecapsulationKey::bit(&self, usize) -> bool
@@ -507,9 +486,6 @@ pub fn veilid_core::BareDecapsulationKey::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareDecapsulationKey
 pub type veilid_core::BareDecapsulationKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareDecapsulationKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareDecapsulationKey
-pub fn veilid_core::BareDecapsulationKey::get_heap_size(&self) -> usize
-pub fn veilid_core::BareDecapsulationKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareDecapsulationKey
 pub fn veilid_core::BareDecapsulationKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for veilid_core::BareDecapsulationKey
@@ -558,9 +534,6 @@ pub fn veilid_core::BareEncapsulationKey::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareEncapsulationKey
 pub type veilid_core::BareEncapsulationKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareEncapsulationKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareEncapsulationKey
-pub fn veilid_core::BareEncapsulationKey::get_heap_size(&self) -> usize
-pub fn veilid_core::BareEncapsulationKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareEncapsulationKey
 pub fn veilid_core::BareEncapsulationKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for veilid_core::BareEncapsulationKey
@@ -609,9 +582,6 @@ pub fn veilid_core::BareHashDigest::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareHashDigest
 pub type veilid_core::BareHashDigest::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareHashDigest::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareHashDigest
-pub fn veilid_core::BareHashDigest::get_heap_size(&self) -> usize
-pub fn veilid_core::BareHashDigest::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareHashDigest
 pub fn veilid_core::BareHashDigest::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareHashDigest
@@ -648,9 +618,6 @@ pub fn veilid_core::BareKemKeyPair::fmt(&self, &mut core::fmt::Formatter<'_>) ->
 impl core::str::traits::FromStr for veilid_core::BareKemKeyPair
 pub type veilid_core::BareKemKeyPair::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareKemKeyPair::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareKemKeyPair
-pub fn veilid_core::BareKemKeyPair::get_heap_size(&self) -> usize
-pub fn veilid_core::BareKemKeyPair::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareKemKeyPair
 pub fn veilid_core::BareKemKeyPair::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for veilid_core::BareKemKeyPair
@@ -685,9 +652,6 @@ pub fn veilid_core::BareKeyPair::fmt(&self, &mut core::fmt::Formatter<'_>) -> co
 impl core::str::traits::FromStr for veilid_core::BareKeyPair
 pub type veilid_core::BareKeyPair::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareKeyPair::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareKeyPair
-pub fn veilid_core::BareKeyPair::get_heap_size(&self) -> usize
-pub fn veilid_core::BareKeyPair::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareKeyPair
 pub fn veilid_core::BareKeyPair::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareKeyPair
@@ -738,9 +702,6 @@ pub fn veilid_core::BareMemberId::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareMemberId
 pub type veilid_core::BareMemberId::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareMemberId::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareMemberId
-pub fn veilid_core::BareMemberId::get_heap_size(&self) -> usize
-pub fn veilid_core::BareMemberId::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareMemberId
 pub fn veilid_core::BareMemberId::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareMemberId
@@ -791,9 +752,6 @@ pub fn veilid_core::BareNodeId::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareNodeId
 pub type veilid_core::BareNodeId::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareNodeId::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareNodeId
-pub fn veilid_core::BareNodeId::get_heap_size(&self) -> usize
-pub fn veilid_core::BareNodeId::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareNodeId
 pub fn veilid_core::BareNodeId::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for veilid_core::BareNodeId
@@ -842,9 +800,6 @@ pub fn veilid_core::BareOpaqueRecordKey::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareOpaqueRecordKey
 pub type veilid_core::BareOpaqueRecordKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareOpaqueRecordKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareOpaqueRecordKey
-pub fn veilid_core::BareOpaqueRecordKey::get_heap_size(&self) -> usize
-pub fn veilid_core::BareOpaqueRecordKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareOpaqueRecordKey
 pub fn veilid_core::BareOpaqueRecordKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareOpaqueRecordKey
@@ -895,9 +850,6 @@ pub fn veilid_core::BarePublicKey::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BarePublicKey
 pub type veilid_core::BarePublicKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BarePublicKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BarePublicKey
-pub fn veilid_core::BarePublicKey::get_heap_size(&self) -> usize
-pub fn veilid_core::BarePublicKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BarePublicKey
 pub fn veilid_core::BarePublicKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BarePublicKey
@@ -933,9 +885,6 @@ pub fn veilid_core::BareRecordKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> 
 impl core::str::traits::FromStr for veilid_core::BareRecordKey
 pub type veilid_core::BareRecordKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareRecordKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareRecordKey
-pub fn veilid_core::BareRecordKey::get_heap_size(&self) -> usize
-pub fn veilid_core::BareRecordKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareRecordKey
 pub fn veilid_core::BareRecordKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareRecordKey
@@ -986,9 +935,6 @@ pub fn veilid_core::BareRouteId::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareRouteId
 pub type veilid_core::BareRouteId::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareRouteId::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareRouteId
-pub fn veilid_core::BareRouteId::get_heap_size(&self) -> usize
-pub fn veilid_core::BareRouteId::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareRouteId
 pub fn veilid_core::BareRouteId::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for veilid_core::BareRouteId
@@ -1037,9 +983,6 @@ pub fn veilid_core::BareSecretKey::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareSecretKey
 pub type veilid_core::BareSecretKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareSecretKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareSecretKey
-pub fn veilid_core::BareSecretKey::get_heap_size(&self) -> usize
-pub fn veilid_core::BareSecretKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareSecretKey
 pub fn veilid_core::BareSecretKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareSecretKey
@@ -1090,9 +1033,6 @@ pub fn veilid_core::BareSharedSecret::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareSharedSecret
 pub type veilid_core::BareSharedSecret::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareSharedSecret::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareSharedSecret
-pub fn veilid_core::BareSharedSecret::get_heap_size(&self) -> usize
-pub fn veilid_core::BareSharedSecret::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareSharedSecret
 pub fn veilid_core::BareSharedSecret::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareSharedSecret
@@ -1143,9 +1083,6 @@ pub fn veilid_core::BareSignature::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::BareSignature
 pub type veilid_core::BareSignature::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::BareSignature::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::BareSignature
-pub fn veilid_core::BareSignature::get_heap_size(&self) -> usize
-pub fn veilid_core::BareSignature::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::BareSignature
 pub fn veilid_core::BareSignature::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::BareSignature
@@ -1169,9 +1106,6 @@ pub fn veilid_core::ByteCount::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::ByteCount
 pub type veilid_core::ByteCount::Err = <u64 as core::str::traits::FromStr>::Err
 pub fn veilid_core::ByteCount::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::ByteCount
-pub fn veilid_core::ByteCount::get_heap_size(&self) -> usize
-pub fn veilid_core::ByteCount::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl<Rhs: core::convert::Into<u64>> core::ops::arith::Add<Rhs> for veilid_core::ByteCount
 pub type veilid_core::ByteCount::Output = veilid_core::ByteCount
 pub fn veilid_core::ByteCount::add(self, Rhs) -> Self
@@ -1248,16 +1182,13 @@ pub fn veilid_core::CryptoKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> cor
 impl core::str::traits::FromStr for veilid_core::CryptoKind
 pub type veilid_core::CryptoKind::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::CryptoKind::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::CryptoKind
-pub fn veilid_core::CryptoKind::get_heap_size(&self) -> usize
-pub fn veilid_core::CryptoKind::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::CryptoKind
 pub fn veilid_core::CryptoKind::to_veilid_api_error_argument(&self) -> alloc::string::String
 pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -1362,9 +1293,6 @@ pub fn veilid_core::DecapsulationKey::fmt(&self, &mut core::fmt::Formatter<'_>) 
 impl core::str::traits::FromStr for veilid_core::DecapsulationKey
 pub type veilid_core::DecapsulationKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::DecapsulationKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::DecapsulationKey
-pub fn veilid_core::DecapsulationKey::get_heap_size(&self) -> usize
-pub fn veilid_core::DecapsulationKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::DecapsulationKey
 pub fn veilid_core::DecapsulationKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'a> core::convert::TryFrom<&'a [u8]> for veilid_core::DecapsulationKey
@@ -1411,9 +1339,6 @@ pub fn veilid_core::DecapsulationKeyGroup::deref(&self) -> &[veilid_core::Decaps
 impl core::str::traits::FromStr for veilid_core::DecapsulationKeyGroup
 pub type veilid_core::DecapsulationKeyGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::DecapsulationKeyGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::DecapsulationKeyGroup
-pub fn veilid_core::DecapsulationKeyGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::DecapsulationKeyGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::EncapsulationKey
 impl veilid_core::EncapsulationKey
 pub fn veilid_core::EncapsulationKey::into_value(self) -> veilid_core::BareEncapsulationKey
@@ -1448,9 +1373,6 @@ pub fn veilid_core::EncapsulationKey::fmt(&self, &mut core::fmt::Formatter<'_>) 
 impl core::str::traits::FromStr for veilid_core::EncapsulationKey
 pub type veilid_core::EncapsulationKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::EncapsulationKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::EncapsulationKey
-pub fn veilid_core::EncapsulationKey::get_heap_size(&self) -> usize
-pub fn veilid_core::EncapsulationKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::EncapsulationKey
 pub fn veilid_core::EncapsulationKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'a> core::convert::TryFrom<&'a [u8]> for veilid_core::EncapsulationKey
@@ -1497,9 +1419,6 @@ pub fn veilid_core::EncapsulationKeyGroup::deref(&self) -> &[veilid_core::Encaps
 impl core::str::traits::FromStr for veilid_core::EncapsulationKeyGroup
 pub type veilid_core::EncapsulationKeyGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::EncapsulationKeyGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::EncapsulationKeyGroup
-pub fn veilid_core::EncapsulationKeyGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::EncapsulationKeyGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::FmtStripVeilidFields
 impl veilid_core::FmtStripVeilidFields
 pub fn veilid_core::FmtStripVeilidFields::mapper() -> alloc::boxed::Box<dyn core::ops::function::FnOnce(tracing_subscriber::fmt::format::DefaultFields) -> veilid_core::FmtStripVeilidFields>
@@ -1539,9 +1458,6 @@ pub fn veilid_core::HashDigest::fmt(&self, &mut core::fmt::Formatter<'_>) -> cor
 impl core::str::traits::FromStr for veilid_core::HashDigest
 pub type veilid_core::HashDigest::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::HashDigest::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::HashDigest
-pub fn veilid_core::HashDigest::get_heap_size(&self) -> usize
-pub fn veilid_core::HashDigest::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::HashDigest
 pub fn veilid_core::HashDigest::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::HashDigest
@@ -1590,9 +1506,6 @@ pub fn veilid_core::HashDigestGroup::deref(&self) -> &[veilid_core::HashDigest]
 impl core::str::traits::FromStr for veilid_core::HashDigestGroup
 pub type veilid_core::HashDigestGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::HashDigestGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::HashDigestGroup
-pub fn veilid_core::HashDigestGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::HashDigestGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::KemKeyPair
 impl veilid_core::KemKeyPair
 pub fn veilid_core::KemKeyPair::bare_secret(&self) -> veilid_core::BareDecapsulationKey
@@ -1628,9 +1541,6 @@ pub fn veilid_core::KemKeyPair::fmt(&self, &mut core::fmt::Formatter<'_>) -> cor
 impl core::str::traits::FromStr for veilid_core::KemKeyPair
 pub type veilid_core::KemKeyPair::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::KemKeyPair::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::KemKeyPair
-pub fn veilid_core::KemKeyPair::get_heap_size(&self) -> usize
-pub fn veilid_core::KemKeyPair::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::KemKeyPair
 pub fn veilid_core::KemKeyPair::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for veilid_core::KemKeyPair
@@ -1674,9 +1584,6 @@ pub fn veilid_core::KemKeyPairGroup::deref(&self) -> &[veilid_core::KemKeyPair]
 impl core::str::traits::FromStr for veilid_core::KemKeyPairGroup
 pub type veilid_core::KemKeyPairGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::KemKeyPairGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::KemKeyPairGroup
-pub fn veilid_core::KemKeyPairGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::KemKeyPairGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::KeyPair
 impl veilid_core::KeyPair
 pub fn veilid_core::KeyPair::bare_secret(&self) -> veilid_core::BareSecretKey
@@ -1712,9 +1619,6 @@ pub fn veilid_core::KeyPair::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::
 impl core::str::traits::FromStr for veilid_core::KeyPair
 pub type veilid_core::KeyPair::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::KeyPair::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::KeyPair
-pub fn veilid_core::KeyPair::get_heap_size(&self) -> usize
-pub fn veilid_core::KeyPair::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::KeyPair
 pub fn veilid_core::KeyPair::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::KeyPair
@@ -1760,9 +1664,6 @@ pub fn veilid_core::KeyPairGroup::deref(&self) -> &[veilid_core::KeyPair]
 impl core::str::traits::FromStr for veilid_core::KeyPairGroup
 pub type veilid_core::KeyPairGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::KeyPairGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::KeyPairGroup
-pub fn veilid_core::KeyPairGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::KeyPairGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::LatencyStats
 pub veilid_core::LatencyStats::average: veilid_core::TimestampDuration
 pub veilid_core::LatencyStats::fastest: veilid_core::TimestampDuration
@@ -1816,9 +1717,6 @@ pub fn veilid_core::MemberId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core:
 impl core::str::traits::FromStr for veilid_core::MemberId
 pub type veilid_core::MemberId::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::MemberId::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::MemberId
-pub fn veilid_core::MemberId::get_heap_size(&self) -> usize
-pub fn veilid_core::MemberId::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::MemberId
 pub fn veilid_core::MemberId::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::MemberId
@@ -1867,9 +1765,6 @@ pub fn veilid_core::MemberIdGroup::deref(&self) -> &[veilid_core::MemberId]
 impl core::str::traits::FromStr for veilid_core::MemberIdGroup
 pub type veilid_core::MemberIdGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::MemberIdGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::MemberIdGroup
-pub fn veilid_core::MemberIdGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::MemberIdGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 #[repr(C, align(8))] pub struct veilid_core::NodeCount(_)
 impl veilid_core::NodeCount
 pub const fn veilid_core::NodeCount::as_u64(self) -> u64
@@ -1887,9 +1782,6 @@ pub fn veilid_core::NodeCount::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::NodeCount
 pub type veilid_core::NodeCount::Err = <u64 as core::str::traits::FromStr>::Err
 pub fn veilid_core::NodeCount::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::NodeCount
-pub fn veilid_core::NodeCount::get_heap_size(&self) -> usize
-pub fn veilid_core::NodeCount::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl<Rhs: core::convert::Into<u64>> core::ops::arith::Add<Rhs> for veilid_core::NodeCount
 pub type veilid_core::NodeCount::Output = veilid_core::NodeCount
 pub fn veilid_core::NodeCount::add(self, Rhs) -> Self
@@ -1944,9 +1836,6 @@ pub fn veilid_core::NodeId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::r
 impl core::str::traits::FromStr for veilid_core::NodeId
 pub type veilid_core::NodeId::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::NodeId::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::NodeId
-pub fn veilid_core::NodeId::get_heap_size(&self) -> usize
-pub fn veilid_core::NodeId::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::NodeId
 pub fn veilid_core::NodeId::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::NodeId
@@ -1995,9 +1884,6 @@ pub fn veilid_core::NodeIdGroup::deref(&self) -> &[veilid_core::NodeId]
 impl core::str::traits::FromStr for veilid_core::NodeIdGroup
 pub type veilid_core::NodeIdGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::NodeIdGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::NodeIdGroup
-pub fn veilid_core::NodeIdGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::NodeIdGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::Nonce
 impl veilid_core::Nonce
 pub fn veilid_core::Nonce::bit(&self, usize) -> bool
@@ -2044,9 +1930,6 @@ pub fn veilid_core::Nonce::deref(&self) -> &Self::Target
 impl core::str::traits::FromStr for veilid_core::Nonce
 pub type veilid_core::Nonce::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::Nonce::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::Nonce
-pub fn veilid_core::Nonce::get_heap_size(&self) -> usize
-pub fn veilid_core::Nonce::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::Nonce
 pub fn veilid_core::Nonce::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for veilid_core::Nonce
@@ -2085,9 +1968,6 @@ pub fn veilid_core::OpaqueRecordKey::fmt(&self, &mut core::fmt::Formatter<'_>) -
 impl core::str::traits::FromStr for veilid_core::OpaqueRecordKey
 pub type veilid_core::OpaqueRecordKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::OpaqueRecordKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::OpaqueRecordKey
-pub fn veilid_core::OpaqueRecordKey::get_heap_size(&self) -> usize
-pub fn veilid_core::OpaqueRecordKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::OpaqueRecordKey
 pub fn veilid_core::OpaqueRecordKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::OpaqueRecordKey
@@ -2136,9 +2016,6 @@ pub fn veilid_core::OpaqueRecordKeyGroup::deref(&self) -> &[veilid_core::OpaqueR
 impl core::str::traits::FromStr for veilid_core::OpaqueRecordKeyGroup
 pub type veilid_core::OpaqueRecordKeyGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::OpaqueRecordKeyGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::OpaqueRecordKeyGroup
-pub fn veilid_core::OpaqueRecordKeyGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::OpaqueRecordKeyGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 #[repr(C, align(8))] pub struct veilid_core::OperationId(_)
 impl veilid_core::OperationId
 pub const fn veilid_core::OperationId::as_u64(self) -> u64
@@ -2154,9 +2031,6 @@ pub fn veilid_core::OperationId::fmt(&self, &mut core::fmt::Formatter<'_>) -> co
 impl core::str::traits::FromStr for veilid_core::OperationId
 pub type veilid_core::OperationId::Err = <u64 as core::str::traits::FromStr>::Err
 pub fn veilid_core::OperationId::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::OperationId
-pub fn veilid_core::OperationId::get_heap_size(&self) -> usize
-pub fn veilid_core::OperationId::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::PeerStats
 pub veilid_core::PeerStats::latency: core::option::Option<veilid_core::LatencyStats>
 pub veilid_core::PeerStats::transfer: veilid_core::TransferStatsDownUp
@@ -2175,9 +2049,6 @@ pub veilid_core::PrivateSpec::sequencing: veilid_core::Sequencing
 pub veilid_core::PrivateSpec::stability: veilid_core::Stability
 impl core::fmt::Display for veilid_core::PrivateSpec
 pub fn veilid_core::PrivateSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl get_size2::GetSize for veilid_core::PrivateSpec
-pub fn veilid_core::PrivateSpec::get_heap_size(&self) -> usize
-pub fn veilid_core::PrivateSpec::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::PublicKey
 impl veilid_core::PublicKey
 pub fn veilid_core::PublicKey::into_value(self) -> veilid_core::BarePublicKey
@@ -2212,9 +2083,6 @@ pub fn veilid_core::PublicKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::PublicKey
 pub type veilid_core::PublicKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::PublicKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::PublicKey
-pub fn veilid_core::PublicKey::get_heap_size(&self) -> usize
-pub fn veilid_core::PublicKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::PublicKey
 pub fn veilid_core::PublicKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::PublicKey
@@ -2263,9 +2131,6 @@ pub fn veilid_core::PublicKeyGroup::deref(&self) -> &[veilid_core::PublicKey]
 impl core::str::traits::FromStr for veilid_core::PublicKeyGroup
 pub type veilid_core::PublicKeyGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::PublicKeyGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::PublicKeyGroup
-pub fn veilid_core::PublicKeyGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::PublicKeyGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::RecordKey
 impl veilid_core::RecordKey
 pub fn veilid_core::RecordKey::encryption_key(&self) -> core::option::Option<veilid_core::SharedSecret>
@@ -2299,9 +2164,6 @@ pub fn veilid_core::RecordKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::RecordKey
 pub type veilid_core::RecordKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::RecordKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::RecordKey
-pub fn veilid_core::RecordKey::get_heap_size(&self) -> usize
-pub fn veilid_core::RecordKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::RecordKey
 pub fn veilid_core::RecordKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::RecordKey
@@ -2347,9 +2209,6 @@ pub fn veilid_core::RecordKeyGroup::deref(&self) -> &[veilid_core::RecordKey]
 impl core::str::traits::FromStr for veilid_core::RecordKeyGroup
 pub type veilid_core::RecordKeyGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::RecordKeyGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::RecordKeyGroup
-pub fn veilid_core::RecordKeyGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::RecordKeyGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::RouteBlob
 pub veilid_core::RouteBlob::blob: alloc::vec::Vec<u8>
 pub veilid_core::RouteBlob::route_id: veilid_core::RouteId
@@ -2387,9 +2246,6 @@ pub fn veilid_core::RouteId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::
 impl core::str::traits::FromStr for veilid_core::RouteId
 pub type veilid_core::RouteId::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::RouteId::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::RouteId
-pub fn veilid_core::RouteId::get_heap_size(&self) -> usize
-pub fn veilid_core::RouteId::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::RouteId
 pub fn veilid_core::RouteId::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::RouteId
@@ -2438,9 +2294,6 @@ pub fn veilid_core::RouteIdGroup::deref(&self) -> &[veilid_core::RouteId]
 impl core::str::traits::FromStr for veilid_core::RouteIdGroup
 pub type veilid_core::RouteIdGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::RouteIdGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::RouteIdGroup
-pub fn veilid_core::RouteIdGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::RouteIdGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::RoutingContext
 impl veilid_core::RoutingContext
 pub fn veilid_core::RoutingContext::api(&self) -> veilid_core::VeilidAPI
@@ -2470,9 +2323,6 @@ pub veilid_core::SafetySpec::sequencing: veilid_core::Sequencing
 pub veilid_core::SafetySpec::stability: veilid_core::Stability
 impl core::fmt::Display for veilid_core::SafetySpec
 pub fn veilid_core::SafetySpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl get_size2::GetSize for veilid_core::SafetySpec
-pub fn veilid_core::SafetySpec::get_heap_size(&self) -> usize
-pub fn veilid_core::SafetySpec::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::SecretKey
 impl veilid_core::SecretKey
 pub fn veilid_core::SecretKey::into_value(self) -> veilid_core::BareSecretKey
@@ -2507,9 +2357,6 @@ pub fn veilid_core::SecretKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::SecretKey
 pub type veilid_core::SecretKey::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::SecretKey::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::SecretKey
-pub fn veilid_core::SecretKey::get_heap_size(&self) -> usize
-pub fn veilid_core::SecretKey::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::SecretKey
 pub fn veilid_core::SecretKey::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::SecretKey
@@ -2558,9 +2405,6 @@ pub fn veilid_core::SecretKeyGroup::deref(&self) -> &[veilid_core::SecretKey]
 impl core::str::traits::FromStr for veilid_core::SecretKeyGroup
 pub type veilid_core::SecretKeyGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::SecretKeyGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::SecretKeyGroup
-pub fn veilid_core::SecretKeyGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::SecretKeyGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::SetDHTValueOptions
 pub veilid_core::SetDHTValueOptions::allow_offline: core::option::Option<veilid_core::AllowOffline>
 pub veilid_core::SetDHTValueOptions::min_seqnum: core::option::Option<veilid_core::ValueSeqNum>
@@ -2601,9 +2445,6 @@ pub fn veilid_core::SharedSecret::fmt(&self, &mut core::fmt::Formatter<'_>) -> c
 impl core::str::traits::FromStr for veilid_core::SharedSecret
 pub type veilid_core::SharedSecret::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::SharedSecret::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::SharedSecret
-pub fn veilid_core::SharedSecret::get_heap_size(&self) -> usize
-pub fn veilid_core::SharedSecret::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::SharedSecret
 pub fn veilid_core::SharedSecret::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::SharedSecret
@@ -2652,9 +2493,6 @@ pub fn veilid_core::SharedSecretGroup::deref(&self) -> &[veilid_core::SharedSecr
 impl core::str::traits::FromStr for veilid_core::SharedSecretGroup
 pub type veilid_core::SharedSecretGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::SharedSecretGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::SharedSecretGroup
-pub fn veilid_core::SharedSecretGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::SharedSecretGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::Signature
 impl veilid_core::Signature
 pub fn veilid_core::Signature::into_value(self) -> veilid_core::BareSignature
@@ -2689,9 +2527,6 @@ pub fn veilid_core::Signature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::Signature
 pub type veilid_core::Signature::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::Signature::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::Signature
-pub fn veilid_core::Signature::get_heap_size(&self) -> usize
-pub fn veilid_core::Signature::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl serde_core::ser::Serialize for veilid_core::Signature
 pub fn veilid_core::Signature::serialize<S>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error> where S: serde_core::ser::Serializer
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::Signature
@@ -2740,9 +2575,6 @@ pub fn veilid_core::SignatureGroup::deref(&self) -> &[veilid_core::Signature]
 impl core::str::traits::FromStr for veilid_core::SignatureGroup
 pub type veilid_core::SignatureGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::SignatureGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::SignatureGroup
-pub fn veilid_core::SignatureGroup::get_heap_size(&self) -> usize
-pub fn veilid_core::SignatureGroup::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 pub struct veilid_core::StatsManager
 impl veilid_core::StatsManager
 pub fn veilid_core::StatsManager::init(core::option::Option<veilid_core::VeilidLogKey>, veilid_core::StatsSettings)
@@ -2810,9 +2642,6 @@ pub fn veilid_core::Timestamp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::Timestamp
 pub type veilid_core::Timestamp::Err = <u64 as core::str::traits::FromStr>::Err
 pub fn veilid_core::Timestamp::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::Timestamp
-pub fn veilid_core::Timestamp::get_heap_size(&self) -> usize
-pub fn veilid_core::Timestamp::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::Timestamp
 pub fn veilid_core::Timestamp::to_veilid_api_error_argument(&self) -> alloc::string::String
 #[repr(C, align(8))] pub struct veilid_core::TimestampDuration(_)
@@ -2852,9 +2681,6 @@ pub fn veilid_core::TimestampDuration::fmt(&self, &mut core::fmt::Formatter<'_>)
 impl core::str::traits::FromStr for veilid_core::TimestampDuration
 pub type veilid_core::TimestampDuration::Err = <u64 as core::str::traits::FromStr>::Err
 pub fn veilid_core::TimestampDuration::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::TimestampDuration
-pub fn veilid_core::TimestampDuration::get_heap_size(&self) -> usize
-pub fn veilid_core::TimestampDuration::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::TimestampDuration
 pub fn veilid_core::TimestampDuration::to_veilid_api_error_argument(&self) -> alloc::string::String
 pub struct veilid_core::TransactDHTRecordsOptions
@@ -2944,9 +2770,6 @@ pub fn veilid_core::ValueSubkeyRangeSet::deref_mut(&mut self) -> &mut Self::Targ
 impl core::str::traits::FromStr for veilid_core::ValueSubkeyRangeSet
 pub type veilid_core::ValueSubkeyRangeSet::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::ValueSubkeyRangeSet::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::ValueSubkeyRangeSet
-pub fn veilid_core::ValueSubkeyRangeSet::get_heap_size(&self) -> usize
-pub fn veilid_core::ValueSubkeyRangeSet::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::ValueSubkeyRangeSet
 pub fn veilid_core::ValueSubkeyRangeSet::to_veilid_api_error_argument(&self) -> alloc::string::String
 pub struct veilid_core::VeilidAPI
@@ -3020,9 +2843,6 @@ pub fn veilid_core::VeilidCapability::fmt(&self, &mut core::fmt::Formatter<'_>) 
 impl core::str::traits::FromStr for veilid_core::VeilidCapability
 pub type veilid_core::VeilidCapability::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::VeilidCapability::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl get_size2::GetSize for veilid_core::VeilidCapability
-pub fn veilid_core::VeilidCapability::get_heap_size(&self) -> usize
-pub fn veilid_core::VeilidCapability::get_heap_size_with_tracker<TRACKER: get_size2::tracker::GetSizeTracker>(&self, TRACKER) -> (usize, TRACKER)
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::VeilidCapability
 pub fn veilid_core::VeilidCapability::to_veilid_api_error_argument(&self) -> alloc::string::String
 pub struct veilid_core::VeilidComponentGuard<'a, T: core::marker::Send + core::marker::Sync + 'static>

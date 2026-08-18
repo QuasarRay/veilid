@@ -3,7 +3,7 @@
 //! optional `#[api(...)]` parameter list immediately after it (consumed, never expanded).
 //! Base attrs are always emitted: Clone/Debug/Serialize/Deserialize, camelCase rename
 //! under `json-camel-case` (structs only), JsonSchema under `schemars`, `#[must_use]`.
-//! Params: `eq`, `copy`, `ord`, `hash`, `default`, `get_size`, `ts` (bare Tsify on wasm),
+//! Params: `eq`, `copy`, `ord`, `hash`, `default`, `ts` (bare Tsify on wasm),
 //! `ts(<args>)` (Tsify + `tsify(<args>)` verbatim). Extra one-off derives still work as
 //! a separate `#[derive(...)]` line after `#[api(...)]`.
 
@@ -23,9 +23,6 @@ macro_rules! api_data_struct {
     };
     ( @munch [default $(, $($rest:tt)*)?] [$($acc:tt)*] $($item:tt)* ) => {
         api_data_struct! { @munch [$($($rest)*)?] [$($acc)* #[derive(Default)]] $($item)* }
-    };
-    ( @munch [get_size $(, $($rest:tt)*)?] [$($acc:tt)*] $($item:tt)* ) => {
-        api_data_struct! { @munch [$($($rest)*)?] [$($acc)* #[derive(::get_size2::GetSize)]] $($item)* }
     };
     ( @munch [ts($($tsargs:tt)*) $(, $($rest:tt)*)?] [$($acc:tt)*] $($item:tt)* ) => {
         api_data_struct! { @munch [$($($rest)*)?] [$($acc)*
@@ -96,9 +93,6 @@ macro_rules! api_data_enum {
     };
     ( @munch [default $(, $($rest:tt)*)?] [$($acc:tt)*] $($item:tt)* ) => {
         api_data_enum! { @munch [$($($rest)*)?] [$($acc)* #[derive(Default)]] $($item)* }
-    };
-    ( @munch [get_size $(, $($rest:tt)*)?] [$($acc:tt)*] $($item:tt)* ) => {
-        api_data_enum! { @munch [$($($rest)*)?] [$($acc)* #[derive(::get_size2::GetSize)]] $($item)* }
     };
     ( @munch [ts($($tsargs:tt)*) $(, $($rest:tt)*)?] [$($acc:tt)*] $($item:tt)* ) => {
         api_data_enum! { @munch [$($($rest)*)?] [$($acc)*

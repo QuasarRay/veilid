@@ -86,16 +86,35 @@ sealed class EncodedString extends Equatable {
   final String contents;
 
   EncodedString._fromBytes(Uint8List bytes)
-    : contents = base64UrlNoPadEncode(bytes);
+    : contents = base64UrlNoPadEncode(bytes) {
+    _rejectEmpty();
+  }
 
   EncodedString._fromString(String s) : contents = s {
     // Ensure things can be decoded, will throw an exception if it fails
     base64UrlNoPadDecode(contents);
+    _rejectEmpty();
   }
 
   EncodedString._fromJson(dynamic json) : contents = json as String {
     // Ensure things can be decoded, will throw an exception if it fails
     base64UrlNoPadDecode(contents);
+    _rejectEmpty();
+  }
+
+  /// No crypto value has a zero-length form, so one is a construction that went
+  /// wrong upstream rather than a value to carry.
+  ///
+  /// Refused HERE rather than where such a value is used, because the type is
+  /// the invariant: an unset protobuf field decodes to empty bytes, and the
+  /// object that produces is well-typed, encodes without complaint as
+  /// `<kind>:`, and only fails at the FFI - where the argument is parsed in
+  /// Rust and a failure there is a process panic, not a Dart exception anyone
+  /// can catch.
+  void _rejectEmpty() {
+    if (contents.isEmpty) {
+      throw FormatException('$runtimeType has no value', contents);
+    }
   }
 
   /// Encodes the value as its base64url JSON string.

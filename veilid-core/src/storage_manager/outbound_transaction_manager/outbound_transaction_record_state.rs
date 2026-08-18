@@ -1,7 +1,7 @@
 use super::*;
 
 /// Parameters for creating an OutboundTransactionRecord
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundTransactionRecordParams {
     /// The record key being transacted over
     pub record_key: RecordKey,

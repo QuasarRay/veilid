@@ -207,7 +207,6 @@ use cfg_if::*;
 use enumset::*;
 use eyre::{bail, eyre, Report as EyreReport, Result as EyreResult, WrapErr};
 use futures_util::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
-use get_size2::*;
 use indent::*;
 use macro_rules_attribute::apply;
 use macros::*;

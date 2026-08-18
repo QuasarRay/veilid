@@ -128,7 +128,6 @@ num-traits = "0.2.19"
 cfg-if = "1.0.4"
 lazy_static = "1.5.0"
 directories = "6.0.0"
-get-size2 = { version = "0.10.1", features = ["derive"] }
 async-trait = "0.1.89"
 macro_rules_attribute = "0.2.2"
 clap = { version = "4.5.39", features = ["derive"], optional = true }

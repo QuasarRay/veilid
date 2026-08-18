@@ -91,6 +91,11 @@ pub(crate) fn check_node_id(crypto: &Crypto, node_id: &NodeId) -> VeilidAPIResul
 pub(crate) struct MockNode {
     pub node_ids: Vec<NodeId>,
     pub opened_records: HashMap<OpaqueRecordKey, MockOpenedRecord>,
+    /// This node's local record store, lagging the network until a get or set refreshes it.
+    /// Persists across close and reopen as the real store does; only delete or a purge drops it.
+    /// Keeping it separate from the shared store is what makes local and network sequence
+    /// numbers in a report differ.
+    pub local_records: HashMap<OpaqueRecordKey, HashMap<ValueSubkey, ValueData>>,
     /// Writes made while detached, waiting to reach the shared store. Kept outside
     /// [MockOpenedRecord] because the queue outlives a close.
     pub offline_writes: HashMap<OpaqueRecordKey, HashMap<ValueSubkey, ValueData>>,
@@ -122,6 +127,7 @@ impl MockNetwork {
         let node = MockNode {
             node_ids,
             opened_records: HashMap::new(),
+            local_records: HashMap::new(),
             offline_writes: HashMap::new(),
             attachment: MockAttachment::default(),
             tables: MockTableStore::default(),

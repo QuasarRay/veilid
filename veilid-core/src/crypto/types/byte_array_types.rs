@@ -9,10 +9,6 @@ use data_encoding::BASE64URL_NOPAD;
 
 //////////////////////////////////////////////////////////////////////
 
-fn bytes_size_helper(bytes: &Bytes) -> usize {
-    bytes.len()
-}
-
 macro_rules! byte_array_type {
     ($visibility:vis $name:ident) => {
 
@@ -20,10 +16,9 @@ macro_rules! byte_array_type {
         ///
         /// Serializes as a base64url-nopad string. Ordering, hashing, and equality are over the raw bytes.
         #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
-        #[derive(Clone, Hash, Default, PartialOrd, Ord, PartialEq, Eq, GetSize)]
+        #[derive(Clone, Hash, Default, PartialOrd, Ord, PartialEq, Eq)]
         #[must_use]
         $visibility struct $name {
-            #[get_size(size_fn = bytes_size_helper)]
             bytes: Bytes,
         }
 

@@ -1,7 +1,7 @@
 use super::*;
 
 /// Information about nodes that cache a local record remotely
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct PerNodeRecordDetail {
     pub last_set: Timestamp,
     pub last_seen: Timestamp,
@@ -10,14 +10,14 @@ pub(in crate::storage_manager) struct PerNodeRecordDetail {
 
 /// A record's most recent transaction membership: the set it was committed with, plus the signer
 /// used (writer if write-opened, else the default signing keypair) so background transactions can be begun
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct TransactionMembership {
     pub record_set: Vec<OpaqueRecordKey>,
     pub operation_signer: KeyPair,
 }
 
 /// Information required to handle locally opened records
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct LocalRecordDetail {
     /// The last 'safety selection' used when creating/opening this record.
     /// Even when closed, this safety selection applies to re-publication attempts by the system.

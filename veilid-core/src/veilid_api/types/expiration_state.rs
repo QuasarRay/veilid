@@ -2,7 +2,7 @@ use super::*;
 
 /// The state of a timestamp, either live (not expired) or dead (expired)
 #[apply(api_data_enum!)]
-#[api(eq, copy, hash, default, get_size)]
+#[api(eq, copy, hash, default)]
 pub enum ExpirationState {
     /// Not expired.
     #[default]

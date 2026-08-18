@@ -2,7 +2,7 @@ use super::*;
 
 /// Untyped public/secret key pair, carrying no cryptosystem kind.
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
-#[derive(Clone, Default, Hash, PartialOrd, Ord, PartialEq, Eq, GetSize)]
+#[derive(Clone, Default, Hash, PartialOrd, Ord, PartialEq, Eq)]
 #[must_use]
 pub struct BareKeyPair {
     key: BarePublicKey,

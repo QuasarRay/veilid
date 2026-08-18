@@ -115,7 +115,6 @@ impl VeilidAPI {
 fn take_changes(
     records: &mut HashMap<OpaqueRecordKey, MockRecord>,
     record_key: &RecordKey,
-    writer: MockNodeKey,
     changed: &ValueSubkeyRangeSet,
 ) -> Vec<PendingChange> {
     let Some(record) = records.get_mut(&record_key.opaque()) else {
@@ -134,10 +133,9 @@ fn take_changes(
 
     let mut pending = Vec::new();
     for watch in &mut record.watches {
-        // The writer does not hear its own change, matching ExcludeTarget on the real path
-        if watch.watcher == writer {
-            continue;
-        }
+        // The writer hears its own change too: the real ExcludeTarget compares the set's sender
+        // against the watch's target, and app watches register over private routes, so a node
+        // watching through a route is notified of its own node's writes
         let reportable = watch.subkeys.intersect(changed);
         if reportable.is_empty() {
             continue;
@@ -189,13 +187,9 @@ fn take_changes(
     pending
 }
 
-/// Report a committed change to every watcher but the writer.
-pub(crate) fn report_value_change(
-    record_key: &RecordKey,
-    writer: MockNodeKey,
-    changed: &ValueSubkeyRangeSet,
-) {
-    let pending = with_records(|records| take_changes(records, record_key, writer, changed));
+/// Report a committed change to every watcher, the writer included.
+pub(crate) fn report_value_change(record_key: &RecordKey, changed: &ValueSubkeyRangeSet) {
+    let pending = with_records(|records| take_changes(records, record_key, changed));
 
     // Delivered outside the record lock: a callback may re-enter the API
     for p in pending {

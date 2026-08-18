@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, GetSize)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct RecordTableKey {
     pub record_key: OpaqueRecordKey,
 }
@@ -23,7 +23,7 @@ impl TryFrom<&[u8]> for RecordTableKey {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, GetSize)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SubkeyTableKey {
     pub record_key: OpaqueRecordKey,
     pub subkey: ValueSubkey,
@@ -34,6 +34,10 @@ impl fmt::Display for SubkeyTableKey {
     }
 }
 impl SubkeyTableKey {
+    /// In-memory footprint, including the record key bytes
+    pub fn total_size(&self) -> usize {
+        mem::size_of::<Self>() + self.record_key.ref_value().len()
+    }
     pub fn bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::<_>::from(self.record_key.clone());
         bytes.extend_from_slice(&self.subkey.to_le_bytes());

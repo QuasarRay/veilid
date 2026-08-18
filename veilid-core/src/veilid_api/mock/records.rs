@@ -23,12 +23,10 @@ static MOCK_RECORDS: LazyLock<Mutex<HashMap<OpaqueRecordKey, MockRecord>>> =
 /// How often a waiting flush rechecks, since nothing wakes it: there is no tick task under mock.
 const FLUSH_POLL_INTERVAL_MS: u32 = 100;
 
-/// A record this node has opened.
+/// A record this node has opened. The node's copy of the values lives in
+/// [MockNode::local_records], which outlives the open.
 pub(crate) struct MockOpenedRecord {
     pub writer: Option<KeyPair>,
-    /// This node's cached copy, which lags the network until a get or set refreshes it. Keeping it
-    /// separate is what makes the local and network sequence numbers in a report differ.
-    pub local: HashMap<ValueSubkey, ValueData>,
 }
 
 /// Read from the shared DHT.
@@ -59,13 +57,36 @@ impl MockNode {
     fn opened(&self, record_key: &RecordKey) -> VeilidAPIResult<&MockOpenedRecord> {
         self.opened_records
             .get(&record_key.opaque())
-            .ok_or_else(|| VeilidAPIError::generic("record not open"))
+            .ok_or_else(|| {
+                VeilidAPIError::invalid_argument(
+                    "record not open",
+                    "record_key",
+                    record_key.opaque(),
+                )
+            })
     }
 
-    fn opened_mut(&mut self, record_key: &RecordKey) -> VeilidAPIResult<&mut MockOpenedRecord> {
-        self.opened_records
-            .get_mut(&record_key.opaque())
-            .ok_or_else(|| VeilidAPIError::generic("record not open"))
+    pub(crate) fn local_value(
+        &self,
+        record_key: &RecordKey,
+        subkey: ValueSubkey,
+    ) -> Option<ValueData> {
+        self.local_records
+            .get(&record_key.opaque())
+            .and_then(|m| m.get(&subkey))
+            .cloned()
+    }
+
+    pub(crate) fn set_local_value(
+        &mut self,
+        record_key: &RecordKey,
+        subkey: ValueSubkey,
+        value: ValueData,
+    ) {
+        self.local_records
+            .entry(record_key.opaque())
+            .or_default()
+            .insert(subkey, value);
     }
 }
 
@@ -110,9 +131,10 @@ impl VeilidAPI {
                 record_key.opaque(),
                 MockOpenedRecord {
                     writer: Some(owner.clone()),
-                    local: HashMap::new(),
                 },
-            )
+            );
+            // The local store holds a record from the moment it is created, values or not
+            node.local_records.entry(record_key.opaque()).or_default();
         })?;
 
         Ok(DHTRecordDescriptor::new(
@@ -150,11 +172,10 @@ impl VeilidAPI {
         MockNetwork::with_node(&self.mock_key()?, |node| {
             node.opened_records
                 .entry(record_key.opaque())
-                .or_insert_with(|| MockOpenedRecord {
-                    writer: None,
-                    local: HashMap::new(),
-                })
+                .or_insert_with(|| MockOpenedRecord { writer: None })
                 .writer = default_writer;
+            // The local store holds a record from the moment it is opened, values or not
+            node.local_records.entry(record_key.opaque()).or_default();
         })?;
 
         Ok(DHTRecordDescriptor::new(
@@ -171,24 +192,30 @@ impl VeilidAPI {
             node.opened_records
                 .remove(&record_key.opaque())
                 .map(|_| ())
-                .ok_or_else(|| VeilidAPIError::generic("record not open"))
+                .ok_or_else(|| {
+                    VeilidAPIError::invalid_argument(
+                        "record not open",
+                        "record_key",
+                        record_key.opaque(),
+                    )
+                })
         })?
     }
 
     /// Drop this node's copy of a record. The shared DHT keeps its own, as the network would.
+    ///
+    /// Scoped to the local store like the real delete: a record this node no longer holds is
+    /// `KeyNotFound` even though the network still has it.
     pub(crate) fn mock_delete_dht_record(&self, record_key: RecordKey) -> VeilidAPIResult<()> {
         // Deleting an open record closes it first rather than refusing
         MockNetwork::with_node(&self.mock_key()?, |node| {
             node.opened_records.remove(&record_key.opaque());
             node.offline_writes.remove(&record_key.opaque());
-        })?;
-
-        with_records(|records| {
-            records
-                .get(&record_key.opaque())
+            node.local_records
+                .remove(&record_key.opaque())
                 .map(|_| ())
                 .ok_or_else(|| VeilidAPIError::key_not_found(record_key.opaque()))
-        })
+        })?
     }
 
     /// The subkeys of a record this node still owes the network.
@@ -248,7 +275,7 @@ impl VeilidAPI {
         })?;
 
         if !changed.is_empty() {
-            report_value_change(record_key, key, &changed);
+            report_value_change(record_key, &changed);
         }
         Ok(true)
     }
@@ -300,8 +327,8 @@ impl VeilidAPI {
     ) -> VeilidAPIResult<Option<ValueData>> {
         let key = self.mock_key()?;
         let cached = MockNetwork::with_node(&key, |node| {
-            node.opened(&record_key)
-                .map(|o| o.local.get(&subkey).cloned())
+            node.opened(&record_key)?;
+            VeilidAPIResult::Ok(node.local_value(&record_key, subkey))
         })??;
 
         if !force_refresh {
@@ -326,9 +353,7 @@ impl VeilidAPI {
 
         if let Some(value) = value.clone() {
             MockNetwork::with_node(&key, |node| {
-                if let Ok(opened) = node.opened_mut(&record_key) {
-                    opened.local.insert(subkey, value);
-                }
+                node.set_local_value(&record_key, subkey, value);
             })?;
         }
         Ok(value)
@@ -352,8 +377,8 @@ impl VeilidAPI {
         let options = options.unwrap_or_default();
 
         let (default_writer, cached) = MockNetwork::with_node(&key, |node| {
-            node.opened(&record_key)
-                .map(|o| (o.writer.clone(), o.local.get(&subkey).cloned()))
+            let writer = node.opened(&record_key)?.writer.clone();
+            VeilidAPIResult::Ok((writer, node.local_value(&record_key, subkey)))
         })??;
         let Some(writer) = options.writer.clone().or(default_writer) else {
             apibail_generic!("value is not writable");
@@ -370,9 +395,14 @@ impl VeilidAPI {
             VeilidAPIResult::Ok((record.owner.clone(), record.schema.clone()))
         })?;
 
-        // Schema authorization, shared with the real implementation
+        // Schema authorization, shared with the real implementation; refused with the same
+        // wording as the real set path so callers can classify the failure
         let crypto = self.crypto()?;
-        check_subkey_value_data(&crypto, &schema, &owner, subkey, &writer.key(), data.len())?;
+        if check_subkey_value_data(&crypto, &schema, &owner, subkey, &writer.key(), data.len())
+            .is_err()
+        {
+            apibail_generic!("failed schema validation: {}:{}", record_key, subkey);
+        }
 
         let min_seqnum = options.min_seqnum.unwrap_or(ValueSeqNum::NONE);
 
@@ -405,9 +435,7 @@ impl VeilidAPI {
                 apibail_try_again!("offline, try again later");
             }
             MockNetwork::with_node(&key, |node| {
-                if let Ok(opened) = node.opened_mut(&record_key) {
-                    opened.local.insert(subkey, incoming.clone());
-                }
+                node.set_local_value(&record_key, subkey, incoming.clone());
                 node.offline_writes
                     .entry(record_key.opaque())
                     .or_default()
@@ -444,24 +472,20 @@ impl VeilidAPI {
         match result {
             SetOutcome::Accepted { value, changed } => {
                 MockNetwork::with_node(&key, |node| {
-                    if let Ok(opened) = node.opened_mut(&record_key) {
-                        opened.local.insert(subkey, value);
-                    }
+                    node.set_local_value(&record_key, subkey, value);
                     // This write superseded whatever was queued for the subkey
                     if let Some(pending) = node.offline_writes.get_mut(&record_key.opaque()) {
                         pending.remove(&subkey);
                     }
                 })?;
                 if changed {
-                    report_value_change(&record_key, key, &ValueSubkeyRangeSet::single(subkey));
+                    report_value_change(&record_key, &ValueSubkeyRangeSet::single(subkey));
                 }
                 Ok(None)
             }
             SetOutcome::Superseded(existing) => {
                 MockNetwork::with_node(&key, |node| {
-                    if let Ok(opened) = node.opened_mut(&record_key) {
-                        opened.local.insert(subkey, existing.clone());
-                    }
+                    node.set_local_value(&record_key, subkey, existing.clone());
                 })?;
                 Ok(Some(existing))
             }
@@ -496,14 +520,14 @@ impl VeilidAPI {
         let offline_subkeys = self.mock_offline_subkeys(&record_key)?.intersect(&subkeys);
 
         let local_seqs = MockNetwork::with_node(&key, |node| {
-            let opened = node.opened(&record_key)?;
+            node.opened(&record_key)?;
+            let local = node.local_records.get(&record_key.opaque());
             VeilidAPIResult::Ok(
                 subkeys
                     .iter()
                     .map(|sk| {
-                        opened
-                            .local
-                            .get(&sk)
+                        local
+                            .and_then(|m| m.get(&sk))
                             .map(|v| v.seq())
                             .unwrap_or(ValueSeqNum::NONE)
                     })

@@ -7,7 +7,7 @@ macro_rules! impl_crypto_typed {
         pastey::paste! {
 
             #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
-            #[derive(Clone, PartialEq, Eq, Hash, GetSize)]
+            #[derive(Clone, PartialEq, Eq, Hash)]
             #[must_use]
             $(#[$attr])*
             /// A value tagged with the `CryptoKind` of the cryptosystem it belongs to.

@@ -1,11 +1,10 @@
 use super::*;
 use data_encoding::BASE64URL_NOPAD;
 
-#[derive(Clone, Eq, PartialEq, GetSize, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 #[must_use]
 pub struct EncryptedValueData {
     // capnp struct ValueData encoded without packing
-    #[get_size(size_fn = bytes_size_helper)]
     blob: Bytes,
 }
 
@@ -131,9 +130,10 @@ impl EncryptedValueData {
         reader.get_data().unwrap_or_log().len()
     }
 
+    /// In-memory footprint, including the capnp blob
     #[must_use]
     pub fn total_size(&self) -> usize {
-        mem::size_of::<Self>() + self.data_size()
+        mem::size_of::<Self>() + self.blob.len()
     }
 
     #[must_use]

@@ -2,7 +2,7 @@ use super::*;
 
 /// Untyped DHT record key: an opaque record key with an optional record encryption secret.
 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
-#[derive(Clone, Default, PartialOrd, Ord, PartialEq, Eq, Hash, GetSize)]
+#[derive(Clone, Default, PartialOrd, Ord, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct BareRecordKey {
     key: BareOpaqueRecordKey,

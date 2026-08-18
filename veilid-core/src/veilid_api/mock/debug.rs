@@ -14,24 +14,34 @@ impl VeilidAPI {
             // Purging the local record store leaves the records on their storage nodes
             ["record", "purge", "local"] => {
                 let count = MockNetwork::with_node(&self.mock_key()?, |node| {
-                    let count = node.opened_records.len();
+                    let count = node.local_records.len();
                     node.opened_records.clear();
+                    node.local_records.clear();
+                    node.offline_writes.clear();
                     count
                 })?;
                 Ok(format!("purged {} local records", count))
             }
             // A mock node stores nothing for anyone else, so its remote record store is empty
-            ["record", "purge", "remote"] => {
-                MockNetwork::with_node(&self.mock_key()?, |node| {
-                    node.opened_records.clear();
-                })?;
-                Ok("purged 0 remote records".to_owned())
-            }
+            ["record", "purge", "remote"] => Ok("purged 0 remote records".to_owned()),
             ["record", "list"] => {
                 let keys = with_records(|records| {
                     records.keys().map(|k| k.to_string()).collect::<Vec<_>>()
                 });
                 Ok(format!("{} records:\n{}", keys.len(), keys.join("\n")))
+            }
+            ["record", "list", "local"] => {
+                let keys = MockNetwork::with_node(&self.mock_key()?, |node| {
+                    node.local_records
+                        .keys()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<_>>()
+                })?;
+                Ok(format!(
+                    "{} local records:\n{}",
+                    keys.len(),
+                    keys.join("\n")
+                ))
             }
             ["nodeid"] => {
                 let node_ids = MockNetwork::with_node(&self.mock_key()?, |node| {
@@ -55,4 +65,5 @@ mock-api debug commands:
     record purge local      close every record and drop this node's copies
     record purge remote     no-op: a mock node holds no records for others
     record list             list the mock network's records
+    record list local       list the records this node holds copies of
     nodeid                  show this node's ids";

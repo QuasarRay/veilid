@@ -1479,7 +1479,7 @@ where
         // we want to ensure that it is consistent at all costs
         let res = (|| {
             // Calculate the space requirements for the new record data
-            let subkey_memsize = stk.get_size() + data.get_size();
+            let subkey_memsize = stk.total_size() + data.total_size();
             let mut space = self.subkey_cache_space.modify().unwrap_or_log();
             space = self.add_to_subkey_cache_space(space, subkey_memsize)?;
 
@@ -1491,12 +1491,12 @@ where
                     });
 
             if let Some(lru_out) = opt_lru_out {
-                let lru_memsize = lru_out.0.get_size() + lru_out.1.get_size();
+                let lru_memsize = lru_out.0.total_size() + lru_out.1.total_size();
                 space = self.sub_from_subkey_cache_space(space, lru_memsize)?;
             }
 
             if let Some(prev_data) = &opt_prev_data {
-                let prev_memsize = stk.get_size() + prev_data.get_size();
+                let prev_memsize = stk.total_size() + prev_data.total_size();
                 space = self.sub_from_subkey_cache_space(space, prev_memsize)?;
             }
 
@@ -1507,7 +1507,7 @@ where
                         space
                     );
                 };
-                let lru_memsize = dead_stk.get_size() + dead_data.get_size();
+                let lru_memsize = dead_stk.total_size() + dead_data.total_size();
                 space = self.sub_from_subkey_cache_space(space, lru_memsize)?;
             }
 
@@ -1541,7 +1541,7 @@ where
             let opt_data = self.subkey_cache.remove(stk);
             if let Some(data) = &opt_data {
                 let mut space = self.subkey_cache_space.modify().unwrap_or_log();
-                let subkey_memsize = stk.get_size() + data.get_size();
+                let subkey_memsize = stk.total_size() + data.total_size();
                 space = self.sub_from_subkey_cache_space(space, subkey_memsize)?;
                 space.commit()?;
             }

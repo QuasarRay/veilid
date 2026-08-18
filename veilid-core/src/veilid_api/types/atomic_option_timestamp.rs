@@ -4,7 +4,7 @@ use super::*;
 
 /// Atomic wrapper for optional timestamps used in structs so we can avoid locks
 /// for LRU and similar operations
-#[derive(Debug, Default, Serialize, Deserialize, GetSize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(from = "Option<Timestamp>", into = "Option<Timestamp>")]
 #[must_use]
 pub struct AtomicOptionTimestamp(AtomicU64);

@@ -2,7 +2,7 @@ use futures_util::StreamExt as _;
 
 use super::*;
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct RecordSnapshot {
     all_value_data: Vec<Option<Arc<SignedValueData>>>,
 }

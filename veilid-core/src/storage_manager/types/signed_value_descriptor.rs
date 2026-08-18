@@ -2,11 +2,10 @@ use super::*;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize, GetSize)]
+#[derive(Clone, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize)]
 pub struct SignedValueDescriptor {
     #[serde(with = "public_key_try_untyped_vld0")]
     owner: PublicKey,
-    #[get_size(size_fn = bytes_size_helper)]
     schema_data: Bytes,
     #[serde(with = "signature_try_untyped_vld0")]
     signature: Signature,

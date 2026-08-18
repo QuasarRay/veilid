@@ -13,7 +13,6 @@ use super::*;
     ord,
     hash,
     default,
-    get_size,
     ts(from_wasm_abi, into_wasm_abi, namespace)
 )]
 // Ordering here matters, >= is used to check strength of sequencing requirement
@@ -180,7 +179,6 @@ pub type SequenceOrderingSet = EnumSet<SequenceOrdering>;
     ord,
     hash,
     default,
-    get_size,
     ts(from_wasm_abi, into_wasm_abi, namespace)
 )]
 // Ordering here matters, >= is used to check strength of stability requirement
@@ -229,7 +227,7 @@ impl FromStr for Stability {
 /// * `SafetySelection::Unsafe`: don't use a safety route, only specify the sequencing preference
 /// * `SafetySelection::Safe`: use a safety route and parameters specified by a SafetySpec.
 #[apply(api_data_enum!)]
-#[api(eq, ord, hash, get_size)]
+#[api(eq, ord, hash)]
 pub enum SafetySelection {
     /// Don't use a safety route, only specify the sequencing preference.
     Unsafe(Sequencing),
@@ -265,7 +263,7 @@ impl fmt::Display for SafetySelection {
 
 /// Options for safety routes (sender privacy).
 #[apply(api_data_struct!)]
-#[api(eq, ord, hash, default, get_size)]
+#[api(eq, ord, hash, default)]
 pub struct SafetySpec {
     /// Preferred safety route set id if it still exists.
     #[cfg_attr(feature = "schemars", schemars(with = "Option<String>"))]
@@ -319,7 +317,7 @@ impl fmt::Display for SafetySpec {
 
 /// Options for private routes (receiver privacy).
 #[apply(api_data_struct!)]
-#[api(eq, ord, hash, default, get_size)]
+#[api(eq, ord, hash, default)]
 pub struct PrivateSpec {
     /// Empty value here will use all the available crypto kinds
     #[serde(default)]
