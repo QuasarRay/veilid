@@ -162,7 +162,7 @@ impl VeilidAPI {
                 .map(|rk| {
                     let opened = node.opened_records.get(&rk.opaque()).ok_or_else(|| {
                         VeilidAPIError::invalid_argument(
-                            "record is not open",
+                            "record not open",
                             "record_key",
                             rk.to_string(),
                         )
