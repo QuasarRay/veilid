@@ -27,6 +27,8 @@ cfg_if::cfg_if! {
         // Native FFI bindings for Linux/Mac/Windows/iOS/Android.
         mod dart_ffi;
         mod dart_isolate_wrapper;
+        #[cfg(unix)]
+        mod duplicate_image_guard;
         mod tools;
 
         #[cfg(target_os = "android")]

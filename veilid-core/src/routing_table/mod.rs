@@ -150,8 +150,14 @@ pub(crate) struct RoutingTable {
     /// Last route-test enqueue time per route, so a struggling route is not
     /// re-tested continuously on lossy networks
     route_test_cooldown: Mutex<BTreeMap<RouteId, Timestamp>>,
+    /// Routes whose test failures were deferred while blame was suppressed;
+    /// retested with cooldown bypassed once blame lifts
+    deferred_route_tests: Mutex<BTreeSet<RouteId>>,
+    /// Ping outcome and queue accounting surfaced through stats
+    #[cfg(feature = "stats")]
+    ping_stats: Mutex<tasks::ping_stats_accounting::PingStatsAccounting>,
     /// Interim accounting mechanism for this node's RPC latency to any other node
-    self_latency_stats_accounting: Mutex<(LatencyStatsAccounting, LatencyStats)>,
+    self_latency_stats_accounting: Mutex<LatencyStatsAccounting>,
     /// Interim accounting mechanism for the total bandwidth to/from this node
     self_transfer_stats_accounting: Mutex<(TransferStatsAccounting, TransferStatsDownUp)>,
     /// Peers we have recently communicated with
@@ -213,6 +219,9 @@ impl RoutingTable {
             kick_queue: Default::default(),
             cm_viability_dirty: core::sync::atomic::AtomicBool::new(true),
             route_test_cooldown: Default::default(),
+            deferred_route_tests: Default::default(),
+            #[cfg(feature = "stats")]
+            ping_stats: Default::default(),
             ping_validation_sender: Mutex::new(ping_validation_sender),
             ping_validation_receiver: Mutex::new(Some(ping_validation_receiver)),
             ping_validation_processor_jh: Mutex::new(None),
@@ -1050,8 +1059,9 @@ impl RoutingTable {
     }
 
     pub fn record_latency(&self, latency: TimestampDuration) {
-        let mut lsa = self.self_latency_stats_accounting.lock();
-        lsa.1 = lsa.0.record_latency(latency);
+        self.self_latency_stats_accounting
+            .lock()
+            .record_latency(latency);
     }
 
     /////////////////////////////////////

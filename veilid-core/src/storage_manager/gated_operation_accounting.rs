@@ -11,9 +11,7 @@ struct GatedKindAccounting {
     // Completions that ended in a retryable outcome (no consensus / congestion);
     // the client defers or retries these, so the ratio to `count` is retry pressure.
     retryable: u64,
-    gate_wait: LatencyStats,
     gate_wait_accounting: LatencyStatsAccounting,
-    held: LatencyStats,
     held_accounting: LatencyStatsAccounting,
 }
 
@@ -47,13 +45,14 @@ impl GatedOperationAccounting {
         }
     }
     pub(super) fn record_wait(&mut self, kind: GatedOperationKind, wait: TimestampDuration) {
-        let k = self.kind_mut(kind);
-        k.gate_wait = k.gate_wait_accounting.record_latency(wait);
+        self.kind_mut(kind)
+            .gate_wait_accounting
+            .record_latency(wait);
     }
     pub(super) fn record_completion(&mut self, kind: GatedOperationKind, held: TimestampDuration) {
         let k = self.kind_mut(kind);
         k.count += 1;
-        k.held = k.held_accounting.record_latency(held);
+        k.held_accounting.record_latency(held);
     }
     pub(super) fn record_retryable(&mut self, kind: GatedOperationKind) {
         self.kind_mut(kind).retryable += 1;
@@ -63,8 +62,8 @@ impl GatedOperationAccounting {
             kind,
             count: k.count,
             retryable: k.retryable,
-            gate_wait: k.gate_wait.clone(),
-            held: k.held.clone(),
+            gate_wait: k.gate_wait_accounting.latency_stats().unwrap_or_default(),
+            held: k.held_accounting.latency_stats().unwrap_or_default(),
         };
         [
             snap("set", &self.set),

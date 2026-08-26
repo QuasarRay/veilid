@@ -86,7 +86,10 @@ export const dhtSuite: Suite = {
           // No retry: we're asserting the not-writable rejection.
           await expect(
             rc.setDHTValue(rec.key, 0, textEncoder.encode(data)),
-          ).rejects.toEqual({ kind: 'Generic', message: 'value is not writable' });
+          ).rejects.toMatchObject({
+            kind: 'Generic',
+            message: 'value is not writable',
+          });
         }),
       });
 
@@ -122,7 +125,10 @@ export const dhtSuite: Suite = {
           // No retry: we're asserting the not-writable rejection.
           await expect(
             rc.setDHTValue(rec.key, 0, textEncoder.encode(`${data}👋`)),
-          ).rejects.toEqual({ kind: 'Generic', message: 'value is not writable' });
+          ).rejects.toMatchObject({
+            kind: 'Generic',
+            message: 'value is not writable',
+          });
 
           const setValueRes = await dhtRetry(
             () =>

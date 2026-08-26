@@ -299,6 +299,7 @@ DIRECTORY_IGNORE_PATTERNS: list[str] = [
     'veilid-flutter/example/**/.svn',
     'veilid-flutter/example/**/app.*.map.json',
     'veilid-flutter/example/**/app.*.symbols',
+    'veilid-flutter/example/**/web/wasm',
     'veilid-flutter/example/android/**/**/*.jks',
     'veilid-flutter/example/android/**/**/*.keystore',
     'veilid-flutter/example/android/**/GeneratedPluginRegistrant.java',

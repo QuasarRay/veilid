@@ -209,9 +209,10 @@ impl PublicInternetRoutingDomainController {
                     let routing_table = nr.routing_table();
 
                     // Get what contact method would be used for contacting the bootstrap
-                    let bsdi = match network_manager
-                        .get_node_contact_method(nr.sequencing_filtered(Sequencing::PreferOrdered))
-                    {
+                    let bsdi = match network_manager.get_node_contact_method(
+                        nr.sequencing_filtered(Sequencing::PreferOrdered),
+                        ContactMethodIntent::Advisory,
+                    ) {
                         Ok(NodeContactMethodResult::Resolved(ncm)) => {
                             let Some(di) = ncm.direct_dial_info() else {
                                 veilid_log!(nr debug "invalid contact method for bootstrap, ignoring peer: {}", NodeContactMethodResult::Resolved(ncm));

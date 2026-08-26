@@ -27,16 +27,6 @@ impl AllocatedRouteRef {
         &self.route_key
     }
 
-    /// The deduplicated node ids of this route's hops (read directly from the
-    /// held cache entry; no cache lookup).
-    pub fn hop_node_ids(&self) -> HashSet<NodeId> {
-        self.entry()
-            .hop_node_refs()
-            .iter()
-            .map(|nr| nr.best_node_id())
-            .collect()
-    }
-
     /// Mutate this route's stats (held cache entry; no lookup).
     pub fn with_stats_mut<F, R>(&self, f: F) -> R
     where
@@ -103,16 +93,6 @@ impl RemoteRouteRef {
 
     pub fn route_key(&self) -> &PublicKey {
         &self.route_key
-    }
-
-    /// The first hop node id of this remote private route (the remaining hops
-    /// are encrypted). Read directly from the held cache entry; no cache lookup.
-    pub fn first_hop_node_id(&self) -> Option<NodeId> {
-        let pr = self.entry().best_private_route()?;
-        match &pr.hops {
-            PrivateRouteHops::FirstHop(rh) => rh.node.node_id(),
-            _ => None,
-        }
     }
 
     /// Mutate this route's stats (held cache entry; no lookup).

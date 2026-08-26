@@ -74,7 +74,8 @@ impl PeerMessages {
 
         let part_start = off;
         let part_end = off + chunk.len() as LengthType - 1;
-        let part = RangeSetBlaze::from_iter([part_start..=part_end]);
+        let mut part = RangeSetBlaze::new();
+        part.ranges_insert(part_start..=part_end);
 
         // if fragments overlap, drop the old assembly and go with a new one
         if !assembly.parts.is_disjoint(&part) {
@@ -112,12 +113,14 @@ impl PeerMessages {
         // make the assembly
         let part_start = off;
         let part_end = off + chunk.len() as LengthType - 1;
+        let mut parts = RangeSetBlaze::new();
+        parts.ranges_insert(part_start..=part_end);
 
         let mut assembly = MessageAssembly {
             timestamp,
             seq,
             data: BytesMut::zeroed(len as usize),
-            parts: RangeSetBlaze::from_iter([part_start..=part_end]),
+            parts,
         };
         assembly.data[part_start as usize..=part_end as usize].copy_from_slice(chunk);
 

@@ -15,6 +15,7 @@ scripts/_clippy_aarch64_apple_darwin.sh $@
 scripts/_clippy_x86_64_unknown_linux_gnu.sh $@
 scripts/_clippy_x86_64_unknown_linux_gnu_async_std.sh $@
 scripts/_clippy_mock_api.sh $@
+scripts/_clippy_optional_features.sh $@
 
 # Flutter analyze for every dart/flutter package in the workspace
 FLUTTER_PKGS=(

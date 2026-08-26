@@ -143,9 +143,6 @@ pub fn veilid_core::Stability::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for veilid_core::Stability
 pub type veilid_core::Stability::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::Stability::from_str(&str) -> core::result::Result<Self, Self::Err>
-pub enum veilid_core::StatsOutput
-pub veilid_core::StatsOutput::Facility
-pub veilid_core::StatsOutput::File(std::path::PathBuf)
 pub enum veilid_core::Target
 pub veilid_core::Target::NodeId(veilid_core::NodeId)
 pub veilid_core::Target::RouteId(veilid_core::RouteId)
@@ -1188,7 +1185,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -1266,6 +1263,7 @@ pub fn veilid_core::DecapsulationKey::new(veilid_core::CryptoKind, veilid_core::
 pub fn veilid_core::DecapsulationKey::ref_value(&self) -> &veilid_core::BareDecapsulationKey
 impl veilid_core::DecapsulationKey
 pub fn veilid_core::DecapsulationKey::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::DecapsulationKey
 pub fn veilid_core::DecapsulationKey::value(&self) -> veilid_core::BareDecapsulationKey
 impl core::cmp::Ord for veilid_core::DecapsulationKey
 pub fn veilid_core::DecapsulationKey::cmp(&self, &Self) -> core::cmp::Ordering
@@ -1309,7 +1307,6 @@ pub fn veilid_core::DecapsulationKeyGroup::contains(&self, &veilid_core::Decapsu
 pub fn veilid_core::DecapsulationKeyGroup::contains_any(&self, alloc::vec::Vec<veilid_core::DecapsulationKey>) -> bool
 pub fn veilid_core::DecapsulationKeyGroup::is_empty(&self) -> bool
 pub fn veilid_core::DecapsulationKeyGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareDecapsulationKey>
-pub fn veilid_core::DecapsulationKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::DecapsulationKeyGroup::len(&self) -> usize
 pub fn veilid_core::DecapsulationKeyGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::DecapsulationKey>
 impl veilid_core::DecapsulationKeyGroup
@@ -1323,6 +1320,8 @@ pub fn veilid_core::DecapsulationKeyGroup::contains_kind(&self, veilid_core::Cry
 pub fn veilid_core::DecapsulationKeyGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::DecapsulationKey>
 pub fn veilid_core::DecapsulationKeyGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::DecapsulationKey>
 pub fn veilid_core::DecapsulationKeyGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::DecapsulationKeyGroup
+pub fn veilid_core::DecapsulationKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::DecapsulationKey]> for veilid_core::DecapsulationKeyGroup
 pub fn veilid_core::DecapsulationKeyGroup::from(&[veilid_core::DecapsulationKey]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::DecapsulationKey>> for veilid_core::DecapsulationKeyGroup
@@ -1346,6 +1345,7 @@ pub fn veilid_core::EncapsulationKey::new(veilid_core::CryptoKind, veilid_core::
 pub fn veilid_core::EncapsulationKey::ref_value(&self) -> &veilid_core::BareEncapsulationKey
 impl veilid_core::EncapsulationKey
 pub fn veilid_core::EncapsulationKey::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::EncapsulationKey
 pub fn veilid_core::EncapsulationKey::value(&self) -> veilid_core::BareEncapsulationKey
 impl core::cmp::Ord for veilid_core::EncapsulationKey
 pub fn veilid_core::EncapsulationKey::cmp(&self, &Self) -> core::cmp::Ordering
@@ -1389,7 +1389,6 @@ pub fn veilid_core::EncapsulationKeyGroup::contains(&self, &veilid_core::Encapsu
 pub fn veilid_core::EncapsulationKeyGroup::contains_any(&self, alloc::vec::Vec<veilid_core::EncapsulationKey>) -> bool
 pub fn veilid_core::EncapsulationKeyGroup::is_empty(&self) -> bool
 pub fn veilid_core::EncapsulationKeyGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareEncapsulationKey>
-pub fn veilid_core::EncapsulationKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::EncapsulationKeyGroup::len(&self) -> usize
 pub fn veilid_core::EncapsulationKeyGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::EncapsulationKey>
 impl veilid_core::EncapsulationKeyGroup
@@ -1403,6 +1402,8 @@ pub fn veilid_core::EncapsulationKeyGroup::contains_kind(&self, veilid_core::Cry
 pub fn veilid_core::EncapsulationKeyGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::EncapsulationKey>
 pub fn veilid_core::EncapsulationKeyGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::EncapsulationKey>
 pub fn veilid_core::EncapsulationKeyGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::EncapsulationKeyGroup
+pub fn veilid_core::EncapsulationKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::EncapsulationKey]> for veilid_core::EncapsulationKeyGroup
 pub fn veilid_core::EncapsulationKeyGroup::from(&[veilid_core::EncapsulationKey]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::EncapsulationKey>> for veilid_core::EncapsulationKeyGroup
@@ -1431,6 +1432,7 @@ pub fn veilid_core::HashDigest::new(veilid_core::CryptoKind, veilid_core::BareHa
 pub fn veilid_core::HashDigest::ref_value(&self) -> &veilid_core::BareHashDigest
 impl veilid_core::HashDigest
 pub fn veilid_core::HashDigest::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::HashDigest
 pub fn veilid_core::HashDigest::value(&self) -> veilid_core::BareHashDigest
 impl core::cmp::Ord for veilid_core::HashDigest
 pub fn veilid_core::HashDigest::cmp(&self, &Self) -> core::cmp::Ordering
@@ -1476,7 +1478,6 @@ pub fn veilid_core::HashDigestGroup::contains(&self, &veilid_core::HashDigest) -
 pub fn veilid_core::HashDigestGroup::contains_any(&self, alloc::vec::Vec<veilid_core::HashDigest>) -> bool
 pub fn veilid_core::HashDigestGroup::is_empty(&self) -> bool
 pub fn veilid_core::HashDigestGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareHashDigest>
-pub fn veilid_core::HashDigestGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::HashDigestGroup::len(&self) -> usize
 pub fn veilid_core::HashDigestGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::HashDigest>
 impl veilid_core::HashDigestGroup
@@ -1490,6 +1491,8 @@ pub fn veilid_core::HashDigestGroup::contains_kind(&self, veilid_core::CryptoKin
 pub fn veilid_core::HashDigestGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::HashDigest>
 pub fn veilid_core::HashDigestGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::HashDigest>
 pub fn veilid_core::HashDigestGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::HashDigestGroup
+pub fn veilid_core::HashDigestGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::HashDigest]> for veilid_core::HashDigestGroup
 pub fn veilid_core::HashDigestGroup::from(&[veilid_core::HashDigest]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::HashDigest>> for veilid_core::HashDigestGroup
@@ -1521,6 +1524,7 @@ pub fn veilid_core::KemKeyPair::new(veilid_core::CryptoKind, veilid_core::BareKe
 pub fn veilid_core::KemKeyPair::ref_value(&self) -> &veilid_core::BareKemKeyPair
 impl veilid_core::KemKeyPair
 pub fn veilid_core::KemKeyPair::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::KemKeyPair
 pub fn veilid_core::KemKeyPair::value(&self) -> veilid_core::BareKemKeyPair
 impl core::cmp::Ord for veilid_core::KemKeyPair
 pub fn veilid_core::KemKeyPair::cmp(&self, &Self) -> core::cmp::Ordering
@@ -1554,7 +1558,6 @@ pub fn veilid_core::KemKeyPairGroup::contains(&self, &veilid_core::KemKeyPair) -
 pub fn veilid_core::KemKeyPairGroup::contains_any(&self, alloc::vec::Vec<veilid_core::KemKeyPair>) -> bool
 pub fn veilid_core::KemKeyPairGroup::is_empty(&self) -> bool
 pub fn veilid_core::KemKeyPairGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareKemKeyPair>
-pub fn veilid_core::KemKeyPairGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::KemKeyPairGroup::len(&self) -> usize
 pub fn veilid_core::KemKeyPairGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::KemKeyPair>
 impl veilid_core::KemKeyPairGroup
@@ -1568,6 +1571,8 @@ pub fn veilid_core::KemKeyPairGroup::contains_kind(&self, veilid_core::CryptoKin
 pub fn veilid_core::KemKeyPairGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::KemKeyPair>
 pub fn veilid_core::KemKeyPairGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::KemKeyPair>
 pub fn veilid_core::KemKeyPairGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::KemKeyPairGroup
+pub fn veilid_core::KemKeyPairGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::KemKeyPair]> for veilid_core::KemKeyPairGroup
 pub fn veilid_core::KemKeyPairGroup::from(&[veilid_core::KemKeyPair]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::KemKeyPair>> for veilid_core::KemKeyPairGroup
@@ -1599,6 +1604,7 @@ pub fn veilid_core::KeyPair::new(veilid_core::CryptoKind, veilid_core::BareKeyPa
 pub fn veilid_core::KeyPair::ref_value(&self) -> &veilid_core::BareKeyPair
 impl veilid_core::KeyPair
 pub fn veilid_core::KeyPair::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::KeyPair
 pub fn veilid_core::KeyPair::value(&self) -> veilid_core::BareKeyPair
 impl core::cmp::Ord for veilid_core::KeyPair
 pub fn veilid_core::KeyPair::cmp(&self, &Self) -> core::cmp::Ordering
@@ -1634,7 +1640,6 @@ pub fn veilid_core::KeyPairGroup::contains(&self, &veilid_core::KeyPair) -> bool
 pub fn veilid_core::KeyPairGroup::contains_any(&self, alloc::vec::Vec<veilid_core::KeyPair>) -> bool
 pub fn veilid_core::KeyPairGroup::is_empty(&self) -> bool
 pub fn veilid_core::KeyPairGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareKeyPair>
-pub fn veilid_core::KeyPairGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::KeyPairGroup::len(&self) -> usize
 pub fn veilid_core::KeyPairGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::KeyPair>
 impl veilid_core::KeyPairGroup
@@ -1648,6 +1653,8 @@ pub fn veilid_core::KeyPairGroup::contains_kind(&self, veilid_core::CryptoKind) 
 pub fn veilid_core::KeyPairGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::KeyPair>
 pub fn veilid_core::KeyPairGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::KeyPair>
 pub fn veilid_core::KeyPairGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::KeyPairGroup
+pub fn veilid_core::KeyPairGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::KeyPair]> for veilid_core::KeyPairGroup
 pub fn veilid_core::KeyPairGroup::from(&[veilid_core::KeyPair]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::KeyPair>> for veilid_core::KeyPairGroup
@@ -1690,6 +1697,7 @@ pub fn veilid_core::MemberId::new(veilid_core::CryptoKind, veilid_core::BareMemb
 pub fn veilid_core::MemberId::ref_value(&self) -> &veilid_core::BareMemberId
 impl veilid_core::MemberId
 pub fn veilid_core::MemberId::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::MemberId
 pub fn veilid_core::MemberId::value(&self) -> veilid_core::BareMemberId
 impl core::cmp::Ord for veilid_core::MemberId
 pub fn veilid_core::MemberId::cmp(&self, &Self) -> core::cmp::Ordering
@@ -1735,7 +1743,6 @@ pub fn veilid_core::MemberIdGroup::contains(&self, &veilid_core::MemberId) -> bo
 pub fn veilid_core::MemberIdGroup::contains_any(&self, alloc::vec::Vec<veilid_core::MemberId>) -> bool
 pub fn veilid_core::MemberIdGroup::is_empty(&self) -> bool
 pub fn veilid_core::MemberIdGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareMemberId>
-pub fn veilid_core::MemberIdGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::MemberIdGroup::len(&self) -> usize
 pub fn veilid_core::MemberIdGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::MemberId>
 impl veilid_core::MemberIdGroup
@@ -1749,6 +1756,8 @@ pub fn veilid_core::MemberIdGroup::contains_kind(&self, veilid_core::CryptoKind)
 pub fn veilid_core::MemberIdGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::MemberId>
 pub fn veilid_core::MemberIdGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::MemberId>
 pub fn veilid_core::MemberIdGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::MemberIdGroup
+pub fn veilid_core::MemberIdGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::MemberId]> for veilid_core::MemberIdGroup
 pub fn veilid_core::MemberIdGroup::from(&[veilid_core::MemberId]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::MemberId>> for veilid_core::MemberIdGroup
@@ -1809,6 +1818,7 @@ pub fn veilid_core::NodeId::new(veilid_core::CryptoKind, veilid_core::BareNodeId
 pub fn veilid_core::NodeId::ref_value(&self) -> &veilid_core::BareNodeId
 impl veilid_core::NodeId
 pub fn veilid_core::NodeId::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::NodeId
 pub fn veilid_core::NodeId::value(&self) -> veilid_core::BareNodeId
 impl core::cmp::Ord for veilid_core::NodeId
 pub fn veilid_core::NodeId::cmp(&self, &Self) -> core::cmp::Ordering
@@ -1854,7 +1864,6 @@ pub fn veilid_core::NodeIdGroup::contains(&self, &veilid_core::NodeId) -> bool
 pub fn veilid_core::NodeIdGroup::contains_any(&self, alloc::vec::Vec<veilid_core::NodeId>) -> bool
 pub fn veilid_core::NodeIdGroup::is_empty(&self) -> bool
 pub fn veilid_core::NodeIdGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareNodeId>
-pub fn veilid_core::NodeIdGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::NodeIdGroup::len(&self) -> usize
 pub fn veilid_core::NodeIdGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::NodeId>
 impl veilid_core::NodeIdGroup
@@ -1868,6 +1877,8 @@ pub fn veilid_core::NodeIdGroup::contains_kind(&self, veilid_core::CryptoKind) -
 pub fn veilid_core::NodeIdGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::NodeId>
 pub fn veilid_core::NodeIdGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::NodeId>
 pub fn veilid_core::NodeIdGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::NodeIdGroup
+pub fn veilid_core::NodeIdGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::NodeId]> for veilid_core::NodeIdGroup
 pub fn veilid_core::NodeIdGroup::from(&[veilid_core::NodeId]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::NodeId>> for veilid_core::NodeIdGroup
@@ -1941,6 +1952,7 @@ pub fn veilid_core::OpaqueRecordKey::new(veilid_core::CryptoKind, veilid_core::B
 pub fn veilid_core::OpaqueRecordKey::ref_value(&self) -> &veilid_core::BareOpaqueRecordKey
 impl veilid_core::OpaqueRecordKey
 pub fn veilid_core::OpaqueRecordKey::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::OpaqueRecordKey
 pub fn veilid_core::OpaqueRecordKey::value(&self) -> veilid_core::BareOpaqueRecordKey
 impl core::cmp::Ord for veilid_core::OpaqueRecordKey
 pub fn veilid_core::OpaqueRecordKey::cmp(&self, &Self) -> core::cmp::Ordering
@@ -1986,7 +1998,6 @@ pub fn veilid_core::OpaqueRecordKeyGroup::contains(&self, &veilid_core::OpaqueRe
 pub fn veilid_core::OpaqueRecordKeyGroup::contains_any(&self, alloc::vec::Vec<veilid_core::OpaqueRecordKey>) -> bool
 pub fn veilid_core::OpaqueRecordKeyGroup::is_empty(&self) -> bool
 pub fn veilid_core::OpaqueRecordKeyGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareOpaqueRecordKey>
-pub fn veilid_core::OpaqueRecordKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::OpaqueRecordKeyGroup::len(&self) -> usize
 pub fn veilid_core::OpaqueRecordKeyGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::OpaqueRecordKey>
 impl veilid_core::OpaqueRecordKeyGroup
@@ -2000,6 +2011,8 @@ pub fn veilid_core::OpaqueRecordKeyGroup::contains_kind(&self, veilid_core::Cryp
 pub fn veilid_core::OpaqueRecordKeyGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::OpaqueRecordKey>
 pub fn veilid_core::OpaqueRecordKeyGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::OpaqueRecordKey>
 pub fn veilid_core::OpaqueRecordKeyGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::OpaqueRecordKeyGroup
+pub fn veilid_core::OpaqueRecordKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::OpaqueRecordKey]> for veilid_core::OpaqueRecordKeyGroup
 pub fn veilid_core::OpaqueRecordKeyGroup::from(&[veilid_core::OpaqueRecordKey]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::OpaqueRecordKey>> for veilid_core::OpaqueRecordKeyGroup
@@ -2056,6 +2069,7 @@ pub fn veilid_core::PublicKey::new(veilid_core::CryptoKind, veilid_core::BarePub
 pub fn veilid_core::PublicKey::ref_value(&self) -> &veilid_core::BarePublicKey
 impl veilid_core::PublicKey
 pub fn veilid_core::PublicKey::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::PublicKey
 pub fn veilid_core::PublicKey::value(&self) -> veilid_core::BarePublicKey
 impl core::cmp::Ord for veilid_core::PublicKey
 pub fn veilid_core::PublicKey::cmp(&self, &Self) -> core::cmp::Ordering
@@ -2101,7 +2115,6 @@ pub fn veilid_core::PublicKeyGroup::contains(&self, &veilid_core::PublicKey) -> 
 pub fn veilid_core::PublicKeyGroup::contains_any(&self, alloc::vec::Vec<veilid_core::PublicKey>) -> bool
 pub fn veilid_core::PublicKeyGroup::is_empty(&self) -> bool
 pub fn veilid_core::PublicKeyGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BarePublicKey>
-pub fn veilid_core::PublicKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::PublicKeyGroup::len(&self) -> usize
 pub fn veilid_core::PublicKeyGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::PublicKey>
 impl veilid_core::PublicKeyGroup
@@ -2115,6 +2128,8 @@ pub fn veilid_core::PublicKeyGroup::contains_kind(&self, veilid_core::CryptoKind
 pub fn veilid_core::PublicKeyGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::PublicKey>
 pub fn veilid_core::PublicKeyGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::PublicKey>
 pub fn veilid_core::PublicKeyGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::PublicKeyGroup
+pub fn veilid_core::PublicKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::PublicKey]> for veilid_core::PublicKeyGroup
 pub fn veilid_core::PublicKeyGroup::from(&[veilid_core::PublicKey]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::PublicKey>> for veilid_core::PublicKeyGroup
@@ -2144,6 +2159,7 @@ pub fn veilid_core::RecordKey::new(veilid_core::CryptoKind, veilid_core::BareRec
 pub fn veilid_core::RecordKey::ref_value(&self) -> &veilid_core::BareRecordKey
 impl veilid_core::RecordKey
 pub fn veilid_core::RecordKey::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::RecordKey
 pub fn veilid_core::RecordKey::value(&self) -> veilid_core::BareRecordKey
 impl core::cmp::Ord for veilid_core::RecordKey
 pub fn veilid_core::RecordKey::cmp(&self, &Self) -> core::cmp::Ordering
@@ -2179,7 +2195,6 @@ pub fn veilid_core::RecordKeyGroup::contains(&self, &veilid_core::RecordKey) -> 
 pub fn veilid_core::RecordKeyGroup::contains_any(&self, alloc::vec::Vec<veilid_core::RecordKey>) -> bool
 pub fn veilid_core::RecordKeyGroup::is_empty(&self) -> bool
 pub fn veilid_core::RecordKeyGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareRecordKey>
-pub fn veilid_core::RecordKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::RecordKeyGroup::len(&self) -> usize
 pub fn veilid_core::RecordKeyGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::RecordKey>
 impl veilid_core::RecordKeyGroup
@@ -2193,6 +2208,8 @@ pub fn veilid_core::RecordKeyGroup::contains_kind(&self, veilid_core::CryptoKind
 pub fn veilid_core::RecordKeyGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::RecordKey>
 pub fn veilid_core::RecordKeyGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::RecordKey>
 pub fn veilid_core::RecordKeyGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::RecordKeyGroup
+pub fn veilid_core::RecordKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::RecordKey]> for veilid_core::RecordKeyGroup
 pub fn veilid_core::RecordKeyGroup::from(&[veilid_core::RecordKey]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::RecordKey>> for veilid_core::RecordKeyGroup
@@ -2219,6 +2236,7 @@ pub fn veilid_core::RouteId::new(veilid_core::CryptoKind, veilid_core::BareRoute
 pub fn veilid_core::RouteId::ref_value(&self) -> &veilid_core::BareRouteId
 impl veilid_core::RouteId
 pub fn veilid_core::RouteId::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::RouteId
 pub fn veilid_core::RouteId::value(&self) -> veilid_core::BareRouteId
 impl core::cmp::Ord for veilid_core::RouteId
 pub fn veilid_core::RouteId::cmp(&self, &Self) -> core::cmp::Ordering
@@ -2264,7 +2282,6 @@ pub fn veilid_core::RouteIdGroup::contains(&self, &veilid_core::RouteId) -> bool
 pub fn veilid_core::RouteIdGroup::contains_any(&self, alloc::vec::Vec<veilid_core::RouteId>) -> bool
 pub fn veilid_core::RouteIdGroup::is_empty(&self) -> bool
 pub fn veilid_core::RouteIdGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareRouteId>
-pub fn veilid_core::RouteIdGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::RouteIdGroup::len(&self) -> usize
 pub fn veilid_core::RouteIdGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::RouteId>
 impl veilid_core::RouteIdGroup
@@ -2278,6 +2295,8 @@ pub fn veilid_core::RouteIdGroup::contains_kind(&self, veilid_core::CryptoKind) 
 pub fn veilid_core::RouteIdGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::RouteId>
 pub fn veilid_core::RouteIdGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::RouteId>
 pub fn veilid_core::RouteIdGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::RouteIdGroup
+pub fn veilid_core::RouteIdGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::RouteId]> for veilid_core::RouteIdGroup
 pub fn veilid_core::RouteIdGroup::from(&[veilid_core::RouteId]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::RouteId>> for veilid_core::RouteIdGroup
@@ -2330,6 +2349,7 @@ pub fn veilid_core::SecretKey::new(veilid_core::CryptoKind, veilid_core::BareSec
 pub fn veilid_core::SecretKey::ref_value(&self) -> &veilid_core::BareSecretKey
 impl veilid_core::SecretKey
 pub fn veilid_core::SecretKey::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::SecretKey
 pub fn veilid_core::SecretKey::value(&self) -> veilid_core::BareSecretKey
 impl core::cmp::Ord for veilid_core::SecretKey
 pub fn veilid_core::SecretKey::cmp(&self, &Self) -> core::cmp::Ordering
@@ -2375,7 +2395,6 @@ pub fn veilid_core::SecretKeyGroup::contains(&self, &veilid_core::SecretKey) -> 
 pub fn veilid_core::SecretKeyGroup::contains_any(&self, alloc::vec::Vec<veilid_core::SecretKey>) -> bool
 pub fn veilid_core::SecretKeyGroup::is_empty(&self) -> bool
 pub fn veilid_core::SecretKeyGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareSecretKey>
-pub fn veilid_core::SecretKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::SecretKeyGroup::len(&self) -> usize
 pub fn veilid_core::SecretKeyGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::SecretKey>
 impl veilid_core::SecretKeyGroup
@@ -2389,6 +2408,8 @@ pub fn veilid_core::SecretKeyGroup::contains_kind(&self, veilid_core::CryptoKind
 pub fn veilid_core::SecretKeyGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::SecretKey>
 pub fn veilid_core::SecretKeyGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::SecretKey>
 pub fn veilid_core::SecretKeyGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::SecretKeyGroup
+pub fn veilid_core::SecretKeyGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::SecretKey]> for veilid_core::SecretKeyGroup
 pub fn veilid_core::SecretKeyGroup::from(&[veilid_core::SecretKey]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::SecretKey>> for veilid_core::SecretKeyGroup
@@ -2418,6 +2439,7 @@ pub fn veilid_core::SharedSecret::new(veilid_core::CryptoKind, veilid_core::Bare
 pub fn veilid_core::SharedSecret::ref_value(&self) -> &veilid_core::BareSharedSecret
 impl veilid_core::SharedSecret
 pub fn veilid_core::SharedSecret::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::SharedSecret
 pub fn veilid_core::SharedSecret::value(&self) -> veilid_core::BareSharedSecret
 impl core::cmp::Ord for veilid_core::SharedSecret
 pub fn veilid_core::SharedSecret::cmp(&self, &Self) -> core::cmp::Ordering
@@ -2463,7 +2485,6 @@ pub fn veilid_core::SharedSecretGroup::contains(&self, &veilid_core::SharedSecre
 pub fn veilid_core::SharedSecretGroup::contains_any(&self, alloc::vec::Vec<veilid_core::SharedSecret>) -> bool
 pub fn veilid_core::SharedSecretGroup::is_empty(&self) -> bool
 pub fn veilid_core::SharedSecretGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareSharedSecret>
-pub fn veilid_core::SharedSecretGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::SharedSecretGroup::len(&self) -> usize
 pub fn veilid_core::SharedSecretGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::SharedSecret>
 impl veilid_core::SharedSecretGroup
@@ -2477,6 +2498,8 @@ pub fn veilid_core::SharedSecretGroup::contains_kind(&self, veilid_core::CryptoK
 pub fn veilid_core::SharedSecretGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::SharedSecret>
 pub fn veilid_core::SharedSecretGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::SharedSecret>
 pub fn veilid_core::SharedSecretGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::SharedSecretGroup
+pub fn veilid_core::SharedSecretGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::SharedSecret]> for veilid_core::SharedSecretGroup
 pub fn veilid_core::SharedSecretGroup::from(&[veilid_core::SharedSecret]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::SharedSecret>> for veilid_core::SharedSecretGroup
@@ -2500,6 +2523,7 @@ pub fn veilid_core::Signature::new(veilid_core::CryptoKind, veilid_core::BareSig
 pub fn veilid_core::Signature::ref_value(&self) -> &veilid_core::BareSignature
 impl veilid_core::Signature
 pub fn veilid_core::Signature::kind(&self) -> veilid_core::CryptoKind
+impl veilid_core::Signature
 pub fn veilid_core::Signature::value(&self) -> veilid_core::BareSignature
 impl core::cmp::Ord for veilid_core::Signature
 pub fn veilid_core::Signature::cmp(&self, &Self) -> core::cmp::Ordering
@@ -2545,7 +2569,6 @@ pub fn veilid_core::SignatureGroup::contains(&self, &veilid_core::Signature) -> 
 pub fn veilid_core::SignatureGroup::contains_any(&self, alloc::vec::Vec<veilid_core::Signature>) -> bool
 pub fn veilid_core::SignatureGroup::is_empty(&self) -> bool
 pub fn veilid_core::SignatureGroup::keys(&self) -> alloc::vec::Vec<veilid_core::BareSignature>
-pub fn veilid_core::SignatureGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 pub fn veilid_core::SignatureGroup::len(&self) -> usize
 pub fn veilid_core::SignatureGroup::to_vec(&self) -> alloc::vec::Vec<veilid_core::Signature>
 impl veilid_core::SignatureGroup
@@ -2559,6 +2582,8 @@ pub fn veilid_core::SignatureGroup::contains_kind(&self, veilid_core::CryptoKind
 pub fn veilid_core::SignatureGroup::get(&self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::Signature>
 pub fn veilid_core::SignatureGroup::remove(&mut self, veilid_core::CryptoKind) -> core::option::Option<veilid_core::Signature>
 pub fn veilid_core::SignatureGroup::remove_all(&mut self, alloc::vec::Vec<veilid_core::CryptoKind>)
+impl veilid_core::SignatureGroup
+pub fn veilid_core::SignatureGroup::kinds(&self) -> alloc::vec::Vec<veilid_core::CryptoKind>
 impl core::convert::From<&[veilid_core::Signature]> for veilid_core::SignatureGroup
 pub fn veilid_core::SignatureGroup::from(&[veilid_core::Signature]) -> Self
 impl core::convert::From<alloc::vec::Vec<veilid_core::Signature>> for veilid_core::SignatureGroup
@@ -2575,18 +2600,6 @@ pub fn veilid_core::SignatureGroup::deref(&self) -> &[veilid_core::Signature]
 impl core::str::traits::FromStr for veilid_core::SignatureGroup
 pub type veilid_core::SignatureGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::SignatureGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
-pub struct veilid_core::StatsManager
-impl veilid_core::StatsManager
-pub fn veilid_core::StatsManager::init(core::option::Option<veilid_core::VeilidLogKey>, veilid_core::StatsSettings)
-pub fn veilid_core::StatsManager::uninit(core::option::Option<veilid_core::VeilidLogKey>)
-impl core::fmt::Debug for veilid_core::StatsManager
-pub fn veilid_core::StatsManager::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct veilid_core::StatsSettings
-pub veilid_core::StatsSettings::enabled: bool
-pub veilid_core::StatsSettings::interval_secs: u32
-pub veilid_core::StatsSettings::output: veilid_core::StatsOutput
-impl core::default::Default for veilid_core::StatsSettings
-pub fn veilid_core::StatsSettings::default() -> Self
 pub struct veilid_core::TableDB
 impl veilid_core::TableDB
 pub async fn veilid_core::TableDB::cleanup(&self) -> veilid_core::VeilidAPIResult<()>

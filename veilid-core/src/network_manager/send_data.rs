@@ -93,7 +93,8 @@ impl NetworkManager {
         node_ref: FilteredNodeRef,
         data: Bytes,
     ) -> EyreResult<SendDataResult> {
-        let mut ncm_result = self.get_node_contact_method(node_ref.clone())?;
+        let mut ncm_result =
+            self.get_node_contact_method(node_ref.clone(), ContactMethodIntent::Send)?;
 
         loop {
             // Boxed because calling rpc_call_signal() is recursive to send_data()
@@ -628,6 +629,7 @@ impl NetworkManager {
     pub fn get_node_contact_method(
         &self,
         target_node_ref: FilteredNodeRef,
+        intent: ContactMethodIntent,
     ) -> EyreResult<NodeContactMethodResult> {
         let routing_table = self.routing_table();
 
@@ -674,7 +676,7 @@ impl NetworkManager {
             target_node_ref_sequencing: target_node_ref.sequencing(),
         };
         if let Some(contact_methods) = self.inner.lock().node_contact_method_cache.get(&ncm_key) {
-            return self.pick_contact_method(target_node_ref.clone(), contact_methods);
+            return self.pick_contact_method(target_node_ref.clone(), contact_methods, intent);
         }
 
         // Determine if the published peer info is the same as our current peer info
@@ -706,7 +708,7 @@ impl NetworkManager {
                 .node_contact_method_cache
                 .insert(ncm_key.clone(), contact_methods.clone());
 
-            self.pick_contact_method(target_node_ref.clone(), contact_methods)?
+            self.pick_contact_method(target_node_ref.clone(), contact_methods, intent)?
         };
 
         Ok(ncm_result)
@@ -723,6 +725,7 @@ impl NetworkManager {
         &self,
         target_node_ref: FilteredNodeRef,
         contact_methods: Vec<ContactMethod>,
+        intent: ContactMethodIntent,
     ) -> EyreResult<NodeContactMethodResult> {
         let opt_routing_domain = target_node_ref.best_routing_domain();
         let mut contact_method_map = BTreeMap::<(bool, bool, u8, u64), Vec<ContactMethod>>::new();
@@ -770,19 +773,29 @@ impl NetworkManager {
 
         let opt_rd_transport = opt_routing_domain.zip(first_contact_method.opt_transport_type());
 
-        // Every method rides a suppressed transport; the caller falls back or gives up
-        if suppressed {
-            if let Some((rd, transport)) = opt_rd_transport {
-                self.transport_stats().record_skip(rd, transport);
+        // Every method rides a suppressed transport; the caller falls back or gives up.
+        // Until enforcement arms (outbound ready), resolve anyway: the send is the canary.
+        if suppressed
+            && opt_routing_domain
+                .map(|rd| self.transport_stats().is_enforcing(rd))
+                .unwrap_or(false)
+        {
+            if intent == ContactMethodIntent::Send {
+                if let Some((rd, transport)) = opt_rd_transport {
+                    self.transport_stats().record_skip(rd, transport);
+                }
             }
             return Ok(NodeContactMethodResult::TransportSuppressed);
         }
 
-        // Spend the canary at decision time when the winner's transport is due one
-        if let Some((rd, transport)) = opt_rd_transport {
-            let _ = self
-                .transport_stats()
-                .deprioritized_consuming_canary(rd, transport);
+        // Spend the canary at decision time when the winner's transport is due one.
+        // Advisory lookups never spend it; no send follows them.
+        if intent == ContactMethodIntent::Send {
+            if let Some((rd, transport)) = opt_rd_transport {
+                let _ = self
+                    .transport_stats()
+                    .deprioritized_consuming_canary(rd, transport);
+            }
         }
 
         Ok(NodeContactMethodResult::Resolved(first_contact_method))

@@ -519,7 +519,7 @@ impl StorageManager {
                 }
             }
         }
-        veilid_log!(self debug "Rehydration member {}: {} values to push (network_newer={} local_seqs={:?} network_seqs={:?})", opaque_record_key, values.len(), has_network_newer, report.local_seqs(), report.network_seqs());
+        veilid_log!(self debug "Rehydration member {}: {} values to push (network_newer={} report={:?})", opaque_record_key, values.len(), has_network_newer, report);
         Ok((values, has_network_newer))
     }
 }

@@ -1,5 +1,7 @@
 use super::*;
 
+use tasks::ping_stats_accounting::PingStats;
+
 #[derive(Debug, Serialize)]
 pub(super) struct RoutingTableStats {
     total_entry_count: u32,
@@ -8,6 +10,7 @@ pub(super) struct RoutingTableStats {
     public_internet_ready: bool,
     local_network_ready: bool,
     entries_by_state: Vec<StateCount>,
+    pings: PingStats,
 }
 
 #[derive(Debug, Serialize)]
@@ -33,6 +36,7 @@ impl RoutingTable {
                     count: *count as u32,
                 })
                 .collect(),
+            pings: self.ping_stats.lock().snapshot(),
         }))
     }
 }

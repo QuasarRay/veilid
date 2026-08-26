@@ -3,11 +3,7 @@ use super::*;
 /// DHT Record Report
 #[derive(Default, Clone, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi)
-)]
+#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
 #[must_use]
 pub struct DHTRecordReport {
@@ -111,8 +107,8 @@ impl fmt::Debug for DHTRecordReport {
         write!(
             f,
             "DHTRecordReport {{\n  subkeys: {:?}\n  offline_subkeys: {:?}\n  local_seqs: {}\n  remote_seqs: {}\n}}\n",
-            &self.subkeys,
-            &self.offline_subkeys,
+            self.subkeys,
+            self.offline_subkeys,
             self.local_seqs.to_table_string(),
             self.network_seqs.to_table_string(),
         )
@@ -121,14 +117,7 @@ impl fmt::Debug for DHTRecordReport {
 
 /// DHT Record Report Scope
 #[apply(api_data_enum!)]
-#[api(
-    eq,
-    copy,
-    ord,
-    hash,
-    default,
-    ts(from_wasm_abi, into_wasm_abi, namespace)
-)]
+#[api(eq, copy, ord, hash, default, ts(namespace))]
 pub enum DHTReportScope {
     /// Return only the local copy sequence numbers
     /// Useful for seeing what subkeys you have locally and which ones have not been retrieved

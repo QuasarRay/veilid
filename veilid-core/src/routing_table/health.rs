@@ -314,7 +314,7 @@ impl RoutingTable {
                 != current_routing_table_health.live_entry_count()
             || !routing_domain_ready_changes.is_empty()
         {
-            veilid_log!(self debug target: "rtab::health", "Routing Table Health:\n{}", indent_all_string(format!("{:#}", &*current_routing_table_health)));
+            veilid_log!(self debug target: "rtab::health", "Routing Table Health:\n{}", indent_all_string(format!("{:#}", *current_routing_table_health)));
         }
     }
 }

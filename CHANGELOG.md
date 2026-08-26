@@ -21,15 +21,26 @@
   - Transaction post-consensus grace period reduced to avoid waiting for unnecessary slow additional-consensus nodes.
   - OnlineDetector now tracks local stalls, and local degradation is no longer blamed on specific nodes.
   - Better watch reporting coalescing.
-  - Added `mock-api` feature, which must be used with `--no-default-features`, but enables testing apps against a stubbed-out
-    `VeilidAPI` that performs no network access, and uses in-memory maps for all API functionality. Integration tests should use this
-    so network access does not have to be performed in CI tests for repeatability. It also completely eliminated network latency and
-    returns results immediately, so your tests will complete faster too.
-  - Strip out 'get-size2' crate and simplify StorageManager calculation of data sizes
+  - Added `mock-api` feature, which must be used with `--no-default-features`, but enables testing apps against a stubbed-out `VeilidAPI` that performs no network access, and uses in-memory maps for all API functionality. Integration tests should use this so network access does not have to be performed in CI tests for repeatability. It also completely eliminated network latency andreturns results immediately, so your tests will complete faster too.
+  - Strip out 'get-size2' crate and simplify StorageManager calculation of data sizes.
+  - Fix watch routes and make route failures not contribute excessively to offline detection.
+  - Dial info discovery scales its validation quorum down to the available validator pool (minimum 2), so small networks can still confirm dial info and settle instead of retrying forever.
+  - Node liveness probing is quieter. Never-answered nodes are declared dead after three lost questions instead of a 60-second span, missing and initial nodes are probed at the unreliable interval instead of every tick, and a persistently failing transport backs off. Steady-state ping traffic roughly halves.
+  - Degraded detection no longer false-fires on healthy networks. Only failures from transports that answered recently count, and they must span several percent of the live routing table.
+  - Ping outcome and queue statistics per purpose and transport in stats output, and an `entries liveness` debug command showing per-node probe ages, transport health, and steady-loss spans.
+  - Migrated to tsify 0.5.7 `Ts<T>` boundaries. WASM serialization failures now throw catchable errors instead of leaking or panicking at the ABI boundary. TypeScript declarations are unchanged, except group `contains_kind` is renamed `containsKind` to match the rest of the API, typed-value constructors take the branded `CryptoKind` rather than a bare string, and raw-string artifacts in doc comments are fixed.
+  - VeilidAPIError now derives from JS Error, closing [#441](https://gitlab.com/veilid/veilid/-/work_items/441)
+  - Latency statistics are computed when they are read rather than on every sample. Recording used to sort a rolling window while holding a lock, on every crypto operation and every guarded lock section, which made stats accounting the most contended lock in the process and starved the executor under load.
+  - Online detector interval data is published as a read-mostly snapshot, so per-node state computation no longer queues behind the detector's state machine.
+  - Route loopback failures deferred while offline or degraded are now capped, so a dead route cannot stay allocated forever on a chronically degraded node.
+  - Table store databases are integrity-checked at open and, if damaged, rebuilt from whatever rows are still readable. The damaged files are kept beside the store for inspection.
+  - Disable `stats` feature by default
 
 - veilid-flutter:
   - Full conversion to Native Assets and rust build hooks. Apps must drop any extra build steps for building veilid-flutter and linking its output; Flutter handles it.
   - CocoaPods support removed.
+  - Minimum Flutter version is now 3.47.1 due to improved build hooks support
+  - Completely remove 'rust-android-gradle' because it is failing to keep up with the rest of the ecosystem (AGP, Kotlin, etc)
 
 - veilid-python:
   - More tests
@@ -40,6 +51,7 @@
 
 - veilid-wasm:
   - BREAKING: veilid-wasm no longer automatically loads the wasm file at import-time, which had used a top-level await. Instead, the default export is now an `init()` function that you await as part of your loading logic for your application: `import init from "veilid-wasm";`. You must call `await init()` at some point before calling any other export.
+  - BREAKING: thrown errors are now real `Error` instances instead of plain objects. `VeilidAPIError` extends `Error` and each variant has its own subclass, so `catch` blocks can use `err instanceof VeilidAPIError`, `err instanceof VeilidAPIErrorTimeout`, and the usual `message`, `name` and `stack`. Reading `err.kind` and the per-variant fields still works, so code that switches on `kind` needs no change; code that compared a caught error to a plain object by structural equality does. The classes are exported from the package entry point, and the `VeilidAPIError` TypeScript type that described the old plain object is gone, its name now belonging to the class.
 
 **Changed in Veilid 0.5.7**
 

@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "veilid",
     platforms: [
-        .iOS("13.0")
+        .iOS("15.0")
     ],
     products: [
         .library(name: "veilid", targets: ["veilid"])

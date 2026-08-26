@@ -232,6 +232,21 @@ impl PublicInternetRoutingDomainController {
                 .await;
         }
 
+        // Retest routes whose failures were deferred during blame suppression, now that it lifted
+        if !routing_table
+            .network_manager()
+            .online_detector()
+            .blame_suppressed(RoutingDomain::PublicInternet)
+        {
+            let deferred_routes = routing_table.take_deferred_route_tests();
+            if !deferred_routes.is_empty() {
+                veilid_log!(self debug "Retesting {} routes with deferred failures", deferred_routes.len());
+                routing_table
+                    .enqueue_route_tests(cur_ts, deferred_routes, 0)
+                    .await;
+            }
+        }
+
         // Get locally allocated routes needing loopback keepalive and enqueue them
         let routes_needing_keepalive = self.get_allocated_routes_to_loopback_keepalive(cur_ts);
         if !routes_needing_keepalive.is_empty() {

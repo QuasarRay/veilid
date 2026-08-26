@@ -22,7 +22,16 @@ rootProject.allprojects {
 }
 
 apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
+
+// No 'kotlin-android' here on purpose. Declaring KGP in a plugin's build script
+// is what flutter warns about under AGP 9; Kotlin still compiles, from AGP's
+// built-in support when the app enables it and from flutter's own fallback
+// otherwise. The kotlin-gradle-plugin classpath above stays for the DSL types.
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
 
 android {
     compileSdkVersion flutter.compileSdkVersion
@@ -31,10 +40,6 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = '17'
     }
 
     sourceSets {

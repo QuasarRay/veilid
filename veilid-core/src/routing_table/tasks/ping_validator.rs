@@ -9,6 +9,10 @@ impl_veilid_log_facility!("rtab");
 /// Minimum seconds between tests of the same route
 const ROUTE_TEST_MIN_INTERVAL_SECS: u32 = 15;
 
+/// Loopback failures a route may defer under blame suppression before one is
+/// recorded anyway, so chronic degradation cannot make a dead route immortal
+const MAX_LOOPBACK_FAILURE_DEFERRALS: usize = 3;
+
 /////////////////////////////////////
 // Priority Groups
 
@@ -104,8 +108,10 @@ struct PingCompletionResult {
 
 #[derive(Default)]
 struct PingValidationProcessorState {
-    /// Per-group queued items, sorted by priority (BTreeMap key = priority number, 0 = highest)
-    groups: BTreeMap<PingValidationGroup, BTreeMap<usize, VecDeque<PingValidationEntry>>>,
+    /// Per-group queued items with enqueue timestamps, sorted by priority
+    /// (BTreeMap key = priority number, 0 = highest)
+    groups:
+        BTreeMap<PingValidationGroup, BTreeMap<usize, VecDeque<(Timestamp, PingValidationEntry)>>>,
     /// Per-group in-flight counts
     group_in_flight: BTreeMap<PingValidationGroup, usize>,
     /// Keys currently queued (for deduplication)
@@ -130,7 +136,7 @@ impl PingValidationProcessorState {
             .or_default()
             .entry(entry.priority)
             .or_default()
-            .push_back(entry);
+            .push_back((Timestamp::now(), entry));
         true
     }
 
@@ -177,11 +183,20 @@ impl PingValidationProcessorState {
                     continue;
                 };
                 while started < available {
-                    let Some(entry) = queue.pop_front() else {
+                    let Some((_enqueue_ts, entry)) = queue.pop_front() else {
                         break;
                     };
                     self.queued_keys.remove(&entry.key);
                     self.in_process_keys.insert(entry.key.clone());
+
+                    veilid_stats!(registry
+                        .routing_table()
+                        .ping_stats
+                        .lock()
+                        .record_queue_wait(
+                            entry.group,
+                            Timestamp::now().duration_since(_enqueue_ts),
+                        ));
 
                     let fut_group = entry.group;
                     let fut_key = entry.key.clone();
@@ -193,9 +208,34 @@ impl PingValidationProcessorState {
                         #[cfg(feature = "verbose-tracing")]
                         veilid_log!(fut_registry debug "--> validator ping ({:?}) to {:?}", fut_group, fut_dest);
 
+                        let _start_ts = Timestamp::now();
                         let rpc_processor = fut_registry.rpc_processor();
                         let result =
-                            Box::pin(rpc_processor.rpc_call_status(fut_dest)).await;
+                            Box::pin(rpc_processor.rpc_call_status(fut_dest.clone())).await;
+
+                        veilid_stats!({
+                            use super::ping_stats_accounting::{PingOutcome, PingPurpose};
+                            let (outcome, transport) = match &result {
+                                Ok(StatusResult::Sent(sa)) => {
+                                    (PingOutcome::Answered, sa.send_data_result.transport_type())
+                                }
+                                // Failed with a flow means the question went out and nothing came back
+                                Ok(StatusResult::Failed(sdr)) => match sdr.unique_flow() {
+                                    Some(_) => (PingOutcome::Lost, sdr.transport_type()),
+                                    None => (PingOutcome::SendFailed, sdr.transport_type()),
+                                },
+                                Ok(StatusResult::NotSent(_)) => (PingOutcome::NotSent, None),
+                                Err(_) => (PingOutcome::Error, None),
+                            };
+                            let purpose = PingPurpose::derive(fut_group, &fut_key, &fut_dest);
+                            fut_registry.routing_table().ping_stats.lock().record_completion(
+                                fut_group,
+                                purpose,
+                                transport,
+                                outcome,
+                                Timestamp::now().duration_since(_start_ts),
+                            );
+                        });
 
                         PingCompletionResult {
                             group: fut_group,
@@ -243,6 +283,19 @@ impl PingValidationProcessorState {
         }
     }
 
+    /// Per-group (queued, in_flight) gauge snapshot for stats
+    #[cfg(feature = "stats")]
+    fn group_gauges(&self) -> Vec<(PingValidationGroup, usize, usize)> {
+        let mut gauges = BTreeMap::<PingValidationGroup, (usize, usize)>::new();
+        for (group, pm) in &self.groups {
+            gauges.entry(*group).or_default().0 = pm.values().map(|q| q.len()).sum();
+        }
+        for (group, in_flight) in &self.group_in_flight {
+            gauges.entry(*group).or_default().1 = *in_flight;
+        }
+        gauges.into_iter().map(|(g, (q, f))| (g, q, f)).collect()
+    }
+
     /// Returns the total number of queued items
     fn queued_count(&self) -> usize {
         self.groups
@@ -275,6 +328,12 @@ impl RoutingTable {
         loop {
             // Start as much pending work as possible from the priority queue
             state.start_pending_work(&registry, &mut in_flight);
+
+            veilid_stats!(registry
+                .routing_table()
+                .ping_stats
+                .lock()
+                .record_queue_gauges(&state.group_gauges()));
 
             if in_flight.is_empty() {
                 // Nothing in-flight: block on channel recv
@@ -472,6 +531,27 @@ impl RoutingTable {
         accepted
     }
 
+    /// Request a route test that runs as soon as blame is not suppressed, bypassing
+    /// the test cooldown
+    pub fn request_route_test(&self, route_id: RouteId) {
+        self.deferred_route_tests.lock().insert(route_id);
+    }
+
+    /// Drain the deferred-test set, clearing each route's test cooldown so the
+    /// retest is not swallowed by the interval that deferred it
+    pub fn take_deferred_route_tests(&self) -> Vec<RouteId> {
+        let deferred: Vec<RouteId> = mem::take(&mut *self.deferred_route_tests.lock())
+            .into_iter()
+            .collect();
+        if !deferred.is_empty() {
+            let mut recent = self.route_test_cooldown.lock();
+            for route_id in &deferred {
+                recent.remove(route_id);
+            }
+        }
+        deferred
+    }
+
     /// Enqueue per-ordering loopback pings for allocated routes. Same shape as a test,
     /// driven by the keepalive rate limiter; the entry it produces is identical.
     pub async fn enqueue_route_loopback_keepalives(
@@ -651,8 +731,8 @@ impl RoutingTable {
                                 .online_detector()
                                 .blame_suppressed(RoutingDomain::PublicInternet)
                             {
-                                #[cfg(feature = "verbose-tracing")]
                                 veilid_log!(registry debug "Deferring remote route release (offline/degraded): {:#}", route_id_clone);
+                                routing_table.request_route_test(route_id_clone);
                             } else {
                                 veilid_log!(registry debug "Remote route test failed (no response): {:#}", route_id_clone);
                                 routing_table
@@ -691,10 +771,9 @@ impl RoutingTable {
                 let routing_table = registry.routing_table();
                 let rss = routing_table.route_spec_store();
                 let sdr = match result {
-                    Ok(StatusResult::Sent(_status_answer)) => {
+                    Ok(StatusResult::Sent(status_answer)) => {
                         // End-to-end route round-trip (includes inter-hop legs), not a per-node RTT.
-                        #[cfg(feature = "verbose-tracing")]
-                        veilid_log!(registry debug "Route loopback rtt: route={:#} ord={:#} rtt={:#} hops={}", route_key, ordering, _status_answer.answer.answer_context.latency, hops.len());
+                        veilid_log!(registry debug target: "rtab::stats", "Route loopback rtt: route={:#} ord={:#} rtt={:#} hops={}", route_key, ordering, status_answer.answer.answer_context.latency, hops.len());
 
                         let cur_ts = Timestamp::now();
                         rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
@@ -719,9 +798,19 @@ impl RoutingTable {
                     .online_detector()
                     .blame_suppressed(RoutingDomain::PublicInternet)
                 {
-                    #[cfg(feature = "verbose-tracing")]
-                    veilid_log!(registry debug "Deferring route loopback failure (offline/degraded): {:#} ({:#})", route_id, ordering);
-                    return Vec::new();
+                    // Unbounded deferral makes a dead route immortal: its failures
+                    // are never recorded, so it is never released
+                    let mut deferrals = 0;
+                    rss.update_allocated_route_stats(Timestamp::now(), &route_key, |s| {
+                        deferrals = s.record_loopback_deferral(ordering);
+                        Ok(())
+                    });
+                    if deferrals <= MAX_LOOPBACK_FAILURE_DEFERRALS {
+                        veilid_log!(registry debug "Deferring route loopback failure (offline/degraded): {:#} ({:#})", route_id, ordering);
+                        routing_table.request_route_test(route_id);
+                        return Vec::new();
+                    }
+                    veilid_log!(registry debug "Route loopback deferral cap reached, recording failure: {:#} ({:#})", route_id, ordering);
                 }
 
                 // Neither route nor hops can be blamed for a transport we could not send on

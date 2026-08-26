@@ -40,13 +40,15 @@ macro_rules! impl_crypto_typed {
                 }
             }
 
-            #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
             impl $name {
                 /// The cryptosystem this value belongs to.
-                #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(getter, unchecked_return_type = "CryptoKind"))]
                 pub fn kind(&self) -> CryptoKind {
                     self.kind
                 }
+            }
+
+            #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
+            impl $name {
                 /// A clone of the untagged value.
                 #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(getter))]
                 #[allow(dead_code)]
@@ -149,9 +151,20 @@ macro_rules! impl_crypto_typed {
             #[wasm_bindgen]
             impl $name {
                 /// Pairs a value with the `CryptoKind` it belongs to.
+                ///
+                /// Errors with `VeilidAPIError::ParseError` if `kind` is not a four-character code.
                 #[wasm_bindgen(constructor)]
-                pub fn js_new(kind: CryptoKind, value: [<Bare $name>]) -> Self {
-                    Self::new(kind,value)
+                pub fn js_new(
+                    #[wasm_bindgen(unchecked_param_type = "CryptoKind")]
+                    kind: String,
+                    value: [<Bare $name>]) -> VeilidAPIResult<Self> {
+                    Ok(Self::new(CryptoKind::from_str(&kind)?, value))
+                }
+
+                /// The cryptosystem this value belongs to.
+                #[wasm_bindgen(getter, js_name = kind, unchecked_return_type = "CryptoKind")]
+                pub fn js_kind(&self) -> String {
+                    self.kind.to_string()
                 }
 
                 /// Parses a `$name` from its `kind:value` string form; a bare value with no `kind:` prefix decodes against the best available kind.

@@ -216,6 +216,11 @@ impl BucketEntrySnapshot {
     /// transport's own state: when the node is unreliable, every transport is pinged at the fast
     /// unreliable interval so a stale 'reliable' transport gets re-probed and can degrade,
     /// instead of riding the slow reliable backoff.
+    ///
+    /// EXCEPT an ordering with consecutive lost questions at the Failing threshold, which
+    /// probes on a falloff from its steady-loss start: it is either down (the [D3]/[D4]
+    /// spans need no more evidence than a few probes provide) or chronically flaky
+    /// (full-rate probing of it is what floods the ping queue and the loss logs).
     pub fn needs_proof_of_life_ping(
         &self,
         routing_domain: RoutingDomain,
@@ -229,10 +234,35 @@ impl BucketEntrySnapshot {
                 continue;
             };
 
+            if stats.recent_lost_questions >= TRANSPORT_FAILING_LOST_QUESTIONS
+                && !matches!(
+                    self.state,
+                    BucketEntryState::Punished | BucketEntryState::Dead
+                )
+            {
+                if let (Some(last_question_ts), Some(first_steady_lost_ts)) =
+                    (stats.last_question_ts, stats.first_steady_lost_question_ts)
+                {
+                    if retry_falloff_log(
+                        last_question_ts
+                            .duration_since(first_steady_lost_ts)
+                            .as_u64(),
+                        self.cur_ts.duration_since(first_steady_lost_ts).as_u64(),
+                        UNRELIABLE_PING_INTERVAL.as_u64(),
+                        RELIABLE_PING_INTERVAL_MAX.as_u64(),
+                        RELIABLE_PING_INTERVAL_MULTIPLIER,
+                    ) {
+                        out |= so;
+                    }
+                    continue;
+                }
+            }
+
             let needs_ping = match self.state {
                 BucketEntryState::Punished | BucketEntryState::Dead => false,
-                BucketEntryState::Missing | BucketEntryState::Initial => true,
-                BucketEntryState::Unreliable => match stats.last_question_ts {
+                BucketEntryState::Missing
+                | BucketEntryState::Initial
+                | BucketEntryState::Unreliable => match stats.last_question_ts {
                     None => true,
                     Some(last_question_ts) => {
                         self.cur_ts.duration_since(last_question_ts) >= UNRELIABLE_PING_INTERVAL

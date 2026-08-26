@@ -116,6 +116,9 @@ impl VeilidAPI {
         options: Option<TransactDHTRecordsOptions>,
     ) -> VeilidAPIResult<OutboundTransactionHandle> {
         self.mock_require_dht_online()?;
+        for record_key in &record_keys {
+            check_fault(MockFaultOp::Begin, Some(record_key), None)?;
+        }
         let key = self.mock_key()?;
         if record_keys.is_empty() {
             apibail_invalid_argument!("no records in transaction", "record_keys", "[]");
@@ -275,6 +278,10 @@ impl VeilidAPI {
             apibail_generic!("failed schema validation: {}:{}", record_key, subkey);
         }
 
+        // Staged like a storage node would hold it: ciphertext, so the sequence and
+        // identical-bytes rules below compare what is actually stored
+        let data = self.mock_crypt_value(&record_key, subkey, &data)?;
+
         with_transactions(|txns| {
             let tx = txns.get_mut(&handle.txid).ok_or_else(not_found)?;
             let slot = (record_key.opaque(), subkey);
@@ -350,7 +357,9 @@ impl VeilidAPI {
                 tx.reads.insert(slot, value);
             }
             VeilidAPIResult::Ok(value)
-        })
+        })?
+        .map(|v| self.mock_crypt_value_data(&record_key, subkey, &v))
+        .transpose()
     }
 
     /// Report a transaction's view of a record without touching the network.
@@ -442,6 +451,7 @@ impl VeilidAPI {
         handle: OutboundTransactionHandle,
     ) -> VeilidAPIResult<()> {
         self.mock_require_dht_online()?;
+        check_fault(MockFaultOp::Commit, None, None)?;
         let key = self.mock_key()?;
         let tx = with_transactions(|txns| txns.remove(&handle.txid).ok_or_else(not_found))?;
 
@@ -481,7 +491,7 @@ impl VeilidAPI {
 
         for r in &tx.records {
             if let Some(subkeys) = changed.get(&r.record_key.opaque()) {
-                report_value_change(&r.record_key, subkeys);
+                self.report_value_change(&r.record_key, subkeys);
             }
         }
 

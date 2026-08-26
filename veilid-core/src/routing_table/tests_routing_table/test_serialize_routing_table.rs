@@ -203,7 +203,7 @@ pub async fn test_replace_node_ids_rejects_without_valid_id() {
         let entry = {
             let inner = rt.inner.read();
             let mut found = None;
-            'outer: for (_ck, buckets) in inner.buckets.iter() {
+            'outer: for buckets in inner.buckets.values() {
                 for bucket in buckets {
                     if let Some((_k, e)) = bucket.entries().next() {
                         found = Some(e.clone());

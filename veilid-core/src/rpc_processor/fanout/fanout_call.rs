@@ -219,6 +219,8 @@ pub(crate) struct FanoutCall<'a> {
     post_consensus_timeout_callback: Option<FanoutPostConsensusTimeoutCallback>,
     /// Accepts this run needs, when it differs from `consensus_count` (see `set_run_target`)
     opt_run_target_count: Option<usize>,
+    /// Accepts to keep collecting toward after consensus (see `set_collection_count`)
+    collection_count: usize,
     /// Seed from never-contacted nodes too (see `set_seed_untried`)
     seed_untried: bool,
 }
@@ -269,6 +271,7 @@ impl<'a> FanoutCall<'a> {
             check_done,
             post_consensus_timeout_callback: None,
             opt_run_target_count: None,
+            collection_count: params.consensus_count,
             seed_untried: false,
         }
     }
@@ -312,6 +315,21 @@ impl<'a> FanoutCall<'a> {
     pub fn set_run_target(&mut self, target_count: usize, check_done: FanoutCheckDone) {
         self.opt_run_target_count = Some(target_count);
         self.check_done = check_done;
+    }
+
+    /// Keep dispatching replacement candidates after consensus until this many
+    /// accepts, the queue exhausts, or the post-consensus window closes.
+    ///
+    /// The default (= `consensus_count`) stops all dispatch at consensus, so only
+    /// lanes already in flight can add accepts; a caller that wants headroom
+    /// beyond the durability minimum raises this to its collection cap.
+    pub fn set_collection_count(&mut self, collection_count: usize) {
+        self.collection_count = collection_count.max(self.consensus_count);
+    }
+
+    /// Whether this run keeps working the queue after consensus
+    fn collecting_past_consensus(&self) -> bool {
+        self.collection_count > self.consensus_count
     }
 
     /// Accepts this run must collect to call it consensus
@@ -399,7 +417,12 @@ impl<'a> FanoutCall<'a> {
             if ctx.consensus_reached_ts.is_none() {
                 ctx.consensus_reached_ts = Some(Timestamp::now_non_decreasing());
             }
-            drop(ctx.ticker_stop_source.take())
+            // On Done a collecting run keeps the ticker so replacements still
+            // dispatch; the post-consensus window bounds how long that lasts
+            if matches!(done, FanoutDoneDisposition::DoneEarly) || !self.collecting_past_consensus()
+            {
+                drop(ctx.ticker_stop_source.take())
+            }
         }
         done
     }
@@ -413,13 +436,17 @@ impl<'a> FanoutCall<'a> {
         lane_name: String,
         context: &Mutex<FanoutContext<'_>>,
     ) -> Result<FanoutProcessorReturn, RPCError> {
-        // Make a stop token to break out when we're done
-        let stop_token = context
+        // Make a stop token to break out when we're done; a fanout that finished
+        // before this lane started has nothing left for it to do
+        let Some(stop_token) = context
             .lock()
             .ticker_stop_source
             .as_ref()
-            .ok_or_else(|| RPCError::internal("should have stop source"))?
-            .token();
+            .map(|ss| ss.token())
+        else {
+            veilid_log!(self debug "{}[{}]: Fanout finished before lane started", self.name, lane_name);
+            return Ok(FanoutProcessorReturn::Done);
+        };
 
         // Loop until we have a result or are done
         loop {
@@ -519,8 +546,12 @@ impl<'a> FanoutCall<'a> {
                                 break Ok(FanoutProcessorReturn::DoneEarly);
                             }
                             FanoutDoneDisposition::Done => {
-                                veilid_log!(self debug "{}[{}]: Fanout done, letting other lanes complete", self.name, lane_name);
-                                break Ok(FanoutProcessorReturn::Done);
+                                if self.collecting_past_consensus() {
+                                    veilid_log!(self debug "{}[{}]: Consensus met, lane continuing toward collection target", self.name, lane_name);
+                                } else {
+                                    veilid_log!(self debug "{}[{}]: Fanout done, letting other lanes complete", self.name, lane_name);
+                                    break Ok(FanoutProcessorReturn::Done);
+                                }
                             }
                             FanoutDoneDisposition::NotDone => {
                                 veilid_log!(self debug "{}[{}]: Work done, lane checking for more work", self.name, lane_name);
@@ -626,6 +657,7 @@ impl<'a> FanoutCall<'a> {
                 self.hash_coordinate.kind(),
                 node_sort,
                 self.consensus_count,
+                self.collection_count,
                 self.consensus_width,
                 match fanout_queue_mode {
                     FanoutQueueMode::ThrottleAtConsensus => {

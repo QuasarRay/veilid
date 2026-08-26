@@ -9,6 +9,13 @@
 //! - While suppressed, one canary send per CANARY_INTERVAL_SECS probes for
 //!   recovery; it is spent at decision time so concurrent selections cannot all
 //!   escape with it
+//! - Enforcement (skipping sends, rationing the canary) runs only while the
+//!   domain's outbound stage is ReadyToOperate. Until then every send is a
+//!   canary: with too few live peers the evidence is stale by construction (a
+//!   whole-fleet restart looks exactly like a broken local transport), and
+//!   bootstrap/dial-info-confirmation sends must flow to make progress. Verdicts
+//!   still accrue and still void peer blame; enforcement re-arms on readiness,
+//!   and any degradation that costs readiness lifts it again
 //! - Debug `transport disable` fails low-level sends with NoConnection, driving
 //!   this machinery with real evidence instead of overriding verdicts
 
@@ -224,6 +231,9 @@ pub(crate) struct TransportStats {
     registry: VeilidComponentRegistry,
     /// One send-outcome window per routing domain and transport
     windows: Mutex<BTreeMap<(RoutingDomain, LowLevelTransportType), TransportWindow>>,
+    /// Domains where enforcement is armed (outbound stage ReadyToOperate); absent
+    /// means suppression is advisory only and every send doubles as a canary
+    enforcing: Mutex<BTreeSet<RoutingDomain>>,
     /// Debug availability overrides; value is the change generation so a timed
     /// toggle only reverts state nothing else has touched since
     disabled: Mutex<BTreeMap<LowLevelTransportType, u64>>,
@@ -240,6 +250,7 @@ impl TransportStats {
         Self {
             registry,
             windows: Mutex::new(BTreeMap::new()),
+            enforcing: Mutex::new(BTreeSet::new()),
             disabled: Mutex::new(BTreeMap::new()),
             #[cfg(feature = "debug-api")]
             change_generation: Mutex::new(0),
@@ -396,6 +407,29 @@ impl TransportStats {
         false
     }
 
+    /// Arm or stand down suppression enforcement for a routing domain; armed only
+    /// while the domain's outbound stage is ReadyToOperate
+    pub fn set_enforcing(&self, routing_domain: RoutingDomain, enforcing: bool) {
+        let changed = {
+            let mut set = self.enforcing.lock();
+            if enforcing {
+                set.insert(routing_domain)
+            } else {
+                set.remove(&routing_domain)
+            }
+        };
+        if changed {
+            veilid_log!(self debug "transport suppression {} for {:?}",
+                if enforcing { "armed: outbound ready" } else { "standing down: outbound not ready" },
+                routing_domain);
+        }
+    }
+
+    /// Whether suppression enforcement is armed for this domain
+    pub fn is_enforcing(&self, routing_domain: RoutingDomain) -> bool {
+        self.enforcing.lock().contains(&routing_domain)
+    }
+
     /// Decision-point verdict check that spends the canary at selection time, so
     /// sends picked during the in-flight window cannot all escape with it.
     /// Never use for read-only verdict queries.
@@ -404,6 +438,10 @@ impl TransportStats {
         routing_domain: RoutingDomain,
         transport: TransportType,
     ) -> bool {
+        // Until enforcement arms, sends flow freely and none may spend the canary
+        if !self.is_enforcing(routing_domain) {
+            return false;
+        }
         let transport = LowLevelTransportType::from(transport);
         let cur_ts = Timestamp::now();
         let mut windows = self.windows.lock();
@@ -458,6 +496,9 @@ impl TransportStats {
         if before != windows.len() {
             veilid_log!(self debug "transport stats reset for {:?}: {}", routing_domain, reason);
         }
+        drop(windows);
+        // Stand down until the domain controller re-arms on readiness
+        self.set_enforcing(routing_domain, false);
     }
 
     /// Per-domain health lines. `take_skipped` resets the skip counters, which only
@@ -509,7 +550,11 @@ impl TransportStats {
             .into_iter()
             .map(|(rd, mut entries)| {
                 entries.sort();
-                (rd, entries.join(" | "))
+                let mut line = entries.join(" | ");
+                if !self.is_enforcing(rd) {
+                    line += " [advisory: enforcement not armed]";
+                }
+                (rd, line)
             })
             .collect()
     }

@@ -457,12 +457,14 @@ impl RouteSpecStoreCache {
         for arce in self.allocated_route_set_cache.values() {
             arce.with_stats_mut(|s| {
                 s.roll_transfers(last_ts, cur_ts);
+                s.update_latency_stats();
             });
         }
 
         for (_, rrce) in self.remote_route_set_cache.iter() {
             rrce.with_stats_mut(|s| {
                 s.roll_transfers(last_ts, cur_ts);
+                s.update_latency_stats();
             });
         }
     }

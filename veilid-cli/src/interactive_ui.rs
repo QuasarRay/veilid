@@ -493,7 +493,7 @@ impl LogWriter for InteractiveUISender {
         indent += levstr.len();
         lines += &levstr;
 
-        let args = format!("{}", &record.args());
+        let args = format!("{}", record.args());
         lines += &indent_by(indent, args);
 
         print!("{}\r\n", lines);

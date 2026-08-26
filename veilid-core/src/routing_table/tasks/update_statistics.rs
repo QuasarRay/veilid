@@ -47,7 +47,10 @@ impl RoutingTable {
         // Roll all bucket entry transfers
         let all_entries: Vec<Arc<BucketEntry>> = self.inner.read().all_entries.iter().collect();
         for entry in all_entries {
-            entry.with_mut(|e| e.update_state_stats());
+            entry.with_mut(|e| {
+                e.update_state_stats();
+                e.update_latency_stats();
+            });
         }
 
         Ok(())

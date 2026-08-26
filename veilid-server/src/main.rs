@@ -79,7 +79,6 @@ pub struct CmdlineArgs {
     flame: Option<OsString>,
 
     /// Turn on stats logging (--stats=<seconds>[,<directory>]; omit directory for the 'stats' log facility)
-    #[cfg(feature = "stats")]
     #[arg(long, value_name = "SPEC", num_args=0..=1, require_equals=true, default_missing_value = "")]
     stats: Option<String>,
 
@@ -261,7 +260,6 @@ fn main() -> EyreResult<()> {
         settingsrw.logging.flame.enabled = true;
         settingsrw.logging.flame.path = flame;
     }
-    #[cfg(feature = "stats")]
     if let Some(stats) = args.stats {
         let (secs_str, dir) = match stats.split_once(',') {
             Some((s, d)) => (s.trim(), d.trim().to_owned()),
@@ -274,6 +272,7 @@ fn main() -> EyreResult<()> {
                 .parse::<u32>()
                 .wrap_err("invalid --stats duration")?
         };
+        #[cfg(feature = "stats")]
         if dir.is_empty() {
             println!("Enabling stats logging every {interval_secs}s to the 'stats' log facility");
         } else {
@@ -487,6 +486,11 @@ fn main() -> EyreResult<()> {
 
     // --- Verify Config ---
     settings.verify()?;
+
+    #[cfg(not(feature = "stats"))]
+    if settings.read().logging.stats.enabled {
+        println!("Stats logging configured but the stats feature is not compiled in; ignoring");
+    }
 
     // --- Dump Config ---
     if args.dump_config {

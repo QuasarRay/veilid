@@ -13,18 +13,21 @@ rust-version.workspace = true
 publish = false
 
 [lib]
+# Cargo derives this from the package name; native_toolchain_rust 1.0.6 reads
+# it out of the manifest and fails the build hook when it is not written down
+name = "veilid_flutter"
 crate-type = ["cdylib", "staticlib", "rlib"]
 path = "src/lib.rs"
 
 [features]
-default = ["rt-tokio", "veilid-core/default", "stats"]
+default = ["rt-tokio", "veilid-core/default"]
 default-wasm = ["veilid-core/default-wasm"]
 debug-api = ["veilid-core/debug-api"]
 stats = ["veilid-core/stats"]
 crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
 
-# Run against the in-process mock instead of the network. Excludes stats, so these need their own
-# default-free feature set:
+# Run against the in-process mock instead of the network. Mutually exclusive with the
+# (non-default) stats feature. Self-contained feature sets:
 #   cargo build -p veilid-flutter --no-default-features --features mock-api
 #   cargo build -p veilid-flutter --no-default-features --features mock-api-wasm --target wasm32-unknown-unknown
 mock-api = ["rt-tokio", "veilid-core/mock-api", "veilid-core/default-tokio", "debug-api"]
@@ -104,3 +107,6 @@ lazy_static = "1.5.0"
 
 [lints]
 workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

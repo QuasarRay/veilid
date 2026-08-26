@@ -1462,7 +1462,7 @@ impl LogWriter for CursiveUISender {
     fn write(&self, _now: &mut DeferredNow, record: &Record) -> std::io::Result<()> {
         let color = *self.colors.get(&record.level()).unwrap_or_log();
 
-        let args = format!("[veilid-cli] {}", &record.args());
+        let args = format!("[veilid-cli] {}", record.args());
 
         let mut line = StyledString::new();
         let mut indent = 0;

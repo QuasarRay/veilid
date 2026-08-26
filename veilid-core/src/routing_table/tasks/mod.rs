@@ -1,5 +1,7 @@
 pub mod flush;
 pub mod kick_buckets;
+#[cfg(feature = "stats")]
+pub mod ping_stats_accounting;
 pub mod ping_validator;
 pub mod update_cm_viability;
 pub mod update_statistics;

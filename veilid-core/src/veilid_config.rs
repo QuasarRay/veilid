@@ -31,7 +31,7 @@ cfg_if::cfg_if! {
 /// ```
 ///
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigUDP {
     /// Enable the UDP protocol.
     pub enabled: bool,
@@ -69,7 +69,7 @@ impl Default for VeilidConfigUDP {
 ///     public_address: ''
 ///
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigTCP {
     /// Allow outbound TCP connections.
     pub connect: bool,
@@ -113,7 +113,7 @@ impl Default for VeilidConfigTCP {
 ///     url: 'ws://localhost:5150/ws'
 ///
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigWS {
     /// Allow outbound WebSocket connections.
     pub connect: bool,
@@ -161,7 +161,7 @@ impl Default for VeilidConfigWS {
 ///
 #[cfg(feature = "enable-protocol-wss")]
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigWSS {
     /// Allow outbound secure WebSocket connections.
     pub connect: bool,
@@ -197,7 +197,7 @@ impl Default for VeilidConfigWSS {
 /// sort out which protocol is used for each peer connection.
 ///
 #[apply(api_data_struct!)]
-#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, default, ts)]
 pub struct VeilidConfigProtocol {
     /// UDP protocol configuration.
     pub udp: VeilidConfigUDP,
@@ -219,11 +219,7 @@ pub struct VeilidConfigProtocol {
 /// ```
 #[apply(api_data_struct!)]
 #[api(eq, default)]
-#[cfg_attr(
-    target_arch = "wasm32",
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
+#[cfg_attr(target_arch = "wasm32", derive(Tsify))]
 pub struct VeilidConfigPrivacy {
     /// Always use an inbound relay; never accept direct inbound connections.
     pub require_inbound_relay: bool,
@@ -242,11 +238,7 @@ pub struct VeilidConfigPrivacy {
 #[cfg(feature = "virtual-network")]
 #[apply(api_data_struct!)]
 #[api(eq, default)]
-#[cfg_attr(
-    target_arch = "wasm32",
-    derive(Tsify),
-    tsify(into_wasm_abi, from_wasm_abi)
-)]
+#[cfg_attr(target_arch = "wasm32", derive(Tsify))]
 pub struct VeilidConfigVirtualNetwork {
     /// Route all networking through the virtual network server.
     pub enabled: bool,
@@ -263,7 +255,7 @@ pub struct VeilidConfigVirtualNetwork {
 ///     connection_initial_timeout_ms: 2000
 ///
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigTLS {
     /// Path to the TLS certificate (PEM) for inbound TLS protocols.
     pub certificate_path: String,
@@ -314,7 +306,7 @@ pub fn get_default_ssl_directory(
 /// If you change the count/fanout/timeout parameters, you may render your node inoperable
 /// for correct DHT operations.
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigDHT {
     /// Number of subkeys cached for locally-created DHT records.
     pub local_subkey_cache_size: u32,
@@ -387,7 +379,7 @@ impl Default for VeilidConfigDHT {
 /// Configure RPC.
 ///
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigRPC {
     /// Default number of hops used when allocating private routes.
     pub default_route_hop_count: u8,
@@ -404,7 +396,7 @@ impl Default for VeilidConfigRPC {
 /// Configure the network routing table.
 ///
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigRoutingTable {
     /// This node's identity public keys, by crypto kind (empty = generate fresh).
     #[cfg_attr(feature = "schemars", schemars(with = "Vec<String>"))]
@@ -462,7 +454,7 @@ impl Default for VeilidConfigRoutingTable {
 
 /// An IP address family (IP version) the node may use.
 #[apply(api_data_enum!)]
-#[api(eq, copy, ord, hash, ts(namespace, into_wasm_abi, from_wasm_abi))]
+#[api(eq, copy, ord, hash, ts(namespace))]
 pub enum VeilidConfigAddressType {
     /// IPv4 (32-bit) addresses.
     #[serde(rename = "IPV4", alias = "ipv4", alias = "v4", alias = "4")]
@@ -494,7 +486,7 @@ impl FromStr for VeilidConfigAddressType {
 
 /// Network subsystem configuration: connections, routing table, RPC, DHT, transports, and privacy.
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigNetwork {
     /// Maximum total simultaneous connections across all protocols.
     /// Range: native 32-512, wasm32/browser 16-64.
@@ -549,7 +541,7 @@ impl Default for VeilidConfigNetwork {
 
 /// Table store configuration: the encrypted key-value database backing node state.
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigTableStore {
     /// Directory holding the table store database (empty = platform default).
     pub directory: String,
@@ -600,7 +592,7 @@ fn get_default_store_path(
 
 /// Block store configuration: content-addressed block storage.
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigBlockStore {
     /// Directory holding the block store (empty = platform default).
     pub directory: String,
@@ -624,7 +616,7 @@ impl Default for VeilidConfigBlockStore {
 /// native, `localStorage` in a browser Window, IndexedDB in a worker, and extension storage in a
 /// WebExtension.
 #[apply(api_data_enum!)]
-#[api(eq, copy, ord, default, ts(namespace, into_wasm_abi, from_wasm_abi))]
+#[api(eq, copy, ord, default, ts(namespace))]
 pub enum VeilidConfigProtectedStoreBackend {
     /// Choose automatically based on the platform and runtime context.
     #[default]
@@ -641,7 +633,7 @@ pub enum VeilidConfigProtectedStoreBackend {
 
 /// Protected store configuration: where secrets such as the device encryption key are kept.
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigProtectedStore {
     /// Fall back to insecure file storage if no OS keychain/keyring is available.
     pub allow_insecure_fallback: bool,
@@ -676,7 +668,7 @@ impl Default for VeilidConfigProtectedStore {
 
 /// Capabilities advertised by this node.
 #[apply(api_data_struct!)]
-#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, default, ts)]
 pub struct VeilidConfigCapabilities {
     /// Capabilities to disable (advertised as unavailable).
     pub disable: Vec<VeilidCapability>,
@@ -684,7 +676,7 @@ pub struct VeilidConfigCapabilities {
 
 /// Logging level threshold (`Off` disables logging).
 #[apply(api_data_enum!)]
-#[api(eq, copy, ord, default, ts(namespace, into_wasm_abi, from_wasm_abi))]
+#[api(eq, copy, ord, default, ts(namespace))]
 pub enum VeilidConfigLogLevel {
     /// Logging disabled.
     #[default]
@@ -834,7 +826,7 @@ impl fmt::Display for VeilidConfigLogLevel {
 
 /// Internal "footgun" UDP configuration. See [VeilidConfigInternal].
 #[apply(api_data_struct!)]
-#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, default, ts)]
 pub struct VeilidConfigInternalUDP {
     /// Number of UDP sockets in the send/receive pool (0 = automatic).
     pub socket_pool_size: u32,
@@ -842,7 +834,7 @@ pub struct VeilidConfigInternalUDP {
 
 /// Internal "footgun" per-protocol configuration. See [VeilidConfigInternal].
 #[apply(api_data_struct!)]
-#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, default, ts)]
 pub struct VeilidConfigInternalProtocol {
     /// Internal UDP tuning.
     pub udp: VeilidConfigInternalUDP,
@@ -850,7 +842,7 @@ pub struct VeilidConfigInternalProtocol {
 
 /// Internal "footgun" RPC configuration. See [VeilidConfigInternal].
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigInternalRPC {
     /// Number of concurrent RPC worker tasks (0 = automatic).
     pub concurrency: u32,
@@ -884,7 +876,7 @@ impl Default for VeilidConfigInternalRPC {
 /// Changing the count/fanout/timeout parameters may render your node inoperable for
 /// correct DHT operations.
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigInternalDHT {
     /// Maximum number of nodes returned by a FindNode query.
     pub max_find_node_count: u32,
@@ -953,7 +945,7 @@ impl Default for VeilidConfigInternalDHT {
 
 /// Internal "footgun" network configuration. See [VeilidConfigInternal].
 #[apply(api_data_struct!)]
-#[api(eq, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, ts)]
 pub struct VeilidConfigInternalNetwork {
     /// Timeout to establish a new connection, in milliseconds.
     pub connection_initial_timeout_ms: u32,
@@ -1014,7 +1006,7 @@ impl Default for VeilidConfigInternalNetwork {
 /// veilid-core is built with the `footgun-config` feature; without it, any non-default values
 /// here are reset to defaults at startup (with a warning).
 #[apply(api_data_struct!)]
-#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, default, ts)]
 pub struct VeilidConfigInternal {
     /// Internal network tuning.
     pub network: VeilidConfigInternalNetwork,
@@ -1022,7 +1014,7 @@ pub struct VeilidConfigInternal {
 
 /// Top level of the Veilid configuration tree
 #[apply(api_data_struct!)]
-#[api(eq, default, ts(into_wasm_abi, from_wasm_abi))]
+#[api(eq, default, ts)]
 pub struct VeilidConfig {
     /// An identifier used to describe the program using veilid-core.
     /// Used to partition storage locations in places like the ProtectedStore.

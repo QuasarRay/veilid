@@ -94,12 +94,12 @@ impl fmt::Display for OutboundTransactionRecordState {
                 "".to_string()
             },
             if !self.current_consensus.is_empty() {
-                format!("current_subkey_states: {}\n", &self.current_consensus)
+                format!("current_subkey_states: {}\n", self.current_consensus)
             } else {
                 "".to_string()
             },
             if !self.updated_consensus.is_empty() {
-                format!("updated_subkey_states: {}\n", &self.updated_consensus)
+                format!("updated_subkey_states: {}\n", self.updated_consensus)
             } else {
                 "".to_string()
             }

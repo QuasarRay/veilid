@@ -17,6 +17,7 @@ impl VeilidAPI {
                     let count = node.local_records.len();
                     node.opened_records.clear();
                     node.local_records.clear();
+                    node.local_descriptors.clear();
                     node.offline_writes.clear();
                     count
                 })?;
@@ -52,6 +53,31 @@ impl VeilidAPI {
                 })?;
                 Ok(node_ids.join(" "))
             }
+            // Same grammar as the real command: `config [insecure] [key]`
+            ["config", rest @ ..] => {
+                let config = self.config()?;
+                let (config, rest) = match rest {
+                    ["insecure", rest @ ..] => (config, rest),
+                    rest => (config.safe(), rest),
+                };
+                // Materialize the effective internal config so `internal.*` keys
+                // resolve even when startup json omitted the section
+                let mut config = (*config).clone();
+                if config.internal.is_none() {
+                    let effective = config.internal().clone();
+                    config.internal = Some(effective);
+                }
+                match rest {
+                    [] => config.get_key_json("", true),
+                    [key] => config.get_key_json(key, true),
+                    _ => Err(VeilidAPIError::invalid_argument(
+                        "debug_config",
+                        "args",
+                        args.to_owned(),
+                    )),
+                }
+            }
+            ["fault", rest @ ..] => mock_debug_fault(rest),
             _ => Ok(format!(
                 "unsupported under mock-api: '{}'\n\n{}",
                 args, MOCK_DEBUG_HELP
@@ -66,4 +92,18 @@ mock-api debug commands:
     record purge remote     no-op: a mock node holds no records for others
     record list             list the mock network's records
     record list local       list the records this node holds copies of
-    nodeid                  show this node's ids";
+    nodeid                  show this node's ids
+    config [insecure] [key] dump config json, or one dot-path key
+    fault arm OP MODE [--count N] [--record PREFIX] [--subkeys A,B]
+                            fail an operation the way the network would.
+                            OP is what to fail:
+                              begin commit get set inspect open create
+                            MODE is how it fails:
+                              try_again timeout key_not_found generic silent
+                            silent means succeed and produce nothing, and
+                            applies to get and set only.
+                            --count limits how many times it fires, default
+                            until cleared; --record and --subkeys narrow it
+                            to one record or a few of its subkeys.
+    fault list              what is armed, and how often each has fired
+    fault clear             disarm every fault";

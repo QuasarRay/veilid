@@ -155,7 +155,6 @@ pub async fn run_veilid_server_subnode(
             info!("Stats logging enabled every {}s", interval_secs);
         }
     }
-
     // Start client api if one is requested
     let capi_enabled = settings_client_api_ipc_enabled || settings_client_api_network_enabled;
     let mut capi = if capi_enabled && matches!(server_mode, ServerMode::Normal) {

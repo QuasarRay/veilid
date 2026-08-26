@@ -231,7 +231,7 @@ fn failed_with(msg: &str, value: &dyn fmt::Debug) -> ! {
     #[cfg(feature = "panic-quiet")]
     panic!();
     #[cfg(not(feature = "panic-quiet"))]
-    panic!("{}: {:?}", msg, &value);
+    panic!("{}: {:?}", msg, value);
 }
 
 #[inline(never)]

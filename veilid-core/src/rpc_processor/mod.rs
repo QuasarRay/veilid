@@ -133,17 +133,13 @@ struct RPCProcessorInner {
     rpc_stop_source: Option<StopSource>,
     /// The join handles for the RPC workers
     rpc_worker_join_handles: Vec<MustJoinHandle<()>>,
-    /// The dequeue latency stats for the RPC workers
-    rpc_worker_dequeue_latency: LatencyStats,
-    /// The processing latency stats for the RPC workers
-    rpc_worker_process_latency: LatencyStats,
     /// The dequeue latency stats accounting for the RPC workers
     rpc_worker_dequeue_latency_accounting: LatencyStatsAccounting,
     /// The processing latency stats accounting for the RPC workers
     rpc_worker_process_latency_accounting: LatencyStatsAccounting,
-    /// The processing latency stats and accounting for the RPC workers by operation kind
+    /// The processing latency accounting and count for the RPC workers by operation kind
     rpc_worker_process_latency_and_accounting_by_operation_kind:
-        BTreeMap<&'static str, (LatencyStats, LatencyStatsAccounting, u64)>,
+        BTreeMap<&'static str, (LatencyStatsAccounting, u64)>,
 }
 
 #[derive(Debug)]
@@ -179,8 +175,6 @@ impl RPCProcessor {
             rpc_send_channel: None,
             rpc_stop_source: None,
             rpc_worker_join_handles: Vec::new(),
-            rpc_worker_dequeue_latency: LatencyStats::default(),
-            rpc_worker_process_latency: LatencyStats::default(),
             rpc_worker_dequeue_latency_accounting: LatencyStatsAccounting::new(),
             rpc_worker_process_latency_accounting: LatencyStatsAccounting::new(),
             rpc_worker_process_latency_and_accounting_by_operation_kind: BTreeMap::new(),
@@ -1168,31 +1162,6 @@ impl RPCProcessor {
         node_ref.clear_last_flows();
     }
 
-    /// Node ids attempted by a routed RPC, for offline detection: the route hops plus any
-    /// remote private route first hop.
-    fn online_detector_failure_node_ids(
-        opt_safety_route: Option<&AllocatedRouteRef>,
-        opt_reply_private_route: Option<&AllocatedRouteRef>,
-        opt_remote_private_route: Option<&RemoteRouteRef>,
-    ) -> HashSet<NodeId> {
-        let mut node_ids = HashSet::new();
-        if let Some(sr) = opt_safety_route {
-            node_ids.extend(sr.hop_node_ids());
-        }
-        if let Some(rpr) = opt_reply_private_route {
-            // Skip if the reply route is the same as the safety route.
-            if opt_safety_route.map(|sr| sr.route_key()) != Some(rpr.route_key()) {
-                node_ids.extend(rpr.hop_node_ids());
-            }
-        }
-        if let Some(prr) = opt_remote_private_route {
-            if let Some(first_hop) = prr.first_hop_node_id() {
-                node_ids.insert(first_hop);
-            }
-        }
-        node_ids
-    }
-
     /// Whether our own spread verdict condemns this transport, voiding any blame
     /// evidence carried over it
     fn transport_send_suppressed(
@@ -1248,19 +1217,12 @@ impl RPCProcessor {
         let network_manager = self.network_manager();
         let online_detector = network_manager.online_detector();
         // Only counts toward offline detection if a transport was actually attempted.
-        if let (Some(rd), Some(transport)) = (opt_rd, opt_transport) {
-            let node_ids: Vec<NodeId> = if is_routed {
-                Self::online_detector_failure_node_ids(
-                    safety_route.as_ref(),
-                    None,
-                    remote_private_route.as_ref(),
-                )
-                .into_iter()
-                .collect()
-            } else {
-                vec![node_ref.best_node_id()]
-            };
-            online_detector.record_failure(rd, node_ids, send_ts, transport);
+        // Routed failures are excluded: any hop or the route itself may be at fault, and
+        // spreading one failure across hop ids fabricates the distinct-node breadth that
+        // defines broad failures. Direct sends are the unambiguous local-connectivity
+        // signal; route stats carry routed failures.
+        if let (Some(rd), Some(transport), false) = (opt_rd, opt_transport, is_routed) {
+            online_detector.record_failure(rd, vec![node_ref.best_node_id()], send_ts, transport);
         }
         let suppress_degradation = opt_rd.is_some_and(|rd| online_detector.blame_suppressed(rd));
         let transport_suppressed =
@@ -1323,20 +1285,17 @@ impl RPCProcessor {
 
         let network_manager = self.network_manager();
         let online_detector = network_manager.online_detector();
+        // Routed losses are excluded from offline detection; see record_send_failure
         if let Some(rd) = opt_rd {
-            let node_ids: Vec<NodeId> = if context.is_routed() {
-                Self::online_detector_failure_node_ids(
-                    context.opt_safety_route_ref.as_ref(),
-                    context.opt_reply_private_route_ref.as_ref(),
-                    context.opt_remote_private_route_ref.as_ref(),
-                )
-                .into_iter()
-                .collect()
-            } else {
-                vec![context.node_ref.best_node_id()]
-            };
-            if let Some(transport) = context.send_data_result.transport_type() {
-                online_detector.record_failure(rd, node_ids, context.send_ts, transport);
+            if !context.is_routed() {
+                if let Some(transport) = context.send_data_result.transport_type() {
+                    online_detector.record_failure(
+                        rd,
+                        vec![context.node_ref.best_node_id()],
+                        context.send_ts,
+                        transport,
+                    );
+                }
             }
         }
         let suppress_degradation = opt_rd.is_some_and(|rd| online_detector.blame_suppressed(rd));
@@ -2593,8 +2552,8 @@ impl RPCProcessor {
                 .entry(desc)
                 .or_default();
 
-            entry.0 = entry.1.record_latency(latency);
-            entry.2 += 1;
+            entry.0.record_latency(latency);
+            entry.1 += 1;
         }
         out
     }

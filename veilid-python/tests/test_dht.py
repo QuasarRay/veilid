@@ -738,6 +738,138 @@ async def test_watch_many_dht_values():
                     await rc0.delete_dht_record(record.key)
 
 
+@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.skipif(os.getenv("STRESS") != "1", reason="stress test takes a long time")
+@pytest.mark.asyncio
+async def test_watch_push_sustained():
+    """Sustained watch delivery: subnode 1 writes one record at a steady pace while
+    subnode 0 watches. Every change must arrive, and pushes must stay the dominant
+    delivery path: systematic push loss shows up as latencies at the 30s
+    fallback-inspect cadence even though delivery still succeeds.
+
+    WATCH_STRESS_SECS (default 300) sets the write phase length; over ~600s also
+    crosses a watch renewal boundary.
+    """
+    duration_secs = int(os.getenv("WATCH_STRESS_SECS", "300"))
+    write_period_secs = 2.0
+    fallback_band_secs = 10.0
+    max_fallback_fraction = 0.3
+
+    value_change_queue: asyncio.Queue[veilid.VeilidUpdate] = asyncio.Queue()
+
+    async def value_change_update_callback(update: veilid.VeilidUpdate):
+        if update.kind == veilid.VeilidUpdateKind.VALUE_CHANGE:
+            await value_change_queue.put(update)
+
+    async def null_update_callback(update: veilid.VeilidUpdate):
+        pass
+
+    try:
+        api0 = await veilid.api_connector(value_change_update_callback, 0)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 0.")
+        return
+
+    try:
+        api1 = await veilid.api_connector(null_update_callback, 1)
+    except veilid.VeilidConnectionError:
+        pytest.skip("Unable to connect to veilid-server 1.")
+        return
+
+    async with api0, api1:
+        await api0.debug("record purge local")
+        await api0.debug("record purge remote")
+        await api1.debug("record purge local")
+        await api1.debug("record purge remote")
+        value_change_queue = asyncio.Queue()
+
+        rc0 = await api0.new_routing_context()
+        rc1 = await api1.new_routing_context()
+        async with rc0, rc1:
+            kind = (await api0.valid_crypto_kinds())[0]
+
+            # Server 0: create, seed, and watch the record
+            rec0 = await rc0.create_dht_record(kind, veilid.DHTSchema.dflt(1))
+            vd = await rc0.set_dht_value(rec0.key, ValueSubkey(0), b"stress-0")
+            assert vd is None
+            await sync(rc0, [rec0])
+            active = await rc0.watch_dht_values(rec0.key)
+            assert active
+
+            # Server 1: open for writing and fetch the seed so the first set doesn't conflict
+            rec1 = await rc1.open_dht_record(rec0.key, rec0.owner_key_pair())
+            vd = await rc1.get_dht_value(rec1.key, ValueSubkey(0))
+            assert vd is not None and vd.data == b"stress-0"
+
+            send_done: dict[int, float] = {}
+            delivered: dict[int, float] = {}
+            highest_seen = 0
+
+            async def observe(seq: int, now: float):
+                nonlocal highest_seen
+                # Freshness-on-read: seeing write i delivers every j <= i
+                for j in range(highest_seen + 1, seq + 1):
+                    if j in send_done and j not in delivered:
+                        delivered[j] = now
+                highest_seen = max(highest_seen, seq)
+
+            async def consume(timeout: float) -> bool:
+                try:
+                    upd = await asyncio.wait_for(value_change_queue.get(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    return False
+                if not isinstance(upd.detail, veilid.VeilidValueChange) or upd.detail.key != rec0.key:
+                    return True
+                now = time.monotonic()
+                if upd.detail.value is not None:
+                    await observe(int(upd.detail.value.data.split(b"-")[1]), now)
+                else:
+                    # Hint form: the verifying read consumes the report and re-arms it
+                    vd = await rc0.get_dht_value(rec0.key, ValueSubkey(0), True)
+                    if vd is not None:
+                        await observe(int(vd.data.split(b"-")[1]), time.monotonic())
+                return True
+
+            # Write phase: steady pace on one subkey, consuming deliveries as they come
+            total_writes = max(2, int(duration_secs / write_period_secs))
+            for i in range(1, total_writes + 1):
+                next_write = time.monotonic() + write_period_secs
+                vd = await rc1.set_dht_value(rec1.key, ValueSubkey(0), f"stress-{i}".encode())
+                assert vd is None
+                await sync(rc1, [rec1])
+                send_done[i] = time.monotonic()
+                while (remain := next_write - time.monotonic()) > 0:
+                    if not await consume(remain):
+                        break
+
+            # Drain phase: the last change must arrive within the fallback cadence
+            deadline = time.monotonic() + 60.0
+            while highest_seen < total_writes and (remain := deadline - time.monotonic()) > 0:
+                await consume(remain)
+
+            # Ledger: latency distribution tells push (~1s) from fallback (~30s) delivery
+            lats = sorted(delivered[i] - send_done[i] for i in delivered)
+            missing = total_writes - len(lats)
+            slow = sum(1 for l in lats if l > fallback_band_secs)
+            if lats:
+                print(
+                    f"watch stress ledger: writes={total_writes} delivered={len(lats)} "
+                    f"missing={missing} min={lats[0]:.2f}s median={lats[len(lats)//2]:.2f}s "
+                    f"p90={lats[int(len(lats)*0.9)]:.2f}s max={lats[-1]:.2f}s "
+                    f">5s={sum(1 for l in lats if l > 5.0)} >{fallback_band_secs:.0f}s={slow}"
+                )
+
+            await rc1.close_dht_record(rec1.key)
+            await rc0.close_dht_record(rec0.key)
+            await rc0.delete_dht_record(rec0.key)
+
+            assert highest_seen == total_writes, f"final write never arrived: {highest_seen} < {total_writes}"
+            assert slow / total_writes <= max_fallback_fraction, (
+                f"{slow}/{total_writes} deliveries exceeded {fallback_band_secs}s: "
+                "pushes are being lost and rescued by the fallback inspect"
+            )
+
+
 @pytest.mark.asyncio
 async def test_min_seqnum_dht_value(api_connection: veilid.VeilidAPI):
     rc = await api_connection.new_routing_context()
@@ -1440,6 +1572,15 @@ async def sync_win(
         subkey_count: int,
         init_futures: set[Awaitable[Any]]
     ):
+    import sys
+
+    # headless: curses needs a tty; finish the writes then poll with plain prints
+    if not sys.stdout.isatty():
+        if init_futures:
+            await asyncio.gather(*init_futures)
+        await sync(rc, records)
+        return
+
     import curses
 
     screen = curses.initscr()

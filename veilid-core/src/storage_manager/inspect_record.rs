@@ -45,6 +45,9 @@ struct OutboundInspectValueContext {
     pub convergence: usize,
     /// The convergence counter as of the previous done check
     pub checked_convergence: usize,
+    /// Safety routes that carried an accepted answer
+    #[cfg(feature = "verbose-tracing")]
+    pub answered_safety_routes: BTreeSet<PublicKey>,
 }
 
 /// The result of the outbound_inspect_value operation
@@ -54,6 +57,9 @@ pub(in crate::storage_manager) struct OutboundInspectValueResult {
     pub subkey_fanout_results: Vec<FanoutResult>,
     /// The inspection that was retrieved
     pub inspect_result: InspectResult,
+    /// Safety routes that carried an accepted answer
+    #[cfg(feature = "verbose-tracing")]
+    pub answered_safety_routes: Vec<PublicKey>,
 }
 
 /// The result of the inbound_inspect_value operation
@@ -232,6 +238,18 @@ impl StorageManager {
             )
             .await?;
 
+        // Pairs with the watch route diagnosis on a productive change inspect
+        #[cfg(feature = "verbose-tracing")]
+        if !outbound_inspect_result.answered_safety_routes.is_empty() {
+            let srs = outbound_inspect_result
+                .answered_safety_routes
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            veilid_log!(self debug "InspectValue answered via safety routes [{}] ({})", srs, record_key);
+        }
+
         // Keep the list of nodes that returned a value for later reference
         let results_iter = outbound_inspect_result
             .inspect_result
@@ -350,6 +368,8 @@ impl StorageManager {
             opt_descriptor_info,
             convergence: 0,
             checked_convergence: 0,
+            #[cfg(feature = "verbose-tracing")]
+            answered_safety_routes: BTreeSet::new(),
         }));
 
         // Routine to call to generate fanout
@@ -416,6 +436,18 @@ impl StorageManager {
                                 peer_info_list: answer.peers,
                                 disposition: FanoutCallDisposition::Rejected,
                             });
+                        }
+
+                        #[cfg(feature = "verbose-tracing")]
+                        if let Some(sr) = &iva
+                            .answer_context
+                            .waitable_reply_context
+                            .opt_safety_route_ref
+                        {
+                            context
+                                .lock()
+                                .answered_safety_routes
+                                .insert(sr.route_key().clone());
                         }
 
                         // Keep the descriptor if we got one. If we had a last_descriptor it will
@@ -675,6 +707,8 @@ impl StorageManager {
 
         let result = OutboundInspectValueResult {
             subkey_fanout_results,
+            #[cfg(feature = "verbose-tracing")]
+            answered_safety_routes: ctx.answered_safety_routes.iter().cloned().collect(),
             inspect_result: InspectResult::new(
                 self,
                 requested_subkeys,

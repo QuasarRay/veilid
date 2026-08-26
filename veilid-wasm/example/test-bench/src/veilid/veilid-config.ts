@@ -13,7 +13,7 @@ export const veildCoreInitConfig: VeilidWASMConfig = {
         performance: {
             enabled: false,
             level: 'Info',
-            logsInConsole: {
+            console: {
                 enabled: true,
             },
         },

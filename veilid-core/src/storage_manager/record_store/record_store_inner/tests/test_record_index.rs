@@ -96,6 +96,47 @@ pub async fn test_record_index() {
         }
     }
 
+    // Reopen-based tests own their table lifecycle: they rebuild an index over
+    // the same tables, which the harness above never does
+    for crypto_kind in VALID_CRYPTO_KINDS {
+        let vcrypto = crypto
+            .get(crypto_kind)
+            .expect("should get valid cryptosystem");
+        for test_name in ["test_reopen_persistence", "test_subkey_seq_heal"] {
+            let context_name = format!("reopen_{}", vcrypto.kind());
+            let record_table_name = format!("records_{}_{}", context_name, test_name);
+            let subkey_table_name = format!("subkeys_{}_{}", context_name, test_name);
+
+            let _ = table_store.delete(&record_table_name).await;
+            let _ = table_store.delete(&subkey_table_name).await;
+
+            let record_table = table_store
+                .open_pooled(&record_table_name, 1, 1)
+                .await
+                .expect("should open");
+            let subkey_table = table_store
+                .open_pooled(&subkey_table_name, 1, 1)
+                .await
+                .expect("should open");
+
+            let unlocked_inner = Arc::new(RecordStoreUnlockedInner {
+                registry: registry.clone(),
+                name: format!("{}_{}", context_name, test_name),
+                limits: local_config,
+                record_table,
+                subkey_table,
+            });
+
+            info!("{}: {}", context_name, test_name);
+            match test_name {
+                "test_reopen_persistence" => {
+                    test_reopen_persistence(unlocked_inner, &vcrypto).await;
+                }
+                _ => test_subkey_seq_heal(unlocked_inner, &vcrypto).await,
+            }
+        }
+    }
+
     mock_registry::terminate(registry).await;
 }
 
@@ -652,3 +693,218 @@ pub async fn test_create_read_write_delete_loop(
 // ) {
 //     //
 // }
+
+fn mirror_seq(
+    record_index: &mut TestRecordIndex,
+    key: &OpaqueRecordKey,
+    subkey: ValueSubkey,
+) -> ValueSeqNum {
+    record_index
+        .peek_record(key, |r| r.subkey_seq(subkey).expect("subkey in range"))
+        .expect("record should exist")
+}
+
+async fn load_row(
+    record_index: &mut TestRecordIndex,
+    key: &OpaqueRecordKey,
+    subkey: ValueSubkey,
+) -> RecordData {
+    let lar = record_index
+        .prepare_load_action(key.clone(), subkey, false)
+        .expect("should prepare load action");
+    let LoadActionResult::Subkey {
+        mut load_action,
+        descriptor: _,
+    } = lar
+    else {
+        panic!("should get a subkey load action");
+    };
+    let Some(value) = load_action.load().await.expect("should load") else {
+        panic!("row should be present");
+    };
+    record_index.finish_load_action(load_action);
+    value
+}
+
+async fn commit_all(record_index: &mut TestRecordIndex) {
+    let mut commit_action = record_index
+        .prepare_commit_action()
+        .expect("should prepare commit action");
+    commit_action.commit().await.expect("should commit");
+    record_index.finish_commit_action(commit_action);
+}
+
+/// A committed record, its subkey rows and its seq mirror survive try_new over
+/// the same tables. Nothing else in this file reopens an index, so this is
+/// what pins load_db's reconstruction.
+pub async fn test_reopen_persistence(
+    unlocked_inner: Arc<RecordStoreUnlockedInner>,
+    vcrypto: &CryptoSystemGuard<'_>,
+) {
+    let key = nth_opaque_record_key(vcrypto, 0);
+    let desc = random_signed_value_descriptor(vcrypto, Some(MAX_SUBKEY));
+    let sk = ValueSubkey::from(0u32);
+    let svd = random_signed_value_data(vcrypto, ValueSeqNum::from(5), SUBKEY_SIZE);
+
+    // Session 1: create, set, commit
+    {
+        let mut record_index = TestRecordIndex::try_new(unlocked_inner.clone())
+            .await
+            .expect("should make new recordindex");
+        record_index
+            .create_record(
+                key.clone(),
+                Record::<LocalRecordDetail>::new(
+                    Timestamp::now(),
+                    desc.clone(),
+                    LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferUnordered)),
+                )
+                .expect("should create record data"),
+            )
+            .expect("should create record");
+        record_index
+            .set_single_subkey(&key, sk, svd.clone())
+            .expect("should set subkey");
+        commit_all(&mut record_index).await;
+    }
+
+    // Session 2: record, row and mirror all survived
+    {
+        let mut record_index = TestRecordIndex::try_new(unlocked_inner.clone())
+            .await
+            .expect("should reopen recordindex");
+        assert!(
+            record_index.contains_record(&key),
+            "record should survive reopen"
+        );
+        assert_eq!(
+            mirror_seq(&mut record_index, &key, sk),
+            ValueSeqNum::from(5),
+            "seq mirror should survive reopen"
+        );
+        let value = load_row(&mut record_index, &key, sk).await;
+        assert_eq!(
+            value.signed_value_data().value_data().seq(),
+            ValueSeqNum::from(5),
+            "row should survive reopen"
+        );
+    }
+}
+
+/// A row newer than the record's seq mirror (the on-disk shape of a mirror
+/// left behind) is healed by one read, the heal persists, and a STALE row
+/// never regresses the mirror.
+pub async fn test_subkey_seq_heal(
+    unlocked_inner: Arc<RecordStoreUnlockedInner>,
+    vcrypto: &CryptoSystemGuard<'_>,
+) {
+    let key = nth_opaque_record_key(vcrypto, 1);
+    let desc = random_signed_value_descriptor(vcrypto, Some(MAX_SUBKEY));
+    let sk = ValueSubkey::from(0u32);
+    let stk = SubkeyTableKey {
+        record_key: key.clone(),
+        subkey: sk,
+    };
+
+    // Session 1: the row and mirror agree at seq 7
+    {
+        let mut record_index = TestRecordIndex::try_new(unlocked_inner.clone())
+            .await
+            .expect("should make new recordindex");
+        record_index
+            .create_record(
+                key.clone(),
+                Record::<LocalRecordDetail>::new(
+                    Timestamp::now(),
+                    desc.clone(),
+                    LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferUnordered)),
+                )
+                .expect("should create record data"),
+            )
+            .expect("should create record");
+        record_index
+            .set_single_subkey(
+                &key,
+                sk,
+                random_signed_value_data(vcrypto, ValueSeqNum::from(7), SUBKEY_SIZE),
+            )
+            .expect("should set subkey");
+        commit_all(&mut record_index).await;
+    }
+
+    // Forge a newer row directly in the subkey table, bypassing the index
+    let newer = RecordData::new(random_signed_value_data(
+        vcrypto,
+        ValueSeqNum::from(9),
+        SUBKEY_SIZE,
+    ));
+    unlocked_inner
+        .subkey_table
+        .store_json(0, &stk.bytes(), &newer)
+        .await
+        .expect("should forge newer row");
+
+    // Session 2: the mirror is behind; one read heals it
+    {
+        let mut record_index = TestRecordIndex::try_new(unlocked_inner.clone())
+            .await
+            .expect("should reopen recordindex");
+        assert_eq!(
+            mirror_seq(&mut record_index, &key, sk),
+            ValueSeqNum::from(7),
+            "mirror should still be behind before any read"
+        );
+        let value = load_row(&mut record_index, &key, sk).await;
+        assert_eq!(
+            value.signed_value_data().value_data().seq(),
+            ValueSeqNum::from(9),
+            "read should return the newer row"
+        );
+        assert_eq!(
+            mirror_seq(&mut record_index, &key, sk),
+            ValueSeqNum::from(9),
+            "read should heal the mirror"
+        );
+        commit_all(&mut record_index).await;
+    }
+
+    // Session 3: the heal persisted
+    {
+        let mut record_index = TestRecordIndex::try_new(unlocked_inner.clone())
+            .await
+            .expect("should reopen recordindex");
+        assert_eq!(
+            mirror_seq(&mut record_index, &key, sk),
+            ValueSeqNum::from(9),
+            "healed mirror should survive reopen"
+        );
+    }
+
+    // Forge a STALE row; forward-only means the mirror must not regress
+    let stale = RecordData::new(random_signed_value_data(
+        vcrypto,
+        ValueSeqNum::from(3),
+        SUBKEY_SIZE,
+    ));
+    unlocked_inner
+        .subkey_table
+        .store_json(0, &stk.bytes(), &stale)
+        .await
+        .expect("should forge stale row");
+    {
+        let mut record_index = TestRecordIndex::try_new(unlocked_inner.clone())
+            .await
+            .expect("should reopen recordindex");
+        let value = load_row(&mut record_index, &key, sk).await;
+        assert_eq!(
+            value.signed_value_data().value_data().seq(),
+            ValueSeqNum::from(3),
+            "read returns the row as stored"
+        );
+        assert_eq!(
+            mirror_seq(&mut record_index, &key, sk),
+            ValueSeqNum::from(9),
+            "a stale row must not regress the mirror"
+        );
+    }
+}

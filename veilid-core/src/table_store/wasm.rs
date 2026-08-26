@@ -1,6 +1,11 @@
 use super::*;
 pub use keyvaluedb_web::*;
 
+/// No cross-instance guard on wasm: browser storage is origin-scoped and
+/// there is no process to crash-release a lock from
+#[must_use]
+pub(in crate::table_store) struct TableStoreLock;
+
 #[derive(Clone)]
 #[must_use]
 pub(in crate::table_store) struct TableStoreDriver {
@@ -22,6 +27,11 @@ impl TableStoreDriver {
         } else {
             format!("{}_{}", namespace, table)
         }
+    }
+
+    #[expect(clippy::unused_async)]
+    pub async fn acquire_namespace_lock(&self) -> VeilidAPIResult<Option<TableStoreLock>> {
+        Ok(Some(TableStoreLock))
     }
 
     pub async fn open(
@@ -79,8 +89,31 @@ impl TableStoreDriver {
             .await
             .map_err(VeilidAPIError::from)?;
 
+        // A name belongs to this namespace only if, after the namespace
+        // prefix, it is a bare table real-name or the name-mapping db. A bare
+        // prefix match is not enough: the default namespace has an empty
+        // prefix that matches everything, and namespace "a" prefix-matches
+        // namespace "a_b"'s tables.
+        let prefix = opt_prefix.unwrap_or_default();
+        fn owned_by_namespace(name: &str, prefix: &str) -> bool {
+            let Some(rest) = name.strip_prefix(prefix) else {
+                return false;
+            };
+            if rest == "__veilid_all_tables" {
+                return true;
+            }
+            // Table real-names are 32 random bytes as base64url: 43 chars
+            rest.len() == 43
+                && rest
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        }
+
         let mut deleted = 0usize;
         for (name, _ver) in entries {
+            if !owned_by_namespace(&name, &prefix) {
+                continue;
+            }
             match Database::delete(&name).await {
                 Ok(removed) => {
                     if removed {

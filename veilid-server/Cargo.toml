@@ -17,13 +17,12 @@ name = "veilid-server"
 path = "src/main.rs"
 
 [features]
-default = ["rt-tokio", "veilid-core/default", "veilid-remote-api/default", "stats"]
+default = ["rt-tokio", "veilid-core/default", "veilid-remote-api/default"]
 
 default-async-std = [
     "rt-async-std",
     "veilid-core/default-async-std",
     "veilid-remote-api/default-async-std",
-    "stats",
 ]
 
 stats = ["veilid-core/stats"]
@@ -42,8 +41,8 @@ rt-async-std = [
 
 # Debugging and testing features
 
-# Serve the in-process mock instead of the network. Excludes stats, so it needs its own
-# default-free feature set:
+# Serve the in-process mock instead of the network. Mutually exclusive with the (non-default)
+# stats feature. Self-contained feature set:
 #   cargo run -p veilid-server --no-default-features --features mock-api
 mock-api = [
     "rt-tokio",

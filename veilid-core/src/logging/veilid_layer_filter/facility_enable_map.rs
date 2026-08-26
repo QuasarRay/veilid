@@ -63,7 +63,7 @@ impl FacilityEnableMap {
         if tag == "#enabled" || tag == "#unspecified" {
             // Apply to all enabled names
             let mut was_enabled = false;
-            for (_, current_state) in self.name_map.iter_mut() {
+            for current_state in self.name_map.values_mut() {
                 match current_state.level {
                     VeilidConfigLogLevel::Off => {
                         // For disabled logs, ignore
@@ -81,7 +81,7 @@ impl FacilityEnableMap {
             }
 
             // Apply to all enabled tags
-            for (_, current_state) in self.tag_map.iter_mut() {
+            for current_state in self.tag_map.values_mut() {
                 match current_state.level {
                     VeilidConfigLogLevel::Off => {
                         // For disabled logs, ignore
@@ -159,10 +159,10 @@ impl FacilityEnableMap {
     // Get max level hint
     pub fn max_level_hint(&self) -> LevelFilter {
         let mut out = VeilidConfigLogLevel::Off;
-        for (_, v) in self.tag_map.iter() {
+        for v in self.tag_map.values() {
             out.max_assign(v.level);
         }
-        for (_, v) in self.name_map.iter() {
+        for v in self.name_map.values() {
             out.max_assign(v.level);
         }
         out.into()

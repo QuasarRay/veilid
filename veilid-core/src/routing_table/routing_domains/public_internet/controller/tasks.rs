@@ -132,6 +132,12 @@ impl PublicInternetRoutingDomainController {
             }
         }
 
+        // Suppression enforcement is armed only once outbound is ready; until then
+        // (bootstrap, dial info confirmation, node testing) every send is a canary
+        self.network_manager()
+            .transport_stats()
+            .set_enforcing(RoutingDomain::PublicInternet, state.is_ready_outbound);
+
         // public_internet_ready should stay true once true on a stable network; warn if it flaps
         let ready = state.is_ready_inbound && state.is_ready_outbound;
         let opt_penalty = self

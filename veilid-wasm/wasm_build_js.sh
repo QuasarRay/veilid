@@ -37,7 +37,8 @@ fi
 
 # --- wasm-bindgen ------------------------------------------------------------
 mkdir -p "$OUTPUTDIR"
-rm -f "$OUTPUTDIR"/*
+# -r because wasm-bindgen emits a snippets/ directory that must not accumulate stale copies
+rm -rf "$OUTPUTDIR"/*
 if [ "$RELEASE" -eq 1 ]; then
     wasm-bindgen --target web --weak-refs --out-dir "$OUTPUTDIR" "$WASM_IN"
 else
@@ -56,6 +57,14 @@ if [ "$RELEASE" -eq 1 ]; then
         -o "$OUTPUTDIR/veilid_wasm_bg.wasm.opt"
     mv "$OUTPUTDIR/veilid_wasm_bg.wasm.opt" "$OUTPUTDIR/veilid_wasm_bg.wasm"
 fi
+
+# --- error classes -----------------------------------------------------------
+# The bridge snippet in pkg/snippets reaches back to these, so the glue and package
+# consumers share one class identity and `instanceof` holds for errors from wasm.
+cp -f "$SCRIPTDIR/js/veilid_errors.js" "$OUTPUTDIR/veilid_errors.js"
+cp -f "$SCRIPTDIR/js/veilid_errors.d.ts" "$OUTPUTDIR/veilid_errors.d.ts"
+echo "export * from './veilid_errors.js';" >> "$OUTPUTDIR/veilid_wasm.js"
+echo "export * from './veilid_errors.js';" >> "$OUTPUTDIR/veilid_wasm.d.ts"
 
 # --- package.json + license + readme ----------------------------------------
 VERSION="$(awk -F'"' '/^version = "/ {print $2; exit}' "$SCRIPTDIR/Cargo.toml")"

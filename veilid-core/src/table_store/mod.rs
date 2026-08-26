@@ -93,7 +93,13 @@ struct TableStoreInner {
     opened: WeakValueHashMap<String, Weak<TableDBUnlockedInner>>,
     encryption_key: Option<SharedSecret>,
     all_table_names: HashMap<String, String>,
+    // Skips the periodic flush when the name map is unchanged; the flush task
+    // otherwise rewrites the whole map every interval and bloats the WAL
+    all_table_names_dirty: bool,
     all_tables_db: Option<Database>,
+    // Exclusive per-namespace lock held from init to terminate; a second core
+    // on the same namespace, in this process or another, fails init loudly
+    namespace_lock: Option<TableStoreLock>,
     /// Tick subscription
     tick_subscription: Option<EventBusSubscription>,
 }
@@ -117,6 +123,9 @@ pub struct TableStore {
     inner: Mutex<TableStoreInner>, // Sync mutex here because TableDB drops can happen at any time
     table_store_driver: TableStoreDriver,
     async_lock: Arc<AsyncMutex<()>>,
+    // Serializes name-map snapshots so a slow flush cannot overwrite a newer
+    // one; taken after async_lock when both are held
+    flush_lock: Arc<AsyncMutex<()>>,
     flush_tables_task: TickTask<EyreReport>,
     cleanup_tables_task: TickTask<EyreReport>,
 }
@@ -140,7 +149,9 @@ impl TableStore {
             opened: WeakValueHashMap::new(),
             encryption_key: None,
             all_table_names: HashMap::new(),
+            all_table_names_dirty: false,
             all_tables_db: None,
+            namespace_lock: None,
             tick_subscription: None,
         }
     }
@@ -154,6 +165,7 @@ impl TableStore {
             inner: Mutex::new(inner),
             table_store_driver,
             async_lock: Arc::new(AsyncMutex::new(())),
+            flush_lock: Arc::new(AsyncMutex::new(())),
             flush_tables_task: TickTask::new("flush_tables_task", FLUSH_TABLES_INTERVAL_SECS),
             cleanup_tables_task: TickTask::new("cleanup_tables_task", CLEANUP_TABLES_INTERVAL_SECS),
         };
@@ -165,8 +177,13 @@ impl TableStore {
 
     // Flush internal control state
     async fn flush(&self) {
+        let _flush_guard = self.flush_lock.lock().await;
         let (all_table_names_value, all_tables_db) = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
+            if !inner.all_table_names_dirty {
+                return;
+            }
+            inner.all_table_names_dirty = false;
             let all_table_names_value = serialize_json_bytes(&inner.all_table_names);
             (
                 all_table_names_value,
@@ -177,11 +194,21 @@ impl TableStore {
         dbt.put(0, ALL_TABLE_NAMES, &all_table_names_value);
         if let Err(e) = all_tables_db.write(dbt).await {
             veilid_log!(self error "failed to write all tables db: {}", e);
+            self.inner.lock().all_table_names_dirty = true;
         }
     }
 
     // Cleanup/vacuum database
     async fn cleanup(&self) {
+        // The name-mapping db is not in 'opened' and needs its WAL
+        // checkpointed like any other table
+        let all_tables_db = self.inner.lock().all_tables_db.clone();
+        if let Some(db) = all_tables_db {
+            if let Err(e) = db.cleanup().await {
+                veilid_log!(self error "Error cleaning up all-tables db: {}", e);
+            }
+        }
+
         // Vacuum the open databases while we're at it
         let all_open_db: Vec<_> = {
             let inner = self.inner.lock();
@@ -234,6 +261,7 @@ impl TableStore {
         {
             veilid_log!(self error "should not have already had this table name: {}", name);
         };
+        inner.all_table_names_dirty = true;
 
         Ok(real_name)
     }
@@ -246,6 +274,9 @@ impl TableStore {
         let name = self.namespaced_name(table)?;
         let mut inner = self.inner.lock();
         let real_name = inner.all_table_names.remove(&name);
+        if real_name.is_some() {
+            inner.all_table_names_dirty = true;
+        }
         Ok(real_name)
     }
 
@@ -279,6 +310,7 @@ impl TableStore {
         };
         // Insert with new name
         inner.all_table_names.insert(new_name.to_owned(), real_name);
+        inner.all_table_names_dirty = true;
 
         Ok(())
     }
@@ -559,6 +591,9 @@ impl TableStore {
         {
             let _async_guard = self.async_lock.lock().await;
 
+            // Claim the namespace before touching any of its files
+            let namespace_lock = self.table_store_driver.acquire_namespace_lock().await?;
+
             // Get device encryption key from protected store
             let mut device_encryption_key = self.load_device_encryption_key().await?;
             let mut device_encryption_key_changed = false;
@@ -627,6 +662,7 @@ impl TableStore {
                 let mut inner = self.inner.lock();
                 inner.encryption_key = device_encryption_key;
                 inner.all_tables_db = Some(all_tables_db);
+                inner.namespace_lock = namespace_lock;
             }
         }
         startup_guard.success();
@@ -699,6 +735,7 @@ impl TableStore {
         inner.all_tables_db = None;
         inner.all_table_names.clear();
         inner.encryption_key = None;
+        inner.namespace_lock = None;
     }
 
     /// Get or create a TableDB database table. If the column count is greater than an

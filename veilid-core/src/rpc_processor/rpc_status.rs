@@ -12,14 +12,6 @@ pub struct StatusSenderInfo {
 #[derive(Debug)]
 pub struct StatusAnswer {
     /// The peer's status answer
-    #[cfg_attr(
-        all(
-            target_arch = "wasm32",
-            target_os = "unknown",
-            not(feature = "debug-api")
-        ),
-        expect(dead_code)
-    )]
     pub answer: Answer<StatusSenderInfo>,
     /// The first-hop send attempt that carried the question
     pub send_data_result: SendDataResult,

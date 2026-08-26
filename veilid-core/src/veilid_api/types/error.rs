@@ -121,8 +121,12 @@ macro_rules! apibail_already_initialized {
 }
 
 /// Error type returned by all fallible Veilid API operations.
+///
+/// Deliberately has no `Tsify` derive: veilid-wasm exports a `VeilidAPIError` class
+/// under that name, so no structural type is generated for it. Adding a variant here
+/// means adding a class in `veilid-wasm/js/veilid_errors.js`.
 #[apply(api_data_enum!)]
-#[api(eq, ord, ts(into_wasm_abi))]
+#[api(eq, ord)]
 #[derive(ThisError)]
 #[serde(tag = "kind")]
 pub enum VeilidAPIError {
@@ -325,7 +329,6 @@ impl VeilidAPIError {
             VeilidAPIError::NotInitialized
             | VeilidAPIError::AlreadyInitialized
             | VeilidAPIError::InvalidTarget { message: _ }
-            | VeilidAPIError::Internal { message: _ }
             | VeilidAPIError::Generic { message: _ }
             | VeilidAPIError::ParseError {
                 message: _,
@@ -340,15 +343,16 @@ impl VeilidAPIError {
                 context: _,
                 argument: _,
             }
-            | VeilidAPIError::Shutdown => Level::ERROR,
-
-            VeilidAPIError::NoConnection { message: _ }
+            | VeilidAPIError::NoConnection { message: _ }
             | VeilidAPIError::KeyNotFound { key: _ }
-            | VeilidAPIError::Unimplemented { message: _ } => Level::WARN,
-
-            VeilidAPIError::Timeout
+            | VeilidAPIError::Shutdown
+            | VeilidAPIError::Timeout
             | VeilidAPIError::TryAgain { message: _ }
             | VeilidAPIError::TransactionNotFound { message: _ } => Level::DEBUG,
+
+            VeilidAPIError::Unimplemented { message: _ } => Level::WARN,
+
+            VeilidAPIError::Internal { message: _ } => Level::ERROR,
         }
     }
 

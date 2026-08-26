@@ -83,16 +83,23 @@ impl TransferStatsAccounting {
     }
 }
 
+/// Rolling sample-window accounting for latency measurements.
+///
+/// Recording is append-only by design: it runs on hot paths (every crypto op,
+/// every StatsMutex section) while a lock is held, so computing the
+/// [LatencyStats] output happens at read time instead. Readers that keep a
+/// cached [LatencyStats] refresh it with [Self::take_latency_stats], which
+/// costs nothing while no new samples arrive; rare on-demand snapshots use
+/// [Self::latency_stats].
 #[derive(Debug, Clone, Default)]
 pub struct LatencyStatsAccounting {
     rolling_latencies: VecDeque<TimestampDuration>,
+    dirty: bool,
 }
 
 impl LatencyStatsAccounting {
     pub fn new() -> Self {
-        Self {
-            rolling_latencies: VecDeque::new(),
-        }
+        Self::default()
     }
 
     fn get_tm_n(sorted_latencies: &[TimestampDuration], n: usize) -> Option<TimestampDuration> {
@@ -114,37 +121,40 @@ impl LatencyStatsAccounting {
         sorted_latencies[pindex]
     }
 
-    pub fn record_latency(&mut self, latency: TimestampDuration) -> LatencyStats {
+    pub fn record_latency(&mut self, latency: TimestampDuration) {
         while self.rolling_latencies.len() >= ROLLING_LATENCIES_SIZE {
             self.rolling_latencies.pop_front();
         }
         self.rolling_latencies.push_back(latency);
+        self.dirty = true;
+    }
 
-        // Calculate latency stats
+    /// Stats over the sample window, or None if nothing has been recorded
+    pub fn latency_stats(&self) -> Option<LatencyStats> {
+        if self.rolling_latencies.is_empty() {
+            return None;
+        }
+        let mut sorted: Vec<TimestampDuration> = self.rolling_latencies.iter().copied().collect();
+        sorted.sort_unstable();
 
-        let mut fastest = TimestampDuration::new(u64::MAX);
-        let mut slowest = TimestampDuration::new(0u64);
+        let fastest = *sorted.first().unwrap();
+        let slowest = *sorted.last().unwrap();
+
         let mut average = TimestampDuration::new(0u64);
-
-        for rl in &self.rolling_latencies {
-            fastest.min_assign(*rl);
-            slowest.max_assign(*rl);
+        for rl in &sorted {
             average.saturating_add_assign(*rl);
         }
-        let len = u64::try_from(self.rolling_latencies.len()).unwrap_or_default();
+        let len = u64::try_from(sorted.len()).unwrap_or_default();
         if len > 0 {
             average.div_assign(len);
         }
 
-        let mut sorted_latencies: Vec<_> = self.rolling_latencies.iter().copied().collect();
-        sorted_latencies.sort_unstable();
+        let tm90 = Self::get_tm_n(&sorted, 90).unwrap_or(average);
+        let tm75 = Self::get_tm_n(&sorted, 75).unwrap_or(average);
+        let p90 = Self::get_p_n(&sorted, 90);
+        let p75 = Self::get_p_n(&sorted, 75);
 
-        let tm90 = Self::get_tm_n(&sorted_latencies, 90).unwrap_or(average);
-        let tm75 = Self::get_tm_n(&sorted_latencies, 75).unwrap_or(average);
-        let p90 = Self::get_p_n(&sorted_latencies, 90);
-        let p75 = Self::get_p_n(&sorted_latencies, 75);
-
-        LatencyStats {
+        Some(LatencyStats {
             fastest,
             average,
             slowest,
@@ -152,7 +162,17 @@ impl LatencyStatsAccounting {
             tm75,
             p90,
             p75,
+        })
+    }
+
+    /// [Self::latency_stats], but None when no sample has arrived since the
+    /// last take, so periodic refreshers skip windows that did not change
+    pub fn take_latency_stats(&mut self) -> Option<LatencyStats> {
+        if !self.dirty {
+            return None;
         }
+        self.dirty = false;
+        self.latency_stats()
     }
 }
 
@@ -160,6 +180,7 @@ impl LatencyStatsAccounting {
 #[derive(Debug, Clone, Default)]
 pub struct PerRouteStats {
     /// Full RTT samples (not one-way latency); don't sum with other LatencyStats.
+    /// Refreshed once per stats interval by [Self::update_latency_stats].
     pub round_trip: LatencyStats,
     /// Bytes flowing through this (target, local-route) pair.
     pub transfer: TransferStatsDownUp,
@@ -171,7 +192,12 @@ pub struct PerRouteStats {
 
 impl PerRouteStats {
     pub fn record_round_trip(&mut self, sample: TimestampDuration) {
-        self.round_trip = self.round_trip_accounting.record_latency(sample);
+        self.round_trip_accounting.record_latency(sample);
+    }
+    pub fn update_latency_stats(&mut self) {
+        if let Some(l) = self.round_trip_accounting.take_latency_stats() {
+            self.round_trip = l;
+        }
     }
     pub fn add_up(&mut self, bytes: ByteCount) {
         self.transfer_accounting.add_up(bytes);
@@ -190,5 +216,64 @@ impl fmt::Display for PerRouteStats {
         writeln!(f, "round_trip: {}", f.to_string(&self.round_trip))?;
         write!(f, "transfer:   {}", f.to_string(&self.transfer))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The stats must be what a sort of the rolling window gives.
+    #[test]
+    fn stats_match_a_full_sort() {
+        let mut lsa = LatencyStatsAccounting::new();
+        for i in 0..(ROLLING_LATENCIES_SIZE * 2) {
+            // Spread, with repeats, so percentiles land on real boundaries
+            let v = ((i * 37) % 23) as u64;
+            lsa.record_latency(TimestampDuration::new(v));
+        }
+        assert_eq!(lsa.rolling_latencies.len(), ROLLING_LATENCIES_SIZE);
+        let stats = lsa.latency_stats().expect("window has samples");
+
+        let mut sorted: Vec<_> = lsa.rolling_latencies.iter().copied().collect();
+        sorted.sort_unstable();
+        let mut average = TimestampDuration::new(0u64);
+        for rl in &sorted {
+            average.saturating_add_assign(*rl);
+        }
+        average.div_assign(u64::try_from(sorted.len()).unwrap());
+
+        assert_eq!(stats.fastest, *sorted.first().unwrap());
+        assert_eq!(stats.slowest, *sorted.last().unwrap());
+        assert_eq!(stats.average, average);
+        assert_eq!(
+            stats.tm90,
+            LatencyStatsAccounting::get_tm_n(&sorted, 90).unwrap_or(average)
+        );
+        assert_eq!(
+            stats.tm75,
+            LatencyStatsAccounting::get_tm_n(&sorted, 75).unwrap_or(average)
+        );
+        assert_eq!(stats.p90, LatencyStatsAccounting::get_p_n(&sorted, 90));
+        assert_eq!(stats.p75, LatencyStatsAccounting::get_p_n(&sorted, 75));
+    }
+
+    /// take_latency_stats yields only when new samples arrived since the last
+    /// take, so periodic refreshers skip unchanged windows.
+    #[test]
+    fn take_skips_unchanged_windows() {
+        let mut lsa = LatencyStatsAccounting::new();
+        assert!(lsa.take_latency_stats().is_none());
+
+        lsa.record_latency(TimestampDuration::new(5));
+        let first = lsa.take_latency_stats().expect("dirty after record");
+        assert_eq!(first.fastest, TimestampDuration::new(5));
+        assert!(lsa.take_latency_stats().is_none());
+
+        lsa.record_latency(TimestampDuration::new(7));
+        assert!(lsa.take_latency_stats().is_some());
+        // Non-taking reads never consume the dirty flag
+        assert!(lsa.latency_stats().is_some());
+        assert!(lsa.take_latency_stats().is_none());
     }
 }

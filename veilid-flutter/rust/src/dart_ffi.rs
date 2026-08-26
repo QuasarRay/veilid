@@ -166,6 +166,17 @@ pub extern "C" fn initialize_veilid_flutter(
     dart_post_c_object_ptr: ffi::DartPostCObjectFnType,
     crash_path: FfiStr,
 ) {
+    // A duplicate image cannot work (its statics are not the live core's);
+    // failing loudly here beats the silent forever-hang its calls produce
+    #[cfg(unix)]
+    if let Some(desc) = crate::duplicate_image_guard::duplicate_image() {
+        eprintln!(
+            "veilid-flutter: FATAL: refusing to initialize a duplicate \
+             veilid_flutter image in this process: {desc}"
+        );
+        std::process::abort();
+    }
+
     unsafe {
         store_dart_post_cobject(dart_post_c_object_ptr);
     }
@@ -590,6 +601,13 @@ pub extern "C" fn shutdown_veilid_core(port: i64) {
         async move {
             let mut api_lock = VEILID_API.lock().await;
             let veilid_api = api_lock.take().ok_or(VeilidAPIError::NotInitialized)?;
+            // A dead Dart session (hot restart) never releases its handles;
+            // drop them here so the table store can close its files instead
+            // of leaving sqlite pools pinned open into the next startup
+            TABLE_DB_TRANSACTIONS.lock().clear();
+            TABLE_DBS.lock().clear();
+            DHT_TRANSACTIONS.lock().clear();
+            ROUTING_CONTEXTS.lock().clear();
             veilid_api.shutdown().await;
             VeilidAPIResult::Ok(())
         }

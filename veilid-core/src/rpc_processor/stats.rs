@@ -19,8 +19,14 @@ impl RPCProcessor {
     pub(super) fn stats_impl(&self) -> Option<Box<dyn VeilidComponentStats>> {
         let inner = self.inner.lock();
         Some(Box::new(RPCProcessorStats {
-            worker_dequeue_latency: inner.rpc_worker_dequeue_latency.clone(),
-            worker_process_latency: inner.rpc_worker_process_latency.clone(),
+            worker_dequeue_latency: inner
+                .rpc_worker_dequeue_latency_accounting
+                .latency_stats()
+                .unwrap_or_default(),
+            worker_process_latency: inner
+                .rpc_worker_process_latency_accounting
+                .latency_stats()
+                .unwrap_or_default(),
             queue_depth: inner
                 .rpc_send_channel
                 .as_ref()
@@ -29,10 +35,10 @@ impl RPCProcessor {
             process_by_kind: inner
                 .rpc_worker_process_latency_and_accounting_by_operation_kind
                 .iter()
-                .map(|(kind, (lat, _, count))| RPCKindStats {
+                .map(|(kind, (acc, count))| RPCKindStats {
                     kind: (*kind).to_string(),
                     count: *count,
-                    latency: lat.clone(),
+                    latency: acc.latency_stats().unwrap_or_default(),
                 })
                 .collect(),
         }))

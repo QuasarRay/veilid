@@ -111,7 +111,7 @@ where
             write!(
                 f,
                 "[{}]:{}{}",
-                &self.unlocked_inner.description,
+                self.unlocked_inner.description,
                 value,
                 if let Some(limit) = self.unlocked_inner.opt_limit {
                     format!("/{}", limit)
@@ -363,8 +363,8 @@ where
         write!(
             f,
             "[{}]:{}{}{}",
-            &self.unlocked_inner.description,
-            &self.inner.value,
+            self.unlocked_inner.description,
+            self.inner.value,
             if let Some(limit) = self.unlocked_inner.opt_limit {
                 format!("/{}", limit)
             } else {

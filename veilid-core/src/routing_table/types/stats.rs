@@ -214,7 +214,7 @@ pub struct RPCStats {
     pub recent_lost_questions: u32,
     /// when the peer was last questioned (either successfully or not) and we wanted an answer
     pub last_question_ts: Option<Timestamp>,
-    /// when the peer was last seen for any reason, including when we first attempted to reach out to it
+    /// when we last received anything from the peer (questions and answers, not send attempts)
     pub last_seen_ts: Option<Timestamp>,
     /// the timestamp of the first consecutively seen answer for this node
     pub first_steady_answer_ts: Option<Timestamp>,

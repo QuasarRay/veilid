@@ -1,6 +1,7 @@
 mod app_messaging;
 mod attach;
 mod debug;
+mod faults;
 mod protected_store;
 mod records;
 mod table_store;
@@ -11,6 +12,7 @@ pub use table_store::{TableDB, TableDBTransaction};
 
 pub(crate) use app_messaging::*;
 pub(crate) use attach::*;
+pub(crate) use faults::*;
 pub(crate) use protected_store::*;
 pub(crate) use records::*;
 pub(crate) use table_store::MockTableStore;
@@ -96,6 +98,10 @@ pub(crate) struct MockNode {
     /// Keeping it separate from the shared store is what makes local and network sequence
     /// numbers in a report differ.
     pub local_records: HashMap<OpaqueRecordKey, HashMap<ValueSubkey, ValueData>>,
+    /// The descriptor of every record in this node's local store, which is what lets it be
+    /// opened again with no network: the real local store holds the owner and schema beside
+    /// the values, and `open_record` returns them without asking anybody.
+    pub local_descriptors: HashMap<OpaqueRecordKey, (PublicKey, DHTSchema)>,
     /// Writes made while detached, waiting to reach the shared store. Kept outside
     /// [MockOpenedRecord] because the queue outlives a close.
     pub offline_writes: HashMap<OpaqueRecordKey, HashMap<ValueSubkey, ValueData>>,
@@ -128,6 +134,7 @@ impl MockNetwork {
             node_ids,
             opened_records: HashMap::new(),
             local_records: HashMap::new(),
+            local_descriptors: HashMap::new(),
             offline_writes: HashMap::new(),
             attachment: MockAttachment::default(),
             tables: MockTableStore::default(),

@@ -9,7 +9,6 @@ mod debug;
 #[cfg(all(not(feature = "debug-api"), not(feature = "mock-api")))]
 mod debug_stub;
 mod dht_transaction;
-mod error;
 #[cfg(feature = "mock-api")]
 mod mock;
 mod routing_context;
@@ -25,7 +24,6 @@ pub use api::*;
 pub use block_store::*;
 pub use crypto::*;
 pub use dht_transaction::*;
-pub use error::*;
 pub use routing_context::*;
 pub use serialize_helpers::*;
 pub use types::*;

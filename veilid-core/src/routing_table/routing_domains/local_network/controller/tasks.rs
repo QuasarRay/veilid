@@ -23,6 +23,11 @@ impl LocalNetworkRoutingDomainController {
     pub async fn tick(&self) -> EyreResult<()> {
         let state = self.state();
 
+        // Suppression enforcement is armed only once outbound is ready
+        self.network_manager()
+            .transport_stats()
+            .set_enforcing(RoutingDomain::LocalNetwork, state.is_ready_outbound);
+
         match state.outbound_stage {
             RoutingDomainOutboundStage::Invalid | RoutingDomainOutboundStage::NeedsBootstrap => {
                 // Do nothing

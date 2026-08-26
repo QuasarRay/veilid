@@ -385,8 +385,7 @@ pub struct Flame {
     pub path: String,
 }
 
-/// Optimization stats logging sink.
-#[cfg(feature = "stats")]
+/// Optimization stats logging sink; ignored when the stats feature is not compiled in.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Stats {
@@ -398,7 +397,6 @@ pub struct Stats {
     pub interval_secs: u32,
 }
 
-#[cfg(feature = "stats")]
 impl Default for Stats {
     fn default() -> Self {
         Self {
@@ -571,7 +569,6 @@ pub struct Logging {
     #[cfg(feature = "flame")]
     pub flame: Flame,
     /// Optimization stats logging sink.
-    #[cfg(feature = "stats")]
     pub stats: Stats,
     /// Perfetto sink.
     #[cfg(all(unix, feature = "perfetto"))]
@@ -1549,12 +1546,9 @@ impl Settings {
             set_config_value!(inner.logging.flame.enabled, value);
             set_config_value!(inner.logging.flame.path, value);
         }
-        #[cfg(feature = "stats")]
-        {
-            set_config_value!(inner.logging.stats.enabled, value);
-            set_config_value!(inner.logging.stats.directory, value);
-            set_config_value!(inner.logging.stats.interval_secs, value);
-        }
+        set_config_value!(inner.logging.stats.enabled, value);
+        set_config_value!(inner.logging.stats.directory, value);
+        set_config_value!(inner.logging.stats.interval_secs, value);
         #[cfg(all(unix, feature = "perfetto"))]
         {
             set_config_value!(inner.logging.perfetto.enabled, value);
@@ -2078,12 +2072,9 @@ mod tests {
             assert!(!s.logging.flame.enabled);
             assert_eq!(s.logging.flame.path, "");
         }
-        #[cfg(feature = "stats")]
-        {
-            assert!(!s.logging.stats.enabled);
-            assert_eq!(s.logging.stats.directory, "");
-            assert_eq!(s.logging.stats.interval_secs, 10);
-        }
+        assert!(!s.logging.stats.enabled);
+        assert_eq!(s.logging.stats.directory, "");
+        assert_eq!(s.logging.stats.interval_secs, 10);
         #[cfg(all(unix, feature = "perfetto"))]
         {
             assert!(!s.logging.perfetto.enabled);

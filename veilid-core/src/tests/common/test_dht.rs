@@ -520,6 +520,54 @@ async fn test_flush_dht_record(api: VeilidAPI) {
     rc.delete_dht_record(dht_key).await.unwrap();
 }
 
+/// A watch report carries the value in the form a get returns it.
+///
+/// Records hold ciphertext, so a report that hands its watcher what is stored hands it
+/// undecipherable bytes. Nothing else in this suite reads a value out of an update.
+async fn test_watch_value_change_is_decrypted() {
+    let updates = Arc::new(Mutex::new(Vec::<VeilidUpdate>::new()));
+    let captured = updates.clone();
+    let update_callback: UpdateCallback = Arc::new(move |update| captured.lock().push(update));
+
+    let api = api_startup(update_callback, fixture_veilid_config())
+        .await
+        .expect("startup failed");
+    let rc = api.routing_context().unwrap();
+    let _ = api.attach().await;
+    fixture_wait_for_public_internet_ready(&api).await;
+
+    let rec = rc
+        .create_dht_record(TEST_CRYPTO_KIND, DHTSchema::dflt(1).unwrap(), None)
+        .await
+        .unwrap();
+    let dht_key = rec.key().clone();
+
+    assert!(rc
+        .watch_dht_values(dht_key.clone(), None, None, None)
+        .await
+        .unwrap());
+
+    let plaintext = b"watched plaintext".to_vec();
+    rc.set_dht_value(dht_key.clone(), 0, plaintext.clone(), None)
+        .await
+        .unwrap();
+
+    let reported = updates
+        .lock()
+        .iter()
+        .filter_map(|u| match u {
+            VeilidUpdate::ValueChange(c) if c.key == dht_key => c.value.clone(),
+            _ => None,
+        })
+        .next_back()
+        .expect("no value change reported");
+    assert_eq!(reported.data(), plaintext.as_slice());
+
+    rc.close_dht_record(dht_key.clone()).await.unwrap();
+    rc.delete_dht_record(dht_key).await.unwrap();
+    api.shutdown().await;
+}
+
 pub async fn test_all() {
     let (update_callback, config) = fixture_veilid_core();
     let api = api_startup(update_callback, config)
@@ -546,4 +594,7 @@ pub async fn test_all() {
     test_flush_dht_record(api.clone()).await;
 
     api.shutdown().await;
+
+    // Starts its own api: it needs an update callback that keeps what it is handed
+    test_watch_value_change_is_decrypted().await;
 }

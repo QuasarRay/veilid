@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/common.dart';
 import 'package:integration_test/integration_test.dart';
 // ignore: implementation_imports
 import 'package:test_api/src/backend/invoker.dart';
@@ -130,6 +131,14 @@ void _onTestEnd() {
       .map((e) => '${e.error}')
       .toList();
   IntegrationTestStatusSink.instance.onEnd(name, elapsed, errors);
+  // The driver's verdict comes from this map, and only `testWidgets` populates
+  // it - a suite declared with plain `test()` leaves it empty, which reads to
+  // `flutter drive` as "no failures" and makes every web run pass regardless.
+  // visibleForTesting, and this package is only ever a test dependency
+  // ignore: invalid_use_of_visible_for_testing_member
+  IntegrationTestWidgetsFlutterBinding.instance.results[name] = errors.isEmpty
+      ? 'success'
+      : Failure(name, errors.join('\n'));
   if (errors.isEmpty) {
     IntegrationLogSink.instance.writePass('✓ $name  (${elapsed}ms)');
   } else {
@@ -258,7 +267,10 @@ class _IntegrationLogAppState extends State<IntegrationLogApp> {
                     controller: _terminalController,
                     scrollController: _scrollController,
                     autofocus: true,
-                    textStyle: const TerminalStyle(fontSize: 10),
+                    textStyle: TerminalStyle(
+                      fontSize: 10,
+                      fontFamily: 'Source Code Pro'
+                    ),
                   ),
                 ),
               ),
@@ -316,7 +328,7 @@ class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
                     style: const TextStyle(
                       color: Colors.greenAccent,
                       fontSize: 11,
-                      fontFamily: 'monospace',
+                      fontFamily: 'Source Code Pro'
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -327,7 +339,7 @@ class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
                           ? Colors.redAccent
                           : Colors.grey.shade600,
                       fontSize: 11,
-                      fontFamily: 'monospace',
+                      fontFamily: 'Source Code Pro'
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -338,7 +350,7 @@ class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
                         style: const TextStyle(
                           color: Colors.yellowAccent,
                           fontSize: 11,
-                          fontFamily: 'monospace',
+                      fontFamily: 'Source Code Pro',
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -371,7 +383,7 @@ class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
                         style: TextStyle(
                           color: color,
                           fontSize: 11,
-                          fontFamily: 'monospace',
+                          fontFamily: 'Source Code Pro'
                         ),
                       ),
                     );

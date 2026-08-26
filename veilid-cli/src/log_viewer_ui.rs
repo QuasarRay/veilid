@@ -295,7 +295,7 @@ impl LogWriter for LogViewerUISender {
         indent += levstr.len();
         lines += &levstr;
 
-        let args = format!("{}", &record.args());
+        let args = format!("{}", record.args());
         lines += &indent_by(indent, args);
 
         println!("{}", lines);

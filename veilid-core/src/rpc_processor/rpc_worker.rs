@@ -101,10 +101,10 @@ impl RPCProcessor {
 
             // Accounting
             let mut inner = self.inner.lock();
-            inner.rpc_worker_dequeue_latency = inner
+            inner
                 .rpc_worker_dequeue_latency_accounting
                 .record_latency(dequeue_latency);
-            inner.rpc_worker_process_latency = inner
+            inner
                 .rpc_worker_process_latency_accounting
                 .record_latency(process_latency);
         }

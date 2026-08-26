@@ -29,7 +29,7 @@ pub fn test_encode_and_decode_signed_value_data() {
     .into_inner()
     .freeze();
 
-    println!("buffer[{}] = {:02x?}", buffer.len(), &buffer);
+    println!("buffer[{}] = {:02x?}", buffer.len(), buffer);
 
     let mut value_data_cursor = &mut &buffer[..];
     let tmp_reader = capnp::serialize_packed::read_message(

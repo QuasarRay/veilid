@@ -161,12 +161,16 @@ where
             }
         }
 
-        if let Err(e) = rt_xact.clone().commit().await {
+        // Subkey rows commit before record rows: a failure or crash between the
+        // two tables then leaves the record's seq mirror BEHIND its rows, the
+        // direction the read-path heal repairs. The reverse order mints a
+        // mirror claiming rows that were never written, which nothing repairs.
+        if let Err(e) = st_xact.clone().commit().await {
             self.rt_xact = Some(rt_xact);
             self.st_xact = Some(st_xact);
             return Err(e);
         }
-        if let Err(e) = st_xact.clone().commit().await {
+        if let Err(e) = rt_xact.clone().commit().await {
             self.rt_xact = Some(rt_xact);
             self.st_xact = Some(st_xact);
             return Err(e);

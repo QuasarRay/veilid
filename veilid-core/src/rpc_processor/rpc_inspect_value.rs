@@ -60,7 +60,7 @@ impl RPCProcessor {
 
         let debug_string = format!(
             "OUT ==> InspectValueQ({} #{}{}) => {:#}",
-            opaque_record_key, &subkeys, descriptor_mode, dest
+            opaque_record_key, subkeys, descriptor_mode, dest
         );
 
         // Send the inspectvalue question

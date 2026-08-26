@@ -477,9 +477,89 @@ where
         let (stk, opt_cached_record_data) = load_action.into_cached_record_data();
 
         if let Some(cached_record_data) = opt_cached_record_data {
+            self.heal_subkey_seq(&stk, &cached_record_data);
             // This automatically checks if the data is in the cache before inserting it
             self.cache_subkey(stk, cached_record_data);
         }
+    }
+
+    /// Forward-only repair of the record's subkey seq mirror from a loaded row.
+    ///
+    /// The row's embedded seq is authoritative; nothing outside the set path
+    /// rewrites the mirror, so one left behind (a crash between the two table
+    /// commits, or historical damage) makes inspect lie about the local copy
+    /// forever. A mirror AHEAD of its row is deliberately left alone: quietly
+    /// regressing it would hide a lost row instead of surfacing it.
+    ///
+    /// Per-subkey on purpose, not whole-record: transaction atomicity lives in
+    /// the value rows, which this never writes, and every mirror consumer
+    /// reads per-subkey, so a still-stale sibling only under-reports - which
+    /// fails safe into a fetch whose store then heals it. A whole-record
+    /// reconcile here would be repair_record's row scan inside the store lock.
+    ///
+    /// Failures only skip the heal - a read must never fail because a repair
+    /// could not be queued.
+    fn heal_subkey_seq(&mut self, stk: &SubkeyTableKey, data: &RecordData) {
+        let rtk = RecordTableKey {
+            record_key: stk.record_key.clone(),
+        };
+        let Some(old_record) = self.record_cache.get(&rtk).cloned() else {
+            return;
+        };
+        let row_seq = data.signed_value_data().value_data().seq();
+        let Ok(mirror_seq) = old_record.subkey_seq(stk.subkey) else {
+            return;
+        };
+        if row_seq <= mirror_seq {
+            return;
+        }
+
+        let record_size_estimator = self.record_size_estimator();
+        let mut new_record = old_record.clone();
+        if let Err(e) = new_record.record_stored_subkey(
+            stk.subkey,
+            data,
+            self.unlocked_inner.limits.max_record_data_size,
+        ) {
+            veilid_log!(self debug "subkey seq heal skipped for {} subkey {}: {}", rtk, stk.subkey, e);
+            return;
+        }
+
+        let (old_record_size, new_record_size) = match (
+            record_size_estimator.estimate(&rtk, &old_record),
+            record_size_estimator.estimate(&rtk, &new_record),
+        ) {
+            (Ok(o), Ok(n)) => (o, n),
+            (Err(e), _) | (_, Err(e)) => {
+                veilid_log!(self debug "subkey seq heal skipped for {} subkey {}: {}", rtk, stk.subkey, e);
+                return;
+            }
+        };
+        if let Err(e) = self.make_room_for_record(new_record_size, Some(old_record_size)) {
+            veilid_log!(self debug "subkey seq heal skipped for {} subkey {}: {}", rtk, stk.subkey, e);
+            return;
+        }
+
+        // Store record and adjust total storage
+        let mut space = self.record_cache_space.modify().unwrap_or_log();
+        if space.sub(old_record_size).is_err()
+            || space.add(new_record_size).is_err()
+            || space.commit().is_err()
+        {
+            return;
+        }
+
+        // No failures after commit point
+        self.record_cache.insert(rtk.clone(), new_record.clone());
+        self.add_uncommitted_record_update(
+            rtk.clone(),
+            new_record,
+            new_record_size,
+            old_record,
+            old_record_size,
+        );
+
+        veilid_log!(self debug "healed subkey seq mirror for {} subkey {}: {} -> {}", rtk, stk.subkey, mirror_seq, row_seq);
     }
 
     /// Update a record subkey
@@ -699,9 +779,9 @@ where
             } else {
                 // If it wasn't in the cache, then it may exist on disk if it was stored
                 if is_new_subkey {
-                    self.add_uncommitted_subkey_update(stk, new_data, None);
-                } else {
                     self.add_uncommitted_subkey_create(stk, new_data);
+                } else {
+                    self.add_uncommitted_subkey_update(stk, new_data, None);
                 }
             }
         }

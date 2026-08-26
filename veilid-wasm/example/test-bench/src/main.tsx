@@ -1,11 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
-import { initVeilid, startVeilid } from './veilid/veilid-core.ts'
+import { initVeilid } from './veilid/veilid-core.ts'
 
 async function main() {
+    // Only the wasm load happens here; App drives startup so the page can report on it
     await initVeilid();
-    await startVeilid();
 
     createRoot(document.getElementById('root')!).render(
         <StrictMode>
@@ -17,4 +17,3 @@ async function main() {
 main().catch((e) => {
     console.error(e);
 });
-

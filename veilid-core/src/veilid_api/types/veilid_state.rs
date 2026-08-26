@@ -2,7 +2,7 @@ use super::*;
 
 /// Attachment abstraction for network 'signal strength'.
 #[apply(api_data_enum!)]
-#[api(eq, copy, default, ts(namespace, from_wasm_abi, into_wasm_abi))]
+#[api(eq, copy, default, ts(namespace))]
 pub enum AttachmentState {
     /// Not attached to the network.
     #[default]
@@ -316,7 +316,7 @@ impl fmt::Display for VeilidValueChange {
 /// An update from the veilid-core to the host application describing a change
 /// to the internal state of the Veilid node.
 #[apply(api_data_enum!)]
-#[api(eq, ts(into_wasm_abi))]
+#[api(eq, ts)]
 #[serde(tag = "kind")]
 pub enum VeilidUpdate {
     /// A log message emitted by veilid-core.
@@ -378,7 +378,7 @@ impl fmt::Display for VeilidUpdate {
 }
 /// A queriable state of the internals of veilid-core.
 #[apply(api_data_struct!)]
-#[api(eq, default, ts(into_wasm_abi))]
+#[api(eq, default, ts)]
 pub struct VeilidState {
     /// The current attachment state.
     pub attachment: Box<VeilidStateAttachment>,

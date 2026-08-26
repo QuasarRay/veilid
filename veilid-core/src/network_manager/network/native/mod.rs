@@ -54,6 +54,9 @@ struct NetworkInner {
     /// the number of consecutive dial info confirmation failures per routing domain,
     /// used to avoid unpublishing peer info after a single transient discovery failure
     dial_info_confirm_failure_count: BTreeMap<RoutingDomain, usize>,
+    /// validator pool size (capped at the full quorum) seen at the last public internet
+    /// dial info confirmation attempt; a below-quorum confirmation re-tests as this grows
+    confirmed_validator_count: Option<usize>,
     /// result of resolving 'auto'/None detect_address_changes mode
     routing_domain_detect_address_changes: BTreeSet<RoutingDomain>,
     /// the next time we are allowed to check for better dialinfo when we are OutboundOnly
@@ -596,10 +599,9 @@ impl PlatformNetwork for NativeNetwork {
             let data_len = data.len();
             let network_manager = self.network_manager();
 
-            let unique_flow;
             let ip_addr = dial_info.address().ip_addr();
 
-            if dial_info.protocol_type() == ProtocolType::UDP {
+            let unique_flow = if dial_info.protocol_type() == ProtocolType::UDP {
                 // Never send to one of our own addresses; it loops back to our own socket
                 if network_manager
                     .routing_table()
@@ -626,11 +628,11 @@ impl PlatformNetwork for NativeNetwork {
                     .send_message(data, peer_socket_addr, "dial_info")
                     .await
                     .wrap_err("failed to send data to dial info")?);
-                unique_flow = UniqueFlow {
+                UniqueFlow {
                     flow,
                     connection_id: None,
                     dialed: true,
-                };
+                }
             } else {
                 // Handle connection-oriented protocols
                 let connmgr = network_manager.connection_manager();
@@ -649,8 +651,8 @@ impl PlatformNetwork for NativeNetwork {
                         return Ok(NetworkResult::timeout());
                     }
                 }
-                unique_flow = conn.unique_flow();
-            }
+                conn.unique_flow()
+            };
 
             // Network accounting
             network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
@@ -805,6 +807,7 @@ impl NativeNetwork {
         NetworkInner {
             network_needs_restart: false,
             dial_info_confirm_failure_count: BTreeMap::new(),
+            confirmed_validator_count: None,
             routing_domain_detect_address_changes: BTreeSet::new(),
             next_outbound_only_dial_info_check: Timestamp::default(),
             outbound_only_dial_info_check_period_secs: UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS,

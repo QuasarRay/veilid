@@ -30,6 +30,8 @@ pub mod veilid_api_js;
 pub mod veilid_client_js;
 /// `VeilidCrypto` bindings: per-cryptosystem hashing, signing, and encryption.
 pub mod veilid_crypto_js;
+/// Error conversion to the JS `VeilidAPIError` class hierarchy.
+pub mod veilid_error_js;
 /// `VeilidRoutingContext` bindings: messaging and DHT record operations.
 pub mod veilid_routing_context_js;
 /// `VeilidTableDB` bindings: persistent key-value table storage.

@@ -182,6 +182,44 @@ deps-linux:
     COPY +deps-rust/cargo-zigbuild /usr/local/cargo/bin/cargo-zigbuild
     COPY +deps-rust/zig /usr/local/zig
 
+# Flutter SDK for the veilid-flutter integration tests. Newer base than the rest of the
+# build: these tests ship nothing, so the ubuntu 18.04 glibc floor that keeps the release
+# binaries portable buys them nothing, and Flutter's own floor is well above it.
+deps-flutter:
+    FROM ubuntu:24.04
+    # Flutter publishes a linux-x64 SDK only, so this half of the build is amd64-only
+    IF [ $(arch) != "x86_64" ]
+        RUN echo "the flutter integration tests need an x86_64 host; Flutter ships no linux-arm64 SDK"
+        RUN false
+    END
+    ENV DEBIAN_FRONTEND=noninteractive
+    ENV RUSTUP_HOME=/usr/local/rustup
+    ENV CARGO_HOME=/usr/local/cargo
+    ENV FLUTTER_SDK_DIR=/usr/local/share/veilid-flutter-sdk
+    ENV PATH=$PATH:/usr/local/cargo/bin:/usr/local/share/veilid-flutter-sdk/flutter/bin
+    ENV CARGO_INCREMENTAL=0
+    ENV CARGO_BUILD_JOBS=1
+    ENV RUST_BACKTRACE=1
+    RUN apt-get -y update
+    RUN apt-get install -y ca-certificates curl git unzip xz-utils file build-essential pkg-config libssl-dev
+    WAIT
+        BUILD +deps-rust
+    END
+    COPY +deps-rust/cargo /usr/local/cargo
+    COPY +deps-rust/rustup /usr/local/rustup
+    # The same pinned installer the dev-setup scripts use, so CI and a dev host land on one SDK
+    COPY --keep-ts .dagger/versions.env dev-setup/_flutter_install.sh /tmp/flutter-install/
+    RUN . /tmp/flutter-install/versions.env && . /tmp/flutter-install/_flutter_install.sh && i_flutter
+    # flutter shells out to git against its own checkout, which this container did not clone
+    RUN git config --global --add safe.directory "$FLUTTER_SDK_DIR/flutter"
+    RUN flutter --version
+
+# Code + Flutter deps
+code-flutter:
+    FROM +deps-flutter
+    COPY --keep-ts --dir .cargo .dagger dev-setup scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
+    WORKDIR /veilid
+
 # Make a cache image with downloaded and built dependencies
 build-linux-cache:
     FROM +deps-linux
@@ -353,12 +391,20 @@ test-clippy-x86-64-unknown-linux-gnu-async-std:
 test-clippy-mock-api:
     FROM +code-linux
     RUN ./scripts/_clippy_mock_api.sh
+test-clippy-optional-features:
+    FROM +code-linux
+    RUN ./scripts/_clippy_optional_features.sh
 test-build-docs:
     FROM +code-linux    
     RUN ./scripts/_build_docs.sh
 test-unit-tests-all:
     FROM +code-linux
     RUN ./scripts/_unit_tests_all.sh
+# The desktop flutter binding end to end against the in-process mock, headless on
+# flutter-tester - the same run check_all.sh does locally.
+test-flutter-integration:
+    FROM +code-flutter
+    RUN ./scripts/_flutter_integration_tests.sh
 test-all:
     BUILD +test-msrv-all
     BUILD +test-smoketest-all
@@ -371,8 +417,10 @@ test-all:
     BUILD +test-clippy-x86-64-unknown-linux-gnu
     BUILD +test-clippy-x86-64-unknown-linux-gnu-async-std
     BUILD +test-clippy-mock-api
+    BUILD +test-clippy-optional-features
     BUILD +test-build-docs
     BUILD +test-unit-tests-all
+    BUILD +test-flutter-integration
 
 # Package
 # Each package compiles the SELinux .pp in-place from package/selinux (RPM on rockylinux:9, DEB on ubuntu 18.04).

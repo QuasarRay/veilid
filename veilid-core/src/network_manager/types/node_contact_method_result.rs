@@ -1,5 +1,16 @@
 use super::*;
 
+/// Whether a contact method lookup precedes an actual send. Only a real send may
+/// spend the suppression recovery canary or count as a skipped send; an advisory
+/// lookup that consumed the canary would starve the send that follows it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ContactMethodIntent {
+    /// A send follows immediately
+    Send,
+    /// Inspection only (bootstrap pre-check, debug)
+    Advisory,
+}
+
 /// Pre-send outcome of choosing how to reach a node.
 /// Resolved means we picked a contact method; other variants explain why we couldn't.
 #[derive(Clone, Debug)]

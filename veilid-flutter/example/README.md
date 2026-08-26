@@ -2,6 +2,19 @@
 
 Demonstrates how to use the veilid plugin.
 
+## Running on the web
+
+`web/index.html` loads the veilid wasm blob out of `web/wasm/`, which is
+gitignored and not populated by a plain `flutter run`. Build and copy it first:
+
+```sh
+./scripts/wasm_update.sh          # debug
+./scripts/wasm_update.sh release  # release
+flutter run -d chrome
+```
+
+`../run_integration_tests_web.sh` does this step for you.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

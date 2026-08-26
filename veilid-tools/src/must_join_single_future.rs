@@ -3,6 +3,11 @@ use super::*;
 use core::task::Poll;
 use futures_util::poll;
 
+/// Returned when another caller is concurrently polling the single future
+#[derive(ThisError, Debug, Copy, Clone, PartialEq, Eq)]
+#[error("Single future locked")]
+pub struct SingleFutureLockedError;
+
 #[derive(Debug)]
 struct MustJoinSingleFutureInner<T>
 where
@@ -46,11 +51,11 @@ where
         }
     }
 
-    fn try_lock(&self) -> Result<Option<MustJoinHandle<T>>, ()> {
+    fn try_lock(&self) -> Result<Option<MustJoinHandle<T>>, SingleFutureLockedError> {
         let mut inner = self.inner.lock();
         if inner.locked {
             // If already locked error out
-            return Err(());
+            return Err(SingleFutureLockedError);
         }
         inner.locked = true;
         // If we got the lock, return what we have for a join handle if anything
@@ -67,7 +72,7 @@ where
 
     /// Check the result and take it if there is one
     /// Non-blocking: polls the in-flight task once and returns immediately; `Err` if another caller holds the lock.
-    pub async fn check(&self) -> Result<Option<T>, ()> {
+    pub async fn check(&self) -> Result<Option<T>, SingleFutureLockedError> {
         let mut out: Option<T> = None;
 
         // See if we have a result we can return
@@ -75,7 +80,7 @@ where
             Ok(v) => v,
             Err(_) => {
                 // If we are already polling somewhere else, don't hand back a result
-                return Err(());
+                return Err(SingleFutureLockedError);
             }
         };
         if let Some(mut jh) = maybe_jh {
@@ -99,7 +104,7 @@ where
 
     /// Wait for the result and take it
     /// Blocks until the in-flight task finishes; `Err` if another caller is concurrently polling.
-    pub async fn join(&self) -> Result<Option<T>, ()> {
+    pub async fn join(&self) -> Result<Option<T>, SingleFutureLockedError> {
         let mut out: Option<T> = None;
 
         // See if we have a result we can return
@@ -109,7 +114,7 @@ where
                 // If we are already polling somewhere else,
                 // that's an error because you can only join
                 // these things once
-                return Err(());
+                return Err(SingleFutureLockedError);
             }
         };
         if let Some(jh) = maybe_jh {
@@ -132,7 +137,7 @@ where
         &self,
         name: &str,
         future: impl Future<Output = T> + 'static,
-    ) -> Result<(Option<T>, bool), ()> {
+    ) -> Result<(Option<T>, bool), SingleFutureLockedError> {
         let mut out: Option<T> = None;
 
         // See if we have a result we can return
@@ -140,7 +145,7 @@ where
             Ok(v) => v,
             Err(_) => {
                 // If we are already polling somewhere else, don't hand back a result
-                return Err(());
+                return Err(SingleFutureLockedError);
             }
         };
         let mut run = true;
@@ -178,14 +183,14 @@ where
         &self,
         name: &str,
         future_callback: C,
-    ) -> Result<(Option<T>, bool), ()> {
+    ) -> Result<(Option<T>, bool), SingleFutureLockedError> {
         let mut out: Option<T> = None;
         // See if we have a result we can return
         let maybe_jh = match self.try_lock() {
             Ok(v) => v,
             Err(_) => {
                 // If we are already polling somewhere else, don't hand back a result
-                return Err(());
+                return Err(SingleFutureLockedError);
             }
         };
         let mut run = true;

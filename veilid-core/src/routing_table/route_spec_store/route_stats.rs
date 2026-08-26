@@ -32,6 +32,8 @@ impl RouteStatsDisposition {
 pub struct RouteOrderingStats {
     /// Consecutive failed-to-send count (loopback test failures count here too)
     pub failed_to_send: usize,
+    /// Consecutive loopback failures deferred under blame suppression
+    pub deferred_loopback_failures: usize,
     /// Per-destination lost question tracking: destination pubkey -> lost count
     pub lost_question_destinations: HashMap<PublicKey, usize>,
     /// When this ordering was last known valid (loopback pass / rcvd traffic)
@@ -88,6 +90,7 @@ pub struct RouteStats {
     /// per-ordering later via a rollup/update).
     pub transfer: TransferStatsDownUp,
     /// Latency stats (route-level for now; same reservation as transfer).
+    /// Refreshed once per stats interval by [Self::update_latency_stats].
     pub latency: LatencyStats,
     /// Per-local-route stats keyed by local-route pubkey on our side.
     pub routed_stats: LruCache<PublicKey, PerRouteStats>,
@@ -333,6 +336,7 @@ impl RouteStats {
         cur_ts: Timestamp,
     ) {
         let os = self.ordering_mut(ordering);
+        os.deferred_loopback_failures = 0;
         if ok {
             os.last_known_valid_ts = Some(cur_ts);
             os.failed_to_send = 0;
@@ -342,6 +346,14 @@ impl RouteStats {
         }
     }
 
+    /// Count a loopback failure observed while blame is suppressed. The caller
+    /// caps how long deferral can hide a dead route; any recorded result resets.
+    pub fn record_loopback_deferral(&mut self, ordering: SequenceOrdering) -> usize {
+        let os = self.ordering_mut(ordering);
+        os.deferred_loopback_failures += 1;
+        os.deferred_loopback_failures
+    }
+
     /// Mark when we last enqueued a periodic loopback keepalive for this route at a given ordering
     pub fn record_loopback_keepalive(&mut self, cur_ts: Timestamp, ordering: SequenceOrdering) {
         self.ordering_mut(ordering).last_loopback_keepalive_ts = Some(cur_ts);
@@ -349,7 +361,7 @@ impl RouteStats {
 
     /// Record latency for this route (route-level)
     pub fn record_latency(&mut self, latency: TimestampDuration) {
-        self.latency = self.latency_stats_accounting.record_latency(latency);
+        self.latency_stats_accounting.record_latency(latency);
     }
 
     pub fn record_routed_up(&mut self, key: &PublicKey, bytes: ByteCount) {
@@ -376,6 +388,17 @@ impl RouteStats {
             .or_insert_with(PerRouteStats::default);
         entry.record_round_trip(sample);
         entry.add_down(bytes);
+    }
+
+    /// Refresh the cached latency views; recomputes only from accountings that
+    /// saw new samples since the last pass
+    pub fn update_latency_stats(&mut self) {
+        if let Some(l) = self.latency_stats_accounting.take_latency_stats() {
+            self.latency = l;
+        }
+        for (_key, entry) in self.routed_stats.iter_mut() {
+            entry.update_latency_stats();
+        }
     }
 
     /// Roll transfers for these route stats (route-level)

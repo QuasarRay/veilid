@@ -14,8 +14,7 @@
 #                         run), it gets killed first. Captures the new PID.
 #   stop_chromedriver   - kill the chromedriver pid we started (graceful
 #                         SIGTERM, then SIGKILL if it doesn't exit promptly).
-#                         Also kills the log poller and removes the headless
-#                         Chrome wrapper file.
+#                         Also kills the log poller.
 #
 # Resolution order for the chromedriver binary:
 #   1. $CHROMEDRIVER env var (if executable)
@@ -31,7 +30,6 @@ CHROMEDRIVER_PORT="${CHROMEDRIVER_PORT:-4444}"
 _chromedriver_started_pid=""
 _chromedriver_log_poller_pid=""
 _chromedriver_binary=""
-_headless_chrome_wrapper=""
 
 _chromedriver_os() {
     case "$(uname -s 2>/dev/null)" in
@@ -362,10 +360,6 @@ stop_chromedriver() {
         wait "${_chromedriver_started_pid}" 2>/dev/null || true
         _chromedriver_started_pid=""
     fi
-    if [ -n "${_headless_chrome_wrapper}" ] && [ -f "${_headless_chrome_wrapper}" ]; then
-        rm -f "${_headless_chrome_wrapper}"
-        _headless_chrome_wrapper=""
-    fi
 }
 
 # Stream browser console messages from the active chromedriver WebDriver
@@ -416,30 +410,6 @@ stop_chromedriver_log_poller() {
         wait "${_chromedriver_log_poller_pid}" 2>/dev/null || true
         _chromedriver_log_poller_pid=""
     fi
-}
-
-# Generate a Chrome wrapper script that prepends --headless=new (and a fresh
-# isolated user-data-dir) to every Chrome invocation, and export
-# CHROME_EXECUTABLE pointing at it. Used with `flutter drive -d chrome` so the
-# Chrome flutter_tools launches to host the test app runs headless while still
-# proxying the browser console to flutter drive's stdout. Cleanup is handled
-# by stop_chromedriver.
-setup_headless_chrome_executable() {
-    local chrome
-    chrome="$(_chromedriver_locate_chrome)" || {
-        echo "ERROR: Chrome not found." >&2
-        _chromedriver_install_hint >&2
-        return 1
-    }
-
-    _headless_chrome_wrapper="$(mktemp -t chrome_headless_XXXXXX)"
-    cat > "${_headless_chrome_wrapper}" <<EOF
-#!/usr/bin/env bash
-exec "${chrome}" --headless=new --no-first-run --disable-gpu "\$@"
-EOF
-    chmod +x "${_headless_chrome_wrapper}"
-    export CHROME_EXECUTABLE="${_headless_chrome_wrapper}"
-    echo "chrome: headless wrapper at ${_headless_chrome_wrapper} -> ${chrome}"
 }
 
 # Run flutter drive, watching for the test-result marker. flutter drive on web

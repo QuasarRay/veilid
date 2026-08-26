@@ -20,7 +20,7 @@ impl VeilidCrypto {
     #[wasm_bindgen(getter, unchecked_return_type = "CryptoKind")]
     #[must_use]
     pub fn CRYPTO_KIND_VLD0() -> JsValue {
-        crate::CRYPTO_KIND_VLD0.into()
+        crate::CRYPTO_KIND_VLD0.to_string().into()
     }
 
     /// The NONE crypto kind
@@ -28,7 +28,7 @@ impl VeilidCrypto {
     #[wasm_bindgen(getter, unchecked_return_type = "CryptoKind")]
     #[must_use]
     pub fn CRYPTO_KIND_NONE() -> JsValue {
-        crate::CRYPTO_KIND_NONE.into()
+        crate::CRYPTO_KIND_NONE.to_string().into()
     }
 
     // /// The VLD1 crypto kind
@@ -57,7 +57,7 @@ impl VeilidCrypto {
     #[wasm_bindgen(getter, unchecked_return_type = "CryptoKind")]
     #[must_use]
     pub fn kind(&self) -> JsValue {
-        self.kind.into()
+        self.kind.to_string().into()
     }
 
     fn with_crypto_system<

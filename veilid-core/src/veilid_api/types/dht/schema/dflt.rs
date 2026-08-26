@@ -2,7 +2,7 @@ use super::*;
 
 /// Default DHT Schema (DFLT)
 #[apply(api_data_struct!)]
-#[api(eq, ord, ts(from_wasm_abi, into_wasm_abi))]
+#[api(eq, ord, ts)]
 pub struct DHTSchemaDFLT {
     /// Owner subkey count
     o_cnt: u16,

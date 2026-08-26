@@ -680,9 +680,31 @@ async def test_dht_transaction_integration_writer_reader_fail_begin():
                     # open dht record on server 1
                     rec1 = await rc1.open_dht_record(rec0.key, rec0.owner_key_pair())
 
-                    # Try to transact with the same member keypair a second time and it will fail
-                    with pytest.raises(VeilidAPIError):
-                        await api1.transact_dht_records([rec1.key], None)
+                    # Storage nodes cap concurrent same-member transactions at THEIR
+                    # member_transaction_limit, which may lag the local build's (main net
+                    # still enforces 1). Server 0 holds one, so at most limit-1 more
+                    # same-member begins may succeed before one is rejected.
+                    limit = int(await api1.debug("config internal.network.dht.member_transaction_limit"))
+                    extra_txs = []
+                    rejected = False
+                    try:
+                        for _ in range(limit):
+                            try:
+                                extra_txs.append(await api1.transact_dht_records([rec1.key], None))
+                            except VeilidAPIError:
+                                rejected = True
+                                break
+                        print(
+                            f"member transaction exclusion: {len(extra_txs) + 1} concurrent "
+                            f"same-member transactions allowed (local limit {limit})"
+                        )
+                        assert rejected, (
+                            f"{len(extra_txs) + 1} concurrent same-member transactions all "
+                            f"accepted, exceeding member_transaction_limit {limit}"
+                        )
+                    finally:
+                        for tx in extra_txs:
+                            await tx.rollback()
 
                     # commit on server 0
                     await rec0_tx.commit()

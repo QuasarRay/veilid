@@ -190,7 +190,7 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
                     }
                 }
             }
-            Err(()) => {
+            Err(SingleFutureLockedError) => {
                 // If we get this, it's because we are joining the singlefuture already
                 // Don't bother running but this is not an error in this case
                 Ok(false)

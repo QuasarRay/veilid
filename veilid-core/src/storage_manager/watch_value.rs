@@ -1291,6 +1291,8 @@ impl StorageManager {
                         veilid_log!(this debug "change inspect: nothing newer online for {}", record_key);
                     } else {
                         veilid_log!(this debug "change inspect: PRODUCTIVE: missed value change on {} subkeys {}", record_key, newer_online_subkeys);
+                        #[cfg(feature = "verbose-tracing")]
+                        this.diagnose_watch_notification_routes(&opaque_record_key);
                     }
 
                     // Get changed first changed subkey until we find one to report
@@ -1409,6 +1411,49 @@ impl StorageManager {
         );
     }
 
+    /// Diagnose a watch's notification routes after a productive change inspect: the
+    /// inspect answered, so our receive path works and a missed push implicates the
+    /// bound routes. Logs whether each is still allocated (present-but-broken vs
+    /// missing-but-unnoticed) and requests a cooldown-bypassed test of the present ones.
+    #[cfg(feature = "verbose-tracing")]
+    fn diagnose_watch_notification_routes(&self, opaque_record_key: &OpaqueRecordKey) {
+        let value_changed_routes: Vec<PublicKey> = {
+            let inner = self.inner.lock();
+            let Some(outbound_watch) = inner
+                .outbound_watch_manager
+                .outbound_watches
+                .get(opaque_record_key)
+            else {
+                return;
+            };
+            let Some(state) = outbound_watch.state() else {
+                return;
+            };
+            state.value_changed_routes().iter().cloned().collect()
+        };
+        if value_changed_routes.is_empty() {
+            veilid_log!(self debug "watch route diagnosis: no notification routes bound ({})", opaque_record_key);
+            return;
+        }
+
+        let routing_table = self.routing_table();
+        let rss = routing_table.route_spec_store();
+        for vcr in value_changed_routes {
+            match rss.get_route_id_for_key(&vcr) {
+                Some(route_id) => {
+                    veilid_log!(self debug "watch route diagnosis: notification route {} allocated as {:#}, requesting test ({})", vcr, route_id, opaque_record_key);
+                    routing_table.request_route_test(route_id);
+                }
+                None => {
+                    let allocated = rss
+                        .list_allocated_routes(|k, _v| Some(k.to_string()))
+                        .join(",");
+                    veilid_log!(self warn "watch route diagnosis: notification route {} MISSING but watch not renewed; allocated routes [{}] ({})", vcr, allocated, opaque_record_key);
+                }
+            }
+        }
+    }
+
     fn get_change_inspection_operation_transactional_inner(
         registry: VeilidComponentRegistry,
         record_key: RecordKey,
@@ -1440,6 +1485,8 @@ impl StorageManager {
                         return VeilidAPIResult::Ok(());
                     }
                     veilid_log!(this info "change inspect productive: missed value change on {} subkeys {}", record_key, report.newer_online_subkeys());
+                    #[cfg(feature = "verbose-tracing")]
+                    this.diagnose_watch_notification_routes(&opaque_record_key);
 
                     this.with_background_transaction(
                         record_key.clone(),

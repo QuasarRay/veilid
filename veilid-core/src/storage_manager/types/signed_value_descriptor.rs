@@ -120,7 +120,7 @@ impl fmt::Debug for SignedValueDescriptor {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("SignedValueDescriptor")
             .field("owner", &self.owner)
-            .field("schema_data", &format!("{:?}", &self.schema_data))
+            .field("schema_data", &format!("{:?}", self.schema_data))
             .field("signature", &self.signature)
             .finish()
     }

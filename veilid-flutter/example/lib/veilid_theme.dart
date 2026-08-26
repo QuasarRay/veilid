@@ -242,6 +242,13 @@ const MaterialColor materialPopComplementaryColor =
 const kDefaultSpacingFactor = 4.0;
 
 const kDefaultMonoTerminalFontFamily = 'Fira Code';
+
+/// The static face to fall back to. Fira Code ships here as a VARIABLE font,
+/// which the web engine renders with the wrong metrics - and xterm's own
+/// fallback list is desktop font NAMES (Menlo, Consolas, ...), none of which a
+/// web build has registered, so without this the terminal lands on a
+/// proportional last-resort face and its cell grid stops being a grid.
+const kDefaultMonoTerminalFallbackFontFamily = 'Cascadia Mono';
 const kDefaultMonoTerminalFontHeight = 1.2;
 const kDefaultMonoTerminalFontSize = 12.0;
 

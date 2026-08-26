@@ -7,14 +7,7 @@ use super::*;
 ///
 /// No sequencing preference guarantees delivery under all conditions, as there is no queuing/buffering in the network
 #[apply(api_data_enum!)]
-#[api(
-    eq,
-    copy,
-    ord,
-    hash,
-    default,
-    ts(from_wasm_abi, into_wasm_abi, namespace)
-)]
+#[api(eq, copy, ord, hash, default, ts(namespace))]
 // Ordering here matters, >= is used to check strength of sequencing requirement
 pub enum Sequencing {
     /// Any `SequenceOrdering` is acceptable, but `SequenceOrdering::Unordered` will be chosen if available
@@ -94,7 +87,7 @@ impl FromStr for Sequencing {
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi, namespace)
+    tsify(namespace)
 )]
 #[must_use]
 #[enumset(repr = "u8")]
@@ -173,14 +166,7 @@ pub type SequenceOrderingSet = EnumSet<SequenceOrdering>;
 /// * `Stability::LowLatency`: prefer nodes with low latency, but may be unreliable and require route reallocation
 /// * `Stability::Reliable`: prefer nodes with reliable uptime, but may have higher latency
 #[apply(api_data_enum!)]
-#[api(
-    eq,
-    copy,
-    ord,
-    hash,
-    default,
-    ts(from_wasm_abi, into_wasm_abi, namespace)
-)]
+#[api(eq, copy, ord, hash, default, ts(namespace))]
 // Ordering here matters, >= is used to check strength of stability requirement
 pub enum Stability {
     /// Prefer nodes with low latency, but may be unreliable and require route reallocation

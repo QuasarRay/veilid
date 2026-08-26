@@ -130,5 +130,8 @@ step ./scripts/_check_wasm_builds.sh js
 step ./scripts/_build_docs.sh $CLEANUP
 step ./scripts/_unit_tests_all.sh
 step env DEFAULT_CARGO_TARGET=wasm32-unknown-unknown ./scripts/_unit_tests_all.sh
+# Desktop flutter binding, exercised end to end against the in-process mock. Headless, so
+# it is the same run here as in CI - no window, everything on stdout.
+step ./scripts/_flutter_integration_tests.sh
 
 echo "check_all: all checks passed."

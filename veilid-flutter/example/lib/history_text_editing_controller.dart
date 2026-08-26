@@ -9,6 +9,9 @@ class HistoryTextEditingController {
 
   final TextEditingController _controller;
 
+  /// A caller's controller is theirs to dispose; only a self-made one is ours
+  final bool _ownsController;
+
   late final FocusNode _historyFocusNode;
 
   final List<String> _history = [];
@@ -19,7 +22,8 @@ class HistoryTextEditingController {
 
   HistoryTextEditingController(
       {required this.setState, TextEditingController? controller})
-      : _controller = controller ?? TextEditingController() {
+      : _controller = controller ?? TextEditingController(),
+        _ownsController = controller == null {
     _historyFocusNode = FocusNode(onKeyEvent: (node, event) {
       if (event.runtimeType == KeyDownEvent &&
           event.logicalKey == LogicalKeyboardKey.arrowUp) {
@@ -71,4 +75,11 @@ class HistoryTextEditingController {
   FocusNode get focusNode => _historyFocusNode;
 
   TextEditingController get controller => _controller;
+
+  void dispose() {
+    _historyFocusNode.dispose();
+    if (_ownsController) {
+      _controller.dispose();
+    }
+  }
 }

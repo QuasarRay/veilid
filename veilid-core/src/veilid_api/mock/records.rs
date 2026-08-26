@@ -53,6 +53,61 @@ fn accepts(existing: Option<&ValueData>, incoming: &ValueData) -> bool {
     }
 }
 
+impl VeilidAPI {
+    /// Transform value data between plaintext and what a storage node holds.
+    ///
+    /// The real record layer stream-ciphers subkey values under the encryption key half of the
+    /// record key (`storage_manager/record_encryption.rs`). That is what makes a record key the
+    /// read capability for its record: handing one out hands out the ability to read it, and
+    /// reopening the same opaque storage under a different encryption key takes that ability away.
+    /// Modelled here so a holder of the wrong key gets the same undecipherable bytes the real
+    /// network gives it instead of reading straight through.
+    ///
+    /// Symmetric, because the cipher is: encrypt and decrypt are the same call.
+    ///
+    /// Real core stores a random nonce beside each value; the mock keeps plain `ValueData` with
+    /// nowhere to put one, so the nonce is derived from the slot instead. That keeps ciphertext the
+    /// same length as plaintext, and keeps a rewrite of identical bytes identical - which the
+    /// equal-sequence idempotency arm in [accepts] compares. It does mean one nonce per slot rather
+    /// than per write, which no real deployment should imitate; there is no adversary inside a
+    /// single mock process.
+    pub(crate) fn mock_crypt_value(
+        &self,
+        record_key: &RecordKey,
+        subkey: ValueSubkey,
+        data: &[u8],
+    ) -> VeilidAPIResult<Vec<u8>> {
+        let Some(encryption_key) = record_key.ref_value().ref_encryption_key() else {
+            return Ok(data.to_vec());
+        };
+        let crypto = self.crypto()?;
+        let Some(vcrypto) = crypto.get(record_key.kind()) else {
+            apibail_generic!("unsupported cryptosystem for record encryption key");
+        };
+
+        let mut nonce_material = record_key.ref_value().ref_key().bytes().to_vec();
+        nonce_material.extend_from_slice(&subkey.to_le_bytes());
+        let digest = vcrypto.generate_hash(&nonce_material);
+        let nonce = Nonce::new(&digest.ref_value().bytes()[..vcrypto.nonce_length()]);
+
+        let encryption_key = SharedSecret::new(record_key.kind(), encryption_key.clone());
+        let mut out = vec![0u8; data.len()];
+        vcrypto.crypt_b2b_no_auth(data, &mut out, &nonce, &encryption_key)?;
+        Ok(out)
+    }
+
+    /// [Self::mock_crypt_value] over a whole stored value, keeping seq and writer
+    pub(crate) fn mock_crypt_value_data(
+        &self,
+        record_key: &RecordKey,
+        subkey: ValueSubkey,
+        value: &ValueData,
+    ) -> VeilidAPIResult<ValueData> {
+        let data = self.mock_crypt_value(record_key, subkey, value.data())?;
+        ValueData::new_with_seq(value.seq(), data, value.ref_writer().clone())
+    }
+}
+
 impl MockNode {
     fn opened(&self, record_key: &RecordKey) -> VeilidAPIResult<&MockOpenedRecord> {
         self.opened_records
@@ -98,6 +153,7 @@ impl VeilidAPI {
         schema: DHTSchema,
         owner: Option<KeyPair>,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
+        check_fault(MockFaultOp::Create, None, None)?;
         let crypto = self.crypto()?;
         let Some(vcrypto) = crypto.get_async(kind) else {
             apibail_generic!("unsupported cryptosystem");
@@ -135,6 +191,8 @@ impl VeilidAPI {
             );
             // The local store holds a record from the moment it is created, values or not
             node.local_records.entry(record_key.opaque()).or_default();
+            node.local_descriptors
+                .insert(record_key.opaque(), (owner.key(), schema.clone()));
         })?;
 
         Ok(DHTRecordDescriptor::new(
@@ -145,23 +203,37 @@ impl VeilidAPI {
         ))
     }
 
-    /// Open an existing record from the shared DHT.
+    /// Open a record: from this node's local store when it has one, else from the shared DHT.
+    ///
+    /// A record already in the local store opens with no network at all, which is what
+    /// `open_record` does - it returns the local descriptor and only queues a rehydration.
+    /// Only a record this node has never held has to be fetched, and that is the one case
+    /// that needs to be attached.
     pub(crate) fn mock_open_dht_record(
         &self,
         record_key: RecordKey,
         default_writer: Option<KeyPair>,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
-        // Opening reads the descriptor off the network, so it needs the network
-        if !self.mock_is_attached()? {
-            apibail_try_again!("offline, try again later");
-        }
-
-        let (owner, schema) = with_records(|records| {
-            records
-                .get(&record_key.opaque())
-                .map(|r| (r.owner.clone(), r.schema.clone()))
-                .ok_or_else(|| VeilidAPIError::key_not_found(record_key.opaque()))
+        check_fault(MockFaultOp::Open, Some(&record_key), None)?;
+        let local = MockNetwork::with_node(&self.mock_key()?, |node| {
+            node.local_descriptors.get(&record_key.opaque()).cloned()
         })?;
+
+        let (owner, schema) = match local {
+            Some(descriptor) => descriptor,
+            None => {
+                // Nothing held locally, so this open has to reach the network
+                if !self.mock_is_attached()? {
+                    apibail_try_again!("offline, try again later");
+                }
+                with_records(|records| {
+                    records
+                        .get(&record_key.opaque())
+                        .map(|r| (r.owner.clone(), r.schema.clone()))
+                        .ok_or_else(|| VeilidAPIError::key_not_found(record_key.opaque()))
+                })?
+            }
+        };
 
         // Only an owner-keyed writer conveys the owner secret back, matching the real descriptor
         let owner_secret = default_writer
@@ -176,6 +248,9 @@ impl VeilidAPI {
                 .writer = default_writer;
             // The local store holds a record from the moment it is opened, values or not
             node.local_records.entry(record_key.opaque()).or_default();
+            node.local_descriptors
+                .entry(record_key.opaque())
+                .or_insert_with(|| (owner.clone(), schema.clone()));
         })?;
 
         Ok(DHTRecordDescriptor::new(
@@ -211,6 +286,7 @@ impl VeilidAPI {
         MockNetwork::with_node(&self.mock_key()?, |node| {
             node.opened_records.remove(&record_key.opaque());
             node.offline_writes.remove(&record_key.opaque());
+            node.local_descriptors.remove(&record_key.opaque());
             node.local_records
                 .remove(&record_key.opaque())
                 .map(|_| ())
@@ -275,7 +351,7 @@ impl VeilidAPI {
         })?;
 
         if !changed.is_empty() {
-            report_value_change(record_key, &changed);
+            self.report_value_change(record_key, &changed);
         }
         Ok(true)
     }
@@ -325,6 +401,9 @@ impl VeilidAPI {
         subkey: ValueSubkey,
         force_refresh: bool,
     ) -> VeilidAPIResult<Option<ValueData>> {
+        if check_fault(MockFaultOp::Get, Some(&record_key), Some(subkey))? {
+            return Ok(None);
+        }
         let key = self.mock_key()?;
         let cached = MockNetwork::with_node(&key, |node| {
             node.opened(&record_key)?;
@@ -333,7 +412,11 @@ impl VeilidAPI {
 
         if !force_refresh {
             if let Some(cached) = cached {
-                return Ok(Some(cached));
+                return Ok(Some(self.mock_crypt_value_data(
+                    &record_key,
+                    subkey,
+                    &cached,
+                )?));
             }
         }
         if !self.mock_is_attached()? {
@@ -356,7 +439,9 @@ impl VeilidAPI {
                 node.set_local_value(&record_key, subkey, value);
             })?;
         }
-        Ok(value)
+        value
+            .map(|v| self.mock_crypt_value_data(&record_key, subkey, &v))
+            .transpose()
     }
 
     /// Write a subkey through to the shared DHT.
@@ -373,6 +458,11 @@ impl VeilidAPI {
         data: Vec<u8>,
         options: Option<SetDHTValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
+        // A silent write reports success and drops the value, which is the
+        // failure nothing retries
+        if check_fault(MockFaultOp::Set, Some(&record_key), Some(subkey))? {
+            return Ok(None);
+        }
         let key = self.mock_key()?;
         let options = options.unwrap_or_default();
 
@@ -405,6 +495,10 @@ impl VeilidAPI {
         }
 
         let min_seqnum = options.min_seqnum.unwrap_or(ValueSeqNum::NONE);
+
+        // Nothing below this line handles plaintext: a storage node only ever sees ciphertext,
+        // and the sequence and identical-bytes rules are applied to what it stores
+        let data = self.mock_crypt_value(&record_key, subkey, &data)?;
 
         // Rewriting identical bytes as the same writer keeps the number rather than burning one
         let identical = cached
@@ -479,7 +573,7 @@ impl VeilidAPI {
                     }
                 })?;
                 if changed {
-                    report_value_change(&record_key, &ValueSubkeyRangeSet::single(subkey));
+                    self.report_value_change(&record_key, &ValueSubkeyRangeSet::single(subkey));
                 }
                 Ok(None)
             }
@@ -487,7 +581,11 @@ impl VeilidAPI {
                 MockNetwork::with_node(&key, |node| {
                     node.set_local_value(&record_key, subkey, existing.clone());
                 })?;
-                Ok(Some(existing))
+                Ok(Some(self.mock_crypt_value_data(
+                    &record_key,
+                    subkey,
+                    &existing,
+                )?))
             }
         }
     }
@@ -499,6 +597,7 @@ impl VeilidAPI {
         subkeys: Option<ValueSubkeyRangeSet>,
         scope: DHTReportScope,
     ) -> VeilidAPIResult<DHTRecordReport> {
+        check_fault(MockFaultOp::Inspect, Some(&record_key), None)?;
         let key = self.mock_key()?;
         let schema = with_records(|records| {
             records

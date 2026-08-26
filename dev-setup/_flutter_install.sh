@@ -5,7 +5,7 @@
 # Managed, namespaced install dir so it never clobbers a dev's own flutter checkout.
 FLUTTER_SDK_DIR="${FLUTTER_SDK_DIR:-$HOME/.local/share/veilid-flutter}"
 
-# flutter --version -> "Flutter 3.44.0 • channel stable • ..."; empty when flutter isn't installed.
+# flutter --version -> "Flutter 3.47.1 • channel stable • ..."; empty when flutter isn't installed.
 flutter_ver() { command -v flutter >/dev/null 2>&1 && flutter --version 2>/dev/null | head -1; }
 
 # Put the flutter bin on this session's PATH + persist it to the user's shell rc (idempotent).

@@ -297,15 +297,21 @@ impl RouteSpecStore {
             })
             .count();
 
-        if good_count > 1 {
-            // Round-robin among top-tier routes to distribute load
-            let idx = route_selection_counter.fetch_add(1, Ordering::Relaxed) % good_count;
+        // Round-robin among top-tier routes to distribute load; with no top tier,
+        // over all candidates so the same possibly-broken lowest-latency route
+        // is not re-picked every time
+        let pool = if good_count >= 1 {
+            good_count
+        } else {
+            routes.len()
+        };
+        if pool > 1 {
+            let idx = route_selection_counter.fetch_add(1, Ordering::Relaxed) % pool;
             routes.get(idx).map(|r| RouteIdAndKeys {
                 route_id: r.0.clone(),
                 route_set_keys: r.1.route_set_keys().clone(),
             })
         } else {
-            // Only one or zero good routes, just return the best available
             routes.first().map(|r| RouteIdAndKeys {
                 route_id: r.0.clone(),
                 route_set_keys: r.1.route_set_keys().clone(),

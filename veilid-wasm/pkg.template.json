@@ -15,6 +15,9 @@
     "veilid_wasm_bg.wasm",
     "veilid_wasm.js",
     "veilid_wasm.d.ts",
+    "veilid_errors.js",
+    "veilid_errors.d.ts",
+    "snippets/",
     "LICENSE.md"
   ],
   "main": "veilid_wasm.js",

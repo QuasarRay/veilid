@@ -13,17 +13,15 @@ mod imp {
     #[derive(Debug, Default)]
     struct LockHoldAccounting {
         count: u64,
-        wait: LatencyStats,
         wait_accounting: LatencyStatsAccounting,
-        held: LatencyStats,
         held_accounting: LatencyStatsAccounting,
     }
 
     impl LockHoldAccounting {
         fn record(&mut self, wait: TimestampDuration, held: TimestampDuration) {
             self.count += 1;
-            self.wait = self.wait_accounting.record_latency(wait);
-            self.held = self.held_accounting.record_latency(held);
+            self.wait_accounting.record_latency(wait);
+            self.held_accounting.record_latency(held);
         }
     }
 
@@ -89,8 +87,8 @@ mod imp {
             LockStats {
                 name: self.name,
                 count: a.count,
-                wait: a.wait.clone(),
-                held: a.held.clone(),
+                wait: a.wait_accounting.latency_stats().unwrap_or_default(),
+                held: a.held_accounting.latency_stats().unwrap_or_default(),
             }
         }
     }

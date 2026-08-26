@@ -7,6 +7,7 @@ mod byte_count;
 #[cfg(feature = "geolocation")]
 mod country_code;
 mod dht;
+mod error;
 mod expiration_state;
 mod fourcc;
 mod node_count;
@@ -24,7 +25,7 @@ mod veilid_state;
 mod wasm_helpers;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-pub(crate) use wasm_helpers::*;
+pub use wasm_helpers::*;
 
 use super::*;
 
@@ -36,6 +37,7 @@ pub use byte_count::*;
 #[cfg(feature = "geolocation")]
 pub use country_code::*;
 pub use dht::*;
+pub use error::*;
 pub use expiration_state::*;
 pub(crate) use fourcc::*;
 pub use node_count::*;

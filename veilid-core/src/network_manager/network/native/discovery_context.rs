@@ -9,6 +9,38 @@ impl_veilid_log_facility!("net");
 const EXTERNAL_INFO_NODE_COUNT: usize = 20;
 const EXTERNAL_INFO_CONCURRENCY: usize = 20;
 pub(super) const EXTERNAL_INFO_VALIDATIONS: usize = 5;
+// NAT classification compares answers from two validators, so fewer than this is starvation
+pub(super) const MIN_EXTERNAL_INFO_VALIDATIONS: usize = 2;
+
+/// Entry filters a dial info validator must pass, independent of protocol and address type
+pub(super) fn make_validator_entry_filters(
+    routing_domain: RoutingDomain,
+) -> Vec<RoutingTableEntryFilter<'static>> {
+    // Relayed nodes can't report an accurate external address
+    let disallow_relays_filter = Box::new(
+        move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+            let snap = opt_snap.as_ref().unwrap_or_log();
+            if let Some(pi) = snap.get_peer_info(routing_domain) {
+                pi.node_info().relay_ids().is_empty()
+            } else {
+                false
+            }
+        },
+    ) as RoutingTableEntryFilter;
+    let will_validate_dial_info_filter = Box::new(
+        move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
+            let snap = opt_snap.as_ref().unwrap_or_log();
+            snap.get_peer_info(routing_domain)
+                .map(|pi| {
+                    pi.node_info()
+                        .has_capability(VEILID_CAPABILITY_VALIDATE_DIAL_INFO)
+                        && pi.node_info().is_fully_direct_inbound()
+                })
+                .unwrap_or(false)
+        },
+    ) as RoutingTableEntryFilter;
+    vec![disallow_relays_filter, will_validate_dial_info_filter]
+}
 
 // Detection result of dial info detection futures
 #[derive(Clone, Debug)]
@@ -119,6 +151,7 @@ struct ExternalInfo {
 struct DiscoveryContextInner {
     external_infos: Vec<ExternalInfo>,
     mapped_dial_info: Option<DialInfo>,
+    validator_pool_starved: bool,
 }
 
 pub(super) struct DiscoveryContextUnlockedInner {
@@ -179,9 +212,15 @@ impl DiscoveryContext {
             inner: Arc::new(Mutex::new(DiscoveryContextInner {
                 external_infos: Vec::new(),
                 mapped_dial_info: None,
+                validator_pool_starved: false,
             })),
             stop_token,
         }
+    }
+
+    /// True when the last discovery had fewer validator candidates than the full quorum
+    pub fn validator_pool_starved(&self) -> bool {
+        self.inner.lock().validator_pool_starved
     }
 
     ///////
@@ -247,34 +286,9 @@ impl DiscoveryContext {
         let inbound_dial_info_entry_filter = self
             .routing_table()
             .make_inbound_dial_info_entry_filter(routing_domain, dial_info_filter);
-        let disallow_relays_filter = Box::new(
-            move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
-                let snap = opt_snap.as_ref().unwrap_or_log();
-                if let Some(pi) = snap.get_peer_info(routing_domain) {
-                    pi.node_info().relay_ids().is_empty()
-                } else {
-                    false
-                }
-            },
-        ) as RoutingTableEntryFilter;
-        let will_validate_dial_info_filter = Box::new(
-            move |opt_snap: &Option<BucketEntrySnapshot>, _cur_ts: Timestamp| {
-                let snap = opt_snap.as_ref().unwrap_or_log();
-                snap.get_peer_info(routing_domain)
-                    .map(|pi| {
-                        pi.node_info()
-                            .has_capability(VEILID_CAPABILITY_VALIDATE_DIAL_INFO)
-                            && pi.node_info().is_fully_direct_inbound()
-                    })
-                    .unwrap_or(false)
-            },
-        ) as RoutingTableEntryFilter;
 
-        let filters = VecDeque::from([
-            inbound_dial_info_entry_filter,
-            disallow_relays_filter,
-            will_validate_dial_info_filter,
-        ]);
+        let mut filters = VecDeque::from([inbound_dial_info_entry_filter]);
+        filters.extend(make_validator_entry_filters(routing_domain));
 
         // Find public nodes matching this filter
         let nodes = self.routing_table().find_fast_non_local_nodes_filtered(
@@ -282,9 +296,17 @@ impl DiscoveryContext {
             node_count,
             filters,
         );
-        if nodes.is_empty() {
+        // Scale the quorum down to the candidate pool; a small network may not have five
+        // qualifying validators
+        let required_validations = EXTERNAL_INFO_VALIDATIONS.min(nodes.len());
+        if nodes.len() < EXTERNAL_INFO_VALIDATIONS {
+            self.inner.lock().validator_pool_starved = true;
+        }
+        if required_validations < MIN_EXTERNAL_INFO_VALIDATIONS {
             veilid_log!(self debug
-                "no external address detection peers of type {:?}:{:?}",
+                "not enough external address detection peers ({}<{}) of type {:?}:{:?}",
+                nodes.len(),
+                MIN_EXTERNAL_INFO_VALIDATIONS,
                 protocol_type,
                 address_type
             );
@@ -329,7 +351,7 @@ impl DiscoveryContext {
                 {
                     Ok(Some(Some(ei))) => {
                         external_address_infos.push(ei);
-                        if external_address_infos.len() == EXTERNAL_INFO_VALIDATIONS {
+                        if external_address_infos.len() == required_validations {
                             break;
                         }
                     }
@@ -348,7 +370,7 @@ impl DiscoveryContext {
             }
         }
         // Finish whatever is left if we need to
-        while external_address_infos.len() < EXTERNAL_INFO_VALIDATIONS {
+        while external_address_infos.len() < required_validations {
             match unord
                 .next()
                 .timeout_at(self.stop_token.clone())
@@ -371,10 +393,11 @@ impl DiscoveryContext {
                 }
             }
         }
-        if external_address_infos.len() < EXTERNAL_INFO_VALIDATIONS {
-            veilid_log!(self debug "not enough peers ({}<{}) responded with an external address for type {:?}:{:?}",
+        if external_address_infos.len() < required_validations {
+            veilid_log!(self debug "not enough peers ({}<{} of {} candidates) responded with an external address for type {:?}:{:?}",
                 external_address_infos.len(),
-                EXTERNAL_INFO_VALIDATIONS,
+                required_validations,
+                nodes.len(),
                 protocol_type,
                 address_type);
             return false;

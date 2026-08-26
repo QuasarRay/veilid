@@ -67,42 +67,54 @@ macro_rules! impl_crypto_typed_group {
             impl [<$name Group>]
             {
                 /// The entry for the given kind, if present.
-                #[must_use]
-                pub fn get(&self,
+                ///
+                /// Errors with `VeilidAPIError::ParseError` if `kind` is not a four-character code.
+                #[wasm_bindgen(js_name = get)]
+                pub fn js_get(&self,
                     #[wasm_bindgen(unchecked_param_type = "CryptoKind")]
-                    kind: CryptoKind) -> Option<$name> {
-                    self.items.iter().find(|x| x.kind() == kind).cloned()
+                    kind: String) -> VeilidAPIResult<Option<$name>> {
+                    Ok(self.get(CryptoKind::from_str(&kind)?))
                 }
 
                 /// Whether the group holds an entry for the given kind.
-                #[must_use]
-                pub fn contains_kind(&self,
+                ///
+                /// Errors with `VeilidAPIError::ParseError` if `kind` is not a four-character code.
+                #[wasm_bindgen(js_name = containsKind)]
+                pub fn js_contains_kind(&self,
                     #[wasm_bindgen(unchecked_param_type = "CryptoKind")]
-                    kind: CryptoKind) -> bool {
-                    self.items.iter().any(|x| x.kind() == kind)
+                    kind: String) -> VeilidAPIResult<bool> {
+                    Ok(self.contains_kind(CryptoKind::from_str(&kind)?))
                 }
 
                 /// Removes and returns the entry for the given kind, if present.
-                pub fn remove(&mut self,
+                ///
+                /// Errors with `VeilidAPIError::ParseError` if `kind` is not a four-character code.
+                #[wasm_bindgen(js_name = remove)]
+                pub fn js_remove(&mut self,
                     #[wasm_bindgen(unchecked_param_type = "CryptoKind")]
-                    kind: CryptoKind) -> Option<$name> {
-                    if let Some(idx) = self.items.iter().position(|x| x.kind() == kind) {
-                        return Some(self.items.remove(idx));
-                    }
-                    None
+                    kind: String) -> VeilidAPIResult<Option<$name>> {
+                    Ok(self.remove(CryptoKind::from_str(&kind)?))
                 }
 
                 /// Removes the entries for all of the given kinds.
-                #[wasm_bindgen(js_name = "removeAll")]
-                pub fn remove_all(&mut self,
+                ///
+                /// Errors with `VeilidAPIError::ParseError` if any kind is not a four-character code.
+                #[wasm_bindgen(js_name = removeAll)]
+                pub fn js_remove_all(&mut self,
                     #[wasm_bindgen(unchecked_param_type = "CryptoKind[]")]
-                    kinds: Vec<CryptoKind>) {
+                    kinds: Vec<String>) -> VeilidAPIResult<()> {
                     for k in kinds {
-                        self.remove(k);
+                        self.remove(CryptoKind::from_str(&k)?);
                     }
+                    Ok(())
+                }
+
+                /// The kinds present in the group, sorted by cryptosystem preference.
+                #[wasm_bindgen(getter, js_name = kinds, unchecked_return_type = "CryptoKind[]")]
+                pub fn js_kinds(&self) -> Vec<String> {
+                    self.kinds().iter().map(|k| k.to_string()).collect()
                 }
             }
-            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
             impl [<$name Group>]
             {
                 /// The entry for the given kind, if present.
@@ -134,16 +146,17 @@ macro_rules! impl_crypto_typed_group {
             }
 
 
-            #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
             impl [<$name Group>] {
                 /// The kinds present in the group, sorted by cryptosystem preference.
-                #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen(getter, unchecked_return_type = "CryptoKind[]"))]
                 pub fn kinds(&self) -> Vec<CryptoKind> {
                     let mut out = self.items.iter().map(|tk| tk.kind()).collect::<Vec<_>>();
                     out.sort_unstable_by(compare_crypto_kind);
                     out
                 }
+            }
 
+            #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), wasm_bindgen)]
+            impl [<$name Group>] {
                 /// The untagged values of every entry, in kind-sorted order.
                 #[must_use]
                 pub fn keys(&self) -> Vec<[<Bare $name>]> {

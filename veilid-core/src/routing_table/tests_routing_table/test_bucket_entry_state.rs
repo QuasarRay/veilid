@@ -77,7 +77,8 @@ fn send_failing_stats() -> RPCStats {
 fn transport_map(entries: &[(TransportType, RPCStats)]) -> BTreeMap<TransportType, RPCStats> {
     entries.iter().cloned().collect()
 }
-// A non-empty per-transport map; only its emptiness gates [D3]/[D4], contents are irrelevant.
+// A non-empty per-transport map; contents are irrelevant to [D3]/[D4], which key on
+// node-level last_seen_ts (traffic FROM the node), not dial evidence.
 fn seen_transports() -> BTreeMap<TransportType, RPCStats> {
     transport_map(&[(udp4(), RPCStats::default())])
 }
@@ -248,7 +249,7 @@ pub fn test_state_send_failures_never_kill() {
 pub fn test_state_dead_never_seen_lost_questions() {
     info!("--- test_state_dead_never_seen_lost_questions ---");
 
-    // [D3] never-seen (no per-transport stats) with enough node-level lost questions is dead
+    // [D3] never heard from (last_seen_ts None) with enough node-level lost questions is dead
     let rpc = RPCStats {
         recent_lost_questions: DEAD_NEVER_SEEN_LOST_QUESTIONS,
         ..Default::default()
@@ -257,13 +258,21 @@ pub fn test_state_dead_never_seen_lost_questions() {
         compute(None, &rpc, &BTreeMap::new(), &BTreeMap::new(), None),
         BucketEntryStateReason::Dead(BucketEntryStateDeadReason::NeverSeenLostQuestions)
     );
+
+    // dial evidence (per-transport buckets exist from sends) does not shield it:
+    // a dialed-but-silent node still dies at the [D3] threshold, not the [D4] span
+    assert_eq!(
+        compute(None, &rpc, &BTreeMap::new(), &seen_transports(), None),
+        BucketEntryStateReason::Dead(BucketEntryStateDeadReason::NeverSeenLostQuestions)
+    );
 }
 
 pub fn test_state_dead_steady_lost_questions() {
     info!("--- test_state_dead_steady_lost_questions ---");
 
-    // [D4] seen before, node-level steadily losing questions past the span, is dead
+    // [D4] heard from before, node-level steadily losing questions past the span, is dead
     let rpc = RPCStats {
+        last_seen_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 2)),
         first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 1)),
         ..Default::default()
     };
@@ -274,6 +283,7 @@ pub fn test_state_dead_steady_lost_questions() {
 
     // boundary: a steady lost question newer than the span is not yet dead
     let rpc = RPCStats {
+        last_seen_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 2)),
         first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) - 1)),
         ..Default::default()
     };
@@ -333,9 +343,10 @@ pub fn test_state_missing_failed_to_send() {
 pub fn test_state_missing_lost_questions() {
     info!("--- test_state_missing_lost_questions ---");
 
-    // [M3] seen before, node-level lost questions at the missing threshold but no
-    // steady span yet, is missing; per_transport is non-empty so [D3] does not apply
+    // [M3] heard from before, node-level lost questions at the missing threshold but no
+    // steady span yet, is missing; last_seen_ts is set so [D3] does not apply
     let rpc = RPCStats {
+        last_seen_ts: Some(secs_ago(30)),
         recent_lost_questions: MISSING_LOST_QUESTIONS,
         first_steady_lost_question_ts: None,
         ..Default::default()
@@ -352,6 +363,7 @@ pub fn test_state_revive_reaches_initial() {
     // revive() clears node-level and per-ordering stats but keeps transport
     // evidence; that field state must compute Initial or revival is a no-op
     let rpc = RPCStats {
+        last_seen_ts: Some(secs_ago(30)),
         recent_lost_questions: MISSING_LOST_QUESTIONS,
         first_steady_lost_question_ts: None,
         ..Default::default()
@@ -482,6 +494,7 @@ pub fn test_state_transition_reliable_degrades_to_missing() {
         },
     )]);
     let rpc = RPCStats {
+        last_seen_ts: Some(secs_ago(30)),
         recent_lost_questions: MISSING_LOST_QUESTIONS,
         ..Default::default()
     };
@@ -496,6 +509,7 @@ pub fn test_state_offline_credit_steady_lost_questions() {
 
     // [D4] a node losing questions past the dead span is Dead by raw time.
     let rpc = RPCStats {
+        last_seen_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 20)),
         first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 10)),
         recent_lost_questions: MISSING_LOST_QUESTIONS,
         ..Default::default()
@@ -511,6 +525,7 @@ pub fn test_state_offline_credit_steady_lost_questions() {
     );
     // A genuinely long lost span stays Dead despite the same offline credit.
     let long_lost = RPCStats {
+        last_seen_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 220)),
         first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 200)),
         recent_lost_questions: MISSING_LOST_QUESTIONS,
         ..Default::default()

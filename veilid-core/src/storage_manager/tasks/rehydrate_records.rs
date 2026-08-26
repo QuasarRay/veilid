@@ -45,13 +45,16 @@ impl StorageManager {
                     Ok(v) => v,
                     Err(e) => {
                         if matches!(e, VeilidAPIError::TryAgain { message: _ }) {
-                            veilid_log!(self debug "Rehydration request skipped: {}", e);
+                            veilid_log!(self debug "Rehydration request will retry: {}", e);
+
                             // Try again later
                             self.add_rehydration_request(
                                 req.0,
                                 req.1.subkeys,
                                 req.1.consensus_count,
                             );
+                        } else if matches!(e, VeilidAPIError::KeyNotFound { key: _ }) {
+                            veilid_log!(self debug "Rehydration request skipped: {}", e);
                         } else {
                             veilid_log!(self error "Rehydration request failed: {}", e);
                         }

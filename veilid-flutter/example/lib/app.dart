@@ -40,6 +40,12 @@ class _MyAppState extends State<MyApp> with UiLoggy {
     unawaited(initPlatformState());
   }
 
+  @override
+  void dispose() {
+    _historyController.dispose();
+    super.dispose();
+  }
+
   // Platform messages are asynchronous, so we initialize in an async method.
   Future<void> initPlatformState() async {
     String veilidVersion;

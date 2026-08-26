@@ -646,14 +646,15 @@ pub fn veilid_tools::MustJoinHandle<T>::drop(&mut self)
 pub mod veilid_tools::must_join_single_future
 pub struct veilid_tools::must_join_single_future::MustJoinSingleFuture<T> where T: 'static
 impl<T> veilid_tools::MustJoinSingleFuture<T> where T: 'static + core::marker::Send
-pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn<F: core::future::future::Future<Output = T> + core::marker::Send + 'static, C: core::ops::function::FnOnce() -> F>(&self, &str, C) -> core::result::Result<(core::option::Option<T>, bool), ()>
+pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn<F: core::future::future::Future<Output = T> + core::marker::Send + 'static, C: core::ops::function::FnOnce() -> F>(&self, &str, C) -> core::result::Result<(core::option::Option<T>, bool), veilid_tools::SingleFutureLockedError>
 impl<T> veilid_tools::MustJoinSingleFuture<T> where T: 'static
-pub async fn veilid_tools::MustJoinSingleFuture<T>::check(&self) -> core::result::Result<core::option::Option<T>, ()>
-pub async fn veilid_tools::MustJoinSingleFuture<T>::join(&self) -> core::result::Result<core::option::Option<T>, ()>
+pub async fn veilid_tools::MustJoinSingleFuture<T>::check(&self) -> core::result::Result<core::option::Option<T>, veilid_tools::SingleFutureLockedError>
+pub async fn veilid_tools::MustJoinSingleFuture<T>::join(&self) -> core::result::Result<core::option::Option<T>, veilid_tools::SingleFutureLockedError>
 pub fn veilid_tools::MustJoinSingleFuture<T>::new() -> Self
-pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn_local(&self, &str, impl core::future::future::Future<Output = T> + 'static) -> core::result::Result<(core::option::Option<T>, bool), ()>
+pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn_local(&self, &str, impl core::future::future::Future<Output = T> + 'static) -> core::result::Result<(core::option::Option<T>, bool), veilid_tools::SingleFutureLockedError>
 impl<T> core::default::Default for veilid_tools::MustJoinSingleFuture<T> where T: 'static
 pub fn veilid_tools::MustJoinSingleFuture<T>::default() -> Self
+pub struct veilid_tools::must_join_single_future::SingleFutureLockedError
 pub mod veilid_tools::network_attempt
 pub enum veilid_tools::network_attempt::NetworkAttempt<T>
 pub veilid_tools::network_attempt::NetworkAttempt::Performed(veilid_tools::NetworkResult<T>)
@@ -831,7 +832,7 @@ pub fn veilid_tools::VeilidRng::next_u64(&mut self) -> u64
 pub fn veilid_tools::VeilidRng::try_fill_bytes(&mut self, &mut [u8]) -> core::result::Result<(), rand_core::error::Error>
 impl rand_core::TryCryptoRng for veilid_tools::VeilidRng
 impl rand_core::TryRng for veilid_tools::VeilidRng
-pub type veilid_tools::VeilidRng::Error = core::convert::Infallible
+pub type veilid_tools::VeilidRng::Error = never
 pub fn veilid_tools::VeilidRng::try_fill_bytes(&mut self, &mut [u8]) -> core::result::Result<(), Self::Error>
 pub fn veilid_tools::VeilidRng::try_next_u32(&mut self) -> core::result::Result<u32, Self::Error>
 pub fn veilid_tools::VeilidRng::try_next_u64(&mut self) -> core::result::Result<u64, Self::Error>
@@ -1653,12 +1654,12 @@ impl<T> core::ops::drop::Drop for veilid_tools::MustJoinHandle<T>
 pub fn veilid_tools::MustJoinHandle<T>::drop(&mut self)
 pub struct veilid_tools::MustJoinSingleFuture<T> where T: 'static
 impl<T> veilid_tools::MustJoinSingleFuture<T> where T: 'static + core::marker::Send
-pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn<F: core::future::future::Future<Output = T> + core::marker::Send + 'static, C: core::ops::function::FnOnce() -> F>(&self, &str, C) -> core::result::Result<(core::option::Option<T>, bool), ()>
+pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn<F: core::future::future::Future<Output = T> + core::marker::Send + 'static, C: core::ops::function::FnOnce() -> F>(&self, &str, C) -> core::result::Result<(core::option::Option<T>, bool), veilid_tools::SingleFutureLockedError>
 impl<T> veilid_tools::MustJoinSingleFuture<T> where T: 'static
-pub async fn veilid_tools::MustJoinSingleFuture<T>::check(&self) -> core::result::Result<core::option::Option<T>, ()>
-pub async fn veilid_tools::MustJoinSingleFuture<T>::join(&self) -> core::result::Result<core::option::Option<T>, ()>
+pub async fn veilid_tools::MustJoinSingleFuture<T>::check(&self) -> core::result::Result<core::option::Option<T>, veilid_tools::SingleFutureLockedError>
+pub async fn veilid_tools::MustJoinSingleFuture<T>::join(&self) -> core::result::Result<core::option::Option<T>, veilid_tools::SingleFutureLockedError>
 pub fn veilid_tools::MustJoinSingleFuture<T>::new() -> Self
-pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn_local(&self, &str, impl core::future::future::Future<Output = T> + 'static) -> core::result::Result<(core::option::Option<T>, bool), ()>
+pub async fn veilid_tools::MustJoinSingleFuture<T>::single_spawn_local(&self, &str, impl core::future::future::Future<Output = T> + 'static) -> core::result::Result<(core::option::Option<T>, bool), veilid_tools::SingleFutureLockedError>
 impl<T> core::default::Default for veilid_tools::MustJoinSingleFuture<T> where T: 'static
 pub fn veilid_tools::MustJoinSingleFuture<T>::default() -> Self
 pub struct veilid_tools::NetworkInterface
@@ -1719,6 +1720,7 @@ pub struct veilid_tools::Resolver
 impl veilid_tools::Resolver
 pub async fn veilid_tools::Resolver::ptr_lookup(core::net::ip_addr::IpAddr) -> core::result::Result<alloc::string::String, veilid_tools::ResolverError>
 pub async fn veilid_tools::Resolver::txt_lookup<S: core::convert::AsRef<str>>(S) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, veilid_tools::ResolverError>
+pub struct veilid_tools::SingleFutureLockedError
 pub struct veilid_tools::SingleShotEventual<T> where T: core::marker::Unpin
 impl<T> veilid_tools::SingleShotEventual<T> where T: core::marker::Unpin
 pub fn veilid_tools::SingleShotEventual<T>::instance(&self) -> veilid_tools::EventualValueFuture<T>
@@ -1835,7 +1837,7 @@ pub fn veilid_tools::VeilidRng::next_u64(&mut self) -> u64
 pub fn veilid_tools::VeilidRng::try_fill_bytes(&mut self, &mut [u8]) -> core::result::Result<(), rand_core::error::Error>
 impl rand_core::TryCryptoRng for veilid_tools::VeilidRng
 impl rand_core::TryRng for veilid_tools::VeilidRng
-pub type veilid_tools::VeilidRng::Error = core::convert::Infallible
+pub type veilid_tools::VeilidRng::Error = never
 pub fn veilid_tools::VeilidRng::try_fill_bytes(&mut self, &mut [u8]) -> core::result::Result<(), Self::Error>
 pub fn veilid_tools::VeilidRng::try_next_u32(&mut self) -> core::result::Result<u32, Self::Error>
 pub fn veilid_tools::VeilidRng::try_next_u64(&mut self) -> core::result::Result<u64, Self::Error>

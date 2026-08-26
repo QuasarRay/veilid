@@ -190,9 +190,9 @@ impl BucketEntryInner {
     ///   - [D1] the node has per-entry unreachable >= DEAD_UNREACHABLE_COUNT
     ///   - [D2] cm_viability is computed and every ordering with contact methods is
     ///     fully failing (all Direct transports Failing, no indirect avenue)
-    ///   - [D3] if no transports have been seen, and node-level
-    ///     recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
-    ///   - [D4] if any transport has been seen, and node-level
+    ///   - [D3] if the node has never been heard from (last_seen_ts is None), and
+    ///     node-level recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
+    ///   - [D4] if the node has been heard from, and node-level
     ///     time_since(first_steady_lost_question_ts) >= DEAD_LOST_QUESTION_SPAN
     ///     (any answer on any transport resets it)
     /// * Missing (any of the following are true):
@@ -275,8 +275,11 @@ impl BucketEntryInner {
             }
         }
 
-        // [D3] never seen any transport, and node-level lost questions at threshold
-        if per_transport_stats.is_empty()
+        // [D3] never heard from the node, and node-level lost questions at threshold.
+        // "Seen" means traffic FROM the node (last_seen_ts), not dial attempts toward it:
+        // question_sent creates a per-transport bucket on send, so map emptiness would
+        // leave every dialed-but-silent node to ride the full [D4] span.
+        if rpc_stats.last_seen_ts.is_none()
             && rpc_stats.recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
         {
             return BucketEntryStateReason::Dead(
@@ -284,16 +287,18 @@ impl BucketEntryInner {
             );
         }
 
-        // [D4] seen a transport, and node-level steady lost questions (reset by any
-        // answer on any transport) span at least DEAD_LOST_QUESTION_SPAN, minus unjudgeable time
-        if !per_transport_stats.is_empty()
+        // [D4] heard from the node before, and node-level steady lost questions (reset by
+        // any answer on any transport) span at least DEAD_LOST_QUESTION_SPAN, minus unjudgeable time
+        if rpc_stats.last_seen_ts.is_some()
             && rpc_stats
                 .first_steady_lost_question_ts
                 .map(|ts| {
-                    cur_ts
-                        .duration_since(ts)
-                        .saturating_sub(credit_since(ts, TimeCredit::Unblamed))
-                        >= DEAD_LOST_QUESTION_SPAN
+                    // Credit only shrinks the span, so consult the detector
+                    // only once the raw span could cross the threshold
+                    let raw = cur_ts.duration_since(ts);
+                    raw >= DEAD_LOST_QUESTION_SPAN
+                        && raw.saturating_sub(credit_since(ts, TimeCredit::Unblamed))
+                            >= DEAD_LOST_QUESTION_SPAN
                 })
                 .unwrap_or(false)
         {
@@ -358,10 +363,20 @@ impl BucketEntryInner {
     }
 
     /// Compute and record the node-level state for stats accounting and return the full state reason
+    ///
+    /// The computation consults the online detector, so it runs outside the stats lock:
+    /// holding one across that wait convoys every concurrent state read. The cost is a
+    /// rare out-of-order record, which shows up as a zero-length span in debug stats.
     pub fn state_reason(&self, cur_ts: Timestamp) -> BucketEntryStateReason {
-        // Keep the stats lock over this operation so we don't have a race condition
-        let mut state_stats_accounting = self.state_stats_accounting.lock();
-        self.compute_and_log_state_reason_inner(cur_ts, &mut state_stats_accounting)
+        let reason = self.compute_state_reason(cur_ts);
+        if let Some(state_reason_change_span) = self
+            .state_stats_accounting
+            .lock()
+            .record_state_reason(cur_ts, reason)
+        {
+            veilid_log!(self debug target: "rtab::state::node", "{:#}: {:#}", self.best_node_id(), state_reason_change_span);
+        }
+        reason
     }
 
     /// Get the node-level state without the reason for stats accounting

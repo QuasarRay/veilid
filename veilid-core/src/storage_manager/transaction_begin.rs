@@ -395,8 +395,8 @@ impl StorageManager {
         };
 
         // Number of accepters Begin aims to collect: consensus_count plus the
-        // CONSENSUS_TRIM_PERCENT headroom. Once reached, stop all lanes; the
-        // post-consensus deadline keeps gathering accepts up to this cap.
+        // CONSENSUS_TRIM_PERCENT headroom. The fanout keeps dispatching toward
+        // this cap during the post-consensus window; reaching it stops all lanes.
         let safety_count = required_strict_consensus_count
             + (required_strict_consensus_count * CONSENSUS_TRIM_PERCENT).div_ceil(100);
         // Built from a target count so a re-plan can rebuild it around the deficit
@@ -473,6 +473,9 @@ impl StorageManager {
             check_done,
         )
         .with_post_consensus_timeout_callback(post_consensus_timeout_callback);
+        // Keep dispatching reserve candidates after consensus so a thin accept set
+        // converges on the full headroom instead of stalling at the minimum
+        fanout_call.set_collection_count(safety_count);
 
         let shutdown_stop_source = self
             .startup_lock
@@ -546,6 +549,7 @@ impl StorageManager {
             }));
             fanout_call.set_seed_untried(true);
             fanout_call.set_run_target(deficit, make_check_done(deficit_safety));
+            fanout_call.set_collection_count(deficit_safety);
             // No seed list: the value nodes are what the first pass already exhausted
             fanout_result = fanout_call
                 .run(

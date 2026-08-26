@@ -23,6 +23,30 @@ export type "#, stringify!($name), r#" = Opaque<"#, stringify!($base), r#", type
     };
 }
 
+/// Serialize a rust value into its typed JS boundary form, as `Generic` on failure
+pub(crate) fn to_ts<T: Tsify + Serialize>(v: &T) -> VeilidAPIResult<Ts<T>> {
+    Ts::from_rust(v).map_err(|e| VeilidAPIError::generic(e.to_string()))
+}
+
+/// Deserialize a typed JS boundary value into rust, as `Generic` on failure
+pub(crate) fn from_ts<T: Tsify + de::DeserializeOwned>(v: Ts<T>) -> VeilidAPIResult<T>
+where
+    T::JsType: Clone,
+{
+    v.to_rust()
+        .map_err(|e| VeilidAPIError::generic(e.to_string()))
+}
+
+/// The same for an optional boundary value
+pub(crate) fn from_opt_ts<T: Tsify + de::DeserializeOwned>(
+    v: Option<Ts<T>>,
+) -> VeilidAPIResult<Option<T>>
+where
+    T::JsType: Clone,
+{
+    v.map(from_ts).transpose()
+}
+
 /// Declare a `TypeStub<Name>` extern type bound to the TypeScript type `Name`,
 /// giving wasm-bindgen a handle to an externally-defined JS type.
 macro_rules! make_wasm_bindgen_stubs {
@@ -106,7 +130,6 @@ pub mod ts {
 
     /// Options that override defaults for set_dht_value
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct SetDHTValueOptions {
         /// Override writer key pair for this operation
@@ -125,7 +148,6 @@ pub mod ts {
 
     /// Options that override defaults for transact_dht_records
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct TransactDHTRecordsOptions {
         /// Default writer key pair used to sign records in the transaction
@@ -136,7 +158,6 @@ pub mod ts {
 
     /// Options that override defaults for DHTTransaction::set
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct DHTTransactionSetValueOptions {
         /// Override writer key pair for this operation
@@ -151,7 +172,6 @@ pub mod ts {
 
     /// Simple DHT Schema (SMPL) Member
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct DHTSchemaSMPLMember {
         /// Member key
@@ -164,7 +184,6 @@ pub mod ts {
 
     /// Simple DHT Schema (SMPL)
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct DHTSchemaSMPL {
         /// Owner subkey count
@@ -175,7 +194,7 @@ pub mod ts {
 
     /// DHT record schema selector
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi, namespace)]
+    #[tsify(namespace)]
     pub enum DHTSchema {
         /// Default schema (DFLT)
         DFLT(DHTSchemaDFLT),
@@ -185,7 +204,6 @@ pub mod ts {
 
     /// DHT Record Descriptor
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct DHTRecordDescriptor {
         /// DHT Key = Hash(ownerKeyKind) of: [ ownerKeyValue, schema ]
@@ -204,7 +222,6 @@ pub mod ts {
 
     /// A DHT value and its metadata
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct ValueData {
         /// An increasing sequence number to time-order the DHT record changes
@@ -226,7 +243,6 @@ pub mod ts {
 
     /// Safety spec
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct SafetySpec {
         /// Number of hops in the safety route; zero uses the default hop count
@@ -249,7 +265,6 @@ pub mod ts {
 
     /// Private spec
     #[derive(Serialize, Deserialize, Clone, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct PrivateSpec {
         /// Crypto kinds to allow for the route; empty uses all available kinds
@@ -272,7 +287,6 @@ pub mod ts {
 
     /// Route blob
     #[derive(Clone, Deserialize, Serialize, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi)]
     #[serde(rename_all = "camelCase")]
     pub struct RouteBlob {
         /// Id of the route this blob describes
@@ -287,7 +301,7 @@ pub mod ts {
 
     /// The choice of safety route to include in compiled routes.
     #[derive(Clone, Serialize, Deserialize, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi, namespace)]
+    #[tsify(namespace)]
     pub enum SafetySelection {
         /// Don't use a safety route, only specify the sequencing preference.
         Unsafe(Sequencing),
@@ -297,7 +311,7 @@ pub mod ts {
 
     /// The choice of safety route to include in compiled routes.
     #[derive(Clone, Serialize, Deserialize, Tsify)]
-    #[tsify(from_wasm_abi, into_wasm_abi, namespace)]
+    #[tsify(namespace)]
     pub enum Target {
         /// Node by its node id
         NodeId(

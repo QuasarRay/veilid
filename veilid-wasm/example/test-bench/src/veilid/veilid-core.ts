@@ -1,6 +1,7 @@
 import * as veilid from 'veilid-wasm';
 import loadVeilidWasm, {
     veilidClient,
+    VeilidAPIError,
     VeilidRoutingContext,
 } from 'veilid-wasm'
 import { getVeilidCoreStartupConfig, veildCoreInitConfig } from './veilid-config';
@@ -28,7 +29,18 @@ export function isVeilidRunning() {
     return IS_VEILID_RUNNING;
 }
 
-export async function startVeilid() {
+let startVeilidPromise: Promise<typeof veilidClient> | undefined;
+
+/**
+ * Idempotent: React's StrictMode runs effects twice in development, and starting a
+ * second core would fail with an AlreadyInitialized error.
+ */
+export function startVeilid() {
+    startVeilidPromise ??= startVeilidInner();
+    return startVeilidPromise;
+}
+
+async function startVeilidInner() {
     const config = getVeilidCoreStartupConfig({
         namespace: `example-bench-${uuidV4()}`,
         password: 'singleton',
@@ -37,14 +49,42 @@ export async function startVeilid() {
     console.log('starting veilid core...');
     await veilidClient.initializeCore(veildCoreInitConfig);
 
-    veilidClient.startupCore(async (data) => {
+    await veilidClient.startupCore(async (data) => {
         veilidEventEmitter.emit(data.kind, data);
     }, config);
+
+    IS_VEILID_RUNNING = true;
+    console.log('veilid core started!');
+    console.log('Veilid Version', veilidClient.versionString());
+
+    console.log('attaching to veilid network');
+    await veilidClient.attach();
+
+    // attach() only starts attaching. DHT operations are gated on the PublicInternet
+    // routing domain being ready, which arrives later as an Attachment update.
+    await waitForPublicInternetReady();
+    console.log('veilid network ready!');
 
     return veilidClient;
 }
 
-// Listen to updates, and `attach()` once startup is complete.
+function waitForPublicInternetReady() {
+    return new Promise<void>((resolve) => {
+        const check = (attachment: veilid.VeilidStateAttachment) => {
+            if (attachment.publicInternetReady) {
+                veilidEventEmitter.removeListener('Attachment', check);
+                resolve();
+            }
+        };
+        veilidEventEmitter.on('Attachment', check);
+
+        veilidClient.getState().then(
+            (state) => check(state.attachment),
+            (error: unknown) => console.warn('getState failed', describeVeilidError(error)),
+        );
+    });
+}
+
 veilidEventEmitter.on('Log', (data) => {
     switch (data?.logLevel) {
         case 'Warn':
@@ -59,15 +99,6 @@ veilidEventEmitter.on('Log', (data) => {
         default:
             console.log(data.message);
             break;
-    }
-
-    // TODO: Wonder if there's a better way to detect startup complete.
-    if (data.message?.includes('Veilid API startup complete')) {
-        console.log('veilid core started!');
-        IS_VEILID_RUNNING = true;
-        console.log('Veilid Version', veilidClient.versionString());
-        console.log('attaching to veilid network');
-        veilidClient.attach();
     }
 });
 
@@ -97,4 +128,16 @@ export function getRoutingContext() {
         ROUTING_CONTEXT_SINGLETON = VeilidRoutingContext.create();
     }
     return ROUTING_CONTEXT_SINGLETON;
+}
+
+/**
+ * Everything veilid throws is a VeilidAPIError, which extends Error and carries a
+ * `kind` naming the variant. Subclasses such as VeilidAPIErrorTryAgain allow
+ * `instanceof` for one specific failure.
+ */
+export function describeVeilidError(error: unknown): string {
+    if (error instanceof VeilidAPIError) {
+        return `${error.kind}: ${error.message}`;
+    }
+    return error instanceof Error ? error.message : String(error);
 }

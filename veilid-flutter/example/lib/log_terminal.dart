@@ -6,7 +6,9 @@ import 'veilid_theme.dart';
 
 const kDefaultTerminalStyle = TerminalStyle(
     fontSize: kDefaultMonoTerminalFontSize,
-    fontFamily: kDefaultMonoTerminalFontFamily);
+    height: kDefaultMonoTerminalFontHeight,
+    fontFamily: kDefaultMonoTerminalFontFamily,
+    fontFamilyFallback: [kDefaultMonoTerminalFallbackFontFamily]);
 
 class LogTerminal extends StatefulWidget {
   const LogTerminal({super.key});

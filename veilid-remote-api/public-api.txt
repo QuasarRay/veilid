@@ -2,37 +2,37 @@ pub mod veilid_remote_api
 pub use veilid_remote_api::veilid_core
 pub enum veilid_remote_api::ApiResult<T> where T: core::clone::Clone + core::fmt::Debug + schemars::JsonSchema
 pub veilid_remote_api::ApiResult::Err
-pub veilid_remote_api::ApiResult::Err::error: veilid_core::veilid_api::error::VeilidAPIError
+pub veilid_remote_api::ApiResult::Err::error: veilid_core::veilid_api::types::error::VeilidAPIError
 pub veilid_remote_api::ApiResult::Ok
 pub veilid_remote_api::ApiResult::Ok::value: T
 pub enum veilid_remote_api::ApiResultWithOptVecString<T> where T: core::clone::Clone + core::fmt::Debug
 pub veilid_remote_api::ApiResultWithOptVecString::Err
-pub veilid_remote_api::ApiResultWithOptVecString::Err::error: veilid_core::veilid_api::error::VeilidAPIError
+pub veilid_remote_api::ApiResultWithOptVecString::Err::error: veilid_core::veilid_api::types::error::VeilidAPIError
 pub veilid_remote_api::ApiResultWithOptVecString::Ok
 pub veilid_remote_api::ApiResultWithOptVecString::Ok::value: T
 pub enum veilid_remote_api::ApiResultWithOptVecU8
 pub veilid_remote_api::ApiResultWithOptVecU8::Err
-pub veilid_remote_api::ApiResultWithOptVecU8::Err::error: veilid_core::veilid_api::error::VeilidAPIError
+pub veilid_remote_api::ApiResultWithOptVecU8::Err::error: veilid_core::veilid_api::types::error::VeilidAPIError
 pub veilid_remote_api::ApiResultWithOptVecU8::Ok
 pub veilid_remote_api::ApiResultWithOptVecU8::Ok::value: core::option::Option<alloc::vec::Vec<u8>>
 pub enum veilid_remote_api::ApiResultWithString<T> where T: core::clone::Clone + core::fmt::Debug
 pub veilid_remote_api::ApiResultWithString::Err
-pub veilid_remote_api::ApiResultWithString::Err::error: veilid_core::veilid_api::error::VeilidAPIError
+pub veilid_remote_api::ApiResultWithString::Err::error: veilid_core::veilid_api::types::error::VeilidAPIError
 pub veilid_remote_api::ApiResultWithString::Ok
 pub veilid_remote_api::ApiResultWithString::Ok::value: T
 pub enum veilid_remote_api::ApiResultWithVecString<T> where T: core::clone::Clone + core::fmt::Debug
 pub veilid_remote_api::ApiResultWithVecString::Err
-pub veilid_remote_api::ApiResultWithVecString::Err::error: veilid_core::veilid_api::error::VeilidAPIError
+pub veilid_remote_api::ApiResultWithVecString::Err::error: veilid_core::veilid_api::types::error::VeilidAPIError
 pub veilid_remote_api::ApiResultWithVecString::Ok
 pub veilid_remote_api::ApiResultWithVecString::Ok::value: T
 pub enum veilid_remote_api::ApiResultWithVecU8
 pub veilid_remote_api::ApiResultWithVecU8::Err
-pub veilid_remote_api::ApiResultWithVecU8::Err::error: veilid_core::veilid_api::error::VeilidAPIError
+pub veilid_remote_api::ApiResultWithVecU8::Err::error: veilid_core::veilid_api::types::error::VeilidAPIError
 pub veilid_remote_api::ApiResultWithVecU8::Ok
 pub veilid_remote_api::ApiResultWithVecU8::Ok::value: alloc::vec::Vec<u8>
 pub enum veilid_remote_api::ApiResultWithVecVecU8
 pub veilid_remote_api::ApiResultWithVecVecU8::Err
-pub veilid_remote_api::ApiResultWithVecVecU8::Err::error: veilid_core::veilid_api::error::VeilidAPIError
+pub veilid_remote_api::ApiResultWithVecVecU8::Err::error: veilid_core::veilid_api::types::error::VeilidAPIError
 pub veilid_remote_api::ApiResultWithVecVecU8::Ok
 pub veilid_remote_api::ApiResultWithVecVecU8::Ok::value: alloc::vec::Vec<veilid_remote_api::VecU8>
 pub enum veilid_remote_api::CryptoSystemRequestOp
@@ -573,4 +573,4 @@ pub veilid_remote_api::TableDbTransactionResponse::tx_id: u32
 pub veilid_remote_api::TableDbTransactionResponse::tx_op: veilid_remote_api::TableDbTransactionResponseOp
 pub struct veilid_remote_api::VecU8
 pub fn veilid_remote_api::emit_schemas(&mut std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>)
-pub fn veilid_remote_api::to_json_api_result<T: core::clone::Clone + core::fmt::Debug + schemars::JsonSchema>(veilid_core::veilid_api::error::VeilidAPIResult<T>) -> veilid_remote_api::ApiResult<T>
+pub fn veilid_remote_api::to_json_api_result<T: core::clone::Clone + core::fmt::Debug + schemars::JsonSchema>(veilid_core::veilid_api::types::error::VeilidAPIResult<T>) -> veilid_remote_api::ApiResult<T>

@@ -1015,8 +1015,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::Begin => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted Begin; try again");
+            }
             OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
@@ -1076,8 +1078,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::Begin => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted Begin; try again");
+            }
             OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
@@ -1116,8 +1120,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::End => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted End; try again");
+            }
             OutboundTransactionStage::Begin
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted End", stage);
@@ -1182,8 +1188,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::End => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted End; try again");
+            }
             OutboundTransactionStage::Begin
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted End", stage);
@@ -1236,8 +1244,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::Begin => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted Begin; try again");
+            }
             OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
@@ -1302,8 +1312,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::Begin => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted Begin; try again");
+            }
             OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
@@ -1437,8 +1449,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::Begin => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted Begin; try again");
+            }
             OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
@@ -1500,8 +1514,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::Begin => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted Begin; try again");
+            }
             OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);
@@ -1655,8 +1671,10 @@ impl OutboundTransactionManager {
             .stage;
         match stage {
             OutboundTransactionStage::Begin => {}
+            OutboundTransactionStage::Failed => {
+                apibail_try_again!("transaction stage was Failed, wanted Begin; try again");
+            }
             OutboundTransactionStage::End
-            | OutboundTransactionStage::Failed
             | OutboundTransactionStage::Rollback
             | OutboundTransactionStage::Commit => {
                 apibail_transaction_not_found!("stage was {:?}, wanted Begin", stage);

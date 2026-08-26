@@ -309,7 +309,7 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
         indent += levstr.len();
         lines += &levstr;
 
-        let args = format!("{}", &record.args());
+        let args = format!("{}", record.args());
         lines += &indent_by(indent, args);
 
         eprintln!("{}", lines);

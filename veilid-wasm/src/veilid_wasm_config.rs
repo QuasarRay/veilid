@@ -60,7 +60,6 @@ fn default_veilid_wasm_config_logging() -> VeilidWASMConfigLogging {
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi),
     serde(rename_all = "camelCase")
 )]
 pub struct VeilidWASMConfigLoggingPerformanceConsole {
@@ -83,7 +82,6 @@ pub struct VeilidWASMConfigLoggingPerformanceConsole {
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi),
     serde(rename_all = "camelCase")
 )]
 pub struct VeilidWASMConfigLoggingPerformance {
@@ -116,7 +114,6 @@ pub struct VeilidWASMConfigLoggingPerformance {
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi),
     serde(rename_all = "camelCase")
 )]
 pub struct VeilidWASMConfigLoggingAPI {
@@ -142,7 +139,6 @@ pub struct VeilidWASMConfigLoggingAPI {
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi),
     serde(rename_all = "camelCase")
 )]
 /// Configuration for the internal stats logging. Records ride the "stats" log facility.
@@ -159,7 +155,6 @@ pub struct VeilidWASMConfigLoggingStats {
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi),
     serde(rename_all = "camelCase")
 )]
 /// Configuration for all WASM logging outputs.
@@ -179,7 +174,6 @@ pub struct VeilidWASMConfigLogging {
 #[cfg_attr(
     all(target_arch = "wasm32", target_os = "unknown"),
     derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi),
     serde(rename_all = "camelCase")
 )]
 /// Startup configuration for the Veilid WASM module.

@@ -5,11 +5,7 @@ use range_set_blaze::*;
 /// A set of DHT subkeys stored as inclusive ranges of [ValueSubkey]
 #[derive(Clone, Default, Hash, PartialOrd, PartialEq, Eq, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(JsonSchema))]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(Tsify),
-    tsify(from_wasm_abi, into_wasm_abi)
-)]
+#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), derive(Tsify))]
 #[serde(transparent)]
 #[must_use]
 pub struct ValueSubkeyRangeSet {

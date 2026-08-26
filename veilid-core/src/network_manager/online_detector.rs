@@ -51,6 +51,12 @@ pub(crate) const DEGRADED_MAX_HOLD_SECS: u32 = 60;
 /// Local pipeline stalls at or above this consume enough of the rpc timeout to void peer evidence
 const LOCAL_STALL_MIN_MS: u64 = 2500;
 
+/// Degraded breadth scales with the table: at least this fraction (1/divisor) of live
+/// entries must fail fresh in-window per framing type. A big table always carries a few
+/// flapping peers (a flat count false-fires on healthy networks), while a lossy uplink
+/// fails a large slice of previously-clean peers at once.
+const DEGRADED_BREADTH_TABLE_DIVISOR: usize = 20;
+
 /// Failure count threshold for a socket class.
 fn failure_threshold(framing_type: FramingType) -> usize {
     match framing_type {
@@ -103,9 +109,14 @@ pub(crate) fn effective_online_state(
 enum OnlineEvent {
     /// Received something from outside.
     Success,
-    /// Failures for previously-live nodes on one framing type.
+    /// Failures for previously-live nodes on one framing type. `fresh_node_ids` is the
+    /// subset whose failure is news (see `record_failure`); only those arm the degraded
+    /// window, while offline detection keeps the full live set.
     Failure {
         live_node_ids: Vec<NodeId>,
+        fresh_node_ids: Vec<NodeId>,
+        /// Live table size at record time, for the fractional degraded breadth
+        responsive_count: usize,
         sent_ts: Timestamp,
         framing_type: FramingType,
     },
@@ -202,6 +213,23 @@ pub struct OnlineDetector {
     enabled_framing_types: Mutex<FramingTypeSet>,
     /// Last local pipeline stall long enough to void timeout evidence; process-wide
     last_local_stall: Mutex<Option<Timestamp>>,
+    /// Read-mostly snapshot of the interval data credit math reads.
+    ///
+    /// Every bucket entry state computation may consult the overlap of its span
+    /// with offline/degraded time, from every sweep and peer-selection sort at
+    /// once. Serving those reads from `inner` would make it the most contended
+    /// lock in the process; readers share this instead, and the state machine
+    /// republishes on every path that can change the interval data.
+    overlap_data: RwLock<BTreeMap<RoutingDomain, Arc<OverlapData>>>,
+}
+
+/// The interval data [OnlineDetector::interval_overlap] reads.
+#[derive(Debug, Default)]
+struct OverlapData {
+    offline_intervals: VecDeque<(Timestamp, Timestamp)>,
+    degraded_intervals: VecDeque<(Timestamp, Timestamp)>,
+    offline_started_ts: Option<Timestamp>,
+    degraded_started_ts: Option<Timestamp>,
 }
 
 impl_veilid_component_accessors!(OnlineDetector);
@@ -223,6 +251,7 @@ impl OnlineDetector {
             // Require both classes until the network reports its protocol config.
             enabled_framing_types: Mutex::new(FramingTypeSet::all()),
             last_local_stall: Mutex::new(None),
+            overlap_data: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -230,6 +259,18 @@ impl OnlineDetector {
     fn uses_ping_detection(routing_domain: RoutingDomain) -> bool {
         // Other domains will plug in their own signals (LocalNetwork: interface link state).
         matches!(routing_domain, RoutingDomain::PublicInternet)
+    }
+
+    /// Republish the overlap snapshot; call before releasing `inner` on any
+    /// path that can change interval data (all three mutable-lock functions do)
+    fn publish_overlap_data(&self, routing_domain: RoutingDomain, pd: &OnlineDetectionPerDomain) {
+        let snap = Arc::new(OverlapData {
+            offline_intervals: pd.recent_offline_intervals.clone(),
+            degraded_intervals: pd.recent_degraded_intervals.clone(),
+            offline_started_ts: pd.offline_started_ts,
+            degraded_started_ts: pd.degraded_started_ts,
+        });
+        self.overlap_data.write().insert(routing_domain, snap);
     }
 
     /// Set which framing types offline detection requires, from the network protocol config.
@@ -246,7 +287,9 @@ impl OnlineDetector {
         self.process_event(routing_domain, OnlineEvent::Success);
     }
 
-    /// Record RPC failures against the attempted nodes (direct target, or routed hops).
+    /// Record an RPC failure against the directly attempted node. Routed failures are
+    /// never fed here: any hop or the route itself may be at fault, and spreading one
+    /// failure across hop ids fabricates broad-failure breadth.
     pub fn record_failure(
         &self,
         routing_domain: RoutingDomain,
@@ -262,25 +305,50 @@ impl OnlineDetector {
         // routing table loads entries as Initial while their persisted answer history
         // survives, so a historical-liveness check would count them and flip us offline
         // during the attach burst.
+        //
+        // The degraded window additionally requires the failure to be news: the ordering
+        // answered recently and is not already judged Failing. Chronic single-transport
+        // failers otherwise re-arm the window forever; a real local storm still counts
+        // each node's first losses before the judge trips.
         let cur_ts = Timestamp::now();
         let routing_table = self.routing_table();
-        let live_node_ids: Vec<NodeId> = node_ids
-            .into_iter()
-            .filter(|node_id| {
-                routing_table
-                    .lookup_node_id(node_id.clone())
-                    .ok()
-                    .flatten()
-                    .is_some_and(|nr| nr.state(cur_ts).is_responsive())
-            })
-            .collect();
+        let so = transport.sequence_ordering();
+        let mut live_node_ids = Vec::new();
+        let mut fresh_node_ids = Vec::new();
+        for node_id in node_ids {
+            let Some(nr) = routing_table.lookup_node_id(node_id.clone()).ok().flatten() else {
+                continue;
+            };
+            let (responsive, fresh) = nr.operate(|e| {
+                let responsive = e.state(cur_ts).is_responsive();
+                let fresh = responsive
+                    && e.per_sequence_ordering_stats().get(&so).is_some_and(|s| {
+                        s.recent_lost_questions
+                            < crate::routing_table::TRANSPORT_FAILING_LOST_QUESTIONS
+                            && s.last_seen_ts.is_some_and(|ts| {
+                                cur_ts.duration_since(ts)
+                                    <= crate::routing_table::RELIABLE_PING_INTERVAL_MAX
+                            })
+                    });
+                (responsive, fresh)
+            });
+            if responsive {
+                live_node_ids.push(node_id.clone());
+            }
+            if fresh {
+                fresh_node_ids.push(node_id);
+            }
+        }
         if live_node_ids.is_empty() {
             return;
         }
+        let responsive_count = routing_table.get_routing_table_health().live_entry_count();
         self.process_event(
             routing_domain,
             OnlineEvent::Failure {
                 live_node_ids,
+                fresh_node_ids,
+                responsive_count,
                 sent_ts,
                 framing_type: transport.framing_type(),
             },
@@ -325,7 +393,9 @@ impl OnlineDetector {
             let opt_transition = {
                 let mut inner = self.inner.lock();
                 let pd = inner.entry(routing_domain).or_default();
-                Self::commit_effective(pd, Some(now), now)
+                let opt_transition = Self::commit_effective(pd, Some(now), now);
+                self.publish_overlap_data(routing_domain, pd);
+                opt_transition
             };
             self.log_effective_transition(routing_domain, opt_transition, "local stall");
         }
@@ -348,6 +418,7 @@ impl OnlineDetector {
             let mut inner = self.inner.lock();
             let pd = inner.entry(routing_domain).or_default();
             let opt_transition = Self::commit_effective(pd, local_stall_ts, now);
+            self.publish_overlap_data(routing_domain, pd);
             (pd.effective_state, opt_transition)
         };
         self.log_effective_transition(routing_domain, opt_transition, "evidence aged");
@@ -408,24 +479,24 @@ impl OnlineDetector {
         if !Self::uses_ping_detection(routing_domain) || to <= from {
             return TimestampDuration::new(0);
         }
-        let inner = self.inner.lock();
-        let Some(pd) = inner.get(&routing_domain) else {
+        // Snapshot, so per-entry credit math never contends with the state machine
+        let Some(od) = self.overlap_data.read().get(&routing_domain).cloned() else {
             return TimestampDuration::new(0);
         };
         let empty: VecDeque<(Timestamp, Timestamp)> = VecDeque::new();
         let (degraded_intervals, opt_degraded_started) = if include_degraded {
-            (&pd.recent_degraded_intervals, pd.degraded_started_ts)
+            (&od.degraded_intervals, od.degraded_started_ts)
         } else {
             (&empty, None)
         };
         let mut overlap = 0u64;
         // Offline and degraded never overlap: entering one closes the other
-        for (s, e) in pd
-            .recent_offline_intervals
+        for (s, e) in od
+            .offline_intervals
             .iter()
             .chain(degraded_intervals.iter())
             .copied()
-            .chain(pd.offline_started_ts.map(|s| (s, to)))
+            .chain(od.offline_started_ts.map(|s| (s, to)))
             .chain(opt_degraded_started.map(|s| (s, to)))
         {
             let lo = s.max(from);
@@ -643,6 +714,7 @@ impl OnlineDetector {
                 }
             }
             let opt_eff_transition = Self::commit_effective(pd, local_stall_ts, now);
+            self.publish_overlap_data(routing_domain, pd);
             (
                 opt_new_state,
                 opt_flap_penalty,
@@ -662,9 +734,9 @@ impl OnlineDetector {
         if do_purge {
             // close_all_connections is silent on an empty table; log the decision
             veilid_log!(self debug "{:?} purging connections: {}", routing_domain, purge_reason);
-            self.network_manager()
-                .connection_manager()
-                .close_all_connections();
+            if let Some(connection_manager) = self.network_manager().opt_connection_manager() {
+                connection_manager.close_all_connections();
+            }
         }
         if do_wipe {
             self.network_manager()
@@ -701,6 +773,8 @@ impl OnlineDetector {
             }
             OnlineEvent::Failure {
                 live_node_ids,
+                fresh_node_ids,
+                responsive_count,
                 sent_ts,
                 framing_type,
             } => {
@@ -709,9 +783,13 @@ impl OnlineDetector {
                     return None;
                 }
                 let bucket = pd.pending_failures.entry(*framing_type).or_default();
-                let wbucket = pd.windowed_failures.entry(*framing_type).or_default();
                 for node_id in live_node_ids {
                     bucket.insert(node_id.clone());
+                }
+                // Only fresh failures arm the degraded window; the offline breadth
+                // above keeps the full live set
+                let wbucket = pd.windowed_failures.entry(*framing_type).or_default();
+                for node_id in fresh_node_ids {
                     wbucket.insert(node_id.clone(), now);
                 }
                 // Windowed breadth survives interleaved successes: the degraded signature
@@ -719,10 +797,15 @@ impl OnlineDetector {
                 for wb in pd.windowed_failures.values_mut() {
                     wb.retain(|_, ts| now.duration_since(*ts) <= window);
                 }
+                // Degraded needs a table-relative slice of previously-clean peers
+                // failing at once; the flat offline threshold below stays as-is
+                let degraded_threshold = |ft: FramingType| {
+                    failure_threshold(ft).max(responsive_count / DEGRADED_BREADTH_TABLE_DIVISOR)
+                };
                 let all_windowed = !enabled_framing_types.is_empty()
                     && enabled_framing_types.iter().all(|ft| {
                         pd.windowed_failures.get(&ft).map_or(0, BTreeMap::len)
-                            >= failure_threshold(ft)
+                            >= degraded_threshold(ft)
                     });
                 if all_windowed {
                     pd.last_degraded_evidence_ts = Some(now);

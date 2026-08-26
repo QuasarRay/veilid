@@ -65,10 +65,10 @@ impl VeilidRoutingContext {
     /// Throws `Generic` if `safety_selection` is `Unsafe` without the `footgun-nodeid-target` feature or its hop count exceeds the configured maximum, `InvalidArgument` if its `preferred_route` is not a known route id, and `NotInitialized` if the node is not started.
     pub fn withSafety(
         &self,
-        safety_selection: ts::SafetySelection,
+        safety_selection: Ts<ts::SafetySelection>,
     ) -> VeilidAPIResult<VeilidRoutingContext> {
         let routing_context = self.getRoutingContext()?;
-        let safety_selection = safety_selection.try_into()?;
+        let safety_selection = from_ts(safety_selection)?.try_into()?;
         Ok(VeilidRoutingContext {
             inner_routing_context: routing_context.with_safety(safety_selection)?,
         })
@@ -76,7 +76,11 @@ impl VeilidRoutingContext {
 
     /// Use a specified `Sequencing` preference.
     /// Returns a new instance of VeilidRoutingContext - does not mutate.
-    pub fn withSequencing(&self, sequencing: Sequencing) -> VeilidAPIResult<VeilidRoutingContext> {
+    pub fn withSequencing(
+        &self,
+        sequencing: Ts<Sequencing>,
+    ) -> VeilidAPIResult<VeilidRoutingContext> {
+        let sequencing = from_ts(sequencing)?;
         let routing_context = self.getRoutingContext()?;
         Ok(VeilidRoutingContext {
             inner_routing_context: routing_context.with_sequencing(sequencing),
@@ -85,11 +89,11 @@ impl VeilidRoutingContext {
 
     /// Get the safety selection in use on this routing context
     /// @returns the SafetySelection currently in use if successful.
-    pub fn safety(&self) -> VeilidAPIResult<ts::SafetySelection> {
+    pub fn safety(&self) -> VeilidAPIResult<Ts<ts::SafetySelection>> {
         let routing_context = self.getRoutingContext()?;
 
         let safety_selection = routing_context.safety();
-        Ok(safety_selection.into())
+        to_ts(&safety_selection.into())
     }
     /// App-level unidirectional message that does not expect any value to be returned.
     ///
@@ -101,9 +105,13 @@ impl VeilidRoutingContext {
     /// Awaits a network send.
     ///
     /// Throws the same error its core twin `RoutingContext::app_message` returns: `InvalidTarget` if `target` is a node id (only route ids are allowed without the `footgun-nodeid-target` feature), otherwise `NoConnection` if the route could not be resolved or allocated, `Timeout` if dispatch timed out, or `TryAgain` if a route is temporarily unavailable (all retryable). Throws `NotInitialized` if the node is not started, and `Generic` if `target` is malformed.
-    pub async fn appMessage(&self, target: ts::Target, message: Box<[u8]>) -> VeilidAPIResult<()> {
+    pub async fn appMessage(
+        &self,
+        target: Ts<ts::Target>,
+        message: Box<[u8]>,
+    ) -> VeilidAPIResult<()> {
         let routing_context = self.getRoutingContext()?;
-        let target = target.try_into()?;
+        let target = from_ts(target)?.try_into()?;
         let message = message.into_vec();
         routing_context.app_message(target, message).await
     }
@@ -121,12 +129,12 @@ impl VeilidRoutingContext {
     /// Throws the same error its core twin `RoutingContext::app_call` returns: `InvalidTarget` if `target` is a node id (only route ids are allowed without the `footgun-nodeid-target` feature), otherwise `NoConnection` if the route could not be resolved or allocated, `Timeout` if the reply deadline elapsed, or `TryAgain` if a route is temporarily unavailable (all retryable). Throws `NotInitialized` if the node is not started, and `Generic` if `target` is malformed.
     pub async fn appCall(
         &self,
-        target: ts::Target,
+        target: Ts<ts::Target>,
         request: Box<[u8]>,
     ) -> VeilidAPIResult<Uint8Array> {
         let request: Vec<u8> = request.into_vec();
         let routing_context = self.getRoutingContext()?;
-        let target = target.try_into()?;
+        let target = from_ts(target)?.try_into()?;
         let answer = routing_context.app_call(target, request).await?;
         let answer = Uint8Array::from(answer.as_slice());
         Ok(answer)
@@ -151,12 +159,12 @@ impl VeilidRoutingContext {
     pub async fn createDHTRecord(
         &self,
         #[wasm_bindgen(unchecked_param_type = "CryptoKind")] kind: JsValue,
-        schema: ts::DHTSchema,
+        schema: Ts<ts::DHTSchema>,
         owner: Option<TypeStubKeyPair>,
-    ) -> VeilidAPIResult<ts::DHTRecordDescriptor> {
+    ) -> VeilidAPIResult<Ts<ts::DHTRecordDescriptor>> {
         let kind = CryptoKind::from_js(kind)
             .map_err(|e| VeilidAPIError::parse_error("failed to parse kind", e.to_string()))?;
-        let schema = schema.try_into()?;
+        let schema = from_ts(schema)?.try_into()?;
         let owner = match owner {
             Some(owner) => try_from_js_option::<KeyPair>(owner)
                 .map_err(|e| VeilidAPIError::parse_error("failed to parse owner", e))?,
@@ -169,7 +177,7 @@ impl VeilidRoutingContext {
             .create_dht_record(kind, schema, owner)
             .await?;
 
-        Ok(dht_record_descriptor.into())
+        to_ts(&dht_record_descriptor.into())
     }
 
     /// Opens a DHT record at a specific key.
@@ -193,7 +201,7 @@ impl VeilidRoutingContext {
         &self,
         recordKey: &RecordKey,
         defaultWriter: Option<TypeStubKeyPair>,
-    ) -> VeilidAPIResult<ts::DHTRecordDescriptor> {
+    ) -> VeilidAPIResult<Ts<ts::DHTRecordDescriptor>> {
         let default_writer = match defaultWriter {
             Some(default_writer) => try_from_js_option::<KeyPair>(default_writer)
                 .map_err(|e| VeilidAPIError::parse_error("failed to parse default writer", e))?,
@@ -201,10 +209,12 @@ impl VeilidRoutingContext {
         };
 
         let routing_context = self.getRoutingContext()?;
-        routing_context
-            .open_dht_record(recordKey.clone(), default_writer)
-            .await
-            .map(|x| x.into())
+        to_ts(
+            &routing_context
+                .open_dht_record(recordKey.clone(), default_writer)
+                .await?
+                .into(),
+        )
     }
 
     /// Closes a DHT record at a specific key that was opened with create_dht_record or open_dht_record.
@@ -246,12 +256,13 @@ impl VeilidRoutingContext {
         recordKey: &RecordKey,
         subkey: u32,
         forceRefresh: bool,
-    ) -> VeilidAPIResult<Option<ts::ValueData>> {
+    ) -> VeilidAPIResult<Option<Ts<ts::ValueData>>> {
         let routing_context = self.getRoutingContext()?;
         routing_context
             .get_dht_value(recordKey.clone(), subkey, forceRefresh)
-            .await
-            .map(|x| x.map(|y| y.into()))
+            .await?
+            .map(|y| to_ts(&y.into()))
+            .transpose()
     }
 
     /// Pushes a changed subkey value to the network.
@@ -270,8 +281,8 @@ impl VeilidRoutingContext {
         recordKey: &RecordKey,
         subkey: u32,
         data: Box<[u8]>,
-        options: Option<ts::SetDHTValueOptions>,
-    ) -> VeilidAPIResult<Option<ts::ValueData>> {
+        options: Option<Ts<ts::SetDHTValueOptions>>,
+    ) -> VeilidAPIResult<Option<Ts<ts::ValueData>>> {
         let data = data.into_vec();
 
         let routing_context = self.getRoutingContext()?;
@@ -280,13 +291,14 @@ impl VeilidRoutingContext {
                 recordKey.clone(),
                 subkey,
                 data,
-                match options {
+                match from_opt_ts(options)? {
                     Some(o) => Some(o.try_into()?),
                     None => None,
                 },
             )
-            .await
-            .map(|x| x.map(|y| y.into()))
+            .await?
+            .map(|y| to_ts(&y.into()))
+            .transpose()
     }
 
     /// Add or update a watch to a DHT value that informs the user via an VeilidUpdate::ValueChange callback when the record has subkeys change.
@@ -321,10 +333,12 @@ impl VeilidRoutingContext {
     pub async fn watchDhtValues(
         &self,
         recordKey: &RecordKey,
-        subkeys: Option<ValueSubkeyRangeSet>,
-        expiration: Option<Timestamp>,
+        subkeys: Option<Ts<ValueSubkeyRangeSet>>,
+        expiration: Option<Ts<Timestamp>>,
         count: Option<u32>,
     ) -> VeilidAPIResult<bool> {
+        let subkeys = from_opt_ts(subkeys)?;
+        let expiration = from_opt_ts(expiration)?;
         let routing_context = self.getRoutingContext()?;
         let res = routing_context
             .watch_dht_values(recordKey.clone(), subkeys, expiration, count)
@@ -349,8 +363,9 @@ impl VeilidRoutingContext {
     pub async fn cancelDHTWatch(
         &self,
         recordKey: &RecordKey,
-        subkeys: Option<ValueSubkeyRangeSet>,
+        subkeys: Option<Ts<ValueSubkeyRangeSet>>,
     ) -> VeilidAPIResult<bool> {
+        let subkeys = from_opt_ts(subkeys)?;
         let routing_context = self.getRoutingContext()?;
         routing_context
             .cancel_dht_watch(recordKey.clone(), subkeys)
@@ -403,15 +418,18 @@ impl VeilidRoutingContext {
     pub async fn inspectDHTRecord(
         &self,
         recordKey: &RecordKey,
-        subkeys: Option<ValueSubkeyRangeSet>,
-        scope: Option<DHTReportScope>,
-    ) -> VeilidAPIResult<DHTRecordReport> {
-        let scope = scope.unwrap_or_default();
+        subkeys: Option<Ts<ValueSubkeyRangeSet>>,
+        scope: Option<Ts<DHTReportScope>>,
+    ) -> VeilidAPIResult<Ts<DHTRecordReport>> {
+        let subkeys = from_opt_ts(subkeys)?;
+        let scope = from_opt_ts(scope)?.unwrap_or_default();
 
         let routing_context = self.getRoutingContext()?;
-        routing_context
-            .inspect_dht_record(recordKey.clone(), subkeys, scope)
-            .await
+        to_ts(
+            &routing_context
+                .inspect_dht_record(recordKey.clone(), subkeys, scope)
+                .await?,
+        )
     }
 
     /// Waits for any pending offline subkey writes for a DHT record to be flushed to the network.

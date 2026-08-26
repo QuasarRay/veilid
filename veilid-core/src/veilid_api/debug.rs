@@ -67,7 +67,7 @@ enum DebugCommand {
     Entries {
         /// Optional filters in any order:
         /// - minimum state: `dead` or `reliable`
-        /// - mode: `fastest`
+        /// - mode: `fastest` or `liveness` (per-entry probe/answer ages and transport health)
         /// - capabilities list: comma-separated four-char codes
         ///   (for example `ROUT,SGNL,RLAY,DIAL,DHTV,APPM`).
         #[arg(value_name = "entries_token")]
@@ -956,10 +956,9 @@ fn get_node_ref_modifiers(node_ref: NodeRef) -> impl FnOnce(&str) -> Option<Filt
                 node_ref.merge_filter(NodeRefFilter::new().with_protocol_type(pt));
             } else if let Some(at) = get_address_type(m) {
                 node_ref.merge_filter(NodeRefFilter::new().with_address_type(at));
-            } else if let Some(rd) = get_routing_domain(m) {
-                node_ref.merge_filter(NodeRefFilter::new().with_routing_domain(rd));
             } else {
-                return None;
+                let rd = get_routing_domain(m)?;
+                node_ref.merge_filter(NodeRefFilter::new().with_routing_domain(rd));
             }
         }
         Some(node_ref)
@@ -1042,16 +1041,13 @@ fn resolve_node_ref(
     move |text| {
         let text = text.to_owned();
         Box::pin(async move {
-            let nr = if let Some(node_id) = get_node_id(&text) {
-                registry
-                    .rpc_processor()
-                    .resolve_node(node_id, safety_selection)
-                    .await
-                    .ok()
-                    .flatten()?
-            } else {
-                return None;
-            };
+            let node_id = get_node_id(&text)?;
+            let nr = registry
+                .rpc_processor()
+                .resolve_node(node_id, safety_selection)
+                .await
+                .ok()
+                .flatten()?;
             Some(nr)
         })
     }
@@ -1069,16 +1065,13 @@ fn resolve_filtered_node_ref(
                 .map(|x| (x.0, Some(x.1)))
                 .unwrap_or((&text, None));
 
-            let nr = if let Some(node_id) = get_node_id(text) {
-                registry
-                    .rpc_processor()
-                    .resolve_node(node_id, safety_selection)
-                    .await
-                    .ok()
-                    .flatten()?
-            } else {
-                return None;
-            };
+            let node_id = get_node_id(text)?;
+            let nr = registry
+                .rpc_processor()
+                .resolve_node(node_id, safety_selection)
+                .await
+                .ok()
+                .flatten()?;
             if let Some(mods) = mods {
                 Some(get_node_ref_modifiers(nr)(mods)?)
             } else {
@@ -1093,10 +1086,9 @@ fn get_node_ref(registry: VeilidComponentRegistry) -> impl FnOnce(&str) -> Optio
         let routing_table = registry.routing_table();
         let nr = if let Some(key) = get_bare_node_id(text) {
             routing_table.lookup_bare_node_id(key).ok().flatten()?
-        } else if let Some(node_id) = get_node_id(text) {
-            routing_table.lookup_node_id(node_id).ok().flatten()?
         } else {
-            return None;
+            let node_id = get_node_id(text)?;
+            routing_table.lookup_node_id(node_id).ok().flatten()?
         };
         Some(nr)
     }
@@ -1291,11 +1283,14 @@ impl VeilidAPI {
         let mut min_state = BucketEntryState::Missing;
         let mut capabilities = vec![];
         let mut fastest = false;
+        let mut liveness = false;
         for arg in args {
             if let Some(ms) = get_bucket_entry_state(&arg) {
                 min_state = ms;
             } else if arg == "fastest" {
                 fastest = true;
+            } else if arg == "liveness" {
+                liveness = true;
             } else {
                 for cap in arg.split(',') {
                     if let Ok(cap) = VeilidCapability::from_str(cap) {
@@ -1309,9 +1304,12 @@ impl VeilidAPI {
 
         // Dump routing table entries
         let routing_table = self.core_context()?.routing_table();
-        Ok(match fastest {
-            true => routing_table.debug_info_entries_fastest(min_state, capabilities, 100000),
-            false => routing_table.debug_info_entries(min_state, capabilities),
+        Ok(if liveness {
+            routing_table.debug_info_entries_liveness()
+        } else if fastest {
+            routing_table.debug_info_entries_fastest(min_state, capabilities, 100000)
+        } else {
+            routing_table.debug_info_entries(min_state, capabilities)
         })
     }
 
@@ -1351,13 +1349,12 @@ impl VeilidAPI {
             (vec![proto(p)?], vec![family(f)?])
         } else if let Some(p) = proto(&token) {
             (vec![p], vec![AddressType::IPV4, AddressType::IPV6])
-        } else if let Some(f) = family(&token) {
+        } else {
+            let f = family(&token)?;
             (
                 vec![LowLevelProtocolType::UDP, LowLevelProtocolType::TCP],
                 vec![f],
             )
-        } else {
-            return None;
         };
         let mut out = Vec::new();
         for p in &protos {
@@ -1759,7 +1756,7 @@ impl VeilidAPI {
 
         let cm = registry
             .network_manager()
-            .get_node_contact_method(node_ref)
+            .get_node_contact_method(node_ref, ContactMethodIntent::Advisory)
             .map_err(VeilidAPIError::internal)?;
 
         Ok(format!("{:#?}", cm))
@@ -1786,7 +1783,7 @@ impl VeilidAPI {
                 safety_selection: _,
             } => Ok(format!(
                 "Destination: {:#?}\nNode:\n{}\n",
-                &dest,
+                dest,
                 routing_table.debug_info_entry(node.unfiltered())
             )),
             Destination::DialInfo {
@@ -1794,14 +1791,14 @@ impl VeilidAPI {
                 node,
             } => Ok(format!(
                 "Destination: {:#?}\nNode:\n{}\nDialInfo:\n{}\n",
-                &dest,
+                dest,
                 routing_table.debug_info_entry(node.clone()),
                 relay_di,
             )),
             Destination::PrivateRoute {
                 private_route: _,
                 safety_selection: _,
-            } => Ok(format!("Destination: {:#?}", &dest)),
+            } => Ok(format!("Destination: {:#?}", dest)),
         }
     }
 

@@ -15,6 +15,13 @@ struct DialInfoConfirmationResult {
     dial_info_details: Vec<DialInfoDetail>,
 }
 
+enum DialInfoDetectionOutcome {
+    Confirmed(DialInfoConfirmationResult),
+    // Too few qualifying validators; the network is the problem, not our dial info
+    ValidatorStarvation,
+    Failed,
+}
+
 impl NativeNetwork {
     /// Get routing domains that need dial info confirmation
     pub(super) fn routing_domains_needing_confirm_dial_info(&self) -> RoutingDomainSet {
@@ -49,6 +56,18 @@ impl NativeNetwork {
             state.inbound_stage,
             RoutingDomainInboundStage::NeedsDialInfoConfirmation
         )
+    }
+
+    /// Count live nodes usable as dial info validators, capped at the full quorum
+    fn count_validator_capable_nodes(&self) -> usize {
+        let filters = VecDeque::from(make_validator_entry_filters(RoutingDomain::PublicInternet));
+        self.routing_table()
+            .find_fast_non_local_nodes_filtered(
+                RoutingDomain::PublicInternet,
+                EXTERNAL_INFO_VALIDATIONS,
+                filters,
+            )
+            .len()
     }
 
     // Determine if we need to run the dial info confirmation for the PublicInternet domain
@@ -96,7 +115,9 @@ impl NativeNetwork {
                 && !current_peer_info.node_info().has_dial_info()
                 && self.inner.lock().next_outbound_only_dial_info_check <= Timestamp::now())
         {
-            // Bootstrap needs to have gotten us enough connectivity nodes
+            // Bootstrap needs to have gotten us enough connectivity nodes. The discovery
+            // quorum scales down to the validator pool, so gate on its minimum, not the
+            // full quorum, or a small network never attempts confirmation at all
             let mut has_enough_nodes = true;
             for ck in VALID_CRYPTO_KINDS {
                 if entry_summary
@@ -104,7 +125,7 @@ impl NativeNetwork {
                     .get(&ck)
                     .map(|cc| cc.live.connectivity_capabilities)
                     .unwrap_or_default()
-                    < EXTERNAL_INFO_VALIDATIONS
+                    < MIN_EXTERNAL_INFO_VALIDATIONS
                 {
                     has_enough_nodes = false;
                     break;
@@ -112,6 +133,15 @@ impl NativeNetwork {
             }
 
             has_enough_nodes
+        } else if state_is_publishable && current_peer_info.node_info().has_dial_info() {
+            // Confirmed below the full quorum: re-test when more validators appear
+            let confirmed_validator_count = self.inner.lock().confirmed_validator_count;
+            match confirmed_validator_count {
+                Some(count) if count < EXTERNAL_INFO_VALIDATIONS => {
+                    self.count_validator_capable_nodes() > count
+                }
+                _ => false,
+            }
         } else {
             false
         }
@@ -242,10 +272,11 @@ impl NativeNetwork {
         stop_token: StopToken,
         cur_ts: Timestamp,
         inbound_protocol_map: &InboundProtocolMap,
-    ) -> EyreResult<Option<DialInfoConfirmationResult>> {
+    ) -> EyreResult<DialInfoDetectionOutcome> {
         // Process all protocol and address combinations
         let mut unord = FuturesUnordered::new();
         let mut context_configs = HashSet::new();
+        let mut discovery_contexts = Vec::new();
         for ((address_type, _llpt, port), protocols) in inbound_protocol_map.clone() {
             let protocol_type = *protocols.first().unwrap_or_log();
             let dcc = DiscoveryContextConfig {
@@ -255,6 +286,7 @@ impl NativeNetwork {
             };
             context_configs.insert(dcc);
             let discovery_context = DiscoveryContext::new(self.clone(), dcc, stop_token.clone());
+            discovery_contexts.push(discovery_context.clone());
             unord.push(discovery_context.discover());
         }
 
@@ -288,7 +320,7 @@ impl NativeNetwork {
                 Err(_) => {
                     // Stop token, exit early without error propagation
                     veilid_log!(self debug "Stopped public internet dial info detection");
-                    return Ok(None);
+                    return Ok(DialInfoDetectionOutcome::Failed);
                 }
             }
         }
@@ -305,17 +337,26 @@ impl NativeNetwork {
 
         // If we got no external address types, try again
         if external_address_types.is_empty() {
+            if discovery_contexts
+                .iter()
+                .any(|dc| dc.validator_pool_starved())
+            {
+                veilid_log!(self debug "DialInfo discovery starved for validators in {:#}, trying again", done_duration);
+                return Ok(DialInfoDetectionOutcome::ValidatorStarvation);
+            }
             veilid_log!(self debug "DialInfo discovery failed in {:#}, trying again, got no external address types", done_duration);
-            return Ok(None);
+            return Ok(DialInfoDetectionOutcome::Failed);
         }
 
         // All done
         veilid_log!(self debug "DialInfo discovery finished in {:#} with address_types {:?}", done_duration, external_address_types);
 
-        Ok(Some(DialInfoConfirmationResult {
-            external_address_types,
-            dial_info_details,
-        }))
+        Ok(DialInfoDetectionOutcome::Confirmed(
+            DialInfoConfirmationResult {
+                external_address_types,
+                dial_info_details,
+            },
+        ))
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), err, fields(__VEILID_LOG_KEY = self.log_key())))]
@@ -378,28 +419,47 @@ impl NativeNetwork {
         // Save off existing public dial info for change detection later
         let routing_table = self.routing_table();
 
-        // Get the last dial info details and last network config
-        let last_network_config = {
+        // Get the current published state, last network config and inbound stage
+        let (last_network_config, inbound_stage, current_node_info) = {
             let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
+            let state = rdc.state();
             let rdd = rdc.read_dyn();
-            rdd.network_config().clone()
+            (
+                rdd.network_config().clone(),
+                state.inbound_stage,
+                rdd.get_peer_info().node_info().clone(),
+            )
         };
 
-        // Set most permissive network config and start from scratch
+        // A quorum upgrade re-tests while peer info is already published; it must not
+        // disturb the routing domain unless the result actually differs
+        let is_quorum_upgrade = matches!(
+            inbound_stage,
+            RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish
+        ) && current_node_info.has_dial_info();
+
+        // Record the validator pool this attempt gets; a below-quorum confirmation
+        // re-tests only when this grows, so each pool size is tried once
+        let validator_capable_count = self.count_validator_capable_nodes();
+        self.inner.lock().confirmed_validator_count = Some(validator_capable_count);
+
         let rdc = routing_table
             .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>();
         let mut editor = rdc.edit();
-        editor.set_network_config(RoutingDomainNetworkConfig::new(
-            protocol_config.outbound,
-            protocol_config.inbound,
-            protocol_config.family_global,
-            protocol_config.public_internet_capabilities.clone(),
-        ));
-        editor.commit();
+        if !is_quorum_upgrade {
+            // Set most permissive network config and start from scratch
+            editor.set_network_config(RoutingDomainNetworkConfig::new(
+                protocol_config.outbound,
+                protocol_config.inbound,
+                protocol_config.family_global,
+                protocol_config.public_internet_capabilities.clone(),
+            ));
+            editor.commit();
+        }
 
         // Bound the detection so a hung discovery fails instead of wedging this
         // single-flight task forever
-        let opt_confirmation_result = match timeout(
+        let detection_outcome = match timeout(
             DIAL_INFO_DETECTION_TIMEOUT_MS,
             self.do_public_internet_dial_info_detection(stop_token, cur_ts, &inbound_protocol_map),
         )
@@ -408,34 +468,52 @@ impl NativeNetwork {
             Ok(res) => res?,
             Err(_) => {
                 veilid_log!(self debug "DialInfo detection timed out after {}ms", DIAL_INFO_DETECTION_TIMEOUT_MS);
-                None
+                DialInfoDetectionOutcome::Failed
             }
         };
 
-        let Some(confirmation_result) = opt_confirmation_result else {
-            // Revert to last network config
-            editor.set_network_config(last_network_config);
-
-            // Track consecutive confirmation failures so a single transient failure
-            // does not cause us to unpublish working peer info
-            let confirm_failure_count = {
-                let mut inner = self.inner.lock();
-                *inner
-                    .dial_info_confirm_failure_count
-                    .entry(RoutingDomain::PublicInternet)
-                    .and_modify(|x| *x += 1)
-                    .or_insert(1)
-            };
-
-            if confirm_failure_count >= MAX_DIAL_INFO_CONFIRM_FAILURE_COUNT {
-                veilid_log!(self debug "DialInfo confirmation failed {} times consecutively for PublicInternet, unpublishing peer info", confirm_failure_count);
-                editor.set_confirmed(false);
-                editor.commit();
-                rdc.unpublish_peer_info();
-            } else {
-                veilid_log!(self debug "DialInfo confirmation failed {} time(s) consecutively for PublicInternet, will retry before unpublishing", confirm_failure_count);
+        let confirmation_result = match detection_outcome {
+            DialInfoDetectionOutcome::Confirmed(confirmation_result) => confirmation_result,
+            DialInfoDetectionOutcome::ValidatorStarvation => {
+                if is_quorum_upgrade {
+                    veilid_log!(self debug "DialInfo quorum upgrade got no result, keeping current peer info");
+                    return Ok(false);
+                }
+                // Keep last-known-good peer info; unpublishing would starve other nodes too
+                editor.set_network_config(last_network_config);
+                veilid_log!(self debug "DialInfo confirmation starved for validators for PublicInternet, keeping peer info");
+                return Ok(false);
             }
-            return Ok(false);
+            DialInfoDetectionOutcome::Failed => {
+                // A failed upgrade probe says nothing about our published dial info
+                if is_quorum_upgrade {
+                    veilid_log!(self debug "DialInfo quorum upgrade failed, keeping current peer info");
+                    return Ok(false);
+                }
+                // Revert to last network config
+                editor.set_network_config(last_network_config);
+
+                // Track consecutive confirmation failures so a single transient failure
+                // does not cause us to unpublish working peer info
+                let confirm_failure_count = {
+                    let mut inner = self.inner.lock();
+                    *inner
+                        .dial_info_confirm_failure_count
+                        .entry(RoutingDomain::PublicInternet)
+                        .and_modify(|x| *x += 1)
+                        .or_insert(1)
+                };
+
+                if confirm_failure_count >= MAX_DIAL_INFO_CONFIRM_FAILURE_COUNT {
+                    veilid_log!(self debug "DialInfo confirmation failed {} times consecutively for PublicInternet, unpublishing peer info", confirm_failure_count);
+                    editor.set_confirmed(false);
+                    editor.commit();
+                    rdc.unpublish_peer_info();
+                } else {
+                    veilid_log!(self debug "DialInfo confirmation failed {} time(s) consecutively for PublicInternet, will retry before unpublishing", confirm_failure_count);
+                }
+                return Ok(false);
+            }
         };
 
         // Successful confirmation, reset the failure counter
@@ -443,6 +521,27 @@ impl NativeNetwork {
             .lock()
             .dial_info_confirm_failure_count
             .remove(&RoutingDomain::PublicInternet);
+
+        // An upgrade re-test that reproduces the published state records the larger
+        // quorum and leaves the routing domain alone
+        if is_quorum_upgrade {
+            let mut new_dial_info_details: Vec<DialInfoDetail> = static_dial_info_details
+                .iter()
+                .cloned()
+                .chain(confirmation_result.dial_info_details.iter().cloned())
+                .collect();
+            new_dial_info_details.sort_unstable();
+            new_dial_info_details.dedup();
+            let mut current_dial_info_details = current_node_info.dial_info_detail_list().to_vec();
+            current_dial_info_details.sort_unstable();
+            current_dial_info_details.dedup();
+            if new_dial_info_details == current_dial_info_details
+                && confirmation_result.external_address_types == current_node_info.address_types()
+            {
+                veilid_log!(self debug "DialInfo re-confirmed unchanged with {} validators", validator_capable_count);
+                return Ok(true);
+            }
+        }
 
         // Set the address types we've seen and confirm the dialinfo we just discovered
         editor.set_network_config(RoutingDomainNetworkConfig::new(

@@ -4,6 +4,11 @@ import {
   KeyPair,
   Signature,
   CryptoKind,
+  VeilidAPIError,
+  VeilidAPIErrorGeneric,
+  VeilidAPIErrorInvalidArgument,
+  VeilidAPIErrorNotInitialized,
+  RecordKey,
 } from 'veilid-wasm';
 import {
   asyncCallWithTimeout,
@@ -194,6 +199,7 @@ export const clientSuite: Suite = {
             { label: 'newCustomPrivateRoute with invalid crypto kind' },
           );
         } catch (error) {
+          expect(error).toBeInstanceOf(VeilidAPIErrorGeneric);
           expect(error).toMatchObject({ kind: 'Generic' });
         }
       },
@@ -214,7 +220,29 @@ export const clientSuite: Suite = {
             { label: 'newCustomPrivateRoute with large hop count' },
           );
         } catch (error) {
+          expect(error).toBeInstanceOf(VeilidAPIErrorInvalidArgument);
           expect(error).toMatchObject({ kind: 'InvalidArgument' });
+        }
+      },
+    },
+    {
+      name: 'should throw Error subclasses carrying a kind',
+      run: ({ expect }) => {
+        // Thrown from veilid-core's own export, which reaches the classes through the
+        // factory rather than veilid-wasm's bindings
+        try {
+          RecordKey.parse('!!!not-a-key!!!');
+          throw new Error('parse should have thrown');
+        } catch (error) {
+          expect(error).toBeInstanceOf(VeilidAPIError);
+          expect(error).toBeInstanceOf(Error);
+          expect(error).not.toBeInstanceOf(VeilidAPIErrorNotInitialized);
+          const e = error as VeilidAPIError;
+          expect(typeof e.kind).toBe('string');
+          expect(typeof e.message).toBe('string');
+          expect(e.message.length).toBeGreaterThan(0);
+          expect(typeof e.stack).toBe('string');
+          expect(e.name).toBe(e.constructor.name);
         }
       },
     },

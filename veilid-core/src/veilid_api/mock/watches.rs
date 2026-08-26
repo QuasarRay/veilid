@@ -4,6 +4,8 @@ use super::*;
 #[derive(Clone)]
 pub(crate) struct MockWatch {
     pub watcher: MockNodeKey,
+    /// The key this node opened the record under, which is what its reports are decrypted with
+    pub record_key: RecordKey,
     pub subkeys: ValueSubkeyRangeSet,
     pub count: u32,
     /// When the watch lapses, or zero for a watch that was never given a deadline
@@ -19,6 +21,7 @@ impl MockWatch {
 /// A change to deliver once the record lock is released.
 struct PendingChange {
     watcher: MockNodeKey,
+    record_key: RecordKey,
     change: VeilidValueChange,
 }
 
@@ -55,6 +58,7 @@ impl VeilidAPI {
             }
             record.watches.push(MockWatch {
                 watcher: key,
+                record_key: record_key.clone(),
                 subkeys,
                 count,
                 expiration: expiration.unwrap_or_else(|| Timestamp::new(0)),
@@ -123,11 +127,11 @@ fn take_changes(
 
     // Nothing sweeps expired watches, so they lapse on the next change instead
     let now = Timestamp::now();
-    let lapsed: Vec<MockNodeKey> = record
+    let lapsed: Vec<(MockNodeKey, RecordKey)> = record
         .watches
         .iter()
         .filter(|w| w.expired(now))
-        .map(|w| w.watcher)
+        .map(|w| (w.watcher, w.record_key.clone()))
         .collect();
     record.watches.retain(|w| !w.expired(now));
 
@@ -155,8 +159,9 @@ fn take_changes(
 
         pending.push(PendingChange {
             watcher: watch.watcher,
+            record_key: watch.record_key.clone(),
             change: VeilidValueChange {
-                key: record_key.clone(),
+                key: watch.record_key.clone(),
                 subkeys: reportable,
                 count: watch.count,
                 value,
@@ -165,19 +170,20 @@ fn take_changes(
     }
 
     // A dead watch is reported to its holder with an empty range and zero count
-    let mut dead: Vec<MockNodeKey> = record
+    let mut dead: Vec<(MockNodeKey, RecordKey)> = record
         .watches
         .iter()
         .filter(|w| w.count == 0)
-        .map(|w| w.watcher)
+        .map(|w| (w.watcher, w.record_key.clone()))
         .collect();
     dead.extend(lapsed);
-    for watcher in dead {
+    for (watcher, watcher_key) in dead {
         record.watches.retain(|w| w.watcher != watcher);
         pending.push(PendingChange {
             watcher,
+            record_key: watcher_key.clone(),
             change: VeilidValueChange {
-                key: record_key.clone(),
+                key: watcher_key,
                 subkeys: ValueSubkeyRangeSet::new(),
                 count: 0,
                 value: None,
@@ -187,12 +193,33 @@ fn take_changes(
     pending
 }
 
-/// Report a committed change to every watcher, the writer included.
-pub(crate) fn report_value_change(record_key: &RecordKey, changed: &ValueSubkeyRangeSet) {
-    let pending = with_records(|records| take_changes(records, record_key, changed));
+impl VeilidAPI {
+    /// Report a committed change to every watcher, the writer included.
+    pub(crate) fn report_value_change(
+        &self,
+        record_key: &RecordKey,
+        changed: &ValueSubkeyRangeSet,
+    ) {
+        let pending = with_records(|records| take_changes(records, record_key, changed));
 
-    // Delivered outside the record lock: a callback may re-enter the API
-    for p in pending {
-        let _ = MockNetwork::send_update(&p.watcher, VeilidUpdate::ValueChange(Box::new(p.change)));
+        // Delivered outside the record lock: a callback may re-enter the API
+        for mut p in pending {
+            // Records hold ciphertext, and a report carries a value the same way a get returns
+            // one: decrypted under the key its own watcher opened the record with
+            if let (Some(value), Some(subkey)) = (p.change.value.take(), p.change.subkeys.first()) {
+                match self.mock_crypt_value_data(&p.record_key, subkey, &value) {
+                    // A report with no value still tells the watcher to go read
+                    Ok(decrypted) => p.change.value = Some(decrypted),
+                    Err(e) => {
+                        if let Ok(context) = self.core_context() {
+                            veilid_log!(context error
+                                "dropping value from report on {}: {}", p.record_key, e);
+                        }
+                    }
+                }
+            }
+            let _ =
+                MockNetwork::send_update(&p.watcher, VeilidUpdate::ValueChange(Box::new(p.change)));
+        }
     }
 }

@@ -32,6 +32,8 @@
 /build/
 
 # Web related
+# wasm blob copied in by run_integration_tests_web.sh
+web/wasm/
 
 # Symbolication related
 app.*.symbols

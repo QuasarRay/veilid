@@ -452,8 +452,46 @@ impl fmt::Display for BucketEntryInner {
         }
         writeln!(f, "per_transport_stats:")?;
         for (key, entry) in &self.per_transport_stats {
-            writeln!(f, "  {}:", key)?;
+            writeln!(f, "  {}: {:?}", key, transport_liveness_health(entry))?;
             write!(f, "{}", indent_all_string(f.to_string(entry)))?;
+        }
+        writeln!(f, "cm_viability:")?;
+        match &self.cm_viability {
+            Some(v) => {
+                for (so, r) in &v.per_ordering {
+                    writeln!(
+                        f,
+                        "    {:?}: direct=[{}] indirect={}",
+                        so,
+                        r.direct_transports
+                            .iter()
+                            .map(|t| t.to_string())
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        r.has_indirect
+                    )?;
+                }
+            }
+            None => writeln!(f, "    None")?,
+        }
+        if let Some(ts) = self.rpc_stats.first_steady_lost_question_ts {
+            let credit = self
+                .registry
+                .lookup::<NetworkManager>()
+                .map(|nm| {
+                    nm.online_detector().blame_suppressed_overlap(
+                        RoutingDomain::PublicInternet,
+                        ts,
+                        cur_ts,
+                    )
+                })
+                .unwrap_or_else(|| TimestampDuration::new(0));
+            writeln!(
+                f,
+                "steady_lost: span={} unblamed_credit={}",
+                f.to_string(cur_ts.duration_since(ts)),
+                f.to_string(credit)
+            )?;
         }
         // Per route stats
         if !self.per_route_stats.is_empty() {
@@ -994,6 +1032,14 @@ impl BucketEntryInner {
         &self.rpc_stats
     }
 
+    pub(crate) fn per_sequence_ordering_stats(&self) -> &BTreeMap<SequenceOrdering, RPCStats> {
+        &self.per_sequence_ordering_stats
+    }
+
+    pub(crate) fn per_transport_stats(&self) -> &BTreeMap<TransportType, RPCStats> {
+        &self.per_transport_stats
+    }
+
     pub fn connection_stats(&self) -> &ConnectionStats {
         &self.connection_stats
     }
@@ -1100,11 +1146,24 @@ impl BucketEntryInner {
     // Called when a protected connection to this peer is closed by the remote
     // side. Longer durations = more reliable peer.
     pub(super) fn record_protected_connection_drop(&mut self, duration: TimestampDuration) {
-        self.connection_stats.protected_drop_span =
-            Some(self.protected_drop_span_accounting.record_latency(duration));
+        self.protected_drop_span_accounting.record_latency(duration);
     }
 
-    // Called every UPDATE_STATE_STATS_SECS seconds
+    // Called every UPDATE_STATE_STATS_INTERVAL_SECS seconds; recomputes only
+    // from accountings that saw new samples since the last pass
+    pub(super) fn update_latency_stats(&mut self) {
+        if let Some(l) = self.latency_stats_accounting.take_latency_stats() {
+            self.peer_stats.latency = Some(l);
+        }
+        if let Some(l) = self.protected_drop_span_accounting.take_latency_stats() {
+            self.connection_stats.protected_drop_span = Some(l);
+        }
+        for (_key, prs) in self.per_route_stats.iter_mut() {
+            prs.update_latency_stats();
+        }
+    }
+
+    // Called every UPDATE_STATE_STATS_INTERVAL_SECS seconds
     pub(super) fn update_state_stats(&mut self) {
         if let Some(state_stats) = self.state_stats_accounting.lock().take_stats() {
             self.state_stats = state_stats;
@@ -1208,10 +1267,8 @@ impl BucketEntryInner {
         self.transfer_stats_accounting.add_down(bytes);
 
         // Update latency accounting
-        self.peer_stats.latency = Some(
-            self.latency_stats_accounting
-                .record_latency(recv_ts.duration_since(send_ts)),
-        );
+        self.latency_stats_accounting
+            .record_latency(recv_ts.duration_since(send_ts));
 
         // Only dial evidence goes in the per-transport bucket
         if dialed {
@@ -1502,7 +1559,7 @@ impl Drop for BucketEntry {
             #[cfg(debug_assertions)]
             panic!(
                 "bucket entry dropped with non-zero refcount: {:#?}",
-                &*self.inner.read()
+                *self.inner.read()
             );
             #[cfg(not(debug_assertions))]
             {

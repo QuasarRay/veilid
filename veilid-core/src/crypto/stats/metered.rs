@@ -90,7 +90,6 @@ const CRYPTO_OP_COUNT: usize = 19;
 #[derive(Default)]
 struct CryptoOpAccounting {
     count: u64,
-    latency: LatencyStats,
     accounting: LatencyStatsAccounting,
 }
 
@@ -117,7 +116,7 @@ impl CryptoStatsAccounting {
     fn record(&self, op: CryptoOp, dur: TimestampDuration) {
         let mut a = self.ops[op as usize].lock();
         a.count += 1;
-        a.latency = a.accounting.record_latency(dur);
+        a.accounting.record_latency(dur);
     }
 
     pub(super) fn snapshot(&self) -> Vec<CryptoOpSnapshot> {
@@ -128,7 +127,7 @@ impl CryptoStatsAccounting {
                 (a.count > 0).then(|| CryptoOpSnapshot {
                     kind: op.name(),
                     count: a.count,
-                    latency: a.latency.clone(),
+                    latency: a.accounting.latency_stats().unwrap_or_default(),
                 })
             })
             .collect()

@@ -1,30 +1,36 @@
 // Builds veilid-flutter/rust as the code asset lib/veilid_ffi.dart resolves against.
 // `assetName` below and that file's @DefaultAsset must move together.
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_rust/native_toolchain_rust.dart';
 
-/// Cargo features a consuming app selects for this build, read from
-/// `.dart_tool/veilid_build_config.json` under that app.
+/// Cargo features a consuming app selects for this build, read from the
+/// environment so a selection lives only as long as the process that made it.
 ///
-/// `.dart_tool` is gitignored in every Dart project, so a test run can select a
-/// feature set without touching a tracked file, and an ordinary app build -
-/// which never writes one - gets the default. It has to be a file rather than an
-/// environment variable or a `--define`: hooks run under a fixed environment
-/// allowlist, and user-defines reach a hook only from the workspace pubspec,
-/// which the app shares with its own release builds.
-const _configFileName = 'veilid_build_config.json';
+/// Hooks run under a fixed environment allowlist that passes only a few name
+/// prefixes. `CARGO_` reaches a hook from hooks_runner 1.6.2 on, which no
+/// flutter stable ships yet, so `CCACHE_` carries the same selection until one
+/// does and the runner scripts set both. Drop the `CCACHE_` spelling once the
+/// minimum flutter bundles hooks_runner 1.6.2.
+const _featuresVars = [
+  'CARGO_VEILID_FLUTTER_FEATURES',
+  'CCACHE_VEILID_FLUTTER_FEATURES',
+];
+const _noDefaultFeaturesVars = [
+  'CARGO_VEILID_FLUTTER_NO_DEFAULT_FEATURES',
+  'CCACHE_VEILID_FLUTTER_NO_DEFAULT_FEATURES',
+];
 
 void main(List<String> args) async {
   await build(args, (input, output) async {
     if (!input.config.buildCodeAssets) {
       return;
     }
-    final selection = _featureSelection(input, output);
+    final selection = _featureSelection(input);
+    _rejectMockApi(input, selection);
     await RustBuilder(
       assetName: 'veilid_ffi.dart',
       cratePath: 'rust',
@@ -40,62 +46,90 @@ void main(List<String> args) async {
 BuildMode _buildMode(BuildInput input) =>
     input.config.linkingEnabled ? BuildMode.release : BuildMode.debug;
 
-typedef _FeatureSelection = ({List<String> features, bool defaultFeatures});
+typedef _FeatureSelection = ({
+  List<String> features,
+  bool defaultFeatures,
+  String source,
+});
 
-/// The config file wins over pubspec user-defines, which stay supported for an
+/// A shipping build must never link the in-process mock, which answers every
+/// network operation itself. This refuses rather than warns.
+///
+/// linkingEnabled stands in for the Flutter build mode, which hooks are not
+/// told: false only for debug, so the mock stays available to the test suites.
+void _rejectMockApi(BuildInput input, _FeatureSelection selection) {
+  if (!input.config.linkingEnabled) {
+    return;
+  }
+  final mock = selection.features.where((f) => f.startsWith('mock-api'));
+  if (mock.isEmpty) {
+    return;
+  }
+  throw StateError(
+    'veilid-flutter: refusing to build ${mock.join(', ')} into a non-debug '
+    'build. The mock replaces the network with an in-process fake.\n'
+    'Selected by ${selection.source}; unset it and build again.',
+  );
+}
+
+/// The environment wins over pubspec user-defines, which stay supported for an
 /// app that wants one fixed feature set for every build.
-_FeatureSelection _featureSelection(BuildInput input, BuildOutputBuilder output) {
-  final configFile = _configFile(input);
-  if (configFile != null) {
-    // Declared whether or not it exists, so writing one re-runs this hook rather
-    // than serving the previous build's library
-    output.dependencies.add(configFile.uri);
-    final fromFile = _readConfig(configFile);
-    if (fromFile != null) {
-      return fromFile;
+_FeatureSelection _featureSelection(BuildInput input) =>
+    _environmentSelection() ??
+    (
+      features: _userDefineFeatures(input),
+      defaultFeatures: true,
+      source: 'the pubspec user-defines',
+    );
+
+/// Null when the environment names no selection, so the caller falls back
+/// rather than building something the app did not ask for.
+_FeatureSelection? _environmentSelection() {
+  final features = _firstSet(_featuresVars);
+  final noDefaults = _firstSet(_noDefaultFeaturesVars);
+  if (features == null && noDefaults == null) {
+    return null;
+  }
+  return (
+    features: _parseFeatures(features?.value),
+    defaultFeatures: !_parseBool(noDefaults),
+    source: (features ?? noDefaults!).name,
+  );
+}
+
+typedef _EnvVar = ({String name, String value});
+
+_EnvVar? _firstSet(List<String> names) {
+  for (final name in names) {
+    final value = Platform.environment[name];
+    if (value != null) {
+      return (name: name, value: value);
     }
   }
-  return (features: _userDefineFeatures(input), defaultFeatures: true);
+  return null;
 }
 
-/// Where the consuming app would put its config, derived from the hook's own
-/// output directory because that is the only path a hook is handed inside it.
-File? _configFile(BuildInput input) {
-  final segments = input.outputDirectoryShared.pathSegments;
-  final dartTool = segments.lastIndexOf('.dart_tool');
-  if (dartTool < 0) {
-    return null;
-  }
-  return File.fromUri(
-    input.outputDirectoryShared.replace(
-      pathSegments: [...segments.take(dartTool + 1), _configFileName],
-    ),
-  );
-}
+/// Comma- or whitespace-separated, so it reads the same as cargo's own
+/// `--features`.
+List<String> _parseFeatures(String? value) =>
+    (value ?? '').split(RegExp(r'[,\s]+')).where((f) => f.isNotEmpty).toList();
 
-/// Null when there is no usable config, so the caller falls back rather than
-/// building something the app did not ask for
-_FeatureSelection? _readConfig(File configFile) {
-  if (!configFile.existsSync()) {
-    return null;
+/// Throws on anything else: a build selection misspelled as `yes` must not
+/// silently read as the safe answer.
+bool _parseBool(_EnvVar? variable) {
+  if (variable == null) {
+    return false;
   }
-  final Object? decoded;
-  try {
-    decoded = jsonDecode(configFile.readAsStringSync());
-  } on FormatException catch (e) {
-    throw StateError('$_configFileName is not valid JSON: $e');
+  switch (variable.value.trim().toLowerCase()) {
+    case '' || '0' || 'false':
+      return false;
+    case '1' || 'true':
+      return true;
+    default:
+      throw StateError(
+        '${variable.name} must be 1/true or 0/false, got "${variable.value}"',
+      );
   }
-  if (decoded is! Map<String, Object?>) {
-    throw StateError('$_configFileName must hold a JSON object');
-  }
-  final features = decoded['features'];
-  final defaultFeatures = decoded['default_features'];
-  return (
-    features: features is List ? features.cast<String>() : const <String>[],
-    // Absent means the ordinary build; a feature set that conflicts with the
-    // defaults has to say so, the way mock-api does against stats
-    defaultFeatures: defaultFeatures is bool ? defaultFeatures : true,
-  );
 }
 
 List<String> _userDefineFeatures(BuildInput input) {

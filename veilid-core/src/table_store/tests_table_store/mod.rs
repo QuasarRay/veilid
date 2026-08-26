@@ -257,7 +257,7 @@ async fn test_protect_unprotect(vcrypto: &AsyncCryptoSystemGuard<'_>, ts: &Table
                 .await
                 .expect_err(&format!(
                     "invalid_password: dek: '{}' pw: '{}'",
-                    dek, &invalid_password
+                    dek, invalid_password
                 ));
             if !password.is_empty() {
                 let _ = ts
@@ -391,6 +391,50 @@ async fn test_maybe_encrypt_decrypt(ts: &TableStore) {
                 .unwrap();
         assert_eq!(data, &decrypted);
     }
+}
+
+/// The per-namespace instance lock refuses a second live core on the same
+/// namespace (in-process models the two-dylib hot restart case), allows a
+/// different namespace in the same directory, and a lock file left behind by
+/// a dead process never blocks a fresh start.
+/// Native only: the wasm lock is a no-op stub (no advisory file locks).
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+async fn test_namespace_lock() {
+    info!("test_namespace_lock");
+
+    // The fixture isolates table store directories per startup; the lock is
+    // per-directory-per-namespace, so pin one shared directory here
+    let (update_callback, mut config) = fixture_veilid_core_with_namespace("lock_test");
+    let shared_dir = format!("{}_ns_lock_shared", config.table_store.directory);
+    config.table_store.directory = shared_dir.clone();
+    let api = api_startup(update_callback, config)
+        .await
+        .expect("first instance should start");
+
+    let (update_callback2, mut config2) = fixture_veilid_core_with_namespace("lock_test");
+    config2.table_store.directory = shared_dir.clone();
+    assert!(
+        api_startup(update_callback2, config2).await.is_err(),
+        "second instance on the same namespace should be refused"
+    );
+
+    let (update_callback3, mut config3) = fixture_veilid_core_with_namespace("lock_test_other");
+    config3.table_store.directory = shared_dir.clone();
+    let api3 = api_startup(update_callback3, config3)
+        .await
+        .expect("a different namespace should share the directory");
+    api3.shutdown().await;
+
+    api.shutdown().await;
+
+    // The lock file deliberately survives shutdown (and crashes); only the
+    // kernel lock matters, so a stale file must not block a fresh start
+    let (update_callback4, mut config4) = fixture_veilid_core_with_namespace("lock_test");
+    config4.table_store.directory = shared_dir;
+    let api4 = api_startup(update_callback4, config4)
+        .await
+        .expect("stale lock file should not block startup");
+    api4.shutdown().await;
 }
 
 /// protected_store.delete=true with table_store.delete=false should still
@@ -551,6 +595,8 @@ pub async fn test_all() {
 
     shutdown(api).await;
 
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_namespace_lock().await;
     test_protected_store_delete_wipes_tables().await;
     test_protected_store_delete_no_wipe_returns_not_initialized().await;
 }

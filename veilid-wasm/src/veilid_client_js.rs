@@ -41,7 +41,7 @@ impl VeilidClient {
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
     pub fn VEILID_CAPABILITY_ROUTE() -> JsValue {
-        crate::VEILID_CAPABILITY_ROUTE.into()
+        crate::VEILID_CAPABILITY_ROUTE.to_string().into()
     }
 
     /// The TUNL capability
@@ -49,42 +49,44 @@ impl VeilidClient {
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
     pub fn VEILID_CAPABILITY_TUNNEL() -> JsValue {
-        crate::VEILID_CAPABILITY_TUNNEL.into()
+        crate::VEILID_CAPABILITY_TUNNEL.to_string().into()
     }
 
     /// The SGNL capability
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
     pub fn VEILID_CAPABILITY_SIGNAL() -> JsValue {
-        crate::VEILID_CAPABILITY_SIGNAL.into()
+        crate::VEILID_CAPABILITY_SIGNAL.to_string().into()
     }
 
     /// The RLAY capability
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
     pub fn VEILID_CAPABILITY_RELAY() -> JsValue {
-        crate::VEILID_CAPABILITY_RELAY.into()
+        crate::VEILID_CAPABILITY_RELAY.to_string().into()
     }
 
     /// The DIAL capability
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
     pub fn VEILID_CAPABILITY_VALIDATE_DIAL_INFO() -> JsValue {
-        crate::VEILID_CAPABILITY_VALIDATE_DIAL_INFO.into()
+        crate::VEILID_CAPABILITY_VALIDATE_DIAL_INFO
+            .to_string()
+            .into()
     }
 
     /// The DHTV capability
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
     pub fn VEILID_CAPABILITY_DHT() -> JsValue {
-        crate::VEILID_CAPABILITY_DHT.into()
+        crate::VEILID_CAPABILITY_DHT.to_string().into()
     }
 
     /// The APPM capability
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
     pub fn VEILID_CAPABILITY_APPMESSAGE() -> JsValue {
-        crate::VEILID_CAPABILITY_APPMESSAGE.into()
+        crate::VEILID_CAPABILITY_APPMESSAGE.to_string().into()
     }
 
     /// The BLOC capability
@@ -92,7 +94,7 @@ impl VeilidClient {
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
     pub fn VEILID_CAPABILITY_BLOCKSTORE() -> JsValue {
-        crate::VEILID_CAPABILITY_BLOCKSTORE.into()
+        crate::VEILID_CAPABILITY_BLOCKSTORE.to_string().into()
     }
 
     /// All distance metric capabilites of this version of Veilid
@@ -132,9 +134,10 @@ impl VeilidClient {
     ///
     /// Idempotent; only the first call has any effect. Must run before `startupCore`.
     #[allow(clippy::unused_async)]
-    pub async fn initializeCore(platformConfig: VeilidWASMConfig) {
+    pub async fn initializeCore(platformConfig: Ts<VeilidWASMConfig>) -> VeilidAPIResult<()> {
+        let platformConfig = from_ts(platformConfig)?;
         if INITIALIZED.swap(true, Ordering::AcqRel) {
-            return;
+            return Ok(());
         }
         console_error_panic_hook::set_once();
 
@@ -213,6 +216,7 @@ impl VeilidClient {
                 },
             );
         }
+        Ok(())
     }
 
     /// Initialize a Veilid node, with the configuration in JSON format
@@ -227,15 +231,19 @@ impl VeilidClient {
     /// Throws `AlreadyInitialized` if a node is already running, otherwise the error from core startup (`Generic` on a bad config or a failure bringing the core up).
     pub async fn startupCore(
         updateCallbackJS: UpdateVeilidFunction,
-        config: VeilidConfig,
+        config: Ts<VeilidConfig>,
     ) -> VeilidAPIResult<()> {
+        let config = from_ts(config)?;
         let update_callback_js = SendWrapper::new(updateCallbackJS);
         let update_callback = Arc::new(move |update: VeilidUpdate| {
-            let _ret = match Function::call1(
-                &update_callback_js,
-                &JsValue::UNDEFINED,
-                &JsValue::from(update),
-            ) {
+            let update_js = match update.into_js() {
+                Ok(v) => JsValue::from(v),
+                Err(e) => {
+                    console_log(&format!("failed to serialize update: {}", e));
+                    return;
+                }
+            };
+            let _ret = match Function::call1(&update_callback_js, &JsValue::UNDEFINED, &update_js) {
                 Ok(v) => v,
                 Err(e) => {
                     console_log(&format!("calling update callback failed: {:?}", e));
@@ -318,9 +326,9 @@ impl VeilidClient {
     /// Get a full copy of the current state of Veilid.
     ///
     /// Throws `NotInitialized` if the node is not started.
-    pub async fn getState() -> VeilidAPIResult<VeilidState> {
+    pub async fn getState() -> VeilidAPIResult<Ts<VeilidState>> {
         let veilid_api = get_veilid_api()?;
-        veilid_api.get_state().await
+        to_ts(&veilid_api.get_state().await?)
     }
 
     /// Connect to the network.
@@ -407,7 +415,7 @@ impl VeilidClient {
     /// Throws the same error its core twin `VeilidAPI::transact_dht_records` returns: `InvalidArgument` if a record is not open or more than 32 records are passed, `MissingArgument` if `recordKeys` is empty or has duplicates, `Generic` if a record key is malformed or its encryption key does not match the opened record, `TryAgain` (retryable) if the DHT is offline, the records are contended, or Begin consensus was not reached, and `NotInitialized` if the node is not started. Network failures surface as `Timeout` or `NoConnection`. Also throws `Generic` if `recordKeys` or `options` fail to deserialize.
     pub async fn transactDHTRecords(
         #[wasm_bindgen(unchecked_param_type = "RecordKey[]")] recordKeys: JsValue,
-        options: Option<ts::TransactDHTRecordsOptions>,
+        options: Option<Ts<ts::TransactDHTRecordsOptions>>,
     ) -> VeilidAPIResult<VeilidDHTTransaction> {
         let record_keys =
             try_from_js_array::<RecordKey>(recordKeys).map_err(VeilidAPIError::generic)?;
@@ -417,7 +425,7 @@ impl VeilidClient {
         let dht_transaction = veilid_api
             .transact_dht_records(
                 record_keys,
-                match options {
+                match from_opt_ts(options)? {
                     Some(o) => Some(o.try_into()?),
                     None => None,
                 },
@@ -437,11 +445,11 @@ impl VeilidClient {
     /// Throws the same error its core twin `VeilidAPI::get_dht_record_key` returns: `InvalidArgument` or `Generic` if `schema` is malformed, `Generic` if `owner` or `encryptionKey` is an unsupported crypto kind, and `NotInitialized` if the node is not started. Also throws `Generic` (or `InvalidArgument` for `schema`) if `schema` or `encryptionKey` fail to deserialize.
     #[allow(clippy::unused_async)]
     pub async fn getDHTRecordKey(
-        schema: ts::DHTSchema,
+        schema: Ts<ts::DHTSchema>,
         owner: &PublicKey,
         encryptionKey: Option<TypeStubSharedSecret>,
     ) -> VeilidAPIResult<RecordKey> {
-        let schema = schema.try_into()?;
+        let schema = from_ts(schema)?.try_into()?;
 
         let encryption_key = match encryptionKey {
             Some(encryption_key) => try_from_js_option::<SharedSecret>(encryption_key)
@@ -465,11 +473,11 @@ impl VeilidClient {
     /// Blocks on the network to allocate and test the route. The returned route id holds an allocated route the caller must free with [VeilidClient::releasePrivateRoute] or it leaks.
     ///
     /// Throws the same error its core twin `VeilidAPI::new_private_route` returns: `TryAgain` (retryable) if there is no valid PublicInternet network class yet, not enough nodes are known to build the route, or the route failed its reachability test, and `NotInitialized` if the node is not started.
-    pub async fn newPrivateRoute() -> VeilidAPIResult<ts::RouteBlob> {
+    pub async fn newPrivateRoute() -> VeilidAPIResult<Ts<ts::RouteBlob>> {
         let veilid_api = get_veilid_api()?;
 
         let route_blob = veilid_api.new_private_route().await?;
-        Ok(route_blob.into())
+        to_ts(&route_blob.into())
     }
 
     /// Import a private route blob as a remote private route.
@@ -495,13 +503,13 @@ impl VeilidClient {
     ///
     /// Throws the same error its core twin `VeilidAPI::new_custom_private_route` returns: `Generic` if `private_spec` names an invalid crypto kind, `InvalidArgument` if its hop count exceeds the configured maximum, `TryAgain` (retryable) if there is no valid PublicInternet network class yet, not enough nodes are known, or the route failed its reachability test, and `NotInitialized` if the node is not started.
     pub async fn newCustomPrivateRoute(
-        private_spec: ts::PrivateSpec,
-    ) -> VeilidAPIResult<ts::RouteBlob> {
+        private_spec: Ts<ts::PrivateSpec>,
+    ) -> VeilidAPIResult<Ts<ts::RouteBlob>> {
         let veilid_api = get_veilid_api()?;
-        let private_spec = private_spec.try_into()?;
+        let private_spec = from_ts(private_spec)?.try_into()?;
 
         let route_blob = veilid_api.new_custom_private_route(private_spec).await?;
-        Ok(route_blob.into())
+        to_ts(&route_blob.into())
     }
 
     /// Release either a locally allocated or remotely imported private route.
@@ -593,14 +601,13 @@ impl VeilidClient {
     }
 
     /// Return the cargo package version of veilid-core, in object format.
-    #[must_use]
-    pub fn version() -> VeilidVersion {
+    pub fn version() -> VeilidAPIResult<Ts<VeilidVersion>> {
         let (major, minor, patch) = veilid_version();
-        super::VeilidVersion {
+        to_ts(&super::VeilidVersion {
             major,
             minor,
             patch,
-        }
+        })
     }
 
     /// Return the features that were enabled when veilid-core was built.
@@ -616,8 +623,8 @@ impl VeilidClient {
     }
 
     /// Return the default veilid configuration, in string format
-    pub fn defaultConfig() -> VeilidConfig {
-        VeilidConfig::default()
+    pub fn defaultConfig() -> VeilidAPIResult<Ts<VeilidConfig>> {
+        to_ts(&VeilidConfig::default())
     }
 }
 
@@ -671,7 +678,7 @@ impl VeilidDHTTransaction {
     pub async fn extend(
         &self,
         #[wasm_bindgen(unchecked_param_type = "RecordKey[]")] recordKeys: JsValue,
-        options: Option<ts::TransactDHTRecordsOptions>,
+        options: Option<Ts<ts::TransactDHTRecordsOptions>>,
     ) -> VeilidAPIResult<()> {
         let record_keys =
             try_from_js_array::<RecordKey>(recordKeys).map_err(VeilidAPIError::generic)?;
@@ -679,7 +686,7 @@ impl VeilidDHTTransaction {
         transaction
             .extend(
                 record_keys,
-                match options {
+                match from_opt_ts(options)? {
                     Some(o) => Some(o.try_into()?),
                     None => None,
                 },
@@ -705,8 +712,8 @@ impl VeilidDHTTransaction {
         recordKey: &RecordKey,
         subkey: ValueSubkey,
         data: Vec<u8>,
-        options: Option<ts::DHTTransactionSetValueOptions>,
-    ) -> VeilidAPIResult<Option<ts::ValueData>> {
+        options: Option<Ts<ts::DHTTransactionSetValueOptions>>,
+    ) -> VeilidAPIResult<Option<Ts<ts::ValueData>>> {
         let transaction = self.getTransaction()?;
 
         transaction
@@ -714,13 +721,14 @@ impl VeilidDHTTransaction {
                 recordKey.clone(),
                 subkey,
                 data,
-                match options {
+                match from_opt_ts(options)? {
                     Some(o) => Some(o.try_into()?),
                     None => None,
                 },
             )
-            .await
-            .map(|x| x.map(|y| y.into()))
+            .await?
+            .map(|y| to_ts(&y.into()))
+            .transpose()
     }
 
     /// Perform a get_dht_value operation inside the transaction
@@ -739,13 +747,14 @@ impl VeilidDHTTransaction {
         &self,
         recordKey: &RecordKey,
         subkey: ValueSubkey,
-    ) -> VeilidAPIResult<Option<ts::ValueData>> {
+    ) -> VeilidAPIResult<Option<Ts<ts::ValueData>>> {
         let transaction = self.getTransaction()?;
 
         transaction
             .get(recordKey.clone(), subkey)
-            .await
-            .map(|x| x.map(|y| y.into()))
+            .await?
+            .map(|y| to_ts(&y.into()))
+            .transpose()
     }
 
     /// Perform a inspect_dht_record operation inside the transaction
@@ -760,13 +769,18 @@ impl VeilidDHTTransaction {
     pub async fn inspect(
         &self,
         recordKey: &RecordKey,
-        subkeys: Option<ValueSubkeyRangeSet>,
-        scope: Option<DHTReportScope>,
-    ) -> VeilidAPIResult<DHTRecordReport> {
-        let scope = scope.unwrap_or_default();
+        subkeys: Option<Ts<ValueSubkeyRangeSet>>,
+        scope: Option<Ts<DHTReportScope>>,
+    ) -> VeilidAPIResult<Ts<DHTRecordReport>> {
+        let subkeys = from_opt_ts(subkeys)?;
+        let scope = from_opt_ts(scope)?.unwrap_or_default();
 
         let transaction = self.getTransaction()?;
 
-        transaction.inspect(recordKey.clone(), subkeys, scope).await
+        to_ts(
+            &transaction
+                .inspect(recordKey.clone(), subkeys, scope)
+                .await?,
+        )
     }
 }

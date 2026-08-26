@@ -30,8 +30,6 @@ pub struct NetworkManagerAccountingChangeEvent {
 pub struct NetworkManagerAccounting {
     pub self_stats: PerAddressStats,
     pub per_address_stats: hashlink::LruCache<PerAddressStatsKey, PerAddressStats>,
-    pub relay_worker_dequeue_latency: LatencyStats,
-    pub relay_worker_process_latency: LatencyStats,
     pub relay_worker_dequeue_latency_accounting: LatencyStatsAccounting,
     pub relay_worker_process_latency_accounting: LatencyStatsAccounting,
 }
@@ -41,8 +39,6 @@ impl Default for NetworkManagerAccounting {
         Self {
             self_stats: PerAddressStats::default(),
             per_address_stats: hashlink::LruCache::new(IPADDR_TABLE_SIZE),
-            relay_worker_dequeue_latency: LatencyStats::default(),
-            relay_worker_process_latency: LatencyStats::default(),
             relay_worker_dequeue_latency_accounting: LatencyStatsAccounting::new(),
             relay_worker_process_latency_accounting: LatencyStatsAccounting::new(),
         }
@@ -102,10 +98,10 @@ impl NetworkManager {
         process_latency: TimestampDuration,
     ) {
         let mut stats = self.accounting.write();
-        stats.relay_worker_dequeue_latency = stats
+        stats
             .relay_worker_dequeue_latency_accounting
             .record_latency(dequeue_latency);
-        stats.relay_worker_process_latency = stats
+        stats
             .relay_worker_process_latency_accounting
             .record_latency(process_latency);
     }
@@ -135,8 +131,14 @@ impl NetworkManager {
         };
         Some(Box::new(NetworkManagerStats {
             transfer: s.self_stats.transfer_stats,
-            relay_dequeue_latency: s.relay_worker_dequeue_latency,
-            relay_process_latency: s.relay_worker_process_latency,
+            relay_dequeue_latency: s
+                .relay_worker_dequeue_latency_accounting
+                .latency_stats()
+                .unwrap_or_default(),
+            relay_process_latency: s
+                .relay_worker_process_latency_accounting
+                .latency_stats()
+                .unwrap_or_default(),
             connections,
             public_internet: domain_stats(RoutingDomain::PublicInternet),
             local_network: domain_stats(RoutingDomain::LocalNetwork),

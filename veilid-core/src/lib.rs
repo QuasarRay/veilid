@@ -58,7 +58,7 @@ compile_error!(
 
 #[cfg(all(feature = "mock-api", feature = "stats"))]
 compile_error!(
-    "features \"mock-api\" and \"stats\" are mutually exclusive: no subsystem remains to populate stats, so a mock build would only record garbage. Build with --no-default-features and select the runtime explicitly."
+    "features \"mock-api\" and \"stats\" are mutually exclusive: no subsystem remains to populate stats, so a mock build would only record garbage."
 );
 
 #[macro_use]

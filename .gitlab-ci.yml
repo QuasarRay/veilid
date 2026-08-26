@@ -223,6 +223,11 @@ test_clippy_mock_api:
   variables:
     earthly_target: test-clippy-mock-api
 
+test_clippy_optional_features:
+  extends: .unit_test
+  variables:
+    earthly_target: test-clippy-optional-features
+
 # test_build_docs:
 #   extends: .unit_test
 #   variables:
@@ -232,6 +237,13 @@ test_unit_tests_all:
   extends: .unit_test
   variables:
     earthly_target: test-unit-tests-all
+
+# veilid-flutter end to end against the in-process mock, headless on flutter-tester.
+# Installs the versions.env-pinned Flutter SDK in the image (+deps-flutter).
+test_flutter_integration:
+  extends: .unit_test
+  variables:
+    earthly_target: test-flutter-integration
 
 semgrep:
   # A Docker image with Semgrep installed.

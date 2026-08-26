@@ -13,6 +13,11 @@ impl RoutingTable {
 
     pub fn debug_info_nodeinfo(&self) -> String {
         let self_transfer_stats = self.self_transfer_stats_accounting.lock().1.clone();
+        let self_latency_stats = self
+            .self_latency_stats_accounting
+            .lock()
+            .latency_stats()
+            .unwrap_or_default();
 
         let mut out = Vec::new();
 
@@ -26,6 +31,10 @@ impl RoutingTable {
         out.push(format!(
             "Self Transfer Stats:\n{}\n",
             indent_all_string(format!("{:#}", self_transfer_stats))
+        ));
+        out.push(format!(
+            "Self Latency Stats:\n{}\n",
+            indent_all_string(format!("{:#}", self_latency_stats))
         ));
         out.push(format!(
             "Routing Table Health:\n{}",
@@ -415,6 +424,99 @@ impl RoutingTable {
             }
         }
 
+        out
+    }
+
+    /// One line per entry: state reason, per-ordering probe and answer ages, per-transport
+    /// liveness health, steady-lost span vs blame credit, and contact-method viability
+    pub fn debug_info_entries_liveness(&self) -> String {
+        fn age(cur_ts: Timestamp, ts: Option<Timestamp>) -> String {
+            match ts {
+                Some(ts) => format!("{}s", cur_ts.duration_since(ts).as_u64() / 1_000_000),
+                None => "-".to_owned(),
+            }
+        }
+
+        let cur_ts = Timestamp::now();
+        let network_manager = self.network_manager();
+        let online_detector = network_manager.online_detector();
+
+        let inner = self.inner.read();
+        let mut out = String::new();
+        let mut state_counts = BTreeMap::<BucketEntryState, usize>::new();
+        let mut total = 0usize;
+        for ck in &VALID_CRYPTO_KINDS {
+            for b in 0..inner.buckets[ck].len() {
+                for (node, entry) in inner.buckets[ck][b].entries() {
+                    total += 1;
+                    let line = entry.with(|e| {
+                        let state_reason = e.state_reason(cur_ts);
+                        *state_counts.entry(state_reason.into()).or_default() += 1;
+
+                        let mut line =
+                            format!("{} [{:#}]", NodeId::new(*ck, node.clone()), state_reason);
+
+                        line += " ord{";
+                        for (so, s) in e.per_sequence_ordering_stats() {
+                            line += &format!(
+                                " {:?}: lq={} seen={} rlq={} fsl={}",
+                                so,
+                                age(cur_ts, s.last_question_ts),
+                                age(cur_ts, s.last_seen_ts),
+                                s.recent_lost_questions,
+                                age(cur_ts, s.first_steady_lost_question_ts),
+                            );
+                        }
+                        line += " } tr{";
+                        for (t, s) in e.per_transport_stats() {
+                            line += &format!(
+                                " {}:{:?} seen={} rlq={}",
+                                t,
+                                transport_liveness_health(s),
+                                age(cur_ts, s.last_seen_ts),
+                                s.recent_lost_questions,
+                            );
+                        }
+                        line += " }";
+                        if let Some(ts) = e.rpc_stats().first_steady_lost_question_ts {
+                            let credit = online_detector.blame_suppressed_overlap(
+                                RoutingDomain::PublicInternet,
+                                ts,
+                                cur_ts,
+                            );
+                            line += &format!(
+                                " d4{{span={}s credit={}s}}",
+                                cur_ts.duration_since(ts).as_u64() / 1_000_000,
+                                credit.as_u64() / 1_000_000,
+                            );
+                        }
+                        if let Some(v) = e.cm_viability() {
+                            line += " cm{";
+                            for (so, r) in &v.per_ordering {
+                                line += &format!(
+                                    " {:?}:[{}]{}",
+                                    so,
+                                    r.direct_transports
+                                        .iter()
+                                        .map(|t| t.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(","),
+                                    if r.has_indirect { "+i" } else { "" },
+                                );
+                            }
+                            line += " }";
+                        }
+                        line
+                    });
+                    out += &line;
+                    out += "\n";
+                }
+            }
+        }
+        out += &format!("Total: {}\n", total);
+        for (state, count) in state_counts {
+            out += &format!("  {:#}: {}\n", state, count);
+        }
         out
     }
 

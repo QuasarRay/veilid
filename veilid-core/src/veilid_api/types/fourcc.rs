@@ -22,7 +22,7 @@ macro_rules! fourcc_type {
             #[cfg_attr(
                 all(target_arch = "wasm32", target_os = "unknown"),
                 derive(Tsify),
-                tsify(into_wasm_abi, from_wasm_abi, type_suffix = "Inner"),
+                tsify(type_suffix = "Inner"),
             )]
             #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
             pub struct $name(#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"),tsify(type = "string"))] [u8; 4]);

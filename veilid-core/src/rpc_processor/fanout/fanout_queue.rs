@@ -196,6 +196,8 @@ pub struct FanoutQueue<'a> {
     work_request_receiver: flume::Receiver<FanoutWorkRequest>,
     /// Consensus count to use
     consensus_count: usize,
+    /// Accepts to keep dispatching toward once consensus is met (>= consensus_count)
+    collection_count: usize,
     /// Number of nodes away from the key that can be considered for fanout operations
     consensus_width: usize,
     /// Whether or not to stop handing out work when queue consensus is met
@@ -213,6 +215,7 @@ impl fmt::Debug for FanoutQueue<'_> {
             .field("work_request_sender", &self.work_request_sender)
             .field("work_request_receiver", &self.work_request_receiver)
             .field("consensus_count", &self.consensus_count)
+            .field("collection_count", &self.collection_count)
             .field("consensus_width", &self.consensus_width)
             .field("opt_throttle_duration", &self.opt_throttle_duration)
             .finish()
@@ -235,12 +238,14 @@ impl fmt::Display for FanoutQueue<'_> {
 
 impl<'a> FanoutQueue<'a> {
     /// Create a queue for fanout candidates that have a crypto-kind compatible node id
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         registry: VeilidComponentRegistry,
         crypto_kind: CryptoKind,
         node_sort: FanoutQueueSort<'a>,
         consensus_count: usize,
+        collection_count: usize,
         consensus_width: usize,
         opt_throttle_duration: Option<TimestampDuration>,
     ) -> Self {
@@ -255,6 +260,7 @@ impl<'a> FanoutQueue<'a> {
             work_request_sender: sender,
             work_request_receiver: receiver,
             consensus_count,
+            collection_count: collection_count.max(consensus_count),
             consensus_width,
             opt_throttle_duration,
         }
@@ -357,11 +363,11 @@ impl<'a> FanoutQueue<'a> {
                 break;
             }
 
-            // If we have enough workers to get consensus don't send more work beyond that
-            // unless we are unthrottled
+            // If we have enough workers to reach the collection target don't send more
+            // work beyond that unless we are unthrottled
             let mut throttle_unlock = false;
             if self.opt_throttle_duration.is_some() {
-                if working_toward_consensus >= (self.consensus_count + slow_nodes.len()) {
+                if working_toward_consensus >= (self.collection_count + slow_nodes.len()) {
                     break;
                 } else if !slow_nodes.is_empty() {
                     throttle_unlock = true;
@@ -518,10 +524,12 @@ impl<'a> FanoutQueue<'a> {
         }
     }
 
-    /// Transition InProgress | Queued -> Disqualified if they are too far away from the record key
+    /// Transition InProgress | Queued -> Disqualified once they can no longer matter to the outcome
     ///
-    /// Width counts only nodes that can still answer, mirroring `evaluate_done`: an
-    /// unreachable closest node must not cull the candidates that could replace it.
+    /// Width counts only terminal answers that hold a slot (Accepted, Stale, Rejected):
+    /// a candidate is culled only when `consensus_width` closer nodes have answered for
+    /// good, or rejections reach consensus. Unanswered nodes hold no slot, so a slow or
+    /// unreachable closest node never culls the reserve that could replace it.
     fn disqualify(&mut self, cur_ts: Timestamp) {
         let mut consecutive_rejections = 0usize;
         let mut rejected_consensus = false;
@@ -553,8 +561,8 @@ impl<'a> FanoutQueue<'a> {
                 continue;
             }
 
-            // If the node is too far away from the key or we have had enough consecutive rejections,
-            // cancel it immediately and disqualify it
+            // If the window is permanently held by closer answers, or we have had enough
+            // consecutive rejections, cancel it immediately and disqualify it
             if (self.consensus_width > 0 && window_slots >= self.consensus_width)
                 || rejected_consensus
             {
@@ -564,8 +572,6 @@ impl<'a> FanoutQueue<'a> {
                     // Drop the stop source to force the lane to stop processing this node
                     drop(css);
                 }
-            } else {
-                window_slots += 1;
             }
         }
     }
