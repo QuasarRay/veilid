@@ -147,7 +147,10 @@ dep_have "npm"         "$(command -v npm)"                 "comes with node"
 # cocoapods (veilidchat has non-SPM macOS plugins, so it's needed). Under --prefix install it
 # CONTAINED into GEM_HOME; else brew (global). dev-setup owns the contained install — the gem/ruby
 # mechanics live here (flutter-packer just sets GEM_HOME + does the SPM-presence decision upstream).
-if [ -n "$PREFIX" ]; then
+# Like the rust-target set, --build-only trims by TARGET: an android build never runs pod.
+if [ "$BUILDONLY" = 1 ] && [ "$ANDROID" = 1 ]; then
+    : # android target: no pods
+elif [ -n "$PREFIX" ]; then
     dep_have "cocoapods (prefix)" "$([ -x "${GEM_HOME:-$PREFIX/gem}/bin/pod" ] && echo y)" "gem install cocoapods into \$GEM_HOME" i_pods_prefix
 else
     dep_have "cocoapods" "$(command -v pod)" "brew install cocoapods" i_pods

@@ -63,7 +63,9 @@ if [ "$OS" == "linux" ]; then
     flutter config --enable-linux-desktop --enable-android
 
 elif [ "$OS" == "macos" ]; then
-    if [ "$(uname -p)" == "arm" ]; then
+    # Rosetta for the occasional x86-64-only tool; skip when present (softwareupdate would
+    # reinstall and prompt for sudo every run)
+    if [ "$(uname -p)" == "arm" ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
         sudo softwareupdate --install-rosetta --agree-to-license
     fi
 
