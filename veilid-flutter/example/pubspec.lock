@@ -29,10 +29,10 @@ packages:
     dependency: transitive
     description:
       name: async_tools
-      sha256: "296e93c5e4968276e6c060423ecada9a5418d0a1de4d215d6f32e93e55eabef4"
+      sha256: b02e177699fbd10fdeb7871fbf43a147e3f964e50a9b8047d26b53212c16e07e
       url: "https://pub.dev"
     source: hosted
-    version: "0.1.15"
+    version: "0.1.17"
   boolean_selector:
     dependency: transitive
     description:

@@ -39,10 +39,6 @@ dependencies:
   flutter_acrylic: ^1.1.3
   ansicolor: ^2.0.2
 
-# dependency_overrides:
-#   async_tools:
-#     path: ../../../dart_async_tools
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
