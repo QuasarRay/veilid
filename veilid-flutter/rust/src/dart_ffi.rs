@@ -62,6 +62,52 @@ cfg_if! {
     }
 }
 
+cfg_if! {
+    if #[cfg(target_os = "android")] {
+        /// logd is a socket, and `AndroidLogWriter` writes to it on the thread
+        /// that emitted the event. When logd pushes back (an attached `flutter
+        /// run` reader fills its buffer), the blocking write stalls a whole
+        /// tokio worker, and `measure_limit` wall-clock timings blame whatever
+        /// the task was doing rather than the logging.
+        ///
+        /// So the socket gets a dedicated thread and a lossy queue. That is the
+        /// general rule for kernel-level blocking near the runtime: its own
+        /// thread, or veilid_tools' spawn_blocking / blocking_yielding. Lossy
+        /// on purpose: drop log lines rather than stall the node.
+        fn android_log_writer() -> tracing_appender::non_blocking::NonBlocking {
+            use std::io::Write;
+            use tracing_subscriber::fmt::MakeWriter;
+
+            struct AndroidLog(paranoid_android::AndroidLogMakeWriter);
+
+            impl Write for AndroidLog {
+                fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                    // Each buf is one formatted event; AndroidLogWriter emits on flush
+                    let mut writer = self.0.make_writer();
+                    let written = writer.write(buf)?;
+                    writer.flush()?;
+                    Ok(written)
+                }
+                fn flush(&mut self) -> std::io::Result<()> {
+                    Ok(())
+                }
+            }
+
+            let (writer, guard) = tracing_appender::non_blocking(AndroidLog(
+                paranoid_android::AndroidLogMakeWriter::new("com.veilid.veilid-flutter".to_owned()),
+            ));
+            // The worker stops when its guard drops, taking the log with it
+            *ANDROID_LOG_GUARD.lock() = Some(guard);
+            writer
+        }
+
+        lazy_static! {
+            static ref ANDROID_LOG_GUARD: Mutex<Option<tracing_appender::non_blocking::WorkerGuard>> =
+                Mutex::new(None);
+        }
+    }
+}
+
 // Globals
 lazy_static! {
     static ref CORE_INITIALIZED: Mutex<bool> = Mutex::new(false);
@@ -287,11 +333,12 @@ pub extern "C" fn initialize_veilid_core(platform_config: FfiStr) {
 
         cfg_if! {
             if #[cfg(target_os = "android")] {
-                let layer = paranoid_android::layer("com.veilid.veilid-flutter")
+                let layer = tracing_subscriber::fmt::Layer::new()
                     .map_fmt_fields(FmtStripVeilidFields::mapper())
                     .with_timer(timer)
                     .with_target(true)
                     .with_ansi(false)
+                    .with_writer(android_log_writer())
                     .with_filter(filter.clone());
                 filters.insert("terminal", filter);
                 layers.push(layer.boxed());

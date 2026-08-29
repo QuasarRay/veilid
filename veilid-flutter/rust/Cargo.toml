@@ -35,6 +35,9 @@ mock-api-wasm = ["default-wasm", "veilid-core/mock-api", "debug-api"]
 rt-async-std = ["veilid-core/rt-async-std", "async-std"]
 rt-tokio = ["veilid-core/rt-tokio", "tokio"]
 debug-load = ["dep:ctor", "dep:libc-print", "dep:android_log-sys"]
+# Dense veilid-core spans for the always-compiled FlameLayer (FLAME=1), the
+# same coverage veilid-server's `flame` feature gives it
+flame = ["veilid-core/instrument"]
 debug-locks = ["veilid-core/debug-locks"]
 enable-protocol-wss = ["veilid-core/enable-protocol-wss"]
 footgun-nodeid-target = ["veilid-core/footgun-nodeid-target"]
@@ -87,6 +90,8 @@ chrono = "0.4.40"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22.4"
 paranoid-android = "0.2.2"
+# Keeps logd's blocking writes off worker threads - see android_log_writer in dart_ffi.rs
+tracing-appender = "0.2.4"
 android_log-sys = { version = "0.3.2", optional = true }
 
 # Dependencies for iOS builds only

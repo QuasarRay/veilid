@@ -325,8 +325,9 @@ pub(crate) trait NodeRefCommonTrait:
         transport: TransportType,
         dialed: bool,
     ) {
+        // Table-wide accounting stays outside the entry lock
+        self.routing_table().record_sent_bytes(bytes);
         self.operate_mut(|e| {
-            self.routing_table().record_sent_bytes(bytes);
             e.question_sent(ts, bytes, expects_answer, transport, dialed);
         })
     }
@@ -350,10 +351,10 @@ pub(crate) trait NodeRefCommonTrait:
         transport: TransportType,
         dialed: bool,
     ) {
+        let routing_table = self.routing_table();
+        routing_table.record_received_bytes(bytes);
+        routing_table.record_latency(recv_ts.duration_since(send_ts));
         self.operate_mut(|e| {
-            self.routing_table().record_received_bytes(bytes);
-            self.routing_table()
-                .record_latency(recv_ts.duration_since(send_ts));
             e.answer_rcvd(send_ts, recv_ts, bytes, transport, dialed);
         })
     }
