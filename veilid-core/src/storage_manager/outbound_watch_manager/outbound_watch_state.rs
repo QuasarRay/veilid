@@ -1,8 +1,13 @@
 use super::*;
 
-/// How long to wait without receiving a ValueChanged before
-/// triggering a fallback change inspection to detect missed updates.
+/// How long to wait without receiving a ValueChanged before triggering a fallback
+/// change inspection to detect missed updates. Silence is not evidence that a watch
+/// is broken, so this is the interval after evidence that it is live, and it doubles
+/// to WATCH_FALLBACK_INSPECT_MAX_INTERVAL while inspections keep finding nothing.
 const WATCH_FALLBACK_INSPECT_INTERVAL: TimestampDuration = TimestampDuration::new_secs(30);
+
+/// Ceiling for the backed-off fallback change inspection interval.
+const WATCH_FALLBACK_INSPECT_MAX_INTERVAL: TimestampDuration = TimestampDuration::new_secs(600);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundWatchState {
@@ -27,6 +32,10 @@ pub(in crate::storage_manager) struct OutboundWatchState {
     last_value_changed_ts: Option<Timestamp>,
     /// Timestamp of the last fallback change inspection.
     last_fallback_inspect_ts: Option<Timestamp>,
+    /// Current fallback interval, doubled each time an inspection finds nothing and
+    /// reset by evidence the watch is live or has changed
+    #[serde(default)]
+    opt_fallback_inspect_interval: Option<TimestampDuration>,
     /// Set by fallback change inspection when changes are found that should
     /// have been delivered via ValueChanged but weren't. Forces a reconcile
     /// to re-establish the watch with fresh notification routes.
@@ -112,9 +121,27 @@ impl OutboundWatchStateEditor<'_> {
     }
     pub fn touch_value_changed(&mut self, ts: Timestamp) {
         self.state.last_value_changed_ts = Some(ts);
+        // A delivered change is proof the watch works; start the backoff over
+        self.state.opt_fallback_inspect_interval = None;
     }
     pub fn touch_fallback_inspect(&mut self, ts: Timestamp) {
         self.state.last_fallback_inspect_ts = Some(ts);
+    }
+    /// An inspection found nothing: wait longer before asking again
+    pub fn back_off_fallback_inspect(&mut self) {
+        let cur = self
+            .state
+            .opt_fallback_inspect_interval
+            .unwrap_or(WATCH_FALLBACK_INSPECT_INTERVAL);
+        self.state.opt_fallback_inspect_interval = Some(
+            TimestampDuration::new(cur.as_u64().saturating_mul(2))
+                .min(WATCH_FALLBACK_INSPECT_MAX_INTERVAL),
+        );
+    }
+    /// Something that could have hidden a missed update: a productive inspection, or
+    /// the watch's node set or parameters moving
+    pub fn reset_fallback_inspect_backoff(&mut self) {
+        self.state.opt_fallback_inspect_interval = None;
     }
     pub fn set_forced_reconcile(&mut self) {
         self.state.needs_forced_reconcile = true;
@@ -143,6 +170,7 @@ impl OutboundWatchState {
             watch_established_ts: Timestamp::now_non_decreasing(),
             last_value_changed_ts: None,
             last_fallback_inspect_ts: None,
+            opt_fallback_inspect_interval: None,
             needs_forced_reconcile: false,
             last_reported_subkey_seqs: BTreeMap::new(),
             unread_reported_subkeys: BTreeMap::new(),
@@ -260,25 +288,8 @@ impl OutboundWatchState {
         res
     }
 
-    pub fn watch_node_refs(
-        &self,
-        per_node_state: &HashMap<PerNodeKey, OutboundWatchPerNodeState>,
-    ) -> Vec<NodeRef> {
-        self.nodes
-            .iter()
-            .map(|x| {
-                per_node_state
-                    .get(x)
-                    .unwrap_or_log()
-                    .watch_node_ref
-                    .clone()
-                    .unwrap_or_log()
-            })
-            .collect()
-    }
-
-    /// Check if a fallback change inspection is needed because no
-    /// ValueChanged has been received within WATCH_FALLBACK_INSPECT_INTERVAL.
+    /// Check if a fallback change inspection is needed because no ValueChanged has
+    /// been received within the current backed-off interval.
     pub fn needs_fallback_inspect(&self, cur_ts: Timestamp) -> bool {
         let reference_ts = self
             .last_fallback_inspect_ts
@@ -291,7 +302,13 @@ impl OutboundWatchState {
             }
         }
 
-        cur_ts >= reference_ts.later(WATCH_FALLBACK_INSPECT_INTERVAL)
+        cur_ts >= reference_ts.later(self.fallback_inspect_interval())
+    }
+
+    /// The interval currently in force for this watch's fallback inspection
+    pub fn fallback_inspect_interval(&self) -> TimestampDuration {
+        self.opt_fallback_inspect_interval
+            .unwrap_or(WATCH_FALLBACK_INSPECT_INTERVAL)
     }
 
     /// Whether a forced reconcile is needed (fallback inspection found missed changes).

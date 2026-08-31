@@ -14,6 +14,11 @@ pub(in crate::storage_manager) struct OutboundWatch {
     /// Desired parameters
     /// None means cancelled
     desired: Option<OutboundWatchParameters>,
+
+    /// Last fallback change inspection for a watch that has never established.
+    /// Once there is a state, its own timer takes over.
+    #[serde(skip)]
+    opt_unestablished_inspect_ts: Option<Timestamp>,
 }
 
 impl fmt::Display for OutboundWatch {
@@ -42,6 +47,38 @@ impl OutboundWatch {
             record_key,
             state: None,
             desired: Some(desired),
+            opt_unestablished_inspect_ts: None,
+        }
+    }
+
+    /// Whether this watch is due a fallback change inspection, and over which subkeys.
+    /// A wanted but never-established watch has no state to keep a timer in, so it is
+    /// covered here at the slowest rate: reconcile is already retrying establishment,
+    /// and a record no node will serve has nothing to report either way.
+    pub fn needs_fallback_inspect(&self, cur_ts: Timestamp) -> Option<ValueSubkeyRangeSet> {
+        if let Some(state) = self.state.as_ref() {
+            return state
+                .needs_fallback_inspect(cur_ts)
+                .then(|| state.params().subkeys.clone());
+        }
+        let desired = self.desired.as_ref()?;
+        self.opt_unestablished_inspect_ts
+            .map(|last| cur_ts >= last.later(UNESTABLISHED_WATCH_INSPECT_INTERVAL))
+            .unwrap_or(true)
+            .then(|| desired.subkeys.clone())
+    }
+
+    /// Stamp the fallback inspection time, wherever this watch keeps it
+    pub fn touch_fallback_inspect(
+        &mut self,
+        per_node_states: &HashMap<PerNodeKey, OutboundWatchPerNodeState>,
+        cur_ts: Timestamp,
+    ) {
+        match self.state.as_mut() {
+            Some(state) => state.edit(per_node_states, |editor| {
+                editor.touch_fallback_inspect(cur_ts);
+            }),
+            None => self.opt_unestablished_inspect_ts = Some(cur_ts),
         }
     }
 

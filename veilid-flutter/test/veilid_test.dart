@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'test_encoding.dart';
 import 'test_native_asset.dart';
+import 'test_timestamp.dart';
 import 'test_value_subkey_range.dart';
 
 void main() {
@@ -17,6 +18,16 @@ void main() {
     test('test encoding known vectors', testEncodingKnownVectors);
     test('test encode/decode garbage', testEncodeDecodeGarbage);
     test('test encode/decode garbage with pad', testEncodeDecodeGarbagePad);
+  });
+
+  group('Timestamp', () {
+    test('human form matches veilid-core', testTimestampHumanForm);
+    test('machine form round trips', testTimestampMachineForm);
+    test(
+      'duration human form matches veilid-core',
+      testTimestampDurationHumanForm,
+    );
+    test('duration machine form round trips', testTimestampDurationMachineForm);
   });
 
   group('ValueSubkeyRange', () {

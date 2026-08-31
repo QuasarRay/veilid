@@ -82,6 +82,11 @@ impl StorageManager {
             .rehydration_requests
             .retain(|k, _| !dead_records_set.contains(k));
 
+        // A recreated record must be checked afresh
+        for k in &dead_records_set {
+            self.forget_rehydration_checked(k);
+        }
+
         inner
             .flush_record_waiters
             .retain(|k, _| !dead_records_set.contains(k));

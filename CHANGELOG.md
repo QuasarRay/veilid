@@ -37,6 +37,8 @@
   - Disable `stats` feature by default
 
 - veilid-flutter:
+  - API Breaking Change: `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `Timestamp.toString()` now write human readable output, not a raw integer. `TimestampDuration` works the same way.
+  - `DHT_TRACE` is now a `--dart-define` that turns on logging of `DHTRecordPool` and DHT collections operations.
   - Full conversion to Native Assets and rust build hooks. Apps must drop any extra build steps for building veilid-flutter and linking its output; Flutter handles it.
   - CocoaPods support removed.
   - Minimum Flutter version is now 3.47.1 due to improved build hooks support

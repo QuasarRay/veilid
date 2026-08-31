@@ -48,16 +48,22 @@ pub const REHYDRATE_BATCH_SIZE: usize = 16;
 pub const REHYDRATE_REQUESTS_PER_TICK: usize = 4;
 /// Number of subkey sets to push in parallel during transactional rehydration
 pub const REHYDRATE_SET_CONCURRENCY: usize = 8;
-/// Maximum 'offline lag' before we decide to poll for changed watches
-pub const CHANGE_INSPECT_LAG: TimestampDuration = TimestampDuration::new_secs(2);
-/// Minimum time between lag-triggered all-watch change inspections
-pub const CHANGE_INSPECT_LAG_MIN_INTERVAL: TimestampDuration = TimestampDuration::new_secs(30);
+/// How often to change inspect a watch that is wanted but has never established.
+/// Deliberately slow: reconcile is already retrying establishment, and a record no
+/// node will serve has nothing to report
+pub const UNESTABLISHED_WATCH_INSPECT_INTERVAL: TimestampDuration =
+    TimestampDuration::new_secs(600);
 /// Delay before retrying a contended change inspection
 pub const CHANGE_INSPECT_RETRY_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
 /// How long after foreground transaction activity background transactions stay deferred
 pub const BACKGROUND_TRANSACTION_QUIET_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
 /// Length of descriptor cache (512 records and 5 nodes per record, roughly 184320 bytes)
 pub const DESCRIPTOR_CACHE_SIZE: usize = 2560;
+/// How long a completed rehydration check answers for a record, so a reopen
+/// within the interval does not enqueue another one
+pub const REHYDRATE_RECHECK_INTERVAL: TimestampDuration = TimestampDuration::new_secs(300);
+/// Records worth of remembered rehydration checks
+pub const REHYDRATION_CHECKED_CACHE_SIZE: usize = 1024;
 /// Table store table for storage manager metadata
 pub const STORAGE_MANAGER_METADATA: &str = "storage_manager_metadata";
 /// Storage manager metadata key name for offline subkey write persistence

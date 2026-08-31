@@ -180,11 +180,12 @@ pub(crate) struct StorageManager {
     // Cache of which nodes have seen descriptors for which records to optimize outbound set_value and transact_begin operations
     descriptor_cache: Arc<Mutex<LruCache<DescriptorCacheKey, ()>>>,
 
+    // When each record's last rehydration check completed, so an open/close/reopen
+    // pattern does not fan out the same check every time (open enqueues one)
+    rehydration_checked: Mutex<LruCache<OpaqueRecordKey, Timestamp>>,
+
     // Online check
     is_online: AtomicBool,
-
-    // Last lag-triggered all-watch change inspection (usec)
-    last_lag_change_inspect_ts: AtomicU64,
 
     // Last foreground transaction activity, including failed begin attempts (usec)
     last_foreground_transaction_ts: AtomicU64,
@@ -298,9 +299,9 @@ impl StorageManager {
             anonymous_signing_keys,
             background_operation_processor: DeferredStreamProcessor::new(),
             is_online: AtomicBool::new(false),
-            last_lag_change_inspect_ts: AtomicU64::new(0),
             last_foreground_transaction_ts: AtomicU64::new(0),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
+            rehydration_checked: Mutex::new(LruCache::new(REHYDRATION_CHECKED_CACHE_SIZE)),
             upload_budget,
             download_budget,
             gated_operation_concurrency,
@@ -876,13 +877,13 @@ impl StorageManager {
         if now_online && !was_online {
             // A new network invalidates learned budgets
             self.reset_gated_operation_budgets();
+            veilid_log!(self debug "network came back online, change inspecting all watches");
             self.change_inspect_all_watches();
         }
     }
 
-    async fn tick_event_handler(&self, evt: Arc<TickEvent>) {
-        let lag = evt.last_tick_ts.map(|x| evt.cur_tick_ts.duration_since(x));
-        if let Err(e) = self.tick(lag).await {
+    async fn tick_event_handler(&self, _evt: Arc<TickEvent>) {
+        if let Err(e) = self.tick().await {
             error!("Error in storage manager tick: {}", e);
         }
     }

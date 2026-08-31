@@ -188,6 +188,34 @@ impl StorageManager {
         )
     }
 
+    /// Pin a safety selection to the route the remote pushes ValueChanged to, so a
+    /// watch node keeps hearing from us over the path its notifications already use.
+    /// Route selection otherwise round-robins, and `wants_per_node_watch_update` does
+    /// not notice, since the recorded route stays allocated. Returns the selection
+    /// unchanged once the route is gone, leaving reconcile to move the watch.
+    pub(super) fn pin_value_changed_route(
+        &self,
+        safety_selection: &SafetySelection,
+        opt_value_changed_route: Option<&PublicKey>,
+    ) -> SafetySelection {
+        let SafetySelection::Safe(safety_spec) = safety_selection else {
+            return safety_selection.clone();
+        };
+        let Some(value_changed_route) = opt_value_changed_route else {
+            return safety_selection.clone();
+        };
+        let Some(route_id) = self
+            .routing_table()
+            .route_spec_store()
+            .get_route_id_for_key(value_changed_route)
+        else {
+            return safety_selection.clone();
+        };
+        let mut safety_spec = safety_spec.clone();
+        safety_spec.preferred_route = Some(route_id);
+        SafetySelection::Safe(safety_spec)
+    }
+
     /// Get the set of nodes in our active watches
     pub fn get_outbound_watch_nodes(&self) -> Vec<Destination> {
         let inner = self.inner.lock();
@@ -196,9 +224,13 @@ impl StorageManager {
         let mut node_set: HashSet<NodeRef> = HashSet::new();
         for v in inner.outbound_watch_manager.outbound_watches.values() {
             if let Some(current) = v.state() {
-                let node_refs =
-                    current.watch_node_refs(&inner.outbound_watch_manager.per_node_states);
-                for node_ref in &node_refs {
+                for pnk in current.nodes() {
+                    let Some(pns) = inner.outbound_watch_manager.per_node_states.get(pnk) else {
+                        continue;
+                    };
+                    let Some(node_ref) = pns.watch_node_ref.as_ref() else {
+                        continue;
+                    };
                     if node_set.contains(node_ref) {
                         continue;
                     }
@@ -206,7 +238,10 @@ impl StorageManager {
                     node_set.insert(node_ref.clone());
                     out.push(Destination::direct(
                         node_ref.routing_domain_filtered(RoutingDomain::PublicInternet),
-                        Some(current.params().safety_selection.clone()),
+                        Some(self.pin_value_changed_route(
+                            &current.params().safety_selection,
+                            pns.opt_value_changed_route.as_ref(),
+                        )),
                     ))
                 }
             }
@@ -483,13 +518,16 @@ impl StorageManager {
                     let watcher = watcher.clone();
                     let params = params.clone();
 
-                    // See if we have an existing watch id for this node
+                    // Only an id the node can still know about: an expired one is refused
+                    // before the record is checked, and a restart makes every id stale
                     let node_id = next_node.node_ids().get(record_key.kind()).unwrap_or_log();
                     let pnk = PerNodeKey {
                         record_key: record_key.clone(),
                         node_id,
                     };
-                    let watch_id = per_node_state.get(&pnk).map(|pns| pns.watch_id);
+                    let watch_id = per_node_state.get(&pnk).and_then(|pns| {
+                        (Timestamp::now() < pns.expiration).then_some(pns.watch_id)
+                    });
 
                     let fut = async move {
                         let rpc_processor = registry.rpc_processor();
@@ -553,10 +591,12 @@ impl StorageManager {
 
                                 FanoutCallDisposition::Accepted
                             } else {
-                                // If the returned expiration time is zero, this watch was cancelled
-
-                                // If the expiration time is greater than zero this watch is active
-                                veilid_log!(registry debug target:"watch", "WatchValue rejected for {}: id={} expiration={:#} ({})", record_key, wva.answer.watch_id, wva.answer.expiration, next_node);
+                                // Zero expiration is a refusal with no reason on the wire,
+                                // so log whether we sent an id
+                                veilid_log!(registry debug target:"watch", "WatchValue refused for {}: sent_id={} id={} expiration={:#} ({})",
+                                    record_key,
+                                    watch_id.map(|x| x.to_string()).unwrap_or_else(|| "none".to_owned()),
+                                    wva.answer.watch_id, wva.answer.expiration, next_node);
 
                                 // Add to rejected watches
                                 let mut ctx = context.lock();
@@ -566,6 +606,10 @@ impl StorageManager {
                                 FanoutCallDisposition::Stale
                             }
                         } else {
+                            // Logged apart from a refusal: the node put itself outside the
+                            // consensus width, so this is node selection, not the holder
+                            veilid_log!(registry debug target:"watch", "WatchValue not accepted for {}: too far from key ({})", record_key, next_node);
+
                             // Add to rejected watches
                             let mut ctx = context.lock();
                             ctx.watch_value_result.rejected.push(next_node.clone());
@@ -619,7 +663,7 @@ impl StorageManager {
         // and each one might take timeout_us time.
         let routing_table = self.routing_table();
         let hash_coordinate = record_key.to_hash_coordinate();
-        let fanout_call = FanoutCall::new(
+        let mut fanout_call = FanoutCall::new(
             &routing_table,
             FanoutCallParams {
                 name: format!("outbound_watch_value({:#})", Timestamp::now_increasing()),
@@ -634,6 +678,9 @@ impl StorageManager {
             call_routine,
             check_done,
         );
+
+        // A node with no copy refuses the watch, and only the seeds have answered before
+        fanout_call.set_prefer_init_nodes(true);
 
         let shutdown_stop_source = self
             .startup_lock
@@ -760,10 +807,14 @@ impl StorageManager {
         for (pnk, pns) in per_node_states {
             let opaque_record_key = opaque_record_key.clone();
             unord.push(async move {
+                let safety_selection = self.pin_value_changed_route(
+                    &pns.safety_selection,
+                    pns.opt_value_changed_route.as_ref(),
+                );
                 let res = Box::pin(self.outbound_watch_value_cancel(
                     opaque_record_key,
                     pns.opt_watcher,
-                    pns.safety_selection,
+                    safety_selection,
                     pns.watch_node_ref.unwrap_or_log(),
                     pns.watch_id,
                 ))
@@ -885,8 +936,14 @@ impl StorageManager {
         // Now reach out to each node and renew their watches
         let mut unord = FuturesUnordered::new();
         for (_pnk, pns) in per_node_states {
-            let params = per_node_params.clone();
+            let mut params = per_node_params.clone();
             let opaque_record_key = opaque_record_key.clone();
+            // A renewal is not moving the watch, so confirm it over the route its
+            // ValueChanged already uses
+            params.safety_selection = self.pin_value_changed_route(
+                &params.safety_selection,
+                pns.opt_value_changed_route.as_ref(),
+            );
             unord.push(async move {
                 self.outbound_watch_value_change(
                     opaque_record_key,
@@ -1005,6 +1062,9 @@ impl StorageManager {
 
         {
             let inner = &mut *self.inner.lock();
+            // Nobody accepting means no node will serve the record, usually because
+            // nothing is written to it yet, so it takes the slow interval not the retry
+            let none_accepted = matches!(&res, Ok(owvresult) if owvresult.accepted.is_empty());
             match res {
                 Ok(owvresult) => {
                     // Update state
@@ -1045,7 +1105,7 @@ impl StorageManager {
                 .get(&opaque_record_key)
                 .and_then(|ow| ow.state())
                 .is_none_or(|s| s.nodes().len() < consensus_count);
-            let next_ts = cur_ts.later(if below_consensus {
+            let next_ts = cur_ts.later(if below_consensus && !none_accepted {
                 RECONCILE_OUTBOUND_WATCHES_RETRY_INTERVAL
             } else {
                 RECONCILE_OUTBOUND_WATCHES_INTERVAL
@@ -1156,11 +1216,16 @@ impl StorageManager {
         }
 
         // Update watch state
+        let params_changed = opt_old_state_params.as_ref() != Some(&desired);
         state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
             editor.set_params(desired.clone());
             editor.retain_nodes(|x| !remove_nodes.contains(x));
             editor.add_nodes(added_nodes);
             editor.clear_forced_reconcile();
+            // New nodes or a new subkey range can hide a change made while unwatched
+            if params_changed || did_add_new_nodes || !remove_nodes.is_empty() {
+                editor.reset_fallback_inspect_backoff();
+            }
         });
 
         // Inspect on params change (includes first establishment) or a first-time
@@ -1294,6 +1359,10 @@ impl StorageManager {
                         #[cfg(feature = "verbose-tracing")]
                         this.diagnose_watch_notification_routes(&opaque_record_key);
                     }
+                    this.note_change_inspect_outcome(
+                        &opaque_record_key,
+                        !newer_online_subkeys.is_empty(),
+                    );
 
                     // Get changed first changed subkey until we find one to report
                     let mut n = 0;
@@ -1482,9 +1551,11 @@ impl StorageManager {
                         .await?;
                     if report.newer_online_subkeys().is_empty() {
                         veilid_log!(this debug "change inspect: nothing newer online for {}", record_key);
+                        this.note_change_inspect_outcome(&opaque_record_key, false);
                         return VeilidAPIResult::Ok(());
                     }
-                    veilid_log!(this info "change inspect productive: missed value change on {} subkeys {}", record_key, report.newer_online_subkeys());
+                    veilid_log!(this debug "change inspect: PRODUCTIVE: missed value change on {} subkeys {}", record_key, report.newer_online_subkeys());
+                    this.note_change_inspect_outcome(&opaque_record_key, true);
                     #[cfg(feature = "verbose-tracing")]
                     this.diagnose_watch_notification_routes(&opaque_record_key);
 
@@ -2150,6 +2221,31 @@ impl StorageManager {
         feature = "instrument",
         instrument(level = "trace", target = "watch", skip_all)
     )]
+    /// Feed a completed change inspection back into its watch's fallback interval.
+    /// Finding nothing is the common case and earns a longer wait; finding a missed
+    /// change means the watch is not delivering and we want to look again promptly.
+    pub(super) fn note_change_inspect_outcome(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+        productive: bool,
+    ) {
+        let mut inner = self.inner.lock();
+        let owm = &mut inner.outbound_watch_manager;
+        let Some(outbound_watch) = owm.outbound_watches.get_mut(opaque_record_key) else {
+            return;
+        };
+        let Some(state) = outbound_watch.state_mut() else {
+            return;
+        };
+        state.edit(&owm.per_node_states, |editor| {
+            if productive {
+                editor.reset_fallback_inspect_backoff();
+            } else {
+                editor.back_off_fallback_inspect();
+            }
+        });
+    }
+
     pub fn change_inspect_all_watches(&self) {
         let mut inner = self.inner.lock();
 

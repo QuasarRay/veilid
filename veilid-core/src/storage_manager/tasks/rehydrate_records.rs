@@ -42,7 +42,10 @@ impl StorageManager {
                     .await;
 
                 let _report = match res {
-                    Ok(v) => v,
+                    Ok(v) => {
+                        self.mark_rehydration_checked(req.0);
+                        v
+                    }
                     Err(e) => {
                         if matches!(e, VeilidAPIError::TryAgain { message: _ }) {
                             veilid_log!(self debug "Rehydration request will retry: {}", e);

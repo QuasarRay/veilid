@@ -69,6 +69,42 @@ pub(crate) enum InboundInspectValueResult {
     Success(InspectResult),
 }
 
+/// Whether an inspect fanout may stop early.
+///
+/// An unanswered subkey may still live on nodes further out than we have reached,
+/// so the nodes in hand cannot prove absence:
+/// - stop only once some subkey has consensus, proving these nodes carry the record
+/// - every subkey anyone answered for must have reached full consensus
+/// - the last round must have added nothing
+///
+/// So a range in which NO subkey is ever answered, every subkey unwritten, can never
+/// satisfy `any_consensus` and runs to node exhaustion or the full get timeout. An
+/// inspect must always include a subkey known to have been written.
+pub(super) fn inspect_fanout_done(
+    consensus_node_counts: impl IntoIterator<Item = usize>,
+    consensus_count: usize,
+    has_descriptor: bool,
+    stalled: bool,
+) -> FanoutDoneDisposition {
+    let mut any_subkeys = false;
+    let mut any_consensus = false;
+    let mut any_converging = false;
+    for count in consensus_node_counts {
+        any_subkeys = true;
+        if count >= consensus_count {
+            any_consensus = true;
+        } else if count > 0 {
+            any_converging = true;
+        }
+    }
+
+    if any_subkeys && has_descriptor && any_consensus && !any_converging && stalled {
+        FanoutDoneDisposition::DoneEarly
+    } else {
+        FanoutDoneDisposition::NotDone
+    }
+}
+
 impl StorageManager {
     /// Inspect an opened DHT record for its subkey sequence numbers
     #[cfg_attr(
@@ -614,35 +650,15 @@ impl StorageManager {
             Arc::new(move |_: &FanoutResult| {
                 let mut ctx = context.lock();
 
-                // An unanswered subkey may still live on nodes further out than we have reached,
-                // so the nodes in hand cannot prove absence:
-                // - stop only once some subkey has consensus, proving these nodes carry the record
-                // - every subkey anyone answered for must have reached full consensus
-                // - the last round must have added nothing
-                let mut any_consensus = false;
-                let mut any_converging = false;
-                for cs in ctx.seqcounts.iter() {
-                    let count = cs.consensus_nodes.len();
-                    if count >= consensus_count {
-                        any_consensus = true;
-                    } else if count > 0 {
-                        any_converging = true;
-                    }
-                }
-
                 let stalled = ctx.convergence == ctx.checked_convergence;
                 ctx.checked_convergence = ctx.convergence;
 
-                if !ctx.seqcounts.is_empty()
-                    && ctx.opt_descriptor_info.is_some()
-                    && any_consensus
-                    && !any_converging
-                    && stalled
-                {
-                    FanoutDoneDisposition::DoneEarly
-                } else {
-                    FanoutDoneDisposition::NotDone
-                }
+                inspect_fanout_done(
+                    ctx.seqcounts.iter().map(|cs| cs.consensus_nodes.len()),
+                    consensus_count,
+                    ctx.opt_descriptor_info.is_some(),
+                    stalled,
+                )
             })
         };
 

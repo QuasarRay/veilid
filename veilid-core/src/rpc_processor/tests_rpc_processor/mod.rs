@@ -13,6 +13,8 @@ pub async fn test_all() {
     test_fanout_call::test_no_collection_stops_at_consensus().await;
     test_fanout_call::test_collection_exhausted_below_target_bounded_exit().await;
     test_fanout_queue::test_rejection_consensus_culls_everything().await;
+    test_fanout_queue::test_preferred_nodes_lead_the_sort().await;
+    test_fanout_queue::test_no_preference_leaves_order_untouched().await;
     test_signed_value_data::test_encode_and_decode_signed_value_data();
     test_dial_info::test_encode_and_decode_dial_info_udp();
     test_dial_info::test_encode_and_decode_dial_info_tcp();

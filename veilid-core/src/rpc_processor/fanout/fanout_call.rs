@@ -223,6 +223,8 @@ pub(crate) struct FanoutCall<'a> {
     collection_count: usize,
     /// Seed from never-contacted nodes too (see `set_seed_untried`)
     seed_untried: bool,
+    /// Ask the initial seed nodes before unproven closer ones (see `set_prefer_init_nodes`)
+    prefer_init_nodes: bool,
 }
 
 impl VeilidComponentRegistryAccessor for FanoutCall<'_> {
@@ -273,6 +275,7 @@ impl<'a> FanoutCall<'a> {
             opt_run_target_count: None,
             collection_count: params.consensus_count,
             seed_untried: false,
+            prefer_init_nodes: false,
         }
     }
 
@@ -296,6 +299,14 @@ impl<'a> FanoutCall<'a> {
     /// Missing, Dead and Punished.
     pub fn set_seed_untried(&mut self, seed_untried: bool) {
         self.seed_untried = seed_untried;
+    }
+
+    /// Ask the initial seed nodes before unproven closer ones. Seeds are the nodes
+    /// that previously answered for this record, the only evidence that a node can
+    /// serve it, and the default sort merges them into distance order and loses that.
+    /// Set it for an operation only a node already holding the record can satisfy.
+    pub fn set_prefer_init_nodes(&mut self, prefer_init_nodes: bool) {
+        self.prefer_init_nodes = prefer_init_nodes;
     }
 
     /// Narrow which peers this call will consider, for a second run over the same
@@ -686,6 +697,12 @@ impl<'a> FanoutCall<'a> {
         {
             let context_locked = &mut *context.lock();
             let cur_ts = Timestamp::now_non_decreasing();
+
+            if self.prefer_init_nodes {
+                context_locked
+                    .fanout_queue
+                    .set_preferred_nodes(&init_fanout_queue);
+            }
 
             self.init_closest_nodes(context_locked, cur_ts)?;
 

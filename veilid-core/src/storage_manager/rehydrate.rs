@@ -20,6 +20,31 @@ pub(super) struct RehydrationRequest {
 }
 
 impl StorageManager {
+    /// Whether a record's last completed rehydration check has aged out.
+    /// Gates only the open-path enqueue: the debug command and the TryAgain
+    /// retry stay unconditional.
+    pub(super) fn rehydration_recheck_due(&self, opaque_record_key: &OpaqueRecordKey) -> bool {
+        let mut cache = self.rehydration_checked.lock();
+        match cache.get(opaque_record_key) {
+            Some(checked_ts) => {
+                Timestamp::now_non_decreasing() >= checked_ts.later(REHYDRATE_RECHECK_INTERVAL)
+            }
+            None => true,
+        }
+    }
+
+    /// A rehydration check completed for this record
+    pub(super) fn mark_rehydration_checked(&self, opaque_record_key: OpaqueRecordKey) {
+        self.rehydration_checked
+            .lock()
+            .insert(opaque_record_key, Timestamp::now_non_decreasing());
+    }
+
+    /// Forget a record's check, so a recreated record is checked afresh
+    pub(super) fn forget_rehydration_checked(&self, opaque_record_key: &OpaqueRecordKey) {
+        self.rehydration_checked.lock().remove(opaque_record_key);
+    }
+
     /// Add a background rehydration request
     #[cfg_attr(
         feature = "instrument",
@@ -142,6 +167,19 @@ impl StorageManager {
 
         // Trim inspected subkey range to subkeys we have data for locally
         let local_inspect_result = local_inspect_result.strip_none_seqs();
+
+        // Nothing held locally is nothing to rehydrate, so this record is done. Not even the
+        // inspect: an empty subkey set asks every node for the whole record and matches none of
+        // them, so the fanout runs to node exhaustion or the full get timeout to learn nothing
+        if local_inspect_result.subkeys().is_empty() {
+            veilid_log!(self debug "No local subkey data to rehydrate: record={} subkeys={}", opaque_record_key, subkeys);
+            return Ok(RehydrateReport {
+                opaque_record_key,
+                subkeys,
+                consensus_count,
+                rehydrated: ValueSubkeyRangeSet::new(),
+            });
+        }
 
         // Get the inspect record report from the network with only the subkeys for which we have
         // sequence numbers we have locally

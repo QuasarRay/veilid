@@ -2,7 +2,7 @@ use super::*;
 
 impl StorageManager {
     /// Check active watches for missing ValueChanged notifications.
-    /// If no ValueChanged has arrived within WATCH_FALLBACK_INSPECT_INTERVAL,
+    /// If no ValueChanged has arrived within the watch's current fallback interval,
     /// enqueue a change inspection. If that inspection finds changes,
     /// it will set needs_forced_reconcile to re-establish the watch.
     fn check_fallback_inspections_inner(
@@ -10,19 +10,22 @@ impl StorageManager {
         inner: &mut StorageManagerInner,
         cur_ts: Timestamp,
     ) {
+        // A stalled or unreachable node cannot complete these, and either answer the
+        // detector gives means wait
+        if registry
+            .network_manager()
+            .online_detector()
+            .blame_suppressed(RoutingDomain::PublicInternet)
+        {
+            return;
+        }
+
         // Collect watches needing fallback inspection
         let inspections: Vec<_> = inner
             .outbound_watch_manager
             .outbound_watches
             .values()
-            .filter_map(|ow| {
-                let state = ow.state()?;
-                if state.needs_fallback_inspect(cur_ts) {
-                    Some((ow.record_key(), state.params().subkeys.clone()))
-                } else {
-                    None
-                }
-            })
+            .filter_map(|ow| Some((ow.record_key(), ow.needs_fallback_inspect(cur_ts)?)))
             .collect();
 
         if inspections.is_empty() {
@@ -41,11 +44,7 @@ impl StorageManager {
 
             let owm = &mut inner.outbound_watch_manager;
             if let Some(ow) = owm.outbound_watches.get_mut(&record_key.opaque()) {
-                if let Some(state) = ow.state_mut() {
-                    state.edit(&owm.per_node_states, |editor| {
-                        editor.touch_fallback_inspect(cur_ts);
-                    });
-                }
+                ow.touch_fallback_inspect(&owm.per_node_states, cur_ts);
             }
         }
     }
@@ -98,24 +97,43 @@ impl StorageManager {
             }
         }
 
-        // Run queued change inspections that are due, leaving backed-off retries queued
-        let nci = &mut inner.outbound_watch_manager.needs_change_inspection;
-        let due_keys = nci
+        // Run queued change inspections that are due, leaving backed-off retries and
+        // records whose inspection is still running queued
+        let owm = &mut inner.outbound_watch_manager;
+        let due_keys = owm
+            .needs_change_inspection
             .iter()
-            .filter(|(_, (_, not_before))| *not_before <= cur_ts)
+            .filter(|(k, (_, not_before))| {
+                *not_before <= cur_ts && !owm.change_inspects_in_flight.contains(&k.opaque())
+            })
             .map(|(k, _)| k.clone())
             .collect::<Vec<_>>();
         for k in due_keys {
-            let Some((subkeys, _)) = nci.remove(&k) else {
+            let Some((subkeys, _)) = owm.needs_change_inspection.remove(&k) else {
                 continue;
             };
+            let opaque_record_key = k.opaque();
+            owm.change_inspects_in_flight
+                .insert(opaque_record_key.clone());
+
             let op_fut = Self::get_change_inspection_operation_inner(
                 self.registry(),
                 local_record_store.clone(),
                 k,
                 subkeys,
             );
-            self.background_operation_processor.add_future(op_fut);
+            // Cleared in a wrapper so both inspection variants release it
+            let registry = self.registry();
+            self.background_operation_processor.add_future(async move {
+                op_fut.await;
+                registry
+                    .storage_manager()
+                    .inner
+                    .lock()
+                    .outbound_watch_manager
+                    .change_inspects_in_flight
+                    .remove(&opaque_record_key);
+            });
         }
 
         Ok(())

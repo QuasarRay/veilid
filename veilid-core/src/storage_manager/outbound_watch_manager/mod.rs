@@ -32,6 +32,11 @@ pub(in crate::storage_manager) struct OutboundWatchManager {
     /// Subkeys owed a repeat hint per record, drained by the outbound watch check tick
     #[serde(skip)]
     pub pending_rehints: HashMap<RecordKey, ValueSubkeyRangeSet>,
+    /// Records with a change inspection already running. `needs_change_inspection`
+    /// coalesces only what is PENDING, so a slow node would otherwise run several
+    /// concurrent inspections of one record
+    #[serde(skip)]
+    pub change_inspects_in_flight: HashSet<OpaqueRecordKey>,
 }
 
 impl fmt::Display for OutboundWatchManager {
@@ -101,6 +106,7 @@ impl OutboundWatchManager {
             per_node_states: HashMap::new(),
             needs_change_inspection: HashMap::new(),
             pending_rehints: HashMap::new(),
+            change_inspects_in_flight: HashSet::new(),
         }
     }
 
@@ -247,8 +253,9 @@ impl OutboundWatchManager {
             return;
         };
 
-        if outbound_watch.state().is_none() {
-            // No outbound watch current state means no change inspect
+        if outbound_watch.state().is_none() && outbound_watch.desired().is_none() {
+            // Neither established nor wanted, so nothing to report changes to. A
+            // wanted-but-unestablished watch IS inspected: the app awaits its changes
             return;
         };
 

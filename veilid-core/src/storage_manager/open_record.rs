@@ -64,7 +64,10 @@ impl StorageManager {
                 .lock()
                 .locally_created_records
                 .contains(&opaque_record_key);
-            if !locally_created {
+            // A record checked recently is not checked again on reopen: an
+            // app-level open/close/reopen pattern would otherwise fan out one
+            // full-record inspection per reopen
+            if !locally_created && self.rehydration_recheck_due(&opaque_record_key) {
                 let set_consensus = self.config().internal().network.dht.set_value_count as usize;
 
                 self.add_rehydration_request(

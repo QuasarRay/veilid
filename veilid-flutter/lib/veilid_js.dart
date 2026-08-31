@@ -354,7 +354,7 @@ class VeilidRoutingContextJS extends VeilidRoutingContext {
       id.toJS,
       jsonEncode(key).toJS,
       jsonEncode(subkeys).toJS,
-      expiration.toString().toJS,
+      expiration.toJson().toJS,
       count.toJS,
     ]);
   }
@@ -1217,15 +1217,15 @@ class VeilidJS extends Veilid {
       _wasmPromiseVoid('delete_all_user_secrets');
 
   @override
-  Timestamp now() => Timestamp.fromString(_wasmCallString('now', []));
+  Timestamp now() => Timestamp.fromJson(_wasmCallString('now', []));
 
   @override
   Timestamp nowNonDecreasing() =>
-      Timestamp.fromString(_wasmCallString('now_non_decreasing', []));
+      Timestamp.fromJson(_wasmCallString('now_non_decreasing', []));
 
   @override
   Timestamp nowIncreasing() =>
-      Timestamp.fromString(_wasmCallString('now_increasing', []));
+      Timestamp.fromJson(_wasmCallString('now_increasing', []));
 
   @override
   Future<String> debug(String command) =>

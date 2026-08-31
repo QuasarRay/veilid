@@ -191,6 +191,8 @@ pub struct FanoutQueue<'a> {
     sorted_nodes: Vec<NodeId>,
     /// The sort function to use for the nodes
     node_sort: FanoutQueueSort<'a>,
+    /// Nodes to ask ahead of the sort, if any (see `FanoutCall::set_prefer_init_nodes`)
+    preferred_nodes: HashSet<NodeId>,
     /// The channel to receive work requests to process
     work_request_sender: flume::Sender<FanoutWorkRequest>,
     work_request_receiver: flume::Receiver<FanoutWorkRequest>,
@@ -257,6 +259,7 @@ impl<'a> FanoutQueue<'a> {
             nodes: HashMap::new(),
             sorted_nodes: Vec::new(),
             node_sort,
+            preferred_nodes: HashSet::new(),
             work_request_sender: sender,
             work_request_receiver: receiver,
             consensus_count,
@@ -283,6 +286,15 @@ impl<'a> FanoutQueue<'a> {
         self.send_more_work(request_ts);
 
         Ok(work_receiver)
+    }
+
+    /// Ask these nodes ahead of the sort order, for an operation that only a node
+    /// already holding the record can satisfy
+    pub fn set_preferred_nodes(&mut self, nodes: &[NodeRef]) {
+        self.preferred_nodes = nodes
+            .iter()
+            .filter_map(|node_ref| node_ref.node_ids().get(self.crypto_kind))
+            .collect();
     }
 
     /// Update the queue with changes, adding new nodes to a filtered and sorted
@@ -320,6 +332,13 @@ impl<'a> FanoutQueue<'a> {
 
         // Sort the node list
         self.sorted_nodes.sort_unstable_by(&self.node_sort);
+
+        // sort_by_key is stable, so each group keeps the node sort's order within it
+        if !self.preferred_nodes.is_empty() {
+            let preferred_nodes = &self.preferred_nodes;
+            self.sorted_nodes
+                .sort_by_key(|node_id| !preferred_nodes.contains(node_id));
+        }
 
         // Disqualify any nodes that can be
         self.disqualify(cur_ts);

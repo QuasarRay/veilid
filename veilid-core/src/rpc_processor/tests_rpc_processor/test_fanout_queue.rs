@@ -235,3 +235,82 @@ pub async fn test_rejection_consensus_culls_everything() {
     }
     mock_registry::terminate(registry).await;
 }
+
+/// A node with no copy of the record refuses a watch outright, and `consensus_width`
+/// (10) nodes consider themselves close enough while only `set_value_count` (5) ever
+/// receive a write. The seeds are the nodes that answered for the record before, the
+/// only evidence available, and the distance sort loses it. Preferred nodes must lead
+/// while each group keeps distance order within itself.
+pub async fn test_preferred_nodes_lead_the_sort() {
+    let registry = mock_registry::init("fanout_queue").await;
+    {
+        let routing_table = registry.routing_table();
+        let node_refs = seed_nodes(&routing_table, SEED_COUNT);
+
+        // The nodes the plain distance sort puts LAST, so preference is visible
+        let mut unpreferred = make_queue(&registry, CONSENSUS_COUNT, None);
+        unpreferred.update(&node_refs, Timestamp::now_non_decreasing());
+        let distance_order = unpreferred.with_nodes(|_, sorted_nodes| sorted_nodes.to_vec());
+        let farthest: Vec<NodeId> = distance_order.iter().rev().take(3).cloned().collect();
+        let preferred_refs: Vec<NodeRef> = node_refs
+            .iter()
+            .filter(|nr| {
+                nr.node_ids()
+                    .get(CRYPTO_KIND_VLD0)
+                    .is_some_and(|id| farthest.contains(&id))
+            })
+            .cloned()
+            .collect();
+        assert_eq!(preferred_refs.len(), farthest.len());
+
+        let mut queue = make_queue(&registry, CONSENSUS_COUNT, None);
+        queue.set_preferred_nodes(&preferred_refs);
+        queue.update(&node_refs, Timestamp::now_non_decreasing());
+
+        let order = queue.with_nodes(|_, sorted_nodes| sorted_nodes.to_vec());
+        assert_eq!(order.len(), SEED_COUNT);
+
+        // The preferred nodes are asked first, despite being the farthest away
+        let leading: HashSet<NodeId> = order.iter().take(farthest.len()).cloned().collect();
+        assert_eq!(
+            leading,
+            farthest.iter().cloned().collect::<HashSet<_>>(),
+            "preferred nodes should lead the queue"
+        );
+
+        // The rest follow in the relative order the unpreferred queue gave them
+        let rest: Vec<NodeId> = order.into_iter().skip(farthest.len()).collect();
+        let expected_rest: Vec<NodeId> = distance_order
+            .into_iter()
+            .filter(|id| !farthest.contains(id))
+            .collect();
+        assert_eq!(
+            rest, expected_rest,
+            "the unpreferred remainder should keep distance order"
+        );
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// With no preference set the ordering is pure distance, which is what get, set and
+/// inspect rely on.
+pub async fn test_no_preference_leaves_order_untouched() {
+    let registry = mock_registry::init("fanout_queue").await;
+    {
+        let routing_table = registry.routing_table();
+        let node_refs = seed_nodes(&routing_table, SEED_COUNT);
+
+        let mut plain = make_queue(&registry, CONSENSUS_COUNT, None);
+        plain.update(&node_refs, Timestamp::now_non_decreasing());
+
+        let mut empty_pref = make_queue(&registry, CONSENSUS_COUNT, None);
+        empty_pref.set_preferred_nodes(&[]);
+        empty_pref.update(&node_refs, Timestamp::now_non_decreasing());
+
+        assert_eq!(
+            plain.with_nodes(|_, s| s.to_vec()),
+            empty_pref.with_nodes(|_, s| s.to_vec())
+        );
+    }
+    mock_registry::terminate(registry).await;
+}

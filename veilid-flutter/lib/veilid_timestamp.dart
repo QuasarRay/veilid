@@ -2,6 +2,59 @@ import 'package:equatable/equatable.dart';
 import 'package:fixnum/fixnum.dart';
 import 'package:meta/meta.dart';
 
+final BigInt _biMicrosPerSec = BigInt.from(1000000);
+final BigInt _biMicrosPerMilli = BigInt.from(1000);
+
+/// Days since 1970-01-01 to (year, month, day). Howard Hinnant's
+/// `civil_from_days`, ported from veilid-tools `raw_timestamp.rs`.
+(int, int, int) _civilFromDays(int days) {
+  final z = days + 719468;
+  final era = (z >= 0 ? z : z - 146096) ~/ 146097;
+  final doe = z - era * 146097;
+  final yoe = (doe - doe ~/ 1460 + doe ~/ 36524 - doe ~/ 146096) ~/ 365;
+  final y = yoe + era * 400;
+  final doy = doe - (365 * yoe + yoe ~/ 4 - yoe ~/ 100);
+  final mp = (5 * doy + 2) ~/ 153;
+  final d = doy - (153 * mp + 2) ~/ 5 + 1;
+  final m = mp < 10 ? mp + 3 : mp - 9;
+  return (y + (m <= 2 ? 1 : 0), m, d);
+}
+
+/// (year, month, day, hour, minute, second, millisecond) in UTC.
+///
+/// Done in integer arithmetic rather than through [DateTime] so it matches
+/// veilid-core exactly and keeps microsecond precision on the web, where
+/// [DateTime] has none.
+(int, int, int, int, int, int, int) _utcFields(BigInt micros) {
+  final secs = (micros ~/ _biMicrosPerSec).toInt();
+  final millis = ((micros % _biMicrosPerSec) ~/ _biMicrosPerMilli).toInt();
+  final tod = secs % 86400;
+  final (year, month, day) = _civilFromDays(secs ~/ 86400);
+  return (year, month, day, tod ~/ 3600, (tod % 3600) ~/ 60, tod % 60, millis);
+}
+
+String _pad(int n, int width) => n.toString().padLeft(width, '0');
+
+/// A UTC timestamp with the date fields that match today left off, so a log
+/// line carries only what distinguishes it. Matches veilid-tools
+/// `human_timestamp`, including its four-digit-padded milliseconds.
+String _humanTimestamp(BigInt micros) {
+  final (nYear, nMonth, nDay, _, _, _, _) = _utcFields(
+    BigInt.from(DateTime.now().microsecondsSinceEpoch),
+  );
+  final (year, month, day, hour, minute, second, millis) = _utcFields(micros);
+
+  final showYear = nYear != year;
+  final showMonth = showYear || nMonth != month;
+  final showDate = showMonth || nDay != day;
+
+  return '${showYear ? '${_pad(year, 4)}/' : ''}'
+      '${showMonth ? '${_pad(month, 2)}/' : ''}'
+      '${showDate ? '${_pad(day, 2)}-' : ''}'
+      '${_pad(hour, 2)}:${_pad(minute, 2)}:${_pad(second, 2)}'
+      '.${_pad(millis, 4)}';
+}
+
 //////////////////////////////////////
 /// Timestamp
 @immutable
@@ -22,14 +75,15 @@ class Timestamp extends Equatable implements Comparable<Timestamp> {
         BigInt.from(i64.toUnsigned(32).toInt()),
   );
 
-  /// Parse a timestamp from a decimal microseconds string. Throws
-  /// [FormatException] if [s] is not a valid integer.
-  factory Timestamp.fromString(String s) => Timestamp(value: BigInt.parse(s));
-
-  /// Decode a [Timestamp] from its JSON representation. Throws [TypeError] if
-  /// [json] is not a string, or [FormatException] if it is not a valid integer.
+  /// Decode a [Timestamp] from its JSON representation: decimal microseconds
+  /// since the epoch, as [toJson] writes it. Throws [TypeError] if [json] is
+  /// not a string, or [FormatException] if it is not a valid integer.
+  ///
+  /// There is deliberately no `fromString`: [toString] is a lossy human form
+  /// with no inverse, and a decoder named after it would invite round trips
+  /// that silently lose precision.
   factory Timestamp.fromJson(dynamic json) =>
-      Timestamp.fromString(json as String);
+      Timestamp(value: BigInt.parse(json as String));
 
   @override
   List<Object> get props => [value];
@@ -49,11 +103,20 @@ class Timestamp extends Equatable implements Comparable<Timestamp> {
   /// Returns true if this timestamp is at or after [other].
   bool operator >=(Timestamp other) => compareTo(other) >= 0;
 
+  /// A UTC clock time for a human reading a log, eliding the date fields that
+  /// match today: `14:04:21.0547`, or `08/21-14:04:21.0547` on another day.
+  /// Matches veilid-core's `{:#}` form.
+  ///
+  /// **Debug output only.** It is lossy and it is not parseable, so anything
+  /// stored, parsed, sent over the FFI or compared uses [toJson] or [value],
+  /// and anything shown to a user gets formatted for their locale instead.
   @override
-  String toString() => value.toString();
+  String toString() => _humanTimestamp(value);
 
-  /// Encode this [Timestamp] to its JSON representation.
-  String toJson() => toString();
+  /// Encode this [Timestamp] to its JSON representation: microseconds since
+  /// the epoch, in decimal. The machine-readable form, and the one [fromJson]
+  /// reads back.
+  String toJson() => value.toString();
 
   /// This timestamp as an unsigned 64-bit microseconds value.
   Int64 toInt64() => Int64.fromInts(
@@ -98,16 +161,14 @@ class TimestampDuration extends Equatable
         BigInt.from(d.inMicroseconds % 1000000),
   );
 
-  /// Parse a duration from a decimal microseconds string. Throws
-  /// [FormatException] if [s] is not a valid integer.
-  factory TimestampDuration.fromString(String s) =>
-      TimestampDuration(value: BigInt.parse(s));
-
-  /// Decode a [TimestampDuration] from its JSON representation. Throws
-  /// [TypeError] if [json] is not a string, or [FormatException] if it is not a
-  /// valid integer.
+  /// Decode a [TimestampDuration] from its JSON representation: decimal
+  /// microseconds, as [toJson] writes it. Throws [TypeError] if [json] is not
+  /// a string, or [FormatException] if it is not a valid integer.
+  ///
+  /// There is deliberately no `fromString`, for the same reason as
+  /// [Timestamp.fromJson]: [toString] is a lossy human form with no inverse.
   factory TimestampDuration.fromJson(dynamic json) =>
-      TimestampDuration.fromString(json as String);
+      TimestampDuration(value: BigInt.parse(json as String));
 
   @override
   List<Object> get props => [value];
@@ -127,13 +188,19 @@ class TimestampDuration extends Equatable
   /// Returns true if this duration is at least [other].
   bool operator >=(TimestampDuration other) => compareTo(other) >= 0;
 
+  /// A span for a human reading a log: `3.385ms`, `1d2h3m4.005s`. Matches
+  /// veilid-tools `human_duration`.
+  ///
+  /// **Debug output only**, on the same terms as [Timestamp.toString]: use
+  /// [toJson] or [value] for anything machine-read, and locale formatting for
+  /// anything a user sees.
   @override
   String toString() {
-    final biDay = BigInt.from(1000000) * BigInt.from(60 * 60 * 24);
-    final biHour = BigInt.from(1000000) * BigInt.from(60 * 60);
-    final biMin = BigInt.from(1000000) * BigInt.from(60);
-    final biSec = BigInt.from(1000000);
-    final biMsec = BigInt.from(1000);
+    final biDay = _biMicrosPerSec * BigInt.from(60 * 60 * 24);
+    final biHour = _biMicrosPerSec * BigInt.from(60 * 60);
+    final biMin = _biMicrosPerSec * BigInt.from(60);
+    final biSec = _biMicrosPerSec;
+    final biMsec = _biMicrosPerMilli;
 
     final days = (value ~/ biDay).toInt();
     final dvalue = value % biDay;
