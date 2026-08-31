@@ -14,6 +14,7 @@ import 'test_dht_transactions.dart';
 import 'test_dht_transactions_full.dart';
 import 'test_protected_store.dart';
 import 'test_routing_context.dart';
+import 'test_startup_shutdown.dart';
 import 'test_table_db.dart';
 import 'test_veilid_config.dart';
 
@@ -24,6 +25,7 @@ void main() => runWithIntegrationLog(() {
       final fixture = DefaultVeilidFixture(
           programName: 'veilid_flutter integration test',
           logFixture: LogFixture.instance);
+      final testStartupShutdown = TestStartupShutdown();
       final updateProcessorFixture =
           UpdateProcessorFixture(veilidFixture: fixture);
 
@@ -235,5 +237,31 @@ void main() => runWithIntegrationLog(() {
             });
           }
         });
+      });
+
+      // Owns its own node lifecycle, so it runs after the fixture has released
+      // the shared one
+      group('Startup and Shutdown', () {
+        setUpAll(testStartupShutdown.setUpAll);
+        tearDown(testStartupShutdown.tearDown);
+
+        test('two startups then two shutdowns keep the node alive until the last',
+            testStartupShutdown.testTwoStartupsOneShutdownKeepsNodeAlive,
+            timeout: const Timeout(Duration(seconds: 120)), tags: ['startup']);
+        test('joining caller receives updates on its own stream',
+            testStartupShutdown.testJoinedCallerReceivesUpdates,
+            timeout: const Timeout(Duration(seconds: 120)), tags: ['startup']);
+        test('failed startup takes no reference',
+            testStartupShutdown.testFailedStartupTakesNoReference,
+            timeout: const Timeout(Duration(seconds: 120)), tags: ['startup']);
+        test('startup with a different init key is rejected',
+            testStartupShutdown.testDifferentInitKeyIsRejected,
+            timeout: const Timeout(Duration(seconds: 120)), tags: ['startup']);
+        test('extra shutdowns neither underflow nor shut down twice',
+            testStartupShutdown.testExtraShutdownsDoNotUnderflow,
+            timeout: const Timeout(Duration(seconds: 120)), tags: ['startup']);
+        test('a reaped sink holds no reference and leaves the node running',
+            testStartupShutdown.testReapedSinkHoldsNoReference,
+            timeout: const Timeout(Duration(seconds: 120)), tags: ['startup']);
       });
     });

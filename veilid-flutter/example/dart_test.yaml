@@ -4,6 +4,7 @@ concurrency: 1
 
 tags:
   config: {}
+  startup: {}
   crypto: {}
   table_db: {}
   routing_context: {}

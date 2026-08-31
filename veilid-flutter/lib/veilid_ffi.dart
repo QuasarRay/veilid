@@ -61,7 +61,7 @@ void _eagerResolveNativeSymbols() {
     Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._getVeilidState),
     Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._attach),
     Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._detach),
-    Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._shutdownVeilidCore),
+    Native.addressOf<NativeFunction<Void Function(Int64, Int64)>>(VeilidFFI._shutdownVeilidCore),
     Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._routingContext),
     Native.addressOf<NativeFunction<Int32 Function(Uint32)>>(VeilidFFI._releaseRoutingContext),
     Native.addressOf<NativeFunction<Uint32 Function(Uint32)>>(VeilidFFI._routingContextWithDefaultSafety),
@@ -409,7 +409,12 @@ Stream<T> processStreamJson<T>(
 ) async* {
   try {
     await for (final value in port) {
-      final list = value as List<dynamic>;
+      // rust probes a suspect port with a bare int to tell a dead port from a
+      // payload the dart serializer refused
+      if (value is! List<dynamic>) {
+        continue;
+      }
+      final list = value;
       switch (list[0] as int) {
         case messageStreamItemJson:
           {
@@ -1706,6 +1711,11 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
 
 // FFI implementation of high level Veilid API
 class VeilidFFI extends Veilid {
+
+  // One stream port per reference this isolate holds on the running node.
+  // Shutdown releases the most recent one.
+  final _updateStreamPorts = <int>[];
+
   // Shared library functions
   @Native<Void Function(Pointer<Utf8>)>(symbol: 'free_string')
   external static void _freeString(Pointer<Utf8> s);
@@ -1750,8 +1760,8 @@ class VeilidFFI extends Veilid {
   @Native<Void Function(Int64)>(symbol: 'detach')
   external static void _detach(int port);
 
-  @Native<Void Function(Int64)>(symbol: 'shutdown_veilid_core')
-  external static void _shutdownVeilidCore(int port);
+  @Native<Void Function(Int64, Int64)>(symbol: 'shutdown_veilid_core')
+  external static void _shutdownVeilidCore(int port, int streamPort);
 
   @Native<Void Function(Int64)>(symbol: 'routing_context')
   external static void _routingContext(int port);
@@ -2544,7 +2554,7 @@ class VeilidFFI extends Veilid {
   }
 
   @override
-  Future<Stream<VeilidUpdate>> startupVeilidCore(VeilidConfig config) {
+  Future<Stream<VeilidUpdate>> startupVeilidCore(VeilidConfig config) async {
     final nativeConfig = jsonEncode(config).toNativeUtf8();
     final recvStreamPort = ReceivePort('veilid_api_stream');
     final sendStreamPort = recvStreamPort.sendPort;
@@ -2556,10 +2566,19 @@ class VeilidFFI extends Veilid {
       nativeConfig,
     );
     malloc.free(nativeConfig);
-    return processFutureStream(
-      processStreamJson(VeilidUpdate.fromJson, recvStreamPort),
-      recvPort.first,
-    );
+    try {
+      final updateStream = await processFutureStream(
+        processStreamJson(VeilidUpdate.fromJson, recvStreamPort),
+        recvPort.first,
+      );
+      _updateStreamPorts.add(sendStreamPort.nativePort);
+      return updateStream;
+    } on Exception {
+      // processStreamJson is lazy: nobody subscribes to a failed startup, so
+      // its cleanup never runs and the port would pin the event loop
+      recvStreamPort.close();
+      rethrow;
+    }
   }
 
   @override
@@ -2598,7 +2617,12 @@ class VeilidFFI extends Veilid {
   Future<void> shutdownVeilidCore() {
     final recvPort = ReceivePort('shutdown_veilid_core');
     final sendPort = recvPort.sendPort;
-    _shutdownVeilidCore(sendPort.nativePort);
+    // the reply port is one-shot and carries no identity, so the stream port is
+    // what tells rust whose reference to release
+    final streamPort = _updateStreamPorts.isEmpty
+        ? 0
+        : _updateStreamPorts.removeLast();
+    _shutdownVeilidCore(sendPort.nativePort, streamPort);
 
     return processFutureVoid(recvPort.first);
   }

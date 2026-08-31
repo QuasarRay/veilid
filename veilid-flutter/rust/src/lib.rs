@@ -17,10 +17,12 @@ cfg_if::cfg_if! {
         use veilid_core::tools::wasm_tracing::*;
         use wasm_bindgen_futures::*;
 
+        mod dart_js_wrapper;
         pub mod dart_wasm;
         pub mod veilid_version;
         pub mod veilid_wasm_config;
 
+        use dart_js_wrapper::*;
         pub use veilid_version::*;
         pub use veilid_wasm_config::*;
     } else {

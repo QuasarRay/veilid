@@ -86,10 +86,14 @@ abstract class Veilid {
   /// Start veilid-core with the given [config] and return the stream of
   /// [VeilidUpdate] events the node emits.
   ///
-  /// Blocks on core initialization. The open half of the startup/shutdown pair:
-  /// must be matched with [shutdownVeilidCore]. Throws if already started.
+  /// The open half of the startup/shutdown pair: must be matched with
+  /// [shutdownVeilidCore]. Startup is idempotent and refcounted. When a node
+  /// started with the same `programName` and `namespace` is already running,
+  /// this joins it and returns a stream of its own, [config] is ignored, and
+  /// only core initialization for a genuinely new node blocks.
   ///
-  /// Throws [VeilidAPIExceptionAlreadyInitialized] if a node is already running,
+  /// Throws [VeilidAPIExceptionAlreadyInitialized] if a node with a different
+  /// `programName` or `namespace` is already running,
   /// [VeilidAPIExceptionGeneric] if [config] fails validation,
   /// [VeilidAPIExceptionInternal] if a subsystem fails to initialize. Fatal for
   /// this call; fix the config or environment and retry.
@@ -108,24 +112,29 @@ abstract class Veilid {
   /// Connect to the network.
   ///
   /// Sets the maintain-peers flag; the network connect proceeds in the
-  /// background. Throws if already attached.
+  /// background. Idempotent: a node several callers share is attached by all of
+  /// them, so finding it already attached succeeds.
   ///
-  /// Throws [VeilidAPIExceptionGeneric] if already attached, or
-  /// [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
+  /// Throws [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
   Future<void> attach();
 
   /// Disconnect from the network.
   ///
   /// Clears the maintain-peers flag; the network teardown proceeds in the
-  /// background. Throws if already detached.
+  /// background. Idempotent, like [attach]: finding the node already detached
+  /// succeeds.
   ///
-  /// Throws [VeilidAPIExceptionGeneric] if already detached, or
-  /// [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
+  /// Throws [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
   Future<void> detach();
 
-  /// Shut down Veilid and terminate the API.
+  /// Release this caller's reference to the running node, shutting it down and
+  /// terminating the API when the last reference goes.
   ///
-  /// Blocks until the core has finished shutting down.
+  /// Releases one reference per [startupVeilidCore], most recent first, and
+  /// closes that call's update stream. Only the release of the last reference
+  /// shuts the node down and blocks until the core has finished doing so; while
+  /// another reference is outstanding this returns with the node still running.
+  /// A caller holding no reference succeeds without doing anything.
   ///
   /// Throws [VeilidAPIExceptionNotInitialized] if Veilid was never started or
   /// has already been shut down.

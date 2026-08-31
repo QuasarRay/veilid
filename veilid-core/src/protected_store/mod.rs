@@ -217,6 +217,11 @@ impl ProtectedStore {
     }
 
     /// Load a byte buffer secret by key, or `None` if no value is stored for it.
+    ///
+    /// `None` means the backend established that nothing is stored. A backend that could not read
+    /// the store returns [VeilidAPIError::TryAgain] instead (an iOS keychain before first unlock),
+    /// and the stored value is intact. A caller that reprovisions on `None` must propagate that
+    /// error rather than fold it into absence, or it overwrites a secret it merely could not read.
     pub async fn load_user_secret<K: AsRef<str>>(
         &self,
         context: ProtectedStoreContext,

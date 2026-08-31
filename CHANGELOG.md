@@ -43,6 +43,7 @@
   - CocoaPods support removed.
   - Minimum Flutter version is now 3.47.1 due to improved build hooks support
   - Completely remove 'rust-android-gradle' because it is failing to keep up with the rest of the ecosystem (AGP, Kotlin, etc)
+  - Fix multiple-attach idempotency
 
 - veilid-python:
   - More tests

@@ -30,6 +30,12 @@ impl ProtectedStoreBackend {
     }
 }
 
+/// A keyring reported that the store could not be read or written because the device is locked.
+/// The stored value is intact, so this is transient and never absence.
+fn locked_error() -> VeilidAPIError {
+    VeilidAPIError::try_again("protected store is locked, retry once the device is unlocked")
+}
+
 /// Protected store backend backed by the OS keyring (or an on-disk insecure keyring).
 ///
 /// Keyring calls can block on user input (e.g. a keychain permission dialog), so each runs on a
@@ -48,6 +54,7 @@ impl KeyringBackend {
             match km.lock().with_keyring(&service, &key, |kr| kr.get_value()) {
                 Ok(v) => Ok(Some(Zeroizing::new(v))),
                 Err(KeyringError::NoPasswordFound) => Ok(None),
+                Err(KeyringError::Locked) => Err(locked_error()),
                 Err(e) => Err(VeilidAPIError::generic(format!(
                     "failed to load user secret: {}",
                     e
@@ -63,13 +70,18 @@ impl KeyringBackend {
         let key = key.to_owned();
         let value = Zeroizing::new(value.to_owned());
         blocking_yielding(move || {
-            km.lock()
-                .with_keyring(&service, &key, |kr| {
-                    let existed = kr.get_value().is_ok();
-                    kr.set_value(value.as_str())?;
-                    Ok(existed)
-                })
-                .map_err(|e| VeilidAPIError::generic(format!("failed to save user secret: {}", e)))
+            match km.lock().with_keyring(&service, &key, |kr| {
+                let existed = kr.get_value().is_ok();
+                kr.set_value(value.as_str())?;
+                Ok(existed)
+            }) {
+                Ok(existed) => Ok(existed),
+                Err(KeyringError::Locked) => Err(locked_error()),
+                Err(e) => Err(VeilidAPIError::generic(format!(
+                    "failed to save user secret: {}",
+                    e
+                ))),
+            }
         })
         .await
     }
@@ -85,6 +97,7 @@ impl KeyringBackend {
             {
                 Ok(_) => Ok(true),
                 Err(KeyringError::NoPasswordFound) => Ok(false),
+                Err(KeyringError::Locked) => Err(locked_error()),
                 Err(e) => Err(VeilidAPIError::generic(format!(
                     "failed to remove user secret: {}",
                     e
@@ -102,6 +115,7 @@ impl KeyringBackend {
             Err(KeyringError::Unsupported) => Err(VeilidAPIError::generic(
                 "this protected store backend does not support listing keys",
             )),
+            Err(KeyringError::Locked) => Err(locked_error()),
             Err(e) => Err(VeilidAPIError::generic(format!(
                 "failed to list user secrets: {}",
                 e
@@ -119,8 +133,6 @@ fn service_name(config: &VeilidConfig) -> String {
     }
 }
 
-// async to match the wasm build_backend, which awaits opening its database
-#[allow(clippy::unused_async)]
 pub(super) async fn build_backend(ps: &ProtectedStore) -> VeilidAPIResult<ProtectedStoreBackend> {
     let config = ps.config();
 
@@ -139,15 +151,24 @@ pub(super) async fn build_backend(ps: &ProtectedStore) -> VeilidAPIResult<Protec
     let mut keyring_manager: Option<KeyringManager> = None;
 
     if !config.protected_store.always_use_insecure_storage {
-        cfg_if! {
-            if #[cfg(target_os = "android")] {
-                let maybe_km = KeyringManager::new_secure(&config.program_name, crate::veilid_api::android::get_android_globals());
-            } else {
-                let maybe_km = KeyringManager::new_secure(&config.program_name);
+        // Construction probes the store and can block on user input (an unlock dialog), so it
+        // runs off the async threads like every other keyring call
+        let program_name = config.program_name.clone();
+        let maybe_km = blocking_yielding(move || {
+            cfg_if! {
+                if #[cfg(target_os = "android")] {
+                    KeyringManager::new_secure(&program_name, crate::veilid_api::android::get_android_globals())
+                } else {
+                    KeyringManager::new_secure(&program_name)
+                }
             }
-        }
+        })
+        .await;
         keyring_manager = match maybe_km {
             Ok(v) => Some(v),
+            // A locked store is not a missing store: falling back to insecure storage would
+            // read the DEK as absent and re-key over data the locked store still holds
+            Err(KeyringError::Locked) => return Err(locked_error()),
             Err(e) => {
                 veilid_log!(ps info "Secure key storage service unavailable, falling back to direct disk-based storage: {}", e);
                 None

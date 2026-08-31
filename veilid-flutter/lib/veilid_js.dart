@@ -40,6 +40,9 @@ String _wasmCallString(String method, [List<JSAny?>? arguments]) =>
 int _wasmCallInt(String method, [List<JSAny?>? arguments]) =>
     wasm.callMethodVarArgs<JSNumber>(method.toJS, arguments).toDartInt;
 
+bool _wasmCallBool(String method, [List<JSAny?>? arguments]) =>
+    wasm.callMethodVarArgs<JSBoolean>(method.toJS, arguments).toDart;
+
 void _wasmCallVoid(String method, [List<JSAny?>? arguments]) =>
     wasm.callMethodVarArgs(method.toJS, arguments);
 
@@ -993,6 +996,46 @@ class VeilidTableDBJS extends VeilidTableDB {
 // JS implementation of high level Veilid API
 
 class VeilidJS extends Veilid {
+  // Names this dart program to wasm. A hot restart resets lazy statics while the
+  // wasm module and its node survive, so the next program gets a new value and
+  // wasm can retire the update sinks the old one left registered.
+  static final String _generation =
+      DateTime.now().microsecondsSinceEpoch.toString();
+
+  // One caller id per reference this dart context holds on the running node.
+  // Shutdown releases the most recent one. Wasm owns the refcount and every
+  // lifecycle decision.
+  final _callerIds = <String>[];
+
+  static int _callerIdSequence = 0;
+
+  static String _newCallerId() => '$_generation-${_callerIdSequence++}';
+
+  // Wasm delivers a serialized update, or null to close the stream. Throwing out
+  // of here is wasm's only evidence that the js context is gone, so a decode
+  // failure against a newer wasm blob must not escape.
+  static JSFunction _updateSinkCallback(StreamController<VeilidUpdate> sink) =>
+      ((JSString? update) {
+        if (sink.isClosed) {
+          return;
+        }
+        if (update == null) {
+          // never awaited: close() on a controller nobody listened to completes
+          // only once a listener arrives to take the done event
+          unawaited(sink.close());
+          return;
+        }
+        try {
+          sink.add(
+            VeilidUpdate.fromJson(
+              jsonDecode(update.toDart) as Map<String, dynamic>,
+            ),
+          );
+        } on Object catch (e) {
+          web.console.error('veilid: dropped an undecodable update: $e'.toJS);
+        }
+      }).toJS;
+
   @override
   void initializeVeilidCore(Map<String, dynamic> platformConfigJson) {
     final platformConfigJsonString = jsonEncode(platformConfigJson);
@@ -1018,31 +1061,42 @@ class VeilidJS extends Veilid {
 
   @override
   Future<Stream<VeilidUpdate>> startupVeilidCore(VeilidConfig config) async {
-    final streamController = StreamController<VeilidUpdate>();
-    void updateCallback(String update) {
-      final updateJson = jsonDecode(update) as Map<String, dynamic>;
-      if (updateJson['kind'] == 'Shutdown') {
-        unawaited(streamController.close());
-      } else {
-        final update = VeilidUpdate.fromJson(updateJson);
-        streamController.add(update);
-      }
+    final configJson = jsonEncode(config);
+    final callerId = _newCallerId();
+
+    // an abandoned subscription must not pin the refcount
+    late final StreamController<VeilidUpdate> sink;
+    sink = StreamController<VeilidUpdate>(
+      onCancel: () {
+        _callerIds.remove(callerId);
+        _wasmCallVoid('deregister_update_sink', [callerId.toJS]);
+      },
+    );
+
+    try {
+      await _wasmPromiseVoid('startup_veilid_core', [
+        callerId.toJS,
+        _generation.toJS,
+        _updateSinkCallback(sink),
+        configJson.toJS,
+      ]);
+    } on Exception {
+      unawaited(sink.close());
+      rethrow;
     }
+    _callerIds.add(callerId);
 
-    await _wasmPromiseVoid('startup_veilid_core', [
-      updateCallback.toJS,
-      jsonEncode(config).toJS,
-    ]);
-
-    return streamController.stream;
+    return sink.stream;
   }
 
   @override
   Future<VeilidState> getVeilidState() =>
       _wasmPromiseJson('get_veilid_state', VeilidState.fromJson, []);
 
+  // is_shutdown is a plain wasm export, not a promise like the rest of the
+  // lifecycle calls
   @override
-  Future<bool> isShutdown() => _wasmPromiseBool('is_shutdown', []);
+  Future<bool> isShutdown() async => _wasmCallBool('is_shutdown', []);
 
   @override
   Future<void> attach() => _wasmPromiseVoid('attach', []);
@@ -1051,8 +1105,16 @@ class VeilidJS extends Veilid {
   Future<void> detach() => _wasmPromiseVoid('detach', []);
 
   @override
-  Future<void> shutdownVeilidCore() =>
-      _wasmPromiseVoid('shutdown_veilid_core', []);
+  Future<void> shutdownVeilidCore() {
+    // an empty id matches no registration, so wasm reports NotInitialized for a
+    // node that was never started and no-ops for a caller holding no reference,
+    // in both cases after retiring what an earlier dart program left registered
+    final callerId = _callerIds.isEmpty ? '' : _callerIds.removeLast();
+    return _wasmPromiseVoid('shutdown_veilid_core', [
+      callerId.toJS,
+      _generation.toJS,
+    ]);
+  }
 
   @override
   List<CryptoKind> validCryptoKinds() => _wasmCallJson(
@@ -1249,8 +1311,11 @@ class VeilidJS extends Veilid {
   }
 
   @override
-  List<String> veilidFeatures() =>
-      _wasmCallJson('veilid_features', (x) => x as List<String>, []);
+  List<String> veilidFeatures() => _wasmCallJson(
+    'veilid_features',
+    (x) => (x as List<dynamic>).map((e) => e as String).toList(),
+    [],
+  );
 
   @override
   String defaultVeilidConfig() => _wasmCallString('default_veilid_config', []);

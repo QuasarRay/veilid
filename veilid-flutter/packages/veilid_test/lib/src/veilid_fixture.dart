@@ -293,13 +293,16 @@ class DefaultVeilidFixture implements VeilidFixture {
   Future<void> tearDown() async {
     assert(_fixtureMutex.isLocked, 'should not tearDown without setUp');
 
-    await Veilid.instance.shutdownVeilidCore();
-    await _veilidUpdateSubscription?.cancel();
-    await _updateStreamController.close();
+    try {
+      await Veilid.instance.shutdownVeilidCore();
+      await _veilidUpdateSubscription?.cancel();
+      await _updateStreamController.close();
 
-    _veilidUpdateSubscription = null;
-    _veilidUpdateStream = null;
-
-    _fixtureMutex.release();
+      _veilidUpdateSubscription = null;
+      _veilidUpdateStream = null;
+    } finally {
+      // an unreleased static mutex turns one failed test into a hung run
+      _fixtureMutex.release();
+    }
   }
 }

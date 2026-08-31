@@ -57,7 +57,8 @@ class _MyAppState extends State<MyApp> with UiLoggy {
       veilidVersion = 'Failed to get veilid version.';
     }
 
-    // In case of hot restart shut down first
+    // A hot restart leaves the running node with no reference held by this
+    // program, so this is a no-op and the next startup joins that node
     try {
       await Veilid.instance.shutdownVeilidCore();
     } on Exception {
@@ -160,12 +161,15 @@ class _MyAppState extends State<MyApp> with UiLoggy {
 
       final updateStream = await Veilid.instance.startupVeilidCore(config);
 
+      // joining a running node inherits whatever attachment it already had
+      final state = await Veilid.instance.getVeilidState();
+
       setState(() {
         _updateStream = updateStream;
         _updateProcessor = processUpdates();
         _startedUp = true;
         _startupChanging = false;
-        _attached = false;
+        _attached = state.attachment.state != AttachmentState.detached;
         _attachChanging = false;
       });
     } else if (!startup && _startedUp) {

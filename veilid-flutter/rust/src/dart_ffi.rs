@@ -121,6 +121,7 @@ lazy_static! {
     static ref DHT_TRANSACTIONS: Mutex<BTreeMap<u32, DHTTransaction>> = Mutex::new(BTreeMap::new());
     static ref FLAME_GUARD: Mutex<Option<tracing_flame::FlushGuard<std::io::BufWriter<std::fs::File>>>> =
         Mutex::new(None);
+    static ref NODE_STATE: Mutex<Option<NodeState>> = Mutex::new(None);
 }
 
 async fn get_veilid_api() -> VeilidAPIResult<VeilidAPI> {
@@ -129,6 +130,54 @@ async fn get_veilid_api() -> VeilidAPIResult<VeilidAPI> {
         .as_ref()
         .cloned()
         .ok_or(VeilidAPIError::NotInitialized)
+}
+
+/// veilid-core's per-node identity, `(program_name, namespace)`.
+type InitKey = (String, String);
+
+/// Shim state for the running node: who receives its updates, and what started it.
+///
+/// The number of registered sinks is the node's reference count. Startup registers one and
+/// shutdown retires one, and the node is torn down when an explicit shutdown retires the last.
+/// Reaping a dead sink is not a shutdown: an Android foreground service outliving its activity's
+/// engine must keep the node running with nothing attached.
+///
+/// Every transition runs under the `VEILID_API` async lock. Racing two `shutdown().await` calls
+/// would let the loser report completion before the node is down, and core's own Arc count is not
+/// a substitute, since `get_veilid_api` clones it on every FFI call.
+///
+/// One instance today, shaped to become one per `InitKey`.
+struct NodeState {
+    sinks: Arc<DartUpdateSinkSet>,
+    config_json: String,
+    init_key: InitKey,
+}
+
+/// The fields of a startup config that name which node it starts.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VeilidFFIConfigInitKey {
+    program_name: String,
+    namespace: String,
+}
+
+/// Read the init key from a startup config without consuming the config, so core still gets it
+/// verbatim and still warns about unknown keys.
+fn peek_init_key(config_json: &str) -> VeilidAPIResult<InitKey> {
+    let key = veilid_core::deserialize_json::<VeilidFFIConfigInitKey>(config_json)?;
+    if key.program_name.is_empty() {
+        return Err(VeilidAPIError::generic(
+            "Program name must not be empty in 'program_name'",
+        ));
+    }
+    Ok((key.program_name, key.namespace))
+}
+
+fn update_callback(sinks: Arc<DartUpdateSinkSet>) -> UpdateCallback {
+    Arc::new(move |update: VeilidUpdate| match update {
+        VeilidUpdate::Shutdown => sinks.close_all(),
+        _ => sinks.broadcast_json(update),
+    })
 }
 
 /////////////////////////////////////////
@@ -544,7 +593,6 @@ pub extern "C" fn change_log_ignore(layer: FfiStr, log_ignore: FfiStr) {
 #[instrument(level = "trace", target = "ffi", skip_all)]
 pub extern "C" fn startup_veilid_core(port: i64, stream_port: i64, config: FfiStr) {
     let config = config.into_opt_string();
-    let stream = DartIsolateStream::new(stream_port);
     DartIsolateWrapper::new(port).spawn_result(
         async move {
             let config_json = match config {
@@ -557,29 +605,48 @@ pub extern "C" fn startup_veilid_core(port: i64, stream_port: i64, config: FfiSt
                     return VeilidAPIResult::Err(err);
                 }
             };
+            let init_key = peek_init_key(&config_json)?;
 
             let mut api_lock = VEILID_API.lock().await;
+
+            // join the running node when it is the same one this config asks for
             if api_lock.is_some() {
-                return VeilidAPIResult::Err(VeilidAPIError::AlreadyInitialized);
+                let mut node_state = NODE_STATE.lock();
+                let Some(node_state) = node_state.as_mut() else {
+                    return VeilidAPIResult::Err(VeilidAPIError::NotInitialized);
+                };
+                if node_state.init_key != init_key {
+                    return VeilidAPIResult::Err(VeilidAPIError::AlreadyInitialized);
+                }
+                if node_state.config_json != config_json {
+                    warn!(
+                        target: "ffi",
+                        "joining a node started with a different config, this config is ignored"
+                    );
+                }
+                node_state.sinks.register(stream_port);
+                return VeilidAPIResult::Ok(());
             }
 
-            let sink = stream.clone();
-            let update_callback = Arc::new(move |update: VeilidUpdate| {
-                let sink = sink.clone();
-                match update {
-                    VeilidUpdate::Shutdown => {
-                        sink.close();
+            let sinks = Arc::new(DartUpdateSinkSet::new());
+            sinks.register(stream_port);
+
+            let veilid_api =
+                match api_startup_json(update_callback(sinks.clone()), config_json.clone()).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        sinks.retire(stream_port);
+                        return VeilidAPIResult::Err(e);
                     }
-                    _ => {
-                        sink.item_json(update);
-                    }
-                }
+                };
+            *api_lock = Some(veilid_api);
+            *NODE_STATE.lock() = Some(NodeState {
+                sinks,
+                config_json,
+                init_key,
             });
 
-            let veilid_api = api_startup_json(update_callback, config_json).await?;
-            *api_lock = Some(veilid_api);
-
-            Ok(())
+            VeilidAPIResult::Ok(())
         }
         .in_current_span(),
     );
@@ -621,7 +688,13 @@ pub extern "C" fn attach(port: i64) {
     DartIsolateWrapper::new(port).spawn_result(
         async move {
             let veilid_api = get_veilid_api().await?;
-            veilid_api.attach().await?;
+            // every caller sharing the node attaches it, so core's "already attached" Generic
+            // (its only error here other than NotInitialized) is this caller's success
+            if let Err(e) = veilid_api.attach().await {
+                if !matches!(e, VeilidAPIError::Generic { .. }) {
+                    return VeilidAPIResult::Err(e);
+                }
+            }
             VeilidAPIResult::Ok(())
         }
         .in_current_span(),
@@ -634,7 +707,12 @@ pub extern "C" fn detach(port: i64) {
     DartIsolateWrapper::new(port).spawn_result(
         async move {
             let veilid_api = get_veilid_api().await?;
-            veilid_api.detach().await?;
+            // symmetric with attach: "already detached" is another caller's doing, not an error
+            if let Err(e) = veilid_api.detach().await {
+                if !matches!(e, VeilidAPIError::Generic { .. }) {
+                    return VeilidAPIResult::Err(e);
+                }
+            }
             VeilidAPIResult::Ok(())
         }
         .in_current_span(),
@@ -643,19 +721,56 @@ pub extern "C" fn detach(port: i64) {
 
 #[no_mangle]
 #[instrument(level = "trace", target = "ffi", skip_all)]
-pub extern "C" fn shutdown_veilid_core(port: i64) {
+pub extern "C" fn shutdown_veilid_core(port: i64, stream_port: i64) {
     DartIsolateWrapper::new(port).spawn_result(
         async move {
             let mut api_lock = VEILID_API.lock().await;
-            let veilid_api = api_lock.take().ok_or(VeilidAPIError::NotInitialized)?;
-            // A dead Dart session (hot restart) never releases its handles;
-            // drop them here so the table store can close its files instead
-            // of leaving sqlite pools pinned open into the next startup
+            if api_lock.is_none() {
+                return VeilidAPIResult::Err(VeilidAPIError::NotInitialized);
+            }
+
+            let sinks = {
+                let node_state = NODE_STATE.lock();
+                let Some(node_state) = node_state.as_ref() else {
+                    return VeilidAPIResult::Err(VeilidAPIError::NotInitialized);
+                };
+                // a caller with no registered sink holds no reference
+                if !node_state.sinks.contains(stream_port) {
+                    return VeilidAPIResult::Ok(());
+                }
+                node_state.sinks.clone()
+            };
+
+            // a dead engine's sink counts until something reaps it, and a detached node can go
+            // arbitrarily long without an update to reap it on
+            sinks.reap_dead_except(stream_port);
+
+            if sinks.len() > 1 {
+                sinks.retire(stream_port);
+                return VeilidAPIResult::Ok(());
+            }
+
+            // the last reference stays registered through termination so its consumer sees the
+            // updates core emits on the way down
+            let Some(veilid_api) = api_lock.take() else {
+                return VeilidAPIResult::Err(VeilidAPIError::NotInitialized);
+            };
+            // hot restart never releases handles; drop them so sqlite pools do not stay pinned
+            // into the next startup. Last reference only - a live caller's handles are still its own
             TABLE_DB_TRANSACTIONS.lock().clear();
             TABLE_DBS.lock().clear();
             DHT_TRANSACTIONS.lock().clear();
             ROUTING_CONTEXTS.lock().clear();
             veilid_api.shutdown().await;
+
+            // unconditional: a teardown that emits no Shutdown update would park every consumer
+            // in `await for` forever
+            sinks.close_all();
+            // dropped out of the guard's scope: retiring a sink posts, and posting under a lock
+            // is how this deadlocks
+            let retired_state = NODE_STATE.lock().take();
+            drop(retired_state);
+
             VeilidAPIResult::Ok(())
         }
         .in_current_span(),

@@ -1,6 +1,7 @@
 /// Veilid WASM Bindings for Flutter/Dart
 /// The Flutter/Dart bindings are in this lib.rs directly
 use super::*;
+use tracing::warn;
 
 #[wasm_bindgen]
 extern "C" {
@@ -27,6 +28,9 @@ lazy_static! {
         SendWrapper::new(RefCell::new(BTreeMap::new()));
     static ref TABLE_DB_TRANSACTIONS: SendWrapper<RefCell<BTreeMap<u32, veilid_core::TableDBTransaction>>> =
         SendWrapper::new(RefCell::new(BTreeMap::new()));
+    static ref NODE_STATE: SendWrapper<RefCell<Option<NodeState>>> =
+        SendWrapper::new(RefCell::new(None));
+    static ref LIFECYCLE_LOCK: AsyncMutex<()> = AsyncMutex::new(());
 }
 
 fn get_veilid_api() -> Result<veilid_core::VeilidAPI, veilid_core::VeilidAPIError> {
@@ -40,6 +44,56 @@ fn take_veilid_api() -> Result<veilid_core::VeilidAPI, veilid_core::VeilidAPIErr
     (**VEILID_API)
         .take()
         .ok_or(veilid_core::VeilidAPIError::NotInitialized)
+}
+
+/// veilid-core's per-node identity, `(program_name, namespace)`.
+type InitKey = (String, String);
+
+/// Shim state for the running node: who receives its updates, and what started it.
+///
+/// The number of registered sinks is the node's reference count. Startup registers one and
+/// shutdown retires one, and the node is torn down when an explicit shutdown retires the last.
+/// Reaping a sink whose Dart context died is not a shutdown.
+///
+/// The init key is deliberately not cached here. A Dart hot restart discards the Dart side while
+/// this module and the node it holds survive, so the join decision reads the running node's own
+/// config instead of anything either side remembered.
+struct NodeState {
+    sinks: Arc<DartUpdateSinkSet>,
+    config_json: String,
+}
+
+/// The fields of a startup config that name which node it starts.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VeilidWASMConfigInitKey {
+    program_name: String,
+    namespace: String,
+}
+
+/// Read the init key from a startup config without consuming the config, so core still gets it
+/// verbatim and still warns about unknown keys.
+fn peek_init_key(config_json: &str) -> VeilidAPIResult<InitKey> {
+    let key = veilid_core::deserialize_json::<VeilidWASMConfigInitKey>(config_json)?;
+    if key.program_name.is_empty() {
+        return Err(veilid_core::VeilidAPIError::generic(
+            "Program name must not be empty in 'program_name'",
+        ));
+    }
+    Ok((key.program_name, key.namespace))
+}
+
+/// The init key of the node that is actually running.
+fn running_init_key(veilid_api: &veilid_core::VeilidAPI) -> VeilidAPIResult<InitKey> {
+    let config = veilid_api.config()?;
+    Ok((config.program_name.clone(), config.namespace.clone()))
+}
+
+fn update_callback(sinks: Arc<DartUpdateSinkSet>) -> UpdateCallback {
+    Arc::new(move |update: VeilidUpdate| match update {
+        VeilidUpdate::Shutdown => sinks.close_all(),
+        _ => sinks.broadcast_json(update),
+    })
 }
 
 // Serialize a value to JSON and wrap it as a JS string value.
@@ -209,29 +263,86 @@ pub fn change_log_ignore(layer: String, log_ignore: String) {
     }
 }
 
+/// Start or join the node this config names, registering `caller_id`'s update sink on it.
+///
+/// `caller_id` identifies one Dart consumer for the life of its update stream, and is what
+/// `shutdown_veilid_core` releases. `generation` identifies the Dart program that minted it, so a
+/// sink left behind by a hot-restarted program can be told apart from a live one. The Dart side
+/// mints both; wasm only compares them.
 #[wasm_bindgen()]
-pub fn startup_veilid_core(update_callback_js: Function, json_config: String) -> Promise {
-    let update_callback_js = SendWrapper::new(update_callback_js);
+pub fn startup_veilid_core(
+    caller_id: String,
+    generation: String,
+    update_callback_js: Function,
+    json_config: String,
+) -> Promise {
     wrap_api_future_void(async move {
-        let update_callback = Arc::new(move |update: VeilidUpdate| {
-            let _ret =
-                match Function::call1(&update_callback_js, &JsValue::UNDEFINED, &to_json(update)) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        console_log(&format!("calling update callback failed: {:?}", e));
-                        return;
-                    }
-                };
-        });
+        let init_key = peek_init_key(&json_config)?;
 
-        if VEILID_API.borrow().is_some() {
-            return Err(veilid_core::VeilidAPIError::AlreadyInitialized);
+        // held across the startup await, the FFI shim's api lock does the same: two callers racing
+        // a fresh start would otherwise both reach api_startup_json and the loser would take core's
+        // AlreadyInitialized for a config that should have joined
+        let _lifecycle = LIFECYCLE_LOCK.lock().await;
+
+        // join the running node when it is the same one this config asks for
+        if let Ok(veilid_api) = get_veilid_api() {
+            if running_init_key(&veilid_api)? != init_key {
+                return Err(veilid_core::VeilidAPIError::AlreadyInitialized);
+            }
+            let sinks = {
+                let node_state = NODE_STATE.borrow();
+                let Some(node_state) = node_state.as_ref() else {
+                    return Err(veilid_core::VeilidAPIError::NotInitialized);
+                };
+                if node_state.config_json != json_config {
+                    warn!(
+                        target: "wasm",
+                        "joining a node started with a different config, this config is ignored"
+                    );
+                }
+                node_state.sinks.clone()
+            };
+            sinks.retire_other_generations(&generation);
+            sinks.register(caller_id, generation, update_callback_js);
+            return VeilidAPIResult::Ok(());
         }
 
-        let veilid_api = veilid_core::api_startup_json(update_callback, json_config).await?;
+        let sinks = Arc::new(DartUpdateSinkSet::new());
+        sinks.register(caller_id.clone(), generation, update_callback_js);
+
+        let veilid_api = match veilid_core::api_startup_json(
+            update_callback(sinks.clone()),
+            json_config.clone(),
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                sinks.retire(&caller_id);
+                return Err(e);
+            }
+        };
         VEILID_API.replace(Some(veilid_api));
+        NODE_STATE.replace(Some(NodeState {
+            sinks,
+            config_json: json_config,
+        }));
+
         VeilidAPIResult::Ok(())
     })
+}
+
+/// Drop a caller's update sink without closing its stream, for a Dart consumer that cancelled.
+#[wasm_bindgen()]
+pub fn deregister_update_sink(caller_id: String) {
+    let sinks = {
+        let node_state = NODE_STATE.borrow();
+        let Some(node_state) = node_state.as_ref() else {
+            return;
+        };
+        node_state.sinks.clone()
+    };
+    sinks.deregister(&caller_id);
 }
 
 #[wasm_bindgen()]
@@ -258,7 +369,13 @@ pub fn is_shutdown() -> VeilidAPIResult<bool> {
 pub fn attach() -> Promise {
     wrap_api_future_void(async move {
         let veilid_api = get_veilid_api()?;
-        veilid_api.attach().await?;
+        // every caller sharing the node attaches it, so core's "already attached" Generic
+        // (its only error here other than NotInitialized) is this caller's success
+        if let Err(e) = veilid_api.attach().await {
+            if !matches!(e, veilid_core::VeilidAPIError::Generic { .. }) {
+                return Err(e);
+            }
+        }
         VeilidAPIResult::Ok(())
     })
 }
@@ -267,16 +384,58 @@ pub fn attach() -> Promise {
 pub fn detach() -> Promise {
     wrap_api_future_void(async move {
         let veilid_api = get_veilid_api()?;
-        veilid_api.detach().await?;
+        // symmetric with attach: "already detached" is another caller's doing, not an error
+        if let Err(e) = veilid_api.detach().await {
+            if !matches!(e, veilid_core::VeilidAPIError::Generic { .. }) {
+                return Err(e);
+            }
+        }
         VeilidAPIResult::Ok(())
     })
 }
 
+/// Release `caller_id`'s reference on the running node, tearing it down at zero.
 #[wasm_bindgen()]
-pub fn shutdown_veilid_core() -> Promise {
+pub fn shutdown_veilid_core(caller_id: String, generation: String) -> Promise {
     wrap_api_future_void(async move {
+        let _lifecycle = LIFECYCLE_LOCK.lock().await;
+
+        let sinks = {
+            let node_state = NODE_STATE.borrow();
+            let Some(node_state) = node_state.as_ref() else {
+                return Err(veilid_core::VeilidAPIError::NotInitialized);
+            };
+            node_state.sinks.clone()
+        };
+
+        // the web stand-in for the FFI dead-port reap: a sink from an earlier Dart program cannot
+        // be probed, and a detached node can go arbitrarily long without an update to reap it on
+        sinks.retire_other_generations(&generation);
+
+        // a caller with no registered sink holds no reference
+        if !sinks.contains(&caller_id) {
+            return VeilidAPIResult::Ok(());
+        }
+
+        if sinks.len() > 1 {
+            sinks.retire(&caller_id);
+            return VeilidAPIResult::Ok(());
+        }
+
+        // both globals are cleared before the await: the lifecycle lock keeps startup out, but
+        // every other export runs unlocked and must see a node on its way down as NotInitialized
         let veilid_api = take_veilid_api()?;
+        let retired_state = (**NODE_STATE).take();
+
+        // the last reference stays registered through termination so its consumer sees the
+        // updates core emits on the way down
         veilid_api.shutdown().await;
+
+        // unconditional: a teardown that emits no Shutdown update would park every consumer
+        // in `await for` forever
+        sinks.close_all();
+        drop(retired_state);
+
         VeilidAPIResult::Ok(())
     })
 }
@@ -2140,6 +2299,12 @@ pub fn veilid_version() -> JsValue {
         patch,
     };
     <JsValue as JsValueSerdeExt>::from_serde(&vv).unwrap_or_log()
+}
+
+#[wasm_bindgen()]
+#[must_use]
+pub fn veilid_features() -> JsValue {
+    to_json(veilid_core::veilid_features())
 }
 
 #[wasm_bindgen()]
