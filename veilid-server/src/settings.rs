@@ -2009,6 +2009,11 @@ pub fn subnode_namespace(subnode_index: u16) -> String {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "test support: printing and raw clocks are the thing under test"
+)]
 mod tests {
     use super::*;
 

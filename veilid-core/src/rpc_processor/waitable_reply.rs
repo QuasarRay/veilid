@@ -111,7 +111,9 @@ impl<T> RpcOutcome<T> {
     pub(crate) fn into_network_result(self) -> NetworkResult<T> {
         match self {
             RpcOutcome::Sent(v) => NetworkResult::Value(*v),
+            // PANIC-CENSUS: provably-dead the Failed arm carries no value to map
             RpcOutcome::Failed(sdr) => sdr.into_network_result().map(|_| unreachable!()),
+            // PANIC-CENSUS: provably-dead the NotSent arm carries no value to map
             RpcOutcome::NotSent(nr) => nr.map(|_| unreachable!()),
         }
     }

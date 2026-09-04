@@ -193,8 +193,10 @@ fn failed(msg: &str) -> ! {
     error!("{}", msg);
 
     #[cfg(feature = "panic-quiet")]
+    // PANIC-CENSUS: api-shape LogUnwrap returns ! so callers can return T
     panic!();
     #[cfg(not(feature = "panic-quiet"))]
+    // PANIC-CENSUS: api-shape LogUnwrap returns ! so callers can return T
     panic!("{}", msg)
 }
 
@@ -229,8 +231,10 @@ fn failed_with(msg: &str, value: &dyn fmt::Debug) -> ! {
     error!("{}: {:?}", msg, &value);
 
     #[cfg(feature = "panic-quiet")]
+    // PANIC-CENSUS: api-shape LogUnwrap returns ! so callers can return T
     panic!();
     #[cfg(not(feature = "panic-quiet"))]
+    // PANIC-CENSUS: api-shape LogUnwrap returns ! so callers can return T
     panic!("{}: {:?}", msg, value);
 }
 

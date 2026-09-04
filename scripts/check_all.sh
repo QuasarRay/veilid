@@ -116,6 +116,46 @@ if [ "$IGNORE_PATTERNS_BEFORE" != "$IGNORE_PATTERNS_AFTER" ]; then
     echo "NOTE: $IGNORE_PATTERNS was regenerated and needs committing."
 fi
 
+# CI assembles its container from an explicit Earthfile allowlist, so a root-level config
+# that is not listed there is absent in CI while every local run still finds it.
+echo "Checking Earthfile source coverage..."
+if ! python3 - <<'PY'
+import re, subprocess, sys
+
+tracked = subprocess.run(
+    ["git", "ls-files", "--full-name", "."], capture_output=True, text=True, check=True
+).stdout.split()
+# Documentation and the CI/release definitions themselves are not build inputs
+skip = re.compile(r"\.md$|^LICENSE$|^\.|^Earthfile$|^dagger\.json$|^version_bump\.sh$")
+want = {f for f in tracked if "/" not in f and not skip.search(f)}
+
+targets = ("code-linux", "code-flutter", "code-android")
+copied, current = {}, None
+for line in open("Earthfile", encoding="utf-8"):
+    m = re.match(r"^([A-Za-z0-9_.-]+):\s*$", line)
+    if m:
+        current = m.group(1)
+    elif current in targets and "COPY" in line and "Cargo.toml" in line:
+        copied.setdefault(current, set()).update(line.split())
+
+rc = 0
+for t in targets:
+    missing = sorted(want - copied.get(t, set()))
+    if missing:
+        rc = 1
+        print(f"Earthfile target {t} does not copy: {' '.join(missing)}", file=sys.stderr)
+sys.exit(rc)
+PY
+then
+    fail "the CI container is missing a root-level build config. Add the files above to that target's COPY line in the Earthfile, or exclude them in check_all.sh if CI does not need them."
+fi
+
+# Source-only and sub-second, so it runs with the format check rather than with the
+# compiling steps. Self-test first, so a broken gate reports itself rather than passing.
+echo "Performing census check..."
+step ./scripts/test_census.sh
+step env CENSUS_CHECK_ONLY=1 ./scripts/update_census.sh
+
 echo "Running all tests..."
 
 # cargo-public-api (nightly rustdoc) and cargo-msrv (per-crate rust-version) select their own

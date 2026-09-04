@@ -1,3 +1,10 @@
+// Test support code, not production code: a test that wants to observe a lock being
+// contended has to actually block, and one that checks the wall clock has to read it.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "test support: blocking sleeps and raw wall-clock reads are the thing under test"
+)]
+
 #[cfg(all(target_os = "android", feature = "veilid_tools_android_tests"))]
 mod android;
 pub mod common;

@@ -85,6 +85,10 @@ impl VeilidComponentRegistryAccessor for OutboundTransactionState {
 }
 
 impl Drop for OutboundTransactionState {
+    #[expect(
+        clippy::disallowed_macros,
+        reason = "no registry means no log_key, so veilid_log! cannot be reached from here"
+    )]
     fn drop(&mut self) {
         if self.opt_registry.is_none() {
             eprintln!("BUG: OutboundTransactionState dropped without registry");

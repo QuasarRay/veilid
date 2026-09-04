@@ -352,6 +352,7 @@ impl DialInfo {
             (DialInfo::WSS(a), DialInfo::WSS(b)) => a.cmp(b),
             _ => {
                 #[cfg(debug_assertions)]
+                // PANIC-CENSUS: debug-only release logs and orders anyway
                 unreachable!("mismatched DialInfo variants after equal protocol_type");
                 #[cfg(not(debug_assertions))]
                 {

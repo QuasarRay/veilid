@@ -86,6 +86,12 @@ cfg_if! {
     } else {
 
         /// Spawn a named future on the async runtime, returning a join handle that must be awaited or detached.
+        // allow, not expect: which cfg_if branch compiles depends on feature unification
+        // across the workspace, so whether the lint fires here is not fixed.
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "this IS the named-spawn wrapper the lint points callers at"
+        )]
         pub fn spawn<Out>(name: &str, future: impl Future<Output = Out> + Send + 'static) -> MustJoinHandle<Out>
         where
             Out: Send + 'static,
@@ -120,6 +126,12 @@ cfg_if! {
         }
 
         /// Spawn a named future and let it run unattended, with no join handle.
+        // allow, not expect: which cfg_if branch compiles depends on feature unification
+        // across the workspace, so whether the lint fires here is not fixed.
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "this IS the named-spawn wrapper the lint points callers at"
+        )]
         pub fn spawn_detached<Out>(name: &str, future: impl Future<Output = Out> + Send + 'static)
         where
             Out: Send + 'static,

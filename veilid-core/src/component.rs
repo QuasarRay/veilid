@@ -335,7 +335,13 @@ impl VeilidComponentRegistry {
         // Remoave all registered component log facilities from VeilidLayerFilter for this log key
         if let Err(e) = VeilidLayerFilter::terminate_veilid_component_log_facilities(self.log_key())
         {
-            eprintln!("Error terminating log facilities: {}", e);
+            #[expect(
+                clippy::disallowed_macros,
+                reason = "the log facilities are what failed, so nothing is left to log through"
+            )]
+            {
+                eprintln!("Error terminating log facilities: {}", e);
+            }
         }
 
         *_init_guard = false;

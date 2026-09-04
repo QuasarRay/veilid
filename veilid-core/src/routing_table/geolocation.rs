@@ -57,6 +57,11 @@ pub fn query_country_code(addr: IpAddr) -> Option<CountryCode> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "test support: printing and raw clocks are the thing under test"
+)]
 mod tests {
     use crate::CountryCode;
     use core::str::FromStr;

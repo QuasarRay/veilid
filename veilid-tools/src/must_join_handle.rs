@@ -77,6 +77,7 @@ impl<T> Drop for MustJoinHandle<T> {
         // panic if we haven't completed
         if !self.completed {
             #[cfg(debug_assertions)]
+            // PANIC-CENSUS: debug-only release logs the missed completion
             panic!("MustJoinHandle was not completed upon drop. Add cooperative cancellation where appropriate to ensure this is completed before drop.");
             #[cfg(not(debug_assertions))]
             error!("MustJoinHandle was not completed upon drop. Add cooperative cancellation where appropriate to ensure this is completed before drop.");
@@ -92,6 +93,7 @@ impl<T: 'static> Future for MustJoinHandle<T> {
             Poll::Ready(t) => {
                 if self.completed {
                     #[cfg(debug_assertions)]
+                    // PANIC-CENSUS: debug-only release logs the extra poll
                     panic!("should not poll completed join handle");
                     #[cfg(not(debug_assertions))]
                     error!("should not poll completed join handle");

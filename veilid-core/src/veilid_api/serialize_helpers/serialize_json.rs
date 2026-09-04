@@ -133,6 +133,7 @@ pub fn serialize_json<T: Serialize + Debug>(val: T) -> String {
     match serde_json::to_string(&val) {
         Ok(v) => v,
         Err(e) => {
+            // PANIC-CENSUS: infallible serde cannot fail for these derive types
             panic!("failed to serialize json value: {}\nval={:?}", e, val);
         }
     }
@@ -149,6 +150,7 @@ pub fn serialize_json_pretty<T: Serialize + Debug>(val: T) -> String {
     match serde_json::to_string_pretty(&val) {
         Ok(v) => v,
         Err(e) => {
+            // PANIC-CENSUS: infallible serde cannot fail for these derive types
             panic!(
                 "failed to serialize pretty json value: {}\nval={:?}",
                 e, val
@@ -168,6 +170,7 @@ pub fn serialize_json_bytes<T: Serialize + Debug>(val: T) -> Vec<u8> {
     match serde_json::to_vec(&val) {
         Ok(v) => v,
         Err(e) => {
+            // PANIC-CENSUS: infallible serde cannot fail for these derive types
             panic!(
                 "failed to serialize json value to bytes: {}\nval={:?}",
                 e, val

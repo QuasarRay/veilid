@@ -7,6 +7,11 @@ pub use table_db::*;
 
 #[cfg(any(test, feature = "test-util"))]
 #[doc(hidden)]
+#[allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "test support: printing and raw clocks are the thing under test"
+)]
 pub mod tests_table_store;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]

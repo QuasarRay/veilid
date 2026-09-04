@@ -1557,6 +1557,7 @@ impl Drop for BucketEntry {
             }
 
             #[cfg(debug_assertions)]
+            // PANIC-CENSUS: debug-only release logs the leak
             panic!(
                 "bucket entry dropped with non-zero refcount: {:#?}",
                 *self.inner.read()

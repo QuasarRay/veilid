@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_macros,
+    reason = "an example: printing to the console is what it demonstrates"
+)]
+
 use clap::Parser;
 use std::{future::Future, io::Write as _, sync::Arc};
 use veilid_core::*;

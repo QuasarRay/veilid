@@ -472,6 +472,7 @@ impl PlatformNetwork for NativeNetwork {
                                     &stats_dial_info,
                                     TransportSendOutcome::from_network_result(&nr),
                                 );
+                                // PANIC-CENSUS: provably-dead the non-Value arm carries no value to map
                                 return Ok(nr.map(|_| unreachable!()));
                             }
                         };

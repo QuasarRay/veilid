@@ -1,3 +1,6 @@
+// A schema-emitting utility: writing the schema to stdout is the whole program.
+#![expect(clippy::disallowed_macros, reason = "stdout is this utility's output")]
+
 use std::collections::HashMap;
 use std::process::ExitCode;
 

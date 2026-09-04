@@ -1457,6 +1457,7 @@ impl VeilidAPI {
                             out += &format!("reverting in {:#}\n", TimestampDuration::new(dur_us));
                         }
                     }
+                    // PANIC-CENSUS: provably-dead the command word was matched above
                     _ => unreachable!(),
                 }
                 let now_disabled = transport_stats.disabled_transports();
@@ -3267,51 +3268,62 @@ impl VeilidAPI {
         match arg {
             "panic" => {
                 if rest.is_empty() {
+                    // PANIC-CENSUS: crash-test debug_die panic with no message
                     panic!();
                 } else {
+                    // PANIC-CENSUS: crash-test debug_die panic with a message
                     panic!("{}", rest);
                 }
             }
             "unwrap" => {
                 #[expect(clippy::unnecessary_literal_unwrap)]
                 Option::<()>::None.unwrap();
+                // PANIC-CENSUS: crash-test proves unwrap on None panics
                 unreachable!("unwrap must panic");
             }
             "unwrap_or_log" => {
                 Option::<()>::None.unwrap_or_log();
+                // PANIC-CENSUS: crash-test proves unwrap_or_log panics
                 unreachable!("unwrap_or_log must panic");
             }
             "expect" => {
                 #[expect(clippy::unnecessary_literal_unwrap)]
                 Option::<()>::None.expect(&rest);
+                // PANIC-CENSUS: crash-test proves expect panics
                 unreachable!("expect must panic");
             }
             "expect_or_log" => {
                 Option::<()>::None.expect_or_log(&rest);
+                // PANIC-CENSUS: crash-test proves expect_or_log panics
                 unreachable!("expect_or_log must panic");
             }
             "div0" => {
                 let x = 0u32;
                 let y = x / 0u32;
+                // PANIC-CENSUS: crash-test proves divide by zero panics
                 unreachable!("divide by zero must panic: {}", y);
             }
             "overflow" => {
                 let x = u32::MAX;
                 let y = x + 1;
+                // PANIC-CENSUS: crash-test proves integer overflow panics
                 unreachable!("integer overflow must panic: {}", y);
             }
             "oob" => {
                 let x = &[3];
                 #[expect(clippy::out_of_bounds_indexing)]
                 let y = x[1];
+                // PANIC-CENSUS: crash-test proves an out of bounds index panics
                 unreachable!("array out of bounds must panic: {}", y);
             }
             "nullptr" => {
                 let x: *const i32 = std::ptr::null();
                 let y = unsafe { *x };
+                // PANIC-CENSUS: crash-test proves a null deref panics
                 unreachable!("array out of bounds must panic: {}", y);
             }
             "unreachable" => {
+                // PANIC-CENSUS: crash-test calls unreachable directly
                 unreachable!("direct call of unreachable macro");
             }
             _ => {

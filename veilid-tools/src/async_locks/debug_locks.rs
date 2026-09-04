@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_macros,
+    reason = "reports a deadlock; the log stack takes locks"
+)]
+
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex as StdMutex;

@@ -173,7 +173,13 @@ impl StartupLock {
                                 b
                             })
                             .collect();
-                        eprintln!("active guards: {active:#?}");
+                        #[allow(
+                            clippy::disallowed_macros,
+                            reason = "reports a deadlock; the log stack takes locks"
+                        )]
+                        {
+                            eprintln!("active guards: {active:#?}");
+                        }
                         panic!("shutdown deadlock");
                     }
                 };

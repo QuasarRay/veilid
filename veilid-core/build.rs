@@ -1,3 +1,13 @@
+#![expect(
+    clippy::disallowed_macros,
+    reason = "a build script: cargo:rustc-link-lib and friends are its protocol"
+)]
+// allow, not expect: only the geolocation feature reads the wall clock
+#![allow(
+    clippy::disallowed_methods,
+    reason = "compares file mtimes against the wall clock, not node time"
+)]
+
 use glob::glob;
 use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;

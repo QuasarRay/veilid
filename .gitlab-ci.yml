@@ -183,6 +183,11 @@ test_msrv_all:
   variables:
     earthly_target: test-msrv-all
 
+test_census:
+  extends: .unit_test
+  variables:
+    earthly_target: test-census
+
 # test_check_wasm_builds_dart:
 #   extends: .unit_test
 #   variables:

@@ -1,4 +1,10 @@
 #![recursion_limit = "256"]
+#![expect(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "a client of veilid-core rather than part of it, so it has no log facility: \
+              the console is this binary's output, and it times its own connection states"
+)]
 
 use crate::{tools::*, ui::*};
 

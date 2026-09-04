@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_macros,
+    reason = "an example: printing to the console is what it demonstrates"
+)]
+
 use std::sync::Arc;
 use veilid_core::VeilidUpdate::{AppMessage, Network};
 use veilid_core::{

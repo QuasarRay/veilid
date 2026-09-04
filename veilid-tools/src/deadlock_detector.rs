@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_macros,
+    reason = "reports a deadlock; the log stack takes locks"
+)]
+
 //! parking_lot deadlock-detector watchdog.
 //!
 //! Available only under the `debug-locks` feature, which also turns on

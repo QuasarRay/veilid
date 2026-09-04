@@ -79,6 +79,7 @@ source "$SCRIPTDIR/_flutter_install.sh"   # i_flutter / flutter_ver (optional --
 REQ_RUST=$RUST_MSRV;            REQ_JAVA=$JAVA_MIN_VERSION;   REQ_CAPNP=$CAPNP_MIN_VERSION
 REQ_CMAKE=$CMAKE_MIN_VERSION;   REQ_WASMOPT=$BINARYEN_VERSION
 REQ_WASMBINDGEN=$WASM_BINDGEN_VERSION; REQ_CARGOEDIT=$CARGO_EDIT_VERSION; REQ_NDK=$ANDROID_NDK_VERSION
+REQ_ASTGREP=$AST_GREP_VERSION
 # android rust targets, derived from the single-source RUST_STABLE_TARGETS (no duplicated list)
 RUST_ANDROID_TARGETS=""; for _t in $RUST_STABLE_TARGETS; do case "$_t" in *android*) RUST_ANDROID_TARGETS="$RUST_ANDROID_TARGETS $_t" ;; esac; done
 
@@ -122,6 +123,7 @@ i_wbg()   { cargo install --locked wasm-bindgen-cli --version "$REQ_WASMBINDGEN"
 i_cedit() { cargo install --locked cargo-edit --version "$REQ_CARGOEDIT"; }
 i_nxt()   { cargo install --locked cargo-nextest; }
 i_papi()  { cargo install --locked cargo-public-api; }
+i_sg()    { cargo install --locked ast-grep --version "$REQ_ASTGREP"; }
 crate_ver() { cargo install --list 2>/dev/null | sed -n "s/^$1 v\([0-9.]*\):.*/\1/p" | head -1; }
 
 echo "== veilid Linux dev dependencies ($PKG) =="
@@ -143,6 +145,7 @@ if [ "$BUILDONLY" != 1 ]; then
     dep_exact "cargo-edit"          "$(crate_ver cargo-edit)"          "$REQ_CARGOEDIT"   1 i_cedit
     dep_have  "cargo-nextest"       "$(crate_ver cargo-nextest)"       "cargo install --locked cargo-nextest"    i_nxt
     dep_have  "cargo-public-api"    "$(crate_ver cargo-public-api)"    "cargo install --locked cargo-public-api" i_papi
+    dep_exact "ast-grep"            "$(crate_ver ast-grep)"            "$REQ_ASTGREP"   1 i_sg
 fi
 
 # Native build tools + libraries.

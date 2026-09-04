@@ -649,7 +649,8 @@ impl OnlineDetector {
             let mut do_wipe = false;
             if let Some(new_state) = opt_new_state {
                 match new_state {
-                    // The stored machine is two-state; Degraded is the derived overlay
+                    // PANIC-CENSUS: provably-dead the stored machine is two-state; Degraded
+                    // is the derived overlay and is never stored
                     OnlineState::Degraded => unreachable!(),
                     OnlineState::Offline => {
                         pd.offline_started_ts = Some(now);

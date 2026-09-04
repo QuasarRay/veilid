@@ -478,6 +478,10 @@ pub struct DebugGuard {
     counter: &'static AtomicUsize,
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "a hand-debugging aid that deliberately bypasses the log stack"
+)]
 impl DebugGuard {
     /// Increment `counter`, print the entry count, and return a guard that prints the exit count when dropped.
     pub fn new(name: &'static str, counter: &'static AtomicUsize) -> Self {
@@ -487,6 +491,10 @@ impl DebugGuard {
     }
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "a hand-debugging aid that deliberately bypasses the log stack"
+)]
 impl Drop for DebugGuard {
     fn drop(&mut self) {
         let c = self.counter.fetch_sub(1, Ordering::SeqCst);

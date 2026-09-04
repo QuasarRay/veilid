@@ -1,3 +1,8 @@
+// allow, not expect: the prints live in the native cfg_if branch and are absent from wasm
+#![allow(
+    clippy::disallowed_macros,
+    reason = "FFI boundary reporting, outside any attached logger"
+)]
 #![recursion_limit = "256"]
 
 cfg_if::cfg_if! {

@@ -36,6 +36,11 @@ mod waitable_reply;
 
 #[cfg(any(test, feature = "test-util"))]
 #[doc(hidden)]
+#[allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "test support: printing and raw clocks are the thing under test"
+)]
 pub mod tests_rpc_processor;
 
 pub use coders::encode_nonce as capnp_encode_nonce;

@@ -65,6 +65,10 @@ fn get_interface_name(index: u32) -> io::Result<String> {
     Ok(ifname_str.to_owned())
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "turns the OS's remaining address lifetime into an absolute epoch expiry"
+)]
 fn flags_to_address_flags(flags: u32, opt_cache_info: Option<&CacheInfo>) -> AddressFlags {
     // CacheInfo.ifa_valid is the remaining valid lifetime in seconds; u32::MAX means infinite
     let expiration_secs = opt_cache_info.and_then(|ci| {

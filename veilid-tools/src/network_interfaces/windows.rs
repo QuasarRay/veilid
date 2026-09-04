@@ -44,6 +44,10 @@ impl PlatformSupportWindows {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "turns the OS's remaining address lifetime into an absolute epoch expiry"
+    )]
     fn get_address_flags(addr: *const IP_ADAPTER_UNICAST_ADDRESS) -> AddressFlags {
         let ds = unsafe { (*addr).DadState };
         let po = unsafe { (*addr).PrefixOrigin };

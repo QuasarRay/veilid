@@ -64,6 +64,10 @@ cfg_if! {
 
         /// Current wall-clock time as microseconds since the Unix epoch.
         #[must_use]
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "this is the wall clock Timestamp::now is built on"
+        )]
         pub fn get_raw_timestamp() -> u64 {
             match SystemTime::now().duration_since(UNIX_EPOCH) {
                 Ok(n) => n.as_micros() as u64,

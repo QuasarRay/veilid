@@ -30,6 +30,11 @@ fn is_reserved_key(key: &str) -> bool {
 
 #[cfg(any(test, feature = "test-util"))]
 #[doc(hidden)]
+#[allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "test support: printing and raw clocks are the thing under test"
+)]
 pub mod tests_protected_store;
 
 impl_veilid_log_facility!("pstore");

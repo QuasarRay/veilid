@@ -25,6 +25,7 @@ ARG --global BINARYEN_VERSION=$(. /etc/veilid-versions.env && echo $BINARYEN_VER
 ARG --global RUST_VERSION=$(. /etc/veilid-versions.env && echo $RUST_VERSION)
 ARG --global RUST_UNIT_TESTS_NIGHTLY_VERSION=$(. /etc/veilid-versions.env && echo $RUST_UNIT_TESTS_NIGHTLY_VERSION)
 ARG --global RUST_PACKAGE_TESTS_NIGHTLY_VERSION=$(. /etc/veilid-versions.env && echo $RUST_PACKAGE_TESTS_NIGHTLY_VERSION)
+ARG --global AST_GREP_VERSION=$(. /etc/veilid-versions.env && echo $AST_GREP_VERSION)
 ARG --global NDK_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_NDK_VERSION)
 ARG --global ANDROID_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_PLATFORM_VERSION)
 ARG --global ANDROID_BUILD_TOOLS_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_BUILD_TOOLS_VERSION)
@@ -137,6 +138,10 @@ deps-rust:
     # Public API checking tool
     RUN cargo binstall cargo-public-api --disable-strategies=compile --targets $DEFAULT_CARGO_MUSL_TARGET || \
         cargo install cargo-public-api --locked
+    # Census gate engine. Built from source deliberately: ast-grep ships no musl artifact and
+    # its linux-gnu release targets a newer glibc than this base image, so binstall would
+    # fetch a binary that cannot run here.
+    RUN cargo install ast-grep --locked --version $AST_GREP_VERSION
     # Install Linux cross-platform tooling (no binstall available for zigbuild yet)
     RUN curl --retry $RETRY_COUNT --retry-connrefused -L -O https://ziglang.org/download/$ZIG_VERSION/zig-linux-$(arch)-$ZIG_VERSION.tar.xz
     RUN tar -C /usr/local -xJf zig-linux-$(arch)-$ZIG_VERSION.tar.xz
@@ -217,7 +222,7 @@ deps-flutter:
 # Code + Flutter deps
 code-flutter:
     FROM +deps-flutter
-    COPY --keep-ts --dir .cargo .dagger dev-setup scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
+    COPY --keep-ts --dir .cargo .dagger dev-setup scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml clippy.toml sgconfig.yml /veilid
     WORKDIR /veilid
 
 # Make a cache image with downloaded and built dependencies
@@ -265,7 +270,7 @@ code-linux:
         RUN echo "Using cache from registry: $CI_REGISTRY_IMAGE/$CACHE_NAME:$CACHE_TAG"
         FROM $CI_REGISTRY_IMAGE/$CACHE_NAME:$CACHE_TAG
     END
-    COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
+    COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml clippy.toml sgconfig.yml /veilid
     # Check to make sure Cargo.lock is up to date
     RUN cargo update -w --locked
     # Restore original Cargo.lock
@@ -278,7 +283,7 @@ code-linux:
 # Code + Linux + Android deps
 code-android:
     FROM +deps-android
-    COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml /veilid
+    COPY --keep-ts --dir .cargo scripts veilid-cli veilid-core veilid-server veilid-tools veilid-flutter veilid-wasm veilid-remote-api Cargo.lock Cargo.toml clippy.toml sgconfig.yml /veilid
     COPY --keep-ts scripts/earthly/cargo-android/config.toml /veilid/.cargo/config.toml
 
 # Lints only
@@ -300,6 +305,12 @@ smoketest:
 public-api:
     FROM +code-linux
     RUN ./scripts/_check_public_api.sh        
+
+# Census gate only
+census:
+    FROM +code-linux
+    RUN ./scripts/test_census.sh
+    RUN CENSUS_CHECK_ONLY=1 ./scripts/update_census.sh
 
 # Build
 build-linux-amd64:
@@ -367,6 +378,11 @@ test-smoketest-all:
 test-public-api:
     FROM +code-linux
     RUN ./scripts/_check_public_api.sh
+
+test-census:
+    FROM +code-linux
+    RUN ./scripts/test_census.sh
+    RUN CENSUS_CHECK_ONLY=1 ./scripts/update_census.sh
 test-check-wasm-builds-dart:
     FROM +code-linux
     RUN ./scripts/_check_wasm_builds.sh dart

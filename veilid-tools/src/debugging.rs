@@ -75,6 +75,10 @@ pub fn debugger_state() -> DebuggerState {
 }
 
 /// Block until a debugger attaches, or until the optional timeout elapses.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "runs before and outside the async runtime, so it has no Timestamp and nothing to yield to"
+)]
 pub fn wait_until_debugger_attached<T: Into<Option<Duration>>>(
     timeout: T,
 ) -> Result<(), &'static str> {

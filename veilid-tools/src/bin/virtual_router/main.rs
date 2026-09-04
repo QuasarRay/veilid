@@ -1,3 +1,7 @@
+#![allow(
+    clippy::disallowed_macros,
+    reason = "a binary: the console is its output"
+)]
 #![cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 
 use cfg_if::*;

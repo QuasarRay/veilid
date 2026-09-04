@@ -177,7 +177,13 @@ cfg_if! {
                 let _ = writeln!(r, "===== end TrackedMutex deadlock report =====\n");
                 // Belt-and-suspenders: native stderr may not be captured by the test
                 // harness, so also drop the report to a well-known file.
-                eprintln!("{r}");
+                #[allow(
+                    clippy::disallowed_macros,
+                    reason = "reports a deadlock; the log stack takes locks"
+                )]
+                {
+                    eprintln!("{r}");
+                }
                 // Native stderr isn't always captured by the harness (e.g. flutter test),
                 // so also drop the report to a well-known file where a filesystem exists.
                 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
