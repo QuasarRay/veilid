@@ -66,13 +66,17 @@ String wrapWithLogColor(LogLevel? level, String text) {
 void setRootLogLevel(LogLevel? level) {
   Loggy('').level = getLogOptions(level);
   Veilid.instance.changeLogLevel(
-      'all', '#enabled=${convertToVeilidConfigLogLevel(level).name}');
+    'all',
+    '#enabled=${convertToVeilidConfigLogLevel(level).name}',
+  );
 }
 
 extension PrettyPrintLogRecord on LogRecord {
   String pretty() {
-    final lstr =
-        wrapWithLogColor(level, '[${level.toString().substring(0, 1)}]');
+    final lstr = wrapWithLogColor(
+      level,
+      '[${level.toString().substring(0, 1)}]',
+    );
     return '$lstr $message';
   }
 }
@@ -109,10 +113,8 @@ extension TraceLoggy on Loggy {
       log(traceLevel, message, error, stackTrace);
 }
 
-LogOptions getLogOptions(LogLevel? level) => LogOptions(
-      level ?? LogLevel.all,
-      stackTraceLevel: LogLevel.error,
-    );
+LogOptions getLogOptions(LogLevel? level) =>
+    LogOptions(level ?? LogLevel.all, stackTraceLevel: LogLevel.error);
 
 void initLoggy() {
   Loggy.initLoggy(

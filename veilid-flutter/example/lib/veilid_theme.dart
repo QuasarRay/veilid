@@ -25,8 +25,10 @@ const Map<int, Color> primaryColorSwatch = {
   900: Color(0xff2b2068),
 };
 
-const MaterialColor materialPrimaryColor =
-    MaterialColor(0xff6667ab, primaryColorSwatch);
+const MaterialColor materialPrimaryColor = MaterialColor(
+  0xff6667ab,
+  primaryColorSwatch,
+);
 
 const Map<int, Color> primaryComplementaryColorSwatch = {
   50: Color(0xfffafdee),
@@ -41,8 +43,10 @@ const Map<int, Color> primaryComplementaryColorSwatch = {
   900: Color(0xff8b845c),
 };
 
-const MaterialColor materialPrimaryComplementaryColor =
-    MaterialColor(0xffabaa66, primaryComplementaryColorSwatch);
+const MaterialColor materialPrimaryComplementaryColor = MaterialColor(
+  0xffabaa66,
+  primaryComplementaryColorSwatch,
+);
 
 const Map<int, Color> primaryTriadicColorASwatch = {
   50: Color(0xfff0e4f0),
@@ -57,8 +61,10 @@ const Map<int, Color> primaryTriadicColorASwatch = {
   900: Color(0xff441168),
 };
 
-const MaterialColor materialPrimaryTriadicColorA =
-    MaterialColor(0xffaa66ab, primaryTriadicColorASwatch);
+const MaterialColor materialPrimaryTriadicColorA = MaterialColor(
+  0xffaa66ab,
+  primaryTriadicColorASwatch,
+);
 
 const Map<int, Color> primaryTriadicColorBSwatch = {
   50: Color(0xffffe3dc),
@@ -73,8 +79,10 @@ const Map<int, Color> primaryTriadicColorBSwatch = {
   900: Color(0xff551e2a),
 };
 
-const MaterialColor materialPrimaryTriadicColorB =
-    MaterialColor(0xffab6667, primaryTriadicColorBSwatch);
+const MaterialColor materialPrimaryTriadicColorB = MaterialColor(
+  0xffab6667,
+  primaryTriadicColorBSwatch,
+);
 
 const Map<int, Color> secondaryColorSwatch = {
   50: Color(0xffe3e8f7),
@@ -89,8 +97,10 @@ const Map<int, Color> secondaryColorSwatch = {
   900: Color(0xff001d7f),
 };
 
-const MaterialColor materialSecondaryColor =
-    MaterialColor(0xff87a1dd, secondaryColorSwatch);
+const MaterialColor materialSecondaryColor = MaterialColor(
+  0xff87a1dd,
+  secondaryColorSwatch,
+);
 
 const Map<int, Color> secondaryComplementaryColorSwatch = {
   50: Color(0xfff6f1e2),
@@ -105,8 +115,10 @@ const Map<int, Color> secondaryComplementaryColorSwatch = {
   900: Color(0xffb15000),
 };
 
-const MaterialColor materialSecondaryComplementaryColor =
-    MaterialColor(0xffddc387, secondaryComplementaryColorSwatch);
+const MaterialColor materialSecondaryComplementaryColor = MaterialColor(
+  0xffddc387,
+  secondaryComplementaryColorSwatch,
+);
 
 const Map<int, Color> backgroundColorSwatch = {
   50: Color(0xffe3e5eb),
@@ -121,8 +133,10 @@ const Map<int, Color> backgroundColorSwatch = {
   900: Color(0xff0b0b2f), // Base (#0b0b2f)
 };
 
-const MaterialColor materialBackgroundColor =
-    MaterialColor(0xff0b0b2f, backgroundColorSwatch);
+const MaterialColor materialBackgroundColor = MaterialColor(
+  0xff0b0b2f,
+  backgroundColorSwatch,
+);
 
 const Map<int, Color> backgroundComplementaryColorSwatch = {
   50: Color(0xfffffed2),
@@ -137,8 +151,10 @@ const Map<int, Color> backgroundComplementaryColorSwatch = {
   900: Color(0xff2f2f0b), // Base (#2f2f0b)
 };
 
-const MaterialColor materialBackgroundComplementaryColor =
-    MaterialColor(0xff2f2f0b, backgroundComplementaryColorSwatch);
+const MaterialColor materialBackgroundComplementaryColor = MaterialColor(
+  0xff2f2f0b,
+  backgroundComplementaryColorSwatch,
+);
 
 const Map<int, Color> desaturatedColorSwatch = {
   50: Color(0xfff7fbff),
@@ -153,8 +169,10 @@ const Map<int, Color> desaturatedColorSwatch = {
   900: Color(0xff242830),
 };
 
-const MaterialColor materialDesaturatedColor =
-    MaterialColor(0xffc1c5d0, desaturatedColorSwatch);
+const MaterialColor materialDesaturatedColor = MaterialColor(
+  0xffc1c5d0,
+  desaturatedColorSwatch,
+);
 
 const Map<int, Color> desaturatedComplementaryColorSwatch = {
   50: Color(0xffecebe5),
@@ -169,8 +187,10 @@ const Map<int, Color> desaturatedComplementaryColorSwatch = {
   900: Color(0xff312715),
 };
 
-const MaterialColor materialDesaturatedComplementaryColor =
-    MaterialColor(0xffd0ccc1, desaturatedComplementaryColorSwatch);
+const MaterialColor materialDesaturatedComplementaryColor = MaterialColor(
+  0xffd0ccc1,
+  desaturatedComplementaryColorSwatch,
+);
 
 const Map<int, Color> auxiliaryColorSwatch = {
   50: Color(0xffe7e4da), // Base (#e7e4da)
@@ -185,8 +205,10 @@ const Map<int, Color> auxiliaryColorSwatch = {
   900: Color(0xff160000),
 };
 
-const MaterialColor materialAuxiliaryColor =
-    MaterialColor(0xffe7e4da, auxiliaryColorSwatch);
+const MaterialColor materialAuxiliaryColor = MaterialColor(
+  0xffe7e4da,
+  auxiliaryColorSwatch,
+);
 
 const Map<int, Color> auxiliaryComplementaryColorSwatch = {
   50: Color(0xffdadde7), // Base (#dadde7)
@@ -201,8 +223,10 @@ const Map<int, Color> auxiliaryComplementaryColorSwatch = {
   900: Color(0xff00004f),
 };
 
-const MaterialColor materialAuxiliaryComplementaryColor =
-    MaterialColor(0xffdadde7, auxiliaryComplementaryColorSwatch);
+const MaterialColor materialAuxiliaryComplementaryColor = MaterialColor(
+  0xffdadde7,
+  auxiliaryComplementaryColorSwatch,
+);
 
 const Map<int, Color> popColorSwatch = {
   50: Color(0xfffee5f5),
@@ -217,8 +241,10 @@ const Map<int, Color> popColorSwatch = {
   900: Color(0xff8e0097),
 };
 
-const MaterialColor materialPopColor =
-    MaterialColor(0xfff259c9, popColorSwatch);
+const MaterialColor materialPopColor = MaterialColor(
+  0xfff259c9,
+  popColorSwatch,
+);
 
 const Map<int, Color> popComplentaryColorSwatch = {
   50: Color(0xffe6fdea),
@@ -233,8 +259,10 @@ const Map<int, Color> popComplentaryColorSwatch = {
   900: Color(0xff008b05),
 };
 
-const MaterialColor materialPopComplementaryColor =
-    MaterialColor(0xff59f282, popComplentaryColorSwatch);
+const MaterialColor materialPopComplementaryColor = MaterialColor(
+  0xff59f282,
+  popComplentaryColorSwatch,
+);
 
 /////////////////////////////////////////////////////////
 // Spacing
@@ -261,36 +289,42 @@ Padding pad(Widget child) =>
 // Theme
 
 InputDecoration newInputDecoration(
-        String labelText, String? errorText, bool enabled) =>
-    InputDecoration(
-        labelText: labelText,
-        errorText: errorText,
-        filled: !enabled,
-        fillColor: materialPrimaryColor.shade300.withValues(alpha: 0.1));
+  String labelText,
+  String? errorText,
+  bool enabled,
+) => InputDecoration(
+  labelText: labelText,
+  errorText: errorText,
+  filled: !enabled,
+  fillColor: materialPrimaryColor.shade300.withValues(alpha: 0.1),
+);
 
 InputDecorationTheme newInputDecorationTheme() => InputDecorationTheme(
-    border: OutlineInputBorder(
-        borderSide: BorderSide(color: materialPrimaryColor.shade300)),
-    disabledBorder: OutlineInputBorder(
-        borderSide: BorderSide(color: materialPrimaryColor.shade600)),
-    focusedBorder: OutlineInputBorder(
-        borderSide: BorderSide(color: materialPrimaryColor.shade900)),
-    errorBorder: OutlineInputBorder(
-        borderSide: BorderSide(color: materialPopColor.shade800)),
-    focusedErrorBorder: OutlineInputBorder(
-        borderSide: BorderSide(color: materialPopColor.shade600)),
-    errorStyle: TextStyle(
-      color: materialPopColor.shade600,
-      letterSpacing: 1.1,
-    ),
-    floatingLabelStyle: TextStyle(
-      color: materialPrimaryColor.shade900,
-      letterSpacing: 1.1,
-    ));
+  border: OutlineInputBorder(
+    borderSide: BorderSide(color: materialPrimaryColor.shade300),
+  ),
+  disabledBorder: OutlineInputBorder(
+    borderSide: BorderSide(color: materialPrimaryColor.shade600),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderSide: BorderSide(color: materialPrimaryColor.shade900),
+  ),
+  errorBorder: OutlineInputBorder(
+    borderSide: BorderSide(color: materialPopColor.shade800),
+  ),
+  focusedErrorBorder: OutlineInputBorder(
+    borderSide: BorderSide(color: materialPopColor.shade600),
+  ),
+  errorStyle: TextStyle(color: materialPopColor.shade600, letterSpacing: 1.1),
+  floatingLabelStyle: TextStyle(
+    color: materialPrimaryColor.shade900,
+    letterSpacing: 1.1,
+  ),
+);
 
 ThemeData newVeilidTheme() => ThemeData(
-      primarySwatch: materialPrimaryColor,
-      secondaryHeaderColor: materialSecondaryColor,
-      visualDensity: VisualDensity.adaptivePlatformDensity,
-      inputDecorationTheme: newInputDecorationTheme(),
-    );
+  primarySwatch: materialPrimaryColor,
+  secondaryHeaderColor: materialSecondaryColor,
+  visualDensity: VisualDensity.adaptivePlatformDensity,
+  inputDecorationTheme: newInputDecorationTheme(),
+);

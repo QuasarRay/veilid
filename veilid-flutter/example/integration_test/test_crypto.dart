@@ -17,8 +17,10 @@ Future<void> testGetCryptoSystems() async {
 final invalidCryptoKind = CryptoKind.fromInt(cryptoKindNONE.toInt() + 1);
 
 Future<void> testGetCryptoSystemInvalid() async {
-  await expectLater(() => Veilid.instance.getCryptoSystem(invalidCryptoKind),
-      throwsA(isA<VeilidAPIException>()));
+  await expectLater(
+    () => Veilid.instance.getCryptoSystem(invalidCryptoKind),
+    throwsA(isA<VeilidAPIException>()),
+  );
 }
 
 Future<void> testHashAndVerifyPassword() async {
@@ -64,16 +66,20 @@ Future<void> testSignAndVerifySignatures() async {
   }
 
   // Signature match
-  final sigs =
-      await Veilid.instance.generateSignatures(utf8.encode('abc123'), kps);
+  final sigs = await Veilid.instance.generateSignatures(
+    utf8.encode('abc123'),
+    kps,
+  );
   final pks = kps.map((kp) => kp.key).toList();
   expect(
-      await Veilid.instance.verifySignatures(pks, utf8.encode('abc123'), sigs),
-      equals(pks));
+    await Veilid.instance.verifySignatures(pks, utf8.encode('abc123'), sigs),
+    equals(pks),
+  );
   // Signature mismatch
   expect(
-      await Veilid.instance.verifySignatures(pks, utf8.encode('abc1234'), sigs),
-      isNull);
+    await Veilid.instance.verifySignatures(pks, utf8.encode('abc1234'), sigs),
+    isNull,
+  );
 }
 
 Future<void> testGenerateSharedSecret() async {
@@ -85,19 +91,31 @@ Future<void> testGenerateSharedSecret() async {
     final kp3 = await cs.generateKeyPair();
 
     final ssA = await cs.generateSharedSecret(
-        kp1.key, kp2.secret, utf8.encode('abc123'));
+      kp1.key,
+      kp2.secret,
+      utf8.encode('abc123'),
+    );
     final ssB = await cs.generateSharedSecret(
-        kp2.key, kp1.secret, utf8.encode('abc123'));
+      kp2.key,
+      kp1.secret,
+      utf8.encode('abc123'),
+    );
 
     expect(ssA, equals(ssB));
 
     final ssC = await cs.generateSharedSecret(
-        kp2.key, kp1.secret, utf8.encode('abc1234'));
+      kp2.key,
+      kp1.secret,
+      utf8.encode('abc1234'),
+    );
 
     expect(ssA, isNot(equals(ssC)));
 
     final ssD = await cs.generateSharedSecret(
-        kp3.key, kp1.secret, utf8.encode('abc123'));
+      kp3.key,
+      kp1.secret,
+      utf8.encode('abc123'),
+    );
 
     expect(ssA, isNot(equals(ssD)));
   }
@@ -110,10 +128,14 @@ Future<void> testHpkeSealOpen() async {
     final kkp1 = await cs.generateKemKeyPair();
     final kkp2 = await cs.generateKemKeyPair();
     expect(kkp1, isNot(equals(kkp2)));
-    expect(kkp1.key.value.toBytes().length,
-        equals(await cs.encapsulationKeyLength()));
-    expect(kkp1.secret.value.toBytes().length,
-        equals(await cs.decapsulationKeyLength()));
+    expect(
+      kkp1.key.value.toBytes().length,
+      equals(await cs.encapsulationKeyLength()),
+    );
+    expect(
+      kkp1.secret.value.toBytes().length,
+      equals(await cs.decapsulationKeyLength()),
+    );
 
     final aad = utf8.encode('some associated data');
     final plaintext = utf8.encode('hello hpke');
@@ -123,23 +145,30 @@ Future<void> testHpkeSealOpen() async {
 
     // empty aad and empty plaintext round-trip
     final sealedEmpty = await cs.hpkeSeal(kkp1.key, Uint8List(0), Uint8List(0));
-    expect(await cs.hpkeOpen(kkp1.secret, Uint8List(0), sealedEmpty),
-        equals(Uint8List(0)));
+    expect(
+      await cs.hpkeOpen(kkp1.secret, Uint8List(0), sealedEmpty),
+      equals(Uint8List(0)),
+    );
 
     // wrong recipient
-    await expectLater(() async => cs.hpkeOpen(kkp2.secret, aad, sealed),
-        throwsA(isA<VeilidAPIException>()));
+    await expectLater(
+      () async => cs.hpkeOpen(kkp2.secret, aad, sealed),
+      throwsA(isA<VeilidAPIException>()),
+    );
 
     // mismatched aad
     await expectLater(
-        () async => cs.hpkeOpen(kkp1.secret, utf8.encode('other aad'), sealed),
-        throwsA(isA<VeilidAPIException>()));
+      () async => cs.hpkeOpen(kkp1.secret, utf8.encode('other aad'), sealed),
+      throwsA(isA<VeilidAPIException>()),
+    );
 
     // tampered blob
     final tampered = Uint8List.fromList(sealed);
     tampered[tampered.length - 1] ^= 0x80;
-    await expectLater(() async => cs.hpkeOpen(kkp1.secret, aad, tampered),
-        throwsA(isA<VeilidAPIException>()));
+    await expectLater(
+      () async => cs.hpkeOpen(kkp1.secret, aad, tampered),
+      throwsA(isA<VeilidAPIException>()),
+    );
   }
 }
 

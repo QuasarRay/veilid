@@ -6,7 +6,9 @@ import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
+
 import 'package:web/web.dart' as web;
+
 import 'veilid.dart';
 
 //////////////////////////////////////////////////////////
@@ -999,8 +1001,8 @@ class VeilidJS extends Veilid {
   // Names this dart program to wasm. A hot restart resets lazy statics while the
   // wasm module and its node survive, so the next program gets a new value and
   // wasm can retire the update sinks the old one left registered.
-  static final String _generation =
-      DateTime.now().microsecondsSinceEpoch.toString();
+  static final String _generation = DateTime.now().microsecondsSinceEpoch
+      .toString();
 
   // One caller id per reference this dart context holds on the running node.
   // Shutdown releases the most recent one. Wasm owns the refcount and every

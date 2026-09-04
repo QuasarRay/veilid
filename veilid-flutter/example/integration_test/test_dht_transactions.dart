@@ -5,8 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
 import 'package:veilid_test/veilid_test.dart';
 
-final bogusKey =
-    RecordKey.fromString('VLD0:qD10lHHPD1_Qr23_Qy-1JnxTht12eaWwENVG_m2v7II');
+final bogusKey = RecordKey.fromString(
+  'VLD0:qD10lHHPD1_Qr23_Qy-1JnxTht12eaWwENVG_m2v7II',
+);
 
 class TestDHTTransactions {
   late final VeilidRoutingContext routingContext;
@@ -105,9 +106,7 @@ class TestDHTTransactions {
         expect(res, isNull);
       }
 
-      await updateProcessorFixture.retry(
-        () => tx.extend([extraDesc.key]),
-      );
+      await updateProcessorFixture.retry(() => tx.extend([extraDesc.key]));
 
       final extraData = Uint8List.fromList(
         List.filled(dhtSubkeySize, dhtRecordCount),
@@ -137,9 +136,7 @@ class TestDHTTransactions {
       expect(tx, isInstanceOf<VeilidDHTTransaction>());
 
       await tx.set(dhtRecords[0], 0, data[0]);
-      await updateProcessorFixture.retry(
-        () => tx.extend([extraDesc.key]),
-      );
+      await updateProcessorFixture.retry(() => tx.extend([extraDesc.key]));
       final extraData = Uint8List.fromList(
         List.filled(dhtSubkeySize, dhtRecordCount),
       );
@@ -193,7 +190,8 @@ class TestDHTTransactions {
     for (var subkey = 0; subkey < dhtSubkeyCount; subkey++) {
       for (var rec = 0; rec < dhtRecordCount; rec++) {
         sets.add(
-            routingContext.setDHTValue(dhtRecords[rec], subkey, data[rec]));
+          routingContext.setDHTValue(dhtRecords[rec], subkey, data[rec]),
+        );
       }
     }
     try {
@@ -218,8 +216,10 @@ class TestDHTTransactions {
     final inspects1 = <Future<(int, DHTRecordReport)>>[];
     for (var rec = 0; rec < dhtRecordCount; rec++) {
       inspects1.add(() async {
-        final report =
-            await tx.inspect(dhtRecords[rec], scope: DHTReportScope.syncGet);
+        final report = await tx.inspect(
+          dhtRecords[rec],
+          scope: DHTReportScope.syncGet,
+        );
         return (rec, report);
       }());
     }
@@ -245,8 +245,10 @@ class TestDHTTransactions {
     final inspects2 = <Future<(int, DHTRecordReport)>>[];
     for (var rec = 0; rec < dhtRecordCount; rec++) {
       inspects2.add(() async {
-        final report =
-            await tx.inspect(dhtRecords[rec], scope: DHTReportScope.syncGet);
+        final report = await tx.inspect(
+          dhtRecords[rec],
+          scope: DHTReportScope.syncGet,
+        );
         return (rec, report);
       }());
     }
@@ -269,8 +271,10 @@ class TestDHTTransactions {
     final inspects3 = <Future<(int, DHTRecordReport)>>[];
     for (var rec = 0; rec < dhtRecordCount; rec++) {
       inspects3.add(() async {
-        final report =
-            await tx2.inspect(dhtRecords[rec], scope: DHTReportScope.syncGet);
+        final report = await tx2.inspect(
+          dhtRecords[rec],
+          scope: DHTReportScope.syncGet,
+        );
         return (rec, report);
       }());
     }

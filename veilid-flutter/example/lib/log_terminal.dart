@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:veilid_xterm/veilid_xterm.dart';
+
 import 'log.dart';
 import 'veilid_theme.dart';
 
 const kDefaultTerminalStyle = TerminalStyle(
-    fontSize: kDefaultMonoTerminalFontSize,
-    height: kDefaultMonoTerminalFontHeight,
-    fontFamily: kDefaultMonoTerminalFontFamily,
-    fontFamilyFallback: [kDefaultMonoTerminalFallbackFontFamily]);
+  fontSize: kDefaultMonoTerminalFontSize,
+  height: kDefaultMonoTerminalFontHeight,
+  fontFamily: kDefaultMonoTerminalFontFamily,
+  fontFamilyFallback: [kDefaultMonoTerminalFallbackFontFamily],
+);
 
 class LogTerminal extends StatefulWidget {
   const LogTerminal({super.key});
@@ -19,9 +21,7 @@ class LogTerminal extends StatefulWidget {
 }
 
 class _LogTerminalState extends State<LogTerminal> {
-  final _terminal = Terminal(
-    maxLines: 10000,
-  );
+  final _terminal = Terminal(maxLines: 10000);
 
   final _terminalController = TerminalController();
 
@@ -37,26 +37,27 @@ class _LogTerminalState extends State<LogTerminal> {
 
   @override
   Widget build(BuildContext context) => GestureDetector(
-      onTap: () => FocusScope.of(context).unfocus(),
-      child: TerminalView(
-        _terminal,
-        textStyle: kDefaultTerminalStyle,
-        controller: _terminalController,
-        autofocus: true,
-        backgroundOpacity: 0.9,
-        onSecondaryTapDown: (details, offset) async {
-          final selection = _terminalController.selection;
-          if (selection != null) {
-            final text = _terminal.buffer.getText(selection);
-            _terminalController.clearSelection();
-            await Clipboard.setData(ClipboardData(text: text));
-          } else {
-            final data = await Clipboard.getData('text/plain');
-            final text = data?.text;
-            if (text != null) {
-              _terminal.paste(text);
-            }
+    onTap: () => FocusScope.of(context).unfocus(),
+    child: TerminalView(
+      _terminal,
+      textStyle: kDefaultTerminalStyle,
+      controller: _terminalController,
+      autofocus: true,
+      backgroundOpacity: 0.9,
+      onSecondaryTapDown: (details, offset) async {
+        final selection = _terminalController.selection;
+        if (selection != null) {
+          final text = _terminal.buffer.getText(selection);
+          _terminalController.clearSelection();
+          await Clipboard.setData(ClipboardData(text: text));
+        } else {
+          final data = await Clipboard.getData('text/plain');
+          final text = data?.text;
+          if (text != null) {
+            _terminal.paste(text);
           }
-        },
-      ));
+        }
+      },
+    ),
+  );
 }

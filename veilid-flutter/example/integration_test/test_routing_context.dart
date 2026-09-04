@@ -12,19 +12,24 @@ const _kMaxRetries = 5;
 /// Retry an async operation on transient Veilid network errors (TryAgain,
 /// Timeout). These are expected on a live network when relay/hop nodes are
 /// unreachable.
-Future<T> _retryOnNetworkError<T>(Future<T> Function() fn,
-    {int maxRetries = _kMaxRetries, String label = 'operation'}) async {
-  for (var attempt = 0;; attempt++) {
+Future<T> _retryOnNetworkError<T>(
+  Future<T> Function() fn, {
+  int maxRetries = _kMaxRetries,
+  String label = 'operation',
+}) async {
+  for (var attempt = 0; ; attempt++) {
     try {
       return await fn();
     } on VeilidAPIExceptionTryAgain {
       if (attempt >= maxRetries - 1) rethrow;
       debugPrint(
-          '$label: TryAgain, retrying (attempt ${attempt + 1}/$maxRetries)');
+        '$label: TryAgain, retrying (attempt ${attempt + 1}/$maxRetries)',
+      );
     } on VeilidAPIExceptionTimeout {
       if (attempt >= maxRetries - 1) rethrow;
       debugPrint(
-          '$label: Timeout, retrying (attempt ${attempt + 1}/$maxRetries)');
+        '$label: Timeout, retrying (attempt ${attempt + 1}/$maxRetries)',
+      );
     }
   }
 }
@@ -55,11 +60,15 @@ Future<void> testRoutingContexts() async {
 
   {
     final rc = await Veilid.instance.routingContext();
-    final rcp = rc.withSafety(const SafetySelectionSafe(
+    final rcp = rc.withSafety(
+      const SafetySelectionSafe(
         safetySpec: SafetySpec(
-            hopCount: 2,
-            stability: Stability.lowLatency,
-            sequencing: Sequencing.preferUnordered)));
+          hopCount: 2,
+          stability: Stability.lowLatency,
+          sequencing: Sequencing.preferUnordered,
+        ),
+      ),
+    );
     // More debuggable this way
     // ignore: cascade_invocations
     rcp.close();
@@ -68,7 +77,8 @@ Future<void> testRoutingContexts() async {
   {
     final rc = await Veilid.instance.routingContext();
     final rcp = rc.withSafety(
-        const SafetySelectionUnsafe(sequencing: Sequencing.preferOrdered));
+      const SafetySelectionUnsafe(sequencing: Sequencing.preferOrdered),
+    );
     // More debuggable this way
     // ignore: cascade_invocations
     rcp.close();
@@ -89,8 +99,9 @@ Future<void> testAppMessageLoopback(Stream<VeilidUpdate> updateStream) async {
     try {
       // make a new local private route (retry on transient network errors)
       final prl = await _retryOnNetworkError(
-          () => Veilid.instance.newPrivateRoute(),
-          label: 'newPrivateRoute');
+        () => Veilid.instance.newPrivateRoute(),
+        label: 'newPrivateRoute',
+      );
       try {
         // import it as a remote route as well so we can send to it
         final prr = await Veilid.instance.importRemotePrivateRoute(prl.blob);
@@ -131,19 +142,25 @@ Future<void> testAppCallLoopback(Stream<VeilidUpdate> updateStream) async {
     try {
       // make a new local private route (retry on transient network errors)
       final prl = await _retryOnNetworkError(
-          () => Veilid.instance.newCustomPrivateRoute(PrivateSpec(
-              hopCount: 2,
-              sequencing: Sequencing.ensureOrdered,
-              stability: Stability.lowLatency)),
-          label: 'newCustomPrivateRoute');
+        () => Veilid.instance.newCustomPrivateRoute(
+          PrivateSpec(
+            hopCount: 2,
+            sequencing: Sequencing.ensureOrdered,
+            stability: Stability.lowLatency,
+          ),
+        ),
+        label: 'newCustomPrivateRoute',
+      );
       try {
         // import it as a remote route as well so we can send to it
         final prr = await Veilid.instance.importRemotePrivateRoute(prl.blob);
         try {
           // send an app call to our own private route
           final message = utf8.encode('abcd1234');
-          final appCallFuture =
-              rc.appCall(TargetRouteId(routeId: prr), message);
+          final appCallFuture = rc.appCall(
+            TargetRouteId(routeId: prr),
+            message,
+          );
 
           // we should get the same call back
           final update = await appCallQueue.stream.first;
@@ -175,7 +192,8 @@ Future<void> testAppCallLoopback(Stream<VeilidUpdate> updateStream) async {
 }
 
 Future<void> testAppMessageLoopbackBigPackets(
-    Stream<VeilidUpdate> updateStream) async {
+  Stream<VeilidUpdate> updateStream,
+) async {
   final appMessageQueue = StreamController<VeilidAppMessage>();
   final appMessageSubscription = updateStream.listen((update) {
     if (update is VeilidAppMessage) {
@@ -185,8 +203,9 @@ Future<void> testAppMessageLoopbackBigPackets(
 
   final sentMessages = <String>{};
   final random = Random.secure();
-  final cs = await Veilid.instance
-      .getCryptoSystem(Veilid.instance.validCryptoKinds().first);
+  final cs = await Veilid.instance.getCryptoSystem(
+    Veilid.instance.validCryptoKinds().first,
+  );
 
   try {
     // make a routing context that uses a safety route
@@ -194,8 +213,9 @@ Future<void> testAppMessageLoopbackBigPackets(
     try {
       // make a new local private route (retry on transient network errors)
       final prl = await _retryOnNetworkError(
-          () => Veilid.instance.newPrivateRoute(),
-          label: 'newPrivateRoute');
+        () => Veilid.instance.newPrivateRoute(),
+        label: 'newPrivateRoute',
+      );
       try {
         // import it as a remote route as well so we can send to it
         final prr = await Veilid.instance.importRemotePrivateRoute(prl.blob);
@@ -213,8 +233,10 @@ Future<void> testAppMessageLoopbackBigPackets(
           for (var i = 0; i < sentMessages.length; i++) {
             if (await appMessageQueueIterator.moveNext()) {
               final update = appMessageQueueIterator.current;
-              expect(sentMessages.contains(base64Url.encode(update.message)),
-                  isTrue);
+              expect(
+                sentMessages.contains(base64Url.encode(update.message)),
+                isTrue,
+              );
             } else {
               fail('not enough messages in the queue');
             }
@@ -236,7 +258,8 @@ Future<void> testAppMessageLoopbackBigPackets(
 }
 
 Future<void> testAppCallLoopbackBigPackets(
-    Stream<VeilidUpdate> updateStream) async {
+  Stream<VeilidUpdate> updateStream,
+) async {
   final appCallQueue = StreamController<VeilidAppCall>();
   final appMessageSubscription = updateStream.listen((update) {
     if (update is VeilidAppCall) {
@@ -252,8 +275,9 @@ Future<void> testAppCallLoopbackBigPackets(
   }();
 
   final random = Random.secure();
-  final cs = await Veilid.instance
-      .getCryptoSystem(Veilid.instance.validCryptoKinds().first);
+  final cs = await Veilid.instance.getCryptoSystem(
+    Veilid.instance.validCryptoKinds().first,
+  );
 
   try {
     // make a routing context that uses a safety route
@@ -261,8 +285,9 @@ Future<void> testAppCallLoopbackBigPackets(
     try {
       // make a new local private route (retry on transient network errors)
       final prl = await _retryOnNetworkError(
-          () => Veilid.instance.newPrivateRoute(),
-          label: 'newPrivateRoute');
+        () => Veilid.instance.newPrivateRoute(),
+        label: 'newPrivateRoute',
+      );
       try {
         // import it as a remote route as well so we can send to it
         final prr = await Veilid.instance.importRemotePrivateRoute(prl.blob);
@@ -273,9 +298,10 @@ Future<void> testAppCallLoopbackBigPackets(
             final message = await cs.randomBytes(random.nextInt(32768));
             debugPrint('sending app call $i');
             final outmessage = await _retryOnNetworkError(
-                () => rc.appCall(TargetRouteId(routeId: prr), message),
-                maxRetries: 3,
-                label: 'appCall[$i]');
+              () => rc.appCall(TargetRouteId(routeId: prr), message),
+              maxRetries: 3,
+              label: 'appCall[$i]',
+            );
             debugPrint('finished app call $i');
             expect(message, equals(outmessage));
           }

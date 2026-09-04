@@ -124,18 +124,28 @@ cfg_if! {
             if let Ok(dirs) = data_dir.read_dir() {
                 for entries in dirs.flatten() {
                     let entry_path = entries.path();
-                    if !entry_path.starts_with(&test_group_dir) {
-                        if entry_path.metadata().unwrap().is_dir() {
-                            if let Err(e) = std::fs::remove_dir_all(&entry_path) {
-                                error!("failed to remove old test group dir {:?}: {}", entry_path, e);
-                            } else {
-                                info!("purged old test group dir {:?}", entry_path);
+                    if entry_path.starts_with(&test_group_dir) {
+                        continue;
+                    }
+                    // Every process in the run purges the same stale entries, so one can
+                    // vanish under us at any point from here on
+                    let Ok(file_type) = entries.file_type() else {
+                        continue;
+                    };
+                    if file_type.is_dir() {
+                        match std::fs::remove_dir_all(&entry_path) {
+                            Ok(()) => info!("purged old test group dir {:?}", entry_path),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => {
+                                error!("failed to remove old test group dir {:?}: {}", entry_path, e)
                             }
-                        } else if entry_path.metadata().unwrap().is_file() {
-                            if let Err(e) = std::fs::remove_file(&entry_path) {
-                                error!("failed to remove old test group file {:?}: {}", entry_path, e);
-                            } else {
-                                info!("purged old test group file {:?}", entry_path);
+                        }
+                    } else if file_type.is_file() {
+                        match std::fs::remove_file(&entry_path) {
+                            Ok(()) => info!("purged old test group file {:?}", entry_path),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => {
+                                error!("failed to remove old test group file {:?}: {}", entry_path, e)
                             }
                         }
                     }

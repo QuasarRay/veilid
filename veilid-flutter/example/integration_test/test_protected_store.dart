@@ -19,16 +19,24 @@ Future<void> testSaveLoadRemoveUserSecret() async {
   await _cleanup();
 
   // Saving a new secret reports that nothing was there before.
-  expect(await Veilid.instance.saveUserSecret(testKey, utf8.encode('hello')),
-      isFalse);
-  expect(utf8.decode((await Veilid.instance.loadUserSecret(testKey))!),
-      equals('hello'));
+  expect(
+    await Veilid.instance.saveUserSecret(testKey, utf8.encode('hello')),
+    isFalse,
+  );
+  expect(
+    utf8.decode((await Veilid.instance.loadUserSecret(testKey))!),
+    equals('hello'),
+  );
 
   // Overwriting reports the previous value.
-  expect(await Veilid.instance.saveUserSecret(testKey, utf8.encode('world')),
-      isTrue);
-  expect(utf8.decode((await Veilid.instance.loadUserSecret(testKey))!),
-      equals('world'));
+  expect(
+    await Veilid.instance.saveUserSecret(testKey, utf8.encode('world')),
+    isTrue,
+  );
+  expect(
+    utf8.decode((await Veilid.instance.loadUserSecret(testKey))!),
+    equals('world'),
+  );
 
   // Removal is idempotent.
   expect(await Veilid.instance.removeUserSecret(testKey), isTrue);
@@ -54,7 +62,9 @@ Future<void> testBinaryUserSecretRoundtrip() async {
 Future<void> testMissingUserSecret() async {
   expect(await Veilid.instance.loadUserSecret('__dart_never_stored'), isNull);
   expect(
-      await Veilid.instance.removeUserSecret('__dart_never_stored'), isFalse);
+    await Veilid.instance.removeUserSecret('__dart_never_stored'),
+    isFalse,
+  );
 }
 
 Future<void> testListUserSecrets() async {
@@ -91,13 +101,18 @@ Future<void> testListNeverReturnsReservedKeys() async {
 /// An app must not be able to read or clobber veilid's own keys by name.
 Future<void> testReservedKeysAreRejected() async {
   for (final reserved in reservedKeys) {
-    await expectLater(() => Veilid.instance.loadUserSecret(reserved),
-        throwsA(isA<VeilidAPIException>()));
     await expectLater(
-        () => Veilid.instance.saveUserSecret(reserved, utf8.encode('clobber')),
-        throwsA(isA<VeilidAPIException>()));
-    await expectLater(() => Veilid.instance.removeUserSecret(reserved),
-        throwsA(isA<VeilidAPIException>()));
+      () => Veilid.instance.loadUserSecret(reserved),
+      throwsA(isA<VeilidAPIException>()),
+    );
+    await expectLater(
+      () => Veilid.instance.saveUserSecret(reserved, utf8.encode('clobber')),
+      throwsA(isA<VeilidAPIException>()),
+    );
+    await expectLater(
+      () => Veilid.instance.removeUserSecret(reserved),
+      throwsA(isA<VeilidAPIException>()),
+    );
   }
 }
 
@@ -119,7 +134,9 @@ Future<void> testDeleteAllUserSecrets() async {
 
   // The store is still usable afterwards.
   expect(
-      await Veilid.instance.saveUserSecret(testKey, utf8.encode('c')), isFalse);
+    await Veilid.instance.saveUserSecret(testKey, utf8.encode('c')),
+    isFalse,
+  );
   keys = await Veilid.instance.listUserSecrets();
   expect(keys, contains(testKey));
 

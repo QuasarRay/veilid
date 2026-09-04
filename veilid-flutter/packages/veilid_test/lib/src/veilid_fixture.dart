@@ -44,9 +44,8 @@ class DefaultVeilidFixture implements VeilidFixture {
     final ignoreLogTargetsStr = const String.fromEnvironment(
       'IGNORE_LOG_TARGETS',
     ).trim();
-    final logDirectivesStr = const String.fromEnvironment(
-      'LOG_DIRECTIVES',
-    ).trim();
+    final logDirectivesStr = const String.fromEnvironment('LOG_DIRECTIVES')
+        .trim();
     final ignoreLogTargets = ignoreLogTargetsStr.isEmpty
         ? <String>[]
         : ignoreLogTargetsStr.split(',').map((e) => e.trim()).toList();
@@ -72,18 +71,16 @@ class DefaultVeilidFixture implements VeilidFixture {
     // broad (e.g. dht=debug for stdout) while emitting only the spans they
     // want over OTLP. Empty defaults to off-level + no directives, which
     // emits no spans.
-    final otlpDirectivesStr = const String.fromEnvironment(
-      'OTLP_DIRECTIVES',
-    ).trim();
+    final otlpDirectivesStr = const String.fromEnvironment('OTLP_DIRECTIVES')
+        .trim();
     final otlpDirectives = otlpDirectivesStr.isEmpty
         ? <String>[]
         : otlpDirectivesStr.split(',').map((e) => e.trim()).toList();
 
     // Stats: STATS=1 enables, STATS_INTERVAL secs (default 10), STATS_PATH file.
     final statsEnabled = const String.fromEnvironment('STATS').trim() == '1';
-    final statsIntervalStr = const String.fromEnvironment(
-      'STATS_INTERVAL',
-    ).trim();
+    final statsIntervalStr = const String.fromEnvironment('STATS_INTERVAL')
+        .trim();
     final statsInterval = int.tryParse(statsIntervalStr) ?? 10;
     final statsPathStr = const String.fromEnvironment('STATS_PATH').trim();
 

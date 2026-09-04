@@ -269,7 +269,7 @@ class _IntegrationLogAppState extends State<IntegrationLogApp> {
                     autofocus: true,
                     textStyle: TerminalStyle(
                       fontSize: 10,
-                      fontFamily: 'Source Code Pro'
+                      fontFamily: 'Source Code Pro',
                     ),
                   ),
                 ),
@@ -328,7 +328,7 @@ class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
                     style: const TextStyle(
                       color: Colors.greenAccent,
                       fontSize: 11,
-                      fontFamily: 'Source Code Pro'
+                      fontFamily: 'Source Code Pro',
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -339,7 +339,7 @@ class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
                           ? Colors.redAccent
                           : Colors.grey.shade600,
                       fontSize: 11,
-                      fontFamily: 'Source Code Pro'
+                      fontFamily: 'Source Code Pro',
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -350,7 +350,7 @@ class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
                         style: const TextStyle(
                           color: Colors.yellowAccent,
                           fontSize: 11,
-                      fontFamily: 'Source Code Pro',
+                          fontFamily: 'Source Code Pro',
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -383,7 +383,7 @@ class _IntegrationTestStatusPaneState extends State<IntegrationTestStatusPane> {
                         style: TextStyle(
                           color: color,
                           fontSize: 11,
-                          fontFamily: 'Source Code Pro'
+                          fontFamily: 'Source Code Pro',
                         ),
                       ),
                     );

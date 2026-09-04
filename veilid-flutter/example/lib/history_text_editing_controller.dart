@@ -20,42 +20,45 @@ class HistoryTextEditingController {
 
   var _historyCurrentEdit = '';
 
-  HistoryTextEditingController(
-      {required this.setState, TextEditingController? controller})
-      : _controller = controller ?? TextEditingController(),
-        _ownsController = controller == null {
-    _historyFocusNode = FocusNode(onKeyEvent: (node, event) {
-      if (event.runtimeType == KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        if (_historyPosition > 0) {
-          if (_historyPosition == _history.length) {
-            _historyCurrentEdit = _controller.text;
-          }
-          _historyPosition -= 1;
-          setState(() {
-            _controller.text = _history[_historyPosition];
-          });
-        }
-        return KeyEventResult.handled;
-      } else if (event.runtimeType == KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        if (_historyPosition < _history.length) {
-          _historyPosition += 1;
-          setState(() {
+  HistoryTextEditingController({
+    required this.setState,
+    TextEditingController? controller,
+  }) : _controller = controller ?? TextEditingController(),
+       _ownsController = controller == null {
+    _historyFocusNode = FocusNode(
+      onKeyEvent: (node, event) {
+        if (event.runtimeType == KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          if (_historyPosition > 0) {
             if (_historyPosition == _history.length) {
-              _controller.text = _historyCurrentEdit;
-            } else {
-              _controller.text = _history[_historyPosition];
+              _historyCurrentEdit = _controller.text;
             }
-          });
+            _historyPosition -= 1;
+            setState(() {
+              _controller.text = _history[_historyPosition];
+            });
+          }
+          return KeyEventResult.handled;
+        } else if (event.runtimeType == KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          if (_historyPosition < _history.length) {
+            _historyPosition += 1;
+            setState(() {
+              if (_historyPosition == _history.length) {
+                _controller.text = _historyCurrentEdit;
+              } else {
+                _controller.text = _history[_historyPosition];
+              }
+            });
+          }
+          return KeyEventResult.handled;
+        } else if (event.runtimeType == KeyDownEvent) {
+          _historyPosition = _history.length;
+          _historyCurrentEdit = _controller.text;
         }
-        return KeyEventResult.handled;
-      } else if (event.runtimeType == KeyDownEvent) {
-        _historyPosition = _history.length;
-        _historyCurrentEdit = _controller.text;
-      }
-      return KeyEventResult.ignored;
-    });
+        return KeyEventResult.ignored;
+      },
+    );
   }
 
   void submit(String v) {

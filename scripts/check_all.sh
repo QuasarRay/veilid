@@ -94,6 +94,11 @@ if ! cargo fmt --all --check; then
     fail "cargo fmt --all --check found unformatted code. Run 'cargo fmt --all' and commit the result."
 fi
 
+# The Dart half of the format gate; the Rust half is the cargo fmt check above. Same script
+# CI's test_dart_format job runs.
+echo "Performing Dart format check..."
+step ./scripts/check_format.sh
+
 # Dagger's ignore patterns are generated from the repo's .gitignore files. Regenerating belongs
 # with a push, not with CI, which has nothing to commit the result to.
 if ! command -v uv > /dev/null 2>&1; then

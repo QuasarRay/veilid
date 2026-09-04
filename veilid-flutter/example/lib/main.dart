@@ -23,8 +23,11 @@ void main() {
   }
 
   // Run the app
-  runApp(MaterialApp(
+  runApp(
+    MaterialApp(
       title: 'Veilid Plugin Demo',
       theme: newVeilidTheme(),
-      home: const MyApp()));
+      home: const MyApp(),
+    ),
+  );
 }

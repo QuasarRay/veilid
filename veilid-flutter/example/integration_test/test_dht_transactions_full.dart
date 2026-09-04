@@ -4,8 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
 
-final bogusKey =
-    RecordKey.fromString('VLD0:qD10lHHPD1_Qr23_Qy-1JnxTht12eaWwENVG_m2v7II');
+final bogusKey = RecordKey.fromString(
+  'VLD0:qD10lHHPD1_Qr23_Qy-1JnxTht12eaWwENVG_m2v7II',
+);
 
 class TestDHTTransactionsFull {
   late final VeilidRoutingContext routingContext;
@@ -57,16 +58,20 @@ class TestDHTTransactionsFull {
     final inspects1 = <Future<(int, DHTRecordReport)>>[];
     for (var rec = 0; rec < dhtRecordCount; rec++) {
       inspects1.add(() async {
-        final report =
-            await tx.inspect(dhtRecords[rec], scope: DHTReportScope.syncGet);
+        final report = await tx.inspect(
+          dhtRecords[rec],
+          scope: DHTReportScope.syncGet,
+        );
         return (rec, report);
       }());
     }
     final allInspects1Res = await inspects1.wait;
     final expectedSeqs = List.filled(dhtSubkeyCount, null);
     for (final res in allInspects1Res) {
-      expect(res.$2.subkeys,
-          equals([ValueSubkeyRange(low: 0, high: dhtSubkeyCount - 1)]));
+      expect(
+        res.$2.subkeys,
+        equals([ValueSubkeyRange(low: 0, high: dhtSubkeyCount - 1)]),
+      );
       expect(res.$2.localSeqs, equals(expectedSeqs));
       expect(res.$2.networkSeqs, equals(expectedSeqs));
       expect(res.$2.offlineSubkeys, equals([]));
@@ -113,14 +118,16 @@ class TestDHTTransactionsFull {
     final startCommit = Veilid.instance.now();
     await tx.commit();
     debugPrint(
-        'commit transaction: ${Veilid.instance.now().diff(startCommit)}');
+      'commit transaction: ${Veilid.instance.now().diff(startCommit)}',
+    );
 
     // Transaction 2
     final startCommit2 = Veilid.instance.now();
     final tx2 = await Veilid.instance.transactDHTRecords(dhtRecords);
     expect(tx2, isInstanceOf<VeilidDHTTransaction>());
     debugPrint(
-        'begin transaction 2: ${Veilid.instance.now().diff(startCommit2)}');
+      'begin transaction 2: ${Veilid.instance.now().diff(startCommit2)}',
+    );
 
     // Gets
     for (var subkey = 0; subkey < dhtSubkeyCount; subkey++) {
@@ -146,6 +153,7 @@ class TestDHTTransactionsFull {
     final startRollback = Veilid.instance.now();
     await tx2.rollback();
     debugPrint(
-        'rollback transaction 2: ${Veilid.instance.now().diff(startRollback)}');
+      'rollback transaction 2: ${Veilid.instance.now().diff(startRollback)}',
+    );
   }
 }

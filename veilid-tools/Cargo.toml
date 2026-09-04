@@ -19,7 +19,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 path = "src/lib.rs"
 
 [[bin]]
-name = "virtual_router"
+name = "virtual-router"
 path = "src/bin/virtual_router/main.rs"
 required-features = ["virtual-router-bin"]
 

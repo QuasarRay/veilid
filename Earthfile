@@ -418,10 +418,15 @@ test-unit-tests-all:
     RUN ./scripts/_unit_tests_all.sh
 # The desktop flutter binding end to end against the in-process mock, headless on
 # flutter-tester - the same run check_all.sh does locally.
+test-dart-format:
+    FROM +code-flutter
+    RUN ./scripts/check_format.sh
 test-flutter-integration:
     FROM +code-flutter
     RUN ./scripts/_flutter_integration_tests.sh
 test-all:
+    BUILD +test-census
+    BUILD +test-dart-format
     BUILD +test-msrv-all
     BUILD +test-smoketest-all
     BUILD +test-public-api

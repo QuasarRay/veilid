@@ -188,6 +188,11 @@ test_census:
   variables:
     earthly_target: test-census
 
+test_dart_format:
+  extends: .unit_test
+  variables:
+    earthly_target: test-dart-format
+
 # test_check_wasm_builds_dart:
 #   extends: .unit_test
 #   variables:

@@ -22,6 +22,6 @@ Applications can also host a `RouterServer` inside their own process for fully e
 To run VirtualRouter:
 
 ```
-cargo run --bin virtual_router --features=virtual-router-bin
+cargo run --bin virtual-router --features=virtual-router-bin
 ```
 

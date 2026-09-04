@@ -14,40 +14,48 @@ const _updateTimeout = Duration(seconds: 60);
 
 Future<VeilidConfig> _testConfig(String programName) async {
   var config = await getDefaultVeilidConfig(
-      isWeb: kIsWeb,
-      programName: programName,
-      namespace: const String.fromEnvironment('NAMESPACE'),
-      bootstrap: const String.fromEnvironment('BOOTSTRAP'),
-      bootstrapKeys: const bool.hasEnvironment('BOOTSTRAP_KEYS')
-          ? const String.fromEnvironment('BOOTSTRAP_KEYS')
-          : null,
-      networkKeyPassword: const String.fromEnvironment('NETWORK_KEY'));
+    isWeb: kIsWeb,
+    programName: programName,
+    namespace: const String.fromEnvironment('NAMESPACE'),
+    bootstrap: const String.fromEnvironment('BOOTSTRAP'),
+    bootstrapKeys: const bool.hasEnvironment('BOOTSTRAP_KEYS')
+        ? const String.fromEnvironment('BOOTSTRAP_KEYS')
+        : null,
+    networkKeyPassword: const String.fromEnvironment('NETWORK_KEY'),
+  );
 
   if (!kIsWeb) {
     config = config.copyWith(
-        tableStore: config.tableStore.copyWith(
-            directory: p.join(config.tableStore.directory, programName),
-            delete: true),
-        protectedStore: config.protectedStore.copyWith(
-            directory: p.join(config.protectedStore.directory, programName),
-            delete: true),
-        blockStore: config.blockStore.copyWith(
-            directory: p.join(config.blockStore.directory, programName),
-            delete: true));
+      tableStore: config.tableStore.copyWith(
+        directory: p.join(config.tableStore.directory, programName),
+        delete: true,
+      ),
+      protectedStore: config.protectedStore.copyWith(
+        directory: p.join(config.protectedStore.directory, programName),
+        delete: true,
+      ),
+      blockStore: config.blockStore.copyWith(
+        directory: p.join(config.blockStore.directory, programName),
+        delete: true,
+      ),
+    );
   } else {
     config = config.copyWith(
-        tableStore: config.tableStore.copyWith(delete: true),
-        protectedStore: config.protectedStore.copyWith(delete: true),
-        blockStore: config.blockStore.copyWith(delete: true));
+      tableStore: config.tableStore.copyWith(delete: true),
+      protectedStore: config.protectedStore.copyWith(delete: true),
+      blockStore: config.blockStore.copyWith(delete: true),
+    );
   }
 
   return config.copyWith(
-      capabilities:
-          // XXX: Remove after https://gitlab.com/veilid/veilid/-/issues/492
-          const VeilidConfigCapabilities(disable: ['DHTV']),
-      protectedStore: config.protectedStore.copyWith(
-          // Linux often does not have a secret storage mechanism installed
-          allowInsecureFallback: !kIsWeb && Platform.isLinux));
+    capabilities:
+        // XXX: Remove after https://gitlab.com/veilid/veilid/-/issues/492
+        const VeilidConfigCapabilities(disable: ['DHTV']),
+    protectedStore: config.protectedStore.copyWith(
+      // Linux often does not have a secret storage mechanism installed
+      allowInsecureFallback: !kIsWeb && Platform.isLinux,
+    ),
+  );
 }
 
 /// Keeps an update stream subscribed for as long as its reference is held.
@@ -143,10 +151,14 @@ class TestStartupShutdown {
     await Veilid.instance.attach();
     // each joined caller attaches the node it shares
     await Veilid.instance.attach();
-    expect(await first.firstAttachment.timeout(_updateTimeout),
-        isA<VeilidUpdateAttachment>());
-    expect(await second.firstAttachment.timeout(_updateTimeout),
-        isA<VeilidUpdateAttachment>());
+    expect(
+      await first.firstAttachment.timeout(_updateTimeout),
+      isA<VeilidUpdateAttachment>(),
+    );
+    expect(
+      await second.firstAttachment.timeout(_updateTimeout),
+      isA<VeilidUpdateAttachment>(),
+    );
     await Veilid.instance.detach();
     await Veilid.instance.detach();
 
@@ -158,8 +170,10 @@ class TestStartupShutdown {
 
   Future<void> testFailedStartupTakesNoReference() async {
     final invalidConfig = config.copyWith(programName: '$_programName/invalid');
-    await expectLater(() => Veilid.instance.startupVeilidCore(invalidConfig),
-        throwsA(isA<VeilidAPIException>()));
+    await expectLater(
+      () => Veilid.instance.startupVeilidCore(invalidConfig),
+      throwsA(isA<VeilidAPIException>()),
+    );
 
     // one reference, so one shutdown must take the node down
     final stream = await Veilid.instance.startupVeilidCore(config);
@@ -173,8 +187,10 @@ class TestStartupShutdown {
     final stream = await Veilid.instance.startupVeilidCore(config);
     final collector = _UpdateCollector(stream);
 
-    await expectLater(() => Veilid.instance.startupVeilidCore(otherConfig),
-        throwsA(isA<VeilidAPIExceptionAlreadyInitialized>()));
+    await expectLater(
+      () => Veilid.instance.startupVeilidCore(otherConfig),
+      throwsA(isA<VeilidAPIExceptionAlreadyInitialized>()),
+    );
     expect(collector.isDone, isFalse);
 
     // the rejected caller took no reference
@@ -184,8 +200,10 @@ class TestStartupShutdown {
   }
 
   Future<void> testExtraShutdownsDoNotUnderflow() async {
-    await expectLater(Veilid.instance.shutdownVeilidCore,
-        throwsA(isA<VeilidAPIExceptionNotInitialized>()));
+    await expectLater(
+      Veilid.instance.shutdownVeilidCore,
+      throwsA(isA<VeilidAPIExceptionNotInitialized>()),
+    );
 
     final stream = await Veilid.instance.startupVeilidCore(config);
     final collector = _UpdateCollector(stream);
@@ -193,8 +211,10 @@ class TestStartupShutdown {
     expect(await Veilid.instance.isShutdown(), isTrue);
     await collector.done.timeout(_updateTimeout);
 
-    await expectLater(Veilid.instance.shutdownVeilidCore,
-        throwsA(isA<VeilidAPIExceptionNotInitialized>()));
+    await expectLater(
+      Veilid.instance.shutdownVeilidCore,
+      throwsA(isA<VeilidAPIExceptionNotInitialized>()),
+    );
     expect(await Veilid.instance.isShutdown(), isTrue);
 
     // the node comes back after the extra shutdowns
@@ -239,7 +259,9 @@ class TestStartupShutdown {
     await second.done.timeout(_updateTimeout);
 
     // the reaped caller's own release finds nothing left to shut down
-    await expectLater(Veilid.instance.shutdownVeilidCore,
-        throwsA(isA<VeilidAPIExceptionNotInitialized>()));
+    await expectLater(
+      Veilid.instance.shutdownVeilidCore,
+      throwsA(isA<VeilidAPIExceptionNotInitialized>()),
+    );
   }
 }
