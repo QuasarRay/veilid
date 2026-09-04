@@ -41,5 +41,8 @@
 20 unsafe-safety-sites veilid-tools/src/network_interfaces/openbsd.rs
 5 unsafe-safety-sites veilid-tools/src/network_interfaces/sockaddr_tools.rs
 16 unsafe-safety-sites veilid-tools/src/network_interfaces/windows.rs
+9 unsafe-safety-sites veilid-tools/src/resolver/non_windows/android_resolv.rs
+8 unsafe-safety-sites veilid-tools/src/resolver/non_windows/apple_resolv.rs
+1 unsafe-safety-sites veilid-tools/src/resolver/non_windows/config.rs
 2 unsafe-safety-sites veilid-tools/src/resolver/windows.rs
 2 unsafe-safety-sites veilid-tools/src/socket_tools.rs

@@ -95,7 +95,7 @@ pub mod pin;
 pub mod random;
 /// Raw integer timestamps with duration parsing and human formatting.
 pub mod raw_timestamp;
-/// DNS resolution via the system resolver or hickory-resolver.
+/// DNS resolution via the system resolver (Windows) or a built-in minimal DNS client.
 pub mod resolver;
 /// Single-fire eventual whose resolution returns the prior pending value.
 pub mod single_shot_eventual;

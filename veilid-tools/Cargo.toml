@@ -35,7 +35,6 @@ rt-tokio = [
     "async_executors/tokio_tp",
     "async_executors/tokio_io",
     "async_executors/tokio_timer",
-    "hickory-resolver/tokio",
 ]
 rt-async-std = [
     "async-std",
@@ -147,9 +146,6 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 indent = { version = "0.1.1", optional = true }
 libc = "0.2.170"
 minreq = { version = "3.0.0", default-features = false }
-hickory-resolver = { version = "0.25.2", default-features = false, features = [
-    "system-config",
-] }
 socket2 = { version = "0.6.2", features = ["all"] }
 tokio = { version = "1.49.0", features = [
     "rt-multi-thread",

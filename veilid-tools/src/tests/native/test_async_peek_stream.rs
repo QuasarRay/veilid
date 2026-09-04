@@ -3,7 +3,6 @@ use crate::*;
 cfg_if! {
     if #[cfg(feature="rt-async-std")] {
         use async_std::net::{TcpListener, TcpStream};
-        use async_std::prelude::FutureExt;
         use async_std::task::sleep;
     } else if #[cfg(feature="rt-tokio")] {
         use tokio::net::{TcpListener, TcpStream};
@@ -33,13 +32,7 @@ async fn make_tcp_loopback() -> Result<(TcpStream, TcpStream), io::Error> {
         Result::<TcpStream, io::Error>::Ok(connected_stream)
     };
 
-    cfg_if! {
-        if #[cfg(feature="rt-async-std")] {
-            accept_future.try_join(connect_future).await
-        } else if #[cfg(feature="rt-tokio")] {
-            tokio::try_join!(accept_future, connect_future)
-        }
-    }
+    futures_util::future::try_join(accept_future, connect_future).await
 }
 
 async fn make_async_peek_stream_loopback() -> (AsyncPeekStream, AsyncPeekStream) {

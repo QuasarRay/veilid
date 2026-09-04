@@ -5,6 +5,8 @@ mod test_assembly_buffer;
 mod test_async_peek_stream;
 mod test_igd;
 mod test_network_interfaces;
+#[cfg(not(target_os = "windows"))]
+mod test_resolver;
 mod test_udp_ttl_send;
 
 use super::*;
@@ -81,6 +83,15 @@ pub async fn run_all_tests() {
     test_assembly_buffer::test_all().await;
     info!("TEST: exec_test_udp_ttl_send");
     test_udp_ttl_send::test_all().await;
+    #[cfg(not(target_os = "windows"))]
+    {
+        info!("TEST: exec_test_resolver");
+        test_resolver::test_all().await;
+        // Device suites reach the network, so the platform resolver is checked here rather than
+        // in the offline nextest wrapper
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        test_resolver::test_platform_system_resolver().await;
+    }
     info!("TEST: exec_test_tracked_mutex");
     test_tracked_mutex::test_all();
 
@@ -274,6 +285,25 @@ cfg_if! {
             setup();
             block_on(async {
                 test_assembly_buffer::test_all().await;
+            });
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        #[test]
+        fn run_test_resolver() {
+            setup();
+            block_on(async {
+                test_resolver::test_all().await;
+            });
+        }
+
+        // Reaches the network; excluded from scripts/_unit_tests_all.sh
+        #[cfg(not(target_os = "windows"))]
+        #[test]
+        fn run_test_resolver_live() {
+            setup();
+            block_on(async {
+                test_resolver::test_live().await;
             });
         }
 

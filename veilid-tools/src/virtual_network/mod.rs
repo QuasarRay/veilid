@@ -38,7 +38,6 @@
 //!
 //! * `veilid-core`'s network `native` and `wasm` modules
 //! * This crate's `network_interfaces` module
-//! * This crate's `dns_lookup` module
 
 mod commands;
 mod machine;

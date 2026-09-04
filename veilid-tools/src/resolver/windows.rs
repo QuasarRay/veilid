@@ -69,19 +69,7 @@ impl Resolver {
     /// Errors with [`ResolverError::Generic`] if the reverse-arpa name contains an interior NUL, the `DnsQuery_UTF8` call fails, or no PTR record is returned.
     #[allow(clippy::unused_async)]
     pub async fn ptr_lookup(ip_addr: IpAddr) -> Result<String, ResolverError> {
-        let host = match ip_addr {
-            IpAddr::V4(a) => {
-                let oct = a.octets();
-                format!("{}.{}.{}.{}.in-addr.arpa", oct[3], oct[2], oct[1], oct[0])
-            }
-            IpAddr::V6(a) => {
-                let mut s = String::new();
-                for b in a.octets().iter().rev() {
-                    s.push_str(&format!("{:x}.{:x}.", b & 0x0F, b >> 4));
-                }
-                format!("{}ip6.arpa", s)
-            }
-        };
+        let host = reverse_name(ip_addr);
 
         unsafe {
             let mut p_query_results: *mut DNS_RECORDA = core::ptr::null_mut();

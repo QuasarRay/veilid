@@ -12,8 +12,11 @@ class ViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        run_veilid_tools_tests()
-        exit(0)
+        // Off the main thread: on a device the watchdog kills an app that blocks it through launch
+        DispatchQueue.global(qos: .userInitiated).async {
+            run_veilid_tools_tests()
+            exit(0)
+        }
     }
 
 

@@ -23,8 +23,10 @@ pub fn veilid_tools_setup_ios_tests() {
             let mut filters = Targets::default();
             filters = filters.with_default(LevelFilter::OFF);
             filters = filters.with_target("veilid_tools", LevelFilter::INFO);
+            // stdout as well as os_log, so a device run is readable through `devicectl --console`
             tracing_subscriber::registry()
                 .with(OsLogger::new("com.veilid.veilidtools-tests", "default"))
+                .with(tracing_subscriber::fmt::layer().with_ansi(false))
                 .with(filters)
                 .init();
         } else {

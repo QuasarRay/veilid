@@ -2,76 +2,61 @@ use super::*;
 
 use futures_util::future::{select, Either};
 
-cfg_if! {
-    if #[cfg(feature="rt-async-std")] {
-        mod async_std_providers;
-        use async_std_providers::{*, AsyncStdResolver as AsyncResolver};
-
-        use hickory_resolver::{config, system_conf::read_system_conf};
-
-        fn resolver(
-            config: config::ResolverConfig,
-            options: config::ResolverOpts,
-        ) -> AsyncResolver {
-            AsyncResolver::builder_with_config(config, AsyncStdConnectionProvider::default()).with_options(options).build()
-        }
-
-    } else if #[cfg(feature="rt-tokio")] {
-        use hickory_resolver::{config, name_server::TokioConnectionProvider, TokioResolver as AsyncResolver, system_conf::read_system_conf};
-
-        fn resolver(
-            config: config::ResolverConfig,
-            options: config::ResolverOpts,
-        ) -> AsyncResolver {
-            AsyncResolver::builder_with_config(config, TokioConnectionProvider::default()).with_options(options).build()
-        }
-    } else {
-        compile_error!("needs executor implementation");
-    }
-}
+#[cfg(target_os = "android")]
+pub(crate) mod android_resolv;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub(crate) mod apple_resolv;
+pub(crate) mod config;
+pub(crate) mod dns;
 
 /// Head start for the system resolver so a responsive split-horizon view wins the race
 const SYSTEM_RESOLVER_HEAD_START_MS: u32 = 500;
 
-struct Resolvers {
-    system: Option<Arc<AsyncResolver>>,
-    default: Arc<AsyncResolver>,
+/// The system's own view of DNS, whichever form the platform offers
+enum SystemResolver {
+    NameServers(Vec<SocketAddr>),
+    /// The Android OS resolver, which owns its own retries, TCP and private DNS
+    #[cfg(target_os = "android")]
+    AndroidOs,
 }
 
-static RESOLVERS: LazyLock<AsyncMutex<Option<Arc<Resolvers>>>> =
-    LazyLock::new(|| AsyncMutex::new(None));
-
-async fn with_resolvers<R, F: FnOnce(Arc<Resolvers>) -> PinBoxFutureStatic<R>>(closure: F) -> R {
-    let mut resolvers_lock = RESOLVERS.lock().await;
-    if let Some(r) = &*resolvers_lock {
-        return closure(r.clone()).await;
+impl SystemResolver {
+    fn discover() -> Option<Self> {
+        #[cfg(target_os = "android")]
+        if android_resolv::available() {
+            return Some(Self::AndroidOs);
+        }
+        config::system_name_servers().map(Self::NameServers)
     }
 
-    let (config, mut options) = (
-        config::ResolverConfig::default(),
-        config::ResolverOpts::default(),
-    );
-    options.try_tcp_on_error = true;
-    let default = Arc::new(resolver(config, options));
+    async fn query(&self, name: &str, qtype: u16) -> Result<dns::Response, dns::DnsError> {
+        match self {
+            Self::NameServers(servers) => dns::query(servers, name, qtype).await,
+            #[cfg(target_os = "android")]
+            Self::AndroidOs => android_resolv::query(name, qtype).await,
+        }
+    }
+}
 
-    let system = if let Ok((config, mut options)) = read_system_conf() {
-        // UDP-hostile networks need the TCP fallback on the system resolver most of all
-        options.try_tcp_on_error = true;
-        // The race with the default resolver provides the retry redundancy
-        options.attempts = 1;
-        Some(Arc::new(resolver(config, options)))
-    } else {
-        None
-    };
-    let resolvers = Arc::new(Resolvers { system, default });
-    *resolvers_lock = Some(resolvers.clone());
-    closure(resolvers).await
+struct Resolvers {
+    system: Option<SystemResolver>,
+    default: Vec<SocketAddr>,
+}
+
+impl Resolvers {
+    /// Read the nameserver lists fresh so a network change is picked up by the next lookup
+    fn discover() -> Self {
+        Self {
+            system: SystemResolver::discover(),
+            default: config::default_name_servers(),
+        }
+    }
 }
 
 /// Race the system resolver against the default resolver, first success wins.
 /// The system resolver gets a head start, and either side failing waits out the
 /// other, so a wedged system resolver costs the head start plus the default
-/// resolver's latency instead of its own full retry ladder.
+/// resolver's latency rather than its own timeout.
 async fn race_lookups<T, E1, E2, SF, DF>(
     opt_system_fut: Option<SF>,
     default_fut: DF,
@@ -111,69 +96,60 @@ where
     }
 }
 
-/// Cross-platform DNS resolver. This backend uses hickory-resolver, racing the
-/// system configuration (with a head start) against a default resolver.
+/// Cross-platform DNS resolver. This backend is a built-in minimal DNS client, racing
+/// the system resolver (with a head start) against a public fallback list.
 pub struct Resolver {}
 
 impl Resolver {
     /// Resolve the TXT records for `host`, returning each record's text.
     ///
-    /// Blocks on a DNS query; the first call also builds and caches the process-wide resolvers.
-    ///
     /// Errors with [`ResolverError::Generic`] when every resolver's lookup fails (no such name, network/DNS failure).
     pub async fn txt_lookup<S: AsRef<str>>(host: S) -> Result<Vec<String>, ResolverError> {
         let host = host.as_ref().to_string();
-        let txt_result = with_resolvers(|resolvers| {
-            Box::pin(async move {
-                let system_fut = resolvers.system.clone().map(|r| {
-                    let host = host.clone();
-                    async move { r.txt_lookup(&host).await }
-                });
-                let default_resolver = resolvers.default.clone();
-                let default_fut = async move { default_resolver.txt_lookup(&host).await };
-                race_lookups(system_fut, default_fut, "txt_lookup").await
-            })
-        })
-        .await?;
-
-        let mut out = Vec::new();
-        for x in txt_result.iter() {
-            let mut record_out = Vec::<u8>::new();
-            for txtd in x.txt_data() {
-                record_out.extend_from_slice(txtd);
+        let resolvers = Resolvers::discover();
+        let system_fut = resolvers.system.map(|system| {
+            let host = host.clone();
+            async move {
+                system
+                    .query(&host, dns::TYPE_TXT)
+                    .await
+                    .map(|r| dns::txt_records(&r))
             }
-            if let Ok(s) = String::from_utf8(record_out) {
-                out.push(s);
-            }
-        }
-        Ok(out)
+        });
+        let default_servers = resolvers.default;
+        let default_fut = async move {
+            dns::query(&default_servers, &host, dns::TYPE_TXT)
+                .await
+                .map(|r| dns::txt_records(&r))
+        };
+        race_lookups(system_fut, default_fut, "txt_lookup").await
     }
 
     /// Reverse-resolve `ip_addr` to a hostname via its PTR record.
     ///
-    /// Blocks on a DNS query; the first call also builds and caches the process-wide resolvers.
-    ///
     /// Errors with [`ResolverError::Generic`] when every resolver's lookup fails or returns no records.
     pub async fn ptr_lookup(ip_addr: IpAddr) -> Result<String, ResolverError> {
-        let ptr_result = with_resolvers(|resolvers| {
-            Box::pin(async move {
-                let system_fut = resolvers
-                    .system
-                    .clone()
-                    .map(|r| async move { r.reverse_lookup(ip_addr).await });
-                let default_resolver = resolvers.default.clone();
-                let default_fut = async move { default_resolver.reverse_lookup(ip_addr).await };
-                race_lookups(system_fut, default_fut, "ptr_lookup").await
+        let name = reverse_name(ip_addr);
+        let resolvers = Resolvers::discover();
+        let system_fut = resolvers.system.map(|system| {
+            let name = name.clone();
+            async move {
+                system
+                    .query(&name, dns::TYPE_PTR)
+                    .await
+                    .map(|r| dns::ptr_record(&r))
+            }
+        });
+        let default_servers = resolvers.default;
+        let default_fut = async move {
+            dns::query(&default_servers, &name, dns::TYPE_PTR)
+                .await
+                .map(|r| dns::ptr_record(&r))
+        };
+        race_lookups(system_fut, default_fut, "ptr_lookup")
+            .await?
+            .ok_or_else(|| {
+                ResolverError::Generic("PTR lookup returned an empty string".to_string())
             })
-        })
-        .await?;
-
-        if let Some(r) = ptr_result.iter().next() {
-            Ok(r.to_string().trim_end_matches('.').to_string())
-        } else {
-            Err(ResolverError::Generic(
-                "PTR lookup returned an empty string".to_string(),
-            ))
-        }
     }
 }
