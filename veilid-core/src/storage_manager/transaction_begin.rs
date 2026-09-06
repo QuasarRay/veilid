@@ -537,15 +537,11 @@ impl StorageManager {
             let skip_nodes: HashSet<NodeId> =
                 context.lock().accepted_rtts.keys().cloned().collect();
             let capability_filter = capability_fanout_peer_info_filter(vec![VEILID_CAPABILITY_DHT]);
-            fanout_call.set_peer_info_filter(Arc::new(move |pi: Arc<PeerInfo>| {
-                if pi
-                    .node_ids()
-                    .iter()
-                    .any(|node_id| skip_nodes.contains(node_id))
-                {
+            fanout_call.set_peer_info_filter(Arc::new(move |node_ids, node_info| {
+                if node_ids.iter().any(|node_id| skip_nodes.contains(node_id)) {
                     return false;
                 }
-                capability_filter(pi)
+                capability_filter(node_ids, node_info)
             }));
             fanout_call.set_seed_untried(true);
             fanout_call.set_run_target(deficit, make_check_done(deficit_safety));

@@ -7,7 +7,7 @@ pub struct SetValueAnswer {
     pub accepted: bool,
     pub need_descriptor: bool,
     pub value: Option<SignedValueData>,
-    pub peers: Vec<Arc<PeerInfo>>,
+    pub peers: Vec<Arc<UnverifiedPeerInfo>>,
 }
 
 impl RPCProcessor {
@@ -151,7 +151,7 @@ impl RPCProcessor {
         let valid = match self.routing_table().verify_peer_infos_closer(
             target_node_id.to_hash_coordinate(),
             opaque_record_key.to_hash_coordinate(),
-            &peers,
+            peers.iter().map(|p| p.node_ids()),
         ) {
             Ok(v) => v,
             Err(e) => {
@@ -310,7 +310,7 @@ impl RPCProcessor {
             accepted,
             need_descriptor,
             return_value.map(|x| (*x).clone()),
-            closer_to_key_peers,
+            UnverifiedPeerInfo::from_verified_list(closer_to_key_peers),
         )?;
 
         // Send SetValue answer

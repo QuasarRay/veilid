@@ -503,18 +503,30 @@ impl StorageManager {
                         .as_ref()
                         .map(|m| m.operation_signer.clone())
                 })?;
-                let Some(opt_signer) = opt_signer else {
-                    apibail_generic!(
-                        "background transaction member has no local record: {}",
-                        opaque
-                    );
+                // A member with no record or no membership of its own means the set
+                // no longer exists: a later non-transactional operation on that member
+                // cleared it. The triggering record's stamp is the only thing keeping
+                // the set alive, so drop it and let the record go on alone.
+                let broken = match opt_signer {
+                    None => Some("no local record"),
+                    Some(None) => Some("no transaction membership"),
+                    Some(Some(_)) => None,
                 };
-                let Some(signer) = opt_signer else {
+                if let Some(why) = broken {
+                    local_record_store.with_record_detail_mut(
+                        &triggering_opaque,
+                        |_descriptor, detail| {
+                            detail.transaction_membership = None;
+                        },
+                    )?;
                     apibail_generic!(
-                        "background transaction member has no stored operation signer: {}",
-                        opaque
+                        "background transaction set dropped: member {} has {}; {} continues alone",
+                        opaque,
+                        why,
+                        triggering_opaque
                     );
-                };
+                }
+                let signer = opt_signer.flatten().expect("checked above");
                 signers.insert(opaque.clone(), signer);
 
                 // Members already open keep their open state and encryption key; the rest are

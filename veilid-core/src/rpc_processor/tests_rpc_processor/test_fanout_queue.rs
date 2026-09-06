@@ -35,7 +35,10 @@ pub fn seed_nodes(routing_table: &RoutingTable, count: usize) -> Vec<NodeRef> {
         .map(|_| {
             let pi = make_distinct_peer_info(routing_table);
             routing_table
-                .register_node_with_peer_info(Arc::new(pi), false)
+                .register_node_with_peer_info(
+                    Arc::new(UnverifiedPeerInfo::from_verified(&pi)),
+                    false,
+                )
                 .expect("should register")
                 .unfiltered()
         })

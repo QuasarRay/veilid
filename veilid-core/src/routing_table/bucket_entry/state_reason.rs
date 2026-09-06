@@ -210,7 +210,7 @@ impl BucketEntryInner {
     ///   - [R1] Any other condition is reliable
     pub(super) fn compute_state_reason(&self, cur_ts: Timestamp) -> BucketEntryStateReason {
         // Zero when there's no network manager (early init / tests)
-        let opt_nm = self.registry.lookup::<NetworkManager>();
+        let opt_nm = self.network_manager.load_full();
         let credit_since = |from: Timestamp, credit: TimeCredit| {
             opt_nm
                 .as_ref()

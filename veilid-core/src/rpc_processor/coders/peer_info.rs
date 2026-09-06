@@ -3,7 +3,7 @@ use super::*;
 pub fn decode_peer_info(
     decode_context: &RPCDecodeContext,
     reader: &veilid_capnp::peer_info::Reader,
-) -> Result<PeerInfo, RPCError> {
+) -> Result<UnverifiedPeerInfo, RPCError> {
     rpc_ignore_missing_property!(reader, node_info_message);
     let node_info_message = reader
         .get_node_info_message()
@@ -21,7 +21,7 @@ pub fn decode_peer_info(
     }
 
     let routing_table = decode_context.registry.routing_table();
-    let opt_peer_info = PeerInfo::new_from_wire(
+    let opt_peer_info = UnverifiedPeerInfo::new_from_wire(
         &routing_table,
         decode_context.origin_routing_domain,
         node_info_message,
@@ -38,7 +38,7 @@ pub fn decode_peer_info(
 }
 
 pub fn encode_peer_info(
-    peer_info: &PeerInfo,
+    peer_info: &UnverifiedPeerInfo,
     builder: &mut veilid_capnp::peer_info::Builder,
 ) -> Result<(), RPCError> {
     builder.set_node_info_message(peer_info.node_info_message());

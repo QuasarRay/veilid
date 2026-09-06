@@ -624,6 +624,16 @@ pub extern "C" fn startup_veilid_core(port: i64, stream_port: i64, config: FfiSt
                         "joining a node started with a different config, this config is ignored"
                     );
                 }
+                // A hot restart's isolate is gone but its handles are not. When no live
+                // consumer remains they belong to nobody, and a table one of them held
+                // open can never be deleted while they stay.
+                node_state.sinks.reap_dead_except(stream_port);
+                if node_state.sinks.len() == 0 {
+                    TABLE_DB_TRANSACTIONS.lock().clear();
+                    TABLE_DBS.lock().clear();
+                    DHT_TRANSACTIONS.lock().clear();
+                    ROUTING_CONTEXTS.lock().clear();
+                }
                 node_state.sinks.register(stream_port);
                 return VeilidAPIResult::Ok(());
             }

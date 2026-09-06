@@ -132,7 +132,7 @@ impl RPCOperationWatchValueQ {
 pub(in crate::rpc_processor) struct RPCOperationWatchValueA {
     accepted: bool,
     duration: TimestampDuration,
-    peers: Vec<Arc<PeerInfo>>,
+    peers: Vec<Arc<UnverifiedPeerInfo>>,
     watch_id: u64,
 }
 
@@ -140,7 +140,7 @@ impl RPCOperationWatchValueA {
     pub fn new(
         accepted: bool,
         duration: TimestampDuration,
-        peers: Vec<Arc<PeerInfo>>,
+        peers: Vec<Arc<UnverifiedPeerInfo>>,
         watch_id: u64,
     ) -> Result<Self, RPCError> {
         if peers.len() > MAX_WATCH_VALUE_A_PEERS_LEN {
@@ -161,7 +161,7 @@ impl RPCOperationWatchValueA {
     //     Ok(())
     // }
 
-    pub fn destructure(self) -> (bool, TimestampDuration, Vec<Arc<PeerInfo>>, u64) {
+    pub fn destructure(self) -> (bool, TimestampDuration, Vec<Arc<UnverifiedPeerInfo>>, u64) {
         (self.accepted, self.duration, self.peers, self.watch_id)
     }
 
@@ -175,7 +175,7 @@ impl RPCOperationWatchValueA {
         rpc_ignore_missing_property!(reader, peers);
         let peers_reader = reader.get_peers()?;
         let peers_len = rpc_ignore_max_len!(peers_reader, MAX_WATCH_VALUE_A_PEERS_LEN);
-        let mut peers = Vec::<Arc<PeerInfo>>::with_capacity(peers_len);
+        let mut peers = Vec::<Arc<UnverifiedPeerInfo>>::with_capacity(peers_len);
         for p in peers_reader.iter() {
             let Some(peer_info) = decode_peer_info(decode_context, &p).ignore_ok()? else {
                 continue;

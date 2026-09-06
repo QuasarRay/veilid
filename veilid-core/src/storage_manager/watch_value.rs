@@ -103,7 +103,8 @@ impl StorageManager {
             .await;
 
         let mut inner = self.inner.lock();
-        self.watch_values_inner(&mut inner, record_key, subkeys, expiration, count)
+        let owm = &mut *self.outbound_watch_manager.lock();
+        self.watch_values_inner(&mut inner, owm, record_key, subkeys, expiration, count)
     }
 
     #[cfg_attr(
@@ -131,17 +132,14 @@ impl StorageManager {
 
         // Calculate change to existing watch
         let mut inner = self.inner.lock();
+        let owm = &mut *self.outbound_watch_manager.lock();
 
         let Some(_opened_record) = inner.opened_records.get(&opaque_record_key) else {
             apibail_invalid_argument!("record not open", "record_key", opaque_record_key);
         };
 
         // See what watch we have currently if any
-        let Some(outbound_watch) = inner
-            .outbound_watch_manager
-            .outbound_watches
-            .get(&opaque_record_key)
-        else {
+        let Some(outbound_watch) = owm.outbound_watches.get(&opaque_record_key) else {
             // If we didn't have an active watch, then we can just return false because there's nothing to do here
             return Ok(false);
         };
@@ -181,6 +179,7 @@ impl StorageManager {
         // This will update the active_watch so we don't need to do that in this routine.
         self.watch_values_inner(
             &mut inner,
+            owm,
             record_key,
             new_subkeys,
             desired.expiration,
@@ -218,14 +217,14 @@ impl StorageManager {
 
     /// Get the set of nodes in our active watches
     pub fn get_outbound_watch_nodes(&self) -> Vec<Destination> {
-        let inner = self.inner.lock();
+        let owm = self.outbound_watch_manager.lock();
 
         let mut out = vec![];
         let mut node_set: HashSet<NodeRef> = HashSet::new();
-        for v in inner.outbound_watch_manager.outbound_watches.values() {
+        for v in owm.outbound_watches.values() {
             if let Some(current) = v.state() {
                 for pnk in current.nodes() {
-                    let Some(pns) = inner.outbound_watch_manager.per_node_states.get(pnk) else {
+                    let Some(pns) = owm.per_node_states.get(pnk) else {
                         continue;
                     };
                     let Some(node_ref) = pns.watch_node_ref.as_ref() else {
@@ -259,6 +258,7 @@ impl StorageManager {
     fn watch_values_inner(
         &self,
         inner: &mut StorageManagerInner,
+        owm: &mut OutboundWatchManager,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
         expiration: Timestamp,
@@ -325,9 +325,7 @@ impl StorageManager {
 
         // Modify the 'desired' state of the watch or add one if it does not exist
         let active = desired_params.is_some();
-        inner
-            .outbound_watch_manager
-            .set_desired_watch(record_key, desired_params);
+        owm.set_desired_watch(record_key, desired_params);
 
         Ok(active)
     }
@@ -724,9 +722,8 @@ impl StorageManager {
         let opaque_record_key = record_lock.record();
 
         let Some(outbound_watch) = self
-            .inner
-            .lock()
             .outbound_watch_manager
+            .lock()
             .outbound_watches
             .remove(&opaque_record_key)
         else {
@@ -765,13 +762,9 @@ impl StorageManager {
         }
 
         let per_node_states = {
-            let inner = &mut *self.inner.lock();
+            let owm = &mut *self.outbound_watch_manager.lock();
 
-            let Some(outbound_watch) = inner
-                .outbound_watch_manager
-                .outbound_watches
-                .get_mut(&opaque_record_key)
-            else {
+            let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
                 veilid_log!(self warn "watch being cancelled should have still been in the table");
                 return;
             };
@@ -782,12 +775,7 @@ impl StorageManager {
             let mut per_node_states = vec![];
             let mut missing_pnks = BTreeSet::new();
             for pnk in state.nodes() {
-                let Some(per_node_state) = inner
-                    .outbound_watch_manager
-                    .per_node_states
-                    .get(pnk)
-                    .cloned()
-                else {
+                let Some(per_node_state) = owm.per_node_states.get(pnk).cloned() else {
                     veilid_log!(self warn "missing per-node state for watch");
                     missing_pnks.insert(pnk.clone());
                     continue;
@@ -795,7 +783,7 @@ impl StorageManager {
                 per_node_states.push((pnk.clone(), per_node_state));
             }
 
-            state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+            state.edit(&owm.per_node_states, |editor| {
                 editor.retain_nodes(|x| !missing_pnks.contains(x));
             });
 
@@ -842,26 +830,17 @@ impl StorageManager {
 
         // Update state
         {
-            let mut inner = self.inner.lock();
+            let owm = &mut *self.outbound_watch_manager.lock();
 
             // Remove per node watches we cancelled
             for pnk in cancelled {
-                if inner
-                    .outbound_watch_manager
-                    .per_node_states
-                    .remove(&pnk)
-                    .is_none()
-                {
+                if owm.per_node_states.remove(&pnk).is_none() {
                     veilid_log!(self warn "per-node watch being cancelled should have still been in the table");
                 };
             }
 
             // Remove outbound watch we've cancelled
-            let Some(outbound_watch) = inner
-                .outbound_watch_manager
-                .outbound_watches
-                .get_mut(&opaque_record_key)
-            else {
+            let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
                 veilid_log!(self warn "watch being cancelled should have still been in the table");
                 return;
             };
@@ -885,12 +864,8 @@ impl StorageManager {
         }
 
         let (record_key, per_node_states, per_node_params) = {
-            let inner = &mut *self.inner.lock();
-            let Some(outbound_watch) = inner
-                .outbound_watch_manager
-                .outbound_watches
-                .get_mut(&opaque_record_key)
-            else {
+            let owm = &mut *self.outbound_watch_manager.lock();
+            let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
                 veilid_log!(self warn "watch being renewed should have still been in the table");
                 return;
             };
@@ -908,19 +883,14 @@ impl StorageManager {
             let mut per_node_states = vec![];
             let mut missing_pnks = BTreeSet::new();
             for pnk in state.nodes() {
-                let Some(per_node_state) = inner
-                    .outbound_watch_manager
-                    .per_node_states
-                    .get(pnk)
-                    .cloned()
-                else {
+                let Some(per_node_state) = owm.per_node_states.get(pnk).cloned() else {
                     veilid_log!(self warn "missing per-node state for watch");
                     missing_pnks.insert(pnk.clone());
                     continue;
                 };
                 per_node_states.push((pnk.clone(), per_node_state));
             }
-            state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+            state.edit(&owm.per_node_states, |editor| {
                 editor.retain_nodes(|x| !missing_pnks.contains(x));
             });
 
@@ -976,8 +946,8 @@ impl StorageManager {
 
         // Update state with merged results if we have them
         if let Some(owvresult) = opt_owvresult {
-            let inner = &mut *self.inner.lock();
-            self.process_outbound_watch_value_result_inner(inner, record_key, owvresult);
+            let owm = &mut *self.outbound_watch_manager.lock();
+            self.process_outbound_watch_value_result_inner(owm, record_key, owvresult);
         }
     }
 
@@ -996,12 +966,8 @@ impl StorageManager {
         // Get the nodes already active on this watch,
         // and the parameters to fanout with for the rest
         let (record_key, per_node_state, per_node_params) = {
-            let inner = &mut *self.inner.lock();
-            let Some(outbound_watch) = inner
-                .outbound_watch_manager
-                .outbound_watches
-                .get_mut(&opaque_record_key)
-            else {
+            let owm = &mut *self.outbound_watch_manager.lock();
+            let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
                 veilid_log!(self warn "watch being reconciled should have still been in the table");
                 return;
             };
@@ -1023,12 +989,7 @@ impl StorageManager {
                     .map(|pnk| {
                         (
                             pnk.clone(),
-                            inner
-                                .outbound_watch_manager
-                                .per_node_states
-                                .get(pnk)
-                                .cloned()
-                                .unwrap_or_log(),
+                            owm.per_node_states.get(pnk).cloned().unwrap_or_log(),
                         )
                     })
                     .collect();
@@ -1040,7 +1001,7 @@ impl StorageManager {
             };
 
             // Add in any inactive per node states
-            for (pnk, pns) in &inner.outbound_watch_manager.per_node_states {
+            for (pnk, pns) in &owm.per_node_states {
                 // Skip any we have already
                 if per_node_state.contains_key(pnk) {
                     continue;
@@ -1061,7 +1022,7 @@ impl StorageManager {
             .await;
 
         {
-            let inner = &mut *self.inner.lock();
+            let owm = &mut *self.outbound_watch_manager.lock();
             // Nobody accepting means no node will serve the record, usually because
             // nothing is written to it yet, so it takes the slow interval not the retry
             let none_accepted = matches!(&res, Ok(owvresult) if owvresult.accepted.is_empty());
@@ -1069,16 +1030,13 @@ impl StorageManager {
                 Ok(owvresult) => {
                     // Update state
                     self.process_outbound_watch_value_result_inner(
-                        inner,
+                        owm,
                         record_key.clone(),
                         owvresult,
                     );
 
                     // If we succeeded update the last consensus node count
-                    let Some(outbound_watch) = inner
-                        .outbound_watch_manager
-                        .outbound_watches
-                        .get_mut(&opaque_record_key)
+                    let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key)
                     else {
                         veilid_log!(self warn "watch being reconciled should have still been in the table");
                         return;
@@ -1087,7 +1045,7 @@ impl StorageManager {
                         veilid_log!(self warn "watch being reconciled should have had a state");
                         return;
                     };
-                    state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+                    state.edit(&owm.per_node_states, |editor| {
                         editor.update_last_consensus_node_count();
                     });
                 }
@@ -1099,8 +1057,7 @@ impl StorageManager {
             // Regardless of result, set our next possible reconciliation time,
             // retrying sooner while the watch is below consensus
             let consensus_count = self.config().internal().network.dht.get_value_count as usize;
-            let below_consensus = inner
-                .outbound_watch_manager
+            let below_consensus = owm
                 .outbound_watches
                 .get(&opaque_record_key)
                 .and_then(|ow| ow.state())
@@ -1110,26 +1067,20 @@ impl StorageManager {
             } else {
                 RECONCILE_OUTBOUND_WATCHES_INTERVAL
             });
-            inner
-                .outbound_watch_manager
-                .set_next_reconcile_ts(opaque_record_key, next_ts);
+            owm.set_next_reconcile_ts(opaque_record_key, next_ts);
         }
     }
 
     fn process_outbound_watch_value_result_inner(
         &self,
-        inner: &mut StorageManagerInner,
+        owm: &mut OutboundWatchManager,
         record_key: RecordKey,
         owvresult: OutboundWatchValueResult,
     ) {
         let kind = record_key.kind();
         let opaque_record_key = record_key.opaque();
 
-        let Some(outbound_watch) = inner
-            .outbound_watch_manager
-            .outbound_watches
-            .get_mut(&opaque_record_key)
-        else {
+        let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
             veilid_log!(self warn "Outbound watch should have still been in the table");
             return;
         };
@@ -1172,11 +1123,8 @@ impl StorageManager {
                     .map(|r| r.route_key().clone());
 
                 // Renewals overwrite existing per-node state; only first registrations count as new
-                did_add_new_nodes |= !inner
-                    .outbound_watch_manager
-                    .per_node_states
-                    .contains_key(&pnk);
-                inner.outbound_watch_manager.per_node_states.insert(
+                did_add_new_nodes |= !owm.per_node_states.contains_key(&pnk);
+                owm.per_node_states.insert(
                     pnk.clone(),
                     OutboundWatchPerNodeState {
                         watch_id,
@@ -1191,7 +1139,7 @@ impl StorageManager {
                 added_nodes.push(pnk);
             } else {
                 // Remove per node state because this watch id was not renewed
-                inner.outbound_watch_manager.per_node_states.remove(&pnk);
+                owm.per_node_states.remove(&pnk);
                 remove_nodes.insert(pnk);
             }
         }
@@ -1202,7 +1150,7 @@ impl StorageManager {
                 record_key: record_key.clone(),
                 node_id,
             };
-            inner.outbound_watch_manager.per_node_states.remove(&pnk);
+            owm.per_node_states.remove(&pnk);
             remove_nodes.insert(pnk);
         }
         // Drop unanswered but leave in per node state
@@ -1217,13 +1165,16 @@ impl StorageManager {
 
         // Update watch state
         let params_changed = opt_old_state_params.as_ref() != Some(&desired);
-        state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+        state.edit(&owm.per_node_states, |editor| {
             editor.set_params(desired.clone());
             editor.retain_nodes(|x| !remove_nodes.contains(x));
             editor.add_nodes(added_nodes);
             editor.clear_forced_reconcile();
-            // New nodes or a new subkey range can hide a change made while unwatched
-            if params_changed || did_add_new_nodes || !remove_nodes.is_empty() {
+            // New nodes or a new subkey range can hide a change made while unwatched.
+            // Losing nodes cannot: it costs future coverage, which is what the fallback
+            // interval is for, and a watch nobody will accept loses nodes on every
+            // reconcile, so resetting on that pins it to the floor forever
+            if params_changed || did_add_new_nodes {
                 editor.reset_fallback_inspect_backoff();
             }
         });
@@ -1231,9 +1182,7 @@ impl StorageManager {
         // Inspect on params change (includes first establishment) or a first-time
         // node registration, so changes made while unwatched are reported promptly
         if opt_old_state_params != Some(desired) || did_add_new_nodes {
-            inner
-                .outbound_watch_manager
-                .enqueue_change_inspect(record_key, watch_subkeys);
+            owm.enqueue_change_inspect(record_key, watch_subkeys);
         }
     }
 
@@ -1365,7 +1314,6 @@ impl StorageManager {
                     );
 
                     // Get changed first changed subkey until we find one to report
-                    let mut n = 0;
                     while !newer_online_subkeys.is_empty() {
                         let first_changed_subkey = newer_online_subkeys.first().unwrap_or_log();
 
@@ -1374,7 +1322,11 @@ impl StorageManager {
                             .await?;
 
                         if let Some(value) = value {
-                            let local_seq = report.local_seqs()[n];
+                            // By subkey: the seq lists follow the report's range, not the
+                            // newer subset (a counter here skipped a seat in the field)
+                            let local_seq = report
+                                .local_seq_for(first_changed_subkey)
+                                .unwrap_or(ValueSeqNum::NONE);
                             if value.seq() > local_seq {
                                 // Committed change: get_value already wrote the local store, so we
                                 // don't track a reported seq here.
@@ -1393,7 +1345,6 @@ impl StorageManager {
 
                         // If we didn't send an update, remove the first changed subkey and try again
                         newer_online_subkeys.pop_first();
-                        n += 1;
                     }
                     VeilidAPIResult::Ok(())
                 }
@@ -1401,20 +1352,11 @@ impl StorageManager {
 
                 if let Err(e) = res {
                     // A failed inspection leaves missed value changes missed forever;
-                    // requeue with backoff while the watch still exists
+                    // requeue while the watch still exists. A fanout that reached
+                    // nobody backs off; contention and offline retry soon.
                     veilid_log!(this debug "Failed to inspect record for changes, will retry: {}", e);
-                    let not_before =
-                        Timestamp::now_non_decreasing().later(CHANGE_INSPECT_RETRY_INTERVAL);
-                    let mut inner = this.inner.lock();
-                    if inner
-                        .outbound_watch_manager
-                        .outbound_watches
-                        .contains_key(&opaque_record_key)
-                    {
-                        inner
-                            .outbound_watch_manager
-                            .enqueue_change_inspect_after(record_key, subkeys, not_before);
-                    }
+                    let reached_nobody = matches!(e, VeilidAPIError::Timeout);
+                    this.requeue_failed_change_inspect(record_key, subkeys, reached_nobody);
                 }
             }
         };
@@ -1442,12 +1384,8 @@ impl StorageManager {
             .await;
 
         let remaining_count = {
-            let inner = &mut *self.inner.lock();
-            let Some(outbound_watch) = inner
-                .outbound_watch_manager
-                .outbound_watches
-                .get_mut(opaque_record_key)
-            else {
+            let owm = &mut *self.outbound_watch_manager.lock();
+            let Some(outbound_watch) = owm.outbound_watches.get_mut(opaque_record_key) else {
                 veilid_log!(self debug "change inspect report skipped: no outbound watch for {}", opaque_record_key);
                 return;
             };
@@ -1459,7 +1397,7 @@ impl StorageManager {
             let cur_ts = Timestamp::now_non_decreasing();
             let missing_value_changes = state.needs_fallback_inspect(cur_ts);
             let seq = value.seq();
-            state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+            state.edit(&owm.per_node_states, |editor| {
                 editor.set_remaining_count(remaining_count);
                 if record_reported_seq {
                     editor.set_last_reported_subkey_seq(first_changed_subkey, seq);
@@ -1487,12 +1425,8 @@ impl StorageManager {
     #[cfg(feature = "verbose-tracing")]
     fn diagnose_watch_notification_routes(&self, opaque_record_key: &OpaqueRecordKey) {
         let value_changed_routes: Vec<PublicKey> = {
-            let inner = self.inner.lock();
-            let Some(outbound_watch) = inner
-                .outbound_watch_manager
-                .outbound_watches
-                .get(opaque_record_key)
-            else {
+            let owm = self.outbound_watch_manager.lock();
+            let Some(outbound_watch) = owm.outbound_watches.get(opaque_record_key) else {
                 return;
             };
             let Some(state) = outbound_watch.state() else {
@@ -1581,13 +1515,12 @@ impl StorageManager {
                 match res {
                     Ok(()) => {}
                     Err(VeilidAPIError::TryAgain { .. }) => {
-                        // Contended; re-enqueue with backoff
-                        let not_before =
-                            Timestamp::now_non_decreasing().later(CHANGE_INSPECT_RETRY_INTERVAL);
-                        let mut inner = this.inner.lock();
-                        inner
-                            .outbound_watch_manager
-                            .enqueue_change_inspect_after(record_key, subkeys, not_before);
+                        // Contended; re-enqueue soon
+                        this.requeue_failed_change_inspect(record_key, subkeys, false);
+                    }
+                    Err(VeilidAPIError::Timeout) => {
+                        // A fanout that reached nobody; re-enqueue with backoff
+                        this.requeue_failed_change_inspect(record_key, subkeys, true);
                     }
                     Err(e) => {
                         veilid_log!(this debug "transactional change inspection failed: {}", e);
@@ -1622,7 +1555,6 @@ impl StorageManager {
         };
         let mut newer_online_subkeys = report.newer_online_subkeys();
 
-        let mut n = 0;
         while !newer_online_subkeys.is_empty() {
             let first_changed_subkey = newer_online_subkeys.first().unwrap_or_log();
 
@@ -1638,7 +1570,9 @@ impl StorageManager {
             };
 
             if let Some(value) = value {
-                let local_seq = report.local_seqs()[n];
+                let local_seq = report
+                    .local_seq_for(first_changed_subkey)
+                    .unwrap_or(ValueSeqNum::NONE);
                 if value.seq() > local_seq {
                     // Non-committing hint: track the reported seq since nothing is written locally
                     self.report_change_inspect_value(
@@ -1655,7 +1589,6 @@ impl StorageManager {
             }
 
             newer_online_subkeys.pop_first();
-            n += 1;
         }
     }
 
@@ -1705,17 +1638,13 @@ impl StorageManager {
 
     fn get_watched_subkeys_inner(
         &self,
-        inner: &StorageManagerInner,
+        owm: &OutboundWatchManager,
         record_key: &RecordKey,
     ) -> VeilidAPIResult<Option<ValueSubkeyRangeSet>> {
         let opaque_record_key = record_key.opaque();
 
         // Get the outbound watch
-        let Some(outbound_watch) = inner
-            .outbound_watch_manager
-            .outbound_watches
-            .get(&opaque_record_key)
-        else {
+        let Some(outbound_watch) = owm.outbound_watches.get(&opaque_record_key) else {
             // No outbound watch means no callback
             return Ok(None);
         };
@@ -1730,14 +1659,13 @@ impl StorageManager {
 
     fn update_watch_per_node_state_inner(
         &self,
-        inner: &mut StorageManagerInner,
+        owm: &mut OutboundWatchManager,
         record_key: &RecordKey,
         count: u32,
         inbound_node_id: &NodeId,
         watch_id: u64,
     ) -> VeilidAPIResult<bool> {
         let opaque_record_key = record_key.opaque();
-        let owm = &mut inner.outbound_watch_manager;
 
         // Get the outbound watch
         let Some(outbound_watch) = owm.outbound_watches.get_mut(&opaque_record_key) else {
@@ -1842,12 +1770,12 @@ impl StorageManager {
 
         // Mark the report and take the count under one guard
         let remaining_count = {
-            let inner = &mut *self.inner.lock();
-            if let Some(state) = Self::watch_state_mut_inner(inner, &opaque_record_key) {
+            let owm = &mut *self.outbound_watch_manager.lock();
+            if let Some(state) = Self::watch_state_mut_inner(owm, &opaque_record_key) {
                 // Data in hand: later range-only copies of this change must not re-notify
                 state.mark_value_reported_subkeys(&reportable_subkeys);
             }
-            Self::note_watch_report_inner(inner, &opaque_record_key, None)
+            Self::note_watch_report_inner(owm, &opaque_record_key, None)
         };
 
         // Announce ValueChanged VeilidUpdate
@@ -1885,15 +1813,15 @@ impl StorageManager {
         let opaque_record_key = record_lock.record();
 
         let (subkeys, remaining_count) = {
-            let inner = &mut *self.inner.lock();
-            let Some(watched) = self.get_watched_subkeys_inner(inner, &record_key)? else {
+            let owm = &mut *self.outbound_watch_manager.lock();
+            let Some(watched) = self.get_watched_subkeys_inner(owm, &record_key)? else {
                 return Ok(());
             };
             let reportable = reportable_subkeys.intersect(&watched);
             if reportable.is_empty() {
                 return Ok(());
             }
-            let Some(state) = Self::watch_state_mut_inner(inner, &opaque_record_key) else {
+            let Some(state) = Self::watch_state_mut_inner(owm, &opaque_record_key) else {
                 return Ok(());
             };
             let subkeys = if opt_value.is_some() {
@@ -1910,7 +1838,7 @@ impl StorageManager {
                 .map(|v| (subkeys.first().unwrap_or_log(), v.value_data().seq()));
             (
                 subkeys,
-                Self::note_watch_report_inner(inner, &opaque_record_key, opt_reported),
+                Self::note_watch_report_inner(owm, &opaque_record_key, opt_reported),
             )
         };
 
@@ -1937,18 +1865,14 @@ impl StorageManager {
     /// Decrement and return the watch's remaining change count for a report,
     /// recording the reported seq that gates transactional hints.
     fn note_watch_report_inner(
-        inner: &mut StorageManagerInner,
+        owm: &mut OutboundWatchManager,
         opaque_record_key: &OpaqueRecordKey,
         opt_reported: Option<(ValueSubkey, ValueSeqNum)>,
     ) -> u32 {
-        if let Some(outbound_watch) = inner
-            .outbound_watch_manager
-            .outbound_watches
-            .get_mut(opaque_record_key)
-        {
+        if let Some(outbound_watch) = owm.outbound_watches.get_mut(opaque_record_key) {
             if let Some(state) = outbound_watch.state_mut() {
                 let rc = state.remaining_count().saturating_sub(1);
-                state.edit(&inner.outbound_watch_manager.per_node_states, |editor| {
+                state.edit(&owm.per_node_states, |editor| {
                     editor.set_remaining_count(rc);
                     if let Some((subkey, seq)) = opt_reported {
                         editor.set_last_reported_subkey_seq(subkey, seq);
@@ -1998,7 +1922,7 @@ impl StorageManager {
         // Determine if we have reportable subkeys
         // Also clears the value if the value should not be reported
         let mut reportable_subkeys = {
-            let inner = &mut *self.inner.lock();
+            let owm = &mut *self.outbound_watch_manager.lock();
 
             // No subkeys means remote node cancelled, but we already captured that with the
             // assignment of 'count' to the per_node_state above, so we can just jump out here
@@ -2013,14 +1937,14 @@ impl StorageManager {
             }
 
             // Get what subkeys are being watched
-            let Some(watched_subkeys) = self.get_watched_subkeys_inner(inner, &record_key)? else {
+            let Some(watched_subkeys) = self.get_watched_subkeys_inner(owm, &record_key)? else {
                 // Nothing watched, nothing to report
                 return Ok(NetworkResult::value(()));
             };
 
             // Update the per-node watch state; skip if rejected
             let accepted = self.update_watch_per_node_state_inner(
-                inner,
+                owm,
                 &record_key,
                 count,
                 &inbound_node_id,
@@ -2090,9 +2014,8 @@ impl StorageManager {
             // Make sure this value would actually be newer than what we last stored (commit path)
             // or last reported (transactional hint path, which doesn't touch the local store)
             let opt_last_seq = if record_is_transactional {
-                let inner = self.inner.lock();
-                inner
-                    .outbound_watch_manager
+                self.outbound_watch_manager
+                    .lock()
                     .outbound_watches
                     .get(&opaque_record_key)
                     .and_then(|ow| ow.state())
@@ -2150,14 +2073,10 @@ impl StorageManager {
 
     /// This record's outbound watch state, if the watch and its state exist.
     fn watch_state_mut_inner<'a>(
-        inner: &'a mut StorageManagerInner,
+        owm: &'a mut OutboundWatchManager,
         opaque_record_key: &OpaqueRecordKey,
     ) -> Option<&'a mut OutboundWatchState> {
-        inner
-            .outbound_watch_manager
-            .outbound_watches
-            .get_mut(opaque_record_key)?
-            .state_mut()
+        owm.outbound_watches.get_mut(opaque_record_key)?.state_mut()
     }
 
     /// Consume the report marks for subkeys the app read from the network, so a later change is
@@ -2168,21 +2087,17 @@ impl StorageManager {
         opaque_record_key: &OpaqueRecordKey,
         subkeys: &ValueSubkeyRangeSet,
     ) {
-        let inner = &mut *self.inner.lock();
-        let Ok(record_key) =
-            Self::get_record_key_for_opaque_record_key_inner(inner, opaque_record_key)
-        else {
+        let Ok(record_key) = self.get_record_key_for_opaque_record_key(opaque_record_key) else {
             return;
         };
-        let Some(owed) = Self::watch_state_mut_inner(inner, opaque_record_key)
+        let owm = &mut *self.outbound_watch_manager.lock();
+        let Some(owed) = Self::watch_state_mut_inner(owm, opaque_record_key)
             .map(|state| state.consume_read_subkeys(subkeys))
         else {
             return;
         };
         if !owed.is_empty() {
-            inner
-                .outbound_watch_manager
-                .pending_rehints
+            owm.pending_rehints
                 .entry(record_key)
                 .and_modify(|s| *s = s.union(&owed))
                 .or_insert(owed);
@@ -2192,12 +2107,8 @@ impl StorageManager {
     /// Send any owed repeat hints. Runs from the outbound watch check tick.
     pub(super) async fn send_pending_rehints(&self) {
         let rehints: Vec<(RecordKey, ValueSubkeyRangeSet)> = {
-            let mut inner = self.inner.lock();
-            inner
-                .outbound_watch_manager
-                .pending_rehints
-                .drain()
-                .collect()
+            let owm = &mut *self.outbound_watch_manager.lock();
+            owm.pending_rehints.drain().collect()
         };
         for (record_key, subkeys) in rehints {
             // Record lock before inner, as everywhere
@@ -2229,8 +2140,7 @@ impl StorageManager {
         opaque_record_key: &OpaqueRecordKey,
         productive: bool,
     ) {
-        let mut inner = self.inner.lock();
-        let owm = &mut inner.outbound_watch_manager;
+        let owm = &mut *self.outbound_watch_manager.lock();
         let Some(outbound_watch) = owm.outbound_watches.get_mut(opaque_record_key) else {
             return;
         };
@@ -2241,16 +2151,55 @@ impl StorageManager {
             if productive {
                 editor.reset_fallback_inspect_backoff();
             } else {
-                editor.back_off_fallback_inspect();
+                // Answered: the record is served, so the ceiling stays short
+                editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL);
             }
         });
     }
 
+    /// Requeue a change inspection that failed.
+    ///
+    /// [reached_nobody] counts the failure against the fallback backoff: an inspect
+    /// over a record no node serves fails every time and takes the full get timeout
+    /// doing it, and the contention interval alone would poll it far harder than a
+    /// working watch polls a quiet record. Contention and offline learned nothing
+    /// about the record and retry at the contention interval.
+    pub(super) fn requeue_failed_change_inspect(
+        &self,
+        record_key: RecordKey,
+        subkeys: ValueSubkeyRangeSet,
+        reached_nobody: bool,
+    ) {
+        let opaque_record_key = record_key.opaque();
+        let owm = &mut *self.outbound_watch_manager.lock();
+        if !owm.outbound_watches.contains_key(&opaque_record_key) {
+            return;
+        }
+
+        let mut interval = CHANGE_INSPECT_RETRY_INTERVAL;
+        if reached_nobody {
+            let per_node_states = &owm.per_node_states;
+            if let Some(state) = owm
+                .outbound_watches
+                .get_mut(&opaque_record_key)
+                .and_then(|ow| ow.state_mut())
+            {
+                state.edit(per_node_states, |editor| {
+                    editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
+                });
+                interval = interval.max(state.fallback_inspect_interval());
+            }
+        }
+
+        let not_before = Timestamp::now_non_decreasing().later(interval);
+        owm.enqueue_change_inspect_after(record_key, subkeys, not_before);
+    }
+
     pub fn change_inspect_all_watches(&self) {
-        let mut inner = self.inner.lock();
+        let owm = &mut *self.outbound_watch_manager.lock();
 
         let mut change_inspects = vec![];
-        for outbound_watch in inner.outbound_watch_manager.outbound_watches.values() {
+        for outbound_watch in owm.outbound_watches.values() {
             if let Some(state) = outbound_watch.state() {
                 let reportable_subkeys = state.params().subkeys.clone();
                 change_inspects.push((outbound_watch.record_key(), reportable_subkeys));
@@ -2264,9 +2213,7 @@ impl StorageManager {
         veilid_log!(self debug "change inspecting {} watches", change_inspects.len());
 
         for change_inspect in change_inspects {
-            inner
-                .outbound_watch_manager
-                .enqueue_change_inspect(change_inspect.0, change_inspect.1);
+            owm.enqueue_change_inspect(change_inspect.0, change_inspect.1);
         }
     }
 }

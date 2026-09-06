@@ -105,14 +105,24 @@ impl ApiTracingLayer {
     }
 
     fn emit_log(&self, meta: &'static Metadata<'static>, log_key: &str, message: &str) {
-        let opt_update_cb = if let Some(inner) = &mut *API_LOGGER_INNER.lock() {
-            inner.update_callbacks.get(log_key).cloned()
+        // Key-less events come from process-wide code (veilid-tools) and reach every node
+        let update_cbs: Vec<UpdateCallback> = if let Some(inner) = &mut *API_LOGGER_INNER.lock() {
+            if log_key.is_empty() {
+                inner.update_callbacks.values().cloned().collect()
+            } else {
+                inner
+                    .update_callbacks
+                    .get(log_key)
+                    .cloned()
+                    .into_iter()
+                    .collect()
+            }
         } else {
-            None
+            Vec::new()
         };
-        let Some(update_cb) = opt_update_cb else {
+        if update_cbs.is_empty() {
             return;
-        };
+        }
 
         let level = *meta.level();
         let target = meta.target();
@@ -172,7 +182,9 @@ impl ApiTracingLayer {
             backtrace,
         }));
 
-        (update_cb)(log_update.clone());
+        for update_cb in update_cbs {
+            (update_cb)(log_update.clone());
+        }
     }
 }
 

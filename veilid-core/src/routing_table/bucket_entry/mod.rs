@@ -131,6 +131,9 @@ pub(crate) struct BucketEntryInner {
     /// Registry for logging
     #[serde(skip)]
     registry: VeilidComponentRegistry,
+    /// Online detector access for state computation, without a registry lookup
+    #[serde(skip)]
+    network_manager: NetworkManagerHandle,
     /// The best (most-preferred valid) node id. Always present and kept in sync with
     /// `node_ids`, so `best_node_id()` is infallible. Reconstructed on load, not persisted.
     #[serde(skip)]
@@ -230,6 +233,7 @@ pub(crate) struct BucketEntryInner {
 /// deserialized entry, replacing the old `prepare` step.
 pub(crate) struct BucketEntryInnerDeserializeSeed {
     pub registry: VeilidComponentRegistry,
+    pub network_manager: NetworkManagerHandle,
 }
 
 impl BucketEntryInner {
@@ -237,10 +241,14 @@ impl BucketEntryInner {
     /// id. Errors if the entry has no valid node id.
     pub fn deserialize_from_persisted(
         registry: VeilidComponentRegistry,
+        network_manager: NetworkManagerHandle,
         bytes: &[u8],
     ) -> EyreResult<BucketEntryInner> {
         use serde::de::DeserializeSeed;
-        let seed = BucketEntryInnerDeserializeSeed { registry };
+        let seed = BucketEntryInnerDeserializeSeed {
+            registry,
+            network_manager,
+        };
         let mut de = serde_json::Deserializer::from_slice(bytes);
         seed.deserialize(&mut de).map_err(|e| eyre!("{}", e))
     }
@@ -255,12 +263,14 @@ impl<'de> serde::de::DeserializeSeed<'de> for BucketEntryInnerDeserializeSeed {
     {
         deserializer.deserialize_map(BucketEntryInnerVisitor {
             registry: self.registry,
+            network_manager: self.network_manager,
         })
     }
 }
 
 struct BucketEntryInnerVisitor {
     registry: VeilidComponentRegistry,
+    network_manager: NetworkManagerHandle,
 }
 
 impl<'de> serde::de::Visitor<'de> for BucketEntryInnerVisitor {
@@ -368,6 +378,7 @@ impl<'de> serde::de::Visitor<'de> for BucketEntryInnerVisitor {
 
         Ok(BucketEntryInner {
             registry: self.registry,
+            network_manager: self.network_manager,
             best_node_id,
             node_ids,
             time_added,
@@ -975,6 +986,7 @@ impl BucketEntryInner {
         registry: VeilidComponentRegistry,
         entry: Arc<BucketEntry>,
         cur_ts: Timestamp,
+        state: BucketEntryState,
     ) -> BucketEntrySnapshot {
         let mut per_routing_domain = BTreeMap::new();
         if let Some(peer_info) = self.public_internet.peer_info.clone() {
@@ -1007,7 +1019,7 @@ impl BucketEntryInner {
             peer_stats: self.peer_stats.clone(),
             rpc_stats: self.rpc_stats.clone(),
             connection_stats: self.connection_stats.clone(),
-            state: self.state(cur_ts),
+            state,
             node_ids: self.node_ids.clone(),
             per_routing_domain,
             per_sequence_ordering,
@@ -1434,13 +1446,18 @@ impl fmt::Debug for BucketEntry {
 }
 
 impl BucketEntry {
-    pub(super) fn new(registry: VeilidComponentRegistry, first_node_id: NodeId) -> Self {
+    pub(super) fn new(
+        registry: VeilidComponentRegistry,
+        network_manager: NetworkManagerHandle,
+        first_node_id: NodeId,
+    ) -> Self {
         // First node id should always be one we support since TypedKeySets are sorted and we must have at least one supported key
         debug_assert!(VALID_CRYPTO_KINDS.contains(&first_node_id.kind()));
 
         let now = Timestamp::now();
         let inner = BucketEntryInner {
             registry,
+            network_manager,
             best_node_id: first_node_id.clone(),
             node_ids: NodeIdGroup::from(first_node_id),
             time_added: now,
@@ -1522,7 +1539,20 @@ impl BucketEntry {
         cur_ts: Timestamp,
     ) -> BucketEntrySnapshot {
         let inner = self.inner.read();
-        inner.make_snapshot(registry, self.clone(), cur_ts)
+        let state = inner.state(cur_ts);
+        inner.make_snapshot(registry, self.clone(), cur_ts, state)
+    }
+
+    /// Snapshot only entries at or above `min_state`, computing the state once
+    pub fn snapshot_if_at_least(
+        self: &Arc<Self>,
+        registry: VeilidComponentRegistry,
+        cur_ts: Timestamp,
+        min_state: BucketEntryState,
+    ) -> Option<BucketEntrySnapshot> {
+        let inner = self.inner.read();
+        let state = inner.state(cur_ts);
+        (state >= min_state).then(|| inner.make_snapshot(registry, self.clone(), cur_ts, state))
     }
 
     pub fn with<F, R>(&self, f: F) -> R

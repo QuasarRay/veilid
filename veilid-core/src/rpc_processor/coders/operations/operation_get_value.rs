@@ -74,7 +74,7 @@ impl RPCOperationGetValueQ {
 pub(in crate::rpc_processor) struct RPCOperationGetValueA {
     accepted: bool,
     value: Option<SignedValueData>,
-    peers: Vec<Arc<PeerInfo>>,
+    peers: Vec<Arc<UnverifiedPeerInfo>>,
     descriptor: Option<SignedValueDescriptor>,
 }
 
@@ -82,7 +82,7 @@ impl RPCOperationGetValueA {
     pub fn new(
         accepted: bool,
         value: Option<SignedValueData>,
-        peers: Vec<Arc<PeerInfo>>,
+        peers: Vec<Arc<UnverifiedPeerInfo>>,
         descriptor: Option<SignedValueDescriptor>,
     ) -> Result<Self, RPCError> {
         if peers.len() > MAX_GET_VALUE_A_PEERS_LEN {
@@ -164,7 +164,7 @@ impl RPCOperationGetValueA {
     ) -> (
         bool,
         Option<SignedValueData>,
-        Vec<Arc<PeerInfo>>,
+        Vec<Arc<UnverifiedPeerInfo>>,
         Option<SignedValueDescriptor>,
     ) {
         (self.accepted, self.value, self.peers, self.descriptor)
@@ -187,7 +187,7 @@ impl RPCOperationGetValueA {
         rpc_ignore_missing_property!(reader, peers);
         let peers_reader = reader.get_peers()?;
         let peers_len = rpc_ignore_max_len!(peers_reader, MAX_GET_VALUE_A_PEERS_LEN);
-        let mut peers = Vec::<Arc<PeerInfo>>::with_capacity(peers_len);
+        let mut peers = Vec::<Arc<UnverifiedPeerInfo>>::with_capacity(peers_len);
         for p in peers_reader.iter() {
             let Some(peer_info) = decode_peer_info(decode_context, &p).ignore_ok()? else {
                 continue;

@@ -119,6 +119,35 @@ where
     }
 }
 
+/// Free arc guard holding a shared reference to a registered component. Must be dropped at or before termination.
+pub struct VeilidComponentGuardArc<T: Send + Sync + 'static> {
+    component: Arc<T>,
+}
+
+impl<T> fmt::Debug for VeilidComponentGuardArc<T>
+where
+    T: Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "VeilidComponentGuardArc<{}>",
+            core::any::type_name::<T>()
+        )
+    }
+}
+
+impl<T> core::ops::Deref for VeilidComponentGuardArc<T>
+where
+    T: Send + Sync + 'static,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.component
+    }
+}
+
 #[derive(Debug)]
 struct VeilidComponentRegistryInner {
     type_map: HashMap<core::any::TypeId, Arc<dyn VeilidComponent + Send + Sync>>,
@@ -406,6 +435,19 @@ impl VeilidComponentRegistry {
             component,
             _phantom: core::marker::PhantomData {},
         })
+    }
+
+    pub fn lookup_arc<T: VeilidComponent + Send + Sync + 'static>(
+        &self,
+    ) -> Option<VeilidComponentGuardArc<T>> {
+        let inner = self.unlocked_inner.inner.lock();
+        let component_type_id = core::any::TypeId::of::<T>();
+        let component_dyn = inner.type_map.get(&component_type_id)?.clone();
+        let component = component_dyn
+            .as_any_arc_send_sync()
+            .downcast::<T>()
+            .unwrap_or_log();
+        Some(VeilidComponentGuardArc { component })
     }
 }
 

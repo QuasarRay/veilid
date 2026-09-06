@@ -93,7 +93,7 @@ pub fn debug_fanout_results(results: &[FanoutResult]) -> String {
 
 #[derive(Debug)]
 pub struct FanoutCallOutput {
-    pub peer_info_list: Vec<Arc<PeerInfo>>,
+    pub peer_info_list: Vec<Arc<UnverifiedPeerInfo>>,
     pub disposition: FanoutCallDisposition,
 }
 
@@ -167,7 +167,7 @@ enum FanoutLoopResult {
 /// Result of a single per-node fanout call
 pub type FanoutCallResult = Result<FanoutCallOutput, RPCError>;
 /// Filter that decides whether a peer-info entry is eligible for fanout
-pub type FanoutPeerInfoFilter = Arc<dyn (Fn(Arc<PeerInfo>) -> bool) + Send + Sync>;
+pub type FanoutPeerInfoFilter = Arc<dyn (Fn(&NodeIdGroup, &NodeInfo) -> bool) + Send + Sync>;
 /// Termination check called after each lane response
 pub type FanoutCheckDone = Arc<dyn (Fn(&FanoutResult) -> FanoutDoneDisposition) + Send + Sync>;
 /// Per-node call routine invoked once per fanout target
@@ -178,11 +178,11 @@ pub type FanoutPostConsensusTimeoutCallback =
     Arc<dyn (Fn(&FanoutResult) -> TimestampDuration) + Send + Sync>;
 
 pub fn empty_fanout_peer_info_filter() -> FanoutPeerInfoFilter {
-    Arc::new(|_| true)
+    Arc::new(|_, _| true)
 }
 
 pub fn capability_fanout_peer_info_filter(caps: Vec<VeilidCapability>) -> FanoutPeerInfoFilter {
-    Arc::new(move |pi| pi.node_info().has_all_capabilities(&caps))
+    Arc::new(move |_, ni| ni.has_all_capabilities(&caps))
 }
 
 /// Contains the logic for generically searching the Veilid routing table for a set of nodes and applying an
@@ -491,11 +491,11 @@ impl<'a> FanoutCall<'a> {
             {
                 Ok(Ok(output)) => {
                     // Filter returned nodes
-                    let filtered_v: Vec<Arc<PeerInfo>> = output
+                    let filtered_v: Vec<Arc<UnverifiedPeerInfo>> = output
                         .peer_info_list
                         .into_iter()
                         .filter(|pi| {
-                            if !(self.peer_info_filter)(pi.clone()) {
+                            if !(self.peer_info_filter)(pi.node_ids(), pi.node_info()) {
                                 return false;
                             }
                             true
@@ -622,7 +622,7 @@ impl<'a> FanoutCall<'a> {
                     }
 
                     // Check our node info filter
-                    if !(peer_info_filter)(peer_info) {
+                    if !(peer_info_filter)(peer_info.node_ids(), peer_info.node_info()) {
                         return false;
                     }
 

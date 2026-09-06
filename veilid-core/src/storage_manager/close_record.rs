@@ -115,8 +115,8 @@ impl StorageManager {
 
                 // Set the watch to cancelled if we have one
                 // Will process cancellation in the background
-                inner
-                    .outbound_watch_manager
+                self.outbound_watch_manager
+                    .lock()
                     .set_desired_watch(record_key, None);
 
                 // Drop any transaction associated with the record

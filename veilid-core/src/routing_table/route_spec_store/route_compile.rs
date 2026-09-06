@@ -220,7 +220,9 @@ impl RouteSpecStore {
                         RouteNode::NodeId(hop_node_id)
                     } else {
                         // Full peer info, required until we are sure the route has been fully established
-                        RouteNode::PeerInfo(hop_peer_info)
+                        RouteNode::PeerInfo(Arc::new(UnverifiedPeerInfo::from_verified(
+                            &hop_peer_info,
+                        )))
                     },
                     next_hop: Some(route_hop_data),
                 };

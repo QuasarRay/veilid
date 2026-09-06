@@ -55,15 +55,18 @@ pub async fn test_signed_node_info() {
         .unwrap();
 
         // Test correct validation and decoding
-        let opt_pi2 = PeerInfo::new_from_wire(
+        let opt_pi2 = UnverifiedPeerInfo::new_from_wire(
             &routing_table,
             RoutingDomain::PublicInternet,
             pi.node_info_message(),
             pi.signatures().clone(),
         )
         .expect("should succeed");
-        assert!(opt_pi2.is_some(), "should validate");
-        let pi2 = opt_pi2.unwrap();
+        assert!(opt_pi2.is_some(), "should decode");
+        let pi2 = opt_pi2
+            .unwrap()
+            .verify_and_extract(&routing_table)
+            .expect("should validate");
 
         assert!(
             pi2.equivalent(&pi),
@@ -74,12 +77,15 @@ pub async fn test_signed_node_info() {
         let invalid_signatures =
             SignatureGroup::from(Signature::new(CRYPTO_KIND_VLD0, BareSignature::default()));
 
-        let _ = PeerInfo::new_from_wire(
+        let _ = UnverifiedPeerInfo::new_from_wire(
             &routing_table,
             RoutingDomain::PublicInternet,
             pi.node_info_message(),
             invalid_signatures,
         )
+        .expect("should decode")
+        .expect("should decode")
+        .verify_and_extract(&routing_table)
         .expect_err("should not validate");
 
         let invalid_crypto_kind = SignatureGroup::from(Signature::new(
@@ -87,7 +93,7 @@ pub async fn test_signed_node_info() {
             BareSignature::default(),
         ));
 
-        let opt_pi_invalid_crypto_kind = PeerInfo::new_from_wire(
+        let opt_pi_invalid_crypto_kind = UnverifiedPeerInfo::new_from_wire(
             &routing_table,
             RoutingDomain::PublicInternet,
             pi.node_info_message(),

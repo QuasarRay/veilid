@@ -233,6 +233,7 @@ pub fn veilid_tools::CloneStream<T>::poll_close(core::pin::Pin<&mut Self>, &mut 
 pub fn veilid_tools::CloneStream<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::io::error::Result<()>>
 pub fn veilid_tools::CloneStream<T>::poll_write(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>, &[u8]) -> core::task::poll::Poll<core::io::error::Result<usize>>
 pub mod veilid_tools::cpu_pool
+pub fn veilid_tools::cpu_pool::cpu_pool_queue_depth() -> usize
 pub fn veilid_tools::cpu_pool::cpu_pool_spawn_fifo(alloc::boxed::Box<(dyn core::ops::function::FnOnce() + core::marker::Send)>)
 pub mod veilid_tools::debugging
 pub enum veilid_tools::debugging::DebuggerState
@@ -386,6 +387,9 @@ pub type veilid_tools::EventualValueCloneFuture<T>::Output = T
 pub fn veilid_tools::EventualValueCloneFuture<T>::poll(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
 impl<T> core::ops::drop::Drop for veilid_tools::EventualValueCloneFuture<T> where T: core::clone::Clone + core::marker::Unpin
 pub fn veilid_tools::EventualValueCloneFuture<T>::drop(&mut self)
+pub mod veilid_tools::executor_snapshot
+pub fn veilid_tools::executor_snapshot::executor_snapshot() -> core::option::Option<alloc::string::String>
+pub fn veilid_tools::executor_snapshot::executor_snapshot_suffix() -> alloc::string::String
 pub mod veilid_tools::flap_detector
 pub struct veilid_tools::flap_detector::FlapDetector<T: core::cmp::PartialEq>
 impl<T: core::cmp::PartialEq> veilid_tools::FlapDetector<T>
@@ -822,6 +826,10 @@ pub mod veilid_tools::pin
 pub type veilid_tools::pin::PinBox<T> = core::pin::Pin<alloc::boxed::Box<T>>
 pub type veilid_tools::pin::PinBoxFuture<'a, T> = veilid_tools::PinBox<(dyn core::future::future::Future<Output = T> + core::marker::Send + 'a)>
 pub type veilid_tools::pin::PinBoxFutureStatic<T> = veilid_tools::PinBoxFuture<'static, T>
+pub mod veilid_tools::process_watchdog
+pub struct veilid_tools::process_watchdog::ProcessWatchdog
+impl veilid_tools::ProcessWatchdog
+pub fn veilid_tools::ProcessWatchdog::start(u64, u64, impl core::ops::function::Fn(u64, u64) + core::marker::Send + 'static) -> Self
 pub mod veilid_tools::random
 pub struct veilid_tools::random::VeilidRng
 impl rand_core::CryptoRng for veilid_tools::VeilidRng
@@ -885,7 +893,7 @@ pub mod veilid_tools::spawn
 pub async fn veilid_tools::spawn::blocking_wrapper<F, R>(F) -> R where F: core::ops::function::FnOnce() -> R + core::marker::Send + 'static, R: core::marker::Send + 'static
 pub async fn veilid_tools::spawn::blocking_yielding<R: core::marker::Send + 'static>(impl core::ops::function::FnOnce() -> R + core::marker::Send + 'static) -> R
 pub async fn veilid_tools::spawn::cpu_yielding<R: core::marker::Send + 'static>(impl core::ops::function::FnOnce() -> R + core::marker::Send + 'static) -> R
-pub async fn veilid_tools::spawn::scaled_yielding<N: core::cmp::PartialOrd, R: core::marker::Send + 'static, T: core::ops::function::FnOnce() -> R + core::marker::Send + 'static>(N, N, N, T) -> R
+pub async fn veilid_tools::spawn::scaled_yielding<N: core::cmp::PartialOrd, R: core::marker::Send + 'static, T: core::ops::function::FnOnce() -> R + core::marker::Send + 'static>(N, N, T) -> R
 pub fn veilid_tools::spawn::spawn<Out>(&str, impl core::future::future::Future<Output = Out> + core::marker::Send + 'static) -> veilid_tools::MustJoinHandle<Out> where Out: core::marker::Send + 'static
 pub fn veilid_tools::spawn::spawn_detached<Out>(&str, impl core::future::future::Future<Output = Out> + core::marker::Send + 'static) where Out: core::marker::Send + 'static
 pub fn veilid_tools::spawn::spawn_detached_local<Out>(&str, impl core::future::future::Future<Output = Out> + 'static) where Out: 'static
@@ -1134,6 +1142,21 @@ pub fn veilid_tools::tools::us_to_ms(u64) -> core::result::Result<u32, alloc::st
 pub mod veilid_tools::tracked_mutex
 pub type veilid_tools::tracked_mutex::TrackedMutex<T> = parking_lot::mutex::Mutex<T>
 pub type veilid_tools::tracked_mutex::TrackedMutexGuard<'a, T> = parking_lot::mutex::MutexGuard<'a, T>
+pub mod veilid_tools::yield_timing
+pub struct veilid_tools::yield_timing::YieldTiming
+pub veilid_tools::yield_timing::YieldTiming::enqueued_us: u64
+pub veilid_tools::yield_timing::YieldTiming::finished_us: u64
+pub veilid_tools::yield_timing::YieldTiming::started_us: u64
+pub veilid_tools::yield_timing::YieldTiming::woken_us: u64
+impl veilid_tools::YieldTiming
+pub fn veilid_tools::YieldTiming::is_slow(&self) -> bool
+pub fn veilid_tools::YieldTiming::log_if_slow(&self, &str, core::option::Option<usize>)
+pub fn veilid_tools::YieldTiming::log_inline_yield_if_slow(u64, u64)
+pub fn veilid_tools::YieldTiming::run_us(&self) -> u64
+pub fn veilid_tools::YieldTiming::total_us(&self) -> u64
+pub fn veilid_tools::YieldTiming::wait_us(&self) -> u64
+pub fn veilid_tools::YieldTiming::wake_us(&self) -> u64
+pub const veilid_tools::yield_timing::YIELD_SLOW_LOG_US: u64
 pub macro veilid_tools::assert_err!
 pub macro veilid_tools::bail_io_error_other!
 pub macro veilid_tools::debug_target_enabled!
@@ -1712,6 +1735,9 @@ impl core::future::future::Future for veilid_tools::PeekExact<'_>
 pub type veilid_tools::PeekExact<'_>::Output = core::result::Result<usize, core::io::error::Error>
 pub fn veilid_tools::PeekExact<'_>::poll(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
 impl core::marker::Unpin for veilid_tools::PeekExact<'_>
+pub struct veilid_tools::ProcessWatchdog
+impl veilid_tools::ProcessWatchdog
+pub fn veilid_tools::ProcessWatchdog::start(u64, u64, impl core::ops::function::Fn(u64, u64) + core::marker::Send + 'static) -> Self
 pub struct veilid_tools::RawAddressSummary
 pub veilid_tools::RawAddressSummary::has_non_loopback_ipv4: bool
 pub veilid_tools::RawAddressSummary::has_non_loopback_ipv6: bool
@@ -1841,9 +1867,23 @@ pub type veilid_tools::VeilidRng::Error = never
 pub fn veilid_tools::VeilidRng::try_fill_bytes(&mut self, &mut [u8]) -> core::result::Result<(), Self::Error>
 pub fn veilid_tools::VeilidRng::try_next_u32(&mut self) -> core::result::Result<u32, Self::Error>
 pub fn veilid_tools::VeilidRng::try_next_u64(&mut self) -> core::result::Result<u64, Self::Error>
+pub struct veilid_tools::YieldTiming
+pub veilid_tools::YieldTiming::enqueued_us: u64
+pub veilid_tools::YieldTiming::finished_us: u64
+pub veilid_tools::YieldTiming::started_us: u64
+pub veilid_tools::YieldTiming::woken_us: u64
+impl veilid_tools::YieldTiming
+pub fn veilid_tools::YieldTiming::is_slow(&self) -> bool
+pub fn veilid_tools::YieldTiming::log_if_slow(&self, &str, core::option::Option<usize>)
+pub fn veilid_tools::YieldTiming::log_inline_yield_if_slow(u64, u64)
+pub fn veilid_tools::YieldTiming::run_us(&self) -> u64
+pub fn veilid_tools::YieldTiming::total_us(&self) -> u64
+pub fn veilid_tools::YieldTiming::wait_us(&self) -> u64
+pub fn veilid_tools::YieldTiming::wake_us(&self) -> u64
 pub const veilid_tools::DEBUG_LOCKS_DURATION_MS: u32
 pub const veilid_tools::DEFAULT_INDENT_SPACES: usize
 pub const veilid_tools::FRAGMENT_LEN: usize
+pub const veilid_tools::YIELD_SLOW_LOG_US: u64
 pub trait veilid_tools::CmpAssign
 pub fn veilid_tools::CmpAssign::max_assign(&mut self, Self)
 pub fn veilid_tools::CmpAssign::min_assign(&mut self, Self)
@@ -1989,12 +2029,15 @@ pub async fn veilid_tools::blocking_wrapper<F, R>(F) -> R where F: core::ops::fu
 pub async fn veilid_tools::blocking_yielding<R: core::marker::Send + 'static>(impl core::ops::function::FnOnce() -> R + core::marker::Send + 'static) -> R
 pub fn veilid_tools::compatible_unspecified_socket_addr(&core::net::socket_addr::SocketAddr) -> core::net::socket_addr::SocketAddr
 pub async fn veilid_tools::connect_async_tcp_stream(core::option::Option<core::net::socket_addr::SocketAddr>, core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<veilid_tools::TimeoutOr<tokio::net::tcp::stream::TcpStream>>
+pub fn veilid_tools::cpu_pool_queue_depth() -> usize
 pub fn veilid_tools::cpu_pool_spawn_fifo(alloc::boxed::Box<(dyn core::ops::function::FnOnce() + core::marker::Send)>)
 pub async fn veilid_tools::cpu_yielding<R: core::marker::Send + 'static>(impl core::ops::function::FnOnce() -> R + core::marker::Send + 'static) -> R
 pub fn veilid_tools::debugger_state() -> veilid_tools::DebuggerState
 pub fn veilid_tools::domain_for_address(core::net::socket_addr::SocketAddr) -> core::ffi::primitives::c_int
 pub fn veilid_tools::ensure_directory_private_owner<P: core::convert::AsRef<std::path::Path>>(P, bool) -> core::result::Result<(), alloc::string::String>
 pub fn veilid_tools::ensure_file_private_owner<P: core::convert::AsRef<std::path::Path>>(P) -> core::result::Result<(), alloc::string::String>
+pub fn veilid_tools::executor_snapshot() -> core::option::Option<alloc::string::String>
+pub fn veilid_tools::executor_snapshot_suffix() -> alloc::string::String
 pub fn veilid_tools::get_concurrency() -> u32
 pub fn veilid_tools::get_random_u32() -> u32
 pub fn veilid_tools::get_random_u64() -> u64
@@ -2057,7 +2100,7 @@ pub async fn veilid_tools::process_batched_future_stream_result<S, C, E, R>(S, u
 pub async fn veilid_tools::process_batched_future_stream_void<S>(S, usize, veilid_tools::stop_token::StopToken) -> bool where S: futures_core::stream::Stream, <S as futures_core::stream::Stream>::Item: core::future::future::Future<Output = ()>
 pub fn veilid_tools::random_bytes(&mut [u8])
 pub fn veilid_tools::retry_falloff_log(u64, u64, u64, u64, f64) -> bool
-pub async fn veilid_tools::scaled_yielding<N: core::cmp::PartialOrd, R: core::marker::Send + 'static, T: core::ops::function::FnOnce() -> R + core::marker::Send + 'static>(N, N, N, T) -> R
+pub async fn veilid_tools::scaled_yielding<N: core::cmp::PartialOrd, R: core::marker::Send + 'static, T: core::ops::function::FnOnce() -> R + core::marker::Send + 'static>(N, N, T) -> R
 pub fn veilid_tools::secs_to_timestamp_duration(f64) -> u64
 pub fn veilid_tools::send_udp_datagram_with_ttl<S: std::os::fd::raw::AsRawFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub fn veilid_tools::set_tcp_stream_linger(&tokio::net::tcp::stream::TcpStream, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>

@@ -116,7 +116,7 @@ pub(in crate::rpc_processor) struct RPCOperationTransactBeginA {
     transaction_id: Option<u64>,
     duration: TimestampDuration,
     seqs: Vec<ValueSeqNum>,
-    peers: Vec<Arc<PeerInfo>>,
+    peers: Vec<Arc<UnverifiedPeerInfo>>,
 }
 
 impl RPCOperationTransactBeginA {
@@ -127,7 +127,7 @@ impl RPCOperationTransactBeginA {
         transaction_id: Option<u64>,
         duration: TimestampDuration,
         seqs: Vec<ValueSeqNum>,
-        peers: Vec<Arc<PeerInfo>>,
+        peers: Vec<Arc<UnverifiedPeerInfo>>,
     ) -> Result<Self, RPCError> {
         // Should not reject but also provide other fields
         if !accepted
@@ -224,7 +224,7 @@ impl RPCOperationTransactBeginA {
         Option<u64>,
         TimestampDuration,
         Vec<ValueSeqNum>,
-        Vec<Arc<PeerInfo>>,
+        Vec<Arc<UnverifiedPeerInfo>>,
     ) {
         (
             self.accepted,
@@ -273,7 +273,7 @@ impl RPCOperationTransactBeginA {
 
         let peers_reader = reader.get_peers()?;
         let peers_len = rpc_ignore_max_len!(peers_reader, MAX_TRANSACT_BEGIN_A_PEERS_LEN);
-        let mut peers = Vec::<Arc<PeerInfo>>::with_capacity(peers_len);
+        let mut peers = Vec::<Arc<UnverifiedPeerInfo>>::with_capacity(peers_len);
         for p in peers_reader.iter() {
             let Some(peer_info) = decode_peer_info(decode_context, &p).ignore_ok()? else {
                 continue;

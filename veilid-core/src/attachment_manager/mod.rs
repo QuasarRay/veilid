@@ -21,6 +21,9 @@ impl_veilid_log_facility!("attach");
 const TICK_INTERVAL_MSEC: u32 = 1000;
 const ATTACHMENT_MAINTAINER_INTERVAL_MSEC: u32 = 1000;
 const BIND_WAIT_DELAY: TimestampDuration = TimestampDuration::new_ms(10000);
+/// Tick lag past this is reported; matches the detector's local-stall floor
+const TICK_LAG_REPORT: TimestampDuration =
+    TimestampDuration::new_ms(2 * (TICK_INTERVAL_MSEC as u64));
 
 type UpdateStateCallback = Box<dyn FnOnce(MutexGuard<AttachmentManagerInner>)>;
 
@@ -71,6 +74,9 @@ struct AttachmentManagerInner {
     last_tick_ts: Option<Timestamp>,
     /// The future for the attachment maintainer task
     tick_future: Option<PinBoxFutureStatic<()>>,
+    /// OS-thread lateness reporter, alive while the ticker is
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    process_watchdog: Option<ProcessWatchdog>,
     /// Subscription to RoutingDomainReadyEvent
     routing_domain_ready_subscription: Option<EventBusSubscription>,
     /// Attachment state time-in-state and transition accounting
@@ -138,6 +144,8 @@ impl AttachmentManager {
             last_tick_ts: None,
             bind_retry_ts: None,
             tick_future: None,
+            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+            process_watchdog: None,
             routing_domain_ready_subscription: None,
             #[cfg(feature = "stats")]
             stats_accounting: stats::AttachmentStatsAccounting::default(),
@@ -229,6 +237,20 @@ impl AttachmentManager {
         // Keep ticker, drop this to stop the ticker
         inner.tick_future = Some(tick_future);
 
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        {
+            let registry = self.registry();
+            inner.process_watchdog = Some(ProcessWatchdog::start(
+                TICK_INTERVAL_MSEC as u64,
+                TICK_LAG_REPORT.as_u64() / 1000,
+                move |late_us, now_us| {
+                    let this = registry.attachment_manager();
+                    veilid_log!(this debug "process watchdog: OS thread late by {} (rust ts {:#})",
+                        TimestampDuration::new(late_us), Timestamp::new(now_us));
+                },
+            ));
+        }
+
         Ok(())
     }
 
@@ -271,7 +293,9 @@ impl AttachmentManager {
             self.event_bus().unsubscribe(sub);
         }
 
-        // Stop ticker
+        // Stop watchdog and ticker
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        drop(self.inner.lock().process_watchdog.take());
         let tick_future = self.inner.lock().tick_future.take();
         if let Some(tick_future) = tick_future {
             tick_future.await;
@@ -354,8 +378,8 @@ impl AttachmentManager {
 
         // Log if we're seeing missed ticks
         if let Some(lag) = last_tick_ts.map(|x| cur_tick_ts.duration_since(x)) {
-            if lag > TimestampDuration::new_ms(2 * (TICK_INTERVAL_MSEC as u64)) {
-                veilid_log!(self debug "tick lag: {}", lag);
+            if lag > TICK_LAG_REPORT {
+                veilid_log!(self debug "tick lag: {}{}", lag, executor_snapshot_suffix());
                 // A stalled executor stalls every in-flight RPC; their timeouts are about us
                 self.network_manager()
                     .online_detector()

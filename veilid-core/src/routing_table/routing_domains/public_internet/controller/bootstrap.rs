@@ -190,7 +190,10 @@ impl PublicInternetRoutingDomainController {
         let routing_domain = peer_info.routing_domain();
         let routing_table = self.routing_table();
 
-        let nr = match routing_table.register_node_with_peer_info(peer_info, true) {
+        let nr = match routing_table.register_node_with_peer_info(
+            Arc::new(UnverifiedPeerInfo::from_verified(&peer_info)),
+            true,
+        ) {
             Ok(nr) => nr,
             Err(e) => {
                 veilid_log!(self error "failed to register bootstrap peer info: {}", e);

@@ -11,6 +11,7 @@ impl_veilid_log_facility!("rtab");
 pub struct Bucket {
     /// Component registryo accessor
     registry: VeilidComponentRegistry,
+    network_manager: NetworkManagerHandle,
     /// Map of keys to entries for this bucket
     entries: BTreeMap<BareNodeId, Arc<BucketEntry>>,
     /// The crypto kind in use for the public keys in this bucket
@@ -33,9 +34,14 @@ struct SerializedBucketData {
 impl_veilid_component_accessors!(Bucket);
 
 impl Bucket {
-    pub fn new(registry: VeilidComponentRegistry, kind: CryptoKind) -> Self {
+    pub fn new(
+        registry: VeilidComponentRegistry,
+        network_manager: NetworkManagerHandle,
+        kind: CryptoKind,
+    ) -> Self {
         Self {
             registry,
+            network_manager,
             entries: BTreeMap::new(),
             kind,
         }
@@ -103,6 +109,7 @@ impl Bucket {
         // Add new entry
         let entry = Arc::new(BucketEntry::new(
             self.registry(),
+            self.network_manager.clone(),
             NodeId::new(self.kind, node_id_key.clone()),
         ));
         self.entries.insert(node_id_key, entry.clone());

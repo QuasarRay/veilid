@@ -172,6 +172,41 @@ opt-level = 3
 overflow-checks = false
 debug-assertions = false
 
+[profile.dev.package.inout]
+opt-level = 3
+overflow-checks = false
+debug-assertions = false
+
+[profile.dev.package.aead]
+opt-level = 3
+overflow-checks = false
+debug-assertions = false
+
+[profile.dev.package.universal-hash]
+opt-level = 3
+overflow-checks = false
+debug-assertions = false
+
+[profile.dev.package.typenum]
+opt-level = 3
+overflow-checks = false
+debug-assertions = false
+
+[profile.dev.package.subtle]
+opt-level = 3
+overflow-checks = false
+debug-assertions = false
+
+[profile.dev.package.zeroize]
+opt-level = 3
+overflow-checks = false
+debug-assertions = false
+
+[profile.dev.package.block-buffer]
+opt-level = 3
+overflow-checks = false
+debug-assertions = false
+
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 must_use_candidate = "deny"

@@ -28,3 +28,10 @@ async fn wasm_run_all_tests() {
     setup();
     run_all_tests().await;
 }
+
+/// Crypto op wall times in the browser; prints, never asserts
+#[wasm_bindgen_test]
+async fn wasm_crypto_timing() {
+    setup();
+    run_crypto_timing_test().await;
+}

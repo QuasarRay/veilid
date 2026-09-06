@@ -9,7 +9,7 @@ fn add_mock_data(routing_table: &RoutingTable) {
     )
     .expect("should be valid");
     routing_table
-        .register_node_with_peer_info(Arc::new(pi), false)
+        .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(&pi)), false)
         .expect("should register");
 
     let _ = fix_peer_info(
@@ -31,11 +31,11 @@ fn add_mock_data(routing_table: &RoutingTable) {
     assert!(pi3.signatures().is_empty(), "should have no signatures");
 
     let _ = routing_table
-        .register_node_with_peer_info(Arc::new(pi3.clone()), false)
+        .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(&pi3)), false)
         .expect_err("should fail with only no signatures");
 
     let _ = routing_table
-        .register_node_with_peer_info(Arc::new(pi3), true)
+        .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(&pi3)), true)
         .expect("should succeed with allow_invalid");
 }
 

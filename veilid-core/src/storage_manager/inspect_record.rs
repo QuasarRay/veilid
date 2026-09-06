@@ -69,7 +69,16 @@ pub(crate) enum InboundInspectValueResult {
     Success(InspectResult),
 }
 
-/// Whether an inspect fanout may stop early.
+/// What an inspect fanout is waiting to learn, and therefore when it may stop.
+#[derive(Debug, Copy, Clone)]
+pub(super) enum InspectFanoutStop {
+    /// The seqs. Stops on [inspect_fanout_done].
+    SubkeyConsensus,
+    /// The descriptor. Stops on [descriptor_fanout_done], at the first node that has it.
+    Descriptor,
+}
+
+/// Whether an inspect fanout gathering seqs may stop early.
 ///
 /// An unanswered subkey may still live on nodes further out than we have reached,
 /// so the nodes in hand cannot prove absence:
@@ -79,7 +88,8 @@ pub(crate) enum InboundInspectValueResult {
 ///
 /// So a range in which NO subkey is ever answered, every subkey unwritten, can never
 /// satisfy `any_consensus` and runs to node exhaustion or the full get timeout. An
-/// inspect must always include a subkey known to have been written.
+/// inspect for seqs must always include a subkey known to have been written; one that
+/// only wants the descriptor uses [InspectFanoutStop::Descriptor] instead.
 pub(super) fn inspect_fanout_done(
     consensus_node_counts: impl IntoIterator<Item = usize>,
     consensus_count: usize,
@@ -99,6 +109,28 @@ pub(super) fn inspect_fanout_done(
     }
 
     if any_subkeys && has_descriptor && any_consensus && !any_converging && stalled {
+        FanoutDoneDisposition::DoneEarly
+    } else {
+        FanoutDoneDisposition::NotDone
+    }
+}
+
+/// Whether an inspect fanout wanting only the descriptor may stop early.
+///
+/// A descriptor is immutable and self-authenticating: the record key is a hash over the
+/// owner and schema, and `SignedValueDescriptor::validate` recomputes it before the
+/// answer reaches the fanout. So the first descriptor to arrive is the only one that
+/// could arrive, and further nodes cannot improve on it. No consensus, no seq, and no
+/// dependence on any subkey ever having been written.
+///
+/// `has_seqs` guards the result frame rather than the descriptor: a node can hand over a
+/// descriptor and no seqs, and stopping there would return a fanout result list that
+/// does not line up with the subkeys the descriptor names.
+pub(super) fn descriptor_fanout_done(
+    has_descriptor: bool,
+    has_seqs: bool,
+) -> FanoutDoneDisposition {
+    if has_descriptor && has_seqs {
         FanoutDoneDisposition::DoneEarly
     } else {
         FanoutDoneDisposition::NotDone
@@ -271,8 +303,26 @@ impl StorageManager {
                     local_inspect_result.clone()
                 },
                 matches!(scope, DHTReportScope::UpdateSet | DHTReportScope::SyncSet),
+                InspectFanoutStop::SubkeyConsensus,
             )
             .await?;
+
+        // A fanout that ran out of time before any subkey reached consensus
+        // has not finished looking. The report cannot say so, and a caller
+        // reads its missing seqs as "nothing on the network". Timeout rather
+        // than TryAgain: TryAgain is contention, which a caller retries soon,
+        // and reaching nobody is what its backoff is for.
+        let results = &outbound_inspect_result.subkey_fanout_results;
+        if !results.is_empty()
+            && results.iter().all(|r| {
+                matches!(
+                    r.kind,
+                    FanoutResultKind::Timeout | FanoutResultKind::Incomplete
+                )
+            })
+        {
+            apibail_timeout!();
+        }
 
         // Pairs with the watch route diagnosis on a productive change inspect
         #[cfg(feature = "verbose-tracing")]
@@ -340,6 +390,7 @@ impl StorageManager {
         safety_selection: SafetySelection,
         local_inspect_result: InspectResult,
         use_set_scope: bool,
+        stop: InspectFanoutStop,
     ) -> VeilidAPIResult<OutboundInspectValueResult> {
         let routing_domain = RoutingDomain::PublicInternet;
         let requested_subkeys = subkeys.clone();
@@ -641,24 +692,31 @@ impl StorageManager {
             )
         };
 
-        // Routine to call to check if we're done at each step
-        // For inspect, we are tracking consensus externally from the FanoutCall,
-        // for each subkey, rather than a single consensus, so the single fanoutresult
-        // that is passed in here is ignored in favor of our own per-subkey tracking
+        // Routine to call to check if we're done at each step.
+        // Seqs need consensus per subkey, which the FanoutCall does not track, so that
+        // case uses our own; the descriptor needs no consensus at all
         let check_done = {
             let context = context.clone();
             Arc::new(move |_: &FanoutResult| {
                 let mut ctx = context.lock();
 
-                let stalled = ctx.convergence == ctx.checked_convergence;
-                ctx.checked_convergence = ctx.convergence;
+                match stop {
+                    InspectFanoutStop::Descriptor => descriptor_fanout_done(
+                        ctx.opt_descriptor_info.is_some(),
+                        !ctx.seqcounts.is_empty(),
+                    ),
+                    InspectFanoutStop::SubkeyConsensus => {
+                        let stalled = ctx.convergence == ctx.checked_convergence;
+                        ctx.checked_convergence = ctx.convergence;
 
-                inspect_fanout_done(
-                    ctx.seqcounts.iter().map(|cs| cs.consensus_nodes.len()),
-                    consensus_count,
-                    ctx.opt_descriptor_info.is_some(),
-                    stalled,
-                )
+                        inspect_fanout_done(
+                            ctx.seqcounts.iter().map(|cs| cs.consensus_nodes.len()),
+                            consensus_count,
+                            ctx.opt_descriptor_info.is_some(),
+                            stalled,
+                        )
+                    }
+                }
             })
         };
 

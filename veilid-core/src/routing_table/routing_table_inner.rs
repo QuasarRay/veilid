@@ -24,16 +24,22 @@ pub struct RoutingTableInner {
     pub(super) buckets: BTreeMap<CryptoKind, Vec<Bucket>>,
     /// A weak set of all the entries we have in the buckets for faster iteration
     pub(super) all_entries: PtrWeakHashSet<Weak<BucketEntry>>,
+    /// Handed to every entry for lock-free access to the online detector
+    pub(super) network_manager: NetworkManagerHandle,
 }
 
 impl_veilid_component_accessors!(RoutingTableInner);
 
 impl RoutingTableInner {
-    pub(super) fn new(registry: VeilidComponentRegistry) -> RoutingTableInner {
+    pub(super) fn new(
+        registry: VeilidComponentRegistry,
+        network_manager: NetworkManagerHandle,
+    ) -> RoutingTableInner {
         RoutingTableInner {
             registry: registry.clone(),
             buckets: BTreeMap::new(),
             all_entries: PtrWeakHashSet::new(),
+            network_manager,
         }
     }
 
@@ -107,7 +113,7 @@ impl RoutingTableInner {
         for ck in VALID_CRYPTO_KINDS {
             let mut ckbuckets = Vec::with_capacity(BUCKET_COUNT);
             for _ in 0..BUCKET_COUNT {
-                let bucket = Bucket::new(self.registry(), ck);
+                let bucket = Bucket::new(self.registry(), self.network_manager.clone(), ck);
                 ckbuckets.push(bucket);
             }
             self.buckets.insert(ck, ckbuckets);
@@ -200,27 +206,9 @@ impl RoutingTableInner {
             .unwrap_or_log()
     }
 
-    pub fn snapshot(
-        &self,
-        registry: VeilidComponentRegistry,
-        cur_ts: Timestamp,
-        min_state: BucketEntryState,
-    ) -> RoutingTableSnapshot {
-        // #[cfg(feature = "verbose-tracing")]
-        // let start_ts = Timestamp::now();
-
-        let mut entries = Vec::with_capacity(self.bucket_entry_count());
-        self.with_entries(cur_ts, min_state, |v| {
-            entries.push(v.snapshot(registry.clone(), cur_ts));
-            Option::<()>::None
-        });
-
-        // #[cfg(feature = "verbose-tracing")]
-        // {
-        //     let elapsed = Timestamp::now().duration_since(start_ts);
-        //     veilid_log!(self debug "snapshot_entries: {} entries in {:#}", entries.len(), elapsed);
-        // }
-
-        RoutingTableSnapshot::new(registry, cur_ts, entries)
+    /// Strong refs to every entry, so callers can compute per-entry state without
+    /// holding the routing table lock
+    pub fn all_entry_refs(&self) -> Vec<Arc<BucketEntry>> {
+        self.all_entries.iter().collect()
     }
 }

@@ -3,7 +3,9 @@ use super::*;
 /// Run `x`, then yield once to the runtime before returning its result.
 pub async fn yielding<R, T: FnOnce() -> R>(x: T) -> R {
     let out = x();
+    let yielded_us = get_raw_timestamp();
     sleep(0).await;
+    YieldTiming::log_inline_yield_if_slow(yielded_us, get_raw_timestamp());
     out
 }
 
@@ -68,14 +70,13 @@ cfg_if! {
             yielding(x).await
         }
 
-        /// Yielding that chooses the best mechanism using a scaled approach
+        /// Run inline when `n` is below `cpu_n`, on the cpu pool otherwise
         pub async fn scaled_yielding<
             N: PartialOrd,
             R: Send + 'static,
             T: FnOnce() -> R + Send + 'static,
         >(
             _n: N,
-            _yield_n: N,
             _cpu_n: N,
             x: T,
         ) -> R {
@@ -171,16 +172,31 @@ cfg_if! {
             F: FnOnce() -> R + Send + 'static,
             R: Send + 'static,
         {
+            let enqueued_us = get_raw_timestamp();
+            let timed_task = move || {
+                let started_us = get_raw_timestamp();
+                let result = blocking_task();
+                (result, started_us, get_raw_timestamp())
+            };
             // run blocking stuff in blocking thread
+            let (result, started_us, finished_us);
             cfg_if! {
                 if #[cfg(feature="rt-async-std")] {
-                    async_std::task::spawn_blocking(blocking_task).await
+                    (result, started_us, finished_us) = async_std::task::spawn_blocking(timed_task).await;
                 } else if #[cfg(feature="rt-tokio")] {
-                    tokio::task::spawn_blocking(blocking_task).await.unwrap_or_log()
+                    (result, started_us, finished_us) = tokio::task::spawn_blocking(timed_task).await.unwrap_or_log();
                 } else {
                     #[compile_error("must use an executor")]
                 }
             }
+            YieldTiming {
+                enqueued_us,
+                started_us,
+                finished_us,
+                woken_us: get_raw_timestamp(),
+            }
+            .log_if_slow("blocking", None);
+            result
         }
 
         /// For things that use locks or IO operations or cpu tasks that take between 10-100us
@@ -192,28 +208,37 @@ cfg_if! {
         /// For heavy cpu-intensive tasks that do not use locks or IO operations > (100us)
         pub async fn cpu_yielding<R: Send + 'static>(x: impl FnOnce() -> R + Send + 'static) -> R {
             let (tx, rx) = flume::bounded(1);
+            let depth = cpu_pool_queue_depth();
+            let enqueued_us = get_raw_timestamp();
             cpu_pool_spawn_fifo(Box::new(move || {
+                let started_us = get_raw_timestamp();
                 let result = x();
-                let _ = tx.send(result);
+                let _ = tx.send((result, started_us, get_raw_timestamp()));
             }));
-            rx.recv_async().await.unwrap_or_log()
+            let (result, started_us, finished_us) = rx.recv_async().await.unwrap_or_log();
+            YieldTiming {
+                enqueued_us,
+                started_us,
+                finished_us,
+                woken_us: get_raw_timestamp(),
+            }
+            .log_if_slow("cpu", Some(depth));
+            result
         }
 
-        /// Yielding that chooses the best mechanism using a scaled approach
+        /// Run inline when `n` is below `cpu_n`, on the cpu pool otherwise
         pub async fn scaled_yielding<
             N: PartialOrd,
             R: Send + 'static,
             T: FnOnce() -> R + Send + 'static,
             >(
             n: N,
-            yield_n: N,
             cpu_n: N,
             x: T,
             ) -> R {
-            if n < yield_n {
+            // Inline below the pool threshold: a yield after a short op costs a full queue pass
+            if n < cpu_n {
                 x()
-            } else if n < cpu_n {
-                yielding(x).await
             } else {
                 cpu_yielding(x).await
             }

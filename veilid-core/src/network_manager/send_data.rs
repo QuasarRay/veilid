@@ -893,7 +893,7 @@ impl NetworkManager {
             Destination::dial_info(relay_di.clone(), target_nr.clone()),
             SignalInfo::ReverseConnect {
                 receipt,
-                peer_info: published_peer_info
+                peer_info: Arc::new(UnverifiedPeerInfo::from_verified(&published_peer_info)),
             },
         ))
         .await
@@ -1022,7 +1022,7 @@ impl NetworkManager {
             Destination::dial_info(relay_di, target_nr.clone()),
             SignalInfo::HolePunch {
                 receipt,
-                peer_info: published_peer_info,
+                peer_info: Arc::new(UnverifiedPeerInfo::from_verified(&published_peer_info)),
                 opt_dial_info: Some(reverse_hole_punch_di),
             },
         ))

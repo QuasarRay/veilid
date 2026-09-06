@@ -1,10 +1,21 @@
 #![cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 
 use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 // Dedicated FIFO pool so heavy CPU work never starves the executor's blocking pool
 static CPU_POOL: OnceLock<flume::Sender<Box<dyn FnOnce() + Send>>> = OnceLock::new();
+static CPU_POOL_ENQUEUED: AtomicUsize = AtomicUsize::new(0);
+static CPU_POOL_STARTED: AtomicUsize = AtomicUsize::new(0);
+
+/// Tasks handed to the pool that no thread has picked up yet.
+#[must_use]
+pub fn cpu_pool_queue_depth() -> usize {
+    CPU_POOL_ENQUEUED
+        .load(Ordering::Relaxed)
+        .saturating_sub(CPU_POOL_STARTED.load(Ordering::Relaxed))
+}
 
 /// Run a task on the dedicated CPU pool in FIFO order.
 pub fn cpu_pool_spawn_fifo(task: Box<dyn FnOnce() + Send>) {
@@ -19,6 +30,7 @@ pub fn cpu_pool_spawn_fifo(task: Box<dyn FnOnce() + Send>) {
                 .name(format!("veilid-cpu-{}", n))
                 .spawn(move || {
                     while let Ok(task) = rx.recv() {
+                        CPU_POOL_STARTED.fetch_add(1, Ordering::Relaxed);
                         task();
                     }
                 })
@@ -26,5 +38,6 @@ pub fn cpu_pool_spawn_fifo(task: Box<dyn FnOnce() + Send>) {
         }
         tx
     });
+    CPU_POOL_ENQUEUED.fetch_add(1, Ordering::Relaxed);
     let _ = tx.send(task);
 }

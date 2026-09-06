@@ -935,7 +935,12 @@ impl NetworkManager {
         let secret_key = routing_table.secret_key(vcrypto.kind());
 
         // Get nonce
+        let nonce_start = Timestamp::now_non_decreasing();
         let nonce = vcrypto.random_nonce().await;
+        let nonce_us = TimestampDuration::since_non_decreasing(nonce_start);
+        if nonce_us > TimestampDuration::new_ms(500) {
+            veilid_log!(self debug "NetworkManager::build_envelope random_nonce slow: {:#}", nonce_us);
+        }
 
         // Encode envelope
         let envelope = match version {
@@ -955,7 +960,7 @@ impl NetworkManager {
         envelope
             .to_encrypted_data(&crypto, body, &secret_key, &network_key)
             .measure_limit(TimestampDuration::new_ms(500), |duration| {
-                veilid_log!(self debug "NetworkManager::build_envelope to_encrypted_data slow: {:#}", duration);
+                veilid_log!(self debug "NetworkManager::build_envelope to_encrypted_data slow: {:#} (nonce {:#})", duration, nonce_us);
                 // Encryption this slow ate the timeout budget of everything in flight
                 self.online_detector().record_local_stall(duration);
             })

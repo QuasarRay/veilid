@@ -85,13 +85,11 @@ impl StorageManager {
             apibail_try_again!("offline, try again later");
         };
 
-        // Inspecting only subkey 0 gets the descriptor for the record but
-        // minimizes the number of subkeys we wait for from the network in the event that
-        // the record has many subkeys that have not yet been written to
-        // This is a bit of a hack because in theory other subkeys besides 0 could have been
-        // written to, but subkey 0 is the most likely to have been written to first
-        // Also, we know subkey 0 must exist, and if we don't have a schema, the only other alternative
-        // is a ValueSubkeyRangeSet::full() which would be more like a transact_dht_record in terms of wait time
+        // An open wants the descriptor and nothing else, which the first node to answer
+        // settles. Waiting on a subkey's consensus instead would hold a record whose
+        // subkeys have never been written to node exhaustion. Subkey 0 is asked for
+        // because a range must be, and with no schema in hand the only alternative is a
+        // full range, whose seqs cost a transact_dht_record's worth of wire per node.
         // No last descriptor, no last value. Use the safety selection we opened the record with.
         let outbound_inspect_result = self
             .outbound_inspect_value(
@@ -100,6 +98,7 @@ impl StorageManager {
                 safety_selection.clone(),
                 InspectResult::default(),
                 false,
+                InspectFanoutStop::Descriptor,
             )
             .await?;
 

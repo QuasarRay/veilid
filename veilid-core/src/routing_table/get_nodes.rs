@@ -526,7 +526,7 @@ impl RoutingTable {
         let valid = match self.verify_peer_infos_closer(
             own_node_id.to_hash_coordinate(),
             hash_coordinate.clone(),
-            &closest_nodes,
+            closest_nodes.iter().map(|p| p.node_ids()),
         ) {
             Ok(v) => v,
             Err(e) => {
@@ -658,11 +658,11 @@ impl RoutingTable {
         feature = "instrument",
         instrument(level = "trace", target = "rtab", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub fn verify_peer_infos_closer(
+    pub fn verify_peer_infos_closer<'a>(
         &self,
         hash_coordinate_far: HashCoordinate,
         hash_coordinate_near: HashCoordinate,
-        peers: &[Arc<PeerInfo>],
+        peers: impl IntoIterator<Item = &'a NodeIdGroup>,
     ) -> EyreResult<bool> {
         if hash_coordinate_far.kind() != hash_coordinate_near.kind() {
             bail!("keys all need the same cryptosystem");
@@ -671,7 +671,7 @@ impl RoutingTable {
         let mut closer = true;
         let d_far = hash_coordinate_far.distance(&hash_coordinate_near);
         for peer in peers {
-            let Some(key_peer) = peer.node_ids().get(hash_coordinate_far.kind()) else {
+            let Some(key_peer) = peer.get(hash_coordinate_far.kind()) else {
                 bail!("peers need to have a key with the same cryptosystem");
             };
             let d_near = hash_coordinate_near.distance(&key_peer.to_hash_coordinate());

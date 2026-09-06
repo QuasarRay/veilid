@@ -9,7 +9,7 @@ pub struct TransactBeginAnswer {
     pub transaction_id: Option<u64>,
     pub expiration: Timestamp,
     pub seqs: Vec<ValueSeqNum>,
-    pub peers: Vec<Arc<PeerInfo>>,
+    pub peers: Vec<Arc<UnverifiedPeerInfo>>,
 }
 
 impl RPCProcessor {
@@ -157,7 +157,7 @@ impl RPCProcessor {
         let valid = match self.routing_table().verify_peer_infos_closer(
             target_node_id.to_hash_coordinate(),
             opaque_record_key.to_hash_coordinate(),
-            &peers,
+            peers.iter().map(|p| p.node_ids()),
         ) {
             Ok(v) => v,
             Err(e) => {
@@ -393,7 +393,7 @@ impl RPCProcessor {
             opt_transaction_id.map(|id| id.into()),
             duration,
             transact_begin_seqs,
-            closer_to_key_peers,
+            UnverifiedPeerInfo::from_verified_list(closer_to_key_peers),
         )?;
 
         // Send TransactBegin answer

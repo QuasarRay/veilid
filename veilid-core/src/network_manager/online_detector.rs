@@ -614,12 +614,19 @@ impl OnlineDetector {
         };
         match (old_state, new_state) {
             (_, OnlineState::Degraded) => {
-                veilid_log!(self info "{:?} degraded detected ({}): blame suppressed, exit needs {}s clean", routing_domain, why, clean_secs);
+                veilid_log!(self info "{:?} degraded detected ({}): blame suppressed, exit needs {}s clean{}", routing_domain, why, clean_secs, executor_snapshot_suffix());
             }
             (OnlineState::Degraded, OnlineState::Online) => {
                 veilid_log!(self info "{:?} recovered from degraded", routing_domain);
             }
             _ => {}
+        }
+        if let Err(e) = self.event_bus().post(OnlineStateChangeEvent {
+            routing_domain,
+            old_state,
+            new_state,
+        }) {
+            veilid_log!(self warn "failed to post OnlineStateChangeEvent: {}", e);
         }
     }
 

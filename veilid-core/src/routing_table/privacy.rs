@@ -28,7 +28,7 @@ pub(crate) enum RouteNode {
     /// Route node is optimized, no contact method information as this node id has been seen before
     NodeId(NodeId),
     /// Route node with full contact method information to ensure the peer is reachable
-    PeerInfo(Arc<PeerInfo>),
+    PeerInfo(Arc<UnverifiedPeerInfo>),
 }
 
 impl RouteNode {

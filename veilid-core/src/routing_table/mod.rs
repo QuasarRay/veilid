@@ -119,9 +119,18 @@ impl Default for RoutingTableStartupContext {
     }
 }
 
+/// The network manager, held by the routing table while it runs so per-entry state
+/// computation reaches the online detector without a registry lookup. Stored once at
+/// post-init and cleared at pre-terminate; loaded on every entry state read.
+/// Peer infos received more than once are the norm; this many verifications are remembered
+const VERIFIED_PEER_INFO_CACHE_SIZE: usize = 1024;
+
+pub(crate) type NetworkManagerHandle = Arc<ArcSwapOption<VeilidComponentGuardArc<NetworkManager>>>;
+
 #[must_use]
 pub(crate) struct RoutingTable {
     registry: VeilidComponentRegistry,
+    network_manager: NetworkManagerHandle,
 
     // Startup context
     startup_context: RoutingTableStartupContext,
@@ -167,6 +176,8 @@ pub(crate) struct RoutingTable {
     self_transfer_stats_accounting: Mutex<(TransferStatsAccounting, TransferStatsDownUp)>,
     /// Peers we have recently communicated with
     recent_peers: Mutex<LruCache<NodeId, RecentPeersEntry>>,
+    /// Byte-identical peer infos whose signatures already checked out
+    verified_peer_infos: Mutex<LruCache<(Bytes, SignatureGroup), ()>>,
     /// Last routing table health summary
     routing_table_health: Mutex<Arc<RoutingTableHealth>>,
     /// Network size estimator (24h rolling history)
@@ -205,7 +216,11 @@ impl RoutingTable {
         registry: VeilidComponentRegistry,
         startup_context: RoutingTableStartupContext,
     ) -> Self {
-        let inner = RwLock::new(RoutingTableInner::new(registry.clone()));
+        let network_manager: NetworkManagerHandle = Arc::new(ArcSwapOption::empty());
+        let inner = RwLock::new(RoutingTableInner::new(
+            registry.clone(),
+            network_manager.clone(),
+        ));
         let route_spec_store = RouteSpecStore::new(registry.clone());
 
         // Create ping validation channel
@@ -213,6 +228,7 @@ impl RoutingTable {
 
         let this = Self {
             registry,
+            network_manager,
             inner,
             startup_context,
             route_spec_store,
@@ -234,6 +250,7 @@ impl RoutingTable {
             self_latency_stats_accounting: Default::default(),
             self_transfer_stats_accounting: Default::default(),
             recent_peers: Mutex::new(LruCache::new(RECENT_PEERS_TABLE_SIZE)),
+            verified_peer_infos: Mutex::new(LruCache::new(VERIFIED_PEER_INFO_CACHE_SIZE)),
             routing_table_health: Mutex::new(Arc::new(RoutingTableHealth::default())),
             network_estimator: Mutex::new(NetworkEstimator::new()),
 
@@ -368,6 +385,8 @@ impl RoutingTable {
 
     #[expect(clippy::unused_async)]
     async fn post_init_async(&self) -> EyreResult<()> {
+        self.network_manager
+            .store(self.registry().lookup_arc::<NetworkManager>().map(Arc::new));
         Ok(())
     }
 
@@ -472,6 +491,8 @@ impl RoutingTable {
             self.startup_context.startup_lock.is_shut_down(),
             "should have shut down by now"
         );
+        // Released here or the network manager outlives its own termination
+        self.network_manager.store(None);
     }
 
     /// Called to shut down the routing table
@@ -485,7 +506,7 @@ impl RoutingTable {
 
         {
             let mut inner = self.inner.write();
-            *inner = RoutingTableInner::new(self.registry());
+            *inner = RoutingTableInner::new(self.registry(), self.network_manager.clone());
         }
         *self.routing_table_health.lock() = Arc::new(RoutingTableHealth::default());
 
@@ -514,9 +535,14 @@ impl RoutingTable {
         cur_ts: Timestamp,
         min_state: BucketEntryState,
     ) -> RoutingTableSnapshot {
-        self.inner
-            .read()
-            .snapshot(self.registry(), cur_ts, min_state)
+        // State computation stays outside the lock: a waiting writer blocks every reader
+        let entry_refs = self.inner.read().all_entry_refs();
+        let registry = self.registry();
+        let entries = entry_refs
+            .into_iter()
+            .filter_map(|entry| entry.snapshot_if_at_least(registry.clone(), cur_ts, min_state))
+            .collect();
+        RoutingTableSnapshot::new(registry, cur_ts, entries)
     }
 
     /// Max entries kept in the bucket at position `pos`.
@@ -1000,6 +1026,7 @@ impl RoutingTable {
             // slot keeps the bucket map's entry indices aligned.
             let entryinner = match BucketEntryInner::deserialize_from_persisted(
                 inner.registry(),
+                inner.network_manager.clone(),
                 &entry_bytes,
             ) {
                 Ok(e) => e,
@@ -1445,25 +1472,50 @@ impl RoutingTable {
     /// and add the dial info we have for it. Returns a noderef filtered to
     /// the routing domain in which this node was registered for convenience.
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
+    pub(crate) fn peer_info_verified(&self, key: &(Bytes, SignatureGroup)) -> bool {
+        self.verified_peer_infos.lock().get(key).is_some()
+    }
+
+    pub(crate) fn note_peer_info_verified(&self, key: (Bytes, SignatureGroup)) {
+        self.verified_peer_infos.lock().insert(key, ());
+    }
+
+    /// The verified peer info this table already holds for any of `node_ids` in `routing_domain`
+    fn existing_peer_info(
+        &self,
+        routing_domain: RoutingDomain,
+        node_ids: &NodeIdGroup,
+    ) -> Option<Arc<PeerInfo>> {
+        node_ids.iter().find_map(|node_id| {
+            self.lookup_node_id(node_id.clone())
+                .ok()
+                .flatten()
+                .and_then(|nr| nr.operate(|e| e.get_peer_info(routing_domain)))
+        })
+    }
+
     pub fn register_node_with_peer_info(
         &self,
-        peer_info: Arc<PeerInfo>,
+        unverified: Arc<UnverifiedPeerInfo>,
         allow_invalid: bool,
     ) -> EyreResult<FilteredNodeRef> {
-        let routing_domain = peer_info.routing_domain();
+        let routing_domain = unverified.routing_domain();
+        // Signatures are checked once the cheap rejections are past, and not at all when the
+        // table already holds this node info: same ids and timestamp mean the same bytes
+        let peer_info: Arc<PeerInfo>;
 
         // if our own node is in the list, then ignore it as we don't add ourselves to our own routing table
         if self
             .routing_table()
-            .matches_own_node_id(peer_info.node_ids())
+            .matches_own_node_id(unverified.node_ids())
         {
             bail!("can't register own node id in routing table");
         }
 
         // node can not be its own relay
-        let node_info = peer_info.node_info();
+        let node_info = unverified.node_info();
         let relay_ids = node_info.relay_ids();
-        let node_ids = peer_info.node_ids().clone();
+        let node_ids = unverified.node_ids().clone();
         if node_ids.contains_any_from_iter(relay_ids.iter()) {
             bail!("node can not be its own relay");
         }
@@ -1479,16 +1531,16 @@ impl RoutingTable {
         {
             bail!(
                 "can't register node {:?} because its dial info matches our own",
-                peer_info.node_ids()
+                unverified.node_ids()
             );
         }
 
         if !allow_invalid {
             // verify signature
-            if peer_info.signatures().is_empty() {
+            if unverified.signatures().is_empty() {
                 bail!(
                     "peerinfo for {:?} has no valid signature",
-                    peer_info.node_ids()
+                    unverified.node_ids()
                 );
             }
         }
@@ -1497,10 +1549,21 @@ impl RoutingTable {
         if !valid_routing_domains.contains(routing_domain) {
             bail!(
                 "peerinfo for {:?} not valid in the {:?} routing domain",
-                peer_info.node_ids(),
+                unverified.node_ids(),
                 routing_domain
             );
         }
+
+        peer_info = match self.existing_peer_info(routing_domain, &node_ids) {
+            Some(current)
+                if !current.signatures().is_empty()
+                    && current.node_ids() == &node_ids
+                    && current.node_info().timestamp() == unverified.timestamp() =>
+            {
+                current
+            }
+            _ => Arc::new(unverified.verify_and_extract(self)?),
+        };
 
         let mut updated = false;
         let mut old_peer_info = None;
@@ -1733,7 +1796,7 @@ impl RoutingTable {
     )]
     pub fn register_nodes_with_peer_info_list(
         &self,
-        peer_info_list: Vec<Arc<PeerInfo>>,
+        peer_info_list: Vec<Arc<UnverifiedPeerInfo>>,
     ) -> Vec<NodeRef> {
         // Register nodes we'd found
         let mut out = Vec::<NodeRef>::with_capacity(peer_info_list.len());

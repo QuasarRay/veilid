@@ -1019,7 +1019,9 @@ impl RPCProcessor {
                                     ));
                                 }
                             },
-                            RouteNode::PeerInfo(peer_info),
+                            RouteNode::PeerInfo(Arc::new(UnverifiedPeerInfo::from_verified(
+                                &peer_info,
+                            ))),
                         ));
 
                         // Wrap with safety route
@@ -1147,7 +1149,10 @@ impl RPCProcessor {
         if let Some(published_peer_info) = routing_table.get_published_peer_info(routing_domain) {
             // If the target has not yet seen our published peer info, send it along if we have it
             if !node.has_seen_our_node_info_ts(routing_domain) {
-                return SenderPeerInfo::new(published_peer_info, target_node_info_ts);
+                return SenderPeerInfo::new(
+                    Arc::new(UnverifiedPeerInfo::from_verified(&published_peer_info)),
+                    target_node_info_ts,
+                );
             }
         }
         SenderPeerInfo::new_no_peer_info(target_node_info_ts)

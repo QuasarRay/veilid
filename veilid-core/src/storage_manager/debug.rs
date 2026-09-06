@@ -32,8 +32,7 @@ impl StorageManager {
         format!("{}]\n", out)
     }
     pub fn debug_watched_records(&self) -> String {
-        let inner = self.inner.lock();
-        inner.outbound_watch_manager.to_string()
+        self.outbound_watch_manager.lock().to_string()
     }
     pub fn debug_transactions(&self) -> String {
         let inner = self.inner.lock();

@@ -83,6 +83,16 @@ impl DHTRecordReport {
     pub fn network_seqs(&self) -> &[ValueSeqNum] {
         &self.network_seqs
     }
+
+    /// The local seq of one subkey, or None when the report does not cover it.
+    /// The seq lists are aligned with `subkeys()`, not with any subset of it.
+    #[must_use]
+    pub fn local_seq_for(&self, subkey: ValueSubkey) -> Option<ValueSeqNum> {
+        self.subkeys
+            .iter()
+            .position(|sk| sk == subkey)
+            .map(|n| self.local_seqs[n])
+    }
     /// The subkeys whose network sequence number is newer than the local copy
     pub fn newer_online_subkeys(&self) -> ValueSubkeyRangeSet {
         let mut newer_online = ValueSubkeyRangeSet::new();

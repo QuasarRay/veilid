@@ -58,6 +58,8 @@ pub mod eventual_base;
 pub mod eventual_value;
 /// `Eventual` carrying a payload cloned to every waiter.
 pub mod eventual_value_clone;
+/// One-line async runtime load summary for stall logs.
+pub mod executor_snapshot;
 /// Hysteresis detector that debounces a value flapping between states.
 pub mod flap_detector;
 /// String indentation, human-readable byte counts, and formatter helpers.
@@ -91,6 +93,9 @@ pub mod network_interfaces;
 pub mod network_result;
 /// Type aliases for pinned, boxed futures.
 pub mod pin;
+/// OS thread that reports late wakeups, separating process stalls from executor stalls.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod process_watchdog;
 /// Cryptographically secure RNG and random number helpers.
 pub mod random;
 /// Raw integer timestamps with duration parsing and human formatting.
@@ -141,6 +146,8 @@ pub mod wasm_tools;
 /// Tracing layer reporting to the browser console and performance timeline.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "tracing"))]
 pub mod wasm_tracing;
+/// Wall-clock phase split of a closure handed to a worker pool.
+pub mod yield_timing;
 
 ///////////////////////////////////////////////////////////////
 // Veilid-tools Prelude
@@ -256,6 +263,8 @@ pub use eventual_value::*;
 #[doc(inline)]
 pub use eventual_value_clone::*;
 #[doc(inline)]
+pub use executor_snapshot::*;
+#[doc(inline)]
 pub use flap_detector::*;
 #[doc(inline)]
 pub use formatting::*;
@@ -285,6 +294,9 @@ pub use network_interfaces::*;
 pub use network_result::*;
 #[doc(inline)]
 pub use pin::*;
+#[doc(inline)]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use process_watchdog::*;
 #[doc(inline)]
 pub use random::*;
 #[doc(inline)]
@@ -328,6 +340,8 @@ pub use tracked_mutex::*;
 pub use trim_backtrace::*;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub use wasm_tools::*;
+#[doc(inline)]
+pub use yield_timing::*;
 
 #[cfg(any(test, feature = "test-util"))]
 #[doc(hidden)]

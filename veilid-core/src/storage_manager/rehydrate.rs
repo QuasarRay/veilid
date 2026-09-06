@@ -190,6 +190,7 @@ impl StorageManager {
                 safety_selection.clone(),
                 InspectResult::default(),
                 true,
+                InspectFanoutStop::SubkeyConsensus,
             )
             .await?;
 

@@ -15,7 +15,7 @@ impl RPCProcessor {
         dest: Destination,
         hash_coordinate: HashCoordinate,
         capabilities: Vec<VeilidCapability>,
-    ) -> RPCNetworkResult<Answer<Vec<Arc<PeerInfo>>>> {
+    ) -> RPCNetworkResult<Answer<Vec<Arc<UnverifiedPeerInfo>>>> {
         let _guard = self
             .startup_context
             .startup_lock
@@ -115,7 +115,8 @@ impl RPCProcessor {
         );
 
         // Make FindNode answer
-        let find_node_a = RPCOperationFindNodeA::new(closest_nodes)?;
+        let find_node_a =
+            RPCOperationFindNodeA::new(UnverifiedPeerInfo::from_verified_list(closest_nodes))?;
 
         // Send FindNode answer
         self.answer(

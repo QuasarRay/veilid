@@ -108,7 +108,7 @@ impl RPCOperationInspectValueQ {
 pub(in crate::rpc_processor) struct RPCOperationInspectValueA {
     accepted: bool,
     seqs: Vec<ValueSeqNum>,
-    peers: Vec<Arc<PeerInfo>>,
+    peers: Vec<Arc<UnverifiedPeerInfo>>,
     descriptor: Option<SignedValueDescriptor>,
 }
 
@@ -116,7 +116,7 @@ impl RPCOperationInspectValueA {
     pub fn new(
         accepted: bool,
         seqs: Vec<ValueSeqNum>,
-        peers: Vec<Arc<PeerInfo>>,
+        peers: Vec<Arc<UnverifiedPeerInfo>>,
         descriptor: Option<SignedValueDescriptor>,
     ) -> Result<Self, RPCError> {
         // Validate length of seqs
@@ -202,7 +202,7 @@ impl RPCOperationInspectValueA {
     ) -> (
         bool,
         Vec<ValueSeqNum>,
-        Vec<Arc<PeerInfo>>,
+        Vec<Arc<UnverifiedPeerInfo>>,
         Option<SignedValueDescriptor>,
     ) {
         (self.accepted, self.seqs, self.peers, self.descriptor)
@@ -224,7 +224,7 @@ impl RPCOperationInspectValueA {
         rpc_ignore_missing_property!(reader, peers);
         let peers_reader = reader.get_peers()?;
         let peers_len = rpc_ignore_max_len!(peers_reader, MAX_INSPECT_VALUE_A_PEERS_LEN);
-        let mut peers = Vec::<Arc<PeerInfo>>::with_capacity(peers_len);
+        let mut peers = Vec::<Arc<UnverifiedPeerInfo>>::with_capacity(peers_len);
         for p in peers_reader.iter() {
             let Some(peer_info) = decode_peer_info(decode_context, &p).ignore_ok()? else {
                 continue;

@@ -63,25 +63,32 @@ impl AsyncCryptoSystemGuard<'_> {
 
     /// Diffie-Hellman shared secret, served from the `Crypto` DH cache when present.
     ///
-    /// Local CPU only; awaits a single runtime yield. On a cache miss runs the DH inline (does not
-    /// offload to the rayon pool, unlike [`compute_dh`](Self::compute_dh)).
+    /// Local CPU only, inline: a cache hit is under a microsecond, a miss under 50us.
     ///
     /// Errors `VeilidAPIError::Generic` if `key` or `secret` carries the wrong kind or length, or
     /// (on a cache miss) `VeilidAPIError::Internal` if `key` is not a valid curve point and
     /// `VeilidAPIError::Generic` if the exchange is non-contributory.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn cached_dh(
         &self,
         key: &PublicKey,
         secret: &SecretKey,
     ) -> VeilidAPIResult<SharedSecret> {
-        yielding(|| self.guard.cached_dh(key, secret)).await
+        self.guard.cached_dh(key, secret)
     }
 
     // Generation
 
     /// Generate `len` cryptographically random bytes.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn random_bytes(&self, len: usize) -> Bytes {
-        yielding(|| self.guard.random_bytes(len).into()).await
+        self.guard.random_bytes(len).into()
     }
 
     /// Hash a password with the given salt, producing a verifier string.
@@ -112,8 +119,7 @@ impl AsyncCryptoSystemGuard<'_> {
     }
     /// Derive a shared secret deterministically from a password and salt.
     ///
-    /// CPU-heavy (Argon2) but run inline before a single yield (not offloaded), so it holds the
-    /// thread for the full KDF. No network or disk.
+    /// CPU-heavy (Argon2, ~15ms); offloaded to the cpu pool off-WASM. No network or disk.
     ///
     /// Errors `VeilidAPIError::Generic` if `salt` length is outside the Argon2 bounds or the KDF fails.
     pub async fn derive_shared_secret(
@@ -121,37 +127,51 @@ impl AsyncCryptoSystemGuard<'_> {
         password: Bytes,
         salt: Bytes,
     ) -> VeilidAPIResult<SharedSecret> {
-        yielding(|| self.guard.derive_shared_secret(&password, &salt)).await
+        let cs = self.guard.clone_arc();
+        let salt = salt.to_vec();
+        cpu_yielding(move || cs.derive_shared_secret(&password, &salt)).await
     }
     /// Generate a random nonce.
+    ///
+    /// Inline, as are the other single-digit-microsecond operations below: a yield after
+    /// them costs a full pass over the runnable queue and buys nothing (measured in
+    /// `tests_crypto::test_crypto_timing`).
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn random_nonce(&self) -> Nonce {
-        yielding(|| self.guard.random_nonce()).await
+        self.guard.random_nonce()
     }
     /// Generate a random shared secret.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn random_shared_secret(&self) -> SharedSecret {
-        yielding(|| self.guard.random_shared_secret()).await
+        self.guard.random_shared_secret()
     }
     /// Compute the Diffie-Hellman shared secret for a public key and secret key.
     ///
-    /// Local CPU only, offloaded to the rayon thread pool off-WASM; uncached, recomputes every call.
+    /// Local CPU only, inline (44us); uncached, recomputes every call.
     /// Use [`cached_dh`](Self::cached_dh) to memoize.
     ///
     /// Errors `VeilidAPIError::Internal` if `key` is not a valid curve point, `VeilidAPIError::Generic`
     /// if the exchange is non-contributory (low-order public key).
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn compute_dh(
         &self,
         key: &PublicKey,
         secret: &SecretKey,
     ) -> VeilidAPIResult<SharedSecret> {
-        let cs = self.guard.clone_arc();
-        let key = key.clone();
-        let secret = secret.clone();
-        cpu_yielding(move || cs.compute_dh(&key, &secret)).await
+        self.guard.compute_dh(key, secret)
     }
     /// Derive a domain-separated shared secret by hashing the DH result together with `domain` and the Veilid API domain.
     ///
-    /// Local CPU only; the DH step is offloaded to the rayon thread pool off-WASM (see
-    /// [`compute_dh`](Self::compute_dh)).
+    /// Local CPU only, inline (see [`compute_dh`](Self::compute_dh)).
     ///
     /// Errors with the [`compute_dh`](Self::compute_dh) errors if the key exchange fails.
     pub async fn generate_shared_secret(
@@ -219,13 +239,21 @@ impl AsyncCryptoSystemGuard<'_> {
     }
 
     /// Generate a new keypair.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn generate_keypair(&self) -> KeyPair {
-        yielding(|| self.guard.generate_keypair()).await
+        self.guard.generate_keypair()
     }
 
     /// Generate a new KEM key pair.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn generate_kem_keypair(&self) -> KemKeyPair {
-        yielding(|| self.guard.generate_kem_keypair()).await
+        self.guard.generate_kem_keypair()
     }
 
     /// Derive the KEM encapsulation key corresponding to a signing public key.
@@ -234,11 +262,15 @@ impl AsyncCryptoSystemGuard<'_> {
     /// `VeilidAPIError::Unimplemented`.
     ///
     /// Errors `VeilidAPIError::InvalidArgument` if `key` is not a valid signing public key.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn encapsulation_key_from_signing_key(
         &self,
         key: &PublicKey,
     ) -> VeilidAPIResult<EncapsulationKey> {
-        yielding(|| self.guard.encapsulation_key_from_signing_key(key)).await
+        self.guard.encapsulation_key_from_signing_key(key)
     }
 
     /// Derive the KEM decapsulation key corresponding to a signing secret key.
@@ -247,16 +279,24 @@ impl AsyncCryptoSystemGuard<'_> {
     /// `VeilidAPIError::Unimplemented`.
     ///
     /// Errors `VeilidAPIError::InvalidArgument` if `secret` is not a valid signing secret key.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn decapsulation_key_from_signing_secret(
         &self,
         secret: &SecretKey,
     ) -> VeilidAPIResult<DecapsulationKey> {
-        yielding(|| self.guard.decapsulation_key_from_signing_secret(secret)).await
+        self.guard.decapsulation_key_from_signing_secret(secret)
     }
 
     /// Hash a byte buffer.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn generate_hash(&self, data: Bytes) -> HashDigest {
-        yielding(|| self.guard.generate_hash(&data)).await
+        self.guard.generate_hash(&data)
     }
 
     /// Hash the entire contents of a reader.
@@ -368,19 +408,27 @@ impl AsyncCryptoSystemGuard<'_> {
     ///
     /// Returns `Ok(false)` if they do not match. Errors `VeilidAPIError::Generic` if `key` or
     /// `secret` has the wrong kind or length.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn validate_keypair(
         &self,
         key: &PublicKey,
         secret: &SecretKey,
     ) -> VeilidAPIResult<bool> {
-        yielding(|| self.guard.validate_keypair(key, secret)).await
+        self.guard.validate_keypair(key, secret)
     }
 
     /// Check that a buffer hashes to the given digest.
     ///
     /// Errors `VeilidAPIError::Generic` if `hash` has the wrong kind or length.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn validate_hash(&self, data: Bytes, hash: &HashDigest) -> VeilidAPIResult<bool> {
-        yielding(|| self.guard.validate_hash(&data, hash)).await
+        self.guard.validate_hash(&data, hash)
     }
 
     /// Check that a reader's contents hash to the given digest.
@@ -399,31 +447,36 @@ impl AsyncCryptoSystemGuard<'_> {
 
     /// Sign a buffer with a keypair, returning a detached signature.
     ///
-    /// Local CPU only, offloaded to the rayon thread pool off-WASM.
+    /// Local CPU only, inline: under 100us at any size.
     ///
     /// Errors `VeilidAPIError::Generic` if `public_key` or `secret` has the wrong kind or length,
     /// `VeilidAPIError::ParseError` if they do not form a valid ed25519 keypair,
     /// `VeilidAPIError::Internal` if signing fails.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn sign(
         &self,
         public_key: &PublicKey,
         secret: &SecretKey,
         data: Bytes,
     ) -> VeilidAPIResult<Signature> {
-        let cs = self.guard.clone_arc();
-        let public_key = public_key.clone();
-        let secret = secret.clone();
-        cpu_yielding(move || cs.sign(&public_key, &secret, &data)).await
+        self.guard.sign(public_key, secret, &data)
     }
 
     /// Sign the bytes in `range` and write the signature into `data` at `sig_idx`, returning the buffer.
     ///
-    /// Local CPU only, offloaded to the rayon thread pool off-WASM.
+    /// Local CPU only, inline: under 100us at any size.
     ///
     /// Errors `VeilidAPIError::Generic` if `public_key` or `secret` has the wrong kind or length,
     /// `VeilidAPIError::ParseError` if they do not form a valid ed25519 keypair or `sig_idx` is out
     /// of bounds, `VeilidAPIError::InvalidArgument` if `range` is out of bounds,
     /// `VeilidAPIError::Internal` if signing fails.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn sign_in_place(
         &self,
         public_key: &PublicKey,
@@ -432,42 +485,42 @@ impl AsyncCryptoSystemGuard<'_> {
         range: Range<usize>,
         sig_idx: usize,
     ) -> VeilidAPIResult<BytesMut> {
-        let cs = self.guard.clone_arc();
-        let public_key = public_key.clone();
-        let secret = secret.clone();
-        cpu_yielding(move || {
-            cs.sign_in_place(&public_key, &secret, &mut data, range, sig_idx)?;
-            Ok(data)
-        })
-        .await
+        self.guard
+            .sign_in_place(public_key, secret, &mut data, range, sig_idx)?;
+        Ok(data)
     }
 
     /// Verify a detached signature over a buffer against a public key.
     ///
-    /// Local CPU only, offloaded to the rayon thread pool off-WASM.
+    /// Local CPU only, inline: under 100us at any size.
     ///
     /// Returns `Ok(false)` if the signature does not match. Errors `VeilidAPIError::Generic` if
     /// `public_key` or `signature` has the wrong kind or length, `VeilidAPIError::ParseError` if
     /// `public_key` is not a valid ed25519 point.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn verify(
         &self,
         public_key: &PublicKey,
         data: Bytes,
         signature: &Signature,
     ) -> VeilidAPIResult<bool> {
-        let cs = self.guard.clone_arc();
-        let public_key = public_key.clone();
-        let signature = signature.clone();
-        cpu_yielding(move || cs.verify(&public_key, &data, &signature)).await
+        self.guard.verify(public_key, &data, signature)
     }
 
     /// Verify the signature at `sig_idx` over the bytes in `range` of `data` against a public key.
     ///
-    /// Local CPU only, offloaded to the rayon thread pool off-WASM.
+    /// Local CPU only, inline: under 100us at any size.
     ///
     /// Returns `Ok(false)` if the signature does not match. Errors `VeilidAPIError::Generic` if
     /// `public_key` has the wrong kind or length, `VeilidAPIError::ParseError` if `public_key` is
     /// not a valid ed25519 point, `VeilidAPIError::Internal` if `range` or `sig_idx` is out of bounds.
+    #[expect(
+        clippy::unused_async,
+        reason = "async facade: inline for VLD0, a heavier kind may offload"
+    )]
     pub async fn verify_in_place(
         &self,
         public_key: &PublicKey,
@@ -475,9 +528,8 @@ impl AsyncCryptoSystemGuard<'_> {
         range: Range<usize>,
         sig_idx: usize,
     ) -> VeilidAPIResult<bool> {
-        let cs = self.guard.clone_arc();
-        let public_key = public_key.clone();
-        cpu_yielding(move || cs.verify_in_place(&public_key, &data, range, sig_idx)).await
+        self.guard
+            .verify_in_place(public_key, &data, range, sig_idx)
     }
 
     // AEAD Encrypt/Decrypt
@@ -500,7 +552,7 @@ impl AsyncCryptoSystemGuard<'_> {
         let cs = self.guard.clone_arc();
         let nonce = nonce.clone();
         let shared_secret = shared_secret.clone();
-        scaled_yielding(body.len(), 1024, 8192, move || {
+        scaled_yielding(body.len(), 8192, move || {
             Ok(cs
                 .decrypt_aead(&body, &nonce, &shared_secret, associated_data.as_deref())?
                 .into())
@@ -524,7 +576,7 @@ impl AsyncCryptoSystemGuard<'_> {
         let cs = self.guard.clone_arc();
         let nonce = nonce.clone();
         let shared_secret = shared_secret.clone();
-        scaled_yielding(body.len(), 1024, 8192, move || {
+        scaled_yielding(body.len(), 8192, move || {
             cs.decrypt_in_place_aead(
                 &mut body,
                 &nonce,
@@ -553,7 +605,7 @@ impl AsyncCryptoSystemGuard<'_> {
         let cs = self.guard.clone_arc();
         let nonce = nonce.clone();
         let shared_secret = shared_secret.clone();
-        scaled_yielding(body.len(), 1024, 8192, move || {
+        scaled_yielding(body.len(), 8192, move || {
             Ok(cs
                 .encrypt_aead(&body, &nonce, &shared_secret, associated_data.as_deref())?
                 .into())
@@ -577,7 +629,7 @@ impl AsyncCryptoSystemGuard<'_> {
         let cs = self.guard.clone_arc();
         let nonce = nonce.clone();
         let shared_secret = shared_secret.clone();
-        scaled_yielding(body.len(), 1024, 8192, move || {
+        scaled_yielding(body.len(), 8192, move || {
             cs.encrypt_in_place_aead(
                 &mut body,
                 &nonce,
@@ -609,7 +661,7 @@ impl AsyncCryptoSystemGuard<'_> {
         let cs = self.guard.clone_arc();
         let nonce = nonce.clone();
         let shared_secret = shared_secret.clone();
-        scaled_yielding(in_buf.len(), 1024, 8192, move || {
+        scaled_yielding(in_buf.len(), 8192, move || {
             cs.crypt_b2b_no_auth(
                 &in_buf,
                 &mut out_buf[out_idx..out_idx + in_buf.len()],
@@ -637,7 +689,7 @@ impl AsyncCryptoSystemGuard<'_> {
         let cs = self.guard.clone_arc();
         let nonce = nonce.clone();
         let shared_secret = shared_secret.clone();
-        scaled_yielding(body.len(), 1024, 8192, move || {
+        scaled_yielding(body.len(), 8192, move || {
             cs.crypt_in_place_no_auth(
                 body.as_mut()
                     .get_mut(range)
@@ -665,7 +717,7 @@ impl AsyncCryptoSystemGuard<'_> {
         let cs = self.guard.clone_arc();
         let nonce = nonce.clone();
         let shared_secret = shared_secret.clone();
-        scaled_yielding(body.len(), 1024, 8192, move || {
+        scaled_yielding(body.len(), 8192, move || {
             cs.crypt_no_auth_aligned_8(&body, &nonce, &shared_secret)
         })
         .await
@@ -686,7 +738,7 @@ impl AsyncCryptoSystemGuard<'_> {
         let cs = self.guard.clone_arc();
         let nonce = nonce.clone();
         let shared_secret = shared_secret.clone();
-        scaled_yielding(body.len(), 1024, 8192, move || {
+        scaled_yielding(body.len(), 8192, move || {
             cs.crypt_no_auth_unaligned(&body, &nonce, &shared_secret)
         })
         .await

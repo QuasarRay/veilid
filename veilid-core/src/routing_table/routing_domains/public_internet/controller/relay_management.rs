@@ -320,8 +320,10 @@ impl PublicInternetRoutingDomainController {
 
                 // Allocate outbound relay if one is needed
                 if !has_outbound_relay {
-                    match routing_table.register_node_with_peer_info(outbound_relay_peerinfo, false)
-                    {
+                    match routing_table.register_node_with_peer_info(
+                        Arc::new(UnverifiedPeerInfo::from_verified(&outbound_relay_peerinfo)),
+                        false,
+                    ) {
                         Ok(relay_node) => {
                             let outbound_relay = RoutingDomainRelay::new(
                                 RoutingDomain::PublicInternet,

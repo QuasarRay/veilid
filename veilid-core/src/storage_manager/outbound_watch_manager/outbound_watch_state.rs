@@ -6,8 +6,16 @@ use super::*;
 /// to WATCH_FALLBACK_INSPECT_MAX_INTERVAL while inspections keep finding nothing.
 const WATCH_FALLBACK_INSPECT_INTERVAL: TimestampDuration = TimestampDuration::new_secs(30);
 
-/// Ceiling for the backed-off fallback change inspection interval.
-const WATCH_FALLBACK_INSPECT_MAX_INTERVAL: TimestampDuration = TimestampDuration::new_secs(600);
+/// Ceiling for the backed-off fallback change inspection interval when the inspection
+/// reached nobody: a record no node serves costs the full get timeout per attempt.
+pub(in crate::storage_manager) const WATCH_FALLBACK_INSPECT_MAX_INTERVAL: TimestampDuration =
+    TimestampDuration::new_secs(600);
+
+/// Ceiling when the inspection was answered and found nothing newer: the record is
+/// served, an inspection costs one round trip, and the watch may simply never have
+/// been accepted, in which case this interval IS delivery latency.
+pub(in crate::storage_manager) const WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL:
+    TimestampDuration = TimestampDuration::new_secs(120);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundWatchState {
@@ -127,16 +135,17 @@ impl OutboundWatchStateEditor<'_> {
     pub fn touch_fallback_inspect(&mut self, ts: Timestamp) {
         self.state.last_fallback_inspect_ts = Some(ts);
     }
-    /// An inspection found nothing: wait longer before asking again
-    pub fn back_off_fallback_inspect(&mut self) {
+    /// An inspection found nothing: wait longer before asking again, up to
+    /// [ceiling]. A ceiling below the current interval brings it back down: an
+    /// answered inspection after a run of unanswered ones says the record is served
+    /// again.
+    pub fn back_off_fallback_inspect(&mut self, ceiling: TimestampDuration) {
         let cur = self
             .state
             .opt_fallback_inspect_interval
             .unwrap_or(WATCH_FALLBACK_INSPECT_INTERVAL);
-        self.state.opt_fallback_inspect_interval = Some(
-            TimestampDuration::new(cur.as_u64().saturating_mul(2))
-                .min(WATCH_FALLBACK_INSPECT_MAX_INTERVAL),
-        );
+        self.state.opt_fallback_inspect_interval =
+            Some(TimestampDuration::new(cur.as_u64().saturating_mul(2)).min(ceiling));
     }
     /// Something that could have hidden a missed update: a productive inspection, or
     /// the watch's node set or parameters moving

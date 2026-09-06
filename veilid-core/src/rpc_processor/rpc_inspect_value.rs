@@ -7,7 +7,7 @@ impl_veilid_log_facility!("rpc");
 pub struct InspectValueAnswer {
     pub accepted: bool,
     pub seqs: Vec<ValueSeqNum>,
-    pub peers: Vec<Arc<PeerInfo>>,
+    pub peers: Vec<Arc<UnverifiedPeerInfo>>,
     pub descriptor: Option<SignedValueDescriptor>,
 }
 
@@ -133,7 +133,7 @@ impl RPCProcessor {
         let valid = match self.routing_table().verify_peer_infos_closer(
             target_node_id.to_hash_coordinate(),
             opaque_record_key.to_hash_coordinate(),
-            &peers,
+            peers.iter().map(|p| p.node_ids()),
         ) {
             Ok(v) => v,
             Err(e) => {
@@ -268,7 +268,7 @@ impl RPCProcessor {
         let inspect_value_a = RPCOperationInspectValueA::new(
             accepted,
             inspect_result_seqs,
-            closer_to_key_peers,
+            UnverifiedPeerInfo::from_verified_list(closer_to_key_peers),
             inspect_result_descriptor.map(|x| (*x).clone()),
         )?;
 

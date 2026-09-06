@@ -48,11 +48,12 @@ use super::*;
 use hashlink::{LinkedHashMap, LruCache};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 
+use crate::network_manager::OnlineState;
 use constants::*;
 use gated_operation::*;
 #[cfg(feature = "stats")]
 use gated_operation_accounting::*;
-use inspect_record::OutboundInspectValueResult;
+use inspect_record::{InspectFanoutStop, OutboundInspectValueResult};
 use local_record_detail::*;
 use offline_subkey_writes::*;
 use outbound_transaction_manager::*;
@@ -116,14 +117,13 @@ struct StorageManagerInner {
     pub locally_created_records: HashSet<OpaqueRecordKey>,
     /// StopSources for callers waiting on flush_record; dropped when offline writes for a key drain
     pub flush_record_waiters: HashMap<OpaqueRecordKey, Vec<StopSource>>,
-    /// State management for outbound watches
-    pub outbound_watch_manager: OutboundWatchManager,
     /// State management for outbound transactions
     pub outbound_transaction_manager: OutboundTransactionManager,
     /// Storage manager metadata that is persistent, including copy of offline subkey writes
     pub metadata_db: Option<TableDB>,
     /// Routing domain ready subscription (drives the DHT-online gate)
     pub routing_domain_ready_subscription: Option<EventBusSubscription>,
+    pub online_state_change_subscription: Option<EventBusSubscription>,
     /// Tick subscription
     pub tick_subscription: Option<EventBusSubscription>,
     /// Network stats change subscription
@@ -139,7 +139,6 @@ impl fmt::Debug for StorageManagerInner {
             .field("remote_record_store", &self.remote_record_store)
             .field("offline_subkey_writes", &self.offline_subkey_writes)
             .field("rehydration_requests", &self.rehydration_requests)
-            .field("outbound_watch_manager", &self.outbound_watch_manager)
             .field(
                 "outbound_transaction_manager",
                 &self.outbound_transaction_manager,
@@ -147,6 +146,10 @@ impl fmt::Debug for StorageManagerInner {
             .field(
                 "routing_domain_ready_subscription",
                 &self.routing_domain_ready_subscription,
+            )
+            .field(
+                "online_state_change_subscription",
+                &self.online_state_change_subscription,
             )
             //.field("metadata_db", &self.metadata_db)
             //.field("tick_subscription", &self.tick_subscription)
@@ -157,6 +160,10 @@ impl fmt::Debug for StorageManagerInner {
 pub(crate) struct StorageManager {
     registry: VeilidComponentRegistry,
     inner: StatsMutex<StorageManagerInner>,
+    /// Outbound watch state, on its own lock so the watch sweeps and every inbound
+    /// ValueChanged stop queueing behind record operations. Lock order: record lock,
+    /// then `inner`, then this; never take `inner` while holding it.
+    outbound_watch_manager: StatsMutex<OutboundWatchManager>,
     startup_lock: Arc<StartupLock>,
 
     // Background processes
@@ -255,15 +262,16 @@ impl StorageManager {
                     offline_subkey_writes: Default::default(),
                     rehydration_requests: Default::default(),
                     flush_record_waiters: Default::default(),
-                    outbound_watch_manager: Default::default(),
                     outbound_transaction_manager: OutboundTransactionManager::new(registry.clone()),
                     metadata_db: Default::default(),
                     routing_domain_ready_subscription: None,
+                    online_state_change_subscription: None,
                     tick_subscription: None,
                     network_stats_change_subscription: None,
                 },
                 "storage_manager_inner",
             ),
+            outbound_watch_manager: StatsMutex::new(Default::default(), "outbound_watch_manager"),
             registry: registry.clone(),
             startup_lock: Arc::new(StartupLock::new()),
 
@@ -452,17 +460,22 @@ impl StorageManager {
         // Register event handlers
         let routing_domain_ready_subscription =
             impl_subscribe_event_bus!(self, Self, routing_domain_ready_event_handler);
+        let online_state_change_subscription =
+            impl_subscribe_event_bus!(self, Self, online_state_change_event_handler);
         let tick_subscription = impl_subscribe_event_bus_async!(self, Self, tick_event_handler);
         let network_stats_change_subscription =
             impl_subscribe_event_bus!(self, Self, network_stats_change_event_handler);
 
-        let mut inner = self.inner.lock();
-
         // Resolve outbound watch manager noderefs
-        inner.outbound_watch_manager.prepare(&self.routing_table());
+        self.outbound_watch_manager
+            .lock()
+            .prepare(&self.routing_table());
+
+        let mut inner = self.inner.lock();
 
         // Schedule tick
         inner.routing_domain_ready_subscription = Some(routing_domain_ready_subscription);
+        inner.online_state_change_subscription = Some(online_state_change_subscription);
         inner.tick_subscription = Some(tick_subscription);
         inner.network_stats_change_subscription = Some(network_stats_change_subscription);
 
@@ -479,6 +492,9 @@ impl StorageManager {
         {
             let mut inner = self.inner.lock();
             if let Some(sub) = inner.routing_domain_ready_subscription.take() {
+                self.event_bus().unsubscribe(sub);
+            }
+            if let Some(sub) = inner.online_state_change_subscription.take() {
                 self.event_bus().unsubscribe(sub);
             }
             if let Some(sub) = inner.tick_subscription.take() {
@@ -537,6 +553,7 @@ impl StorageManager {
         }
 
         // Reset inner state
+        *self.outbound_watch_manager.lock() = Default::default();
         {
             let mut inner = self.inner.lock();
             *inner = StorageManagerInner {
@@ -548,9 +565,9 @@ impl StorageManager {
                 offline_subkey_writes: Default::default(),
                 rehydration_requests: Default::default(),
                 flush_record_waiters: Default::default(),
-                outbound_watch_manager: Default::default(),
                 metadata_db: Default::default(),
                 routing_domain_ready_subscription: None,
+                online_state_change_subscription: None,
                 tick_subscription: None,
                 network_stats_change_subscription: None,
             };
@@ -583,8 +600,9 @@ impl StorageManager {
 
             let offline_subkey_writes_json = serde_json::to_vec(&inner.offline_subkey_writes)
                 .map_err(VeilidAPIError::internal)?;
-            let outbound_watch_manager_json = serde_json::to_vec(&inner.outbound_watch_manager)
-                .map_err(VeilidAPIError::internal)?;
+            let outbound_watch_manager_json =
+                serde_json::to_vec(&*self.outbound_watch_manager.lock())
+                    .map_err(VeilidAPIError::internal)?;
             let rehydration_requests_json = serde_json::to_vec(&inner.rehydration_requests)
                 .map_err(VeilidAPIError::internal)?;
             let descriptor_cache_json =
@@ -664,8 +682,10 @@ impl StorageManager {
         {
             let mut inner = self.inner.lock();
             inner.offline_subkey_writes = offline_subkey_writes;
-            inner.outbound_watch_manager = outbound_watch_manager;
             inner.rehydration_requests = rehydration_requests;
+        }
+        {
+            *self.outbound_watch_manager.lock() = outbound_watch_manager;
         }
 
         {
@@ -885,6 +905,24 @@ impl StorageManager {
             veilid_log!(self debug "network came back online, change inspecting all watches");
             self.change_inspect_all_watches();
         }
+    }
+
+    fn online_state_change_event_handler(&self, evt: Arc<OnlineStateChangeEvent>) {
+        if Self::online_state_change_reinspects_watches(&evt) {
+            veilid_log!(self debug "recovered from degraded, change inspecting all watches");
+            self.change_inspect_all_watches();
+        }
+    }
+
+    /// Whether an online-state change is the moment to ask every watch for missed
+    /// changes. Degraded suppresses blame because the failures were about this
+    /// node; a watch established or renewed then may never have been accepted, and
+    /// a change it should have delivered is not coming. Same answer as coming back
+    /// online: now, rather than at each watch's backed-off interval.
+    pub(super) fn online_state_change_reinspects_watches(evt: &OnlineStateChangeEvent) -> bool {
+        evt.routing_domain == RoutingDomain::PublicInternet
+            && evt.old_state == OnlineState::Degraded
+            && evt.new_state == OnlineState::Online
     }
 
     async fn tick_event_handler(&self, _evt: Arc<TickEvent>) {

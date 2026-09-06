@@ -8,7 +8,7 @@ pub(crate) enum SignalInfo {
         /// /// Receipt to be returned after the hole punch
         receipt: Bytes,
         /// Sender's peer info
-        peer_info: Arc<PeerInfo>,
+        peer_info: Arc<UnverifiedPeerInfo>,
         /// Hole punch dial info to use (optional, UDP only if not provided)
         opt_dial_info: Option<DialInfo>,
     },
@@ -17,7 +17,7 @@ pub(crate) enum SignalInfo {
         /// Receipt to be returned by the reverse connection
         receipt: Bytes,
         /// Sender's peer info
-        peer_info: Arc<PeerInfo>,
+        peer_info: Arc<UnverifiedPeerInfo>,
     },
     // XXX: WebRTC
 }

@@ -15,6 +15,12 @@ pub use native::wait_for_debugger;
 
 use super::*;
 
+/// Crypto op wall times alone; prints, never asserts
+#[cfg(any(test, feature = "test-util"))]
+pub async fn run_crypto_timing_test() {
+    crypto::tests_crypto::test_crypto_timing::test_all().await;
+}
+
 /// Main tests entry point for ios, android, and wasm targets
 #[cfg(any(test, feature = "test-util"))]
 pub async fn run_all_tests() {

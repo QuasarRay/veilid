@@ -111,86 +111,6 @@ impl PeerInfo {
         })
     }
 
-    // Decode someone else's peer info we got from the network
-    pub fn new_from_wire(
-        routing_table: &RoutingTable,
-        origin_routing_domain: RoutingDomain,
-        node_info_message: &[u8],
-        signatures: SignatureGroup,
-    ) -> VeilidAPIResult<Option<Self>> {
-        // Read node info message
-        let node_info_message_reader = ::capnp::serialize_packed::read_message(
-            node_info_message,
-            capnp::message::ReaderOptions::new(),
-        )
-        .map_err(|e| VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message)))?;
-
-        let node_info_reader = node_info_message_reader
-            .get_root::<veilid_capnp::node_info::Reader>()
-            .map_err(|e| {
-                VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message))
-            })?;
-
-        let node_info = decode_node_info(&node_info_reader)?;
-
-        // Get signing public keys from node info
-        let public_keys = node_info.public_keys();
-
-        // Ensure node ids are within limits
-        if public_keys.is_empty() {
-            apibail_internal!(
-                "no public keys for peer info ({:?})\n{:#?}",
-                origin_routing_domain,
-                node_info
-            );
-        } else if public_keys.len() > MAX_CRYPTO_KINDS {
-            apibail_internal!(
-                "too many public keys for peer info ({:?}): {:?}\n{:#?}",
-                origin_routing_domain,
-                public_keys,
-                node_info
-            );
-        }
-
-        // Verify signatures
-        let crypto = routing_table.crypto();
-
-        let Some(valid_signatures) =
-            crypto.verify_signatures(&public_keys, node_info_message, &signatures)?
-        else {
-            apibail_generic!("invalid signature for node info");
-        };
-        if valid_signatures.is_empty() {
-            // No supported crypto kind for this peer info
-            return Ok(None);
-        }
-
-        // Translate the routing domain
-        let Some(routing_domain) =
-            routing_table.find_best_node_info_routing_domain(origin_routing_domain, &node_info)
-        else {
-            return Ok(None);
-        };
-
-        // Extract node ids for convenience
-        let mut node_ids = NodeIdGroup::new();
-        for pk in public_keys.iter() {
-            node_ids.add(routing_table.generate_node_id(pk)?);
-        }
-
-        // Make owned node info message
-        let node_info_message = Bytes::copy_from_slice(node_info_message);
-
-        // Return decoded peerinfo
-        Ok(Some(Self {
-            routing_domain,
-            node_ids,
-            node_info,
-            node_info_message,
-            signatures,
-        }))
-    }
-
     // Create an unsigned peer info
     pub fn new_from_unsigned(
         routing_table: &RoutingTable,
@@ -252,11 +172,12 @@ impl PeerInfo {
     pub fn node_info(&self) -> &NodeInfo {
         &self.node_info
     }
-    pub fn node_info_message(&self) -> &[u8] {
-        &self.node_info_message
-    }
     pub fn signatures(&self) -> &SignatureGroup {
         &self.signatures
+    }
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn node_info_message(&self) -> &[u8] {
+        &self.node_info_message
     }
 
     #[expect(dead_code)]
@@ -280,5 +201,159 @@ impl PeerInfo {
         self.routing_domain == other.routing_domain
             && self.node_ids == other.node_ids
             && self.node_info.equivalent(&other.node_info)
+    }
+}
+
+/// A peer info off the wire whose signatures have not been checked.
+///
+/// Only node ids, timestamp and node info are readable, enough to decide whether the
+/// routing table wants it; the verified `PeerInfo` comes out of
+/// [`Self::verify_and_extract`], which the routing table calls once per registration
+/// and skips when it already holds the same node info.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnverifiedPeerInfo(PeerInfo);
+
+impl fmt::Display for UnverifiedPeerInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl UnverifiedPeerInfo {
+    /// Parse a peer info from the wire without verifying its signatures.
+    ///
+    /// Returns `Ok(None)` when no signature matches a supported crypto kind or the node
+    /// info is not acceptable from `origin_routing_domain`.
+    pub fn new_from_wire(
+        routing_table: &RoutingTable,
+        origin_routing_domain: RoutingDomain,
+        node_info_message: &[u8],
+        signatures: SignatureGroup,
+    ) -> VeilidAPIResult<Option<Self>> {
+        // Read node info message
+        let node_info_message_reader = ::capnp::serialize_packed::read_message(
+            node_info_message,
+            capnp::message::ReaderOptions::new(),
+        )
+        .map_err(|e| VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message)))?;
+
+        let node_info_reader = node_info_message_reader
+            .get_root::<veilid_capnp::node_info::Reader>()
+            .map_err(|e| {
+                VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message))
+            })?;
+
+        let node_info = decode_node_info(&node_info_reader)?;
+
+        // Get signing public keys from node info
+        let public_keys = node_info.public_keys();
+
+        // Ensure node ids are within limits
+        if public_keys.is_empty() {
+            apibail_internal!(
+                "no public keys for peer info ({:?})\n{:#?}",
+                origin_routing_domain,
+                node_info
+            );
+        } else if public_keys.len() > MAX_CRYPTO_KINDS {
+            apibail_internal!(
+                "too many public keys for peer info ({:?}): {:?}\n{:#?}",
+                origin_routing_domain,
+                public_keys,
+                node_info
+            );
+        }
+
+        // No signature for any supported key: nothing here can ever verify
+        let crypto = routing_table.crypto();
+        if !signatures.iter().any(|sig| {
+            crypto.get(sig.kind()).is_some() && public_keys.iter().any(|pk| pk.kind() == sig.kind())
+        }) {
+            return Ok(None);
+        }
+
+        // Translate the routing domain
+        let Some(routing_domain) =
+            routing_table.find_best_node_info_routing_domain(origin_routing_domain, &node_info)
+        else {
+            return Ok(None);
+        };
+
+        // Extract node ids for convenience
+        let mut node_ids = NodeIdGroup::new();
+        for pk in public_keys.iter() {
+            node_ids.add(routing_table.generate_node_id(pk)?);
+        }
+
+        // Make owned node info message
+        let node_info_message = Bytes::copy_from_slice(node_info_message);
+
+        Ok(Some(Self(PeerInfo {
+            routing_domain,
+            node_ids,
+            node_info,
+            node_info_message,
+            signatures,
+        })))
+    }
+
+    /// A verified peer info of our own, in the form the wire carries
+    pub fn from_verified(peer_info: &PeerInfo) -> Self {
+        Self(peer_info.clone())
+    }
+
+    /// Verified peer infos from our table, in the form an answer carries
+    pub fn from_verified_list(list: Vec<Arc<PeerInfo>>) -> Vec<Arc<Self>> {
+        list.iter()
+            .map(|pi| Arc::new(Self::from_verified(pi)))
+            .collect()
+    }
+
+    /// Check the signatures and hand back the verified peer info.
+    ///
+    /// Byte-identical peer infos verified before are served from the routing table's
+    /// cache. An unsigned peer info passes through unchanged: whether that is acceptable
+    /// is the caller's `allow_invalid` decision.
+    pub fn verify_and_extract(&self, routing_table: &RoutingTable) -> VeilidAPIResult<PeerInfo> {
+        let pi = &self.0;
+        if pi.signatures.is_empty() {
+            return Ok(pi.clone());
+        }
+        let cache_key = (pi.node_info_message.clone(), pi.signatures.clone());
+        if routing_table.peer_info_verified(&cache_key) {
+            return Ok(pi.clone());
+        }
+        let public_keys = pi.node_info.public_keys();
+        let crypto = routing_table.crypto();
+        let Some(valid_signatures) =
+            crypto.verify_signatures(&public_keys, &pi.node_info_message, &pi.signatures)?
+        else {
+            apibail_generic!("invalid signature for node info");
+        };
+        if valid_signatures.is_empty() {
+            apibail_generic!("no supported crypto kind for node info");
+        }
+        routing_table.note_peer_info_verified(cache_key);
+        Ok(pi.clone())
+    }
+
+    pub fn routing_domain(&self) -> RoutingDomain {
+        self.0.routing_domain
+    }
+    pub fn node_ids(&self) -> &NodeIdGroup {
+        &self.0.node_ids
+    }
+    pub fn timestamp(&self) -> Timestamp {
+        self.0.node_info.timestamp()
+    }
+    /// Unverified: for deciding whether to register, never for trusting
+    pub(crate) fn node_info(&self) -> &NodeInfo {
+        &self.0.node_info
+    }
+    pub fn node_info_message(&self) -> &[u8] {
+        &self.0.node_info_message
+    }
+    pub fn signatures(&self) -> &SignatureGroup {
+        &self.0.signatures
     }
 }

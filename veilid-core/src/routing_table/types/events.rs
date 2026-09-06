@@ -24,6 +24,16 @@ pub struct RoutingDomainReadyEvent {
     pub is_ready_outbound: bool,
 }
 
+/// Posted by the online detector when a routing domain's effective online state
+/// changes. Degraded is the state where failure evidence is about this node, so
+/// leaving it is the moment to re-check anything that evidence may have hidden.
+#[derive(Clone, Copy, Debug)]
+pub struct OnlineStateChangeEvent {
+    pub routing_domain: RoutingDomain,
+    pub old_state: OnlineState,
+    pub new_state: OnlineState,
+}
+
 /// Posted when allocated routes are added to or removed from the route spec
 /// store. Subscribers (e.g. ConnectionManager) use this to refresh their view
 /// of route-related state — e.g. SR first-hop connection protections.

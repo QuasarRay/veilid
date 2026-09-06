@@ -6,7 +6,7 @@ impl_veilid_log_facility!("rpc");
 pub struct WatchValueAnswer {
     pub accepted: bool,
     pub expiration: Timestamp,
-    pub peers: Vec<Arc<PeerInfo>>,
+    pub peers: Vec<Arc<UnverifiedPeerInfo>>,
     pub watch_id: u64,
 }
 
@@ -160,7 +160,7 @@ impl RPCProcessor {
         let valid = match self.routing_table().verify_peer_infos_closer(
             target_node_id.to_hash_coordinate(),
             opaque_record_key.to_hash_coordinate(),
-            &peers,
+            peers.iter().map(|p| p.node_ids()),
         ) {
             Ok(v) => v,
             Err(e) => {
@@ -361,7 +361,7 @@ impl RPCProcessor {
         let watch_value_a = RPCOperationWatchValueA::new(
             ret_accepted,
             ret_duration,
-            closer_to_key_peers,
+            UnverifiedPeerInfo::from_verified_list(closer_to_key_peers),
             ret_watch_id,
         )?;
 

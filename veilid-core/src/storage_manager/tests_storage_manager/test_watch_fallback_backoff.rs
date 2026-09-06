@@ -3,7 +3,8 @@ use super::*;
 /// The fallback change inspection fires on SILENCE, and silence is the normal
 /// condition of a record nobody is writing, so a flat interval inspects a quiet
 /// watch forever. The interval has to grow while inspections keep coming back
-/// empty, and snap back on any evidence that the watch is live or has moved.
+/// empty, and snap back on evidence that the watch is live, has gained a node, or
+/// has changed subkeys.
 ///
 /// These pin the pure state machine. The network behaviour it drives is covered by
 /// veilid-python's watch battery.
@@ -29,7 +30,7 @@ fn test_backoff_doubles_until_capped() {
     let mut expected = base;
     for _ in 0..4 {
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect();
+            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
         });
         expected = TimestampDuration::new(expected.as_u64() * 2);
         assert_eq!(state.fallback_inspect_interval(), expected);
@@ -38,7 +39,7 @@ fn test_backoff_doubles_until_capped() {
     // And stops at the ceiling rather than growing without bound
     for _ in 0..20 {
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect();
+            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
         });
     }
     assert_eq!(
@@ -47,8 +48,48 @@ fn test_backoff_doubles_until_capped() {
     );
 }
 
+/// An answered inspection that found nothing newer backs off under a lower
+/// ceiling than one that reached nobody, and an answer after a run of failures
+/// brings a long interval back down: a served record's watch that was never
+/// accepted is delivered by this interval, so it must stay short.
+fn test_answered_backoff_has_lower_ceiling() {
+    let per_node_states = HashMap::new();
+    let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
+
+    for _ in 0..20 {
+        state.edit(&per_node_states, |editor| {
+            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL);
+        });
+    }
+    assert_eq!(
+        state.fallback_inspect_interval(),
+        WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL
+    );
+
+    // Unanswered inspections climb past it
+    for _ in 0..20 {
+        state.edit(&per_node_states, |editor| {
+            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
+        });
+    }
+    assert_eq!(
+        state.fallback_inspect_interval(),
+        WATCH_FALLBACK_INSPECT_MAX_INTERVAL
+    );
+
+    // One answered inspection brings it back under the short ceiling
+    state.edit(&per_node_states, |editor| {
+        editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL);
+    });
+    assert_eq!(
+        state.fallback_inspect_interval(),
+        WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL,
+        "a served record must not keep an unserved record's interval"
+    );
+}
+
 /// A delivered ValueChanged proves the watch works, so the next miss is worth
-/// noticing promptly. Same for the watch moving to different nodes or subkeys.
+/// noticing promptly. Same for the watch gaining a node or changing subkeys.
 fn test_evidence_resets_backoff() {
     let per_node_states = HashMap::new();
 
@@ -56,13 +97,13 @@ fn test_evidence_resets_backoff() {
         // A delivered change
         (|editor: &mut OutboundWatchStateEditor| editor.touch_value_changed(Timestamp::new(1)))
             as fn(&mut OutboundWatchStateEditor),
-        // A productive inspection, or the watch's nodes/params moving
+        // A productive inspection, a gained node, or changed params
         |editor: &mut OutboundWatchStateEditor| editor.reset_fallback_inspect_backoff(),
     ] {
         let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect();
-            editor.back_off_fallback_inspect();
+            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
+            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
         });
         assert_ne!(
             state.fallback_inspect_interval(),
@@ -93,7 +134,7 @@ fn test_needs_fallback_inspect_honours_backoff() {
 
     // After one empty inspection the same moment is no longer due
     state.edit(&per_node_states, |editor| {
-        editor.back_off_fallback_inspect();
+        editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
     });
     assert!(
         !state.needs_fallback_inspect(base_due),
@@ -145,8 +186,59 @@ fn test_unestablished_watch_is_inspected_slowly() {
     );
 }
 
+/// Leaving Degraded re-inspects every watch, the way coming back online does; no
+/// other transition, and no other routing domain, may.
+fn test_recovery_from_degraded_reinspects_watches() {
+    let evt = |routing_domain, old_state, new_state| OnlineStateChangeEvent {
+        routing_domain,
+        old_state,
+        new_state,
+    };
+    assert!(StorageManager::online_state_change_reinspects_watches(
+        &evt(
+            RoutingDomain::PublicInternet,
+            OnlineState::Degraded,
+            OnlineState::Online
+        )
+    ));
+    for (domain, old_state, new_state) in [
+        (
+            RoutingDomain::PublicInternet,
+            OnlineState::Online,
+            OnlineState::Degraded,
+        ),
+        (
+            RoutingDomain::PublicInternet,
+            OnlineState::Offline,
+            OnlineState::Online,
+        ),
+        (
+            RoutingDomain::PublicInternet,
+            OnlineState::Degraded,
+            OnlineState::Offline,
+        ),
+        (
+            RoutingDomain::LocalNetwork,
+            OnlineState::Degraded,
+            OnlineState::Online,
+        ),
+    ] {
+        assert!(
+            !StorageManager::online_state_change_reinspects_watches(&evt(
+                domain, old_state, new_state
+            )),
+            "{:?} {:?}->{:?} must not re-inspect",
+            domain,
+            old_state,
+            new_state
+        );
+    }
+}
+
 pub fn test_all() {
     test_backoff_doubles_until_capped();
+    test_recovery_from_degraded_reinspects_watches();
+    test_answered_backoff_has_lower_ceiling();
     test_evidence_resets_backoff();
     test_needs_fallback_inspect_honours_backoff();
     test_unestablished_watch_is_inspected_slowly();

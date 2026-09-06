@@ -399,7 +399,9 @@ impl EnvelopeENV0 {
             BarePublicKey::new(&self.bare_recipient_id),
         );
 
+        let dh_start = Timestamp::now_non_decreasing();
         let mut dh_secret = vcrypto.cached_dh(&recipient_public_key, secret_key).await?;
+        let dh_us = TimestampDuration::since_non_decreasing(dh_start);
 
         // Write envelope body
         let mut data = BytesMut::zeroed(envelope_size);
@@ -441,13 +443,16 @@ impl EnvelopeENV0 {
         }
 
         // Encrypt message to body data
+        let crypt_start = Timestamp::now_non_decreasing();
         let data = vcrypto
             .crypt_b2b_no_auth(body, data, 0x6A, &self.nonce, &dh_secret)
             .await?;
+        let crypt_us = TimestampDuration::since_non_decreasing(crypt_start);
 
         // Sign the envelope
         let sender_public_key =
             PublicKey::new(self.crypto_kind, BarePublicKey::new(&self.bare_sender_id));
+        let sign_start = Timestamp::now_non_decreasing();
         let data = vcrypto
             .sign_in_place(
                 &sender_public_key,
@@ -457,6 +462,12 @@ impl EnvelopeENV0 {
                 envelope_size - ENV0_SIGNATURE_LENGTH,
             )
             .await?;
+        let sign_us = TimestampDuration::since_non_decreasing(sign_start);
+
+        // Which phase held a slow envelope: dh and sign run inline, crypt goes to the cpu pool above 8KB
+        if dh_us.saturating_add(crypt_us).saturating_add(sign_us) > TimestampDuration::new_ms(500) {
+            veilid_log!(crypto debug "envelope encrypt phases: dh {:#} crypt {:#} sign {:#} (body {} bytes)", dh_us, crypt_us, sign_us, envelope_size);
+        }
 
         Ok(data.freeze())
     }

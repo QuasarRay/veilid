@@ -133,7 +133,9 @@ impl RouteSpecStore {
                     };
                     RouteNode::NodeId(node_id)
                 } else {
-                    RouteNode::PeerInfo(published_peer_info)
+                    RouteNode::PeerInfo(Arc::new(UnverifiedPeerInfo::from_verified(
+                        &published_peer_info,
+                    )))
                 },
                 next_hop: None,
             };
@@ -205,7 +207,7 @@ impl RouteSpecStore {
                     // Optimized, no peer info, just the node id
                     RouteNode::NodeId(hop_node_id)
                 } else {
-                    RouteNode::PeerInfo(hop_peer_info)
+                    RouteNode::PeerInfo(Arc::new(UnverifiedPeerInfo::from_verified(&hop_peer_info)))
                 },
                 next_hop: Some(route_hop_data),
             }

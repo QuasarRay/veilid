@@ -1,5 +1,5 @@
 use super::*;
-use inspect_record::inspect_fanout_done;
+use inspect_record::{descriptor_fanout_done, inspect_fanout_done};
 
 /// An inspect stops early only once SOME subkey has reached consensus. A range in
 /// which no subkey is ever answered can therefore never stop early, and runs to
@@ -66,6 +66,33 @@ fn test_missing_descriptor_holds_it_open() {
     ));
 }
 
+/// A descriptor hashes to the record key, so one node settles it and no count of further
+/// nodes can. This is what keeps opening a record whose subkeys have never been written
+/// off the timeout, and what makes an open a single round trip.
+fn test_descriptor_stops_at_the_first_node() {
+    assert!(matches!(
+        descriptor_fanout_done(true, true),
+        FanoutDoneDisposition::DoneEarly
+    ));
+}
+
+/// No descriptor is nothing to open the record with.
+fn test_descriptor_missing_holds_it_open() {
+    assert!(!matches!(
+        descriptor_fanout_done(false, true),
+        FanoutDoneDisposition::DoneEarly
+    ));
+}
+
+/// A descriptor arriving without seqs leaves a fanout result list that does not line up
+/// with the subkeys the descriptor names, so it is not a stopping point.
+fn test_descriptor_without_seqs_holds_it_open() {
+    assert!(!matches!(
+        descriptor_fanout_done(true, false),
+        FanoutDoneDisposition::DoneEarly
+    ));
+}
+
 pub fn test_all() {
     test_stops_with_one_answered_subkey();
     test_all_empty_range_never_stops();
@@ -73,4 +100,7 @@ pub fn test_all() {
     test_progress_holds_it_open();
     test_empty_request_never_stops();
     test_missing_descriptor_holds_it_open();
+    test_descriptor_stops_at_the_first_node();
+    test_descriptor_missing_holds_it_open();
+    test_descriptor_without_seqs_holds_it_open();
 }

@@ -455,7 +455,9 @@ impl RPCProcessor {
                         ) {
                             RouteNode::NodeId(routing_table.node_id(crypto_kind))
                         } else {
-                            RouteNode::PeerInfo(published_peer_info)
+                            RouteNode::PeerInfo(Arc::new(UnverifiedPeerInfo::from_verified(
+                                &published_peer_info,
+                            )))
                         };
 
                         Ok(NetworkResult::value(RespondTo::PrivateRoute(Arc::new(

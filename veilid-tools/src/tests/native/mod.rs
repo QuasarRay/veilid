@@ -8,6 +8,7 @@ mod test_network_interfaces;
 #[cfg(not(target_os = "windows"))]
 mod test_resolver;
 mod test_udp_ttl_send;
+mod test_yield_timing;
 
 use super::*;
 
@@ -94,6 +95,8 @@ pub async fn run_all_tests() {
     }
     info!("TEST: exec_test_tracked_mutex");
     test_tracked_mutex::test_all();
+    info!("TEST: exec_test_yield_timing");
+    test_yield_timing::test_all().await;
 
     info!("Finished unit tests");
 }
@@ -319,6 +322,14 @@ cfg_if! {
         fn run_test_tracked_mutex() {
             setup();
             test_tracked_mutex::test_all();
+        }
+
+        #[test]
+        fn run_test_yield_timing() {
+            setup();
+            block_on(async {
+                test_yield_timing::test_all().await;
+            });
         }
     }
 }

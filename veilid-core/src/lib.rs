@@ -35,7 +35,7 @@
     feature = "mock-api",
     allow(dead_code, unused_imports, clippy::unused_async)
 )]
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 
 cfg_if::cfg_if! {
     if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
