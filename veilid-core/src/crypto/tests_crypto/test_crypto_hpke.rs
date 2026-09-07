@@ -1,8 +1,6 @@
 use super::*;
 
-use crate::crypto::crypto_system::hpke::{
-    hpke_open_core, hpke_seal_core, HPKE_HEADER_LENGTH, HPKE_VERSION_1,
-};
+use crate::crypto::crypto_system::hpke::{HPKE_HEADER_LENGTH, HPKE_VERSION_1};
 
 const HPKE_TAG_LENGTH: usize = 16;
 const HPKE_ENC_LENGTH: usize = 32;
@@ -38,37 +36,24 @@ fn a2_test_vector() -> A2TestVector {
 }
 
 // Replays fixed bytes so the vector's ikmE drives the ephemeral keypair
-struct ReplayRng(Vec<u8>);
-impl ::hpke::rand_core::TryRng for ReplayRng {
-    type Error = core::convert::Infallible;
-
-    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-        let mut b = [0u8; 4];
-        self.try_fill_bytes(&mut b)?;
-        Ok(u32::from_le_bytes(b))
-    }
-    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-        let mut b = [0u8; 8];
-        self.try_fill_bytes(&mut b)?;
-        Ok(u64::from_le_bytes(b))
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
-        let rest = self.0.split_off(dest.len().min(self.0.len()));
-        dest[..self.0.len()].copy_from_slice(&self.0);
-        self.0 = rest;
-        Ok(())
+#[cfg(feature = "enable-crypto-vld0")]
+fn replay(mut bytes: Vec<u8>) -> impl FnMut(&mut [u8]) {
+    move |dest: &mut [u8]| {
+        let n = dest.len().min(bytes.len());
+        dest[..n].copy_from_slice(&bytes[..n]);
+        bytes.drain(..n);
     }
 }
-impl ::hpke::rand_core::TryCryptoRng for ReplayRng {}
 
-// KATs run against the seal/open core because the public methods pin veilid's own
-// info string while the vectors carry the RFC's
+// KATs run against the optimized crate's seal/open because the public methods pin
+// veilid's own info string while the vectors carry the RFC's
+#[cfg(feature = "enable-crypto-vld0")]
 pub fn test_hpke_kat_seal() {
     info!("test_hpke_kat_seal");
     let v = a2_test_vector();
 
-    let mut rng = ReplayRng(hex(&v.ikm_e));
-    let (enc, ciphertext) = hpke_seal_core::<::hpke::kem::X25519HkdfSha256>(
+    let mut rng = replay(hex(&v.ikm_e));
+    let (enc, ciphertext) = veilid_core_optimized::hpke_x25519_seal(
         &hex(&v.pk_rm),
         &hex(&v.info),
         &hex(&v.encryption.aad),
@@ -80,18 +65,16 @@ pub fn test_hpke_kat_seal() {
     assert_eq!(ciphertext, hex(&v.encryption.ct));
 }
 
+#[cfg(feature = "enable-crypto-vld0")]
 pub fn test_hpke_kat_open() {
     info!("test_hpke_kat_open");
     let v = a2_test_vector();
 
     // skRm derives from ikmR per RFC 9180 DeriveKeyPair
-    {
-        use ::hpke::{Kem as _, Serializable as _};
-        let (sk, _) = ::hpke::kem::X25519HkdfSha256::derive_keypair(&hex(&v.ikm_r));
-        assert_eq!(sk.to_bytes().to_vec(), hex(&v.sk_rm));
-    }
+    let (sk, _) = veilid_core_optimized::hpke_x25519_derive_keypair(&hex(&v.ikm_r));
+    assert_eq!(sk.to_vec(), hex(&v.sk_rm));
 
-    let pt = hpke_open_core::<::hpke::kem::X25519HkdfSha256>(
+    let pt = veilid_core_optimized::hpke_x25519_open(
         &hex(&v.sk_rm),
         &hex(&v.enc),
         &hex(&v.info),
@@ -101,7 +84,7 @@ pub fn test_hpke_kat_open() {
     .unwrap();
     assert_eq!(pt, hex(&v.encryption.pt));
 
-    let wrong_aad = hpke_open_core::<::hpke::kem::X25519HkdfSha256>(
+    let wrong_aad = veilid_core_optimized::hpke_x25519_open(
         &hex(&v.sk_rm),
         &hex(&v.enc),
         &hex(&v.info),
@@ -289,7 +272,6 @@ pub async fn test_hpke_bridge(vcrypto: &AsyncCryptoSystemGuard<'_>) {
 #[cfg(feature = "enable-crypto-vld0")]
 pub async fn test_hpke_bridge_matches_kem_derivation(crypto: &Crypto) {
     info!("test_hpke_bridge_matches_kem_derivation");
-    use ::hpke::{Deserializable as _, Kem as _, Serializable as _};
 
     let vcrypto = crypto.get_async(CRYPTO_KIND_VLD0).unwrap();
     let (signing_key, signing_secret) = vcrypto.generate_keypair().await.into_split();
@@ -302,12 +284,9 @@ pub async fn test_hpke_bridge_matches_kem_derivation(crypto: &Crypto) {
         .await
         .unwrap();
 
-    let sk = <::hpke::kem::X25519HkdfSha256 as ::hpke::Kem>::PrivateKey::from_bytes(
-        bridged_secret.ref_value(),
-    )
-    .unwrap();
-    let pk = ::hpke::kem::X25519HkdfSha256::sk_to_pk(&sk);
-    assert_eq!(pk.to_bytes().to_vec(), bridged_key.ref_value().to_vec());
+    let pk =
+        veilid_core_optimized::hpke_x25519_public_from_secret(bridged_secret.ref_value()).unwrap();
+    assert_eq!(pk.to_vec(), bridged_key.ref_value().to_vec());
 }
 
 pub async fn test_hpke_wrong_recipient(vcrypto: &AsyncCryptoSystemGuard<'_>) {
@@ -456,8 +435,11 @@ async fn test_hpke_cross_kind(crypto: &Crypto) {
 }
 
 pub async fn test_all() {
-    test_hpke_kat_seal();
-    test_hpke_kat_open();
+    #[cfg(feature = "enable-crypto-vld0")]
+    {
+        test_hpke_kat_seal();
+        test_hpke_kat_open();
+    }
 
     let api = crypto_tests_startup().await;
     let crypto = api.crypto().unwrap();

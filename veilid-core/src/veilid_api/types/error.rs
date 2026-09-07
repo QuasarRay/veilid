@@ -400,6 +400,11 @@ impl ToVeilidAPIErrorArgument for Vec<u8> {
         hex::encode(self)
     }
 }
+impl ToVeilidAPIErrorArgument for veilid_core_optimized::Error {
+    fn to_veilid_api_error_argument(&self) -> String {
+        self.to_string()
+    }
+}
 
 impl ToVeilidAPIErrorArgument for usize {
     fn to_veilid_api_error_argument(&self) -> String {

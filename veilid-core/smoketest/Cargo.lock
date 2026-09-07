@@ -23,7 +23,6 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1973cfbc1a2daf9cf550e74e1f088c28e7f7d8c1e1418fb6c9dc5184b7e84c99"
 dependencies = [
- "bytes",
  "crypto-common 0.2.2",
  "inout 0.2.2",
 ]
@@ -1819,9 +1818,9 @@ dependencies = [
 
 [[package]]
 name = "lz4_flex"
-version = "0.13.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ef0d4ed8669f8f8826eb00dc878084aa8f253506c4fd5e8f58f5bce72ddb97e"
+checksum = "ecbdfe44b1bd960b68170b417450a628c43f7cf56bb3c5317e61cb230ee7f226"
 
 [[package]]
 name = "macro_rules_attribute"
@@ -3192,25 +3191,18 @@ name = "veilid-core"
 version = "0.5.7"
 dependencies = [
  "arc-swap",
- "argon2",
  "async-std",
  "async-trait",
  "async-tungstenite",
  "backtrace",
- "blake2",
- "blake3",
  "bosion",
  "bytesize",
  "capnp",
  "capnpc",
  "cfg-if",
- "chacha20",
- "chacha20poly1305",
  "clap",
- "curve25519-dalek",
  "data-encoding",
  "directories",
- "ed25519-dalek",
  "enumset",
  "eyre",
  "flume",
@@ -3220,7 +3212,6 @@ dependencies = [
  "glob",
  "gloo-events",
  "hex",
- "hpke",
  "indent",
  "jni",
  "js-sys",
@@ -3230,7 +3221,6 @@ dependencies = [
  "keyvaluedb-web",
  "lazy_static",
  "libc",
- "lz4_flex",
  "macro_rules_attribute",
  "num-traits",
  "pastey",
@@ -3248,6 +3238,7 @@ dependencies = [
  "tracing-subscriber",
  "tsify",
  "tsify-macros",
+ "veilid-core-optimized",
  "veilid-hashlink",
  "veilid-tools",
  "wasm-bindgen",
@@ -3255,8 +3246,25 @@ dependencies = [
  "weak-table",
  "web-sys",
  "ws_stream_wasm",
- "x25519-dalek",
  "zeroize",
+]
+
+[[package]]
+name = "veilid-core-optimized"
+version = "0.5.7"
+dependencies = [
+ "argon2",
+ "blake2",
+ "blake3",
+ "chacha20",
+ "chacha20poly1305",
+ "curve25519-dalek",
+ "ed25519-dalek",
+ "getrandom 0.4.3",
+ "hpke",
+ "lz4_flex",
+ "rand_core 0.10.1",
+ "x25519-dalek",
 ]
 
 [[package]]

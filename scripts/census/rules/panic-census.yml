@@ -20,6 +20,7 @@ note: |
   not something to declare. todo! is out for a different reason - it marks code not written
   yet, which the compiler already tracks.
 files:
+  - "veilid-core-optimized/src/**"
   - "veilid-core/src/**"
   - "veilid-tools/src/**"
 ignores:

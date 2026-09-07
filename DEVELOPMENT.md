@@ -38,6 +38,7 @@ Veilid can be built for a number of platforms and targets. Here is a non-exhaust
 |---------------------|------|-------------------------------------------------------------------|
 | `veilid-core`       | Rust       | ✅ [Crates.io](https://crates.io/crates/veilid-core)        |
 | `veilid-tools`      | Rust       | ✅ [Crates.io](https://crates.io/crates/veilid-tools)       |
+| `veilid-core-optimized` | Rust   | ✅ [Crates.io](https://crates.io/crates/veilid-core-optimized) |
 | `veilid-remote-api` | Rust       | ✅ [Crates.io](https://crates.io/crates/veilid-remote-api)  |
 | `veilid-wasm`       | Rust       | ❌ Not published directly                                   |
 |                     | Typescript | 🟡 [NPM](https://www.npmjs.com/package/@bmv437/veilid-wasm) |

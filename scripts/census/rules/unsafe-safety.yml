@@ -12,6 +12,7 @@ note: |
   A comment serves exactly the one block below it, so two adjacent unsafe blocks
   need two comments.
 files:
+  - "veilid-core-optimized/src/**"
   - "veilid-core/src/**"
   - "veilid-tools/src/**"
 

@@ -1,5 +1,4 @@
 pub mod veilid_core
-pub use veilid_core::Buffer
 pub use veilid_core::async_trait
 pub use veilid_core::async_trait
 pub use veilid_core::bytes
@@ -3346,6 +3345,8 @@ impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::ValueSubkeyRangeSet
 pub fn veilid_core::ValueSubkeyRangeSet::to_veilid_api_error_argument(&self) -> alloc::string::String
 impl veilid_core::ToVeilidAPIErrorArgument for veilid_core::VeilidCapability
 pub fn veilid_core::VeilidCapability::to_veilid_api_error_argument(&self) -> alloc::string::String
+impl veilid_core::ToVeilidAPIErrorArgument for veilid_core_optimized::error::Error
+pub fn veilid_core_optimized::error::Error::to_veilid_api_error_argument(&self) -> alloc::string::String
 impl<T: veilid_core::ToVeilidAPIErrorArgument + ?core::marker::Sized> veilid_core::ToVeilidAPIErrorArgument for &T
 pub fn &T::to_veilid_api_error_argument(&self) -> alloc::string::String
 impl<T: veilid_core::ToVeilidAPIErrorArgument> veilid_core::ToVeilidAPIErrorArgument for core::ops::range::Range<T>

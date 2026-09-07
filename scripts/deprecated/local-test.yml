@@ -1,6 +1,0 @@
----
-core:
-  network:
-    dht:
-      min_peer_count: 1
-    bootstrap: []

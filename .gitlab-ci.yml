@@ -193,6 +193,11 @@ test_dart_format:
   variables:
     earthly_target: test-dart-format
 
+test_readme_sync:
+  extends: .unit_test
+  variables:
+    earthly_target: test-readme-sync
+
 # test_check_wasm_builds_dart:
 #   extends: .unit_test
 #   variables:
@@ -353,6 +358,8 @@ publish_crates:
   script:
     - cargo publish -p veilid-tools --dry-run
     - cargo publish -p veilid-tools
+    - cargo publish -p veilid-core-optimized --dry-run
+    - cargo publish -p veilid-core-optimized
     - cargo publish -p veilid-core --dry-run
     - cargo publish -p veilid-core
     - cargo publish -p veilid-remote-api --dry-run

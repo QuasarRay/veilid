@@ -25,25 +25,31 @@ PUBLIC_API_TXT_FILE=public-api.txt
 PUBLIC_API_TARGET=x86_64-unknown-linux-gnu
 PUBLIC_API_FILE_VEILID_CORE=veilid-core/$PUBLIC_API_TXT_FILE
 PUBLIC_API_FILE_VEILID_TOOLS=veilid-tools/$PUBLIC_API_TXT_FILE
+PUBLIC_API_FILE_VEILID_CORE_OPTIMIZED=veilid-core-optimized/$PUBLIC_API_TXT_FILE
 PUBLIC_API_FILE_VEILID_REMOTE_API=veilid-remote-api/$PUBLIC_API_TXT_FILE
 PUBLIC_API_FEATURES_VEILID_CORE="geolocation,footgun-nodeid-target,footgun-config"
+PUBLIC_API_FEATURES_VEILID_CORE_OPTIMIZED="enable-crypto-vld0,enable-crypto-none"
 
 # Make temporary file for the public API output
 PUBLIC_API_TMP_FILE_VEILID_CORE=$(mktemp) || exit 2
 PUBLIC_API_TMP_FILE_VEILID_TOOLS=$(mktemp) || exit 2
+PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED=$(mktemp) || exit 2
 PUBLIC_API_TMP_FILE_VEILID_REMOTE_API=$(mktemp) || exit 2
 PUBLIC_API_TMP_FILE_VEILID_CORE_DIFF=$(mktemp) || exit 2
 PUBLIC_API_TMP_FILE_VEILID_TOOLS_DIFF=$(mktemp) || exit 2
+PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED_DIFF=$(mktemp) || exit 2
 PUBLIC_API_TMP_FILE_VEILID_REMOTE_API_DIFF=$(mktemp) || exit 2
 
 # Ensure cleanup happens on exit, interruption, or termination
-trap "rm -f $PUBLIC_API_TMP_FILE_VEILID_CORE $PUBLIC_API_TMP_FILE_VEILID_CORE_DIFF $PUBLIC_API_TMP_FILE_VEILID_TOOLS $PUBLIC_API_TMP_FILE_VEILID_TOOLS_DIFF $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API_DIFF" EXIT
+trap "rm -f $PUBLIC_API_TMP_FILE_VEILID_CORE $PUBLIC_API_TMP_FILE_VEILID_CORE_DIFF $PUBLIC_API_TMP_FILE_VEILID_TOOLS $PUBLIC_API_TMP_FILE_VEILID_TOOLS_DIFF $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED_DIFF $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API_DIFF" EXIT
 
 # Run cargo public-api and save the output to the temporary file
 echo "Checking public API for 'veilid-core'..."
 cargo public-api -sss -p veilid-core --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_CORE > $PUBLIC_API_TMP_FILE_VEILID_CORE
 echo "Checking public API for 'veilid-tools'..."
 cargo public-api -sss -p veilid-tools --target $PUBLIC_API_TARGET --color never > $PUBLIC_API_TMP_FILE_VEILID_TOOLS
+echo "Checking public API for 'veilid-core-optimized'..."
+cargo public-api -sss -p veilid-core-optimized --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_CORE_OPTIMIZED > $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED
 echo "Checking public API for 'veilid-remote-api'..."
 cargo public-api -sss -p veilid-remote-api --target $PUBLIC_API_TARGET --color never > $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API
 
@@ -72,10 +78,12 @@ diff_and_print "veilid-core" $PUBLIC_API_FILE_VEILID_CORE $PUBLIC_API_TMP_FILE_V
 veilid_core_diff_status=$?
 diff_and_print "veilid-tools" $PUBLIC_API_FILE_VEILID_TOOLS $PUBLIC_API_TMP_FILE_VEILID_TOOLS $PUBLIC_API_TMP_FILE_VEILID_TOOLS_DIFF
 veilid_tools_diff_status=$?
+diff_and_print "veilid-core-optimized" $PUBLIC_API_FILE_VEILID_CORE_OPTIMIZED $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED_DIFF
+veilid_core_optimized_diff_status=$?
 diff_and_print "veilid-remote-api" $PUBLIC_API_FILE_VEILID_REMOTE_API $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API_DIFF
 veilid_remote_api_diff_status=$?
 
-if [[ "$veilid_core_diff_status" -ne 0 || "$veilid_tools_diff_status" -ne 0 || "$veilid_remote_api_diff_status" -ne 0 ]]; then
+if [[ "$veilid_core_diff_status" -ne 0 || "$veilid_tools_diff_status" -ne 0 || "$veilid_core_optimized_diff_status" -ne 0 || "$veilid_remote_api_diff_status" -ne 0 ]]; then
     all_diff_status=1
 else
     all_diff_status=0
@@ -103,6 +111,10 @@ if [ $all_diff_status -eq 1 ]; then
     if [ $veilid_tools_diff_status -eq 1 ]; then
         mv $PUBLIC_API_TMP_FILE_VEILID_TOOLS $PUBLIC_API_FILE_VEILID_TOOLS
         echo "Public API updated for 'veilid-tools'."
+    fi
+    if [ $veilid_core_optimized_diff_status -eq 1 ]; then
+        mv $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED $PUBLIC_API_FILE_VEILID_CORE_OPTIMIZED
+        echo "Public API updated for 'veilid-core-optimized'."
     fi
     if [ $veilid_remote_api_diff_status -eq 1 ]; then
         mv $PUBLIC_API_TMP_FILE_VEILID_REMOTE_API $PUBLIC_API_FILE_VEILID_REMOTE_API

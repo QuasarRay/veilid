@@ -2,80 +2,45 @@ mod sizes;
 
 use super::*;
 
-use super::hpke::{build_sealed, hpke_info, hpke_open_core, hpke_seal_core, parse_sealed};
-
-use argon2::{
-    password_hash::{
-        phc::{PasswordHash, Salt},
-        PasswordHasher, PasswordVerifier,
-    },
-    Argon2,
-};
-use chacha20::cipher::{KeyIvInit, StreamCipher};
-use chacha20::XChaCha20;
-use chacha20poly1305 as ch;
-use chacha20poly1305::aead::AeadInOut as _;
-use chacha20poly1305::KeyInit as _;
-use curve25519_dalek::digest::Digest as _;
-use ed25519_dalek as ed;
-use x25519_dalek as xd;
-
-pub use chacha20poly1305::aead::Buffer;
+use super::hpke::{build_sealed, hpke_info, parse_sealed};
+use veilid_core_optimized as opt;
 
 const VLD0_DOMAIN_SIGN: &[u8] = b"VLD0_SIGN";
 const VLD0_DOMAIN_CRYPT: &[u8] = b"VLD0_CRYPT";
 
-const VLD0_AEAD_OVERHEAD: usize = 16;
+const VLD0_AEAD_OVERHEAD: usize = opt::XCHACHA20POLY1305_TAG_LENGTH;
 /// [`CryptoKind`] fourcc identifying the VLD0 cryptosystem.
 pub const CRYPTO_KIND_VLD0: CryptoKind = CryptoKind::new(*b"VLD0");
 /// The VLD0 fourcc as a big-endian `u32`.
 pub const CRYPTO_KIND_VLD0_FOURCC: u32 = u32::from_be_bytes(*b"VLD0");
 pub use sizes::*;
 
-fn public_to_x25519_pk(public: &PublicKey) -> VeilidAPIResult<xd::PublicKey> {
-    let pk_ed = ed::VerifyingKey::from_bytes(
-        public
-            .ref_value()
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?,
-    )
-    .map_err(VeilidAPIError::internal)?;
-    Ok(xd::PublicKey::from(*pk_ed.to_montgomery().as_bytes()))
+fn public_to_x25519_pk(public: &PublicKey) -> VeilidAPIResult<[u8; VLD0_PUBLIC_KEY_LENGTH]> {
+    opt::ed25519_public_to_x25519(public.ref_value()).map_err(VeilidAPIError::internal)
 }
-fn secret_to_x25519_sk(secret: &SecretKey) -> VeilidAPIResult<xd::StaticSecret> {
-    // NOTE: ed::SigningKey.to_scalar() does not produce an unreduced scalar, we want the raw bytes here
-    // See https://github.com/dalek-cryptography/curve25519-dalek/issues/565
-    let hash: [u8; VLD0_SIGNATURE_LENGTH] = ed::Sha512::default()
-        .chain_update(secret.ref_value().bytes())
-        .finalize()
-        .into();
-    let mut output = [0u8; VLD0_SECRET_KEY_LENGTH];
-    output.copy_from_slice(&hash[..VLD0_SECRET_KEY_LENGTH]);
-
-    Ok(xd::StaticSecret::from(output))
+fn secret_to_x25519_sk(secret: &SecretKey) -> VeilidAPIResult<[u8; VLD0_SECRET_KEY_LENGTH]> {
+    opt::ed25519_secret_to_x25519(secret.ref_value()).map_err(VeilidAPIError::internal)
 }
 
 pub(crate) fn vld0_generate_keypair() -> KeyPair {
-    let mut csprng = VeilidRng {};
-    let signing_key = ed::SigningKey::generate(&mut csprng);
-    let verifying_key = signing_key.verifying_key();
-    let public_key = BarePublicKey::new(&verifying_key.to_bytes());
-    let secret_key = BareSecretKey::new(&signing_key.to_bytes());
-
-    KeyPair::new(CRYPTO_KIND_VLD0, BareKeyPair::new(public_key, secret_key))
+    let (public_key, secret_key) = opt::ed25519_generate_keypair(&mut random_bytes);
+    KeyPair::new(
+        CRYPTO_KIND_VLD0,
+        BareKeyPair::new(
+            BarePublicKey::new(&public_key),
+            BareSecretKey::new(&secret_key),
+        ),
+    )
 }
 
 pub(crate) fn vld0_generate_kem_keypair() -> KemKeyPair {
-    use ::hpke::{Kem as _, Serializable as _};
     // RFC 9180 DeriveKeyPair(random ikm), the same path seal/open use
-    let (sk, pk) = ::hpke::kem::X25519HkdfSha256::gen_keypair_with_rng(&mut VeilidRng {});
-
+    let (sk, pk) = opt::hpke_x25519_generate_keypair(&mut random_bytes);
     KemKeyPair::new(
         CRYPTO_KIND_VLD0,
         BareKemKeyPair::new(
-            BareEncapsulationKey::new(&pk.to_bytes()),
-            BareDecapsulationKey::new(&sk.to_bytes()),
+            BareEncapsulationKey::new(&pk),
+            BareDecapsulationKey::new(&sk),
         ),
     )
 }
@@ -125,31 +90,18 @@ impl CryptoSystem for CryptoSystemVLD0 {
         instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
     )]
     fn hash_password(&self, password: &[u8], salt: &[u8]) -> VeilidAPIResult<String> {
-        if salt.len() < Salt::MIN_LENGTH || salt.len() > Salt::MAX_LENGTH {
-            apibail_generic!("invalid salt length");
-        }
-
         // Argon2 with default params (Argon2id v19)
-        let argon2 = Argon2::default();
-
-        // Hash password to PHC string ($argon2id$v=19$...)
-        let password_hash = argon2
-            .hash_password_with_salt(password, salt)
-            .map_err(|e| VeilidAPIError::generic(e.to_string()))?
-            .to_string();
-        Ok(password_hash)
+        opt::argon2_hash_password(password, salt).map_err(VeilidAPIError::generic)
     }
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
     )]
     fn verify_password(&self, password: &[u8], password_hash: &str) -> VeilidAPIResult<bool> {
-        let parsed_hash = PasswordHash::new(password_hash)
-            .map_err(|e| VeilidAPIError::parse_error(e.to_string(), password_hash))?;
-        // Argon2 with default params (Argon2id v19)
-        let argon2 = Argon2::default();
-
-        Ok(argon2.verify_password(password, &parsed_hash).is_ok())
+        opt::argon2_verify_password(password, password_hash).map_err(|e| match e {
+            opt::Error::InvalidPasswordHash(msg) => VeilidAPIError::parse_error(msg, password_hash),
+            e => VeilidAPIError::generic(e),
+        })
     }
 
     #[cfg_attr(
@@ -157,17 +109,10 @@ impl CryptoSystem for CryptoSystemVLD0 {
         instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
     )]
     fn derive_shared_secret(&self, password: &[u8], salt: &[u8]) -> VeilidAPIResult<SharedSecret> {
-        if salt.len() < Salt::MIN_LENGTH || salt.len() > Salt::MAX_LENGTH {
-            apibail_generic!("invalid salt length");
-        }
-
         // Argon2 with default params (Argon2id v19)
-        let argon2 = Argon2::default();
-
         let mut output_key_material = [0u8; VLD0_SHARED_SECRET_LENGTH];
-        argon2
-            .hash_password_into(password, salt, &mut output_key_material)
-            .map_err(|e| VeilidAPIError::generic(e.to_string()))?;
+        opt::argon2_derive_key(password, salt, &mut output_key_material)
+            .map_err(VeilidAPIError::generic)?;
         Ok(SharedSecret::new(
             CRYPTO_KIND_VLD0,
             BareSharedSecret::new(&output_key_material),
@@ -202,20 +147,19 @@ impl CryptoSystem for CryptoSystemVLD0 {
         let pk_xd = public_to_x25519_pk(key)?;
         let sk_xd = secret_to_x25519_sk(secret)?;
 
-        let dh = sk_xd.diffie_hellman(&pk_xd);
-        if !dh.was_contributory() {
-            apibail_generic!("dh was not contributory");
-        }
-        let dh_bytes = dh.to_bytes();
+        let dh_bytes = opt::x25519_diffie_hellman(&sk_xd, &pk_xd).map_err(|e| match e {
+            opt::Error::NotContributory => VeilidAPIError::generic(e),
+            e => VeilidAPIError::internal(e),
+        })?;
 
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = opt::Blake3Hasher::new();
         hasher.update(VLD0_DOMAIN_CRYPT);
         hasher.update(&dh_bytes);
         let output = hasher.finalize();
 
         Ok(SharedSecret::new(
             CRYPTO_KIND_VLD0,
-            BareSharedSecret::new(output.as_bytes()),
+            BareSharedSecret::new(&output),
         ))
     }
 
@@ -229,13 +173,17 @@ impl CryptoSystem for CryptoSystemVLD0 {
         aad: &[u8],
         plaintext: &[u8],
     ) -> VeilidAPIResult<Vec<u8>> {
-        let (enc, ciphertext) = hpke_seal_core::<::hpke::kem::X25519HkdfSha256>(
+        let (enc, ciphertext) = opt::hpke_x25519_seal(
             recipient.ref_value(),
             &hpke_info(CRYPTO_KIND_VLD0),
             aad,
             plaintext,
-            &mut VeilidRng {},
-        )?;
+            &mut random_bytes,
+        )
+        .map_err(|e| match e {
+            opt::Error::InvalidKey => VeilidAPIError::invalid_argument("hpke_seal", "recipient", e),
+            e => VeilidAPIError::generic(e),
+        })?;
         Ok(build_sealed(CRYPTO_KIND_VLD0, &enc, &ciphertext))
     }
 
@@ -250,13 +198,17 @@ impl CryptoSystem for CryptoSystemVLD0 {
         sealed: &[u8],
     ) -> VeilidAPIResult<Vec<u8>> {
         let (enc, ciphertext) = parse_sealed(CRYPTO_KIND_VLD0, VLD0_HPKE_ENC_LENGTH, sealed)?;
-        hpke_open_core::<::hpke::kem::X25519HkdfSha256>(
+        opt::hpke_x25519_open(
             secret.ref_value(),
             enc,
             &hpke_info(CRYPTO_KIND_VLD0),
             aad,
             ciphertext,
         )
+        .map_err(|e| match e {
+            opt::Error::InvalidKey => VeilidAPIError::invalid_argument("hpke_open", "secret", e),
+            e => VeilidAPIError::generic(e),
+        })
     }
 
     #[cfg_attr(
@@ -292,7 +244,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
         })?;
         Ok(EncapsulationKey::new(
             CRYPTO_KIND_VLD0,
-            BareEncapsulationKey::new(pk_xd.as_bytes()),
+            BareEncapsulationKey::new(&pk_xd),
         ))
     }
 
@@ -304,14 +256,6 @@ impl CryptoSystem for CryptoSystemVLD0 {
         &self,
         secret: &SecretKey,
     ) -> VeilidAPIResult<DecapsulationKey> {
-        // The sha512 conversion accepts any input length; enforce the ed25519 one
-        if secret.ref_value().len() != VLD0_SECRET_KEY_LENGTH {
-            apibail_invalid_argument!(
-                "decapsulation_key_from_signing_secret",
-                "secret",
-                secret.ref_value().len()
-            );
-        }
         let sk_xd = secret_to_x25519_sk(secret).map_err(|e| {
             VeilidAPIError::invalid_argument(
                 "decapsulation_key_from_signing_secret",
@@ -321,7 +265,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
         })?;
         Ok(DecapsulationKey::new(
             CRYPTO_KIND_VLD0,
-            BareDecapsulationKey::new(&sk_xd.to_bytes()),
+            BareDecapsulationKey::new(&sk_xd),
         ))
     }
 
@@ -332,7 +276,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
     fn generate_hash(&self, data: &[u8]) -> HashDigest {
         HashDigest::new(
             CRYPTO_KIND_VLD0,
-            BareHashDigest::new(blake3::hash(data).as_bytes()),
+            BareHashDigest::new(&opt::blake3_hash(data)),
         )
     }
 
@@ -341,11 +285,11 @@ impl CryptoSystem for CryptoSystemVLD0 {
         instrument(level = "trace", target = "crypto", skip_all, fields(__VEILID_LOG_KEY = self.registry.log_key()))
     )]
     fn generate_hash_reader(&self, reader: &mut dyn std::io::Read) -> VeilidAPIResult<PublicKey> {
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = opt::Blake3Hasher::new();
         std::io::copy(reader, &mut hasher).map_err(|e| VeilidAPIError::generic(e.to_string()))?;
         Ok(PublicKey::new(
             CRYPTO_KIND_VLD0,
-            BarePublicKey::new(hasher.finalize().as_bytes()),
+            BarePublicKey::new(&hasher.finalize()),
         ))
     }
 
@@ -410,7 +354,7 @@ impl CryptoSystem for CryptoSystemVLD0 {
     fn validate_hash(&self, data: &[u8], hash_digest: &HashDigest) -> VeilidAPIResult<bool> {
         self.check_hash_digest(hash_digest)?;
 
-        let bytes = *blake3::hash(data).as_bytes();
+        let bytes = opt::blake3_hash(data);
 
         Ok(bytes == *hash_digest.ref_value().bytes())
     }
@@ -426,9 +370,9 @@ impl CryptoSystem for CryptoSystemVLD0 {
     ) -> VeilidAPIResult<bool> {
         self.check_hash_digest(hash_digest)?;
 
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = opt::Blake3Hasher::new();
         std::io::copy(reader, &mut hasher).map_err(|e| VeilidAPIError::generic(e.to_string()))?;
-        let bytes = *hasher.finalize().as_bytes();
+        let bytes = hasher.finalize();
         Ok(bytes == *hash_digest.ref_value().bytes())
     }
 
@@ -446,24 +390,21 @@ impl CryptoSystem for CryptoSystemVLD0 {
         self.check_public_key(public_key)?;
         self.check_secret_key(secret_key)?;
 
-        let mut kpb = BytesMut::with_capacity(VLD0_SECRET_KEY_LENGTH + VLD0_PUBLIC_KEY_LENGTH);
+        let sig_bytes = opt::ed25519_sign_prehashed(
+            public_key.ref_value(),
+            secret_key.ref_value(),
+            data,
+            VLD0_DOMAIN_SIGN,
+        )
+        .map_err(|e| match e {
+            opt::Error::InvalidKey => VeilidAPIError::parse_error("Keypair is invalid", e),
+            e => VeilidAPIError::internal(e),
+        })?;
 
-        kpb.extend_from_slice(secret_key.ref_value().as_ref());
-        kpb.extend_from_slice(public_key.ref_value().as_ref());
-        let keypair =
-            ed::SigningKey::from_keypair_bytes(kpb.as_ref().try_into().unwrap_or_log())
-                .map_err(|e| VeilidAPIError::parse_error("Keypair is invalid", e.to_string()))?;
-
-        let mut dig: ed::Sha512 = ed::Sha512::default();
-        dig.update(data);
-
-        let sig_bytes = keypair
-            .sign_prehashed(dig, Some(VLD0_DOMAIN_SIGN))
-            .map_err(VeilidAPIError::internal)?;
-
-        let sig = Signature::new(CRYPTO_KIND_VLD0, BareSignature::new(&sig_bytes.to_bytes()));
-
-        Ok(sig)
+        Ok(Signature::new(
+            CRYPTO_KIND_VLD0,
+            BareSignature::new(&sig_bytes),
+        ))
     }
 
     fn sign_in_place(
@@ -477,29 +418,26 @@ impl CryptoSystem for CryptoSystemVLD0 {
         self.check_public_key(public_key)?;
         self.check_secret_key(secret_key)?;
 
-        let mut kpb = BytesMut::with_capacity(VLD0_SECRET_KEY_LENGTH + VLD0_PUBLIC_KEY_LENGTH);
-
-        kpb.extend_from_slice(secret_key.ref_value().as_ref());
-        kpb.extend_from_slice(public_key.ref_value().as_ref());
-        let keypair =
-            ed::SigningKey::from_keypair_bytes(kpb.as_ref().try_into().unwrap_or_log())
-                .map_err(|e| VeilidAPIError::parse_error("Keypair is invalid", e.to_string()))?;
-
-        let mut dig: ed::Sha512 = ed::Sha512::default();
-
-        dig.update(data.get(range.clone()).ok_or_else(|| {
+        let message = data.get(range.clone()).ok_or_else(|| {
             VeilidAPIError::invalid_argument("range is out of bounds", "range", range)
-        })?);
+        })?;
 
-        let sig_bytes = keypair
-            .sign_prehashed(dig, Some(VLD0_DOMAIN_SIGN))
-            .map_err(VeilidAPIError::internal)?;
+        let sig_bytes = opt::ed25519_sign_prehashed(
+            public_key.ref_value(),
+            secret_key.ref_value(),
+            message,
+            VLD0_DOMAIN_SIGN,
+        )
+        .map_err(|e| match e {
+            opt::Error::InvalidKey => VeilidAPIError::parse_error("Keypair is invalid", e),
+            e => VeilidAPIError::internal(e),
+        })?;
 
         data.get_mut(sig_idx..sig_idx + VLD0_SIGNATURE_LENGTH)
             .ok_or_else(|| {
                 VeilidAPIError::parse_error("signature index is out of bounds", sig_idx)
             })?
-            .copy_from_slice(&sig_bytes.to_bytes());
+            .copy_from_slice(&sig_bytes);
 
         Ok(())
     }
@@ -517,32 +455,18 @@ impl CryptoSystem for CryptoSystemVLD0 {
         self.check_public_key(public_key)?;
         self.check_signature(signature)?;
 
-        let pk = ed::VerifyingKey::from_bytes(
-            public_key
-                .ref_value()
-                .as_ref()
-                .try_into()
-                .map_err(VeilidAPIError::internal)?,
+        opt::ed25519_verify_prehashed(
+            public_key.ref_value(),
+            data,
+            VLD0_DOMAIN_SIGN,
+            signature.ref_value(),
         )
-        .map_err(|_| VeilidAPIError::parse_error("Public key is invalid", public_key.clone()))?;
-        let sig = ed::Signature::from_bytes(
-            signature
-                .ref_value()
-                .as_ref()
-                .try_into()
-                .map_err(VeilidAPIError::internal)?,
-        );
-
-        let mut dig: ed::Sha512 = ed::Sha512::default();
-        dig.update(data);
-
-        if pk
-            .verify_prehashed_strict(dig, Some(VLD0_DOMAIN_SIGN), &sig)
-            .is_err()
-        {
-            return Ok(false);
-        }
-        Ok(true)
+        .map_err(|e| match e {
+            opt::Error::InvalidKey => {
+                VeilidAPIError::parse_error("Public key is invalid", public_key.clone())
+            }
+            e => VeilidAPIError::internal(e),
+        })
     }
 
     fn verify_in_place(
@@ -554,32 +478,20 @@ impl CryptoSystem for CryptoSystemVLD0 {
     ) -> VeilidAPIResult<bool> {
         self.check_public_key(public_key)?;
 
-        let pk = ed::VerifyingKey::from_bytes(
-            public_key
-                .ref_value()
-                .as_ref()
-                .try_into()
-                .map_err(VeilidAPIError::internal)?,
-        )
-        .map_err(|_| VeilidAPIError::parse_error("Public key is invalid", public_key.clone()))?;
-
-        let mut dig: ed::Sha512 = ed::Sha512::default();
-        dig.update(
-            data.get(range)
-                .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
-        );
-
+        let message = data
+            .get(range)
+            .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?;
         let sig = data
             .get(sig_idx..sig_idx + VLD0_SIGNATURE_LENGTH)
             .ok_or_else(|| VeilidAPIError::internal("signature index is out of bounds"))?;
-        let sig = ed::Signature::from_bytes(sig.try_into().unwrap_or_log());
-        if pk
-            .verify_prehashed_strict(dig, Some(VLD0_DOMAIN_SIGN), &sig)
-            .is_err()
-        {
-            return Ok(false);
-        }
-        Ok(true)
+
+        opt::ed25519_verify_prehashed(public_key.ref_value(), message, VLD0_DOMAIN_SIGN, sig)
+            .map_err(|e| match e {
+                opt::Error::InvalidKey => {
+                    VeilidAPIError::parse_error("Public key is invalid", public_key.clone())
+                }
+                e => VeilidAPIError::internal(e),
+            })
     }
 
     // AEAD Encrypt/Decrypt
@@ -596,26 +508,13 @@ impl CryptoSystem for CryptoSystemVLD0 {
     ) -> VeilidAPIResult<()> {
         self.check_shared_secret(shared_secret)?;
 
-        let shared_secret_bytes: [u8; VLD0_SHARED_SECRET_LENGTH] = shared_secret
-            .ref_value()
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?;
-        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] = nonce
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?;
-
-        let key = ch::Key::from(shared_secret_bytes);
-        let xnonce = ch::XNonce::from(nonce_bytes);
-        let aead = ch::XChaCha20Poly1305::new(&key);
         let mut buffer = BufferWrapper::new(body);
-        aead.decrypt_in_place(
-            &xnonce,
+        opt::xchacha20poly1305_decrypt_in_place(
+            shared_secret.ref_value(),
+            nonce.as_ref(),
             associated_data.unwrap_or(b""),
-            &mut buffer as &mut dyn ch::aead::Buffer,
+            &mut buffer,
         )
-        .map_err(map_to_string)
         .map_err(VeilidAPIError::generic)
     }
 
@@ -654,24 +553,14 @@ impl CryptoSystem for CryptoSystemVLD0 {
         self.check_nonce(nonce)?;
         self.check_shared_secret(shared_secret)?;
 
-        let shared_secret_bytes: [u8; VLD0_SHARED_SECRET_LENGTH] = shared_secret
-            .ref_value()
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?;
-        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] = nonce
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?;
-
-        let key = ch::Key::from(shared_secret_bytes);
-        let xnonce = ch::XNonce::from(nonce_bytes);
-        let aead = ch::XChaCha20Poly1305::new(&key);
-
         let mut buffer = BufferWrapper::new(body);
-        aead.encrypt_in_place(&xnonce, associated_data.unwrap_or(b""), &mut buffer)
-            .map_err(map_to_string)
-            .map_err(VeilidAPIError::generic)
+        opt::xchacha20poly1305_encrypt_in_place(
+            shared_secret.ref_value(),
+            nonce.as_ref(),
+            associated_data.unwrap_or(b""),
+            &mut buffer,
+        )
+        .map_err(VeilidAPIError::generic)
     }
 
     #[cfg_attr(
@@ -709,21 +598,8 @@ impl CryptoSystem for CryptoSystemVLD0 {
         self.check_nonce(nonce)?;
         self.check_shared_secret(shared_secret)?;
 
-        let shared_secret_bytes: [u8; VLD0_SHARED_SECRET_LENGTH] = shared_secret
-            .ref_value()
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?;
-        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] = nonce
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?;
-        let key = ch::Key::from(shared_secret_bytes);
-        let xnonce = ch::XNonce::from(nonce_bytes);
-
-        let mut cipher = <XChaCha20 as KeyIvInit>::new(&key, &xnonce);
-        cipher.apply_keystream(body);
-        Ok(())
+        opt::xchacha20_apply_keystream(shared_secret.ref_value(), nonce.as_ref(), body)
+            .map_err(VeilidAPIError::internal)
     }
 
     #[cfg_attr(
@@ -740,21 +616,13 @@ impl CryptoSystem for CryptoSystemVLD0 {
         self.check_nonce(nonce)?;
         self.check_shared_secret(shared_secret)?;
 
-        let shared_secret_bytes: [u8; VLD0_SHARED_SECRET_LENGTH] = shared_secret
-            .ref_value()
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?;
-        let nonce_bytes: [u8; VLD0_NONCE_LENGTH] = nonce
-            .as_ref()
-            .try_into()
-            .map_err(VeilidAPIError::internal)?;
-        let key = ch::Key::from(shared_secret_bytes);
-        let xnonce = ch::XNonce::from(nonce_bytes);
-
-        let mut cipher = <XChaCha20 as KeyIvInit>::new(&key, &xnonce);
-        cipher.apply_keystream_b2b(in_buf, out_buf);
-        Ok(())
+        opt::xchacha20_apply_keystream_b2b(
+            shared_secret.ref_value(),
+            nonce.as_ref(),
+            in_buf,
+            out_buf,
+        )
+        .map_err(VeilidAPIError::internal)
     }
 
     #[cfg_attr(

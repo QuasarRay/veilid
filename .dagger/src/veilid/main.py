@@ -212,6 +212,9 @@ class Veilid:
         ]).with_exec([
             "sh", "-c",
             f"cargo binstall cargo-public-api --disable-strategies=compile --targets {DEFAULT_CARGO_MUSL_TARGET} || cargo install cargo-public-api --locked"
+        ]).with_exec([
+            "sh", "-c",
+            f"cargo binstall cargo-sync-readme --disable-strategies=compile --targets {DEFAULT_CARGO_MUSL_TARGET} || cargo install cargo-sync-readme --locked"
         ])
 
         # Install Zig for cross-compilation (no binstall available for zigbuild yet)
@@ -271,7 +274,7 @@ class Veilid:
             "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--profile=test", "--tests",
             "--target", DEFAULT_CARGO_TARGET, "--all-targets", "--locked", 
             "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
-            "-p", "veilid-core", "-p", "veilid-remote-api"
+            "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
         ])
 
         # Cook dependencies for clippy x86_64-unknown-linux-gnu
@@ -279,7 +282,7 @@ class Veilid:
             "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
             "--target", "x86_64-unknown-linux-gnu", "--all-targets", "--locked", 
             "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
-            "-p", "veilid-core", "-p", "veilid-remote-api"
+            "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
         ])
 
         # Cook dependencies for clippy aarch64-unknown-linux-gnu
@@ -287,7 +290,7 @@ class Veilid:
             "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
             "--target", "aarch64-unknown-linux-gnu", "--all-targets", "--locked", 
             "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
-            "-p", "veilid-core", "-p", "veilid-remote-api"
+            "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
         ])
 
         # Cook dependencies for clippy x86_64-pc-windows-gnu
@@ -295,7 +298,7 @@ class Veilid:
             "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
             "--target", "x86_64-pc-windows-gnu", "--all-targets", "--locked", 
             "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
-            "-p", "veilid-core", "-p", "veilid-remote-api"
+            "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
         ])
 
         # Cook dependencies for clippy aarch64-apple-darwin
@@ -303,7 +306,7 @@ class Veilid:
             "cargo", "chef", "cook", "--recipe-path", "recipe.json", "--zigbuild=clippy",
             "--target", "aarch64-apple-darwin", "--all-targets", "--locked", 
             "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools",
-            "-p", "veilid-core", "-p", "veilid-remote-api"
+            "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
         ])
 
         # Cook WASM dependencies
@@ -451,7 +454,7 @@ class Veilid:
         # which will screw up the build of veilid-server because it will automatically add that feature inappropriately
         out = (
             container.with_exec([
-                "cargo", "zigbuild", "--locked", "--target", target, "--release", "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools", "-p", "veilid-core", "-p", "veilid-remote-api"
+                "cargo", "zigbuild", "--locked", "--target", target, "--release", "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools", "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
             ])
             .with_exec(["rm", "-rf", f"./target/{target}/release/.fingerprint"])
             .with_exec(["rm", "-rf", f"./target/{target}/release/build"]) 
@@ -476,7 +479,7 @@ class Veilid:
         # which will screw up the build of veilid-server because it will automatically add that feature inappropriately
         out = (
             container.with_exec([
-                "cargo", "zigbuild", "--locked", "--target", target, "--release", "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools", "-p", "veilid-core", "-p", "veilid-remote-api"
+                "cargo", "zigbuild", "--locked", "--target", target, "--release", "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools", "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
             ])
             .with_exec(["rm", "-rf", f"./target/{target}/release/.fingerprint"])
             .with_exec(["rm", "-rf", f"./target/{target}/release/build"])
@@ -500,7 +503,7 @@ class Veilid:
         # which will screw up the build of veilid-server because it will automatically add that feature inappropriately
         out = (
             container.with_exec([
-                "cargo", "zigbuild", "--locked", "--target", target, "--release", "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools", "-p", "veilid-core", "-p", "veilid-remote-api"
+                "cargo", "zigbuild", "--locked", "--target", target, "--release", "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools", "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
             ])
             .with_exec(["rm", "-rf", f"./target/{target}/release/.fingerprint"])
             .with_exec(["rm", "-rf", f"./target/{target}/release/build"])
@@ -524,7 +527,7 @@ class Veilid:
     #     # which will screw up the build of veilid-server because it will automatically add that feature inappropriately
     #     out = (
     #         container.with_exec([
-    #             "cargo", "zigbuild", "--locked", "--target", target, "--release", "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools", "-p", "veilid-core", "-p", "veilid-remote-api"
+    #             "cargo", "zigbuild", "--locked", "--target", target, "--release", "-p", "veilid-server", "-p", "veilid-cli", "-p", "veilid-tools", "-p", "veilid-core-optimized", "-p", "veilid-core", "-p", "veilid-remote-api"
     #         ])
     #         .with_exec(["rm", "-rf", f"./target/{target}/release/.fingerprint"])
     #         .with_exec(["rm", "-rf", f"./target/{target}/release/build"])
@@ -550,6 +553,13 @@ class Veilid:
         container = self.code_linux(source, base, ci_registry_image, cache_tag)
         result = await container.with_exec(["./scripts/_check_public_api.sh"]).combined_output()
         return f"Public API check completed:\n{result}"
+
+    @function
+    async def test_readme_sync(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
+        """Check that every generated crate README matches its crate documentation"""
+        container = self.code_linux(source, base, ci_registry_image, cache_tag)
+        result = await container.with_exec(["./scripts/check_readme_sync.sh"]).combined_output()
+        return f"README sync check completed:\n{result}"
 
     @function
     async def test_smoketest_all(self, source: Annotated[dagger.Directory, Ignore(DIRECTORY_IGNORE_PATTERNS)], base: str = "local", ci_registry_image: str = VEILID_REPO, cache_tag: str = "latest") -> str:
@@ -641,6 +651,7 @@ class Veilid:
         results = []
         results.append(await self.test_msrv_all(source, base, ci_registry_image, cache_tag))
         results.append(await self.test_public_api(source, base, ci_registry_image, cache_tag))
+        results.append(await self.test_readme_sync(source, base, ci_registry_image, cache_tag))
         results.append(await self.test_smoketest_all(source, base, ci_registry_image, cache_tag))
         results.append(await self.test_check_wasm_builds_dart(source, base, ci_registry_image, cache_tag))
         results.append(await self.test_check_wasm_builds_js(source, base, ci_registry_image, cache_tag))

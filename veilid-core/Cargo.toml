@@ -56,29 +56,9 @@ rt-async-std = ["async-std", "veilid-tools/rt-async-std"]
 rt-tokio = ["tokio", "veilid-tools/rt-tokio"]
 rt-wasm-bindgen = ["veilid-tools/rt-wasm-bindgen"]
 
-# Crypto support features
-enable-crypto-vld0 = [
-    "ed25519-dalek",
-    "x25519-dalek",
-    "curve25519-dalek",
-    "blake3",
-    "chacha20poly1305",
-    "chacha20",
-    "argon2",
-    "blake2",           # To apply optimization for argon2 code size
-    "hpke",
-]
-enable-crypto-none = [
-    "ed25519-dalek",
-    "curve25519-dalek",
-    "blake3",
-    "argon2",
-    "digest",
-    "blake2",           # To apply optimization for argon2 code size
-    "chacha20poly1305",
-    "hpke",
-    "subtle",
-]
+# Crypto support features; the primitives live in veilid-core-optimized
+enable-crypto-vld0 = ["veilid-core-optimized/enable-crypto-vld0"]
+enable-crypto-none = ["veilid-core-optimized/enable-crypto-none"]
 
 # Protocol support features
 enable-protocol-wss = ["webpki-roots"]
@@ -153,46 +133,8 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 flume = { version = "0.12.0", features = ["async"] }
 arc-swap = { version = "1.8.0" }
 
-# Crypto
-ed25519-dalek = { version = "3.0.0", optional = true, default-features = false, features = [
-    "alloc",
-    "rand_core",
-    "digest",
-    "zeroize",
-] }
-x25519-dalek = { version = "3.0.0", optional = true, default-features = false, features = [
-    "static_secrets",
-    "zeroize",
-    "precomputed-tables",
-] }
-curve25519-dalek = { version = "5.0.0", optional = true, default-features = false, features = [
-    "alloc",
-    "zeroize",
-    "precomputed-tables",
-] }
-blake3 = { version = "1.8.3", optional = true }
-blake2 = { version = "0.11.0-rc.5", optional = true, default-features = false, features = [
-    "size_opt",
-] } # Size optimization for c crate (via feature unification)
-chacha20poly1305 = { version = "0.11.0", optional = true, features = [
-    "bytes",
-    "zeroize",
-    "rand_core",
-] }
-chacha20 = { version = "0.10", optional = true, features = ["xchacha"] }
-argon2 = { version = "0.6.0-rc.8", optional = true, default-features = false, features = [
-    "alloc",
-    "password-hash",
-    "getrandom",
-    "rand_core",
-] }
-digest = { version = "0.11", optional = true, features = ["rand_core"] }
-hpke = { version = "0.14.0", optional = true, default-features = false, features = [
-    "alloc",
-    "x25519",
-    "chacha",
-] }
-subtle = { version = "2.6", optional = true, default-features = false }
+# Crypto and compression primitives, kept at full optimization in every profile
+veilid-core-optimized = { version = "0.5.7", path = "../veilid-core-optimized", default-features = false }
 
 # Serialization
 capnp = { version = "0.26.1", default-features = false, features = [
@@ -205,10 +147,6 @@ serde_json = { version = "1.0.149" }
 data-encoding = { version = "2.8.0" }
 zeroize = { version = "1" }
 schemars = { version = "1.0.3", optional = true }
-lz4_flex = { version = "0.13.1", default-features = false, features = [
-    "safe-encode",
-    "safe-decode",
-] }
 indent = "0.1.1"
 bytesize = { version = "2.3.1", optional = true }
 

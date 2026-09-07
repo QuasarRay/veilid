@@ -20,6 +20,7 @@ if "%TOOLCHAIN%"=="" (
 cargo test --doc
 cargo +%TOOLCHAIN% docs-rs -p veilid-core
 cargo +%TOOLCHAIN% docs-rs -p veilid-tools
+cargo +%TOOLCHAIN% docs-rs -p veilid-core-optimized
 cargo +%TOOLCHAIN% docs-rs -p veilid-remote-api
 
 POPD

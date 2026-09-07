@@ -8,6 +8,7 @@ note: |
   this count collapses to zero and the census diff catches it. A rule that matches
   nothing passes forever otherwise.
 files:
+  - "veilid-core-optimized/src/**"
   - "veilid-core/src/**"
   - "veilid-tools/src/**"
 utils:

@@ -99,6 +99,10 @@ fi
 echo "Performing Dart format check..."
 step ./scripts/check_format.sh
 
+# Crate READMEs are generated from the crate docs; same script CI's test_readme_sync job runs.
+echo "Performing README sync check..."
+step ./scripts/check_readme_sync.sh
+
 # Dagger's ignore patterns are generated from the repo's .gitignore files. Regenerating belongs
 # with a push, not with CI, which has nothing to commit the result to.
 if ! command -v uv > /dev/null 2>&1; then

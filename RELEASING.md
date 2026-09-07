@@ -45,10 +45,12 @@ Git tags serve as a historical record of what repo versions were released at whi
 1. Configure the crates.io credentials, if not already accomplished.
 2. Execute `cargo publish -p veilid-tools --dry-run`
 3. Execute `cargo publish -p veilid-tools`
-4. Execute `cargo publish -p veilid-core --dry-run`
-5. Execute `cargo publish -p veilid-core`
-6. Execute `cargo publish -p veilid-remote-api --dry-run`
-7. Execute `cargo publish -p veilid-remote-api`
+4. Execute `cargo publish -p veilid-core-optimized --dry-run`
+5. Execute `cargo publish -p veilid-core-optimized`
+6. Execute `cargo publish -p veilid-core --dry-run`
+7. Execute `cargo publish -p veilid-core`
+8. Execute `cargo publish -p veilid-remote-api --dry-run`
+9. Execute `cargo publish -p veilid-remote-api`
 
 ## Publish to Pypi (Manual steps if needed)
 
@@ -67,6 +69,9 @@ Occasionally a release will happen that needs to be reverted. This is done manua
 
 - [x] __veilid-tools__ [__Tag__: `veilid-tools-v0.0.0`]
   > An assortment of useful components used by the other Veilid crates.  
+  > Released to crates.io when its version number is changed in `Cargo.toml`
+- [x] __veilid-core-optimized__ [__Tag__: `veilid-core-optimized-v0.0.0`]
+  > Monomorphic entry points for veilid-core's crypto and compression dependencies, built at full optimization in every profile  
   > Released to crates.io when its version number is changed in `Cargo.toml`
 - [x] __veilid-core__  [__Tag__: `veilid-core-v0.0.0`]
   > The base rust crate for Veilid's logic  

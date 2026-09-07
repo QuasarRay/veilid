@@ -7,19 +7,18 @@
 //! utility functions is encouraged rather than adding 'common' functionality to `veilid-core`, allowing it to
 //! remain free of boilerplate and utility classes that could be reused elsewhere.
 //!
-//! Everything added to this crate must be extensively unit-tested (work in progress).
+//! Everything added to this crate must be extensively unit-tested.
 //!
 //! ## Cargo features
 //!
 //! The default `veilid-tools` configurations are:
 //!
-//! * `default` - Uses `tokio` as the async runtime
+//! - `default` - Uses `tokio` as the async runtime
 //!
 //! If you use `--no-default-features`, you can switch to other runtimes:
 //!
-//! * `rt-async-std` - Uses `async-std` as the async runtime
-//! * `rt-wasm-bindgen` - When building for the `wasm32` architecture, use this to enable `wasm-bindgen-futures` as the async runtime
-//!
+//! - `rt-async-std` - Uses `async-std` as the async runtime
+//! - `rt-wasm-bindgen` - When building for the `wasm32` architecture, use this to enable `wasm-bindgen-futures` as the async runtime
 
 #![warn(missing_docs)]
 #![deny(warnings)]

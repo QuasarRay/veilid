@@ -102,6 +102,7 @@ i_wbg()   { cargo install --locked wasm-bindgen-cli --version "$REQ_WASMBINDGEN"
 i_cedit() { cargo install --locked cargo-edit --version "$REQ_CARGOEDIT"; }
 i_nxt()   { cargo install --locked cargo-nextest; }
 i_papi()  { cargo install --locked cargo-public-api; }
+i_srm()   { cargo binstall --no-confirm cargo-sync-readme 2>/dev/null || cargo install --locked cargo-sync-readme; }
 i_sg()    { cargo install --locked ast-grep --version "$REQ_ASTGREP"; }
 crate_ver() { cargo install --list 2>/dev/null | sed -n "s/^$1 v\([0-9.]*\):.*/\1/p" | head -1; }
 
@@ -129,6 +130,7 @@ if [ "$BUILDONLY" != 1 ]; then
     dep_exact "cargo-edit"          "$(crate_ver cargo-edit)"            "$REQ_CARGOEDIT"   1 i_cedit
     dep_have  "cargo-nextest"       "$(crate_ver cargo-nextest)"         "cargo install --locked cargo-nextest"   i_nxt
     dep_have  "cargo-public-api"    "$(crate_ver cargo-public-api)"      "cargo install --locked cargo-public-api" i_papi
+    dep_have  "cargo-sync-readme"   "$(crate_ver cargo-sync-readme)"     "cargo binstall cargo-sync-readme || cargo install --locked cargo-sync-readme" i_srm
     dep_exact "ast-grep"            "$(crate_ver ast-grep)"              "$REQ_ASTGREP"     1 i_sg
 fi
 

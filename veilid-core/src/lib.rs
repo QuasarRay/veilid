@@ -11,7 +11,7 @@
 //! - [Examples](https://gitlab.com/veilid/veilid/-/tree/main/veilid-core/examples/)
 //! - [API Documentation](https://docs.rs/veilid-core)
 //!
-//! The public API is accessed by getting a [VeilidAPI] object via a call to [api_startup], [api_startup_json].
+//! The public API is accessed by getting a [VeilidAPI] object via a call to [api_startup] or [api_startup_json].
 //!
 //! From there, a [RoutingContext] object can get you access to public and private routed operations.
 //!

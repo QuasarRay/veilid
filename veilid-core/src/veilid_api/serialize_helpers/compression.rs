@@ -1,5 +1,5 @@
 use super::*;
-use lz4_flex::block;
+use veilid_core_optimized::{lz4_compress_prepend_size, lz4_decompress, lz4_uncompressed_size};
 
 impl_veilid_log_facility!("compression");
 
@@ -9,7 +9,7 @@ impl_veilid_log_facility!("compression");
 )]
 #[must_use]
 pub(crate) fn compress_prepend_size(input: &[u8]) -> Vec<u8> {
-    block::compress_prepend_size(input)
+    lz4_compress_prepend_size(input)
 }
 
 #[cfg_attr(
@@ -17,7 +17,7 @@ pub(crate) fn compress_prepend_size(input: &[u8]) -> Vec<u8> {
     instrument(level = "trace", target = "compression", skip_all, err)
 )]
 pub(crate) fn decompress_size_prepended(input: &[u8], max_size: usize) -> VeilidAPIResult<Vec<u8>> {
-    let (uncompressed_size, input) = match block::uncompressed_size(input) {
+    let (uncompressed_size, input) = match lz4_uncompressed_size(input) {
         Ok(v) => v,
         Err(e) => {
             apibail_generic!("failed to get uncompressed size: {}", e);
@@ -30,7 +30,7 @@ pub(crate) fn decompress_size_prepended(input: &[u8], max_size: usize) -> Veilid
             max_size
         );
     }
-    match block::decompress(input, uncompressed_size) {
+    match lz4_decompress(input, uncompressed_size) {
         Ok(v) => Ok(v),
         Err(e) => {
             #[cfg(feature = "backtrace")]

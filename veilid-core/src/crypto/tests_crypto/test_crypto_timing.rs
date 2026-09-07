@@ -104,17 +104,15 @@ pub fn test_op_timings(cs: &CryptoSystemGuard<'_>) {
             cs.decapsulation_key_from_signing_secret(&kp.secret())
         }),
     );
-    // Control: the cipher crate alone, no veilid wrapper, same 64KB
+    // Control: the optimized crate's cipher alone, no cryptosystem wrapper, same 64KB
     {
-        use chacha20::cipher::{KeyIvInit, StreamCipher};
         let mut buf = cs.random_bytes(65536);
-        let key = chacha20::Key::from([7u8; 32]);
-        let xnonce = chacha20::XNonce::from([9u8; 24]);
+        let key = [7u8; 32];
+        let nonce = [9u8; 24];
         report(
-            "chacha20 crate apply_keystream(64KB)",
+            "xchacha20_apply_keystream(64KB)",
             time_us(200, || {
-                let mut cipher = chacha20::XChaCha20::new(&key, &xnonce);
-                cipher.apply_keystream(&mut buf);
+                veilid_core_optimized::xchacha20_apply_keystream(&key, &nonce, &mut buf)
             }),
         );
     }

@@ -34,7 +34,7 @@ NEW_VERSION=$(uv tool run bump-my-version show current_version 2>/dev/null)
 echo NEW_VERSION=$NEW_VERSION
 
 # Update crate dependencies for the crates we publish
-cargo upgrade -p veilid-tools@$NEW_VERSION -p veilid-core@$NEW_VERSION -p veilid-remote-api@$NEW_VERSION
+cargo upgrade -p veilid-tools@$NEW_VERSION -p veilid-core-optimized@$NEW_VERSION -p veilid-core@$NEW_VERSION -p veilid-remote-api@$NEW_VERSION
 
 # Update lockfile
 cargo update -w

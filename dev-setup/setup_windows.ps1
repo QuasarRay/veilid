@@ -293,6 +293,7 @@ if (-not $BuildOnly) {
     DepExact "cargo-edit"       (CrateVer "cargo-edit")       $V.CARGO_EDIT_VERSION   $true $iCedit
     DepHave  "cargo-nextest"    (CrateVer "cargo-nextest")    "cargo install --locked cargo-nextest"    { cargo install --locked cargo-nextest }
     DepHave  "cargo-public-api" (CrateVer "cargo-public-api") "cargo install --locked cargo-public-api" { cargo install --locked cargo-public-api }
+    DepHave  "cargo-sync-readme" (CrateVer "cargo-sync-readme") "cargo binstall cargo-sync-readme || cargo install --locked cargo-sync-readme" { cargo binstall --no-confirm cargo-sync-readme 2>$null; if ($LASTEXITCODE -ne 0) { cargo install --locked cargo-sync-readme } }
 }
 
 # JDK for the jni/jvm link. Provisioned (download + JAVA_HOME, keyed off -TargetArch) whenever we

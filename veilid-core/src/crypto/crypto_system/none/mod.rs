@@ -1,16 +1,11 @@
-mod blake3digest512;
-mod none_kem;
 mod sizes;
 
 use super::*;
 
-use super::hpke::{build_sealed, hpke_info, hpke_open_core, hpke_seal_core, parse_sealed};
-use argon2::password_hash::phc::Salt;
-use blake3digest512::Blake3Digest512;
+use super::hpke::{build_sealed, hpke_info, parse_sealed};
 use data_encoding::BASE64URL_NOPAD;
-use digest::rand_core::Rng as _;
-use digest::Digest;
-use none_kem::NoneKem;
+use veilid_core_optimized as opt;
+
 const NONE_AEAD_OVERHEAD: usize = NONE_PUBLIC_KEY_LENGTH;
 /// [`CryptoKind`] fourcc identifying the NONE cryptosystem.
 pub const CRYPTO_KIND_NONE: CryptoKind = CryptoKind::new(*b"NONE");
@@ -19,10 +14,9 @@ pub const CRYPTO_KIND_NONE_FOURCC: u32 = u32::from_be_bytes(*b"NONE");
 pub use sizes::*;
 
 pub(crate) fn none_generate_keypair() -> KeyPair {
-    let mut csprng = VeilidRng {};
     let mut pub_bytes = [0u8; NONE_PUBLIC_KEY_LENGTH];
     let mut sec_bytes = [0u8; NONE_SECRET_KEY_LENGTH];
-    csprng.fill_bytes(&mut pub_bytes);
+    random_bytes(&mut pub_bytes);
     for n in 0..NONE_PUBLIC_KEY_LENGTH {
         sec_bytes[n] = !pub_bytes[n];
     }
@@ -32,10 +26,9 @@ pub(crate) fn none_generate_keypair() -> KeyPair {
 }
 
 pub(crate) fn none_generate_kem_keypair() -> KemKeyPair {
-    let mut csprng = VeilidRng {};
     let mut ek_bytes = [0u8; NONE_ENCAPSULATION_KEY_LENGTH];
     let mut dk_bytes = [0u8; NONE_DECAPSULATION_KEY_LENGTH];
-    csprng.fill_bytes(&mut ek_bytes);
+    random_bytes(&mut ek_bytes);
     for n in 0..NONE_ENCAPSULATION_KEY_LENGTH {
         dk_bytes[n] = !ek_bytes[n];
     }
@@ -94,9 +87,9 @@ fn do_aead_keyblob(
     let mut blob = nonce.to_vec();
     blob.extend_from_slice(&[0u8; 8]);
     let mut blob = do_xor_32(&blob, shared_secret.ref_value())?;
-    let ad_hash = blake3::hash(associated_data.unwrap_or(b""));
+    let ad_hash = opt::blake3_hash(associated_data.unwrap_or(b""));
     for n in 0..32 {
-        blob[n] ^= ad_hash.as_bytes()[n];
+        blob[n] ^= ad_hash[n];
     }
     Ok(blob)
 }
@@ -112,6 +105,13 @@ fn is_bytes_eq_32(a: &[u8], v: u8) -> VeilidAPIResult<bool> {
         }
     }
     Ok(true)
+}
+
+// The signature's message digest: 64 bytes of BLAKE3 extendable output
+fn signature_digest(data: &[u8]) -> [u8; NONE_SIGNATURE_LENGTH] {
+    let mut digest = [0u8; NONE_SIGNATURE_LENGTH];
+    opt::blake3_hash_xof(data, &mut digest);
+    digest
 }
 
 /// None CryptoSystem
@@ -149,7 +149,7 @@ impl CryptoSystem for CryptoSystemNONE {
         bytes
     }
     fn hash_password(&self, password: &[u8], salt: &[u8]) -> VeilidAPIResult<String> {
-        if salt.len() < Salt::MIN_LENGTH || salt.len() > Salt::MAX_LENGTH {
+        if salt.len() < opt::ARGON2_SALT_MIN_LENGTH || salt.len() > opt::ARGON2_SALT_MAX_LENGTH {
             apibail_generic!("invalid salt length");
         }
         Ok(format!(
@@ -169,14 +169,14 @@ impl CryptoSystem for CryptoSystemNONE {
     }
 
     fn derive_shared_secret(&self, password: &[u8], salt: &[u8]) -> VeilidAPIResult<SharedSecret> {
-        if salt.len() < Salt::MIN_LENGTH || salt.len() > Salt::MAX_LENGTH {
+        if salt.len() < opt::ARGON2_SALT_MIN_LENGTH || salt.len() > opt::ARGON2_SALT_MAX_LENGTH {
             apibail_generic!("invalid salt length");
         }
         Ok(SharedSecret::new(
             CRYPTO_KIND_NONE,
-            BareSharedSecret::new(
-                blake3::hash(self.hash_password(password, salt)?.as_bytes()).as_bytes(),
-            ),
+            BareSharedSecret::new(&opt::blake3_hash(
+                self.hash_password(password, salt)?.as_bytes(),
+            )),
         ))
     }
 
@@ -208,13 +208,17 @@ impl CryptoSystem for CryptoSystemNONE {
         aad: &[u8],
         plaintext: &[u8],
     ) -> VeilidAPIResult<Vec<u8>> {
-        let (enc, ciphertext) = hpke_seal_core::<NoneKem>(
+        let (enc, ciphertext) = opt::hpke_none_seal(
             recipient.ref_value(),
             &hpke_info(CRYPTO_KIND_NONE),
             aad,
             plaintext,
-            &mut VeilidRng {},
-        )?;
+            &mut random_bytes,
+        )
+        .map_err(|e| match e {
+            opt::Error::InvalidKey => VeilidAPIError::invalid_argument("hpke_seal", "recipient", e),
+            e => VeilidAPIError::generic(e),
+        })?;
         Ok(build_sealed(CRYPTO_KIND_NONE, &enc, &ciphertext))
     }
 
@@ -225,13 +229,17 @@ impl CryptoSystem for CryptoSystemNONE {
         sealed: &[u8],
     ) -> VeilidAPIResult<Vec<u8>> {
         let (enc, ciphertext) = parse_sealed(CRYPTO_KIND_NONE, NONE_HPKE_ENC_LENGTH, sealed)?;
-        hpke_open_core::<NoneKem>(
+        opt::hpke_none_open(
             secret.ref_value(),
             enc,
             &hpke_info(CRYPTO_KIND_NONE),
             aad,
             ciphertext,
         )
+        .map_err(|e| match e {
+            opt::Error::InvalidKey => VeilidAPIError::invalid_argument("hpke_open", "secret", e),
+            e => VeilidAPIError::generic(e),
+        })
     }
 
     fn generate_keypair(&self) -> KeyPair {
@@ -279,15 +287,15 @@ impl CryptoSystem for CryptoSystemNONE {
     fn generate_hash(&self, data: &[u8]) -> HashDigest {
         HashDigest::new(
             CRYPTO_KIND_NONE,
-            BareHashDigest::new(blake3::hash(data).as_bytes()),
+            BareHashDigest::new(&opt::blake3_hash(data)),
         )
     }
     fn generate_hash_reader(&self, reader: &mut dyn std::io::Read) -> VeilidAPIResult<PublicKey> {
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = opt::Blake3Hasher::new();
         std::io::copy(reader, &mut hasher).map_err(|e| VeilidAPIError::generic(e.to_string()))?;
         Ok(PublicKey::new(
             CRYPTO_KIND_NONE,
-            BarePublicKey::new(hasher.finalize().as_bytes()),
+            BarePublicKey::new(&hasher.finalize()),
         ))
     }
 
@@ -342,9 +350,8 @@ impl CryptoSystem for CryptoSystemNONE {
     }
     fn validate_hash(&self, data: &[u8], hash_digest: &HashDigest) -> VeilidAPIResult<bool> {
         self.check_hash_digest(hash_digest)?;
-        let out_hash = blake3::hash(data);
-        let bytes = out_hash.as_bytes();
-        Ok(*bytes == **hash_digest.ref_value())
+        let bytes = opt::blake3_hash(data);
+        Ok(bytes == **hash_digest.ref_value())
     }
     fn validate_hash_reader(
         &self,
@@ -352,11 +359,10 @@ impl CryptoSystem for CryptoSystemNONE {
         hash_digest: &HashDigest,
     ) -> VeilidAPIResult<bool> {
         self.check_hash_digest(hash_digest)?;
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = opt::Blake3Hasher::new();
         std::io::copy(reader, &mut hasher).map_err(|e| VeilidAPIError::generic(e.to_string()))?;
-        let out_hash = hasher.finalize();
-        let bytes = out_hash.as_bytes();
-        Ok(*bytes == **hash_digest.ref_value())
+        let bytes = hasher.finalize();
+        Ok(bytes == **hash_digest.ref_value())
     }
 
     // Authentication
@@ -379,10 +385,7 @@ impl CryptoSystem for CryptoSystemNONE {
             ));
         }
 
-        let mut dig = Blake3Digest512::new();
-        dig.update(data);
-        let sig = dig.finalize();
-        let in_sig_bytes: [u8; NONE_SIGNATURE_LENGTH] = sig.into();
+        let in_sig_bytes = signature_digest(data);
         let mut sig_bytes = [0u8; NONE_SIGNATURE_LENGTH];
         sig_bytes[0..32].copy_from_slice(&in_sig_bytes[0..32]);
         sig_bytes[32..64]
@@ -402,12 +405,9 @@ impl CryptoSystem for CryptoSystemNONE {
         self.check_public_key(public_key)?;
         self.check_secret_key(secret_key)?;
 
-        let mut dig = Blake3Digest512::new();
-        dig.update(data.get(range.clone()).ok_or_else(|| {
+        let in_sig_bytes = signature_digest(data.get(range.clone()).ok_or_else(|| {
             VeilidAPIError::invalid_argument("range is out of bounds", "range", range)
         })?);
-        let sig = dig.finalize();
-        let in_sig_bytes: [u8; NONE_SIGNATURE_LENGTH] = sig.into();
 
         let sig_out = data
             .get_mut(sig_idx..sig_idx + NONE_SIGNATURE_LENGTH)
@@ -430,10 +430,7 @@ impl CryptoSystem for CryptoSystemNONE {
         self.check_public_key(public_key)?;
         self.check_signature(signature)?;
 
-        let mut dig = Blake3Digest512::new();
-        dig.update(data);
-        let sig = dig.finalize();
-        let in_sig_bytes: [u8; NONE_SIGNATURE_LENGTH] = sig.into();
+        let in_sig_bytes = signature_digest(data);
         let mut verify_bytes = [0u8; NONE_SIGNATURE_LENGTH];
         verify_bytes[0..32].copy_from_slice(&do_xor_32(
             &in_sig_bytes[0..32],
@@ -466,13 +463,10 @@ impl CryptoSystem for CryptoSystemNONE {
     ) -> VeilidAPIResult<bool> {
         self.check_public_key(public_key)?;
 
-        let mut dig = Blake3Digest512::new();
-        dig.update(
+        let in_sig_bytes = signature_digest(
             data.get(range)
                 .ok_or_else(|| VeilidAPIError::internal("range is out of bounds"))?,
         );
-        let sig = dig.finalize();
-        let in_sig_bytes: [u8; NONE_SIGNATURE_LENGTH] = sig.into();
         let mut verify_bytes = [0u8; NONE_SIGNATURE_LENGTH];
         let signature = data
             .get(sig_idx..sig_idx + NONE_SIGNATURE_LENGTH)

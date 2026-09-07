@@ -1,5 +1,8 @@
 **UNRELEASED**
 
+- veilid-core-optimized:
+  - new crate added to hold monomorphic exports for crates that want to be fully speed optimized in all build profiles
+
 - veilid-core:
   - Stats collection, aggregation, and analysis for all subsystems. Robot-generated python script for reviewing the effect of optimizations.
   - Fix OnlineDetector spurious flap.

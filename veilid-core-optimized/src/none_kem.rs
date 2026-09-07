@@ -1,11 +1,11 @@
-use ::hpke::hybrid_array::typenum::U32;
-use ::hpke::hybrid_array::Array;
-use ::hpke::kem::SharedSecret;
-use ::hpke::rand_core::CryptoRng;
-use ::hpke::{Deserializable, HpkeError, Kem as KemTrait, Serializable};
+use hpke::hybrid_array::typenum::U32;
+use hpke::hybrid_array::Array;
+use hpke::kem::SharedSecret;
+use hpke::rand_core::CryptoRng;
+use hpke::{Deserializable, HpkeError, Kem as KemTrait, Serializable};
 use subtle::{Choice, ConstantTimeEq};
 
-const NONE_KEM_KEY_LENGTH: usize = 32;
+pub(crate) const NONE_KEM_KEY_LENGTH: usize = 32;
 
 macro_rules! none_kem_key {
     ($name:ident) => {

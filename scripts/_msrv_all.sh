@@ -12,6 +12,9 @@ fi
 #echo "Checking MSRV for veilid-tools"
 #cargo msrv verify --manifest-path=veilid-tools/Cargo.toml
 
+#echo "Checking MSRV for veilid-core-optimized"
+#cargo msrv verify --manifest-path=veilid-core-optimized/Cargo.toml
+
 #echo "Checking MSRV for veilid-core"
 #cargo msrv verify --manifest-path=veilid-core/Cargo.toml
 

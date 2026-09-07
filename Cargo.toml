@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "veilid-tools",
+    "veilid-core-optimized",
     "veilid-core",
     "veilid-core/examples/basic",
     "veilid-core/examples/private_route",
@@ -27,13 +28,17 @@ rust-version = "1.89.0"
 # keyvaluedb-sqlite = { path = "../keyvaluedb/keyvaluedb-sqlite" }
 # keyvaluedb-web = { path = "../keyvaluedb/keyvaluedb-web" }
 
-# Size-optimized overall; crypto packages below stay at full opt for throughput
+# Size-optimized overall; crypto packages below stay at full opt for throughput. A package
+# override reaches only that package's own code: generic and #[inline] code is compiled
+# where it is instantiated, which is why veilid-core-optimized exists and is listed too.
 [profile.release]
 opt-level = "z"
 lto = true
 panic = "abort"
 codegen-units = 1
 
+[profile.release.package.veilid-core-optimized]
+opt-level = 3
 [profile.release.package.curve25519-dalek]
 opt-level = 3
 [profile.release.package.ed25519-dalek]
@@ -71,6 +76,11 @@ opt-level = 3
 
 [profile.dev.package.backtrace]
 opt-level = 3
+
+[profile.dev.package.veilid-core-optimized]
+opt-level = 3
+overflow-checks = false
+debug-assertions = false
 
 [profile.dev.package.argon2]
 opt-level = 3

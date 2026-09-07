@@ -12,6 +12,7 @@ note: |
   lands in the census, and a new panic added inside a cfg_if! shows up as a census diff
   rather than as nothing at all.
 files:
+  - "veilid-core-optimized/src/**"
   - "veilid-core/src/**"
   - "veilid-tools/src/**"
 ignores:

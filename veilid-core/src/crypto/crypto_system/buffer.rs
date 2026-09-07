@@ -1,7 +1,5 @@
 use super::*;
 
-use chacha20poly1305 as ch;
-
 /// A growable, mutable byte buffer that AEAD operations can encrypt or decrypt in place.
 ///
 /// Implemented for `Vec<u8>` and `BytesMut`. Encryption appends the authentication tag
@@ -56,7 +54,7 @@ impl CryptoSystemBuffer for BytesMut {
     }
 }
 
-/// Adapts a [`CryptoSystemBuffer`] to the `chacha20poly1305` AEAD `Buffer` trait so in-place AEAD
+/// Adapts a [`CryptoSystemBuffer`] to the optimized crate's AEAD buffer trait so in-place AEAD
 /// operations can grow and truncate the underlying `Vec<u8>` or `BytesMut`.
 pub(super) struct BufferWrapper<'a> {
     buffer: &'a mut dyn CryptoSystemBuffer,
@@ -78,16 +76,15 @@ impl<'a> AsMut<[u8]> for BufferWrapper<'a> {
         self.buffer.as_mut()
     }
 }
-impl<'a> ch::aead::Buffer for BufferWrapper<'a> {
+impl<'a> veilid_core_optimized::AeadBuffer for BufferWrapper<'a> {
     fn len(&self) -> usize {
         self.buffer.len()
     }
     fn is_empty(&self) -> bool {
         self.buffer.is_empty()
     }
-    fn extend_from_slice(&mut self, other: &[u8]) -> Result<(), ch::Error> {
+    fn extend_from_slice(&mut self, other: &[u8]) {
         self.buffer.extend_from_slice(other);
-        Ok(())
     }
     fn truncate(&mut self, len: usize) {
         self.buffer.truncate(len)

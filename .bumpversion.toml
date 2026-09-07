@@ -47,6 +47,13 @@ replace = '''name = "veilid-tools"
 version = "{new_version}"'''
 
 [[tool.bumpversion.files]]
+filename = "veilid-core-optimized/Cargo.toml"
+search = '''name = "veilid-core-optimized"
+version = "{current_version}"'''
+replace = '''name = "veilid-core-optimized"
+version = "{new_version}"'''
+
+[[tool.bumpversion.files]]
 filename = "veilid-remote-api/Cargo.toml"
 search = '''name = "veilid-remote-api"
 version = "{current_version}"'''

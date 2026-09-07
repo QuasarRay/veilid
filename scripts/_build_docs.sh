@@ -36,6 +36,11 @@ if [ $CLEANUP -eq 1 ] ; then
     rm -rf target/$TARGET/doc
 fi
 
+cargo +$TOOLCHAIN docs-rs -p veilid-core-optimized --target $TARGET --locked
+if [ $CLEANUP -eq 1 ] ; then
+    rm -rf target/$TARGET/doc
+fi
+
 cargo +$TOOLCHAIN docs-rs -p veilid-remote-api --target $TARGET --locked
 if [ $CLEANUP -eq 1 ] ; then
     rm -rf target/$TARGET/doc
