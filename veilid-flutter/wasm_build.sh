@@ -20,10 +20,10 @@ fi
 
 # Output filenames: veilid_flutter.js + veilid_flutter_bg.wasm.
 if [ "$RELEASE" -eq 1 ]; then
-    OUTPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/release/pkg
-    INPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/release
+    OUTPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/size/pkg
+    INPUTDIR=$SCRIPTDIR/../target/wasm32-unknown-unknown/size
 
-    ./wasm_remap_paths.sh cargo build --target wasm32-unknown-unknown --release --no-default-features --features=default-wasm -p veilid-flutter $@
+    ./wasm_remap_paths.sh cargo build --target wasm32-unknown-unknown --profile size --no-default-features --features=default-wasm -p veilid-flutter $@
     mkdir -p $OUTPUTDIR
     wasm-bindgen --out-dir $OUTPUTDIR --target web $INPUTDIR/veilid_flutter.wasm
     wasm-opt \

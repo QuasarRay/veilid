@@ -5,7 +5,7 @@
 #
 # Usage:
 #   ./wasm_build_js.sh                 # debug build (keeps DWARF info)
-#   ./wasm_build_js.sh release         # release build (wasm-opt -Oz)
+#   ./wasm_build_js.sh release         # size profile + wasm-opt -Oz
 #   ./wasm_build_js.sh release --features=foo
 #
 # Extra args after the optional `release` token are forwarded to cargo build.
@@ -28,8 +28,8 @@ WORKSPACE_TARGET="$SCRIPTDIR/../target/wasm32-unknown-unknown"
 
 # --- cargo build -------------------------------------------------------------
 if [ "$RELEASE" -eq 1 ]; then
-    cargo build --target wasm32-unknown-unknown --release "$@"
-    WASM_IN="$WORKSPACE_TARGET/release/veilid_wasm.wasm"
+    cargo build --target wasm32-unknown-unknown --profile size "$@"
+    WASM_IN="$WORKSPACE_TARGET/size/veilid_wasm.wasm"
 else
     RUSTFLAGS="-g $RUSTFLAGS" cargo build --target wasm32-unknown-unknown --features debug-api "$@"
     WASM_IN="$WORKSPACE_TARGET/debug/veilid_wasm.wasm"

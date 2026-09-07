@@ -28,50 +28,56 @@ rust-version = "1.89.0"
 # keyvaluedb-sqlite = { path = "../keyvaluedb/keyvaluedb-sqlite" }
 # keyvaluedb-web = { path = "../keyvaluedb/keyvaluedb-web" }
 
-# Size-optimized overall; crypto packages below stay at full opt for throughput. A package
-# override reaches only that package's own code: generic and #[inline] code is compiled
-# where it is instantiated, which is why veilid-core-optimized exists and is listed too.
+# Speed by default: every native binary (veilid-server, veilid-flutter) ships this.
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 panic = "abort"
 codegen-units = 1
 
-[profile.release.package.veilid-core-optimized]
+# The wasm targets build with `--profile size`: what a browser downloads. Crypto and the
+# hot path stay at full opt. A package override reaches only that package's own code:
+# generic and #[inline] code is compiled where it is instantiated, which is why
+# veilid-core-optimized exists and is listed too.
+[profile.size]
+inherits = "release"
+opt-level = "z"
+
+[profile.size.package.veilid-core-optimized]
 opt-level = 3
-[profile.release.package.curve25519-dalek]
+[profile.size.package.curve25519-dalek]
 opt-level = 3
-[profile.release.package.ed25519-dalek]
+[profile.size.package.ed25519-dalek]
 opt-level = 3
-[profile.release.package.x25519-dalek]
+[profile.size.package.x25519-dalek]
 opt-level = 3
-[profile.release.package.chacha20poly1305]
+[profile.size.package.chacha20poly1305]
 opt-level = 3
-[profile.release.package.chacha20]
+[profile.size.package.chacha20]
 opt-level = 3
-[profile.release.package.poly1305]
+[profile.size.package.poly1305]
 opt-level = 3
-[profile.release.package.blake3]
+[profile.size.package.blake3]
 opt-level = 3
-[profile.release.package.blake2]
+[profile.size.package.blake2]
 opt-level = 3
-[profile.release.package.sha2]
+[profile.size.package.sha2]
 opt-level = 3
-[profile.release.package.argon2]
+[profile.size.package.argon2]
 opt-level = 3
-[profile.release.package.cipher]
+[profile.size.package.cipher]
 opt-level = 3
-[profile.release.package.digest]
+[profile.size.package.digest]
 opt-level = 3
-[profile.release.package.crypto-common]
+[profile.size.package.crypto-common]
 opt-level = 3
-[profile.release.package.generic-array]
+[profile.size.package.generic-array]
 opt-level = 3
-[profile.release.package.hpke]
+[profile.size.package.hpke]
 opt-level = 3
-[profile.release.package.hkdf]
+[profile.size.package.hkdf]
 opt-level = 3
-[profile.release.package.hmac]
+[profile.size.package.hmac]
 opt-level = 3
 
 [profile.dev.package.backtrace]

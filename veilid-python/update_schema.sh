@@ -7,7 +7,7 @@ for SCHEMA in "Request" "RecvMessage"; do
     OUT="${SCRIPTDIR}/veilid/schema/${SCHEMA}.json"
     echo -n "Updating ${SCHEMA}..."
     if cargo run --quiet --manifest-path "${VEILIDDIR}/Cargo.toml" \
-        -p veilid-remote-api --bin emit_schema -- "${SCHEMA}" > "${OUT}.tmp"; then
+        -p veilid-remote-api --bin emit-schema -- "${SCHEMA}" > "${OUT}.tmp"; then
         mv "${OUT}.tmp" "${OUT}"
         echo " done."
     else
