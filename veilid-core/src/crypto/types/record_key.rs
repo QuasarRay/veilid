@@ -10,7 +10,7 @@ pub struct BareRecordKey {
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-impl_try_from_js_value!(BareRecordKey);
+impl_try_from_js_value!(BareRecordKey, BareRecordKey::default());
 
 impl BareRecordKey {
     /// Builds a record key from an opaque record key and an optional encryption secret.

@@ -11,13 +11,18 @@ pub trait DialInfoConverterResolver: Send + Sync {
         &self,
         host: &str,
         default: SocketAddr,
-    ) -> std::io::Result<std::vec::IntoIter<SocketAddr>>;
+    ) -> PinBoxFuture<'_, std::io::Result<Vec<SocketAddr>>>;
 }
 
 pub trait DialInfoConverter: Send + Sync {
-    fn try_vec_from_short(&self, short_dial_info: &ShortDialInfo)
-        -> VeilidAPIResult<Vec<DialInfo>>;
-    fn try_vec_from_url(&self, url: &str) -> VeilidAPIResult<Vec<DialInfo>>;
+    fn try_vec_from_short<'a>(
+        &'a self,
+        short_dial_info: &'a ShortDialInfo,
+    ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>>;
+    fn try_vec_from_url<'a>(
+        &'a self,
+        url: &'a str,
+    ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>>;
     fn to_short(&self, dial_info: DialInfo) -> PinBoxFuture<'_, ShortDialInfo>;
     #[expect(dead_code)]
     fn to_url(&self, dial_info: DialInfo) -> PinBoxFuture<'_, String>;
@@ -27,84 +32,94 @@ impl<C> DialInfoConverter for C
 where
     C: DialInfoConverterResolver,
 {
-    fn try_vec_from_short(
-        &self,
-        short_dial_info: &ShortDialInfo,
-    ) -> VeilidAPIResult<Vec<DialInfo>> {
-        let short = &short_dial_info.short_url;
-        let hostname = &short_dial_info.hostname;
+    fn try_vec_from_short<'a>(
+        &'a self,
+        short_dial_info: &'a ShortDialInfo,
+    ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>> {
+        pin_dyn_future!(async move {
+            let short = &short_dial_info.short_url;
+            let hostname = &short_dial_info.hostname;
 
-        if short.len() < 2 {
-            apibail_parse_error!("invalid short url length", short);
-        }
-        let url = match &short[0..1] {
-            "U" => {
-                format!("udp://{}:{}", hostname, &short[1..])
+            if short.len() < 2 {
+                apibail_parse_error!("invalid short url length", short);
             }
-            "T" => {
-                format!("tcp://{}:{}", hostname, &short[1..])
-            }
-            "W" => {
-                format!("ws://{}:{}", hostname, &short[1..])
-            }
-            #[cfg(feature = "enable-protocol-wss")]
-            "S" => {
-                format!("wss://{}:{}", hostname, &short[1..])
-            }
-            _ => {
-                apibail_parse_error!("invalid short url type", short);
-            }
-        };
-        self.try_vec_from_url(&url)
+            let url = match &short[0..1] {
+                "U" => {
+                    format!("udp://{}:{}", hostname, &short[1..])
+                }
+                "T" => {
+                    format!("tcp://{}:{}", hostname, &short[1..])
+                }
+                "W" => {
+                    format!("ws://{}:{}", hostname, &short[1..])
+                }
+                #[cfg(feature = "enable-protocol-wss")]
+                "S" => {
+                    format!("wss://{}:{}", hostname, &short[1..])
+                }
+                _ => {
+                    apibail_parse_error!("invalid short url type", short);
+                }
+            };
+            self.try_vec_from_url(&url).await
+        })
     }
 
-    fn try_vec_from_url(&self, url: &str) -> VeilidAPIResult<Vec<DialInfo>> {
-        let split_url = SplitUrl::from_str(url)
-            .map_err(|e| VeilidAPIError::parse_error(format!("unable to split url: {}", e), url))?;
+    fn try_vec_from_url<'a>(
+        &'a self,
+        url: &'a str,
+    ) -> PinBoxFuture<'a, VeilidAPIResult<Vec<DialInfo>>> {
+        pin_dyn_future!(async move {
+            let split_url = SplitUrl::from_str(url).map_err(|e| {
+                VeilidAPIError::parse_error(format!("unable to split url: {}", e), url)
+            })?;
 
-        let port = match split_url.scheme.as_str() {
-            "udp" | "tcp" => split_url
-                .port
-                .ok_or_else(|| VeilidAPIError::parse_error("Missing port in udp url", url))?,
-            "ws" => split_url.port.unwrap_or(80u16),
-            #[cfg(feature = "enable-protocol-wss")]
-            "wss" => split_url.port.unwrap_or(443u16),
-            _ => {
-                apibail_parse_error!("Invalid dial info url scheme", split_url.scheme);
-            }
-        };
-
-        let socket_addrs = match split_url.host {
-            SplitUrlHost::Hostname(_) => self
-                .to_socket_addrs(
-                    &split_url.host_port(port),
-                    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port),
-                )
-                .map_err(|_| VeilidAPIError::parse_error("couldn't resolve hostname in url", url))?
-                .collect(),
-            SplitUrlHost::IpAddr(a) => vec![SocketAddr::new(a, port)],
-        };
-
-        let mut out = Vec::new();
-        for sa in socket_addrs {
-            out.push(match split_url.scheme.as_str() {
-                "udp" => DialInfo::udp_from_socketaddr(sa),
-                "tcp" => DialInfo::tcp_from_socketaddr(sa),
-                "ws" => DialInfo::try_ws(
-                    SocketAddress::from_socket_addr(sa).canonical(),
-                    url.to_string(),
-                )?,
+            let port = match split_url.scheme.as_str() {
+                "udp" | "tcp" => split_url
+                    .port
+                    .ok_or_else(|| VeilidAPIError::parse_error("Missing port in udp url", url))?,
+                "ws" => split_url.port.unwrap_or(80u16),
                 #[cfg(feature = "enable-protocol-wss")]
-                "wss" => DialInfo::try_wss(
-                    SocketAddress::from_socket_addr(sa).canonical(),
-                    url.to_string(),
-                )?,
+                "wss" => split_url.port.unwrap_or(443u16),
                 _ => {
                     apibail_parse_error!("Invalid dial info url scheme", split_url.scheme);
                 }
-            });
-        }
-        Ok(out)
+            };
+
+            let socket_addrs = match split_url.host {
+                SplitUrlHost::Hostname(_) => self
+                    .to_socket_addrs(
+                        &split_url.host_port(port),
+                        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port),
+                    )
+                    .await
+                    .map_err(|_| {
+                        VeilidAPIError::parse_error("couldn't resolve hostname in url", url)
+                    })?,
+                SplitUrlHost::IpAddr(a) => vec![SocketAddr::new(a, port)],
+            };
+
+            let mut out = Vec::new();
+            for sa in socket_addrs {
+                out.push(match split_url.scheme.as_str() {
+                    "udp" => DialInfo::udp_from_socketaddr(sa),
+                    "tcp" => DialInfo::tcp_from_socketaddr(sa),
+                    "ws" => DialInfo::try_ws(
+                        SocketAddress::from_socket_addr(sa).canonical(),
+                        url.to_string(),
+                    )?,
+                    #[cfg(feature = "enable-protocol-wss")]
+                    "wss" => DialInfo::try_wss(
+                        SocketAddress::from_socket_addr(sa).canonical(),
+                        url.to_string(),
+                    )?,
+                    _ => {
+                        apibail_parse_error!("Invalid dial info url scheme", split_url.scheme);
+                    }
+                });
+            }
+            Ok(out)
+        })
     }
 
     fn to_short(&self, dial_info: DialInfo) -> PinBoxFuture<'_, ShortDialInfo> {
@@ -221,17 +236,20 @@ impl DialInfoConverterResolver for BootstrapDialInfoConverter {
         &self,
         host: &str,
         default: SocketAddr,
-    ) -> std::io::Result<std::vec::IntoIter<SocketAddr>> {
+    ) -> PinBoxFuture<'_, std::io::Result<Vec<SocketAddr>>> {
         // Resolve if possible, WASM doesn't support resolution and doesn't need it to connect to the dialinfo
         // This will not be used on signed dialinfo, only for bootstrapping, so we don't need to worry about
         // the '0.0.0.0' address being propagated across the routing table
-
-        cfg_if::cfg_if! {
-            if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
-                Ok(vec![default].into_iter())
-            } else {
-                host.to_socket_addrs()
+        let host = host.to_owned();
+        pin_dyn_future!(async move {
+            cfg_if::cfg_if! {
+                if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
+                    Ok(vec![default])
+                } else {
+                    // getaddrinfo blocks for the system resolver's whole retry ladder
+                    blocking_wrapper(move || host.to_socket_addrs().map(|i| i.collect())).await
+                }
             }
-        }
+        })
     }
 }

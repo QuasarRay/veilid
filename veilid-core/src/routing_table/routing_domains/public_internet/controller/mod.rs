@@ -28,6 +28,8 @@ const PUBLIC_INTERNET_PERSISTED_STATE_KEY: &[u8] = b"public_internet_persisted_s
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct PublicInternetPersistedState {
     low_water_mark: LowWaterMark,
+    #[serde(default)]
+    bootstrap_records: Vec<BootstrapRecord>,
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -246,17 +248,24 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             let detail = self.read_dyn();
             detail.reset_low_water_mark();
             detail.update_low_water_mark(lwm);
+            detail.set_bootstrap_records(persisted.bootstrap_records);
             Ok(())
         })
     }
 
     fn save<'a>(&'a self, dbx: &'a TableDBTransaction) -> PinBoxFuture<'a, EyreResult<()>> {
         Box::pin(async move {
-            let low_water_mark = {
+            let (low_water_mark, bootstrap_records) = {
                 let detail = self.read_dyn();
-                detail.get_low_water_mark().as_ref().clone()
+                (
+                    detail.get_low_water_mark().as_ref().clone(),
+                    detail.get_bootstrap_records(),
+                )
             };
-            let persisted = PublicInternetPersistedState { low_water_mark };
+            let persisted = PublicInternetPersistedState {
+                low_water_mark,
+                bootstrap_records,
+            };
             dbx.store_json(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY, &persisted)
                 .await?;
             Ok(())

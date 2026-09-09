@@ -257,6 +257,13 @@ impl RoutingTable {
         rdd.get_bootstrap_peers()
     }
 
+    /// Return the verified bootstrap records from the last successful bootstrap in a particular routing domain
+    pub fn get_bootstrap_records(&self, routing_domain: RoutingDomain) -> Vec<BootstrapRecord> {
+        let rdc = self.get_routing_domain_controller(routing_domain);
+        let rdd = rdc.read_dyn();
+        rdd.get_bootstrap_records()
+    }
+
     /// Return the domain's filter for what we can receivein the form of a dial info filter
     pub fn get_inbound_dial_info_filter(&self, routing_domain: RoutingDomain) -> DialInfoFilter {
         let rdc = self.get_routing_domain_controller(routing_domain);

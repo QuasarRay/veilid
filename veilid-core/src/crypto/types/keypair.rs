@@ -10,7 +10,7 @@ pub struct BareKeyPair {
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-impl_try_from_js_value!(BareKeyPair);
+impl_try_from_js_value!(BareKeyPair, BareKeyPair::default());
 
 impl BareKeyPair {
     /// Builds a key pair from a public key and its secret key.

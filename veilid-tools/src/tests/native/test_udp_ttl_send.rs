@@ -49,9 +49,34 @@ async fn test_send_with_ttl(local: SocketAddr) {
 
     let ttl_after = read_ttl();
     assert_eq!(ttl_before, ttl_after);
+
+    // Out-of-range TTLs are refused before any syscall, on both address families
+    for bad in [0u32, 256, u32::MAX] {
+        let err = send_udp_datagram_with_ttl(&sender, b"x", recv_addr, bad)
+            .expect_err("ttl out of range should fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+    let sent = send_udp_datagram_with_ttl(&sender, b"max", recv_addr, 255).expect("ttl 255");
+    assert_eq!(sent, 3);
+    let (n, _) = timeout(5000, receiver.recv_from(&mut buf))
+        .await
+        .expect("should not time out")
+        .expect("should receive");
+    assert_eq!(&buf[..n], b"max");
+}
+
+/// An IPv6 destination on an IPv4 socket fails inside sendmsg, not before it
+fn test_send_family_mismatch() {
+    info!("-- test_send_family_mismatch");
+    let sender = bind_async_udp_socket(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)))
+        .expect("bind should not error")
+        .expect("bind should succeed");
+    let v6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 5150, 0, 0));
+    assert!(send_udp_datagram_with_ttl(&sender, b"x", v6, 3).is_err());
 }
 
 pub async fn test_all() {
+    test_send_family_mismatch();
     test_send_with_ttl(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))).await;
     test_send_with_ttl(SocketAddr::V6(SocketAddrV6::new(
         Ipv6Addr::LOCALHOST,

@@ -38,6 +38,15 @@ pub async fn run_all_tests() {
         attachment_manager::tests_attachment_manager::test_all().await;
     }
 
+    #[cfg(all(
+        not(feature = "mock-api"),
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
+    {
+        info!("TEST: test_bootstrap");
+        test_bootstrap::test_all().await;
+    }
+
     info!("TEST: crypto");
     crypto::tests_crypto::test_all().await;
 

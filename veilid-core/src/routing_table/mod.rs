@@ -1112,6 +1112,7 @@ impl RoutingTable {
             {
                 let rdd = rdc.write_dyn();
                 rdd.clear_bootstrap_peers();
+                rdd.set_bootstrap_records(vec![]);
             }
             let mut edit = rdc.edit_dyn();
             edit.reset();

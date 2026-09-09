@@ -21,7 +21,7 @@ macro_rules! impl_crypto_typed {
             }
 
             #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-            impl_try_from_js_value!($name);
+            impl_try_from_js_value!($name, $name::new(CryptoKind::new(*b"NONE"), Default::default()));
 
             impl $name {
                 /// Pairs a value with the `CryptoKind` it belongs to.

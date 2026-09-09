@@ -23,7 +23,7 @@ macro_rules! byte_array_type {
         }
 
         #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-        impl_try_from_js_value!($name);
+        impl_try_from_js_value!($name, $name::default());
 
         impl $name {
             /// Builds a `$name` by copying a byte slice.

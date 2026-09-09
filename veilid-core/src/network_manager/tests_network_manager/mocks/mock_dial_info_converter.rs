@@ -12,7 +12,7 @@ impl DialInfoConverterResolver for MockDialInfoConverter {
         &self,
         _host: &str,
         default: SocketAddr,
-    ) -> std::io::Result<std::vec::IntoIter<SocketAddr>> {
-        Ok(vec![default].into_iter())
+    ) -> PinBoxFuture<'_, std::io::Result<Vec<SocketAddr>>> {
+        pin_dyn_future!(async move { Ok(vec![default]) })
     }
 }

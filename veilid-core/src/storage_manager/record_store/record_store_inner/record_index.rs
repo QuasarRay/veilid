@@ -2135,12 +2135,14 @@ where
             );
         }
         out += &format!("Subkey Cache Count: {}\n", self.subkey_cache.len());
-        let subkey_cache_total_size = ByteCount::new(self.subkey_cache_space.debug_value() as u64);
+        let subkey_cache_total_size =
+            ByteCount::new(self.subkey_cache_space.debug_value().unwrap_or_default() as u64);
         out += &format!(
             "Subkey Cache Total Size: {:#} ({} bytes)\n",
             subkey_cache_total_size, subkey_cache_total_size
         );
-        let total_storage_space = ByteCount::new(self.record_cache_space.debug_value());
+        let total_storage_space =
+            ByteCount::new(self.record_cache_space.debug_value().unwrap_or_default());
         out += &format!(
             "Total Storage Space: {:#} ({} bytes)\n",
             total_storage_space, total_storage_space

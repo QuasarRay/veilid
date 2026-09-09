@@ -52,10 +52,14 @@ fn make_begin_style_check_done() -> FanoutCheckDone {
     })
 }
 
-/// Returns (result kind, consensus node count); NodeRefs must drop before terminate
-async fn run_scripted_fanout(collect: bool, reserve_accepts: bool) -> (FanoutResultKind, usize) {
+/// Returns (result kind, consensus node count, fanout run time); NodeRefs must drop before
+/// terminate. The run time excludes registry startup and shutdown, which dominate under load
+async fn run_scripted_fanout(
+    collect: bool,
+    reserve_accepts: bool,
+) -> (FanoutResultKind, usize, TimestampDuration) {
     let registry = mock_registry::init("fanout_call").await;
-    let (kind, consensus_len) = {
+    let (kind, consensus_len, elapsed) = {
         let routing_table = registry.routing_table();
         let node_refs = seed_nodes(&routing_table, SEED_COUNT);
         let target = fix_typed_node_id(CRYPTO_KIND_VLD0, 0).to_hash_coordinate();
@@ -82,6 +86,7 @@ async fn run_scripted_fanout(collect: bool, reserve_accepts: bool) -> (FanoutRes
         }
 
         let stop_source = StopSource::new();
+        let start_ts = Timestamp::now_non_decreasing();
         let result = fanout_call
             .run(
                 node_refs,
@@ -90,16 +95,17 @@ async fn run_scripted_fanout(collect: bool, reserve_accepts: bool) -> (FanoutRes
             )
             .await
             .expect("fanout should run");
-        (result.kind, result.consensus_nodes.len())
+        let elapsed = Timestamp::now_non_decreasing().duration_since(start_ts);
+        (result.kind, result.consensus_nodes.len(), elapsed)
     };
     mock_registry::terminate(registry).await;
-    (kind, consensus_len)
+    (kind, consensus_len, elapsed)
 }
 
 /// With a collection target, a consensus met among a failing closest set keeps
 /// dispatching the reserve until the full headroom is collected
 pub async fn test_collection_converges_thin_consensus() {
-    let (kind, consensus_len) = run_scripted_fanout(true, true).await;
+    let (kind, consensus_len, _) = run_scripted_fanout(true, true).await;
     assert!(matches!(kind, FanoutResultKind::Consensus));
     assert_eq!(consensus_len, COLLECTION_COUNT);
 }
@@ -107,7 +113,7 @@ pub async fn test_collection_converges_thin_consensus() {
 /// Without a collection target, dispatch stops at consensus and only in-flight
 /// lanes can add accepts
 pub async fn test_no_collection_stops_at_consensus() {
-    let (kind, consensus_len) = run_scripted_fanout(false, true).await;
+    let (kind, consensus_len, _) = run_scripted_fanout(false, true).await;
     assert!(matches!(kind, FanoutResultKind::Consensus));
     assert!(consensus_len < COLLECTION_COUNT);
 }
@@ -115,11 +121,9 @@ pub async fn test_no_collection_stops_at_consensus() {
 /// A collecting run whose queue exhausts below the target still returns the thin
 /// consensus, exiting via the post-consensus window rather than the full timeout
 pub async fn test_collection_exhausted_below_target_bounded_exit() {
-    let start_ts = Timestamp::now_non_decreasing();
-    let (kind, consensus_len) = run_scripted_fanout(true, false).await;
+    let (kind, consensus_len, elapsed) = run_scripted_fanout(true, false).await;
     assert!(matches!(kind, FanoutResultKind::Consensus));
     assert_eq!(consensus_len, CONSENSUS_COUNT);
     // Well under the 10s fanout timeout; the 500ms rolling window is the exit
-    let elapsed = Timestamp::now_non_decreasing().duration_since(start_ts);
     assert!(elapsed < TimestampDuration::new_secs(5), "took {}", elapsed);
 }

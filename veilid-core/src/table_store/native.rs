@@ -45,7 +45,9 @@ fn is_nfs_mount(path: &std::path::Path) -> bool {
     let Ok(cpath) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
         return false;
     };
+    // SAFETY: all-zero is a valid statfs: plain integers and byte arrays
     let mut buf: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: cpath is NUL-terminated and buf is a writable statfs for the call
     let r = unsafe { libc::statfs(cpath.as_ptr(), &mut buf) };
     r == 0 && buf.f_type as u32 == libc::NFS_SUPER_MAGIC as u32
 }

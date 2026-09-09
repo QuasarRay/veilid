@@ -359,6 +359,12 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
     fn add_bootstrap_peer(&self, bootstrap_peer: NodeRef) {
         self.common.add_bootstrap_peer(bootstrap_peer);
     }
+    fn get_bootstrap_records(&self) -> Vec<BootstrapRecord> {
+        self.common.get_bootstrap_records()
+    }
+    fn set_bootstrap_records(&self, bootstrap_records: Vec<BootstrapRecord>) {
+        self.common.set_bootstrap_records(bootstrap_records);
+    }
 
     fn update_low_water_mark(&self, low_water_mark: Arc<LowWaterMark>) {
         self.common.update_low_water_mark(low_water_mark);

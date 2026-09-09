@@ -5,6 +5,12 @@ pub fn test_log() {
 }
 
 pub fn test_tools() {
+    info!("testing zeroed_u8_vec");
+    assert!(zeroed_u8_vec(0).is_empty());
+    let z = zeroed_u8_vec(37);
+    assert_eq!(z.len(), 37);
+    assert!(z.iter().all(|b| *b == 0));
+
     info!("testing retry_falloff_log");
     let mut last_us = 0u64;
     for x in 0..1024 {

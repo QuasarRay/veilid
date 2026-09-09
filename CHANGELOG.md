@@ -4,6 +4,9 @@
   - new crate added to hold monomorphic exports for crates that want to be fully speed optimized in all build profiles
 
 - veilid-core:
+  - **Security** B01T direct-bootstrap requests are answered from the last successful bootstrap set held by the routing domain, which is persisted across restarts. The handler no longer resolves DNS, so an unauthenticated packet can no longer cause non-veilid traffic or block a worker on a slow resolver.
+  - Bootstrap hostname resolution runs on the blocking pool instead of the executor.
+  - Android below API 29 has no system TXT resolver, so a bootstrap hostname is contacted directly on port 5150 over UDP or TCP for a B01T exchange instead. Startup fails on such a device when neither protocol is enabled, since the hostname could never be reached.
   - Stats collection, aggregation, and analysis for all subsystems. Robot-generated python script for reviewing the effect of optimizations.
   - Fix OnlineDetector spurious flap.
   - Properly drop TCP connections when offline condition is detected so they can be recreated in the event of NAT state loss, as is common on cellular.
@@ -54,7 +57,7 @@
 - veilid-tools:
   - AIMD congestion control system (behind `aimd` feature)
   - socket_tools UDP best-effort send-with-ttl implementation
-  - `hickory-resolver` replaced by a built-in minimal DNS client on every non-Windows target, dropping 13 crates from the dependency graph. Queries now carry EDNS0 and every nameserver is asked over UDP and TCP at once, so a bootstrap TXT lookup takes one round trip and a blocked transport costs nothing. macOS and iOS learn their nameservers from libresolv, and Android uses the OS resolver (`android_res_nquery`, API 29 and up), which honors per-network and private DNS; neither had a system view before. Windows keeps the system resolver.
+  - `hickory-resolver` removed, dropping 13 crates from the dependency graph. Every DNS lookup now goes through the platform's own resolver, so the system's DNS privacy settings apply: `DNSServiceQueryRecord` on macOS and iOS (encrypted DNS profiles, VPN and per-interface resolvers), `res_query` on Linux and the BSDs, `android_res_nquery` on Android (per-network and private DNS, API 29 and up), `DnsQuery` on Windows (DoH), and `getnameinfo` for reverse lookups. veilid sends no DNS queries of its own and has no fallback nameservers. `Resolver::supports_txt()` reports whether the platform can resolve TXT at all, and `ResolverError::Unsupported` is returned when it cannot.
 
 - veilid-wasm:
   - BREAKING: veilid-wasm no longer automatically loads the wasm file at import-time, which had used a top-level await. Instead, the default export is now an `init()` function that you await as part of your loading logic for your application: `import init from "veilid-wasm";`. You must call `await init()` at some point before calling any other export.

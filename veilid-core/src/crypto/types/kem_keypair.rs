@@ -10,7 +10,7 @@ pub struct BareKemKeyPair {
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-impl_try_from_js_value!(BareKemKeyPair);
+impl_try_from_js_value!(BareKemKeyPair, BareKemKeyPair::default());
 
 impl BareKemKeyPair {
     /// Builds a KEM key pair from an encapsulation key and its decapsulation key.

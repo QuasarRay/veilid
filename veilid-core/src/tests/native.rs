@@ -117,6 +117,10 @@ cfg_if! {
         // API lifecycle, which the mock implements; check_all.sh runs only the mock copy
         run_test!(common test_attachment_manager);
 
+        // Live two-node bootstrap over the real network
+        #[cfg(not(feature = "mock-api"))]
+        run_test!(common test_bootstrap);
+
         // The rest exercise subsystems mock-api compiles out
         #[cfg(not(feature = "mock-api"))]
         run_test!(component table_store);

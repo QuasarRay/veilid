@@ -2,13 +2,15 @@ use super::*;
 
 impl_veilid_log_facility!("net");
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BootstrapRecord {
     public_keys: PublicKeyGroup,
     envelope_support: Vec<EnvelopeVersion>,
     dial_info_details: Vec<DialInfoDetail>,
     timestamp_secs: Option<u64>,
     extra: Vec<String>,
+    /// Signed v1 strings this record was parsed from, empty for v0
+    signed_strings: Vec<String>,
 }
 
 impl BootstrapRecord {
@@ -28,7 +30,13 @@ impl BootstrapRecord {
             dial_info_details,
             timestamp_secs,
             extra,
+            signed_strings: vec![],
         }
+    }
+
+    pub fn with_signed_strings(mut self, signed_strings: Vec<String>) -> Self {
+        self.signed_strings = signed_strings;
+        self
     }
 
     pub fn public_keys(&self) -> &PublicKeyGroup {
@@ -46,6 +54,9 @@ impl BootstrapRecord {
     #[expect(dead_code)]
     pub fn extra(&self) -> &[String] {
         &self.extra
+    }
+    pub fn signed_strings(&self) -> &[String] {
+        &self.signed_strings
     }
 
     pub fn merge(&mut self, other: BootstrapRecord) {
@@ -73,6 +84,11 @@ impl BootstrapRecord {
             self.timestamp_secs = other.timestamp_secs;
         }
         self.extra.extend_from_slice(&other.extra);
+        for s in other.signed_strings {
+            if !self.signed_strings.contains(&s) {
+                self.signed_strings.push(s);
+            }
+        }
     }
 
     async fn to_vcommon_string(
@@ -180,7 +196,7 @@ impl BootstrapRecord {
         Ok(v1)
     }
 
-    pub fn new_from_v0_str(
+    pub async fn new_from_v0_str(
         network_manager: &NetworkManager,
         dial_info_converter: &dyn DialInfoConverter,
         record_str: &str,
@@ -208,7 +224,9 @@ impl BootstrapRecord {
                     network_manager,
                     dial_info_converter,
                     &fields,
-                ) {
+                )
+                .await
+                {
                     Err(e) => {
                         bail!(
                             "couldn't process v0 bootstrap records from {:?}: {}",
@@ -229,7 +247,7 @@ impl BootstrapRecord {
         Ok(Some(bootstrap_record))
     }
 
-    pub fn new_from_v1_str(
+    pub async fn new_from_v1_str(
         network_manager: &NetworkManager,
         dial_info_converter: &dyn DialInfoConverter,
         record_str: &str,
@@ -260,7 +278,9 @@ impl BootstrapRecord {
                     record_str,
                     &fields,
                     signing_keys,
-                ) {
+                )
+                .await
+                {
                     Err(e) => {
                         bail!(
                             "couldn't process v1 bootstrap records from {:?}: {}",
@@ -288,7 +308,7 @@ impl BootstrapRecord {
     ///
     /// Split bootstrap node record by '|' and then lists by ','. Example:
     /// 0|0|VLD0:7lxDEabK_qgjbe38RtBa3IZLrud84P6NhGP-pRTZzdQ|bootstrap-1.dev.veilid.net|T5150,U5150,W5150/ws
-    fn process_bootstrap_fields_v0(
+    async fn process_bootstrap_fields_v0(
         network_manager: &NetworkManager,
         dial_info_converter: &dyn DialInfoConverter,
         fields: &[String],
@@ -355,7 +375,10 @@ impl BootstrapRecord {
                 short_url: rec.to_string(),
                 hostname: hostname_str.to_string(),
             };
-            let dial_infos = match dial_info_converter.try_vec_from_short(&short_dial_info) {
+            let dial_infos = match dial_info_converter
+                .try_vec_from_short(&short_dial_info)
+                .await
+            {
                 Ok(dis) => dis,
                 Err(e) => {
                     veilid_log!(network_manager debug "Couldn't resolve bootstrap node dial info {}: {}", rec, e);
@@ -395,7 +418,7 @@ impl BootstrapRecord {
     /// timestamp is a uint64 number of seconds since epoch (unix time64)
     /// extra is any extra data to be covered by the signature, any number of extra '|' fields
     /// the signature is over all of the byte data in the string that precedes the signature itself, including all delimeters and/or whitespace
-    fn process_bootstrap_fields_v1(
+    async fn process_bootstrap_fields_v1(
         network_manager: &NetworkManager,
         dial_info_converter: &dyn DialInfoConverter,
         record_str: &str,
@@ -495,7 +518,10 @@ impl BootstrapRecord {
                 short_url: rec.to_string(),
                 hostname: hostname_str.to_string(),
             };
-            let dial_infos = match dial_info_converter.try_vec_from_short(&short_dial_info) {
+            let dial_infos = match dial_info_converter
+                .try_vec_from_short(&short_dial_info)
+                .await
+            {
                 Ok(dis) => dis,
                 Err(e) => {
                     veilid_log!(network_manager debug "Couldn't resolve bootstrap node dial info {}: {}", rec, e);
@@ -522,12 +548,15 @@ impl BootstrapRecord {
         // Extra fields
         let extra = fields[6..fields.len() - 1].to_vec();
 
-        Ok(Some(BootstrapRecord::new(
-            public_keys,
-            envelope_support,
-            dial_info_details,
-            Some(secs_u64),
-            extra,
-        )))
+        Ok(Some(
+            BootstrapRecord::new(
+                public_keys,
+                envelope_support,
+                dial_info_details,
+                Some(secs_u64),
+                extra,
+            )
+            .with_signed_strings(vec![record_str.trim().to_owned()]),
+        ))
     }
 }

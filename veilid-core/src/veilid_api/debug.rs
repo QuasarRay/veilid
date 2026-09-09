@@ -3318,9 +3318,12 @@ impl VeilidAPI {
             }
             "nullptr" => {
                 let x: *const i32 = std::ptr::null();
-                let y = unsafe { *x };
-                // PANIC-CENSUS: crash-test proves a null deref panics
-                unreachable!("array out of bounds must panic: {}", y);
+                // SAFETY: none, this crash test reads null on purpose; volatile keeps the load
+                // from folding away. Natively it faults (a signal, not a panic); on wasm address
+                // 0 is readable, so it falls through to the panic below
+                let y = unsafe { std::ptr::read_volatile(x) };
+                // PANIC-CENSUS: crash-test proves a null deref crashes
+                unreachable!("null pointer read must crash: {}", y);
             }
             "unreachable" => {
                 // PANIC-CENSUS: crash-test calls unreachable directly

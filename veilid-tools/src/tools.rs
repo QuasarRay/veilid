@@ -434,35 +434,10 @@ cfg_if::cfg_if! {
     }
 }
 
-#[repr(C, align(8))]
-struct AlignToEight([u8; 8]);
-
-/// # Safety
-/// Ensure you immediately initialize this vector as it could contain sensitive data
+/// A zeroed byte buffer for output that is written in full before it is read
 #[must_use]
-pub unsafe fn aligned_8_u8_vec_uninit(n_bytes: usize) -> Vec<u8> {
-    let n_units = n_bytes.div_ceil(mem::size_of::<AlignToEight>());
-    let mut aligned: Vec<AlignToEight> = Vec::with_capacity(n_units);
-    let ptr = aligned.as_mut_ptr();
-    let cap_units = aligned.capacity();
-    mem::forget(aligned);
-
-    Vec::from_raw_parts(
-        ptr as *mut u8,
-        n_bytes,
-        cap_units * mem::size_of::<AlignToEight>(),
-    )
-}
-
-/// # Safety
-/// Ensure you immediately initialize this vector as it could contain sensitive data
-#[must_use]
-pub unsafe fn unaligned_u8_vec_uninit(n_bytes: usize) -> Vec<u8> {
-    let mut unaligned: Vec<u8> = Vec::with_capacity(n_bytes);
-    let ptr = unaligned.as_mut_ptr();
-    mem::forget(unaligned);
-
-    Vec::from_raw_parts(ptr, n_bytes, n_bytes)
+pub fn zeroed_u8_vec(n_bytes: usize) -> Vec<u8> {
+    vec![0u8; n_bytes]
 }
 
 /// Type name of a value as a string, without needing to name the type.

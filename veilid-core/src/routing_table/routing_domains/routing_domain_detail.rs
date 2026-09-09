@@ -64,6 +64,10 @@ pub trait RoutingDomainDetail:
     fn clear_bootstrap_peers(&self);
     /// Add a bootstrap peer to this domain
     fn add_bootstrap_peer(&self, bootstrap_peer: NodeRef);
+    /// Get the verified bootstrap records from the last successful bootstrap in this domain
+    fn get_bootstrap_records(&self) -> Vec<BootstrapRecord>;
+    /// Replace the verified bootstrap records for this domain
+    fn set_bootstrap_records(&self, bootstrap_records: Vec<BootstrapRecord>);
 
     /// Update the low water mark of nodes since the last peer minimum refresh
     fn update_low_water_mark(&self, low_water_mark: Arc<LowWaterMark>);

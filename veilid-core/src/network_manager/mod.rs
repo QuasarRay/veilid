@@ -442,6 +442,7 @@ impl NetworkManager {
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn startup(&self) -> EyreResult<StartupDisposition> {
+        self.check_bootstrap_reachable()?;
         let guard = self.startup_context.startup_lock.startup()?;
 
         match self.internal_startup().await {
@@ -458,6 +459,25 @@ impl NetworkManager {
                 Err(e)
             }
         }
+    }
+
+    /// A bare bootstrap hostname needs a TXT resolver, or UDP or TCP to reach the host's B01T directly
+    fn check_bootstrap_reachable(&self) -> EyreResult<()> {
+        if Resolver::supports_txt() {
+            return Ok(());
+        }
+        let config = self.config();
+        let has_txt_names = config
+            .network
+            .routing_table
+            .bootstrap
+            .iter()
+            .any(|b| SplitUrl::from_str(b).is_err());
+        let protocol = &config.network.protocol;
+        if has_txt_names && !protocol.udp.enabled && !protocol.tcp.connect {
+            bail!("bootstrap hostnames need a TXT resolver, which this platform lacks, or UDP or TCP enabled to reach them directly");
+        }
+        Ok(())
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]

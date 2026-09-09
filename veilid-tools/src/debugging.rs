@@ -18,6 +18,7 @@ pub enum DebuggerState {
 #[allow(unreachable_code)]
 pub fn debugger_state() -> DebuggerState {
     #[cfg(windows)]
+    // SAFETY: IsDebuggerPresent takes no arguments and has no preconditions
     unsafe {
         return if winapi::um::debugapi::IsDebuggerPresent() == 0 {
             DebuggerState::Detached
@@ -31,6 +32,8 @@ pub fn debugger_state() -> DebuggerState {
         use libc::{c_int, c_void, getpid, size_t, sysctl, CTL_KERN, KERN_PROC, KERN_PROC_PID};
         // kinfo_proc.kp_proc.p_flag & P_TRACED
         const P_TRACED: u32 = 0x00800;
+        // SAFETY: info is sizeof(kinfo_proc) bytes and size is passed alongside it, so sysctl
+        // writes within the buffer; the p_flag read is at its fixed offset inside that buffer
         unsafe {
             let mut info = [0u8; 648];
             let mut size: size_t = info.len();

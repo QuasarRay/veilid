@@ -855,9 +855,11 @@ pub fn veilid_tools::raw_timestamp::parse_duration(&str) -> core::option::Option
 pub mod veilid_tools::resolver
 pub enum veilid_tools::resolver::ResolverError
 pub veilid_tools::resolver::ResolverError::Generic(alloc::string::String)
+pub veilid_tools::resolver::ResolverError::Unsupported
 pub struct veilid_tools::resolver::Resolver
 impl veilid_tools::Resolver
 pub async fn veilid_tools::Resolver::ptr_lookup(core::net::ip_addr::IpAddr) -> core::result::Result<alloc::string::String, veilid_tools::ResolverError>
+pub fn veilid_tools::Resolver::supports_txt() -> bool
 pub async fn veilid_tools::Resolver::txt_lookup<S: core::convert::AsRef<str>>(S) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, veilid_tools::ResolverError>
 pub mod veilid_tools::single_shot_eventual
 pub struct veilid_tools::single_shot_eventual::SingleShotEventual<T> where T: core::marker::Unpin
@@ -883,9 +885,9 @@ pub fn veilid_tools::socket_tools::domain_for_address(core::net::socket_addr::So
 pub fn veilid_tools::socket_tools::new_default_socket2_tcp(core::ffi::primitives::c_int) -> core::io::error::Result<socket2::socket::Socket>
 pub fn veilid_tools::socket_tools::primary_source_ipv4() -> core::option::Option<core::net::ip_addr::Ipv4Addr>
 pub fn veilid_tools::socket_tools::primary_source_ipv6() -> core::option::Option<core::net::ip_addr::Ipv6Addr>
-pub fn veilid_tools::socket_tools::send_udp_datagram_with_ttl<S: std::os::fd::raw::AsRawFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
+pub fn veilid_tools::socket_tools::send_udp_datagram_with_ttl<S: std::os::fd::owned::AsFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub fn veilid_tools::socket_tools::set_tcp_stream_linger(&tokio::net::tcp::stream::TcpStream, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>
-pub fn veilid_tools::socket_tools::socket2_operation<S: std::os::fd::raw::AsRawFd, F: core::ops::function::FnOnce(&mut socket2::socket::Socket) -> R, R>(&S, F) -> R
+pub fn veilid_tools::socket_tools::socket2_operation<S: std::os::fd::owned::AsFd, F: core::ops::function::FnOnce(&socket2::socket::Socket) -> R, R>(&S, F) -> R
 pub fn veilid_tools::socket_tools::split_async_tcp_stream(tokio::net::tcp::stream::TcpStream) -> (veilid_tools::ReadHalf, veilid_tools::WriteHalf)
 pub type veilid_tools::socket_tools::ReadHalf = tokio::net::tcp::split_owned::OwnedReadHalf
 pub type veilid_tools::socket_tools::WriteHalf = tokio::net::tcp::split_owned::OwnedWriteHalf
@@ -1120,7 +1122,6 @@ pub trait veilid_tools::tools::RemoveDuplicates<T: core::cmp::PartialEq>
 pub fn veilid_tools::tools::RemoveDuplicates::remove_duplicates(&mut self)
 impl<T: core::cmp::PartialEq + core::cmp::Ord> veilid_tools::RemoveDuplicates<T> for alloc::vec::Vec<T>
 pub fn alloc::vec::Vec<T>::remove_duplicates(&mut self)
-pub unsafe fn veilid_tools::tools::aligned_8_u8_vec_uninit(usize) -> alloc::vec::Vec<u8>
 pub async fn veilid_tools::tools::async_try_at_most_n_things<T, I, C, R, F>(usize, I, C) -> core::option::Option<R> where I: core::iter::traits::collect::IntoIterator<Item = T>, C: core::ops::function::Fn(T) -> F, F: core::future::future::Future<Output = core::option::Option<R>>
 pub fn veilid_tools::tools::available_unspecified_addresses() -> alloc::vec::Vec<core::net::ip_addr::IpAddr>
 pub fn veilid_tools::tools::compatible_unspecified_socket_addr(&core::net::socket_addr::SocketAddr) -> core::net::socket_addr::SocketAddr
@@ -1137,8 +1138,8 @@ pub fn veilid_tools::tools::timestamp_duration_to_secs(u64) -> f64
 pub fn veilid_tools::tools::to_io_error_other<E: core::error::Error + core::marker::Send + core::marker::Sync + 'static>(E) -> core::io::error::Error
 pub fn veilid_tools::tools::try_at_most_n_things<T, I, C, R>(usize, I, C) -> core::option::Option<R> where I: core::iter::traits::collect::IntoIterator<Item = T>, C: core::ops::function::Fn(T) -> core::option::Option<R>
 pub fn veilid_tools::tools::type_name_of_val<T: ?core::marker::Sized>(&T) -> &'static str
-pub unsafe fn veilid_tools::tools::unaligned_u8_vec_uninit(usize) -> alloc::vec::Vec<u8>
 pub fn veilid_tools::tools::us_to_ms(u64) -> core::result::Result<u32, alloc::string::String>
+pub fn veilid_tools::tools::zeroed_u8_vec(usize) -> alloc::vec::Vec<u8>
 pub mod veilid_tools::tracked_mutex
 pub type veilid_tools::tracked_mutex::TrackedMutex<T> = parking_lot::mutex::Mutex<T>
 pub type veilid_tools::tracked_mutex::TrackedMutexGuard<'a, T> = parking_lot::mutex::MutexGuard<'a, T>
@@ -1239,6 +1240,7 @@ impl<T> core::fmt::Display for veilid_tools::NetworkResult<T>
 pub fn veilid_tools::NetworkResult<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum veilid_tools::ResolverError
 pub veilid_tools::ResolverError::Generic(alloc::string::String)
+pub veilid_tools::ResolverError::Unsupported
 pub enum veilid_tools::SplitUrlHost
 pub veilid_tools::SplitUrlHost::Hostname(alloc::string::String)
 pub veilid_tools::SplitUrlHost::IpAddr(core::net::ip_addr::IpAddr)
@@ -1745,6 +1747,7 @@ pub veilid_tools::RawAddressSummary::has_unicast_global_ipv6: bool
 pub struct veilid_tools::Resolver
 impl veilid_tools::Resolver
 pub async fn veilid_tools::Resolver::ptr_lookup(core::net::ip_addr::IpAddr) -> core::result::Result<alloc::string::String, veilid_tools::ResolverError>
+pub fn veilid_tools::Resolver::supports_txt() -> bool
 pub async fn veilid_tools::Resolver::txt_lookup<S: core::convert::AsRef<str>>(S) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, veilid_tools::ResolverError>
 pub struct veilid_tools::SingleFutureLockedError
 pub struct veilid_tools::SingleShotEventual<T> where T: core::marker::Unpin
@@ -2018,7 +2021,6 @@ pub fn veilid_tools::ToTableString::to_table_string_custom(&self, usize, usize, 
 impl<T> veilid_tools::ToTableString for alloc::vec::Vec<T> where T: core::fmt::Display
 pub fn alloc::vec::Vec<T>::to_table_string(&self) -> alloc::string::String
 pub fn alloc::vec::Vec<T>::to_table_string_custom(&self, usize, usize, bool, bool) -> alloc::string::String
-pub unsafe fn veilid_tools::aligned_8_u8_vec_uninit(usize) -> alloc::vec::Vec<u8>
 pub fn veilid_tools::async_tcp_listener_incoming(tokio::net::tcp::listener::TcpListener) -> core::pin::Pin<alloc::boxed::Box<impl futures_core::stream::Stream<Item = core::io::error::Result<tokio::net::tcp::stream::TcpStream>> + core::marker::Send>>
 pub async fn veilid_tools::async_try_at_most_n_things<T, I, C, R, F>(usize, I, C) -> core::option::Option<R> where I: core::iter::traits::collect::IntoIterator<Item = T>, C: core::ops::function::Fn(T) -> F, F: core::future::future::Future<Output = core::option::Option<R>>
 pub fn veilid_tools::available_unspecified_addresses() -> alloc::vec::Vec<core::net::ip_addr::IpAddr>
@@ -2102,10 +2104,10 @@ pub fn veilid_tools::random_bytes(&mut [u8])
 pub fn veilid_tools::retry_falloff_log(u64, u64, u64, u64, f64) -> bool
 pub async fn veilid_tools::scaled_yielding<N: core::cmp::PartialOrd, R: core::marker::Send + 'static, T: core::ops::function::FnOnce() -> R + core::marker::Send + 'static>(N, N, T) -> R
 pub fn veilid_tools::secs_to_timestamp_duration(f64) -> u64
-pub fn veilid_tools::send_udp_datagram_with_ttl<S: std::os::fd::raw::AsRawFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
+pub fn veilid_tools::send_udp_datagram_with_ttl<S: std::os::fd::owned::AsFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub fn veilid_tools::set_tcp_stream_linger(&tokio::net::tcp::stream::TcpStream, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>
 pub async fn veilid_tools::sleep(u32)
-pub fn veilid_tools::socket2_operation<S: std::os::fd::raw::AsRawFd, F: core::ops::function::FnOnce(&mut socket2::socket::Socket) -> R, R>(&S, F) -> R
+pub fn veilid_tools::socket2_operation<S: std::os::fd::owned::AsFd, F: core::ops::function::FnOnce(&socket2::socket::Socket) -> R, R>(&S, F) -> R
 pub fn veilid_tools::spawn<Out>(&str, impl core::future::future::Future<Output = Out> + core::marker::Send + 'static) -> veilid_tools::MustJoinHandle<Out> where Out: core::marker::Send + 'static
 pub fn veilid_tools::spawn_detached<Out>(&str, impl core::future::future::Future<Output = Out> + core::marker::Send + 'static) where Out: core::marker::Send + 'static
 pub fn veilid_tools::spawn_detached_local<Out>(&str, impl core::future::future::Future<Output = Out> + 'static) where Out: 'static
@@ -2118,10 +2120,10 @@ pub fn veilid_tools::to_io_error_other<E: core::error::Error + core::marker::Sen
 pub fn veilid_tools::total_memory_bytes() -> core::option::Option<u64>
 pub fn veilid_tools::try_at_most_n_things<T, I, C, R>(usize, I, C) -> core::option::Option<R> where I: core::iter::traits::collect::IntoIterator<Item = T>, C: core::ops::function::Fn(T) -> core::option::Option<R>
 pub fn veilid_tools::type_name_of_val<T: ?core::marker::Sized>(&T) -> &'static str
-pub unsafe fn veilid_tools::unaligned_u8_vec_uninit(usize) -> alloc::vec::Vec<u8>
 pub fn veilid_tools::us_to_ms(u64) -> core::result::Result<u32, alloc::string::String>
 pub fn veilid_tools::wait_until_debugger_attached<T: core::convert::Into<core::option::Option<core::time::Duration>>>(T) -> core::result::Result<(), &'static str>
 pub async fn veilid_tools::yielding<R, T: core::ops::function::FnOnce() -> R>(T) -> R
+pub fn veilid_tools::zeroed_u8_vec(usize) -> alloc::vec::Vec<u8>
 pub type veilid_tools::PinBox<T> = core::pin::Pin<alloc::boxed::Box<T>>
 pub type veilid_tools::PinBoxFuture<'a, T> = veilid_tools::PinBox<(dyn core::future::future::Future<Output = T> + core::marker::Send + 'a)>
 pub type veilid_tools::PinBoxFutureStatic<T> = veilid_tools::PinBoxFuture<'static, T>

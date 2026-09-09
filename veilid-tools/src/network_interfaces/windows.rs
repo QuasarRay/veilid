@@ -13,6 +13,7 @@ use super::*;
 
 use libc::{self, c_ulong, c_void, size_t};
 use std::ffi::CStr;
+use std::marker::PhantomData;
 use std::{io, ptr};
 use winapi::shared::ifdef::IfOperStatusUp;
 use winapi::shared::ipifcons::{IF_TYPE_SOFTWARE_LOOPBACK, IF_TYPE_TUNNEL};
@@ -20,12 +21,17 @@ use winapi::shared::nldef::{
     IpDadStatePreferred, IpPrefixOriginDhcp, IpSuffixOriginDhcp, IpSuffixOriginRandom,
 };
 use winapi::shared::winerror::{ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS};
+
 use winapi::um::iphlpapi::GetAdaptersAddresses;
 use winapi::um::iptypes::{
     GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_INCLUDE_PREFIX, GAA_FLAG_SKIP_ANYCAST,
     GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST,
     IP_ADAPTER_ADDRESSES, IP_ADAPTER_PREFIX, IP_ADAPTER_UNICAST_ADDRESS,
 };
+
+/// GetAdaptersAddresses reports the size it needs; retries cover a table growing in between
+const ADAPTER_TABLE_READ_ATTEMPTS: usize = 4;
+const ADAPTER_TABLE_INITIAL_LEN: c_ulong = 16384;
 
 pub struct PlatformSupportWindows {}
 
@@ -48,12 +54,12 @@ impl PlatformSupportWindows {
         clippy::disallowed_methods,
         reason = "turns the OS's remaining address lifetime into an absolute epoch expiry"
     )]
-    fn get_address_flags(addr: *const IP_ADAPTER_UNICAST_ADDRESS) -> AddressFlags {
-        let ds = unsafe { (*addr).DadState };
-        let po = unsafe { (*addr).PrefixOrigin };
-        let so = unsafe { (*addr).SuffixOrigin };
+    fn get_address_flags(addr: &IP_ADAPTER_UNICAST_ADDRESS) -> AddressFlags {
+        let ds = addr.DadState;
+        let po = addr.PrefixOrigin;
+        let so = addr.SuffixOrigin;
         // ValidLifetime is the remaining valid lifetime in seconds; 0xFFFFFFFF means infinite
-        let valid_lifetime = unsafe { (*addr).ValidLifetime };
+        let valid_lifetime = addr.ValidLifetime;
         let expiration_secs = if valid_lifetime == u32::MAX {
             None
         } else {
@@ -91,102 +97,38 @@ impl PlatformSupportWindows {
 
             // Go through all addresses and add them if appropriate
             for addr in windows_interface.unicast_addresses() {
-                let intf_addr = match sockaddr_tools::to_ipaddr(addr.Address.lpSockaddr) {
+                let intf_addr = match sockaddr_tools::to_ipaddr(&addr.Address) {
                     None => continue,
                     Some(IpAddr::V4(ipv4_addr)) => {
-                        let mut item_netmask = Ipv4Addr::new(0, 0, 0, 0);
-                        let mut item_broadcast = None;
-
-                        // Search prefixes for a prefix matching addr
-                        'prefixloopv4: for prefix in windows_interface.prefixes() {
-                            let ipprefix = sockaddr_tools::to_ipaddr(prefix.Address.lpSockaddr);
-                            match ipprefix {
-                                Some(IpAddr::V4(ref a)) => {
-                                    let mut netmask: [u8; 4] = [0; 4];
-                                    for (n, netmask_elt) in netmask
-                                        .iter_mut()
-                                        .enumerate()
-                                        .take((prefix.PrefixLength as usize).div_ceil(8))
-                                    {
-                                        let x_byte = ipv4_addr.octets()[n];
-                                        let y_byte = a.octets()[n];
-                                        for m in 0..8 {
-                                            if (n * 8) + m > prefix.PrefixLength as usize {
-                                                break;
-                                            }
-                                            let bit = 1 << m;
-                                            if (x_byte & bit) == (y_byte & bit) {
-                                                *netmask_elt |= bit;
-                                            } else {
-                                                continue 'prefixloopv4;
-                                            }
-                                        }
-                                    }
-                                    item_netmask = Ipv4Addr::new(
-                                        netmask[0], netmask[1], netmask[2], netmask[3],
-                                    );
-                                    let mut broadcast: [u8; 4] = ipv4_addr.octets();
-                                    for n in 0..4 {
-                                        broadcast[n] |= !netmask[n];
-                                    }
-                                    item_broadcast = Some(Ipv4Addr::new(
-                                        broadcast[0],
-                                        broadcast[1],
-                                        broadcast[2],
-                                        broadcast[3],
-                                    ));
-                                    break 'prefixloopv4;
+                        // The first on-link prefix covering the address is its subnet
+                        let netmask = windows_interface.prefixes().find_map(|prefix| {
+                            match sockaddr_tools::to_ipaddr(&prefix.Address) {
+                                Some(IpAddr::V4(p)) => {
+                                    v4_prefix_netmask(ipv4_addr, p, prefix.PrefixLength)
                                 }
-                                _ => continue,
-                            };
-                        }
+                                _ => None,
+                            }
+                        });
+                        let broadcast =
+                            netmask.map(|m| Ipv4Addr::from(u32::from(ipv4_addr) | !u32::from(m)));
                         IfAddr::V4(Ifv4Addr {
                             ip: ipv4_addr,
-                            netmask: item_netmask,
-                            broadcast: item_broadcast,
+                            netmask: netmask.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                            broadcast,
                         })
                     }
                     Some(IpAddr::V6(ipv6_addr)) => {
-                        let mut item_netmask = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0);
-                        // Search prefixes for a prefix matching addr
-                        'prefixloopv6: for prefix in windows_interface.prefixes() {
-                            let ipprefix = sockaddr_tools::to_ipaddr(prefix.Address.lpSockaddr);
-                            match ipprefix {
-                                Some(IpAddr::V6(ref a)) => {
-                                    // Iterate the bits in the prefix, if they all match this prefix
-                                    // is the right one, else try the next prefix
-                                    let mut netmask: [u16; 8] = [0; 8];
-                                    for (n, netmask_elt) in netmask
-                                        .iter_mut()
-                                        .enumerate()
-                                        .take((prefix.PrefixLength as usize).div_ceil(16))
-                                    {
-                                        let x_word = ipv6_addr.segments()[n];
-                                        let y_word = a.segments()[n];
-                                        for m in 0..16 {
-                                            if (n * 16) + m > prefix.PrefixLength as usize {
-                                                break;
-                                            }
-                                            let bit = 1 << m;
-                                            if (x_word & bit) == (y_word & bit) {
-                                                *netmask_elt |= bit;
-                                            } else {
-                                                continue 'prefixloopv6;
-                                            }
-                                        }
-                                    }
-                                    item_netmask = Ipv6Addr::new(
-                                        netmask[0], netmask[1], netmask[2], netmask[3], netmask[4],
-                                        netmask[5], netmask[6], netmask[7],
-                                    );
-                                    break 'prefixloopv6;
+                        let netmask = windows_interface.prefixes().find_map(|prefix| {
+                            match sockaddr_tools::to_ipaddr(&prefix.Address) {
+                                Some(IpAddr::V6(p)) => {
+                                    v6_prefix_netmask(ipv6_addr, p, prefix.PrefixLength)
                                 }
-                                _ => continue,
-                            };
-                        }
+                                _ => None,
+                            }
+                        });
                         IfAddr::V6(Ifv6Addr {
                             ip: ipv6_addr,
-                            netmask: item_netmask,
+                            netmask: netmask.unwrap_or(Ipv6Addr::UNSPECIFIED),
                             broadcast: None,
                         })
                     }
@@ -199,7 +141,6 @@ impl PlatformSupportWindows {
                     .push(InterfaceAddress::new(intf_addr, address_flags))
             }
 
-            // Add gateways if we have them
             for gateway_address in windows_interface.gateway_addresses() {
                 network_interface.add_gateway(gateway_address);
             }
@@ -211,52 +152,54 @@ impl PlatformSupportWindows {
     }
 }
 
-#[repr(C)]
-pub struct IpAdapterAddresses {
-    data: *const IP_ADAPTER_ADDRESSES,
+/// One adapter, borrowed from the `WindowsInterfaces` buffer for `'a`
+pub struct IpAdapterAddresses<'a> {
+    data: &'a IP_ADAPTER_ADDRESSES,
 }
 
-impl IpAdapterAddresses {
-    #[allow(unsafe_code)]
+impl IpAdapterAddresses<'_> {
     pub fn name(&self) -> String {
-        unsafe { CStr::from_ptr((*self.data).AdapterName) }
+        if self.data.AdapterName.is_null() {
+            return String::new();
+        }
+        // SAFETY: AdapterName is a NUL-terminated string inside the adapter buffer
+        unsafe { CStr::from_ptr(self.data.AdapterName) }
             .to_string_lossy()
             .into_owned()
     }
 
     pub fn prefixes(&self) -> PrefixesIterator<'_> {
         PrefixesIterator {
-            _phantom: std::marker::PhantomData {},
-            next: unsafe { (*self.data).FirstPrefix },
+            _phantom: PhantomData,
+            next: self.data.FirstPrefix,
         }
     }
 
     pub fn unicast_addresses(&self) -> UnicastAddressesIterator<'_> {
         UnicastAddressesIterator {
-            _phantom: std::marker::PhantomData {},
-            next: unsafe { (*self.data).FirstUnicastAddress },
+            _phantom: PhantomData,
+            next: self.data.FirstUnicastAddress,
         }
     }
 
     pub fn get_flag_loopback(&self) -> bool {
-        unsafe { (*self.data).IfType == IF_TYPE_SOFTWARE_LOOPBACK }
+        self.data.IfType == IF_TYPE_SOFTWARE_LOOPBACK
     }
     pub fn get_flag_running(&self) -> bool {
-        unsafe { (*self.data).OperStatus == IfOperStatusUp }
+        self.data.OperStatus == IfOperStatusUp
     }
     pub fn get_flag_point_to_point(&self) -> bool {
-        unsafe { (*self.data).IfType == IF_TYPE_TUNNEL }
+        self.data.IfType == IF_TYPE_TUNNEL
     }
     pub fn gateway_addresses(&self) -> Vec<IpAddr> {
         let mut out = vec![];
-        unsafe {
-            let mut fga = (*self.data).FirstGatewayAddress;
-            while !fga.is_null() {
-                if let Some(address) = sockaddr_tools::to_ipaddr((*fga).Address.lpSockaddr) {
-                    out.push(address);
-                }
-                fga = (*fga).Next;
+        let mut fga = self.data.FirstGatewayAddress;
+        // SAFETY: the gateway list lives inside the adapter buffer and is null-terminated
+        while let Some(gateway) = unsafe { fga.as_ref() } {
+            if let Some(address) = sockaddr_tools::to_ipaddr(&gateway.Address) {
+                out.push(address);
             }
+            fga = gateway.Next;
         }
         out
     }
@@ -268,19 +211,20 @@ struct WindowsInterfaces {
 
 impl WindowsInterfaces {
     pub fn new() -> io::Result<Self> {
-        let mut buffersize: c_ulong = 16384;
-        let mut ifaddrs: *mut IP_ADAPTER_ADDRESSES;
-
-        loop {
-            unsafe {
-                ifaddrs = libc::malloc(buffersize as size_t) as *mut IP_ADAPTER_ADDRESSES;
-                if ifaddrs.is_null() {
-                    return Err(io_error_other!(
-                        "Failed to allocate buffer in get_if_addrs()"
-                    ));
-                }
-
-                let retcode = GetAdaptersAddresses(
+        let mut buffersize: c_ulong = ADAPTER_TABLE_INITIAL_LEN;
+        for _ in 0..ADAPTER_TABLE_READ_ATTEMPTS {
+            // SAFETY: the buffer is buffersize bytes and freed on every path but success, where
+            // the returned owner frees it
+            let ifaddrs =
+                unsafe { libc::malloc(buffersize as size_t) } as *mut IP_ADAPTER_ADDRESSES;
+            if ifaddrs.is_null() {
+                return Err(io_error_other!(
+                    "Failed to allocate buffer in get_if_addrs()"
+                ));
+            }
+            // SAFETY: ifaddrs is a live buffer of buffersize bytes and buffersize is written back
+            let retcode = unsafe {
+                GetAdaptersAddresses(
                     0,
                     GAA_FLAG_SKIP_ANYCAST
                         | GAA_FLAG_SKIP_MULTICAST
@@ -291,104 +235,101 @@ impl WindowsInterfaces {
                     ptr::null_mut(),
                     ifaddrs,
                     &mut buffersize,
-                );
-
-                match retcode {
-                    ERROR_SUCCESS => break,
-                    ERROR_BUFFER_OVERFLOW => {
-                        libc::free(ifaddrs as *mut c_void);
-                        buffersize *= 2;
-                        continue;
-                    }
-                    _ => return Err(io::Error::last_os_error()),
+                )
+            };
+            match retcode {
+                ERROR_SUCCESS => return Ok(Self { data: ifaddrs }),
+                // buffersize now holds the size the table needs
+                // SAFETY: the buffer is ours and not yet owned by anything else; buffersize holds the needed size
+                ERROR_BUFFER_OVERFLOW => unsafe { libc::free(ifaddrs as *mut c_void) },
+                _ => {
+                    // SAFETY: the buffer is ours and not yet owned by anything else
+                    unsafe { libc::free(ifaddrs as *mut c_void) };
+                    // GetAdaptersAddresses returns its error rather than setting GetLastError
+                    return Err(io::Error::from_raw_os_error(retcode as i32));
                 }
             }
         }
-
-        Ok(Self { data: ifaddrs })
+        Err(io_error_other!("adapter table kept changing size"))
     }
 
     pub fn iter(&self) -> WindowsInterfacesIterator<'_> {
         WindowsInterfacesIterator {
             next: self.data,
-            _phantom: std::marker::PhantomData {},
+            _phantom: PhantomData,
         }
     }
 }
 
 impl Drop for WindowsInterfaces {
     fn drop(&mut self) {
-        unsafe {
-            libc::free(self.data as *mut c_void);
-        }
+        // SAFETY: data is the malloc'd table, freed once; every borrow carries this lifetime
+        unsafe { libc::free(self.data as *mut c_void) };
     }
 }
 
 pub struct WindowsInterfacesIterator<'a> {
     next: *const IP_ADAPTER_ADDRESSES,
-    _phantom: std::marker::PhantomData<&'a u8>,
+    _phantom: PhantomData<&'a WindowsInterfaces>,
 }
 
-impl Iterator for WindowsInterfacesIterator<'_> {
-    type Item = IpAdapterAddresses;
+impl<'a> Iterator for WindowsInterfacesIterator<'a> {
+    type Item = IpAdapterAddresses<'a>;
 
-    #[allow(unsafe_code)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next.is_null() {
-            return None;
-        };
-
-        Some(unsafe {
-            let result = &*self.next;
-            self.next = (*self.next).Next;
-
-            IpAdapterAddresses { data: result }
-        })
+        // SAFETY: next is null or an entry inside the table the owner holds for 'a
+        let data = unsafe { self.next.as_ref()? };
+        self.next = data.Next;
+        Some(IpAdapterAddresses { data })
     }
 }
 
 pub struct PrefixesIterator<'a> {
-    _phantom: std::marker::PhantomData<&'a u8>,
+    _phantom: PhantomData<&'a IP_ADAPTER_ADDRESSES>,
     next: *const IP_ADAPTER_PREFIX,
 }
 
 impl<'a> Iterator for PrefixesIterator<'a> {
     type Item = &'a IP_ADAPTER_PREFIX;
 
-    #[allow(unsafe_code)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next.is_null() {
-            return None;
-        };
-
-        Some(unsafe {
-            let result = &*self.next;
-            self.next = (*self.next).Next;
-
-            result
-        })
+        // SAFETY: next is null or an entry inside the adapter table borrowed for 'a
+        let entry = unsafe { self.next.as_ref()? };
+        self.next = entry.Next;
+        Some(entry)
     }
 }
 
 pub struct UnicastAddressesIterator<'a> {
-    _phantom: std::marker::PhantomData<&'a u8>,
+    _phantom: PhantomData<&'a IP_ADAPTER_ADDRESSES>,
     next: *const IP_ADAPTER_UNICAST_ADDRESS,
 }
 
 impl<'a> Iterator for UnicastAddressesIterator<'a> {
     type Item = &'a IP_ADAPTER_UNICAST_ADDRESS;
 
-    #[allow(unsafe_code)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next.is_null() {
-            return None;
-        };
-
-        Some(unsafe {
-            let result = &*self.next;
-            self.next = (*self.next).Next;
-
-            result
-        })
+        // SAFETY: next is null or an entry inside the adapter table borrowed for 'a
+        let entry = unsafe { self.next.as_ref()? };
+        self.next = entry.Next;
+        Some(entry)
     }
+}
+
+/// The netmask for `plen` when `prefix` covers `addr`
+fn v4_prefix_netmask(addr: Ipv4Addr, prefix: Ipv4Addr, plen: u32) -> Option<Ipv4Addr> {
+    if plen > 32 {
+        return None;
+    }
+    let mask = u32::MAX.checked_shl(32 - plen).unwrap_or(0);
+    ((u32::from(addr) & mask) == (u32::from(prefix) & mask)).then(|| Ipv4Addr::from(mask))
+}
+
+/// The netmask for `plen` when `prefix` covers `addr`
+fn v6_prefix_netmask(addr: Ipv6Addr, prefix: Ipv6Addr, plen: u32) -> Option<Ipv6Addr> {
+    if plen > 128 {
+        return None;
+    }
+    let mask = u128::MAX.checked_shl(128 - plen).unwrap_or(0);
+    ((u128::from(addr) & mask) == (u128::from(prefix) & mask)).then(|| Ipv6Addr::from(mask))
 }

@@ -85,7 +85,7 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", skip(self), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub fn parse_bootstrap_v0(
+    pub async fn parse_bootstrap_v0(
         &self,
         record_strings: &[String],
     ) -> EyreResult<Vec<BootstrapRecord>> {
@@ -97,7 +97,7 @@ impl NetworkManager {
         let mut bootstrap_records: Vec<BootstrapRecord> = Vec::new();
         for record_string in record_strings {
             let Some(bootstrap_record) =
-                BootstrapRecord::new_from_v0_str(self, &dial_info_converter, record_string)?
+                BootstrapRecord::new_from_v0_str(self, &dial_info_converter, record_string).await?
             else {
                 continue;
             };

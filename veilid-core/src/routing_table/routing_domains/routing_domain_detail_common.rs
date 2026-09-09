@@ -30,6 +30,8 @@ pub struct RoutingDomainDetailCommon {
     current_peer_info_cache: Mutex<Option<Arc<PeerInfo>>>,
     /// The last known bootstrap peers that seeded our routing table
     bootstrap_peers: Mutex<Vec<NodeRef>>,
+    /// Verified v1 records from the last successful bootstrap, served to B01T requests
+    bootstrap_records: Mutex<Vec<BootstrapRecord>>,
     /// The last calculated summary of the routing table entries in this domain
     entry_summary: Mutex<Arc<EntrySummary>>,
 }
@@ -46,6 +48,7 @@ impl fmt::Debug for RoutingDomainDetailCommon {
             .field("low_water_mark", &self.low_water_mark)
             .field("current_peer_info_cache", &self.current_peer_info_cache)
             .field("bootstrap_peers", &self.bootstrap_peers)
+            .field("bootstrap_records", &self.bootstrap_records)
             .field("entry_summary", &self.entry_summary)
             .finish()
     }
@@ -55,7 +58,7 @@ impl fmt::Display for RoutingDomainDetailCommon {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Network Config:{}\nRelay Compilation:\n{}\nRelay States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nEntry Summary:\n{}",
+            "Network Config:{}\nRelay Compilation:\n{}\nRelay States:\n{}\nDial Info Details:\n{}\nConfirmed: {}\nLow Water Mark: {}\nBootstrap Peers: {}\nBootstrap Records: {}\nEntry Summary:\n{}",
             if f.alternate() {
                 format!("\n{}",indent_all_string(f.to_string(&self.network_config)))
             } else {
@@ -67,6 +70,7 @@ impl fmt::Display for RoutingDomainDetailCommon {
             f.to_string(self.confirmed),
             f.to_string(self.low_water_mark.lock().1.clone()),
             self.bootstrap_peers.lock().clone().iter().map(|n| f.to_string(n)).collect::<Vec<_>>().join(",").string_if_empty("None"),
+            self.bootstrap_records.lock().iter().map(|r| f.to_string(r.public_keys())).collect::<Vec<_>>().join(",").string_if_empty("None"),
             indent_all_string(f.to_string(self.entry_summary.lock().clone()))
         )
     }
@@ -87,6 +91,7 @@ impl RoutingDomainDetailCommon {
             low_water_mark: Mutex::new((true, Default::default())),
             current_peer_info_cache: Mutex::new(Default::default()),
             bootstrap_peers: Mutex::new(Default::default()),
+            bootstrap_records: Mutex::new(Default::default()),
             entry_summary: Mutex::new(Default::default()),
         }
     }
@@ -129,6 +134,14 @@ impl RoutingDomainDetailCommon {
     pub fn add_bootstrap_peer(&self, bootstrap_peer: NodeRef) {
         let mut bootstrap_peers = self.bootstrap_peers.lock();
         bootstrap_peers.push(bootstrap_peer);
+    }
+
+    pub fn get_bootstrap_records(&self) -> Vec<BootstrapRecord> {
+        self.bootstrap_records.lock().clone()
+    }
+
+    pub fn set_bootstrap_records(&self, bootstrap_records: Vec<BootstrapRecord>) {
+        *self.bootstrap_records.lock() = bootstrap_records;
     }
 
     pub fn update_low_water_mark(&self, mut low_water_mark: Arc<LowWaterMark>) {

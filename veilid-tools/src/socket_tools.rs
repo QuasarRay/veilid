@@ -136,29 +136,7 @@ pub fn set_tcp_stream_linger(
     tcp_stream: &TcpStream,
     linger: Option<core::time::Duration>,
 ) -> io::Result<()> {
-    #[cfg(all(feature = "rt-async-std", unix))]
-    {
-        // async-std does not directly support linger on TcpStream yet
-        use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
-        unsafe {
-            let s = socket2::Socket::from_raw_fd(tcp_stream.as_raw_fd());
-            let res = s.set_linger(linger);
-            let _ = s.into_raw_fd();
-            res
-        }
-    }
-    #[cfg(all(feature = "rt-async-std", windows))]
-    {
-        // async-std does not directly support linger on TcpStream yet
-        use std::os::windows::io::{AsRawSocket, FromRawSocket, IntoRawSocket};
-        unsafe {
-            let s = socket2::Socket::from_raw_socket(tcp_stream.as_raw_socket());
-            let res = s.set_linger(linger);
-            let _ = s.into_raw_socket();
-            res
-        }
-    }
-    #[cfg(not(feature = "rt-async-std"))]
+    // The borrowed view never closes the stream's descriptor
     socket2::SockRef::from(tcp_stream).set_linger(linger)
 }
 
@@ -410,6 +388,15 @@ pub fn primary_source_ipv6() -> Option<Ipv6Addr> {
 // Send a single UDP datagram with a per-packet TTL override
 cfg_if! {
     if #[cfg(unix)] {
+        cfg_if! {
+            if #[cfg(target_os = "openbsd")] {
+                /// netinet6/in6.h; the libc crate has no OpenBSD binding for it
+                const IPV6_HOPLIMIT: libc::c_int = 47;
+            } else {
+                const IPV6_HOPLIMIT: libc::c_int = libc::IPV6_HOPLIMIT;
+            }
+        }
+
         /// Send one UDP datagram with a best-effort per-packet TTL (IPv4) or hop
         /// limit (IPv6) override, never touching the socket's TTL option:
         /// - IPv6: `IPV6_HOPLIMIT` cmsg (RFC 3542)
@@ -419,23 +406,25 @@ cfg_if! {
         ///   race other senders on the shared socket
         ///
         /// Single nonblocking attempt; a full send buffer surfaces as `WouldBlock`.
-        pub fn send_udp_datagram_with_ttl<S: std::os::fd::AsRawFd>(
+        pub fn send_udp_datagram_with_ttl<S: std::os::fd::AsFd>(
             socket: &S,
             data: &[u8],
             remote_addr: SocketAddr,
             ttl: u32,
         ) -> io::Result<usize> {
+            use std::os::fd::AsRawFd;
+            let ttl = ttl_option_value(ttl)?;
             cfg_if! {
                 if #[cfg(any(target_os = "linux", target_os = "android"))] {
                     let (cmsg_level, cmsg_type) = match remote_addr {
                         SocketAddr::V4(_) => (libc::IPPROTO_IP, libc::IP_TTL),
-                        SocketAddr::V6(_) => (libc::IPPROTO_IPV6, libc::IPV6_HOPLIMIT),
+                        SocketAddr::V6(_) => (libc::IPPROTO_IPV6, IPV6_HOPLIMIT),
                     };
-                    sendmsg_with_ttl_cmsg(socket.as_raw_fd(), data, remote_addr, cmsg_level, cmsg_type, ttl)
+                    sendmsg_with_ttl_cmsg(socket.as_fd().as_raw_fd(), data, remote_addr, cmsg_level, cmsg_type, ttl)
                 } else {
                     match remote_addr {
                         SocketAddr::V4(_) => socket2_operation(socket, |s| s.send_to(data, &remote_addr.into())),
-                        SocketAddr::V6(_) => sendmsg_with_ttl_cmsg(socket.as_raw_fd(), data, remote_addr, libc::IPPROTO_IPV6, libc::IPV6_HOPLIMIT, ttl),
+                        SocketAddr::V6(_) => sendmsg_with_ttl_cmsg(socket.as_fd().as_raw_fd(), data, remote_addr, libc::IPPROTO_IPV6, IPV6_HOPLIMIT, ttl),
                     }
                 }
             }
@@ -447,7 +436,7 @@ cfg_if! {
             remote_addr: SocketAddr,
             cmsg_level: libc::c_int,
             cmsg_type: libc::c_int,
-            ttl: u32,
+            ttl: libc::c_int,
         ) -> io::Result<usize> {
             let sockaddr = SockAddr::from(remote_addr);
             let mut iov = libc::iovec {
@@ -468,7 +457,7 @@ cfg_if! {
                 (*cmsg).cmsg_level = cmsg_level;
                 (*cmsg).cmsg_type = cmsg_type;
                 (*cmsg).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as libc::c_uint) as _;
-                std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), ttl as libc::c_int);
+                std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), ttl);
                 let res = libc::sendmsg(fd, &msg, 0);
                 if res < 0 {
                     return Err(io::Error::last_os_error());
@@ -484,23 +473,24 @@ cfg_if! {
         ///   and a setsockopt swap would race other senders on the shared socket
         ///
         /// Single nonblocking attempt; a full send buffer surfaces as `WouldBlock`.
-        pub fn send_udp_datagram_with_ttl<S: std::os::windows::io::AsRawSocket>(
+        pub fn send_udp_datagram_with_ttl<S: std::os::windows::io::AsSocket>(
             socket: &S,
             data: &[u8],
             remote_addr: SocketAddr,
             ttl: u32,
         ) -> io::Result<usize> {
+            let ttl = ttl_option_value(ttl)?;
             match remote_addr {
                 SocketAddr::V4(_) => socket2_operation(socket, |s| s.send_to(data, &remote_addr.into())),
                 SocketAddr::V6(_) => wsasendmsg_with_hoplimit(socket, data, remote_addr, ttl),
             }
         }
 
-        fn wsasendmsg_with_hoplimit<S: std::os::windows::io::AsRawSocket>(
+        fn wsasendmsg_with_hoplimit<S: std::os::windows::io::AsSocket>(
             socket: &S,
             data: &[u8],
             remote_addr: SocketAddr,
-            ttl: u32,
+            ttl: i32,
         ) -> io::Result<usize> {
             use winapi::shared::minwindef::DWORD;
             use winapi::shared::ws2def::{IPPROTO_IPV6, WSABUF, WSACMSGHDR, WSAMSG};
@@ -525,7 +515,7 @@ cfg_if! {
                     cmsg_level: IPPROTO_IPV6 as i32,
                     cmsg_type: IPV6_HOPLIMIT,
                 },
-                value: ttl as i32,
+                value: ttl,
             };
             let mut msg = WSAMSG {
                 name: sockaddr.as_ptr() as *mut _,
@@ -541,7 +531,7 @@ cfg_if! {
             let mut sent: DWORD = 0;
             let res = unsafe {
                 WSASendMsg(
-                    socket.as_raw_socket() as SOCKET,
+                    std::os::windows::io::AsRawSocket::as_raw_socket(&socket.as_socket()) as SOCKET,
                     &mut msg,
                     0,
                     &mut sent,
@@ -557,35 +547,41 @@ cfg_if! {
     }
 }
 
+/// A TTL or hop limit as the int the socket layer takes; values outside 1..=255 are refused
+/// before any syscall
+fn ttl_option_value(ttl: u32) -> io::Result<i32> {
+    if !(1..=255).contains(&ttl) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ttl must be in 1..=255",
+        ));
+    }
+    Ok(ttl as i32)
+}
+
 // Run operations on underlying socket
 cfg_if! {
     if #[cfg(unix)] {
-        /// Run `callback` against the [`socket2::Socket`] backing `s` without taking ownership of it.
-        pub fn socket2_operation<S: std::os::fd::AsRawFd, F: FnOnce(&mut socket2::Socket) -> R, R>(
+        /// Run `callback` against a borrowed [`socket2::Socket`] view of `s`; the view never
+        /// closes the descriptor, even if `callback` unwinds.
+        pub fn socket2_operation<S: std::os::fd::AsFd, F: FnOnce(&socket2::Socket) -> R, R>(
             s: &S,
             callback: F,
         ) -> R {
-            use std::os::fd::{FromRawFd, IntoRawFd};
-            let mut s = unsafe { socket2::Socket::from_raw_fd(s.as_raw_fd()) };
-            let res = callback(&mut s);
-            let _ = s.into_raw_fd();
-            res
+            callback(&socket2::SockRef::from(s))
         }
     } else if #[cfg(windows)] {
-        /// Run `callback` against the [`socket2::Socket`] backing `s` without taking ownership of it.
+        /// Run `callback` against a borrowed [`socket2::Socket`] view of `s`; the view never
+        /// closes the socket, even if `callback` unwinds.
         pub fn socket2_operation<
-            S: std::os::windows::io::AsRawSocket,
-            F: FnOnce(&mut socket2::Socket) -> R,
+            S: std::os::windows::io::AsSocket,
+            F: FnOnce(&socket2::Socket) -> R,
             R,
         >(
             s: &S,
             callback: F,
         ) -> R {
-            use std::os::windows::io::{FromRawSocket, IntoRawSocket};
-            let mut s = unsafe { socket2::Socket::from_raw_socket(s.as_raw_socket()) };
-            let res = callback(&mut s);
-            let _ = s.into_raw_socket();
-            res
+            callback(&socket2::SockRef::from(s))
         }
     } else {
         #[compile_error("unimplemented")]

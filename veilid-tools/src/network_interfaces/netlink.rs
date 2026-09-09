@@ -32,6 +32,7 @@ fn ifreq_from_name(ifname: &str) -> io::Result<ifreq> {
     if name.len() >= IFNAMSIZ {
         bail_io_error_other!("interface name too long");
     }
+    // SAFETY: all-zero is a valid ifreq: a byte array and a zeroed union
     let mut req: ifreq = unsafe { core::mem::zeroed() };
     for (dst, src) in req.ifr_name.iter_mut().zip(name) {
         *dst = *src as libc::c_char;
@@ -179,6 +180,7 @@ impl PlatformSupportNetlink {
     fn get_interface_flags(&self, ifname: &str) -> io::Result<InterfaceFlags> {
         let mut req = ifreq_from_name(ifname)?;
 
+        // SAFETY: socket() has no pointer arguments
         let sock = unsafe { socket(AF_INET, SOCK_DGRAM, 0) };
         if sock < 0 {
             return Err(io::Error::last_os_error());
@@ -191,11 +193,13 @@ impl PlatformSupportNetlink {
                 let res = unsafe { ioctl(sock, SIOCGIFFLAGS, &mut req) };
             }
         }
+        // SAFETY: sock was opened above and is closed exactly once here
         unsafe { close(sock) };
         if res < 0 {
             return Err(io::Error::last_os_error());
         }
 
+        // SAFETY: read after a successful SIOCGIFFLAGS, which fills this union member
         let flags = unsafe { req.ifr_ifru.ifru_flags } as c_int;
 
         // Android CLAT (RFC 6877) lives on a virtual interface named `clat4*` or `v4-*`

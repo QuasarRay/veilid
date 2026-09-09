@@ -9,6 +9,42 @@ pub struct BootV1Response {
 }
 
 impl NetworkManager {
+    /// Build the B01T response from the routing domain's last successful bootstrap.
+    /// Answers an unauthenticated packet, so this touches no resolver and does no I/O:
+    /// records come from the routing domain, peer info from the routing table.
+    pub fn boot_v1_response(&self) -> Option<BootV1Response> {
+        let routing_table = self.routing_table();
+        let routing_domain = RoutingDomain::PublicInternet;
+        let bsrecs = routing_table.get_bootstrap_records(routing_domain);
+
+        let mut records: Vec<String> = bsrecs
+            .iter()
+            .flat_map(|bsrec| bsrec.signed_strings().iter().cloned())
+            .collect();
+        records.sort_unstable();
+        records.dedup();
+        if records.is_empty() {
+            return None;
+        }
+
+        // Add peer infos if we have them, only for the peers present in the records
+        let peers: Vec<Arc<PeerInfo>> = bsrecs
+            .iter()
+            .filter_map(|bsrec| {
+                if routing_table.matches_own_public_key(bsrec.public_keys()) {
+                    routing_table.get_published_peer_info(routing_domain)
+                } else {
+                    let best_public_key = bsrec.public_keys().first()?;
+                    let best_node_id = routing_table.generate_node_id(best_public_key).ok()?;
+                    let nr = routing_table.lookup_node_id(best_node_id).ok().flatten()?;
+                    nr.get_peer_info(routing_domain)
+                }
+            })
+            .collect();
+
+        Some(BootV1Response { records, peers })
+    }
+
     /// Direct bootstrap v1 request handler
     /// This is a proxy mechanism to the TXT bootstrap mechanism
     /// that is intended for supporting WS/WSS nodes that can not perform DNS TXT lookups,
@@ -18,83 +54,11 @@ impl NetworkManager {
         instrument(level = "trace", target = "net", skip(self), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub async fn handle_boot_v1_request(&self, flow: Flow) -> EyreResult<NetworkResult<()>> {
-        let bootstraps = self.config().network.routing_table.bootstrap.clone();
-
-        // Don't bother if bootstraps aren't configured
-        if bootstraps.is_empty() {
-            return Ok(NetworkResult::service_unavailable(
-                "no bootstraps configured",
-            ));
-        }
-
-        // Extract only the TXT hostnames
-        let dial_info_converter = BootstrapDialInfoConverter::default();
-        let mut bootstrap_txt_names = Vec::<String>::new();
-        for bootstrap in bootstraps {
-            if dial_info_converter.try_vec_from_url(&bootstrap).is_ok() {
-                // skip direct bootstraps here
-            } else {
-                bootstrap_txt_names.push(bootstrap);
-            }
-        }
-
-        // Process bootstraps into TXT strings
-        let mut unord = FuturesUnordered::<PinBoxFuture<EyreResult<Vec<String>>>>::new();
-
-        for bstn in bootstrap_txt_names {
-            // TXT bootstrap
-            unord.push(pin_dyn_future!(async {
-                let bstn = bstn;
-                self.resolve_bootstrap_txt_strings(bstn).await
-            }));
-        }
-
-        let mut txt_strings_set = HashSet::<String>::new();
-        while let Some(res) = unord.next().await {
-            match res {
-                Ok(txt_strings) => {
-                    for txt_string in txt_strings {
-                        txt_strings_set.insert(txt_string);
-                    }
-                }
-                Err(e) => {
-                    veilid_log!(self debug "Direct bootstrap resolution error: {}", e);
-                }
-            }
-        }
-
-        let mut records = txt_strings_set.into_iter().collect::<Vec<_>>();
-        records.sort_unstable();
-
-        // Add peer infos if we have them, only for the peers present in the records
-        let routing_table = self.routing_table();
-        let routing_domain = RoutingDomain::PublicInternet;
-        let bsrecs = self.parse_bootstrap_v1(&records)?;
-
-        let peers: Vec<Arc<PeerInfo>> = bsrecs
-            .into_iter()
-            .filter_map(|bsrec| {
-                if routing_table.matches_own_public_key(bsrec.public_keys()) {
-                    routing_table.get_published_peer_info(routing_domain)
-                } else if let Some(best_public_key) = bsrec.public_keys().first() {
-                    if let Ok(best_node_id) = routing_table.generate_node_id(best_public_key) {
-                        if let Some(nr) = routing_table.lookup_node_id(best_node_id).ok().flatten()
-                        {
-                            nr.get_peer_info(routing_domain)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let Some(bootv1response) = self.boot_v1_response() else {
+            return Ok(NetworkResult::service_unavailable("no bootstrap records"));
+        };
 
         // Serialize out bootstrap response
-        let bootv1response = BootV1Response { records, peers };
         let json_bytes: Bytes = serialize_json(bootv1response).into();
         veilid_log!(self trace "B01T reponse: {}", String::from_utf8_lossy(&json_bytes));
 

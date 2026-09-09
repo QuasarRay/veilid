@@ -10,7 +10,7 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", skip(self), ret, err, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub fn parse_bootstrap_v1(
+    pub async fn parse_bootstrap_v1(
         &self,
         record_strings: &[String],
     ) -> EyreResult<Vec<BootstrapRecord>> {
@@ -31,7 +31,8 @@ impl NetworkManager {
                 &dial_info_converter,
                 record_string,
                 &signing_keys,
-            )?
+            )
+            .await?
             else {
                 continue;
             };

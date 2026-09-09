@@ -143,6 +143,27 @@ export const dhtSuite: Suite = {
       });
 
       cases.push({
+        name: `should reject a writer of the wrong class for ${cryptoKind}`,
+        run: withRecord(cryptoKind, async ({ expect }, rc, rec) => {
+          // A PublicKey is a wasm-bindgen object too; only a KeyPair may be the writer
+          const wrongClass = (rec.owner as KeyPair).key as unknown as KeyPair;
+          let caught: unknown;
+          try {
+            await rc.setDHTValue(rec.key, 0, textEncoder.encode(data), {
+              writer: wrongClass,
+              allowOffline: undefined,
+            });
+          } catch (e) {
+            caught = e;
+          }
+          expect(caught).toBeDefined();
+          expect(caught).toMatchObject({ kind: 'Generic' });
+          const message = String((caught as { message?: string })?.message ?? caught);
+          expect(message.includes('expected KeyPair')).toBe(true);
+        }),
+      });
+
+      cases.push({
         name: `should watch value and cancel watch for ${cryptoKind}`,
         run: withRecord(cryptoKind, async ({ expect }, rc, rec) => {
           const setValueRes = await dhtRetry(

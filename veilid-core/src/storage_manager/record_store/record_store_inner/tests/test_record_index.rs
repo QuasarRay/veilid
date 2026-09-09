@@ -88,6 +88,8 @@ pub async fn test_record_index() {
                     let record_index = TestRecordIndex::try_new(Arc::new(unlocked_inner))
                         .await
                         .expect("should make new recordindex");
+                    let debug = record_index.debug();
+                    assert!(debug.contains("Total Storage Space"), "{debug}");
 
                     info!("{}: {}", context_name, test_name);
                     test_func(record_index, &vcrypto).await;

@@ -14,8 +14,31 @@ pub async fn test_limited_size() {
 
     test_modify_add_sub_no_limit(registry.clone());
     test_modify_add_sub_with_limit(registry.clone());
+    test_debug_value(registry.clone());
 
     mock_registry::terminate(registry).await;
+}
+
+fn test_debug_value(registry: VeilidComponentRegistry) {
+    let ls =
+        LimitedSize::try_new(registry.clone(), "debug a", Some(16), 5u32).expect("should succeed");
+    assert_eq!(ls.debug_value(), Some(5));
+    assert_eq!(format!("{:#}", ls), "5");
+    assert_eq!(format!("{}", ls), "[debug a]:5/16");
+    {
+        let mut lsg = ls.modify().expect("should modify");
+        lsg.set(9);
+        // A held guard never blocks the debug read; it reports busy instead
+        assert_eq!(ls.debug_value(), None);
+        assert_eq!(format!("{:#}", ls), "<busy>");
+        assert_eq!(format!("{}", ls), "[debug a]:<busy>/16");
+        assert_eq!(format!("{}", lsg), "[debug a]:5/16(9 uncommitted)");
+        lsg.commit().expect("should commit");
+    }
+    assert_eq!(ls.debug_value(), Some(9));
+
+    let unlimited = LimitedSize::try_new(registry, "debug b", None, 3u32).expect("should succeed");
+    assert_eq!(format!("{}", unlimited), "[debug b]:3");
 }
 
 fn test_no_ops(registry: VeilidComponentRegistry) {

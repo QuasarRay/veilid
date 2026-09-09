@@ -129,6 +129,10 @@ V1:
 | bootstrap-v1 | TXTRecord v0 for bootstrap 2 | TXT         |
 | bootstrap-v1 | TXTRecord v1 for bootstrap 2 | TXT         |
 
+The A and AAAA records are required. A node without a TXT resolver (Android below API 29) resolves
+only those and contacts each address directly on port 5150 over UDP or TCP for a B01T bootstrap
+exchange, so every bootstrap server must listen on 5150 for at least one of them.
+
 V0:
 | Record      | Value                        | Record Type |
 | ----------- | ---------------------------- | ----------- |

@@ -144,7 +144,7 @@ impl CryptoSystem for CryptoSystemNONE {
 
     // Generation
     fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut bytes = unsafe { unaligned_u8_vec_uninit(len) };
+        let mut bytes = zeroed_u8_vec(len);
         random_bytes(bytes.as_mut());
         bytes
     }
@@ -602,7 +602,7 @@ impl CryptoSystem for CryptoSystemNONE {
         self.check_nonce(nonce)?;
         self.check_shared_secret(shared_secret)?;
 
-        let mut out_buf = unsafe { aligned_8_u8_vec_uninit(in_buf.len()) };
+        let mut out_buf = zeroed_u8_vec(in_buf.len());
         self.crypt_b2b_no_auth(in_buf, &mut out_buf, nonce, shared_secret)?;
         Ok(out_buf)
     }
@@ -616,7 +616,7 @@ impl CryptoSystem for CryptoSystemNONE {
         self.check_nonce(nonce)?;
         self.check_shared_secret(shared_secret)?;
 
-        let mut out_buf = unsafe { unaligned_u8_vec_uninit(in_buf.len()) };
+        let mut out_buf = zeroed_u8_vec(in_buf.len());
         self.crypt_b2b_no_auth(in_buf, &mut out_buf, nonce, shared_secret)?;
         Ok(out_buf)
     }

@@ -103,7 +103,9 @@ where
     T: PrimInt + Unsigned + fmt::Display + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let value = self.debug_value();
+        let value = self
+            .debug_value()
+            .map_or_else(|| "<busy>".to_owned(), |v| v.to_string());
 
         if f.alternate() {
             write!(f, "{}", value)
@@ -162,8 +164,9 @@ impl<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> LimitedSize<T> {
         Ok(closure(inner.value))
     }
 
-    pub fn debug_value(&self) -> T {
-        unsafe { (*self.inner.data_ptr()).value }
+    /// The value when nothing is modifying it; None while a guard holds the lock
+    pub fn debug_value(&self) -> Option<T> {
+        self.inner.try_lock().map(|inner| inner.value)
     }
 
     pub fn modify(&self) -> Result<LimitedSizeGuard<T>, ConcurrencyError> {
@@ -358,8 +361,6 @@ where
     T: PrimInt + Unsigned + fmt::Display + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // We use an unsafe read of this mutex because we don't want to
-        // ever deadlock while printing the value
         write!(
             f,
             "[{}]:{}{}{}",

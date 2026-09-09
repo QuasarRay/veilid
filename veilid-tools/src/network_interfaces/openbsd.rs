@@ -3,31 +3,40 @@
 use super::*;
 
 use libc::{
-    c_short, close, freeifaddrs, getifaddrs, ifaddrs, ioctl, pid_t, sockaddr, sockaddr_in6, socket,
-    sysctl, time_t, AF_INET6, CTL_NET, IFF_BROADCAST, IFF_LOOPBACK, IFF_POINTOPOINT, IFF_RUNNING,
-    IFNAMSIZ, NET_RT_FLAGS, PF_ROUTE, SOCK_DGRAM,
+    freeifaddrs, getifaddrs, ifaddrs, ioctl, pid_t, sockaddr_in6, socket, sysctl, time_t, AF_INET6,
+    AF_LINK, CTL_NET, IFF_BROADCAST, IFF_LOOPBACK, IFF_POINTOPOINT, IFF_RUNNING, IFNAMSIZ,
+    NET_RT_FLAGS, PF_ROUTE, RTAX_DST, RTAX_GATEWAY, RTAX_MAX, RTA_DST, RTA_GATEWAY, RTF_GATEWAY,
+    SOCK_DGRAM,
 };
 use sockaddr_tools::SockAddr;
 use std::ffi::CStr;
 use std::io;
-use std::os::raw::{c_int, c_uchar, c_ulong, c_ushort, c_void};
+use std::marker::PhantomData;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::raw::{c_int, c_long, c_short, c_uchar, c_ulong, c_ushort};
 
+/// Sysctl reads retried when the table grows between the size probe and the copy
+const ROUTE_TABLE_READ_ATTEMPTS: usize = 3;
+/// sys/net/route.c ROUNDUP aligns each sockaddr in a routing message to sizeof(long)
+const ROUTE_SOCKADDR_ALIGN: usize = mem::size_of::<c_long>();
+
+// sys/netinet6/in6_var.h IN6_IFF_* flags and address-info ioctls, _IOWR('i', n, in6_ifreq)
+/// Get IPv6 address flags
 const SIOCGIFAFLAG_IN6: c_ulong = 0xC1206949;
+/// Get IPv6 address lifetime (preferred/valid/expire)
 const SIOCGIFALIFETIME_IN6: c_ulong = 0xC1206951;
+/// Address is undergoing duplicate-address detection
 const IN6_IFF_TENTATIVE: c_ushort = 0x0002;
+/// Address has been detected as a duplicate
 const IN6_IFF_DUPLICATED: c_ushort = 0x0004;
+/// Network interface link is detached
 const IN6_IFF_DETACHED: c_ushort = 0x0008;
-const IN6_IFF_AUTOCONF: c_ushort = 0x0040;
-const IN6_IFF_TEMPORARY: c_ushort = 0x0080;
+/// Address has reached the end of its preferred lifetime (still valid but discouraged)
 const IN6_IFF_DEPRECATED: c_ushort = 0x0010;
-const IN6_IFF_DYNAMIC: c_ushort = 0x0100;
-const IN6_IFF_SECURED: c_ushort = 0x0400;
-const RTAX_DST: c_int = 0;
-const RTAX_GATEWAY: c_int = 1;
-const RTAX_MAX: c_int = 15;
-const RTA_DST: c_int = 1;
-const RTA_GATEWAY: c_int = 2;
-const RTF_GATEWAY: c_int = 2;
+/// Address was assigned via IPv6 stateless auto-configuration (SLAAC)
+const IN6_IFF_AUTOCONF: c_ushort = 0x0040;
+/// RFC 4941 privacy / temporary address (rotates)
+const IN6_IFF_TEMPORARY: c_ushort = 0x0080;
 
 macro_rules! set_name {
     ($name_field:expr, $name_str:expr) => {{
@@ -47,16 +56,7 @@ macro_rules! set_name {
     }};
 }
 
-macro_rules! round_up {
-    ($a:expr) => {
-        if $a > 0 {
-            1 + (($a - 1) | 3)
-        } else {
-            4
-        }
-    };
-}
-
+/// sys/net/route.h
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 struct rt_msghdr {
@@ -66,7 +66,7 @@ struct rt_msghdr {
     rtm_hdrlen: c_ushort,
     rtm_index: c_ushort,
     rtm_tableid: c_ushort,
-    rtm_pri: c_uchar,
+    rtm_priority: c_uchar,
     rtm_mpls: c_uchar,
     rtm_addrs: c_int,
     rtm_flags: c_int,
@@ -86,7 +86,7 @@ struct rt_metrics {
     rmx_locks: u32,
     rmx_mtu: u32,
     rmx_refcnt: u32,
-    rmx_hopcount: i32,
+    rmx_hopcount: u32,
     rmx_recvpipe: u32,
     rmx_sendpipe: u32,
     rmx_ssthresh: u32,
@@ -168,6 +168,7 @@ struct icmp6_ifstat {
     ifs6_out_mlddone: u64,
 }
 
+/// The union is 272 bytes (icmp6_ifstat), so in6_ifreq is the 288 the ioctls encode
 #[derive(Clone, Copy)]
 #[repr(C)]
 union IfrIfru {
@@ -189,8 +190,14 @@ struct in6_ifreq {
     ifr_ifru: IfrIfru,
 }
 
+// PANIC-CENSUS: infallible compile-time layout check; the ioctl request numbers encode this size
+const _: () = assert!(mem::size_of::<in6_ifreq>() == 288);
+// PANIC-CENSUS: infallible compile-time layout check against sys/net/route.h
+const _: () = assert!(mem::size_of::<rt_msghdr>() == 96);
+
 impl in6_ifreq {
     pub fn from_name(name: &str) -> io::Result<Self> {
+        // SAFETY: all-zero is a valid in6_ifreq: ints, byte arrays, a null pointer and a zeroed union
         let mut req: in6_ifreq = unsafe { mem::zeroed() };
         req.set_name(name)?;
         Ok(req)
@@ -202,9 +209,11 @@ impl in6_ifreq {
         self.ifr_ifru.ifru_addr = addr;
     }
     pub fn get_flags6(&self) -> c_ushort {
+        // SAFETY: read after a successful SIOCGIFAFLAG_IN6, which fills this union member
         unsafe { self.ifr_ifru.ifru_flags6 as c_ushort }
     }
     pub fn get_ia6t_expire(&self) -> time_t {
+        // SAFETY: read after a successful SIOCGIFALIFETIME_IN6, which fills this union member
         unsafe { self.ifr_ifru.ifru_lifetime.ia6t_expire as time_t }
     }
 }
@@ -221,51 +230,44 @@ pub struct IfAddrs {
 
 impl IfAddrs {
     pub fn new() -> io::Result<Self> {
-        let mut ifaddrs = mem::MaybeUninit::uninit();
-
-        unsafe {
-            if -1 == getifaddrs(ifaddrs.as_mut_ptr()) {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(Self {
-                inner: ifaddrs.assume_init(),
-            })
+        let mut ifaddrs = std::ptr::null_mut();
+        // SAFETY: getifaddrs writes a list head (or leaves null) into the out-pointer
+        if -1 == unsafe { getifaddrs(&mut ifaddrs) } {
+            return Err(io::Error::last_os_error());
         }
+        Ok(Self { inner: ifaddrs })
     }
 
-    pub fn iter(&self) -> IfAddrsIterator {
-        IfAddrsIterator { next: self.inner }
+    pub fn iter(&self) -> IfAddrsIterator<'_> {
+        IfAddrsIterator {
+            next: self.inner,
+            _owner: PhantomData,
+        }
     }
 }
 
 impl Drop for IfAddrs {
-    #[allow(unsafe_code)]
     fn drop(&mut self) {
-        unsafe {
-            freeifaddrs(self.inner);
-        }
+        // SAFETY: inner came from getifaddrs and is freed exactly once; every borrowed
+        // item carries this owner's lifetime
+        unsafe { freeifaddrs(self.inner) };
     }
 }
 
-pub struct IfAddrsIterator {
-    next: *mut ifaddrs,
+/// Borrows list entries for as long as the owning `IfAddrs` lives
+pub struct IfAddrsIterator<'a> {
+    next: *const ifaddrs,
+    _owner: PhantomData<&'a IfAddrs>,
 }
 
-impl Iterator for IfAddrsIterator {
-    type Item = ifaddrs;
+impl<'a> Iterator for IfAddrsIterator<'a> {
+    type Item = &'a ifaddrs;
 
-    #[allow(unsafe_code)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next.is_null() {
-            return None;
-        };
-
-        Some(unsafe {
-            let result = *self.next;
-            self.next = (*self.next).ifa_next;
-
-            result
-        })
+        // SAFETY: next is null or a live entry of the list the owner holds
+        let entry = unsafe { self.next.as_ref()? };
+        self.next = entry.ifa_next;
+        Some(entry)
     }
 }
 
@@ -283,104 +285,15 @@ impl PlatformSupportOpenBSD {
     }
 
     fn refresh_default_route_interfaces(&mut self) {
-        self.default_route_interfaces.clear();
-
-        let mut mib = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_FLAGS, RTF_GATEWAY];
-        let mut sa_tab: [*const sockaddr; RTAX_MAX as usize] =
-            [std::ptr::null(); RTAX_MAX as usize];
-        let mut rt_buf_len = 0usize;
-
-        // Get memory size for mib result
-        if unsafe {
-            sysctl(
-                mib.as_mut_ptr(),
-                mib.len() as u32,
-                std::ptr::null_mut(),
-                &mut rt_buf_len as *mut usize,
-                std::ptr::null_mut(),
-                0,
-            )
-        } < 0
-        {
-            error!("Unable to get memory size for routing table");
-            return;
-        }
-
-        // Allocate a buffer
-        let mut rt_buf = vec![0u8; rt_buf_len];
-
-        // Get mib result
-        if unsafe {
-            sysctl(
-                mib.as_mut_ptr(),
-                mib.len() as u32,
-                rt_buf.as_mut_ptr() as *mut c_void,
-                &mut rt_buf_len as *mut usize,
-                std::ptr::null_mut(),
-                0,
-            )
-        } < 0
-        {
-            error!("Unable to get memory size for routing table");
-            return;
-        }
-
-        // Process each routing message
-        let mut mib_ptr = rt_buf.as_ptr();
-        let mib_end = unsafe { mib_ptr.add(rt_buf_len) };
-        while mib_ptr < mib_end {
-            let rt = mib_ptr as *const rt_msghdr;
-            let mut sa = unsafe { rt.add(1) } as *const sockaddr;
-            let rtm_addrs = unsafe { (*rt).rtm_addrs };
-            let intf_index = unsafe { (*rt).rtm_index } as u32;
-
-            // Fill in sockaddr table
-            (0..(RTAX_MAX as usize)).for_each(|i| {
-                if rtm_addrs & (1 << i) != 0 {
-                    sa_tab[i] = sa;
-                    sa = unsafe {
-                        let sa_len = (*sa).sa_len;
-                        sa = ((sa as *const u8).add(round_up!(sa_len as usize))) as *const sockaddr;
-                        sa
-                    };
-                }
-            });
-
-            // Advance the pointer before potential continue on match fail below
-            mib_ptr = unsafe { mib_ptr.add((*rt).rtm_msglen.into()) };
-
-            // Look for gateways
-            if rtm_addrs & (RTA_DST | RTA_GATEWAY) == (RTA_DST | RTA_GATEWAY) {
-                // Only interested in AF_INET and AF_INET6 address families
-                // SockAddr::new() takes care of this for us
-                let saddr_dst = match SockAddr::new(sa_tab[RTAX_DST as usize]) {
-                    Some(a) => a,
-                    None => continue,
-                };
-
-                let saddr_gateway = match SockAddr::new(sa_tab[RTAX_GATEWAY as usize]) {
-                    Some(a) => a,
-                    None => continue,
-                };
-
-                // Look for default gateways
-                let dst_ipaddr = match saddr_dst.as_ipaddr() {
-                    Some(a) => a,
-                    None => continue,
-                };
-                let gateway_ipaddr = match saddr_gateway.as_ipaddr() {
-                    Some(a) => a,
-                    None => continue,
-                };
-
-                if dst_ipaddr.is_unspecified() {
-                    self.gateways
-                        .entry(intf_index)
-                        .or_default()
-                        .insert(gateway_ipaddr);
-                }
+        let table = match read_route_table() {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Unable to read routing table: {}", e);
+                return;
             }
-        }
+        };
+        self.gateways.clear();
+        parse_default_gateways(&table, &mut self.gateways);
     }
 
     fn get_interface_flags(&self, flags: c_int) -> InterfaceFlags {
@@ -388,40 +301,38 @@ impl PlatformSupportOpenBSD {
             is_loopback: (flags & IFF_LOOPBACK) != 0,
             is_running: (flags & IFF_RUNNING) != 0,
             is_point_to_point: (flags & IFF_POINTOPOINT) != 0,
-            // OpenBSD doesn't run CLAT
+            // OpenBSD has no CLAT
             is_clat: false,
         }
     }
 
     fn get_address_flags(ifname: &str, addr: sockaddr_in6) -> io::Result<AddressFlags> {
+        let mut flags_req = in6_ifreq::from_name(ifname)?;
+        flags_req.set_addr(addr);
+        let mut lifetime_req = in6_ifreq::from_name(ifname)?;
+        lifetime_req.set_addr(addr);
+
+        // SAFETY: socket() has no pointer arguments
         let sock = unsafe { socket(AF_INET6, SOCK_DGRAM, 0) };
         if sock < 0 {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: sock is a fresh descriptor this guard now owns and closes on every path
+        let sock = unsafe { OwnedFd::from_raw_fd(sock) };
 
-        let mut req = in6_ifreq::from_name(ifname).unwrap_or_log();
-        req.set_addr(addr);
-
-        let res = unsafe { ioctl(sock, SIOCGIFAFLAG_IN6, &mut req) };
-        if res < 0 {
-            unsafe { close(sock) };
+        // SAFETY: flags_req is a full in6_ifreq, the size this ioctl encodes
+        if unsafe { ioctl(sock.as_raw_fd(), SIOCGIFAFLAG_IN6, &mut flags_req) } < 0 {
             return Err(io::Error::last_os_error());
         }
-        let flags = req.get_flags6();
-
-        let mut req = in6_ifreq::from_name(ifname).unwrap_or_log();
-        req.set_addr(addr);
-
-        let res = unsafe { ioctl(sock, SIOCGIFALIFETIME_IN6, &mut req) };
-        unsafe { close(sock) };
-        if res < 0 {
+        // SAFETY: lifetime_req is a full in6_ifreq, the size this ioctl encodes
+        if unsafe { ioctl(sock.as_raw_fd(), SIOCGIFALIFETIME_IN6, &mut lifetime_req) } < 0 {
             return Err(io::Error::last_os_error());
         }
-        let expire = req.get_ia6t_expire();
+        let flags = flags_req.get_flags6();
+        let expire = lifetime_req.get_ia6t_expire();
 
-        // RFC 4941 privacy address only; must not be conflated with stable secured SLAAC
         let is_temporary = (flags & IN6_IFF_TEMPORARY) != 0;
-        let is_dynamic = (flags & (IN6_IFF_DYNAMIC | IN6_IFF_AUTOCONF)) != 0;
+        let is_dynamic = (flags & IN6_IFF_AUTOCONF) != 0;
         let is_preferred = (flags
             & (IN6_IFF_TENTATIVE | IN6_IFF_DUPLICATED | IN6_IFF_DETACHED | IN6_IFF_DEPRECATED))
             == 0;
@@ -435,7 +346,7 @@ impl PlatformSupportOpenBSD {
             is_temporary,
             is_dynamic,
             is_preferred,
-            // OpenBSD doesn't have a CLAT-equivalent address flag
+            // OpenBSD has no CLAT address flag
             is_clat: false,
             expiration_secs,
         })
@@ -450,19 +361,39 @@ impl PlatformSupportOpenBSD {
 
         // Ask for all the addresses we have
         let ifaddrs = IfAddrs::new()?;
-        let mut ifindex = 0;
-        let mut last_name = String::new();
+
+        // Determine all the name to index mappings
+        let mut name_to_index = BTreeMap::<String, u32>::new();
         for ifaddr in ifaddrs.iter() {
-            // Get the interface name
-            let ifname = unsafe { CStr::from_ptr(ifaddr.ifa_name) }
-                .to_string_lossy()
-                .into_owned();
+            let Some(sa) = SockAddr::new(ifaddr.ifa_addr) else {
+                continue;
+            };
+            if sa.sa_family() != AF_LINK as u32 {
+                continue;
+            }
+            let index = u32::from(sa.sa_dl().sdl_index);
+            if index == 0 {
+                continue;
+            }
+            name_to_index.insert(interface_name(ifaddr), index);
+        }
+
+        // Iterate all interface addresses, pair them with their gateways and add them to the interfaces map
+        for ifaddr in ifaddrs.iter() {
+            // Ensure we're getting an ip address here otherwise we'll skip it
+            let Some(sa) = SockAddr::new(ifaddr.ifa_addr) else {
+                continue;
+            };
+            let Some(ip_addr) = sa.as_ipaddr() else {
+                continue;
+            };
+
+            let ifname = interface_name(ifaddr);
 
             // Get the interface index
-            if last_name != ifname {
-                last_name = ifname;
-                ifindex += 1;
-            }
+            let Some(ifindex) = name_to_index.get(&ifname).copied() else {
+                continue;
+            };
 
             // Map the name to a NetworkInterface
             if !interfaces.contains_key(&ifname) {
@@ -481,15 +412,14 @@ impl PlatformSupportOpenBSD {
 
             let mut address_flags = AddressFlags::default();
 
-            let intf_addr = match sockaddr_tools::to_ipaddr(ifaddr.ifa_addr) {
-                None => continue,
-                Some(IpAddr::V4(ipv4_addr)) => {
+            let intf_addr = match ip_addr {
+                IpAddr::V4(ipv4_addr) => {
                     let netmask = match sockaddr_tools::to_ipaddr(ifaddr.ifa_netmask) {
                         Some(IpAddr::V4(netmask)) => netmask,
                         _ => Ipv4Addr::new(0, 0, 0, 0),
                     };
                     let broadcast = if (ifaddr.ifa_flags & (IFF_BROADCAST as u32)) != 0 {
-                        match do_broadcast(&ifaddr) {
+                        match do_broadcast(ifaddr) {
                             Some(IpAddr::V4(broadcast)) => Some(broadcast),
                             _ => None,
                         }
@@ -503,20 +433,20 @@ impl PlatformSupportOpenBSD {
                         broadcast,
                     })
                 }
-                Some(IpAddr::V6(ipv6_addr)) => {
+                IpAddr::V6(ipv6_addr) => {
                     let netmask = match sockaddr_tools::to_ipaddr(ifaddr.ifa_netmask) {
                         Some(IpAddr::V6(netmask)) => netmask,
                         _ => Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0),
                     };
 
                     // Get address flags for ipv6
-                    address_flags = match Self::get_address_flags(
-                        &ifname,
-                        SockAddr::new(ifaddr.ifa_addr).unwrap_or_log().sa_in6(),
-                    ) {
+                    address_flags = match Self::get_address_flags(&ifname, sa.sa_in6()) {
                         Ok(v) => v,
                         Err(e) => {
-                            // debug!("failed to get address flags for ifname={}, ifaddr={:?} : {}", ifname, ifaddr.ifa_addr, e);
+                            debug!(
+                                "failed to get address flags for ifname={}, ifaddr={:?} : {}",
+                                ifname, ifaddr.ifa_addr, e
+                            );
                             continue;
                         }
                     };
@@ -534,5 +464,122 @@ impl PlatformSupportOpenBSD {
         }
 
         Ok(())
+    }
+}
+
+/// The NUL-terminated name getifaddrs attaches to every entry
+fn interface_name(ifaddr: &ifaddrs) -> String {
+    // SAFETY: getifaddrs always sets ifa_name to a NUL-terminated string owned by the list
+    unsafe { CStr::from_ptr(ifaddr.ifa_name) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The kernel's dump of every RTF_GATEWAY route as a run of `rt_msghdr` messages
+fn read_route_table() -> io::Result<Vec<u8>> {
+    let mut mib = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_FLAGS, RTF_GATEWAY];
+    for _ in 0..ROUTE_TABLE_READ_ATTEMPTS {
+        let mut len = 0usize;
+        // SAFETY: a null oldp asks only for the needed size; mib and len outlive the call
+        if unsafe {
+            sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as u32,
+                std::ptr::null_mut(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let mut buf = vec![0u8; len];
+        // SAFETY: buf is writable for len bytes and the kernel lowers len to what it wrote
+        if unsafe {
+            sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as u32,
+                buf.as_mut_ptr().cast(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        } < 0
+        {
+            let err = io::Error::last_os_error();
+            // Only a table that grew since the probe is worth another attempt
+            if err.raw_os_error() == Some(libc::ENOMEM) {
+                continue;
+            }
+            return Err(err);
+        }
+        buf.truncate(len);
+        return Ok(buf);
+    }
+    Err(io_error_other!("routing table kept changing size"))
+}
+
+/// Collect the gateway of every default route, keyed by interface index
+fn parse_default_gateways(table: &[u8], gateways: &mut BTreeMap<u32, BTreeSet<IpAddr>>) {
+    const HEADER_LEN: usize = mem::size_of::<rt_msghdr>();
+    let mut pos = 0;
+    while let Some(msg) = table.get(pos..) {
+        if msg.len() < HEADER_LEN {
+            break;
+        }
+        // SAFETY: msg holds a full header; read_unaligned tolerates the byte buffer's alignment
+        let hdr = unsafe { msg.as_ptr().cast::<rt_msghdr>().read_unaligned() };
+        let msglen = usize::from(hdr.rtm_msglen);
+        let hdrlen = usize::from(hdr.rtm_hdrlen);
+        if msglen < HEADER_LEN || msglen > msg.len() || hdrlen < HEADER_LEN || hdrlen > msglen {
+            break;
+        }
+        pos += msglen;
+
+        if hdr.rtm_addrs & (RTA_DST | RTA_GATEWAY) != (RTA_DST | RTA_GATEWAY) {
+            continue;
+        }
+        let Some((dst, gateway)) = dst_and_gateway(&msg[hdrlen..msglen], hdr.rtm_addrs) else {
+            continue;
+        };
+        if dst.is_unspecified() {
+            gateways
+                .entry(u32::from(hdr.rtm_index))
+                .or_default()
+                .insert(gateway);
+        }
+    }
+}
+
+/// The DST and GATEWAY addresses from a message's sockaddr run, if both are IP addresses
+fn dst_and_gateway(mut addrs: &[u8], rtm_addrs: c_int) -> Option<(IpAddr, IpAddr)> {
+    let mut dst = None;
+    for slot in 0..RTAX_MAX {
+        if rtm_addrs & (1 << slot) == 0 {
+            continue;
+        }
+        let sa_len = usize::from(*addrs.first()?);
+        if sa_len > addrs.len() {
+            return None;
+        }
+        // The sockaddr lies within addrs, so SockAddr's sa_len-bounded reads stay in the message
+        let ip = sockaddr_tools::to_ipaddr(addrs.as_ptr().cast());
+        if slot == RTAX_DST {
+            dst = Some(ip?);
+        } else if slot == RTAX_GATEWAY {
+            return Some((dst?, ip?));
+        }
+        addrs = addrs.get(round_up_sockaddr(sa_len)..).unwrap_or(&[]);
+    }
+    None
+}
+
+/// OpenBSD route.c ROUNDUP: the stride between sockaddrs in a routing message
+fn round_up_sockaddr(len: usize) -> usize {
+    if len > 0 {
+        1 + ((len - 1) | (ROUTE_SOCKADDR_ALIGN - 1))
+    } else {
+        ROUTE_SOCKADDR_ALIGN
     }
 }

@@ -24,12 +24,12 @@ if [ "$TARGET" = "wasm32-unknown-unknown" ]; then
         && { echo "Running veilid-wasm tests for target $TARGET..."; ( cd veilid-wasm && ./wasm_test_js.sh --mock ); }
     status=$?
 else
-    # run_test_attachment_manager and run_test_resolver_live are the native tests that reach the
-    # network. The mock pass below covers the attachment lifecycle and run_test_resolver covers
-    # the resolver against a loopback nameserver, so both are excluded to keep this script offline.
-    echo "Skipping run_test_attachment_manager and run_test_resolver_live (need the network)"
+    # run_test_attachment_manager, run_test_bootstrap and run_test_resolver_live are the native
+    # tests that reach the network. The mock pass below covers the attachment lifecycle and
+    # run_test_resolver covers answer decoding, so all three are excluded to keep this script offline.
+    echo "Skipping run_test_attachment_manager, run_test_bootstrap and run_test_resolver_live (need the network)"
     cargo nextest run --tests --target $TARGET --all-targets --locked --features=debug-locks -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core-optimized -p veilid-core -p veilid-remote-api \
-        -E 'not (test(=tests::native::run_test_attachment_manager) + test(=tests::native::run_test_resolver_live))'
+        -E 'not (test(=tests::native::run_test_attachment_manager) + test(=tests::native::run_test_bootstrap) + test(=tests::native::run_test_resolver_live))'
     status=$?
 
     # A second pass over veilid-core against the mock, where the DHT and transaction suites run.

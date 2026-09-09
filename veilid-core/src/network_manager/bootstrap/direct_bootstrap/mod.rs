@@ -14,7 +14,7 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "net", err, skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    pub async fn direct_bootstrap(&self, dial_info: DialInfo) -> EyreResult<Vec<Arc<PeerInfo>>> {
+    pub async fn direct_bootstrap(&self, dial_info: DialInfo) -> EyreResult<BootstrapPeers> {
         let direct_boot_version = if self
             .config()
             .network
@@ -28,7 +28,11 @@ impl NetworkManager {
         };
 
         if direct_boot_version == 0 {
-            self.direct_bootstrap_v0(dial_info).await
+            let peers = self.direct_bootstrap_v0(dial_info).await?;
+            Ok(BootstrapPeers {
+                peers,
+                records: vec![],
+            })
         } else {
             self.direct_bootstrap_v1(dial_info).await
         }
@@ -76,7 +80,7 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "net", err, skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    async fn direct_bootstrap_v1(&self, dial_info: DialInfo) -> EyreResult<Vec<Arc<PeerInfo>>> {
+    async fn direct_bootstrap_v1(&self, dial_info: DialInfo) -> EyreResult<BootstrapPeers> {
         let timeout_ms = self.config().internal().network.rpc.timeout_ms;
 
         // Send boot magic to requested peer address
@@ -88,11 +92,11 @@ impl NetworkManager {
             .send_recv_data_unbound_to_dial_info(dial_info.clone(), data.clone(), timeout_ms)
             .await?
         else {
-            return Ok(Vec::new());
+            return Ok(BootstrapPeers::default());
         };
         let out_data = network_result_value_or_log!(self attempt => [ format!(": dial_info={}, data.len={}", dial_info, data.len()) ]
         {
-            return Ok(Vec::new());
+            return Ok(BootstrapPeers::default());
         });
 
         let bootv1response_str =
@@ -109,7 +113,7 @@ impl NetworkManager {
         };
 
         // Parse v1 records
-        let bsrecs = match self.parse_bootstrap_v1(&bootv1response.records) {
+        let bsrecs = match self.parse_bootstrap_v1(&bootv1response.records).await {
             Ok(v) => v,
             Err(e) => {
                 veilid_log!(self debug "Direct bootstrap v1 parsing failure: {}", e);
@@ -123,7 +127,7 @@ impl NetworkManager {
         let routing_table = self.routing_table();
 
         let peers: Vec<Arc<PeerInfo>> = bsrecs
-            .into_iter()
+            .iter()
             .filter_map(|bsrec| {
                 if routing_table.matches_own_public_key(bsrec.public_keys()) {
                     veilid_log!(self debug "Ignoring own node in bootstrap list");
@@ -188,6 +192,9 @@ impl NetworkManager {
             })
             .collect();
 
-        Ok(peers)
+        Ok(BootstrapPeers {
+            peers,
+            records: bsrecs,
+        })
     }
 }

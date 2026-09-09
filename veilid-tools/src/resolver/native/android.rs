@@ -1,13 +1,14 @@
 //! Android system resolver via `android_res_nquery`, which honors per-network DNS and private DNS.
 //!
-//! The symbols arrive in API 29 and minSdk is lower, so they are bound at runtime and the
-//! resolver falls back to the public nameserver list when they are absent.
+//! The symbols arrive in API 29 and minSdk is lower, so they are bound at runtime; without them
+//! TXT lookup is unsupported and bootstrap goes direct instead.
 
 use super::*;
-use dns::{classify, parse_response, DnsError, Response};
+use dns::{classify, parse_response, txt_records, DnsError, Response, TYPE_TXT};
+use fd_ready::wait_readable;
 use std::ffi::{c_void, CStr, CString};
 use std::io;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
+use std::os::fd::RawFd;
 use std::os::raw::{c_char, c_int};
 
 type NQueryFn = unsafe extern "C" fn(u64, *const c_char, c_int, c_int, u32) -> c_int;
@@ -34,9 +35,14 @@ pub(crate) fn available() -> bool {
     ANDROID_RES.is_some()
 }
 
+pub(crate) async fn txt_lookup(name: &str) -> Result<Vec<String>, DnsError> {
+    let resp = query(name, TYPE_TXT).await?;
+    Ok(txt_records(&resp))
+}
+
 /// Ask the OS resolver for `name`/`qtype`
 pub(crate) async fn query(name: &str, qtype: u16) -> Result<Response, DnsError> {
-    let fns = ANDROID_RES.as_ref().ok_or(DnsError::NoNameServers)?;
+    let fns = ANDROID_RES.as_ref().ok_or(DnsError::Unsupported)?;
     let dname = CString::new(name).map_err(|_| DnsError::InvalidName("interior nul"))?;
 
     // SAFETY: dname is a NUL-terminated string that outlives the call, and the pointer was
@@ -100,44 +106,6 @@ impl Drop for QueryFd {
         if !self.consumed {
             // SAFETY: fd is live and was not consumed by nresult, so this closes it exactly once
             unsafe { (self.fns.cancel)(self.fd) };
-        }
-    }
-}
-
-/// Borrows the fd for the reactor without ever closing it; QueryFd owns the lifetime
-struct FdHandle(RawFd);
-
-impl AsRawFd for FdHandle {
-    fn as_raw_fd(&self) -> RawFd {
-        self.0
-    }
-}
-
-impl AsFd for FdHandle {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        // SAFETY: the fd stays open for this wrapper's lifetime; QueryFd closes it only after
-        // the reactor registration has been dropped
-        unsafe { BorrowedFd::borrow_raw(self.0) }
-    }
-}
-
-/// Park until the answer is ready, deregistering before the caller closes the fd
-async fn wait_readable(fd: RawFd) -> Result<(), DnsError> {
-    cfg_if! {
-        if #[cfg(feature="rt-tokio")] {
-            let async_fd = tokio::io::unix::AsyncFd::with_interest(
-                FdHandle(fd),
-                tokio::io::Interest::READABLE,
-            )?;
-            let _guard = async_fd.readable().await?;
-            Ok(())
-        } else if #[cfg(feature="rt-async-std")] {
-            // new_nonblocking: the fd is the OS resolver's, so O_NONBLOCK is not ours to set
-            let async_fd = async_io::Async::new_nonblocking(FdHandle(fd))?;
-            async_fd.readable().await?;
-            Ok(())
-        } else {
-            compile_error!("needs executor implementation");
         }
     }
 }

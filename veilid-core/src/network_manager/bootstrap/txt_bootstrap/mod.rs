@@ -18,7 +18,7 @@ impl NetworkManager {
         feature = "instrument",
         instrument(level = "trace", target = "net", err, skip(self))
     )]
-    pub async fn txt_bootstrap(&self, hostname: String) -> EyreResult<Vec<Arc<PeerInfo>>> {
+    pub async fn txt_bootstrap(&self, hostname: String) -> EyreResult<BootstrapPeers> {
         // Get the minimum bootstrap version we are supporting
         // If no keys are available, allow v0.
         // If bootstrap keys are specified, require at least v1.
@@ -84,7 +84,7 @@ impl NetworkManager {
         }
         let Some(max_version) = opt_max_version else {
             veilid_log!(self debug "no suitable txt record in bootstrap response");
-            return Ok(vec![]);
+            return Ok(BootstrapPeers::default());
         };
 
         // Process the best version available
@@ -94,7 +94,7 @@ impl NetworkManager {
                 let record_strings = self.resolve_bootstrap_v0(hostname, txt_strings).await?;
 
                 // Parse v0 records
-                let bsrecs = match self.parse_bootstrap_v0(&record_strings) {
+                let bsrecs = match self.parse_bootstrap_v0(&record_strings).await {
                     Ok(v) => v,
                     Err(e) => {
                         veilid_log!(self debug "Bootstrap v0 parsing failure: {}", e);
@@ -108,7 +108,7 @@ impl NetworkManager {
             }
             BOOTSTRAP_TXT_VERSION_1 => {
                 // Parse v1 records
-                let bsrecs = match self.parse_bootstrap_v1(&txt_strings) {
+                let bsrecs = match self.parse_bootstrap_v1(&txt_strings).await {
                     Ok(v) => v,
                     Err(e) => {
                         veilid_log!(self debug "Bootstrap v1 parsing failure: {}", e);
@@ -122,14 +122,14 @@ impl NetworkManager {
             }
             _ => {
                 veilid_log!(self debug "unsupported bootstrap version");
-                return Ok(vec![]);
+                return Ok(BootstrapPeers::default());
             }
         };
 
         let routing_table = self.routing_table();
 
         let peers: Vec<Arc<PeerInfo>> = bsrecs
-            .into_iter()
+            .iter()
             .filter_map(|bsrec| {
                 if routing_table.matches_own_public_key(bsrec.public_keys()) {
                     veilid_log!(self debug "Ignoring own node in bootstrap list");
@@ -181,7 +181,10 @@ impl NetworkManager {
             })
             .collect();
 
-        Ok(peers)
+        Ok(BootstrapPeers {
+            peers,
+            records: bsrecs,
+        })
     }
 
     /// Bootstrap resolution from TXT into strings
@@ -209,6 +212,10 @@ impl NetworkManager {
         // Get TXT record for bootstrap (bootstrap.veilid.net, bootstrap-v1.veilid.net, or similar)
         let txt_strings = match Resolver::txt_lookup(&hostname).await {
             Ok(v) => v,
+            Err(ResolverError::Unsupported) => {
+                veilid_log!(self debug "No TXT resolver on this platform for '{}'", hostname);
+                return Ok(vec![]);
+            }
             Err(e) => {
                 veilid_log!(self warn
                     "Network may be down. No bootstrap resolution for '{}': {}",

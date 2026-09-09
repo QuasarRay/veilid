@@ -368,21 +368,18 @@ impl AssemblyBuffer {
         let off: LengthType = offset as LengthType;
         let len: LengthType = message_len as LengthType;
 
-        unsafe {
-            // Uninitialized vector, careful!
-            let mut out = unaligned_u8_vec_uninit(chunk.len() + HEADER_LEN);
+        let mut out = zeroed_u8_vec(chunk.len() + HEADER_LEN);
 
-            // Write out header
-            out[0] = VERSION_1;
-            out[1] = 0; // reserved
-            out[2..4].copy_from_slice(&seq.to_be_bytes()); // sequence number
-            out[4..6].copy_from_slice(&off.to_be_bytes()); // offset of chunk inside message
-            out[6..HEADER_LEN].copy_from_slice(&len.to_be_bytes()); // total length of message
+        // Write out header
+        out[0] = VERSION_1;
+        out[1] = 0; // reserved
+        out[2..4].copy_from_slice(&seq.to_be_bytes()); // sequence number
+        out[4..6].copy_from_slice(&off.to_be_bytes()); // offset of chunk inside message
+        out[6..HEADER_LEN].copy_from_slice(&len.to_be_bytes()); // total length of message
 
-            // Write out body
-            out[HEADER_LEN..].copy_from_slice(chunk);
-            out.into()
-        }
+        // Write out body
+        out[HEADER_LEN..].copy_from_slice(chunk);
+        out.into()
     }
 
     /// Split a message into packets and send them serially, ensuring

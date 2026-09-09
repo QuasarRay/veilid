@@ -19,7 +19,7 @@ macro_rules! impl_crypto_typed_group {
             }
 
             #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-            impl_try_from_js_value!([<$name Group>]);
+            impl_try_from_js_value!([<$name Group>], [<$name Group>]::default());
 
             impl [<$name Group>]
             {

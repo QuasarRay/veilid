@@ -1,7 +1,8 @@
-//! DNS wire format: query building and response parsing for the record types veilid uses.
+//! DNS wire format: response parsing for the record types veilid reads.
 //!
 //! Decoding is defensive: every read is bounds-checked, compression pointers must point
-//! strictly backward with a hop cap, and any malformed section rejects the whole message.
+//! strictly backward, the hop cap and name length cap bound any pointer cycle, and any
+//! malformed section rejects the whole message.
 
 use super::*;
 
@@ -12,7 +13,6 @@ const FLAG_QR: u16 = 0x8000;
 const FLAG_OPCODE_MASK: u16 = 0x7800;
 const FLAG_OPCODE_SHIFT: u16 = 11;
 const FLAG_TC: u16 = 0x0200;
-const FLAG_RD: u16 = 0x0100;
 const FLAG_RCODE_MASK: u16 = 0x000F;
 
 const LABEL_KIND_MASK: u8 = 0xC0;
@@ -22,18 +22,12 @@ const POINTER_OFFSET_MASK: u8 = 0x3F;
 pub(crate) const TYPE_PTR: u16 = 12;
 pub(crate) const TYPE_TXT: u16 = 16;
 pub(crate) const TYPE_OPT: u16 = 41;
-pub(crate) const CLASS_IN: u16 = 1;
 
 pub(crate) const RCODE_NOERROR: u16 = 0;
 pub(crate) const RCODE_NXDOMAIN: u16 = 3;
 
-pub(crate) const MAX_LABEL_LEN: usize = 63;
 pub(crate) const MAX_NAME_LEN: usize = 255;
 pub(crate) const MAX_POINTER_HOPS: usize = 16;
-/// EDNS0 UDP payload size advertised in queries (RFC 6891 / DNS flag day 2020 value)
-pub(crate) const EDNS_UDP_PAYLOAD: u16 = 1232;
-/// Receive buffer for a UDP answer; servers may ignore the advertised payload size
-pub(crate) const MAX_UDP_MESSAGE_LEN: usize = 4096;
 
 /// A question section entry
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,79 +65,6 @@ pub(crate) struct Response {
     pub rcode: u16,
     pub questions: Vec<Question>,
     pub answers: Vec<ResourceRecord>,
-}
-
-impl Response {
-    /// True if this is a reply to the query with `id` for `name`/`qtype`
-    #[must_use]
-    pub(crate) fn matches(&self, id: u16, name: &str, qtype: u16) -> bool {
-        if self.id != id || !self.qr || self.opcode != 0 || self.questions.len() != 1 {
-            return false;
-        }
-        let q = &self.questions[0];
-        q.qtype == qtype
-            && q.qclass == CLASS_IN
-            && q.name
-                .trim_end_matches('.')
-                .eq_ignore_ascii_case(name.trim_end_matches('.'))
-    }
-}
-
-/// Append `name` in wire form (length-prefixed labels, root terminator)
-pub(crate) fn encode_name(name: &str, out: &mut Vec<u8>) -> Result<(), DnsError> {
-    if !name.is_ascii() {
-        return Err(DnsError::InvalidName("non-ascii"));
-    }
-    let name = name.strip_suffix('.').unwrap_or(name);
-    if name.is_empty() {
-        return Err(DnsError::InvalidName("empty name"));
-    }
-    // Root terminator counts toward the wire length limit
-    let mut wire_len = 1;
-    for label in name.split('.') {
-        if label.is_empty() {
-            return Err(DnsError::InvalidName("empty label"));
-        }
-        if label.len() > MAX_LABEL_LEN {
-            return Err(DnsError::InvalidName("label too long"));
-        }
-        wire_len += 1 + label.len();
-        if wire_len > MAX_NAME_LEN {
-            return Err(DnsError::InvalidName("name too long"));
-        }
-        out.push(label.len() as u8);
-        out.extend_from_slice(label.as_bytes());
-    }
-    out.push(0);
-    Ok(())
-}
-
-/// Build a recursion-desired query for `name`/`qtype`, with an EDNS0 OPT record when a UDP payload size is given
-pub(crate) fn build_query(
-    id: u16,
-    name: &str,
-    qtype: u16,
-    edns_udp_payload: Option<u16>,
-) -> Result<Vec<u8>, DnsError> {
-    let mut out = Vec::with_capacity(HEADER_LEN + MAX_NAME_LEN + 4 + 11);
-    out.extend_from_slice(&id.to_be_bytes());
-    out.extend_from_slice(&FLAG_RD.to_be_bytes());
-    out.extend_from_slice(&1u16.to_be_bytes());
-    out.extend_from_slice(&0u16.to_be_bytes());
-    out.extend_from_slice(&0u16.to_be_bytes());
-    out.extend_from_slice(&u16::from(edns_udp_payload.is_some()).to_be_bytes());
-    encode_name(name, &mut out)?;
-    out.extend_from_slice(&qtype.to_be_bytes());
-    out.extend_from_slice(&CLASS_IN.to_be_bytes());
-    if let Some(payload) = edns_udp_payload {
-        // OPT pseudo-record: root name, class carries the payload size, TTL carries version/flags
-        out.push(0);
-        out.extend_from_slice(&TYPE_OPT.to_be_bytes());
-        out.extend_from_slice(&payload.to_be_bytes());
-        out.extend_from_slice(&0u32.to_be_bytes());
-        out.extend_from_slice(&0u16.to_be_bytes());
-    }
-    Ok(out)
 }
 
 /// Parse a complete DNS message
@@ -256,7 +177,7 @@ fn decode_name(msg: &[u8], start: usize) -> Result<(String, usize), DnsError> {
                     .get(pos + 1)
                     .ok_or(DnsError::Malformed("truncated pointer"))?;
                 let target = (usize::from(len & POINTER_OFFSET_MASK) << 8) | usize::from(lo);
-                // Backward-only pointers cannot loop; the hop cap bounds label re-walks
+                // A backward pointer can still cycle through labels; the hop cap ends that
                 if target >= pos {
                     return Err(DnsError::Malformed("forward pointer"));
                 }
@@ -307,7 +228,7 @@ fn parse_rr(msg: &[u8], pos: usize) -> Result<(ResourceRecord, usize), DnsError>
 }
 
 /// TXT rdata is a sequence of length-prefixed character-strings that must exactly tile it
-fn parse_txt(rdata: &[u8]) -> Result<Vec<Vec<u8>>, DnsError> {
+pub(crate) fn parse_txt(rdata: &[u8]) -> Result<Vec<Vec<u8>>, DnsError> {
     let mut strings = Vec::new();
     let mut pos = 0;
     while pos < rdata.len() {
