@@ -4,7 +4,7 @@
   - new crate added to hold monomorphic exports for crates that want to be fully speed optimized in all build profiles
 
 - veilid-core:
-  - **Security** B01T direct-bootstrap requests are answered from the last successful bootstrap set held by the routing domain, which is persisted across restarts. The handler no longer resolves DNS, so an unauthenticated packet can no longer cause non-veilid traffic or block a worker on a slow resolver.
+  - **Security** B01T direct-bootstrap requests are answered from the last successful bootstrap set held by the routing domain, which is persisted across restarts. The handler no longer resolves DNS, so an unauthenticated packet can no longer cause non-veilid traffic or block a worker on a slow resolver. Thanks to quikchaos for reporting this issue!
   - Bootstrap hostname resolution runs on the blocking pool instead of the executor.
   - Android below API 29 has no system TXT resolver, so a bootstrap hostname is contacted directly on port 5150 over UDP or TCP for a B01T exchange instead. Startup fails on such a device when neither protocol is enabled, since the hostname could never be reached.
   - Stats collection, aggregation, and analysis for all subsystems. Robot-generated python script for reviewing the effect of optimizations.
