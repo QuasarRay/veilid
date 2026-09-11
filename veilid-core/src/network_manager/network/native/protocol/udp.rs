@@ -3,6 +3,20 @@ use stop_token::{StopSource, StopToken};
 
 impl_veilid_log_facility!("net");
 
+/// Consecutive failed receives before this handler gives up and reports an error upward.
+///
+/// `into_network_result` classifies host-unreachable, not-connected and friends as conditions
+/// rather than errors, which is right for one packet and wrong for a socket that returns one
+/// every time: an interface torn down under a bound socket leaves `recv_from` failing instantly
+/// and permanently. Only an `Err` out of here reaches the listener's own consecutive-error
+/// breaker and the network restart behind it.
+const UDP_RECV_FAIL_AFTER_CONSECUTIVE_ERRORS: usize = 16;
+
+/// Delay between retries once a receive failure has repeated. Not applied to the first failure:
+/// a lone ICMP-driven error is ordinary on a UDP socket and must not add latency to the next
+/// packet.
+const UDP_RECV_ERROR_BACKOFF_MS: u32 = 100;
+
 #[derive(Clone)]
 pub struct RawUdpProtocolHandler {
     /// Component registry for logging and access to other subsystems
@@ -57,9 +71,27 @@ impl RawUdpProtocolHandler {
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target = "protocol", err, skip(self, data), fields(self.socket = ?self.socket, data.len = data.len(), ret.len, ret.flow)))]
     pub async fn recv_message(&self, data: &mut [u8]) -> io::Result<(usize, Flow)> {
+        let mut consecutive_errors: usize = 0;
         let (message_len, flow) = loop {
             // Get a packet
-            let (size, remote_addr) = network_result_value_or_log!(self self.socket.recv_from(data).await.into_network_result()? => continue);
+            let nres = self.socket.recv_from(data).await.into_network_result()?;
+            let failure = (!matches!(nres, NetworkResult::Value(_))).then(|| nres.to_string());
+            let (size, remote_addr) = network_result_value_or_log!(self nres => {
+                consecutive_errors += 1;
+                if consecutive_errors >= UDP_RECV_FAIL_AFTER_CONSECUTIVE_ERRORS {
+                    return Err(io::Error::other(format!(
+                        "udp recv failed {} times consecutively: {}",
+                        consecutive_errors,
+                        failure.unwrap_or_default()
+                    )));
+                }
+                // Yield unconditionally: a socket failing instantly would otherwise spin inside a
+                // single poll, which pins a core and leaves the stop token unobserved, so the task
+                // cannot be cancelled either
+                sleep(if consecutive_errors > 1 { UDP_RECV_ERROR_BACKOFF_MS } else { 0 }).await;
+                continue;
+            });
+            consecutive_errors = 0;
 
             // Check to see if it is punished
             if self
@@ -80,7 +112,7 @@ impl RawUdpProtocolHandler {
                     continue;
                 }
                 nres => {
-                    veilid_log!(self debug target:"network_result",
+                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target: "network_result",
                         "UDP::recv_message insert_frame failed: {:?} <= size={} remote_addr={}",
                         nres,
                         size,
@@ -92,7 +124,7 @@ impl RawUdpProtocolHandler {
 
             // Check length of reassembled message (same for all protocols)
             if message.len() > MAX_MESSAGE_SIZE {
-                veilid_log!(self debug "{}({}) at {}@{}:{}", "Invalid message", "received too large UDP message", file!(), line!(), column!());
+                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "{}({}) at {}@{}:{}", "Invalid message", "received too large UDP message", file!(), line!(), column!());
                 continue;
             }
 
@@ -175,7 +207,7 @@ impl RawUdpProtocolHandler {
         {
             Ok(res) => res?,
             Err(_) => {
-                veilid_log!(self debug "UDP send timed out: purpose={} remote_addr={:?}", purpose, remote_addr);
+                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "UDP send timed out: purpose={} remote_addr={:?}", purpose, remote_addr);
                 return Ok(NetworkResult::timeout());
             }
         });
@@ -221,7 +253,7 @@ impl RawUdpProtocolHandler {
         // Zero length packet with a best-effort per-packet TTL
         let res = match send_udp_datagram_with_ttl(self.socket.as_ref(), &[], remote_addr, ttl) {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                veilid_log!(self debug "UDP hole punch send would block: remote_addr={:?}", remote_addr);
+                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "UDP hole punch send would block: remote_addr={:?}", remote_addr);
                 return Ok(NetworkResult::timeout());
             }
             res => res,

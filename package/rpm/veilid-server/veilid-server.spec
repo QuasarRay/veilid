@@ -6,7 +6,6 @@ URL: https://veilid.com
 Group: System
 License: MPL 2.0
 Packager: Veilid Foundation, Inc.
-Requires: glibc-common >= 2.23
 Requires(post): policycoreutils
 Requires(postun): policycoreutils
 BuildRoot: /rpm-work-dir/veilid-server

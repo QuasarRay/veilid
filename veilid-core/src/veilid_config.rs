@@ -421,6 +421,12 @@ pub struct VeilidConfigRoutingTable {
         tsify(type = "string[]")
     )]
     pub bootstrap_keys: Vec<PublicKey>,
+    /// Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.
+    /// Served to direct bootstrap requests without any lookup, and usable to bootstrap this
+    /// node itself. Both record versions are served; bootstrapping from them follows the same
+    /// rule as a TXT bootstrap, so v0 records are only used when no bootstrap keys are set.
+    /// Empty by default, in which case records come from the bootstrap servers.
+    pub bootstrap_records: Vec<String>,
     // xxx pub enable_public_internet: bool,
     // xxx pub enable_local_network: bool,
 }
@@ -448,6 +454,7 @@ impl Default for VeilidConfigRoutingTable {
             secret_keys: SecretKeyGroup::default(),
             bootstrap,
             bootstrap_keys,
+            bootstrap_records: vec![],
         }
     }
 }

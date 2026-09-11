@@ -404,6 +404,7 @@ sealed class VeilidConfigRoutingTable with _$VeilidConfigRoutingTable {
     required List<SecretKey> secretKeys,
     required List<String> bootstrap,
     required List<PublicKey> bootstrapKeys,
+    required List<String> bootstrapRecords,
   }) = _VeilidConfigRoutingTable;
 
   factory VeilidConfigRoutingTable.fromJson(dynamic json) =>

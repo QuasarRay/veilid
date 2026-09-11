@@ -2986,6 +2986,7 @@ pub fn veilid_core::VeilidConfigRPC::default() -> Self
 pub struct veilid_core::VeilidConfigRoutingTable
 pub veilid_core::VeilidConfigRoutingTable::bootstrap: alloc::vec::Vec<alloc::string::String>
 pub veilid_core::VeilidConfigRoutingTable::bootstrap_keys: alloc::vec::Vec<veilid_core::PublicKey>
+pub veilid_core::VeilidConfigRoutingTable::bootstrap_records: alloc::vec::Vec<alloc::string::String>
 pub veilid_core::VeilidConfigRoutingTable::public_keys: veilid_core::PublicKeyGroup
 pub veilid_core::VeilidConfigRoutingTable::secret_keys: veilid_core::SecretKeyGroup
 impl core::default::Default for veilid_core::VeilidConfigRoutingTable

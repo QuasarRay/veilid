@@ -4678,7 +4678,7 @@
       }
     },
     "VeilidAPIError": {
-      "description": "Error type returned by all fallible Veilid API operations.",
+      "description": "Error type returned by all fallible Veilid API operations.\n\nDeliberately has no `Tsify` derive: veilid-wasm exports a `VeilidAPIError` class\nunder that name, so no structural type is generated for it. Adding a variant here\nmeans adding a class in `veilid-wasm/js/veilid_errors.js`.",
       "oneOf": [
         {
           "description": "The API was used before [VeilidAPI](crate::VeilidAPI) was attached, or after it was detached.",
@@ -5717,6 +5717,13 @@
             "type": "string"
           }
         },
+        "bootstrap_records": {
+          "description": "Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.\nServed to direct bootstrap requests without any lookup, and usable to bootstrap this\nnode itself. Both record versions are served; bootstrapping from them follows the same\nrule as a TXT bootstrap, so v0 records are only used when no bootstrap keys are set.\nEmpty by default, in which case records come from the bootstrap servers.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "public_keys": {
           "description": "This node's identity public keys, by crypto kind (empty = generate fresh).",
           "type": "array",
@@ -5736,7 +5743,8 @@
         "public_keys",
         "secret_keys",
         "bootstrap",
-        "bootstrap_keys"
+        "bootstrap_keys",
+        "bootstrap_records"
       ]
     },
     "VeilidConfigTCP": {

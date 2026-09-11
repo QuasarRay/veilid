@@ -24,22 +24,50 @@ if [ "$TARGET" = "wasm32-unknown-unknown" ]; then
         && { echo "Running veilid-wasm tests for target $TARGET..."; ( cd veilid-wasm && ./wasm_test_js.sh --mock ); }
     status=$?
 else
-    # run_test_attachment_manager, run_test_bootstrap and run_test_resolver_live are the native
-    # tests that reach the network. The mock pass below covers the attachment lifecycle and
-    # run_test_resolver covers answer decoding, so all three are excluded to keep this script offline.
-    echo "Skipping run_test_attachment_manager, run_test_bootstrap and run_test_resolver_live (need the network)"
-    cargo nextest run --tests --target $TARGET --all-targets --locked --features=debug-locks -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core-optimized -p veilid-core -p veilid-remote-api \
-        -E 'not (test(=tests::native::run_test_attachment_manager) + test(=tests::native::run_test_bootstrap) + test(=tests::native::run_test_resolver_live))'
-    status=$?
-
+    # The two passes below are separate compilations: resolver-v2 unifies features over the
+    # SELECTED packages, so the mock-api pass shares no dependency artifacts with the default one.
+    # They are functions purely so the argument lists are not duplicated by the timing below.
+    #
+    # run_test_attachment_manager, run_test_bootstrap, run_test_resolver_live and
+    # txt_records_survive_restart are the native tests that reach the network. The mock pass covers
+    # the attachment lifecycle and run_test_resolver covers answer decoding, so all four are
+    # excluded to keep this script offline.
+    native_pass() {
+        cargo nextest run "$@" --tests --target $TARGET --all-targets --locked --features=debug-locks -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core-optimized -p veilid-core -p veilid-remote-api \
+            -E 'not (test(=tests::native::run_test_attachment_manager) + test(=tests::native::run_test_bootstrap) + test(=tests::native::run_test_resolver_live) + test(=tests::bootstrap_records::tests::txt_records_survive_restart))'
+    }
     # A second pass over veilid-core against the mock, where the DHT and transaction suites run.
     # Additive, not a replacement: mock-api compiles out the subsystem unit tests.
-    if [ $status -eq 0 ]; then
-        echo "Running mock-api unit tests for target $TARGET..."
-        cargo nextest run --tests --target $TARGET --all-targets --locked \
+    mock_pass() {
+        cargo nextest run "$@" --tests --target $TARGET --all-targets --locked \
             -p veilid-core --no-default-features \
             --features=default-tokio,debug-api,backtrace,debug-locks,mock-api
+    }
+
+    # Wall time per phase. Each pass is built with --no-run and then run, so the log says
+    # separately how long compiling took and how long the tests took, and how the two feature
+    # configurations divide -- which is what decides whether splitting this job across two runners
+    # is worth a second job's startup cost. The run reuses what --no-run built, so the only cost is
+    # one extra nextest invocation.
+    timed() {  # timed <label> <function> [args...]
+        _label=$1; shift
+        _t=$(date +%s)
+        "$@"
+        _rc=$?
+        echo "TIMING $_label $(( $(date +%s) - _t ))s"
+        return $_rc
+    }
+
+    echo "Skipping run_test_attachment_manager, run_test_bootstrap, run_test_resolver_live and txt_records_survive_restart (need the network)"
+    timed native-build native_pass --no-run
+    status=$?
+    [ $status -eq 0 ] && { timed native-run native_pass; status=$?; }
+
+    if [ $status -eq 0 ]; then
+        echo "Running mock-api unit tests for target $TARGET..."
+        timed mock-build mock_pass --no-run
         status=$?
+        [ $status -eq 0 ] && { timed mock-run mock_pass; status=$?; }
     fi
 fi
 if [ $status -eq 0 ]; then

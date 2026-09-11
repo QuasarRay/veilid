@@ -116,6 +116,7 @@ class VeilidConfigRoutingTable(ConfigBase):
     secret_keys: list[SecretKey]
     bootstrap: list[str]
     bootstrap_keys: list[PublicKey]
+    bootstrap_records: list[str]
 
 
 @dataclass

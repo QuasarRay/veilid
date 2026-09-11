@@ -477,14 +477,16 @@ impl NetworkConnection {
                                     if v.is_invalid_message() {
                                         // Outbound: protocol collision (simultaneous open), not an attack; don't punish the IP
                                         if protocol_connection.direction() == Direction::Out {
-                                            veilid_log!(registry debug
+                                            // Throttled: nothing punishes this one, so a peer
+                                            // can drive it as fast as it can open connections
+                                            veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS,
                                                 "InvalidFraming on outbound {} (protocol collision, not punished): {:?}",
                                                 protocol_connection.flow(),
                                                 v
                                             );
                                             return RecvLoopAction::Finish;
                                         }
-                                        veilid_log!(registry debug
+                                        veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS,
                                             "InvalidFraming on {}: {:?}",
                                             protocol_connection.flow(),
                                             v
@@ -501,11 +503,12 @@ impl NetworkConnection {
                                     // Pass received messages up to the network manager for processing
                                     if let Err(e) = network_manager
                                         .on_recv_envelope(message, flow).measure_debug(TimestampDuration::new_ms(500), |x| {
-                                            veilid_log!(registry debug "on_recv_envelope: {:#} for {} ", x, protocol_connection.flow());
+                                            // Throttled: this one is per message, not per connection
+                                            veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "on_recv_envelope: {:#} for {} ", x, protocol_connection.flow());
                                         })
                                         .await
                                     {
-                                        veilid_log!(registry debug "failed to process received envelope: {}", e);
+                                        veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to process received envelope: {}", e);
                                         RecvLoopAction::Finish
                                     } else {
                                         // Touch the LRU for this connection
@@ -516,7 +519,10 @@ impl NetworkConnection {
                                 }
                                 Err(e) => {
                                     // Connection unable to receive, closed
-                                    veilid_log!(registry error "connection unable to receive: {}", e);
+                                    // Throttled at error level for the same reason as the rpc
+                                    // worker: error is on by default, and connection churn is a
+                                    // peer's decision
+                                    veilid_log!(registry error throttle: PROTOCOL_LOG_THROTTLE_MS, "connection unable to receive: {}", e);
                                     RecvLoopAction::Finish
                                 }
                             }
@@ -567,8 +573,16 @@ impl NetworkConnection {
                 .report_connection_finished(connection_id);
 
             // Close the low level socket
-            if let Err(e) = protocol_connection.close().await {
-                veilid_log!(registry debug "Protocol connection close error: {}", e);
+            // Both the error and the network result: a close that timed out arrives as the
+            // latter, and matching only on `Err` swallowed it
+            match protocol_connection.close().await {
+                Err(e) => {
+                    veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close error: {}", e);
+                }
+                Ok(nres) if !matches!(nres, NetworkResult::Value(_)) => {
+                    veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close incomplete: {}", nres);
+                }
+                Ok(_) => {}
             }
 
             veilid_log!(registry trace

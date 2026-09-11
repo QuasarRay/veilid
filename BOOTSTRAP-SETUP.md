@@ -95,6 +95,17 @@ veilid-server --dump-txt-record <FULL BOOTSTRAP SIGNING KEY PAIR>
 veilid-server --dump-txt-record VLD0:NAPctwUP5NNynWdkX8rcUz_yk44v-cHuDM9ZzvsDXnQ:-ncghvgw2NFQK2RH2vCfvCJj3M3gTVOD-UM08-7n6kQ
 ```
 
+### Optional: serve the record without a lookup
+
+A bootstrap normally learns the records it hands out by looking itself up in DNS. The first
+bootstrap on a new network has nothing to look up yet, and any bootstrap can be told its records
+outright. Paste the V1 line from the step above into `routing_table:`
+
+- `bootstrap_records: ['<the V1 line, exactly as printed>']`
+
+Records configured this way are answered to direct bootstrap requests as soon as the node starts,
+and this node can join the network from them without resolving `bootstrap` at all.
+
 ### Start the Veilid service
 
 Disconnect from the Veilid user and start veilid-server.service.

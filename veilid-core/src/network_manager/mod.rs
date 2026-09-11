@@ -467,6 +467,10 @@ impl NetworkManager {
             return Ok(());
         }
         let config = self.config();
+        if !config.network.routing_table.bootstrap_records.is_empty() {
+            // Configured records need nothing resolved to bootstrap from
+            return Ok(());
+        }
         let has_txt_names = config
             .network
             .routing_table

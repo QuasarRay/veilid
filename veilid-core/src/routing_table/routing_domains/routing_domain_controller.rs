@@ -37,6 +37,10 @@ pub trait RoutingDomainController:
     fn save<'a>(&'a self, _dbx: &'a TableDBTransaction) -> PinBoxFuture<'a, EyreResult<()>> {
         Box::pin(async move { Ok(()) })
     }
+    /// True when this domain's persisted state means the saved routing table must not be trusted
+    fn persisted_state_requires_reset<'a>(&'a self, _db: &'a TableDB) -> PinBoxFuture<'a, bool> {
+        Box::pin(async move { false })
+    }
 
     // Routing Domain Controller Operations
     ///////////////////////////////////////////////////////////////////////////////////////

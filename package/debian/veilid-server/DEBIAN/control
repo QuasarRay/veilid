@@ -3,7 +3,7 @@ Version: $CARGO_VERSION
 Section: network
 Priority: optional
 Architecture: $ARCH
-Depends: libc6 (>= 2.23)
+Depends: libc6 (>= $GLIBC_FLOOR)
 Maintainer: jsmith@veilid.org
 Description: Veilid Server
   This package installs a Veilid peer-to-peer network headless node which can be deployed for

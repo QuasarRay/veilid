@@ -22,7 +22,7 @@ _flutter_persist_path() {
 
 # Download + extract the pinned FLUTTER_VERSION archive for this OS/arch, then put it on PATH.
 i_flutter() {
-    local ver="$FLUTTER_VERSION" base="https://storage.googleapis.com/flutter_infra_release/releases/stable" url file tmp bin
+    local ver="$FLUTTER_VERSION" base="https://storage.googleapis.com/flutter_infra_release/releases/stable" url file tmp bin i
     case "$(uname -s)" in
         Darwin) if [ "$(uname -m)" = arm64 ]; then url="$base/macos/flutter_macos_arm64_${ver}-stable.zip"; else url="$base/macos/flutter_macos_${ver}-stable.zip"; fi ;;
         Linux)  url="$base/linux/flutter_linux_${ver}-stable.tar.xz" ;;
@@ -30,7 +30,14 @@ i_flutter() {
     esac
     echo "    installing Flutter $ver -> $FLUTTER_SDK_DIR/flutter"
     tmp="$(mktemp -d)"; file="$tmp/${url##*/}"
-    if ! curl -fSL "$url" -o "$file"; then echo "    flutter download failed (network?)"; rm -rf "$tmp"; return 1; fi
+    # Retried whole: curl's --retry ignores a TLS handshake failure, which an archive this
+    # size draws often enough to redden CI (the veilid build container cannot use its own
+    # /usr/local/bin/retry here -- deps-flutter starts from the Flutter build image).
+    i=1
+    until curl -fSL --retry "${RETRY_COUNT:-12}" --retry-connrefused "$url" -o "$file"; do
+        if [ "$i" -ge "${RETRY_COUNT:-12}" ]; then echo "    flutter download failed (network?)"; rm -rf "$tmp"; return 1; fi
+        echo "    retry #$i..."; i=$((i+1)); sleep 10
+    done
     rm -rf "$FLUTTER_SDK_DIR"; mkdir -p "$FLUTTER_SDK_DIR"
     case "$file" in
         *.zip)    unzip -q "$file" -d "$FLUTTER_SDK_DIR" ;;

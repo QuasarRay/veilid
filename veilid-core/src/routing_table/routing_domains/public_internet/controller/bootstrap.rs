@@ -17,10 +17,14 @@ impl PublicInternetRoutingDomainController {
         }
         let crypto_kinds = nodes_needed.needs_bootstrap;
 
-        // Don't bother if bootstraps aren't configured
+        // Don't bother if nothing to bootstrap from is configured
         let routing_table = self.routing_table();
-        let bootstraps = self.config().network.routing_table.bootstrap.clone();
-        if bootstraps.is_empty() {
+        let (bootstraps, has_config_records) = {
+            let cfg = self.config();
+            let rt = &cfg.network.routing_table;
+            (rt.bootstrap.clone(), !rt.bootstrap_records.is_empty())
+        };
+        if bootstraps.is_empty() && !has_config_records {
             return Ok(());
         }
 
@@ -57,6 +61,14 @@ impl PublicInternetRoutingDomainController {
         let network_manager = self.network_manager();
         let mut unord = FuturesUnordered::<PinBoxFuture<EyreResult<BootstrapPeers>>>::new();
 
+        // Records supplied by config need no lookup of any kind
+        if has_config_records {
+            unord.push(pin_dyn_future!(async {
+                veilid_log!(self debug "Bootstrap with configured records");
+                pin_future!(network_manager.config_bootstrap()).await
+            }));
+        }
+
         // Get a peer list from bootstraps to process
         for bsdi in bootstrap_dialinfos {
             // Direct bootstrap
@@ -78,11 +90,17 @@ impl PublicInternetRoutingDomainController {
         let mut bootstrapped_peer_id_set = HashSet::<NodeId>::new();
         let mut bootstrapped_peers = vec![];
         let mut bootstrapped_records = vec![];
+        let mut bootstrapped_record_strings = vec![];
         loop {
             match unord.next().timeout_at(stop_token.clone()).await {
                 Ok(Some(res)) => match res {
-                    Ok(BootstrapPeers { peers, records }) => {
+                    Ok(BootstrapPeers {
+                        peers,
+                        records,
+                        record_strings,
+                    }) => {
                         bootstrapped_records.extend(records);
+                        bootstrapped_record_strings.extend(record_strings);
                         for peer in peers {
                             let peer_node_ids = peer.node_ids();
                             let routing_domain = peer.routing_domain();
@@ -121,11 +139,11 @@ impl PublicInternetRoutingDomainController {
 
         self.read_dyn().clear_bootstrap_peers();
 
-        // Own records are kept so a bootstrap alone on its network still answers B01T
-        let (own_records, other_records): (Vec<_>, Vec<_>) = bootstrapped_records
-            .into_iter()
-            .filter(|r| !r.signed_strings().is_empty())
-            .partition(|r| routing_table.matches_own_public_key(r.public_keys()));
+        // Every string received is cached, including versions this build cannot parse, so a node
+        // can pass on what it was told. A receiving client re-verifies signatures against its own
+        // keys, so relaying a string it does not trust costs response size and nothing else.
+        let bootstrap_cache =
+            BootstrapCache::new(bootstrapped_record_strings, bootstrapped_records);
 
         if self
             .unlocked_inner
@@ -144,29 +162,16 @@ impl PublicInternetRoutingDomainController {
         let valid_bootstraps = self
             .bootstrap_with_peer_list(bootstrapped_peers.clone(), crypto_kinds.clone(), stop_token)
             .await?;
+
+        self.record_bootstrap_cache(bootstrap_cache);
+
         if valid_bootstraps.is_empty() {
             veilid_log!(self debug "No external bootstrap peers");
-            self.store_bootstrap_records(own_records);
 
             // Leave bootstrap wait detector set so we don't spam logs
             return Ok(());
         }
         veilid_log!(self debug "External bootstrap peers: {:#?}", valid_bootstraps);
-
-        // Serve only records for bootstraps that answered with valid signed peer info
-        let valid_node_ids: HashSet<NodeId> = valid_bootstraps
-            .iter()
-            .flat_map(|nr| nr.node_ids().iter().cloned().collect::<Vec<_>>())
-            .collect();
-        let mut kept_records = own_records;
-        kept_records.extend(other_records.into_iter().filter(|r| {
-            r.public_keys().iter().any(|pk| {
-                routing_table
-                    .generate_node_id(pk)
-                    .is_ok_and(|nid| valid_node_ids.contains(&nid))
-            })
-        }));
-        self.store_bootstrap_records(kept_records);
 
         // Get all node ids that have a peerinfo in this routing domain
         let mut rd_peer_ids = BTreeSet::new();
@@ -221,13 +226,10 @@ impl PublicInternetRoutingDomainController {
         urls
     }
 
-    /// Replace the served bootstrap records, keeping the last good set if this one is empty
-    fn store_bootstrap_records(&self, records: Vec<BootstrapRecord>) {
-        if records.is_empty() {
-            return;
-        }
-        veilid_log!(self debug "Bootstrap records: {:?}", records.iter().map(|r| r.public_keys().to_string()).collect::<Vec<_>>());
-        self.read_dyn().set_bootstrap_records(records);
+    /// Record what this bootstrap produced, so a restart can serve it without a lookup
+    fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
+        veilid_log!(self debug "Bootstrap records: {:?}", bootstrap_cache.record_strings());
+        self.read_dyn().record_bootstrap_cache(bootstrap_cache);
     }
 
     pub fn bootstrap_with_peer(

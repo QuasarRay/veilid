@@ -166,10 +166,10 @@ where
         let out = match self.stream.clone().next().await {
             Some(Ok(Message::Binary(v))) => {
                 if v.len() > MAX_MESSAGE_SIZE {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "too large ws message",
-                    ));
+                    // Their fault, not ours: an oversized inbound frame is a peer misbehaving, and
+                    // an `Err` here classified it as a local failure. Matches the wasm websocket
+                    // and the tcp framer, and lets the connection processor punish it
+                    return Ok(NetworkResult::invalid_message("too large ws message"));
                 }
                 NetworkResult::Value(v)
             }
@@ -258,7 +258,7 @@ impl WebsocketProtocolHandler {
         socket_addr: SocketAddr,
         local_addr: SocketAddr,
     ) -> io::Result<Option<ProtocolNetworkConnection>> {
-        veilid_log!(self trace "WS: on_accept_async: enter");
+        veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "WS: on_accept_async: enter");
         let request_path_len = self.arc.request_path.len() + 2;
 
         let mut peek_buf = [0u8; MAX_WS_BEFORE_BODY];
@@ -308,7 +308,7 @@ impl WebsocketProtocolHandler {
         let ws_stream = match accept_hdr_async(ps, self.clone()).await {
             Ok(v) => v,
             Err(e) => {
-                veilid_log!(self debug "failed websockets handshake: {}", e);
+                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed websockets handshake: {}", e);
                 return Ok(None);
             }
         };
@@ -335,7 +335,7 @@ impl WebsocketProtocolHandler {
             ws_stream,
         ));
 
-        veilid_log!(self trace
+        veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS,
             "Connection accepted from: {} ({})",
             socket_addr,
             if self.arc.tls { "WSS" } else { "WS" }

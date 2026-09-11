@@ -217,12 +217,24 @@ routing_table:
     secret_keys: null
     bootstrap: ['bootstrap-v1.veilid.net']
     bootstrap_keys: ['VLD0:Vj0lKDdUQXmQ5Ol1SZdlvXkBHUccBcQvGLN9vbLSI7k','VLD0:QeQJorqbXtC7v3OlynCZ_W3m76wGNeB5NTF81ypqHAo','VLD0:QNdcl-0OiFfYVj9331XVR6IqZ49NG-E18d5P7lwi4TA']
+    bootstrap_records: []
     limit_over_attached: 64
     limit_fully_attached: 32
     limit_attached_strong: 16
     limit_attached_good: 8
     limit_attached_weak: 4
 ```
+
+`bootstrap_records` holds whole bootstrap records, verbatim, in the form
+`veilid-server --dump-txt-record` prints. A node answers direct (`B01T`) bootstrap requests from
+them straight away, with no DNS lookup of its own, and can join the network from them without
+resolving `bootstrap` at all. This is how the first bootstrap server on a new network can serve
+records before there is anything to look up. Both record versions are served; bootstrapping from
+them follows the same rule as a TXT bootstrap, so v0 records are only used when `bootstrap_keys`
+is empty. Leaving the list empty (the default) means records come from the bootstrap servers.
+
+Older veilid-server builds do not recognize this key. They log it as an unknown config key and
+start normally, so a config file carrying it is still usable on an older node.
 
 #### core:network:rpc
 

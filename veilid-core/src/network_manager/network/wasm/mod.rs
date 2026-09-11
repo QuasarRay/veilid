@@ -432,7 +432,7 @@ impl PlatformNetwork for WasmNetwork {
                         return Ok(NetworkAttempt::Skipped);
                     }
                     Err(_) => {
-                        veilid_log!(self debug "connection send timed out: flow={:?}", flow);
+                        veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "connection send timed out: flow={:?}", flow);
                         return Ok(NetworkAttempt::Performed(NetworkResult::Timeout));
                     }
                 }
@@ -486,7 +486,7 @@ impl PlatformNetwork for WasmNetwork {
                     )));
                 }
                 Err(_) => {
-                    veilid_log!(self debug "connection send timed out: dial_info={:?}", conn.unique_flow().flow);
+                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "connection send timed out: dial_info={:?}", conn.unique_flow().flow);
                     return Ok(NetworkResult::timeout());
                 }
             }

@@ -1,7 +1,8 @@
-/// Fanout Queue
-/// Keep a deque of unique nodes
-/// Internally the 'front' of the list is the next out, and new nodes are added to the 'back' of the list
-/// When passing in a 'cleanup' function, if it sorts the queue, the 'first' items in the queue are the 'next' out.
+//! Fanout Queue
+//! Keep a deque of unique nodes
+//! Internally the 'front' of the list is the next out, and new nodes are added to the 'back' of the list
+//! When passing in a 'cleanup' function, if it sorts the queue, the 'first' items in the queue are the 'next' out.
+
 use super::*;
 
 impl_veilid_log_facility!("fanout");

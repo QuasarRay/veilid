@@ -198,8 +198,9 @@ use self::core_context::RegisteredComponents;
 use self::logging::{
     debug_duration, impl_veilid_log_facility, log_veilid_api_error, network_result_value_or_log,
     record_duration, record_duration_fut, veilid_log, veilid_log_dbg, veilid_log_err,
-    veilid_log_event, DurationRecorder, MeasureDebugFuture, MeasureFuture,
-    VeilidComponentLogFacilities, VeilidComponentLogFacility, DEBUGWARN,
+    veilid_log_event, veilid_log_throttled_event, DurationRecorder, MeasureDebugFuture,
+    MeasureFuture, VeilidComponentLogFacilities, VeilidComponentLogFacility, DEBUGWARN,
+    PROTOCOL_LOG_THROTTLE_MS,
 };
 use self::stats_accounting::*;
 use self::stats_mutex::*;

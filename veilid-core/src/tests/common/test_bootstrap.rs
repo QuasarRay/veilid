@@ -10,20 +10,17 @@ fn registry(api: &VeilidAPI) -> VeilidComponentRegistry {
     api.core_context().expect("api not started").registry()
 }
 
-fn signed_strings(records: &[BootstrapRecord]) -> BTreeSet<String> {
-    records
-        .iter()
-        .flat_map(|r| r.signed_strings().iter().cloned())
-        .collect()
+fn as_set(strings: &[String]) -> BTreeSet<String> {
+    strings.iter().cloned().collect()
 }
 
-async fn wait_for_bootstrap_records(api: &VeilidAPI) -> Vec<BootstrapRecord> {
+async fn wait_for_bootstrap_records(api: &VeilidAPI) -> BootstrapCache {
     let routing_table = registry(api).routing_table();
     let mut waited_ms = 0;
     loop {
-        let records = routing_table.get_bootstrap_records(RoutingDomain::PublicInternet);
-        if !records.is_empty() || waited_ms >= BOOTSTRAP_RECORDS_WAIT_MS {
-            return records;
+        let cache = routing_table.get_served_bootstrap_cache(RoutingDomain::PublicInternet);
+        if !cache.is_empty() || waited_ms >= BOOTSTRAP_RECORDS_WAIT_MS {
+            return cache;
         }
         sleep(POLL_MS).await;
         waited_ms += POLL_MS;
@@ -51,7 +48,7 @@ fn local_udp_bootstrap_url(api: &VeilidAPI) -> String {
 
 /// Node A bootstraps from DNS and keeps its verified v1 records.
 /// Node B lists only A as a bootstrap, so everything it learns arrives over B01T.
-async fn test_txt_then_direct() {
+async fn test_txt_then_direct() -> BTreeSet<String> {
     info!("test_txt_then_direct: starting node A");
     let (update_callback, config) = fixture_veilid_core();
     let api_a = api_startup(update_callback, config)
@@ -60,9 +57,9 @@ async fn test_txt_then_direct() {
     api_a.attach().await.unwrap();
     fixture_wait_for_public_internet_ready(&api_a).await;
 
-    let records_a = wait_for_bootstrap_records(&api_a).await;
-    assert!(!records_a.is_empty(), "TXT bootstrap stored no records");
-    let strings_a = signed_strings(&records_a);
+    let cache_a = wait_for_bootstrap_records(&api_a).await;
+    assert!(!cache_a.is_empty(), "TXT bootstrap stored no records");
+    let strings_a = as_set(cache_a.record_strings());
     let response = registry(&api_a)
         .network_manager()
         .boot_v1_response()
@@ -95,7 +92,7 @@ async fn test_txt_then_direct() {
             .direct_bootstrap(dial_info.clone())
             .await
             .expect("direct bootstrap failed");
-        strings_b = signed_strings(&peers.records);
+        strings_b = as_set(&peers.record_strings);
         if !strings_b.is_empty() {
             break;
         }
@@ -103,16 +100,71 @@ async fn test_txt_then_direct() {
     }
     assert_eq!(strings_b, strings_a);
 
-    // B's own bootstrap task validates peers through A and stores what it validated
-    let records_b = wait_for_bootstrap_records(&api_b).await;
-    assert!(!records_b.is_empty(), "direct bootstrap stored no records");
-    assert!(signed_strings(&records_b).is_subset(&strings_a));
+    // B's own bootstrap task records what A handed it
+    let cache_b = wait_for_bootstrap_records(&api_b).await;
+    assert!(!cache_b.is_empty(), "direct bootstrap stored no records");
+    assert!(as_set(cache_b.record_strings()).is_subset(&strings_a));
+
+    // Having recorded a bootstrap, neither node's saved table is condemned on the next start
+    registry(&api_a).routing_table().flush().await;
+    assert!(!persisted_state_requires_reset(&api_a).await);
 
     info!("test_txt_then_direct: shutting down");
     api_b.shutdown().await;
     api_a.shutdown().await;
+
+    strings_a
+}
+
+/// Node C is told the records outright, so it bootstraps with no lookup of any kind.
+/// It is configured with both the v0 and v1 strings a TXT lookup yields, serves both, and
+/// bootstraps from the v1 ones because it has keys to check them with.
+async fn test_config_records_bootstrap(strings_a: &BTreeSet<String>) {
+    assert!(
+        strings_a.iter().any(|s| s.starts_with("0|")),
+        "expected v0 strings to configure"
+    );
+    assert!(
+        strings_a.iter().any(|s| s.starts_with("1|")),
+        "expected v1 strings to configure"
+    );
+
+    info!("test_config_records_bootstrap: starting node C");
+    let (update_callback, mut config) = fixture_veilid_core();
+    config.network.routing_table.bootstrap = vec![];
+    config.network.routing_table.bootstrap_records = strings_a.iter().cloned().collect();
+    let api_c = api_startup(update_callback, config)
+        .await
+        .expect("startup failed");
+    api_c.attach().await.unwrap();
+
+    // Served before anything is bootstrapped, straight from the config, both versions
+    wait_for_network_started(&api_c).await;
+    let served = registry(&api_c)
+        .routing_table()
+        .get_served_bootstrap_cache(RoutingDomain::PublicInternet);
+    assert_eq!(as_set(served.record_strings()), *strings_a);
+
+    // And good enough to actually join with
+    fixture_wait_for_public_internet_ready(&api_c).await;
+
+    info!("test_config_records_bootstrap: shutting down");
+    api_c.shutdown().await;
+}
+
+async fn persisted_state_requires_reset(api: &VeilidAPI) -> bool {
+    let registry = registry(api);
+    let table_store = registry.table_store();
+    let db = table_store
+        .open("routing_table", 1)
+        .await
+        .expect("should open routing table db");
+    let routing_table = registry.routing_table();
+    let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
+    rdc.persisted_state_requires_reset(&db).await
 }
 
 pub async fn test_all() {
-    test_txt_then_direct().await;
+    let strings_a = test_txt_then_direct().await;
+    test_config_records_bootstrap(&strings_a).await;
 }

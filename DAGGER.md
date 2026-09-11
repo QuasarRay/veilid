@@ -36,10 +36,16 @@ dagger -c 'build-linux-arm-64 $(host | directory --gitignore .)'
 # Package for distribution
 dagger -c 'package-linux $(host | directory --gitignore .) | export ./target/dist'
 
-# Run individual operations
-dagger -v 'clippy $(host | directory --gitignore .)'
-dagger -v 'test-native $(host | directory --gitignore .)'
+# Run individual gates
+dagger -v 'lint $(host | directory --gitignore .)'
+dagger -v 'census $(host | directory --gitignore .)'
+dagger -v 'test-unit-tests-all $(host | directory --gitignore .)'
 ```
+
+Pass the source with `$(host | directory --gitignore .)` rather than `--source .`. Dagger cannot
+apply `.gitignore` to a function argument, so `--source .` falls back to the short artifact-tree
+list in `.dagger/src/veilid/ignore_patterns.py`; the `--gitignore` form filters from the repo's
+own `.gitignore` files and stays correct as they change.
 
 ## Function Reference
 
@@ -48,46 +54,66 @@ dagger -v 'test-native $(host | directory --gitignore .)'
 | Dagger Function | Earthly Target      | Description                                                                |
 | --------------- | ------------------- | -------------------------------------------------------------------------- |
 | `deps_base()`   | `deps-base`         | Install build prerequisites (Ubuntu 18.04, CMake, cross-compilation tools) |
-| `deps_rust()`   | `deps-rust`         | Install Rust toolchain, targets, cargo tools, and Zig                      |
+| `tool_rust()`   | `tool-rust`         | Rust toolchain: pinned compiler, clippy, every target in versions.env, test nightly |
+| `tool_cargo_bins()` | `tool-cargo-bins` | cargo-binstall, msrv, nextest, docs-rs, public-api, sync-readme             |
+| `tool_astgrep()` | `tool-astgrep`     | ast-grep, the census gate engine (source build)                            |
+| `tool_zigbuild()` | `tool-zigbuild`   | cargo-zigbuild (source build)                                              |
+| `tool_zig()`    | `tool-zig`          | Zig, for cross-compilation                                                 |
+| `tool_binaryen()` | `tool-binaryen`   | wasm-opt                                                                   |
+| (n/a)           | `tool-flutter`      | Flutter SDK; in Dagger the SDK install lives in `deps_flutter()`           |
+| `deps_rust()`   | `deps-rust`         | Every cached tool assembled into one toolchain                             |
 | `deps_linux()`  | `deps-linux`        | Linux build dependencies (equivalent to deps-rust in Dagger)               |
-| `deps_cache()`  | `build-linux-cache` | Pre-compile Rust dependencies using cargo-chef for faster builds           |
-| `publish_debug_cache()` | `build-linux-cache` + `SAVE IMAGE --push` | Publish the cooked dependency cache to the registry as `build-cache:<cache-tag>` (cook layered at `/baked/target`) |
+| `fetch_cache()` | `fetch-cache`       | Pre-download every crate in Cargo.lock so no job depends on reaching crates.io |
+| `deps_flutter()` | `deps-flutter`     | Flutter SDK on `FLUTTER_BUILD_IMAGE`, no Rust (amd64-only)                 |
+| `code_flutter_rust()` | `code-flutter-rust` | Source plus the Rust toolchain, for the gates that build the native library |
+| `publish_crate_cache()` | `fetch-cache` + `SAVE IMAGE --push` | Publish the crate download cache to the registry as `crate-cache:<crate-cache-tag>` |
+
+Each tool is cached on its own version. Earthly keeps `+tool-<name>` as a registry image
+tagged by `scripts/tool_tags.sh`, so a bump to one version in `.dagger/versions.env` rebuilds
+that tool and nothing else; CI passes `--TOOLS=container` to pull them and `build_tools`
+pushes any tag that is missing. Dagger needs no registry — one function per tool is enough for
+the engine to cache each on its own inputs. The `registry_cleanup` job (scheduled, or run by
+hand from the web UI) keeps the 3 most recent tags per `tool-*` repository and in `crate-cache`,
+plus whichever tag the build currently asks for.
 
 ### Source and Code Preparation
 
 | Dagger Function | Earthly Target | Description                                                              |
 | --------------- | -------------- | ------------------------------------------------------------------------ |
-| `code_linux()`  | `code-linux`   | Import source code with build dependencies, supports multiple base modes |
+| `code_linux()`   | `code-linux`   | Import source code with build dependencies, supports multiple base modes |
+| `code_flutter()` | `code-flutter` | Import source code on top of the Flutter SDK                             |
 
-**Base modes:**
-- `local` (default): Uses local deps_cache 
-- `uncached`: Uses deps_linux without cache
-- `container`: Uses the remote registry cache image `build-cache:<cache-tag>` (`--cache-tag`, default `latest`)
+**Crate cache:** `--crate-cache-tag` (Earthly: `--CRATE_CACHE_TAG`) names a published
+`crate-cache:<tag>` image to start from. Unset — the default — downloads crates during the
+build. Nothing compiled is cached either way; the cache exists so that no job depends on
+reaching crates.io, not to make builds warm.
 
-Dagger's `with_directory` replaces the mount path (unlike Earthly `COPY`, which merges),
-so `code_linux` captures the cooked cargo target before mounting source and re-injects
-it at `/veilid/target` afterwards — the same absolute path the cook used, keeping the
-chef fingerprints valid.
+The cache lives in `CARGO_HOME`, outside `/veilid`, which is what lets both builders share one
+code path. Dagger's `with_directory` replaces its mount path where Earthly's `COPY` merges, so
+anything cached *under* `/veilid` would need capturing before the source mount and re-injecting
+after in one builder and not the other. Keeping it in `CARGO_HOME` removes that asymmetry, and
+with it the class of bugs where a mis-ordered call silently wipes the cache.
 
-**Expected partial cache misses (by design, not regressions):** the cooks build 5
-packages, while the clippy scripts check the whole workspace — resolver-v2 feature
-unification can give some dependencies different feature sets than the cook, and
-`_unit_tests_all.sh` adds `--features=debug-locks` the cook doesn't; those deps
-recompile once per run.
-
-**CI tag convention (for the Earthly→Dagger switch):** the module is tag-agnostic;
-CI computes content-keyed tags like `debug-<branch>-<toolkey>-<rustkey>-<arch>`
-(toolkey = versions.env + module source hash; rustkey = Cargo.lock + manifests hash;
-images are single-arch, so the consumer arch must be in the tag). See veilidchat's
-`.gitlab-ci.yml` for the working pattern.
+**CI tag convention:** `scripts/cache_tags.sh crate` prints the tag — a digest of `Cargo.lock`,
+which is exactly and only what decides the download set. `fetch_cache` publishes on a miss, so a
+dependency bump builds one new tag and every pipeline on the same lockfile shares one image.
+Consumers fall back to downloading when the tag is absent, so a missing image is a slow build,
+never a failed one.
 
 ### Linting and Code Quality
 
-| Dagger Function | Earthly Target | Description                                             |
-| --------------- | -------------- | ------------------------------------------------------- |
-| `clippy()`      | `clippy`       | Run clippy linting for Linux, Windows, and WASM targets |
+| Dagger Function       | Earthly Target        | Description                                                  |
+| --------------------- | --------------------- | ------------------------------------------------------------ |
+| `lint()`              | `lint`                | Run every clippy target in one pass (`scripts/_lint_all.sh`)  |
+| `test_clippy_*()`     | `test-clippy-*`       | One function per clippy target, for parallel CI jobs          |
+| `census()`            | `census`              | Census rule self-test, then the inventory drift check         |
+| `dart_format()`       | `test-dart-format`    | Dart format gate over veilid-flutter                          |
+| `public_api()`        | `public-api`          | Public API drift check                                        |
+| `msrv()`              | `msrv`                | MSRV check for every crate                                    |
+| `smoketest()`         | `smoketest`           | Smoketest for every published crate                           |
 
-**Note:** macOS target is commented out due to cross-compilation complexity.
+The `aarch64-apple-darwin` clippy target runs; no Apple binary is built (see
+[Cross-Compilation Status](#cross-compilation-status)).
 
 ### Building
 
@@ -101,10 +127,17 @@ images are single-arch, so the consumer arch must be in the tag). See veilidchat
 
 ### Testing
 
-| Dagger Function | Earthly Target(s)         | Description                                     |
-| --------------- | ------------------------- | ----------------------------------------------- |
-| `test_docs()`   | `unit-tests-docs-linux`   | Build and test documentation                    |
-| `test_all()`    | `unit-tests-linux`        | Run all test suites: clippy, native, docs, WASM |
+| Dagger Function              | Earthly Target(s)          | Description                                              |
+| ---------------------------- | -------------------------- | -------------------------------------------------------- |
+| `test_docs()`                | `package-tests-docs-linux` | Build docs against a given nightly                        |
+| `test_unit_tests_all()`      | `test-unit-tests-all`      | Run the Rust unit tests                                   |
+| `test_census()`              | `test-census`              | Census gates                                              |
+| `test_dart_format()`         | `test-dart-format`         | Dart format gate                                          |
+| `test_flutter_integration()` | `test-flutter-integration` | veilid-flutter against the in-process mock, headless      |
+| `test_all()`                 | `test-all`                 | Every gate, serially — for a desktop, not for CI          |
+
+`test_all()` runs the gates in one process, one after another. CI fans the individual
+`test_*` functions out instead.
 
 ### Packaging
 
@@ -141,9 +174,9 @@ SAVE ARTIFACT ./target/x86_64-unknown-linux-gnu AS LOCAL ./target/artifacts/x86_
 dagger -c 'build-linux-amd-64 $(host | directory --gitignore .) | export ./target/artifacts/x86_64-unknown-linux-gnu'
 ```
 
-#### 2. **Function Consolidation**
-- **Earthly:** 7 separate `unit-tests-*` targets
-- **Dagger:** 2 focused test functions (`test_docs`, `test_all`)
+#### 2. **Gate Granularity**
+- Each Earthly `test-*` target has one `test_*` function, so CI can fan them out as
+  separate jobs; `test_all` runs the same set serially for a desktop.
 
 #### 3. **Cross-compilation Simplification**
 - **Earthly:** Complex MinGW, cross-gcc, libc-dev packages
@@ -156,16 +189,14 @@ dagger -c 'build-linux-amd-64 $(host | directory --gitignore .) | export ./targe
 ## Functions Not Migrated
 
 ### Skipped Functions
-| Earthly Target                  | Reason                              |
-| ------------------------------- | ----------------------------------- |
-| `deps-android`                  | Skipped for initial migration       |
-| `code-android`                  | Skipped for initial migration       |
-| `build-android`                 | Skipped for initial migration       |
-| `build-macos-arm64`             | Commented out in original Earthfile |
-| `unit-tests-clippy-macos-linux` | needs macOS cross-compilation       |
+| Earthly Target      | Reason                                       |
+| ------------------- | -------------------------------------------- |
+| `deps-android`      | No Android build in CI yet                   |
+| `code-android`      | No Android build in CI yet                   |
+| `build-android`     | No Android build in CI yet                   |
+| `build-macos-arm64` | Commented out in the Earthfile               |
 
 ### Functions That Didn't Need Migration
-- **Individual clippy targets:** Consolidated into single `clippy()` function
 - **Wait/Build orchestration:** Handled automatically by Dagger's execution model
 
 ## Cross-Compilation Status
@@ -175,15 +206,32 @@ dagger -c 'build-linux-amd-64 $(host | directory --gitignore .) | export ./targe
 | `x86_64-unknown-linux-gnu`  | ✅ Working  | Uses cross-compilation toolchain           |
 | `x86_64-pc-windows-gnu`     | ✅ Working  | Uses MinGW-w64                             |
 | `aarch64-unknown-linux-gnu` | ✅ Working  | Uses cross-compilation toolchain           |
-| `aarch64-apple-darwin`      | ❌ Disabled | Requires osxcross or similar complex setup |
+| `aarch64-apple-darwin`      | ⚠️ Lint only | Clippy runs; linking needs osxcross         |
 | `wasm32-unknown-unknown`    | ✅ Working  | Native WASM support                        |
+
+## Host Architecture
+
+`deps_base` through `package_*` run on either amd64 or arm64. The Flutter gates
+(`dart_format`, `flutter_integration`) do not: Flutter ships a linux-x64 SDK only, so
+`deps_flutter` fails fast on an arm64 engine rather than half-installing.
+
+## versions.env
+
+Every pinned version comes from `.dagger/versions.env`, which the Earthfile, the
+`dev-setup` scripts and this module all read. The module imports it by path at load time
+(the module runtime mounts `.dagger`, not the repo root).
+
+`DIRECTORY_IGNORE_PATTERNS` drops `.dagger` from the source upload, so the file is not in
+the mounted tree. `code_flutter` writes it back to `/veilid/.dagger/versions.env`, which
+`scripts/_dart_sources.sh` and `scripts/_flutter_integration_tests.sh` both source. A gate
+that needs a pin from versions.env and runs on `code_linux` has to do the same.
 
 ## Usage Examples
 
 ### Development Workflow
 ```bash
 # Quick development check
-dagger -c 'clippy $(host | directory --gitignore .)'
+dagger -c 'lint $(host | directory --gitignore .)'
 
 # Run all tests
 dagger -c 'test-all $(host | directory --gitignore .)'
@@ -205,10 +253,10 @@ dagger -c 'package-linux $(host | directory --gitignore .) --is-nightly true | e
 ### Cache Management
 ```bash
 # Use uncached mode for clean builds
-dagger call test-all --source . --base uncached
+dagger -c 'test-all $(host | directory --gitignore .)'
 
 # Use container mode for CI (with remote cache)
-dagger call test-all --source . --base container --ci-registry-image registry.example.com/veilid/veilid
+dagger -c 'test-all $(host | directory --gitignore .) --crate-cache-tag 3289c6b3 --ci-registry-image registry.example.com/veilid/veilid'
 ```
 
 ### Using Podman
@@ -241,16 +289,29 @@ uv sync
 
 Now, point your development environment to the `.dagger/.venv/bin/python` interpreter
 
-## Performance Benefits
+## What the crate cache costs and buys
 
-1. **Better Caching:** Dagger's content-addressed caching is more efficient than Earthly's layer caching
-2. **Parallel Execution:** Automatic parallelization without manual `WAIT`/`BUILD` blocks
-3. **Simplified Cross-compilation:** Zig handles most cross-compilation complexity
-4. **Artifact Management:** No need for manual registry management or local artifact copying
+Measured on the committed lockfile (670 packages, 660 of them external):
+
+| | |
+| --- | --- |
+| `cargo fetch --locked` | ~10s |
+| `registry/cache` + `registry/index` (what ships) | 152 MB |
+| `registry/src` (dropped; re-extracted locally, no network) | a further 895 MB |
+
+It replaces a `cargo-chef` dependency prebuild that took ~40 minutes of serial cooking, ran
+all-or-nothing, produced a multi-gigabyte image, and matched only five of the nine consuming
+configurations. What it buys is narrower and unconditional: no job depends on reaching
+crates.io. What it gives up is warm dependency artifacts — every job now compiles its own
+dependencies, in parallel, which is roughly what a cold pipeline already cost.
+
+`fetch_cache` asserts completeness by re-running the fetch with `--offline` after dropping
+`registry/src`. An image that exists but is short a crate is otherwise a silent downstream
+failure: every job quietly reaches the network again.
 
 ## Migration Notes
 
-- All functions support the same `base` parameter for cache control
+- Cache control is `--crate-cache-tag`; there is no `base` parameter
 - Package functions now organize output in structured directories
 - Test functions provide detailed output for better CI integration
 - Cross-compilation is more reliable with Zig toolchain

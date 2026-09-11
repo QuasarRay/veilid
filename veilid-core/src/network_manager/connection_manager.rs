@@ -5,8 +5,12 @@ use stop_token::future::FutureExt;
 
 impl_veilid_log_facility!("net");
 
-const PROTECTED_CONNECTION_DROP_SPAN: TimestampDuration = TimestampDuration::new_secs(10);
+pub(super) const PROTECTED_CONNECTION_DROP_SPAN: TimestampDuration =
+    TimestampDuration::new_secs(10);
 const PROTECTED_CONNECTION_DROP_COUNT: usize = 3;
+/// Minimum gap between dial-info confirmations triggered by an emptied connection table.
+/// Without it a peer that churns the last connection sets the rate for real network work.
+const EMPTY_TABLE_CONFIRM_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
 const NEW_CONNECTION_RETRY_COUNT: usize = 0;
 const NEW_CONNECTION_RETRY_DELAY_MS: u32 = 500;
 
@@ -58,8 +62,67 @@ impl Drop for ConnectionRefScope {
 #[derive(Debug)]
 struct ProtectedAddress {
     node_ref: NodeRef,
+    drops: ProtectedDropTracker,
+}
+
+/// What to do about a protected connection that just dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProtectedDropAction {
+    /// Reopen it now; a relay we lost is worth getting back quickly
+    Reconnect,
+    /// Too many drops inside one span. Stay down until the span rolls.
+    HoldOff {
+        /// First drop to trip the breaker in this span, so the caller reports it once
+        tripped_now: bool,
+    },
+}
+
+/// Drop accounting for one protected address.
+///
+/// Separate from the address it belongs to so the policy can be tested on its own: it is the only
+/// thing standing between a peer that accepts a handshake and then drops us, and an unbounded
+/// reconnect loop at handshake rate.
+#[derive(Debug)]
+pub(super) struct ProtectedDropTracker {
     span_start_ts: Timestamp,
     drops_in_span: usize,
+}
+
+impl ProtectedDropTracker {
+    pub(super) fn new(span_start_ts: Timestamp) -> Self {
+        Self {
+            span_start_ts,
+            drops_in_span: 0,
+        }
+    }
+
+    pub(super) fn drops_in_span(&self) -> usize {
+        self.drops_in_span
+    }
+
+    /// Record a drop and decide what to do about it.
+    ///
+    /// Once the breaker trips it stays tripped for the rest of the span. An earlier version reset
+    /// the counter and restarted the span on the spot, which re-armed it immediately and left three
+    /// of every four drops reconnecting, forever. Nothing is stranded by holding off: a send that
+    /// needs this relay opens a connection on demand, and `record_protected_connection_dead` is
+    /// what moves relay selection off a relay that keeps doing this.
+    pub(super) fn record_drop(&mut self, cur_ts: Timestamp) -> ProtectedDropAction {
+        if cur_ts.duration_since(self.span_start_ts) >= PROTECTED_CONNECTION_DROP_SPAN {
+            // First drop of a new span
+            self.drops_in_span = 1;
+            self.span_start_ts = cur_ts;
+            return ProtectedDropAction::Reconnect;
+        }
+
+        self.drops_in_span += 1;
+        if self.drops_in_span < PROTECTED_CONNECTION_DROP_COUNT {
+            return ProtectedDropAction::Reconnect;
+        }
+        ProtectedDropAction::HoldOff {
+            tripped_now: self.drops_in_span == PROTECTED_CONNECTION_DROP_COUNT,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -79,6 +142,8 @@ struct ConnectionManagerArc {
     startup_lock: StartupLock,
     /// Flap detector over protected (relay) connection drops, which should be rare
     connection_flap_detector: Mutex<FlapDetector<()>>,
+    /// Last dial-info confirmation asked for because the connection table emptied
+    last_empty_table_confirm_ts: AtomicTimestamp,
     inner: Mutex<Option<ConnectionManagerInner>>,
     reconnection_processor: DeferredStreamProcessor,
     commit_subscription: Mutex<Option<EventBusSubscription>>,
@@ -125,6 +190,7 @@ impl ConnectionManager {
             config.internal().network.connection_inactivity_timeout_ms;
 
         ConnectionManagerArc {
+            last_empty_table_confirm_ts: AtomicTimestamp::new(Timestamp::new(0)),
             reconnection_processor: DeferredStreamProcessor::new(),
             connection_initial_timeout_ms,
             connection_inactivity_timeout_ms,
@@ -297,8 +363,7 @@ impl ConnectionManager {
                         .and_modify(|pa| pa.node_ref = relay.relay_node.unfiltered())
                         .or_insert_with(|| ProtectedAddress {
                             node_ref: relay.relay_node.unfiltered(),
-                            span_start_ts: Timestamp::now_non_decreasing(),
-                            drops_in_span: 0usize,
+                            drops: ProtectedDropTracker::new(Timestamp::now_non_decreasing()),
                         });
                 }
             }
@@ -778,39 +843,31 @@ impl ConnectionManager {
                 if let Some(inner) = self.arc.inner.lock().as_mut() {
                     for pa in inner.protected_addresses.values_mut() {
                         if pa.node_ref.same_entry(&protect_nr) {
-                            let duration = cur_ts.duration_since(pa.span_start_ts);
+                            let action = pa.drops.record_drop(cur_ts);
+                            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "== Protected connection dropped (count={}, lifetime={}): {} -> {} for node {}", pa.drops.drops_in_span(), lifetime, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
 
-                            let mut reconnect = true;
-
-                            if duration < PROTECTED_CONNECTION_DROP_SPAN {
-                                pa.drops_in_span += 1;
-                                veilid_log!(self debug "== Protected connection dropped (count={}, lifetime={}): {} -> {} for node {}", pa.drops_in_span, lifetime, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
-
-                                if pa.drops_in_span >= PROTECTED_CONNECTION_DROP_COUNT {
+                            let reconnect = match action {
+                                ProtectedDropAction::Reconnect => true,
+                                ProtectedDropAction::HoldOff { tripped_now } => {
                                     // While degraded the drops are ours: back off, but blame nobody
                                     if can_blame_peer {
                                         protect_nr.record_protected_connection_dead(
                                             conn.flow().transport_type(),
                                         );
                                     }
-                                    reconnect = false;
-
-                                    pa.drops_in_span = 0;
-                                    pa.span_start_ts = cur_ts;
+                                    if tripped_now {
+                                        veilid_log!(self debug "== Protected connection dropped {} times in {}, not reconnecting for the rest of the span: node {}", pa.drops.drops_in_span(), PROTECTED_CONNECTION_DROP_SPAN, protect_nr);
+                                    }
+                                    false
                                 }
-                            } else {
-                                pa.drops_in_span = 1;
-                                pa.span_start_ts = cur_ts;
-
-                                veilid_log!(self debug "== Protected connection dropped (count={}, lifetime={}): {} -> {} for node {}", pa.drops_in_span, lifetime, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
-                            }
+                            };
 
                             // Reconnect the protected connection immediately
                             if reconnect {
                                 if let Some(dial_info) = conn.dial_info() {
                                     self.spawn_reconnector(dial_info);
                                 } else {
-                                    veilid_log!(self debug "Can't reconnect to accepted protected connection: {} -> {} for node {}", conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
+                                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Can't reconnect to accepted protected connection: {} -> {} for node {}", conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
                                 }
                             }
 
@@ -832,10 +889,17 @@ impl ConnectionManager {
                 .online_state(RoutingDomain::PublicInternet)
                 != OnlineState::Offline
         {
-            veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
-            self.network_manager()
-                .net()
-                .routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
+            // Rate limited because it is work, not just output: this asks other nodes to probe
+            // us, and a peer churning the last connection would otherwise set how often we do it
+            let cur_ts = Timestamp::now();
+            let last_ts = self.arc.last_empty_table_confirm_ts.get();
+            if cur_ts >= last_ts && cur_ts.duration_since(last_ts) >= EMPTY_TABLE_CONFIRM_INTERVAL {
+                self.arc.last_empty_table_confirm_ts.set(cur_ts);
+                veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
+                self.network_manager()
+                    .net()
+                    .routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
+            }
         }
     }
 
@@ -845,13 +909,13 @@ impl ConnectionManager {
                 Box::pin(async move {
                     match this.get_or_create_connection(dial_info.clone()).await {
                         Ok(NetworkResult::Value(conn)) => {
-                            veilid_log!(this debug "Reconnection successful to {}: {:?}", dial_info,conn);
+                            veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Reconnection successful to {}: {:?}", dial_info,conn);
                         }
                         Ok(res) => {
-                            veilid_log!(this debug "Reconnection unsuccessful to {}: {:?}", dial_info, res);
+                            veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Reconnection unsuccessful to {}: {:?}", dial_info, res);
                         }
                         Err(e) => {
-                            veilid_log!(this debug "Reconnection error to {}: {}", dial_info, e);
+                            veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Reconnection error to {}: {}", dial_info, e);
                         }
                     };
                 }));

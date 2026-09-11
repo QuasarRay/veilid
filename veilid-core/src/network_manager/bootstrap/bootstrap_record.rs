@@ -9,8 +9,6 @@ pub struct BootstrapRecord {
     dial_info_details: Vec<DialInfoDetail>,
     timestamp_secs: Option<u64>,
     extra: Vec<String>,
-    /// Signed v1 strings this record was parsed from, empty for v0
-    signed_strings: Vec<String>,
 }
 
 impl BootstrapRecord {
@@ -30,13 +28,7 @@ impl BootstrapRecord {
             dial_info_details,
             timestamp_secs,
             extra,
-            signed_strings: vec![],
         }
-    }
-
-    pub fn with_signed_strings(mut self, signed_strings: Vec<String>) -> Self {
-        self.signed_strings = signed_strings;
-        self
     }
 
     pub fn public_keys(&self) -> &PublicKeyGroup {
@@ -55,8 +47,28 @@ impl BootstrapRecord {
     pub fn extra(&self) -> &[String] {
         &self.extra
     }
-    pub fn signed_strings(&self) -> &[String] {
-        &self.signed_strings
+
+    /// Merge records that share any public key into one record apiece
+    pub fn merge_all(records: Vec<BootstrapRecord>) -> Vec<BootstrapRecord> {
+        let mut merged: Vec<BootstrapRecord> = Vec::new();
+        for mut bsrec in records {
+            let mut mbi = 0;
+            while mbi < merged.len() {
+                if merged[mbi]
+                    .public_keys()
+                    .contains_any_from_iter(bsrec.public_keys().iter())
+                {
+                    // Merge record, pop this one out
+                    let mbr = merged.remove(mbi);
+                    bsrec.merge(mbr);
+                } else {
+                    // No overlap, go to next record
+                    mbi += 1;
+                }
+            }
+            merged.push(bsrec);
+        }
+        merged
     }
 
     pub fn merge(&mut self, other: BootstrapRecord) {
@@ -84,11 +96,6 @@ impl BootstrapRecord {
             self.timestamp_secs = other.timestamp_secs;
         }
         self.extra.extend_from_slice(&other.extra);
-        for s in other.signed_strings {
-            if !self.signed_strings.contains(&s) {
-                self.signed_strings.push(s);
-            }
-        }
     }
 
     async fn to_vcommon_string(
@@ -196,9 +203,11 @@ impl BootstrapRecord {
         Ok(v1)
     }
 
+    /// Parse a v0 record string. A `None` dial info converter skips hostname resolution
+    /// entirely, keeping the record with no dial info: enough to serve it onward, not to dial it.
     pub async fn new_from_v0_str(
         network_manager: &NetworkManager,
-        dial_info_converter: &dyn DialInfoConverter,
+        opt_dial_info_converter: Option<&dyn DialInfoConverter>,
         record_str: &str,
     ) -> EyreResult<Option<BootstrapRecord>> {
         // All formats split on '|' character
@@ -222,7 +231,7 @@ impl BootstrapRecord {
             BOOTSTRAP_TXT_VERSION_0 => {
                 match Self::process_bootstrap_fields_v0(
                     network_manager,
-                    dial_info_converter,
+                    opt_dial_info_converter,
                     &fields,
                 )
                 .await
@@ -247,18 +256,20 @@ impl BootstrapRecord {
         Ok(Some(bootstrap_record))
     }
 
+    /// Parse a v1 record string, verifying its signature against `signing_keys`.
+    /// A `None` dial info converter skips hostname resolution entirely, keeping the record
+    /// with no dial info: enough to serve it onward, not enough to dial it.
     pub async fn new_from_v1_str(
         network_manager: &NetworkManager,
-        dial_info_converter: &dyn DialInfoConverter,
+        opt_dial_info_converter: Option<&dyn DialInfoConverter>,
         record_str: &str,
         signing_keys: &[PublicKey],
     ) -> EyreResult<Option<BootstrapRecord>> {
+        // The signature covers the record exactly as written, so parse and sign-check the same bytes
+        let record_str = record_str.trim();
+
         // All formats split on '|' character
-        let fields: Vec<String> = record_str
-            .trim()
-            .split('|')
-            .map(|x| x.trim().to_owned())
-            .collect();
+        let fields: Vec<String> = record_str.split('|').map(|x| x.trim().to_owned()).collect();
 
         // Bootstrap TXT record version
         let txt_version: u8 = match fields[0].parse::<u8>() {
@@ -274,7 +285,7 @@ impl BootstrapRecord {
             BOOTSTRAP_TXT_VERSION_1 => {
                 match Self::process_bootstrap_fields_v1(
                     network_manager,
-                    dial_info_converter,
+                    opt_dial_info_converter,
                     record_str,
                     &fields,
                     signing_keys,
@@ -310,7 +321,7 @@ impl BootstrapRecord {
     /// 0|0|VLD0:7lxDEabK_qgjbe38RtBa3IZLrud84P6NhGP-pRTZzdQ|bootstrap-1.dev.veilid.net|T5150,U5150,W5150/ws
     async fn process_bootstrap_fields_v0(
         network_manager: &NetworkManager,
-        dial_info_converter: &dyn DialInfoConverter,
+        opt_dial_info_converter: Option<&dyn DialInfoConverter>,
         fields: &[String],
     ) -> EyreResult<Option<BootstrapRecord>> {
         if fields.len() != 5 {
@@ -367,36 +378,38 @@ impl BootstrapRecord {
         // Hostname
         let hostname_str = fields[3].trim();
 
-        // Resolve each record and store in node dial infos list
+        // Resolve each record and store in node dial infos list, only when it may be dialed
         let mut dial_info_details = Vec::new();
-        for rec in fields[4].split(',') {
-            let rec = rec.trim();
-            let short_dial_info = ShortDialInfo {
-                short_url: rec.to_string(),
-                hostname: hostname_str.to_string(),
-            };
-            let dial_infos = match dial_info_converter
-                .try_vec_from_short(&short_dial_info)
-                .await
-            {
-                Ok(dis) => dis,
-                Err(e) => {
-                    veilid_log!(network_manager debug "Couldn't resolve bootstrap node dial info {}: {}", rec, e);
-                    continue;
+        if let Some(dial_info_converter) = opt_dial_info_converter {
+            for rec in fields[4].split(',') {
+                let rec = rec.trim();
+                let short_dial_info = ShortDialInfo {
+                    short_url: rec.to_string(),
+                    hostname: hostname_str.to_string(),
+                };
+                let dial_infos = match dial_info_converter
+                    .try_vec_from_short(&short_dial_info)
+                    .await
+                {
+                    Ok(dis) => dis,
+                    Err(e) => {
+                        veilid_log!(network_manager debug "Couldn't resolve bootstrap node dial info {}: {}", rec, e);
+                        continue;
+                    }
+                };
+
+                for di in dial_infos {
+                    dial_info_details.push(DialInfoDetail {
+                        dial_info: di,
+                        class: DialInfoClass::Direct,
+                    });
                 }
-            };
-
-            for di in dial_infos {
-                dial_info_details.push(DialInfoDetail {
-                    dial_info: di,
-                    class: DialInfoClass::Direct,
-                });
             }
-        }
 
-        // If no dial info could resolve don't consider this a successful bootstrap
-        if dial_info_details.is_empty() {
-            return Ok(None);
+            // If no dial info could resolve don't consider this a successful bootstrap
+            if dial_info_details.is_empty() {
+                return Ok(None);
+            }
         }
 
         Ok(Some(BootstrapRecord::new(
@@ -420,7 +433,7 @@ impl BootstrapRecord {
     /// the signature is over all of the byte data in the string that precedes the signature itself, including all delimeters and/or whitespace
     async fn process_bootstrap_fields_v1(
         network_manager: &NetworkManager,
-        dial_info_converter: &dyn DialInfoConverter,
+        opt_dial_info_converter: Option<&dyn DialInfoConverter>,
         record_str: &str,
         fields: &[String],
         signing_keys: &[PublicKey],
@@ -510,36 +523,38 @@ impl BootstrapRecord {
         // Hostname
         let hostname_str = fields[3].trim();
 
-        // DialInfos
+        // DialInfos, resolved only when this record may be dialed
         let mut dial_info_details = Vec::new();
-        for rec in fields[4].split(',') {
-            let rec = rec.trim();
-            let short_dial_info = ShortDialInfo {
-                short_url: rec.to_string(),
-                hostname: hostname_str.to_string(),
-            };
-            let dial_infos = match dial_info_converter
-                .try_vec_from_short(&short_dial_info)
-                .await
-            {
-                Ok(dis) => dis,
-                Err(e) => {
-                    veilid_log!(network_manager debug "Couldn't resolve bootstrap node dial info {}: {}", rec, e);
-                    continue;
+        if let Some(dial_info_converter) = opt_dial_info_converter {
+            for rec in fields[4].split(',') {
+                let rec = rec.trim();
+                let short_dial_info = ShortDialInfo {
+                    short_url: rec.to_string(),
+                    hostname: hostname_str.to_string(),
+                };
+                let dial_infos = match dial_info_converter
+                    .try_vec_from_short(&short_dial_info)
+                    .await
+                {
+                    Ok(dis) => dis,
+                    Err(e) => {
+                        veilid_log!(network_manager debug "Couldn't resolve bootstrap node dial info {}: {}", rec, e);
+                        continue;
+                    }
+                };
+
+                for di in dial_infos {
+                    dial_info_details.push(DialInfoDetail {
+                        dial_info: di,
+                        class: DialInfoClass::Direct,
+                    });
                 }
-            };
-
-            for di in dial_infos {
-                dial_info_details.push(DialInfoDetail {
-                    dial_info: di,
-                    class: DialInfoClass::Direct,
-                });
             }
-        }
 
-        // If no dial info could resolve don't consider this a successful bootstrap
-        if dial_info_details.is_empty() {
-            return Ok(None);
+            // If no dial info could resolve don't consider this a successful bootstrap
+            if dial_info_details.is_empty() {
+                return Ok(None);
+            }
         }
 
         // Timestamp
@@ -548,15 +563,12 @@ impl BootstrapRecord {
         // Extra fields
         let extra = fields[6..fields.len() - 1].to_vec();
 
-        Ok(Some(
-            BootstrapRecord::new(
-                public_keys,
-                envelope_support,
-                dial_info_details,
-                Some(secs_u64),
-                extra,
-            )
-            .with_signed_strings(vec![record_str.trim().to_owned()]),
-        ))
+        Ok(Some(BootstrapRecord::new(
+            public_keys,
+            envelope_support,
+            dial_info_details,
+            Some(secs_u64),
+            extra,
+        )))
     }
 }

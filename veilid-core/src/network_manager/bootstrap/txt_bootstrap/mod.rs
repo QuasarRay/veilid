@@ -6,7 +6,7 @@ use super::*;
 pub use v0::*;
 pub use v1::*;
 
-const SUPPORTED_BOOTSTRAP_TXT_VERSIONS: [u8; 2] =
+pub const SUPPORTED_BOOTSTRAP_TXT_VERSIONS: [u8; 2] =
     [BOOTSTRAP_TXT_VERSION_0, BOOTSTRAP_TXT_VERSION_1];
 
 impl_veilid_log_facility!("net");
@@ -20,19 +20,7 @@ impl NetworkManager {
     )]
     pub async fn txt_bootstrap(&self, hostname: String) -> EyreResult<BootstrapPeers> {
         // Get the minimum bootstrap version we are supporting
-        // If no keys are available, allow v0.
-        // If bootstrap keys are specified, require at least v1.
-        let min_boot_version = if self
-            .config()
-            .network
-            .routing_table
-            .bootstrap_keys
-            .is_empty()
-        {
-            BOOTSTRAP_TXT_VERSION_0
-        } else {
-            BOOTSTRAP_TXT_VERSION_1
-        };
+        let min_boot_version = self.bootstrap_min_version();
 
         // Resolve bootstrap servers and recurse their TXT entries
         // This only operates in the PublicInternet routing domain because DNS is inherently
@@ -46,6 +34,15 @@ impl NetworkManager {
                     return Err(e);
                 }
             };
+
+        // Cache every record string we were handed, whatever its version, so this node can serve
+        // versions it cannot itself parse. A '|' delimited string is a record; a bare one is a
+        // v0 sub-name, whose records only appear after the second-level lookup below.
+        let mut record_strings: Vec<String> = txt_strings
+            .iter()
+            .filter(|x| x.contains('|'))
+            .cloned()
+            .collect();
 
         // Heuristic to determine which version to parse
         // Take the first record and see if there is a '|' delimited string in it
@@ -91,10 +88,11 @@ impl NetworkManager {
         let bsrecs = match max_version {
             BOOTSTRAP_TXT_VERSION_0 => {
                 // Resolve second-level hostname
-                let record_strings = self.resolve_bootstrap_v0(hostname, txt_strings).await?;
+                let v0_record_strings = self.resolve_bootstrap_v0(hostname, txt_strings).await?;
+                record_strings.extend(v0_record_strings.iter().cloned());
 
                 // Parse v0 records
-                let bsrecs = match self.parse_bootstrap_v0(&record_strings).await {
+                let bsrecs = match self.parse_bootstrap_v0(&v0_record_strings).await {
                     Ok(v) => v,
                     Err(e) => {
                         veilid_log!(self debug "Bootstrap v0 parsing failure: {}", e);
@@ -126,64 +124,12 @@ impl NetworkManager {
             }
         };
 
-        let routing_table = self.routing_table();
-
-        let peers: Vec<Arc<PeerInfo>> = bsrecs
-            .iter()
-            .filter_map(|bsrec| {
-                if routing_table.matches_own_public_key(bsrec.public_keys()) {
-                    veilid_log!(self debug "Ignoring own node in bootstrap list");
-                    None
-                } else {
-                    // Get crypto support from list of node ids
-                    let crypto_info_list: Vec<CryptoInfo> = bsrec.public_keys().iter().filter_map(|pk| {
-                        match pk.kind() {
-                            CRYPTO_KIND_VLD0 =>
-                                Some(CryptoInfo::VLD0 { public_key: pk.value() }),
-
-                            ck => {
-                                veilid_log!(self warn "Ignoring unsupported bootstrap crypto kind: {}", ck);
-                                None
-                            }
-                        }
-                    }).collect();
-
-                    // Make unsigned node info
-                    // Use the current time for the timestamp since any older bootstrap peer info
-                    // needs to be overwritten for this to be guaranteed to work
-                    let timestamp = Timestamp::now();
-
-                    let ni = NodeInfo::new(
-                        timestamp,
-                        bsrec.envelope_support().to_vec(), // Envelope support is as specified in the bootstrap list
-                        crypto_info_list, // Crypto support is derived from list of node ids
-                        vec![],           // Bootstrap needs no capabilities
-                        ProtocolTypeSet::all(), // Bootstraps are always capable of all protocols
-                        AddressTypeSet::all(), // Bootstraps are always IPV4 and IPV6 capable
-                        bsrec.dial_info_details().to_vec(), // Dial info is as specified in the bootstrap list
-                        vec![],                             // No relays for bootstrap nodes
-                    );
-
-                    let bspi = match PeerInfo::new_from_unsigned(
-                        &routing_table,
-                        RoutingDomain::PublicInternet,
-                        ni,
-                    ) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            veilid_log!(self error "Bootstrap has invalid peer info: {}", e);
-                            return None;
-                        }
-                    };
-
-                    Some(Arc::new(bspi))
-                }
-            })
-            .collect();
+        let peers = self.bootstrap_peers_from_records(&bsrecs);
 
         Ok(BootstrapPeers {
             peers,
             records: bsrecs,
+            record_strings,
         })
     }
 

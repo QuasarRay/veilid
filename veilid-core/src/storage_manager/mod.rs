@@ -195,6 +195,11 @@ pub(crate) struct StorageManager {
     // When each record's last rehydration check completed, so an open/close/reopen
     // pattern does not fan out the same check every time (open enqueues one)
     rehydration_checked: Mutex<LruCache<OpaqueRecordKey, Timestamp>>,
+    /// Consecutive hard rehydration failures per record subkey, cleared by a
+    /// success. Per subkey rather than per record: an unreachable record is
+    /// asked for in chunks, and counting the record would read one outage as
+    /// a run. `None` is a request for the whole record.
+    rehydration_failures: Mutex<LruCache<OpaqueRecordKey, HashMap<Option<ValueSubkey>, u32>>>,
 
     // Online check
     is_online: AtomicBool,
@@ -315,6 +320,7 @@ impl StorageManager {
             last_foreground_transaction_ts: AtomicU64::new(0),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
             rehydration_checked: Mutex::new(LruCache::new(REHYDRATION_CHECKED_CACHE_SIZE)),
+            rehydration_failures: Mutex::new(LruCache::new(REHYDRATION_CHECKED_CACHE_SIZE)),
             upload_budget,
             download_budget,
             gated_operation_concurrency,

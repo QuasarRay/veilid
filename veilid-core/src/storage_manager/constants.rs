@@ -64,6 +64,10 @@ pub const DESCRIPTOR_CACHE_SIZE: usize = 2560;
 pub const REHYDRATE_RECHECK_INTERVAL: TimestampDuration = TimestampDuration::new_secs(300);
 /// Records worth of remembered rehydration checks
 pub const REHYDRATION_CHECKED_CACHE_SIZE: usize = 1024;
+/// Consecutive hard rehydration failures on one subkey before it is worth
+/// someone's attention. One is the network on a bad day; a run of them is a
+/// subkey this node cannot push back and keeps being asked to
+pub const REHYDRATION_FAILURE_WARN_THRESHOLD: u32 = 3;
 /// Table store table for storage manager metadata
 pub const STORAGE_MANAGER_METADATA: &str = "storage_manager_metadata";
 /// Storage manager metadata key name for offline subkey write persistence

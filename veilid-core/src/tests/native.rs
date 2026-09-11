@@ -105,6 +105,7 @@ cfg_if! {
         }
 
 
+        run_test!(component logging);
         run_test!(component crypto);
         run_test!(component veilid_api);
 

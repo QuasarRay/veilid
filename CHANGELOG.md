@@ -5,6 +5,9 @@
 
 - veilid-core:
   - **Security** B01T direct-bootstrap requests are answered from the last successful bootstrap set held by the routing domain, which is persisted across restarts. The handler no longer resolves DNS, so an unauthenticated packet can no longer cause non-veilid traffic or block a worker on a slow resolver. Thanks to quikchaos for reporting this issue!
+  - Bootstrap records are cached verbatim for every record version received, so a node serves what it was told rather than only what it selected for its own bootstrap. A saved routing table that predates the cache is discarded on load and the node bootstraps again, since nothing else ever fetches records: without this a node that restarted with a warm routing table never bootstrapped, held no records, and refused B01T on every protocol.
+  - New `network.routing_table.bootstrap_records` config: whole bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them. They are served to direct bootstrap requests with no lookup and can be used to join the network without resolving `bootstrap` at all, so the first bootstrap server on a network can serve records before there is anything to look up. Empty by default.
+  - A direct bootstrap request over raw TCP is 8 bytes, but the accept path waited for 64 before inspecting a connection, so the request timed out unanswered. Each peek now reads only what it examines.
   - Bootstrap hostname resolution runs on the blocking pool instead of the executor.
   - Android below API 29 has no system TXT resolver, so a bootstrap hostname is contacted directly on port 5150 over UDP or TCP for a B01T exchange instead. Startup fails on such a device when neither protocol is enabled, since the hostname could never be reached.
   - Stats collection, aggregation, and analysis for all subsystems. Robot-generated python script for reviewing the effect of optimizations.
@@ -41,6 +44,7 @@
   - Route loopback failures deferred while offline or degraded are now capped, so a dead route cannot stay allocated forever on a chronically degraded node.
   - Table store databases are integrity-checked at open and, if damaged, rebuilt from whatever rows are still readable. The damaged files are kept beside the store for inspection.
   - Disable `stats` feature by default
+  - Move API tracing logger to its own thread, add log throttles and queue, and RPC hot-path tight-loop logging cleanup.
 
 - veilid-flutter:
   - API Breaking Change: `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `Timestamp.toString()` now write human readable output, not a raw integer. `TimestampDuration` works the same way.

@@ -644,7 +644,7 @@ impl RPCProcessor {
                             .unique_flow()
                             .map(|uf| format!("flow={:#}", uf.flow))
                             .unwrap_or_else(|| "flow=<none>".to_owned());
-                        veilid_log!(this debug "RPC Lost (id={:#} {} {}): {}", id, debug_string, e, context_debug);
+                        veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "RPC Lost (id={:#} {} {}): {}", id, debug_string, e, context_debug);
                         this.record_lost_question(&waitable_reply.context).await;
 
                         #[cfg(feature = "instrument")]
@@ -665,7 +665,7 @@ impl RPCProcessor {
                             .unique_flow()
                             .map(|uf| format!("flow={:#}", uf.flow))
                             .unwrap_or_else(|| "flow=<none>".to_owned());
-                        veilid_log!(this debug "RPC Lost (id={:#} {} Timeout): {}", id, debug_string, context_debug);
+                        veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "RPC Lost (id={:#} {} Timeout): {}", id, debug_string, context_debug);
                         this.record_lost_question(&waitable_reply.context).await;
 
                         #[cfg(feature = "instrument")]
@@ -1210,7 +1210,7 @@ impl RPCProcessor {
         safety_route: Option<AllocatedRouteRef>,
         remote_private_route: Option<RemoteRouteRef>,
     ) {
-        veilid_log!(self debug target: "network_result", "send failure: rpc_kind={:?} send_ts={}, node_ref={}, opt_transport={:?}, safety_route={:?}, remote_private_route={:?}",
+        veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target: "network_result", "send failure: rpc_kind={:?} send_ts={}, node_ref={}, opt_transport={:?}, safety_route={:?}, remote_private_route={:?}",
             rpc_kind, send_ts, node_ref, opt_transport, safety_route, remote_private_route
         );
 
@@ -1776,7 +1776,7 @@ impl RPCProcessor {
             self.render_signed_operation(dest.clone(), operation, signing_params)
                 .measure_debug(
                     TimestampDuration::new_ms(200),
-                    veilid_log_dbg!(self, "RPCProcessor::question render_signed_operation"),
+                    veilid_log_dbg!(self, throttle: PROTOCOL_LOG_THROTTLE_MS, "RPCProcessor::question render_signed_operation"),
                 ),
         )
         .await?;
@@ -1849,7 +1849,7 @@ impl RPCProcessor {
         // may unfairly punish some nodes, randomly, based on their being in the connection table or not
         let send_ts = Timestamp::now();
         if !matches!(send_data_result.network_result(), NetworkResult::Value(_)) {
-            veilid_log!(self debug target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
+            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
                 send_data_result.network_result(), file!(), line!(),
                 outer_op_id, node_ref, opt_dial_info.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
             self.record_send_failure(
@@ -1952,7 +1952,7 @@ impl RPCProcessor {
                 self.render_signed_operation(dest.clone(), operation, signing_params)
                     .measure_debug(
                         TimestampDuration::new_ms(200),
-                        veilid_log_dbg!(self, "RPCProcessor::statement render_signed_operation"),
+                        veilid_log_dbg!(self, throttle: PROTOCOL_LOG_THROTTLE_MS, "RPCProcessor::statement render_signed_operation"),
                     )
             )
             .await?
@@ -2003,7 +2003,7 @@ impl RPCProcessor {
         // may unfairly punish some nodes, randomly, based on their being in the connection table or not
         let send_ts = Timestamp::now();
         if !matches!(send_data_result.network_result(), NetworkResult::Value(_)) {
-            veilid_log!(self debug target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
+            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
                 send_data_result.network_result(), file!(), line!(),
                 outer_op_id, node_ref, opt_dial_info.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
             self.record_send_failure(
@@ -2084,7 +2084,7 @@ impl RPCProcessor {
                 self.render_signed_operation(dest.clone(), operation, signing_params)
                     .measure_debug(
                         TimestampDuration::new_ms(200),
-                        veilid_log_dbg!(self, "RPCProcessor::answer render_signed_operation"),
+                        veilid_log_dbg!(self, throttle: PROTOCOL_LOG_THROTTLE_MS, "RPCProcessor::answer render_signed_operation"),
                     )
             )
             .await?
@@ -2135,7 +2135,7 @@ impl RPCProcessor {
         // may unfairly punish some nodes, randomly, based on their being in the connection table or not
         let send_ts = Timestamp::now();
         if !matches!(send_data_result.network_result(), NetworkResult::Value(_)) {
-            veilid_log!(self debug target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
+            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target: "network_result", "{} at {}:{}: outer_op_id = {}, node_ref={}, opt_relay_di={}, message.len={}",
                 send_data_result.network_result(), file!(), line!(),
                 outer_op_id, node_ref, opt_dial_info.as_ref().map(|x| x.to_string()).unwrap_or_else(String::new), message_len);
             self.record_send_failure(

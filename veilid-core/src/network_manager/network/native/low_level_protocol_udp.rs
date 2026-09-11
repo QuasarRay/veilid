@@ -3,6 +3,10 @@ use stop_token::future::FutureExt;
 
 const UDP_LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS: usize = 16;
 
+/// Delay before retrying a receive that failed, so a listener whose socket is broken costs a
+/// timer rather than a core while it works its way to a restart.
+const UDP_LISTENER_ERROR_BACKOFF_MS: u32 = 100;
+
 /// Runtime command to a UDP listener task
 pub(super) enum UdpListenerCommand {
     /// Spawn a recv-loop for this handler
@@ -49,7 +53,8 @@ impl NativeNetwork {
                             })
                             .await
                         {
-                            veilid_log!(network_manager debug "failed to process received udp envelope: {}", e);
+                            // Throttled: a peer chooses how often this fires
+                            veilid_log!(network_manager debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to process received udp envelope: {}", e);
                         }
                     }
                     Ok(Err(e)) => {
@@ -57,12 +62,16 @@ impl NativeNetwork {
                         if consecutive_errors >= UDP_LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS {
                             return UdpListenerEvent::HandlerExited(Some(e));
                         }
-                        veilid_log!(this debug
+                        veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS,
                             "UDP recv_message transient error {}/{} ({})",
                             consecutive_errors,
                             UDP_LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS,
                             e
                         );
+                        // Space out the retries: `recv_message` already backs off internally, but
+                        // it can also fail on its first try every time, and this loop must not
+                        // become the spin its callee stopped being
+                        sleep(UDP_LISTENER_ERROR_BACKOFF_MS).await;
                     }
                     Err(_) => {
                         return UdpListenerEvent::HandlerExited(None);
@@ -142,7 +151,10 @@ impl NativeNetwork {
                             veilid_log!(this trace "UDP recv-loop stopped");
                         }
                         UdpListenerEvent::HandlerExited(Some(e)) => {
-                            veilid_log!(this debug
+                            // Warn, not debug: this is once per restart, and a transport that
+                            // gave up is the thing an operator most needs to see without
+                            // having raised the log level first
+                            veilid_log!(this warn
                                 "UDP listener task errored persistently ({}), triggering network restart",
                                 e
                             );

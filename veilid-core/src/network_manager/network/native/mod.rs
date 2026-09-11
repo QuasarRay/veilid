@@ -537,7 +537,7 @@ impl PlatformNetwork for NativeNetwork {
                             return Ok(NetworkAttempt::Performed(NetworkResult::Timeout));
                         }
                         nres => {
-                            veilid_log!(self debug target:"network_result",
+                            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target:"network_result",
                                 "send_data_to_existing_flow: {:?}: data.len={}, flow={:?}",
                                 nres, data.len(), flow
                             );
@@ -578,7 +578,7 @@ impl PlatformNetwork for NativeNetwork {
                         return Ok(NetworkAttempt::Skipped);
                     }
                     Err(_) => {
-                        veilid_log!(self debug "connection send timed out: flow={:?}", flow);
+                        veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "connection send timed out: flow={:?}", flow);
                         return Ok(NetworkAttempt::Performed(NetworkResult::Timeout));
                     }
                 }
@@ -648,7 +648,7 @@ impl PlatformNetwork for NativeNetwork {
                         )));
                     }
                     Err(_) => {
-                        veilid_log!(self debug "connection send timed out: dial_info={:?}", conn.unique_flow().flow);
+                        veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "connection send timed out: dial_info={:?}", conn.unique_flow().flow);
                         return Ok(NetworkResult::timeout());
                     }
                 }

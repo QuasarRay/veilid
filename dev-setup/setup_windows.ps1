@@ -291,9 +291,9 @@ if ($script:Cross -and (Has "rustup")) {
 if (-not $BuildOnly) {
     DepExact "wasm-bindgen-cli" (CrateVer "wasm-bindgen-cli") $V.WASM_BINDGEN_VERSION $true $iWbg
     DepExact "cargo-edit"       (CrateVer "cargo-edit")       $V.CARGO_EDIT_VERSION   $true $iCedit
-    DepHave  "cargo-nextest"    (CrateVer "cargo-nextest")    "cargo install --locked cargo-nextest"    { cargo install --locked cargo-nextest }
-    DepHave  "cargo-public-api" (CrateVer "cargo-public-api") "cargo install --locked cargo-public-api" { cargo install --locked cargo-public-api }
-    DepHave  "cargo-sync-readme" (CrateVer "cargo-sync-readme") "cargo binstall cargo-sync-readme || cargo install --locked cargo-sync-readme" { cargo binstall --no-confirm cargo-sync-readme 2>$null; if ($LASTEXITCODE -ne 0) { cargo install --locked cargo-sync-readme } }
+    DepHave  "cargo-nextest"    (CrateVer "cargo-nextest")    "cargo install --locked cargo-nextest"    { cargo install --locked cargo-nextest --version $V.CARGO_NEXTEST_VERSION }
+    DepHave  "cargo-public-api" (CrateVer "cargo-public-api") "cargo install --locked cargo-public-api" { cargo install --locked cargo-public-api --version $V.CARGO_PUBLIC_API_VERSION }
+    DepHave  "cargo-sync-readme" (CrateVer "cargo-sync-readme") "cargo binstall cargo-sync-readme || cargo install --locked cargo-sync-readme" { cargo binstall --no-confirm cargo-sync-readme --version $V.CARGO_SYNC_README_VERSION 2>$null; if ($LASTEXITCODE -ne 0) { cargo install --locked cargo-sync-readme --version $V.CARGO_SYNC_README_VERSION } }
 }
 
 # JDK for the jni/jvm link. Provisioned (download + JAVA_HOME, keyed off -TargetArch) whenever we

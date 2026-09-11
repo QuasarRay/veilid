@@ -26,10 +26,23 @@ const PUBLIC_INTERNET_PERSISTED_STATE_KEY: &[u8] = b"public_internet_persisted_s
 
 /// PublicInternet routing domain state that survives across restarts
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct PublicInternetPersistedState {
-    low_water_mark: LowWaterMark,
+pub(crate) struct PublicInternetPersistedState {
+    pub low_water_mark: LowWaterMark,
+    /// None until a bootstrap records its result. Any state written by a build that did not
+    /// record one reads as None, which is what condemns the routing table saved beside it.
     #[serde(default)]
-    bootstrap_records: Vec<BootstrapRecord>,
+    pub bootstrap: Option<BootstrapCache>,
+}
+
+/// A saved routing table is only as good as this node's ability to say where it came from.
+/// With no recorded bootstrap and nothing configured to serve, discard it and bootstrap again.
+pub(crate) fn persisted_requires_reset(
+    persisted: Option<&PublicInternetPersistedState>,
+    cfg: &VeilidConfigRoutingTable,
+) -> bool {
+    !cfg.bootstrap.is_empty()
+        && cfg.bootstrap_records.is_empty()
+        && persisted.is_none_or(|p| p.bootstrap.is_none())
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -208,6 +221,10 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             // Don't let detached time count toward the fallback-bootstrap delay
             self.no_responsive_since.lock().clear();
 
+            // Serve the configured bootstrap records, whether or not we ever bootstrap
+            let config_cache = self.network_manager().config_bootstrap_cache().await;
+            self.read_dyn().set_config_bootstrap_cache(config_cache);
+
             // Publish peer info
             self.publish_peer_info();
             Ok(())
@@ -248,27 +265,37 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             let detail = self.read_dyn();
             detail.reset_low_water_mark();
             detail.update_low_water_mark(lwm);
-            detail.set_bootstrap_records(persisted.bootstrap_records);
+            detail.set_bootstrap_cache(persisted.bootstrap);
             Ok(())
         })
     }
 
     fn save<'a>(&'a self, dbx: &'a TableDBTransaction) -> PinBoxFuture<'a, EyreResult<()>> {
         Box::pin(async move {
-            let (low_water_mark, bootstrap_records) = {
+            let (low_water_mark, bootstrap) = {
                 let detail = self.read_dyn();
                 (
                     detail.get_low_water_mark().as_ref().clone(),
-                    detail.get_bootstrap_records(),
+                    detail.get_bootstrap_cache(),
                 )
             };
             let persisted = PublicInternetPersistedState {
                 low_water_mark,
-                bootstrap_records,
+                bootstrap,
             };
             dbx.store_json(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY, &persisted)
                 .await?;
             Ok(())
+        })
+    }
+
+    fn persisted_state_requires_reset<'a>(&'a self, db: &'a TableDB) -> PinBoxFuture<'a, bool> {
+        Box::pin(async move {
+            let persisted: Option<PublicInternetPersistedState> = db
+                .load_json(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY)
+                .await
+                .unwrap_or_default();
+            persisted_requires_reset(persisted.as_ref(), &self.config().network.routing_table)
         })
     }
 

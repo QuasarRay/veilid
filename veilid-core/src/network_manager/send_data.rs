@@ -170,6 +170,10 @@ impl NetworkManager {
     /// Restricting relaying to established/existing flows minimizes the amount of work
     /// being done by the relay and puts the effort to maintain the flow on the node that
     /// benefits from the relay.
+    ///
+    /// Returns the network result rather than swallowing it: a relay whose downstream flows are
+    /// all dead fails on every packet as `Ok(NonValue)`, and discarding that left the condition
+    /// invisible to logging, to the transport counters and to the online detector alike.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -179,11 +183,34 @@ impl NetworkManager {
         destination_node_ref: NodeRef,
         sequencing: Sequencing,
         data: Bytes,
-    ) -> EyreResult<()> {
-        let _ = self
-            .send_data_cm_existing(destination_node_ref, sequencing, data)
+    ) -> EyreResult<NetworkResult<UniqueFlow>> {
+        // The transport that will be attempted, captured before the send: on failure there is no
+        // flow left to name, and this is the same flow `send_data_cm_existing` picks
+        let opt_transport = destination_node_ref
+            .sequencing_filtered(sequencing)
+            .last_flow()
+            .map(|flow| flow.transport_type());
+
+        let nres = self
+            .send_data_cm_existing(destination_node_ref.clone(), sequencing, data)
             .await?;
-        Ok(())
+
+        // Relaying bypasses `send_data`, and with it the only place outbound sends were counted,
+        // so a relay whose downstream flows were all dead read as idle rather than broken. Safe to
+        // feed from here: suppression needs failures across several distinct peers, so one dead
+        // destination indicts the peer rather than the transport.
+        if let (Some(routing_domain), Some(transport)) =
+            (destination_node_ref.best_routing_domain(), opt_transport)
+        {
+            self.transport_stats().record_send(
+                routing_domain,
+                transport,
+                destination_node_ref.best_node_id(),
+                TransportSendOutcome::from_network_result(&nres),
+            );
+        }
+
+        Ok(nres)
     }
 
     #[cfg_attr(
@@ -305,7 +332,7 @@ impl NetworkManager {
             match pin_future!(net.send_data_to_existing_flow(flow, data).measure_debug(
                 TimestampDuration::new_secs(1),
                 veilid_log_dbg!(
-                    self,
+                    self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                     "NetworkManager::send_data_unreachable send_data_to_existing_flow"
                 )
             ))
@@ -360,7 +387,7 @@ impl NetworkManager {
             match pin_future!(net.send_data_to_existing_flow(flow, data).measure_debug(
                 TimestampDuration::new_secs(1),
                 veilid_log_dbg!(
-                    self,
+                    self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                     "NetworkManager::send_data_cm_existing send_data_to_existing_flow"
                 )
             ))
@@ -413,7 +440,7 @@ impl NetworkManager {
                 .measure_debug(
                     TimestampDuration::new_secs(1),
                     veilid_log_dbg!(
-                        self,
+                    self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                         "NetworkManager::send_data_cm_signal_reverse send_data_to_existing_flow"
                     )
                 ))
@@ -457,7 +484,7 @@ impl NetworkManager {
                 .measure_debug(
                     excessive_reverse_connect_duration,
                     veilid_log_dbg!(
-                        self,
+                    self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                         "NetworkManager::send_data_cm_signal_reverse do_reverse_connect"
                     )
                 ))
@@ -493,7 +520,7 @@ impl NetworkManager {
                 .measure_debug(
                     TimestampDuration::new_secs(1),
                     veilid_log_dbg!(
-                        self,
+                    self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                         "NetworkManager::send_data_cm_signal_hole_punch send_data_to_existing_flow"
                     )
                 ))
@@ -540,7 +567,7 @@ impl NetworkManager {
                 .measure_debug(
                     hole_punch_receipt_time,
                     veilid_log_dbg!(
-                        self,
+                    self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                         "NetworkManager::send_data_cm_signal_hole_punch do_hole_punch"
                     )
                 ))
@@ -581,7 +608,7 @@ impl NetworkManager {
                 .measure_debug(
                     TimestampDuration::new_secs(1),
                     veilid_log_dbg!(
-                        self,
+                    self, throttle: PROTOCOL_LOG_THROTTLE_MS,
                         "NetworkManager::send_data_cm_direct send_data_to_existing_flow"
                     )
                 ))

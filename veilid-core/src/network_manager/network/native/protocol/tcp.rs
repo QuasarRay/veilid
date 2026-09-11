@@ -162,8 +162,10 @@ impl RawTcpProtocolHandler {
         socket_addr: SocketAddr,
         local_addr: SocketAddr,
     ) -> io::Result<Option<ProtocolNetworkConnection>> {
-        veilid_log!(self trace "TCP: on_accept_async: enter");
-        let mut peekbuf: [u8; PEEK_DETECT_LEN] = [0u8; PEEK_DETECT_LEN];
+        veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "TCP: on_accept_async: enter");
+        // Just the frame magic: a direct bootstrap request is 8 bytes and complete, so waiting
+        // for a longer peek would stall it out instead of answering it
+        let mut peekbuf = [0u8; 2];
         if (timeout(
             self.connection_initial_timeout_ms,
             ps.peek_exact(&mut peekbuf).in_current_span(),
@@ -187,7 +189,7 @@ impl RawTcpProtocolHandler {
             ProtocolType::TCP,
         );
         let flow = Flow::new(peer_addr, SocketAddress::from_socket_addr(local_addr));
-        veilid_log!(self trace target: "net", "RawTcp accept (inbound) flow: {:?}", flow);
+        veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, target: "net", "RawTcp accept (inbound) flow: {:?}", flow);
         let conn = NativeProtocolNetworkConnection::RawTcp(RawTcpNetworkConnection::new(
             self.registry(),
             flow,

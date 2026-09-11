@@ -32,6 +32,7 @@ impl NetworkManager {
             Ok(BootstrapPeers {
                 peers,
                 records: vec![],
+                record_strings: vec![],
             })
         } else {
             self.direct_bootstrap_v1(dial_info).await
@@ -123,78 +124,34 @@ impl NetworkManager {
 
         veilid_log!(self debug "Direct bootstrap v1 resolution: {:#?}", bsrecs);
 
-        // Returned bootstrapped peers
+        // Prefer the signed peer info the bootstrap returned for a record.
+        // This is important for browser websocket bootstrapping where the dialinfo in the
+        // bootstrap record has an unspecified IP address, and as such a routing domain can not
+        // be determined for it by the code that receives the FindNodeA result.
+        // The rest fall back to unsigned peer info built from the record itself.
         let routing_table = self.routing_table();
-
-        let peers: Vec<Arc<PeerInfo>> = bsrecs
-            .iter()
-            .filter_map(|bsrec| {
-                if routing_table.matches_own_public_key(bsrec.public_keys()) {
-                    veilid_log!(self debug "Ignoring own node in bootstrap list");
-                    None
-                } else {
-                    // If signed peer info exists for this record, use it
-                    // This is important for browser websocket bootstrapping where the
-                    // dialinfo in the bootstrap record has an unspecified IP address,
-                    // and as such, a routing domain can not be determined for it
-                    // by the code that receives the FindNodeA result
-                    for pi in bootv1response.peers.iter().cloned() {
-                        if pi.node_info().public_keys().contains_any_from_iter(bsrec.public_keys().iter()) {
-                            return Some(pi);
-                        }
-                    }
-
-                    // Otherwise use an unsigned peerinfo and try to resolve it directly from the bootstrap record
-                    // The bootstrap will be rejected if a FindNodeQ could not resolve the peer info
-
-                    // Get crypto support from list of node ids
-                    let crypto_info_list: Vec<CryptoInfo> = bsrec.public_keys().iter().filter_map(|pk| {
-                        match pk.kind() {
-                            CRYPTO_KIND_VLD0 =>
-                                Some(CryptoInfo::VLD0 { public_key: pk.value() }),
-
-                            ck => {
-                                veilid_log!(self warn "Ignoring unsupported bootstrap crypto kind: {}", ck);
-                                None
-                            }
-                        }
-                    }).collect();
-
-                    // Make unsigned node info
-                    // Use the current time for the timestamp since any older bootstrap peer info
-                    // needs to be overwritten for this to be guaranteed to work
-                    let timestamp = Timestamp::now();
-
-                    let ni = NodeInfo::new(
-                        timestamp,
-                        bsrec.envelope_support().to_vec(), // Envelope support is as specified in the bootstrap list
-                        crypto_info_list, // Crypto support is derived from list of node ids
-                        vec![],           // Bootstrap needs no capabilities
-                        ProtocolTypeSet::all(), // Bootstraps are always capable of all protocols
-                        AddressTypeSet::all(), // Bootstraps are always IPV4 and IPV6 capable
-                        bsrec.dial_info_details().to_vec(), // Dial info is as specified in the bootstrap list
-                        vec![],                             // No relays for bootstrap nodes
-                    );
-                    let bspi = match PeerInfo::new_from_unsigned(
-                        &routing_table,
-                        RoutingDomain::PublicInternet,
-                        ni,
-                    ) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            veilid_log!(self error "Bootstrap has invalid peer info: {}", e);
-                            return None;
-                        }
-                    };
-
-                    Some(Arc::new(bspi))
-                }
-            })
-            .collect();
+        let mut peers = Vec::<Arc<PeerInfo>>::new();
+        let mut unsigned_bsrecs = Vec::<BootstrapRecord>::new();
+        for bsrec in bsrecs.iter() {
+            if routing_table.matches_own_public_key(bsrec.public_keys()) {
+                veilid_log!(self debug "Ignoring own node in bootstrap list");
+                continue;
+            }
+            match bootv1response.peers.iter().find(|pi| {
+                pi.node_info()
+                    .public_keys()
+                    .contains_any_from_iter(bsrec.public_keys().iter())
+            }) {
+                Some(pi) => peers.push(pi.clone()),
+                None => unsigned_bsrecs.push(bsrec.clone()),
+            }
+        }
+        peers.extend(self.bootstrap_peers_from_records(&unsigned_bsrecs));
 
         Ok(BootstrapPeers {
             peers,
             records: bsrecs,
+            record_strings: bootv1response.records,
         })
     }
 }

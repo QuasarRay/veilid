@@ -1,3 +1,4 @@
+use super::api_log_queue::{ApiLogQueue, QueuedLog};
 use crate::core_context::*;
 use crate::veilid_api::*;
 use crate::*;
@@ -39,6 +40,9 @@ pub struct ApiTracingLayer {}
 
 static API_LOGGER_INNER: Mutex<Option<ApiTracingLayerInner>> = Mutex::new(None);
 static API_LOGGER_ENABLED: AtomicBool = AtomicBool::new(false);
+/// The layer's queue. Outside `API_LOGGER_INNER` on purpose: every emitting thread touches it on
+/// every event, and that mutex is held across shutdown.
+static API_LOG_QUEUE: ApiLogQueue = ApiLogQueue::new();
 
 impl ApiTracingLayer {
     /// Initialize an ApiTracingLayer singleton
@@ -78,6 +82,7 @@ impl ApiTracingLayer {
             .insert(log_key, update_callback);
 
         API_LOGGER_ENABLED.store(true, Ordering::Release);
+        API_LOG_QUEUE.start(Arc::new(Self::deliver_queued));
 
         Ok(())
     }
@@ -99,28 +104,61 @@ impl ApiTracingLayer {
         if inner.as_mut().unwrap_or_log().update_callbacks.is_empty() {
             *inner = None;
             API_LOGGER_ENABLED.store(false, Ordering::Release);
+            API_LOG_QUEUE.stop();
         }
 
         Ok(())
     }
 
-    fn emit_log(&self, meta: &'static Metadata<'static>, log_key: &str, message: &str) {
-        // Key-less events come from process-wide code (veilid-tools) and reach every node
-        let update_cbs: Vec<UpdateCallback> = if let Some(inner) = &mut *API_LOGGER_INNER.lock() {
-            if log_key.is_empty() {
-                inner.update_callbacks.values().cloned().collect()
-            } else {
-                inner
-                    .update_callbacks
-                    .get(log_key)
-                    .cloned()
-                    .into_iter()
-                    .collect()
-            }
-        } else {
-            Vec::new()
+    /// Hand one drained event to the callbacks registered for it.
+    ///
+    /// Resolved at delivery rather than at enqueue, so an event queued by a node that has since
+    /// shut down does not call back into it.
+    fn deliver_queued(log: QueuedLog) {
+        let QueuedLog {
+            log_key,
+            log_level,
+            message,
+            backtrace,
+        } = log;
+
+        let update = VeilidUpdate::Log(Box::new(VeilidLog {
+            log_level,
+            message,
+            backtrace,
+        }));
+
+        for update_cb in Self::callbacks_for(&log_key) {
+            update_cb(update.clone());
+        }
+    }
+
+    /// The callbacks the drain should hand a `log_key`'s events to.
+    ///
+    fn callbacks_for(log_key: &str) -> Vec<UpdateCallback> {
+        // Cloned out under the lock and invoked by the caller without it: an update callback is
+        // the application's code and may block for as long as it likes - veilid-flutter's posts
+        // into the Dart isolate - and holding this lock across that would put shutdown behind it
+        let Some(inner) = &*API_LOGGER_INNER.lock() else {
+            return Vec::new();
         };
-        if update_cbs.is_empty() {
+        if log_key.is_empty() {
+            inner.update_callbacks.values().cloned().collect()
+        } else {
+            inner
+                .update_callbacks
+                .get(log_key)
+                .cloned()
+                .into_iter()
+                .collect()
+        }
+    }
+
+    fn emit_log(&self, meta: &'static Metadata<'static>, log_key: &str, message: &str) {
+        // Already behind on delivery, so nothing built here would be delivered anyway. Checked
+        // before the formatting below, which for an error also walks a backtrace.
+        if API_LOG_QUEUE.is_full() {
+            API_LOG_QUEUE.note_dropped();
             return;
         }
 
@@ -176,15 +214,12 @@ impl ApiTracingLayer {
         #[cfg(not(feature = "backtrace"))]
         let backtrace = None;
 
-        let log_update = VeilidUpdate::Log(Box::new(VeilidLog {
+        API_LOG_QUEUE.enqueue(QueuedLog {
+            log_key: log_key.to_owned(),
             log_level,
             message,
             backtrace,
-        }));
-
-        for update_cb in update_cbs {
-            (update_cb)(log_update.clone());
-        }
+        });
     }
 }
 

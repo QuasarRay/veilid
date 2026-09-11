@@ -4,6 +4,9 @@ set -e
 ARCH=$1
 CARGO_ARCH=$2
 IS_NIGHTLY=$3
+# Kept in step with GLIBC_FLOOR in .dagger/versions.env, which is what cargo-zigbuild pins the
+# binaries to. dpkg-deb does not run shlibdeps, so nothing derives this for us.
+GLIBC_FLOOR=$4
 BUILD_DATE=$(date '+%Y%m%d')
 CARGO_VERSION="$(/veilid/package/cargo_version.sh /veilid/veilid-cli/Cargo.toml)"
 mkdir -p /dpkg/out
@@ -21,6 +24,7 @@ else
     echo $3 "is not a valid state to determine if the build is STABLE or NIGHTLY"
 fi
 /veilid/package/replace_variable.sh /dpkg/veilid-cli/DEBIAN/control ARCH $ARCH
+/veilid/package/replace_variable.sh /dpkg/veilid-cli/DEBIAN/control GLIBC_FLOOR $GLIBC_FLOOR
 # veilid-cli executable
 mkdir -p /dpkg/veilid-cli/usr/bin
 cp -f /veilid/target/$CARGO_ARCH/release/veilid-cli /dpkg/veilid-cli/usr/bin

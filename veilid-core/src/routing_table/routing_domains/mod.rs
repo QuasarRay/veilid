@@ -257,11 +257,11 @@ impl RoutingTable {
         rdd.get_bootstrap_peers()
     }
 
-    /// Return the verified bootstrap records from the last successful bootstrap in a particular routing domain
-    pub fn get_bootstrap_records(&self, routing_domain: RoutingDomain) -> Vec<BootstrapRecord> {
+    /// Return everything a particular routing domain can serve to a B01T request
+    pub fn get_served_bootstrap_cache(&self, routing_domain: RoutingDomain) -> BootstrapCache {
         let rdc = self.get_routing_domain_controller(routing_domain);
         let rdd = rdc.read_dyn();
-        rdd.get_bootstrap_records()
+        rdd.get_served_bootstrap_cache()
     }
 
     /// Return the domain's filter for what we can receivein the form of a dial info filter

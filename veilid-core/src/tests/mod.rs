@@ -47,6 +47,9 @@ pub async fn run_all_tests() {
         test_bootstrap::test_all().await;
     }
 
+    info!("TEST: logging");
+    logging::tests_logging::test_all().await;
+
     info!("TEST: crypto");
     crypto::tests_crypto::test_all().await;
 

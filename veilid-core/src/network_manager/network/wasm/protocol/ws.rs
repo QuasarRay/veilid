@@ -58,14 +58,14 @@ impl WebsocketNetworkConnection {
             .network
             .connection_initial_timeout_ms;
 
-        #[allow(unused_variables)]
-        let x = match timeout(timeout_ms, self.inner.ws_meta.close()).await {
-            Ok(v) => v.map_err(ws_err_to_io_error),
-            Err(_) => return Ok(NetworkResult::timeout()),
-        };
-        #[cfg(feature = "verbose-tracing")]
-        veilid_log!(self debug "close result: {:?}", x);
-        Ok(NetworkResult::value(()))
+        // The close result used to be bound, logged only under `verbose-tracing`, and then
+        // dropped in favour of an unconditional success - so in an ordinary build a websocket
+        // that failed to close reported that it had
+        match timeout(timeout_ms, self.inner.ws_meta.close()).await {
+            Ok(Ok(_)) => Ok(NetworkResult::value(())),
+            Ok(Err(e)) => Err::<(), _>(ws_err_to_io_error(e)).into_network_result(),
+            Err(_) => Ok(NetworkResult::timeout()),
+        }
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", target="protocol", err, skip(self, message), fields(network_result, message.len = message.len())))]

@@ -14,6 +14,8 @@ mod client_api;
 mod logs;
 mod server;
 mod settings;
+#[cfg(test)]
+mod tests;
 mod tools;
 #[cfg(unix)]
 mod unix;

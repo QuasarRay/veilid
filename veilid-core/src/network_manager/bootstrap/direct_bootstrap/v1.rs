@@ -15,20 +15,17 @@ impl NetworkManager {
     pub fn boot_v1_response(&self) -> Option<BootV1Response> {
         let routing_table = self.routing_table();
         let routing_domain = RoutingDomain::PublicInternet;
-        let bsrecs = routing_table.get_bootstrap_records(routing_domain);
+        let cache = routing_table.get_served_bootstrap_cache(routing_domain);
 
-        let mut records: Vec<String> = bsrecs
-            .iter()
-            .flat_map(|bsrec| bsrec.signed_strings().iter().cloned())
-            .collect();
-        records.sort_unstable();
-        records.dedup();
+        // Served verbatim, including versions this node could not parse
+        let records = cache.record_strings().to_vec();
         if records.is_empty() {
             return None;
         }
 
         // Add peer infos if we have them, only for the peers present in the records
-        let peers: Vec<Arc<PeerInfo>> = bsrecs
+        let peers: Vec<Arc<PeerInfo>> = cache
+            .records()
             .iter()
             .filter_map(|bsrec| {
                 if routing_table.matches_own_public_key(bsrec.public_keys()) {

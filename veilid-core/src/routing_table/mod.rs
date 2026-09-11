@@ -915,6 +915,15 @@ impl RoutingTable {
         Ok(())
     }
 
+    /// Throw away the saved routing table and start the cache over from empty
+    async fn reset_saved_routing_table(&self, cache_validity_key: &[u8]) -> EyreResult<()> {
+        let table_store = self.table_store();
+        table_store.delete(ROUTING_TABLE).await?;
+        let db = table_store.open(ROUTING_TABLE, 1).await?;
+        db.store(0, CACHE_VALIDITY_KEY, cache_validity_key).await?;
+        Ok(())
+    }
+
     /// Deserialize routing table state from the table store.
     /// Includes buckets, network estimator history, and per-routing-domain state.
     async fn load(&self) -> EyreResult<()> {
@@ -952,9 +961,7 @@ impl RoutingTable {
             // Caches not valid, start over
             veilid_log!(self debug "cache validity key changed, emptying routing table");
             drop(db);
-            table_store.delete(ROUTING_TABLE).await?;
-            let db = table_store.open(ROUTING_TABLE, 1).await?;
-            db.store(0, CACHE_VALIDITY_KEY, &cache_validity_key).await?;
+            self.reset_saved_routing_table(&cache_validity_key).await?;
             return Ok(());
         }
 
@@ -971,6 +978,18 @@ impl RoutingTable {
             veilid_log!(self debug "no all_entry_bytes in saved routing table");
             return Ok(());
         };
+
+        // A routing domain can reject the saved table outright, in which case none of it is
+        // applied and the node bootstraps from nothing. This is how a table saved without a
+        // recorded bootstrap is repaired: nothing else ever refetches bootstrap records.
+        for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
+            if rdc.persisted_state_requires_reset(&db).await {
+                veilid_log!(self info "{} has no recorded bootstrap, emptying routing table to bootstrap again", rdc.routing_domain());
+                drop(db);
+                self.reset_saved_routing_table(&cache_validity_key).await?;
+                return Ok(());
+            }
+        }
 
         // Restore the network estimator histogram if present.
         if let Ok(Some(estimator)) = db
@@ -1112,7 +1131,7 @@ impl RoutingTable {
             {
                 let rdd = rdc.write_dyn();
                 rdd.clear_bootstrap_peers();
-                rdd.set_bootstrap_records(vec![]);
+                rdd.set_bootstrap_cache(None);
             }
             let mut edit = rdc.edit_dyn();
             edit.reset();

@@ -795,6 +795,12 @@ pub struct RoutingTable {
     pub bootstrap: Vec<String>,
     /// Public keys trusted to sign bootstrap records.
     pub bootstrap_keys: Vec<veilid_core::PublicKey>,
+    /// Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.
+    /// Served to direct bootstrap requests without any lookup, and usable to bootstrap this
+    /// node itself. Both record versions are served; bootstrapping from them follows the same
+    /// rule as a TXT bootstrap, so v0 records are only used when no bootstrap keys are set.
+    /// Empty by default, in which case records come from the bootstrap servers.
+    pub bootstrap_records: Vec<String>,
 }
 impl Default for RoutingTable {
     fn default() -> Self {
@@ -804,6 +810,7 @@ impl Default for RoutingTable {
             secret_keys: None,
             bootstrap: d.bootstrap,
             bootstrap_keys: d.bootstrap_keys,
+            bootstrap_records: d.bootstrap_records,
         }
     }
 }
@@ -1206,7 +1213,7 @@ pub struct Settings {
     /// The parsed settings tree, behind a lock for runtime `set()` updates.
     inner: Arc<RwLock<SettingsInner>>,
     /// Config keys present in the file but not recognized; warned about once logging is up.
-    unknown_keys: Arc<Vec<String>>,
+    pub(crate) unknown_keys: Arc<Vec<String>>,
 }
 
 impl Settings {
@@ -1605,6 +1612,7 @@ impl Settings {
         set_config_value!(inner.core.network.routing_table.secret_keys, value);
         set_config_value!(inner.core.network.routing_table.bootstrap, value);
         set_config_value!(inner.core.network.routing_table.bootstrap_keys, value);
+        set_config_value!(inner.core.network.routing_table.bootstrap_records, value);
         set_config_value!(inner.core.network.rpc.default_route_hop_count, value);
         set_config_value!(inner.core.network.dht.local_subkey_cache_size, value);
         set_config_value!(
@@ -1835,6 +1843,7 @@ impl Settings {
                         .unwrap_or_default(),
                     bootstrap: inner.core.network.routing_table.bootstrap.clone(),
                     bootstrap_keys: inner.core.network.routing_table.bootstrap_keys.clone(),
+                    bootstrap_records: inner.core.network.routing_table.bootstrap_records.clone(),
                 },
                 rpc: VeilidConfigRPC {
                     default_route_hop_count: inner.core.network.rpc.default_route_hop_count,
@@ -2174,6 +2183,7 @@ mod tests {
             s.core.network.routing_table.bootstrap,
             vec!["bootstrap-v1.veilid.net".to_owned()]
         );
+        assert!(s.core.network.routing_table.bootstrap_records.is_empty());
         assert_eq!(
             s.core.network.routing_table.bootstrap_keys,
             vec![

@@ -45,6 +45,59 @@ impl StorageManager {
         self.rehydration_checked.lock().remove(opaque_record_key);
     }
 
+    /// Count a hard rehydration failure against each subkey it was asked for,
+    /// and return the longest run any of them now has
+    pub(super) fn note_rehydration_failure(
+        &self,
+        opaque_record_key: OpaqueRecordKey,
+        subkeys: &ValueSubkeyRangeSet,
+    ) -> u32 {
+        let mut failures = self.rehydration_failures.lock();
+        if !failures.contains_key(&opaque_record_key) {
+            failures.insert(opaque_record_key.clone(), HashMap::new());
+        }
+        let Some(runs) = failures.get_mut(&opaque_record_key) else {
+            return 0;
+        };
+        let mut longest = 0;
+        let mut bump = |subkey: Option<ValueSubkey>| {
+            let run = runs.entry(subkey).or_insert(0);
+            *run = run.saturating_add(1);
+            longest = longest.max(*run);
+        };
+        if subkeys.is_empty() {
+            bump(None);
+        } else {
+            for subkey in subkeys.iter() {
+                bump(Some(subkey));
+            }
+        }
+        longest
+    }
+
+    /// A rehydration succeeded, so whatever runs preceded it for these subkeys
+    /// are over. A whole-record success ends every run the record has.
+    pub(super) fn clear_rehydration_failures(
+        &self,
+        opaque_record_key: &OpaqueRecordKey,
+        subkeys: &ValueSubkeyRangeSet,
+    ) {
+        let mut failures = self.rehydration_failures.lock();
+        let Some(runs) = failures.get_mut(opaque_record_key) else {
+            return;
+        };
+        if subkeys.is_empty() {
+            runs.clear();
+        } else {
+            for subkey in subkeys.iter() {
+                runs.remove(&Some(subkey));
+            }
+        }
+        if runs.is_empty() {
+            failures.remove(opaque_record_key);
+        }
+    }
+
     /// Add a background rehydration request
     #[cfg_attr(
         feature = "instrument",

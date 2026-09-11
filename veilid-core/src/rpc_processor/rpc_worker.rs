@@ -81,11 +81,16 @@ impl RPCProcessor {
                         .await
                     {
                         Err(RPCError::Ignore(e)) => {
-                            veilid_log!(self debug "ignoring rpc message: {}", e);
+                            // Throttled: a peer decides how often these fire, and the loop takes
+                            // the next message straight away
+                            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "ignoring rpc message: {}", e);
                             continue;
                         }
                         Err(e) => {
-                            veilid_log!(self error "couldn't process rpc message: {}", e);
+                            // Throttled, and for a stronger reason than the line above: error is
+                            // on in every build, so an unthrottled remote-driven error log floods
+                            // an operator who never turned any logging up
+                            veilid_log!(self error throttle: PROTOCOL_LOG_THROTTLE_MS, "couldn't process rpc message: {}", e);
                             continue;
                         }
                         Ok(v) => {

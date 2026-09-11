@@ -30,8 +30,12 @@ pub struct RoutingDomainDetailCommon {
     current_peer_info_cache: Mutex<Option<Arc<PeerInfo>>>,
     /// The last known bootstrap peers that seeded our routing table
     bootstrap_peers: Mutex<Vec<NodeRef>>,
-    /// Verified v1 records from the last successful bootstrap, served to B01T requests
-    bootstrap_records: Mutex<Vec<BootstrapRecord>>,
+    /// What the last bootstrap recorded, served to B01T requests.
+    /// None until a bootstrap has recorded something, which is what says a persisted
+    /// routing table predates this and must not be trusted.
+    bootstrap_cache: Mutex<Option<BootstrapCache>>,
+    /// Records supplied by config, served alongside the above but never persisted
+    config_bootstrap_cache: Mutex<BootstrapCache>,
     /// The last calculated summary of the routing table entries in this domain
     entry_summary: Mutex<Arc<EntrySummary>>,
 }
@@ -48,7 +52,7 @@ impl fmt::Debug for RoutingDomainDetailCommon {
             .field("low_water_mark", &self.low_water_mark)
             .field("current_peer_info_cache", &self.current_peer_info_cache)
             .field("bootstrap_peers", &self.bootstrap_peers)
-            .field("bootstrap_records", &self.bootstrap_records)
+            .field("bootstrap_cache", &self.bootstrap_cache)
             .field("entry_summary", &self.entry_summary)
             .finish()
     }
@@ -70,7 +74,7 @@ impl fmt::Display for RoutingDomainDetailCommon {
             f.to_string(self.confirmed),
             f.to_string(self.low_water_mark.lock().1.clone()),
             self.bootstrap_peers.lock().clone().iter().map(|n| f.to_string(n)).collect::<Vec<_>>().join(",").string_if_empty("None"),
-            self.bootstrap_records.lock().iter().map(|r| f.to_string(r.public_keys())).collect::<Vec<_>>().join(",").string_if_empty("None"),
+            self.get_served_bootstrap_cache().records().iter().map(|r| f.to_string(r.public_keys())).collect::<Vec<_>>().join(",").string_if_empty("None"),
             indent_all_string(f.to_string(self.entry_summary.lock().clone()))
         )
     }
@@ -91,7 +95,8 @@ impl RoutingDomainDetailCommon {
             low_water_mark: Mutex::new((true, Default::default())),
             current_peer_info_cache: Mutex::new(Default::default()),
             bootstrap_peers: Mutex::new(Default::default()),
-            bootstrap_records: Mutex::new(Default::default()),
+            bootstrap_cache: Mutex::new(Default::default()),
+            config_bootstrap_cache: Mutex::new(Default::default()),
             entry_summary: Mutex::new(Default::default()),
         }
     }
@@ -136,12 +141,37 @@ impl RoutingDomainDetailCommon {
         bootstrap_peers.push(bootstrap_peer);
     }
 
-    pub fn get_bootstrap_records(&self) -> Vec<BootstrapRecord> {
-        self.bootstrap_records.lock().clone()
+    /// What a bootstrap recorded, as persisted. None means no bootstrap ever recorded anything.
+    pub fn get_bootstrap_cache(&self) -> Option<BootstrapCache> {
+        self.bootstrap_cache.lock().clone()
     }
 
-    pub fn set_bootstrap_records(&self, bootstrap_records: Vec<BootstrapRecord>) {
-        *self.bootstrap_records.lock() = bootstrap_records;
+    pub fn set_bootstrap_cache(&self, bootstrap_cache: Option<BootstrapCache>) {
+        *self.bootstrap_cache.lock() = bootstrap_cache;
+    }
+
+    /// Record what a bootstrap produced. An empty result still marks that a bootstrap ran,
+    /// but keeps the last good set so this node goes on serving through a re-bootstrap.
+    pub fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
+        let mut cache = self.bootstrap_cache.lock();
+        if bootstrap_cache.is_empty() {
+            cache.get_or_insert_default();
+        } else {
+            *cache = Some(bootstrap_cache);
+        }
+    }
+
+    /// Records supplied by config. Served like any other, but never persisted and never a
+    /// substitute for having bootstrapped.
+    pub fn set_config_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
+        *self.config_bootstrap_cache.lock() = bootstrap_cache;
+    }
+
+    /// Everything this node can serve over B01T: what a bootstrap recorded, plus config
+    pub fn get_served_bootstrap_cache(&self) -> BootstrapCache {
+        let mut served = self.bootstrap_cache.lock().clone().unwrap_or_default();
+        served.union(self.config_bootstrap_cache.lock().clone());
+        served
     }
 
     pub fn update_low_water_mark(&self, mut low_water_mark: Arc<LowWaterMark>) {

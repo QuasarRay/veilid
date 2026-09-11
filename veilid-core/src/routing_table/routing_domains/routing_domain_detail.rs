@@ -64,10 +64,16 @@ pub trait RoutingDomainDetail:
     fn clear_bootstrap_peers(&self);
     /// Add a bootstrap peer to this domain
     fn add_bootstrap_peer(&self, bootstrap_peer: NodeRef);
-    /// Get the verified bootstrap records from the last successful bootstrap in this domain
-    fn get_bootstrap_records(&self) -> Vec<BootstrapRecord>;
-    /// Replace the verified bootstrap records for this domain
-    fn set_bootstrap_records(&self, bootstrap_records: Vec<BootstrapRecord>);
+    /// Get what the last bootstrap in this domain recorded, None if none ever has
+    fn get_bootstrap_cache(&self) -> Option<BootstrapCache>;
+    /// Replace what the last bootstrap recorded for this domain
+    fn set_bootstrap_cache(&self, bootstrap_cache: Option<BootstrapCache>);
+    /// Record what a bootstrap produced, marking that one ran even if it produced nothing
+    fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache);
+    /// Set the bootstrap records supplied by config for this domain
+    fn set_config_bootstrap_cache(&self, bootstrap_cache: BootstrapCache);
+    /// Everything this domain can serve to a B01T request
+    fn get_served_bootstrap_cache(&self) -> BootstrapCache;
 
     /// Update the low water mark of nodes since the last peer minimum refresh
     fn update_low_water_mark(&self, low_water_mark: Arc<LowWaterMark>);

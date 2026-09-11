@@ -54,6 +54,14 @@ pub(crate) use veilid_log_err;
 /// Builds a closure that logs its error argument at `DEBUG` level in alternate (`{:#}`) form,
 /// with an optional prefix message. Useful as the argument to `Result::map_err` or `inspect_err`.
 macro_rules! veilid_log_dbg {
+    // Throttled forms first, for the same reason as in `veilid_log!`: a failed `expr` fragment is
+    // a hard error rather than a backtrack.
+    ($self_expr:expr, throttle: $ms:expr, $message:expr) => {
+        |e| veilid_log_throttled_event!($self_expr, throttle: $ms, prefix: "", level: $crate::Level::DEBUG, target: self::__VEILID_LOG_FACILITY, "{}: {:#}", $message, e)
+    };
+    ($self_expr:expr, throttle: $ms:expr, $fmt:expr, $($args:expr),* $(,)?) => {
+        |e| veilid_log_throttled_event!($self_expr, throttle: $ms, prefix: "", level: $crate::Level::DEBUG, target: self::__VEILID_LOG_FACILITY, concat!($fmt,": {:#}"), $($args,)* e)
+    };
     ($self_expr:expr) => {
         |e| veilid_log_event!($self_expr, prefix: "", level: $crate::Level::DEBUG, "{:#}", e)
     };
@@ -121,6 +129,27 @@ macro_rules! veilid_log_event {
 }
 pub(crate) use veilid_log_event;
 
+/// Emits a single `tracing` event, but at most one per `throttle:` milliseconds from this call
+/// site, appending how many events it dropped since the last one it let through.
+///
+/// Prefer the `throttle:` option on `veilid_log!`; this is its underlying expansion.
+///
+/// The counter lives in a `static` created by the expansion, so every call site throttles
+/// independently and no state has to be threaded through the caller. The first event after a
+/// quiet period always goes out.
+macro_rules! veilid_log_throttled_event {
+    ($self_expr:expr, throttle: $ms:expr, prefix: $prefix:literal, level: $lvl:expr, target: $target:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
+        static __VEILID_LOG_THROTTLE: $crate::logging::LogThrottle =
+            $crate::logging::LogThrottle::new_ms($ms);
+        if let Some(__veilid_suppressed) = __VEILID_LOG_THROTTLE.check() {
+            veilid_log_event!($self_expr, prefix: $prefix, level: $lvl, target: $target,
+                concat!($fmt, "{}"),
+                $($args,)* $crate::logging::SuppressedCount(__veilid_suppressed));
+        }
+    }};
+}
+pub(crate) use veilid_log_throttled_event;
+
 // Warn in debug builds so it's obvious without enabling debug logging; demote to
 // debug in release so it stays silent unless debug logging is turned on.
 #[cfg(debug_assertions)]
@@ -136,8 +165,15 @@ pub(crate) const DEBUGWARN: tracing::Level = tracing::Level::DEBUG;
 /// default, and a `fields:` form records structured fields. The `debugwarn` level prefixes
 /// `DEBUGWARN:` and logs at `WARN` in debug builds, `DEBUG` in release builds.
 macro_rules! veilid_log {
+    // Within each level, the `throttle:` arms come first: a failed `expr` fragment is a hard
+    // error rather than a backtrack, so they have to be tried before the arms whose next token
+    // is a message expression.
 
     // ERROR //////////////////////////////////////////////////////////////////////////
+    // veilid_log!(self error throttle: 1000, "data: {}", data)
+    ($self_ident:ident error throttle: $ms:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::ERROR, target: self::__VEILID_LOG_FACILITY, $fmt $(, $args)*)};
+    // veilid_log!(self error throttle: 1000, target: "facility", "data: {}", data)
+    ($self_ident:ident error throttle: $ms:expr, target: $target:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::ERROR, target: $target, $fmt $(, $args)*)};
     // veilid_log!(self error "message")
     ($self_ident:ident error $text:expr) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::ERROR, $text)};
     // veilid_log!(self error target: "facility", "message")
@@ -152,6 +188,10 @@ macro_rules! veilid_log {
     ($self_ident:ident error target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::ERROR, target: $target, fields: $($k).+ = $($fields)*)};
 
     // WARN //////////////////////////////////////////////////////////////////////////
+    // veilid_log!(self warn throttle: 1000, "data: {}", data)
+    ($self_ident:ident warn throttle: $ms:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::WARN, target: self::__VEILID_LOG_FACILITY, $fmt $(, $args)*)};
+    // veilid_log!(self warn throttle: 1000, target: "facility", "data: {}", data)
+    ($self_ident:ident warn throttle: $ms:expr, target: $target:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::WARN, target: $target, $fmt $(, $args)*)};
     // veilid_log!(self warn "message")
     ($self_ident:ident warn $text:expr) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::WARN, $text)};
     // veilid_log!(self warn target: "facility", "message")
@@ -166,6 +206,10 @@ macro_rules! veilid_log {
     ($self_ident:ident warn target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::WARN, target: $target, fields: $($k).+ = $($fields)*)};
 
     // INFO //////////////////////////////////////////////////////////////////////////
+    // veilid_log!(self info throttle: 1000, "data: {}", data)
+    ($self_ident:ident info throttle: $ms:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::INFO, target: self::__VEILID_LOG_FACILITY, $fmt $(, $args)*)};
+    // veilid_log!(self info throttle: 1000, target: "facility", "data: {}", data)
+    ($self_ident:ident info throttle: $ms:expr, target: $target:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::INFO, target: $target, $fmt $(, $args)*)};
     // veilid_log!(self info "message")
     ($self_ident:ident info $text:expr) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::INFO, $text)};
     // veilid_log!(self info target: "facility", "message")
@@ -180,6 +224,10 @@ macro_rules! veilid_log {
     ($self_ident:ident info target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::INFO, target: $target, fields: $($k).+ = $($fields)*)};
 
     // DEBUG //////////////////////////////////////////////////////////////////////////
+    // veilid_log!(self debug throttle: 1000, "data: {}", data)
+    ($self_ident:ident debug throttle: $ms:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::DEBUG, target: self::__VEILID_LOG_FACILITY, $fmt $(, $args)*)};
+    // veilid_log!(self debug throttle: 1000, target: "facility", "data: {}", data)
+    ($self_ident:ident debug throttle: $ms:expr, target: $target:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::DEBUG, target: $target, $fmt $(, $args)*)};
     // veilid_log!(self debug "message")
     ($self_ident:ident debug $text:expr) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::DEBUG, $text)};
     // veilid_log!(self debug target: "facility", "message")
@@ -194,6 +242,10 @@ macro_rules! veilid_log {
     ($self_ident:ident debug target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::DEBUG, target: $target, fields: $($k).+ = $($fields)*)};
 
     // TRACE //////////////////////////////////////////////////////////////////////////
+    // veilid_log!(self trace throttle: 1000, "data: {}", data)
+    ($self_ident:ident trace throttle: $ms:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::TRACE, target: self::__VEILID_LOG_FACILITY, $fmt $(, $args)*)};
+    // veilid_log!(self trace throttle: 1000, target: "facility", "data: {}", data)
+    ($self_ident:ident trace throttle: $ms:expr, target: $target:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "", level: $crate::Level::TRACE, target: $target, $fmt $(, $args)*)};
     // veilid_log!(self trace "message")
     ($self_ident:ident trace $text:expr) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::TRACE, $text)};
     // veilid_log!(self trace target: "facility", "message")
@@ -208,6 +260,10 @@ macro_rules! veilid_log {
     ($self_ident:ident trace target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::TRACE, target: $target, fields: $($k).+ = $($fields)*)};
 
     // DEBUGWARN //////////////////////////////////////////////////////////////////////////
+    // veilid_log!(self debugwarn throttle: 1000, "data: {}", data)
+    ($self_ident:ident debugwarn throttle: $ms:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "DEBUGWARN", level: $crate::DEBUGWARN, target: self::__VEILID_LOG_FACILITY, $fmt $(, $args)*)};
+    // veilid_log!(self debugwarn throttle: 1000, target: "facility", "data: {}", data)
+    ($self_ident:ident debugwarn throttle: $ms:expr, target: $target:expr, $fmt:expr $(, $args:expr)* $(,)?) => {veilid_log_throttled_event!($self_ident, throttle: $ms, prefix: "DEBUGWARN", level: $crate::DEBUGWARN, target: $target, $fmt $(, $args)*)};
     // veilid_log!(self debugwarn "message")
     ($self_ident:ident debugwarn $text:expr) => {veilid_log_event!($self_ident, prefix: "DEBUGWARN: ", level: $crate::DEBUGWARN, $text)};
     // veilid_log!(self debugwarn target: "facility", "message")
@@ -222,6 +278,10 @@ macro_rules! veilid_log {
     ($self_ident:ident debugwarn target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "DEBUGWARN", level: $crate::DEBUGWARN, target: $target, fields: $($k).+ = $($fields)*)};
 }
 pub(crate) use veilid_log;
+
+/// How long one call site in a protocol loop stays quiet after emitting. Long enough that a
+/// spinning loop cannot outpace the sink, short enough to still watch a fault develop.
+pub(crate) const PROTOCOL_LOG_THROTTLE_MS: u64 = 1000;
 
 /// If an operation returns a NetworkResult:
 ///
@@ -243,11 +303,11 @@ macro_rules! network_result_value_or_log {
         let __extra_message = if debug_target_enabled!("network_result") {
             $d.to_string()
         } else {
-            "".to_string()
+            String::new()
         };
         match $r {
             NetworkResult::Timeout => {
-                veilid_log!($self debug target: $target,
+                veilid_log!($self debug throttle: $crate::logging::PROTOCOL_LOG_THROTTLE_MS, target: $target,
                     "{} at {}@{}:{} in {}{}",
                     "Timeout",
                     file!(),
@@ -259,7 +319,7 @@ macro_rules! network_result_value_or_log {
                 $f
             }
             NetworkResult::ServiceUnavailable(ref s) => {
-                veilid_log!($self debug target: $target,
+                veilid_log!($self debug throttle: $crate::logging::PROTOCOL_LOG_THROTTLE_MS, target: $target,
                     "{}({}) at {}@{}:{} in {}{}",
                     "ServiceUnavailable",
                     s,
@@ -272,7 +332,7 @@ macro_rules! network_result_value_or_log {
                 $f
             }
             NetworkResult::NoConnection(ref e) => {
-                veilid_log!($self debug target: $target,
+                veilid_log!($self debug throttle: $crate::logging::PROTOCOL_LOG_THROTTLE_MS, target: $target,
                     "{}({}) at {}@{}:{} in {}{}",
                     "No connection",
                     e.to_string(),
@@ -285,7 +345,7 @@ macro_rules! network_result_value_or_log {
                 $f
             }
             NetworkResult::AlreadyExists(ref e) => {
-                veilid_log!($self debug target: $target,
+                veilid_log!($self debug throttle: $crate::logging::PROTOCOL_LOG_THROTTLE_MS, target: $target,
                     "{}({}) at {}@{}:{} in {}{}",
                     "Already exists",
                     e.to_string(),
@@ -298,7 +358,7 @@ macro_rules! network_result_value_or_log {
                 $f
             }
             NetworkResult::InvalidMessage(ref s) => {
-                veilid_log!($self debug target: $target,
+                veilid_log!($self debug throttle: $crate::logging::PROTOCOL_LOG_THROTTLE_MS, target: $target,
                     "{}({}) at {}@{}:{} in {}{}",
                     "Invalid message",
                     s,

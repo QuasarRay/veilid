@@ -59,6 +59,9 @@ REQ_RUST=$RUST_MSRV;            REQ_JAVA=$JAVA_MIN_VERSION;   REQ_CAPNP=$CAPNP_M
 REQ_CMAKE=$CMAKE_MIN_VERSION;   REQ_WASMOPT=$BINARYEN_VERSION
 REQ_WASMBINDGEN=$WASM_BINDGEN_VERSION; REQ_CARGOEDIT=$CARGO_EDIT_VERSION; REQ_NDK=$ANDROID_NDK_VERSION
 REQ_ASTGREP=$AST_GREP_VERSION
+# Pinned for a fresh install only; dep_have still accepts whatever a dev already has
+REQ_NEXTEST=$CARGO_NEXTEST_VERSION; REQ_PUBLICAPI=$CARGO_PUBLIC_API_VERSION
+REQ_SYNCREADME=$CARGO_SYNC_README_VERSION
 # android rust targets, derived from the single-source RUST_STABLE_TARGETS (no duplicated list)
 RUST_ANDROID_TARGETS=""; for _t in $RUST_STABLE_TARGETS; do case "$_t" in *android*) RUST_ANDROID_TARGETS="$RUST_ANDROID_TARGETS $_t" ;; esac; done
 
@@ -100,9 +103,9 @@ i_pods_prefix() { command -v gem >/dev/null 2>&1 || { echo "    cocoapods: no ru
                   local gh="${GEM_HOME:-$PREFIX/gem}"; gem install --install-dir "$gh" --bindir "$gh/bin" --no-document cocoapods; }
 i_wbg()   { cargo install --locked wasm-bindgen-cli --version "$REQ_WASMBINDGEN"; }
 i_cedit() { cargo install --locked cargo-edit --version "$REQ_CARGOEDIT"; }
-i_nxt()   { cargo install --locked cargo-nextest; }
-i_papi()  { cargo install --locked cargo-public-api; }
-i_srm()   { cargo binstall --no-confirm cargo-sync-readme 2>/dev/null || cargo install --locked cargo-sync-readme; }
+i_nxt()   { cargo install --locked cargo-nextest --version "$REQ_NEXTEST"; }
+i_papi()  { cargo install --locked cargo-public-api --version "$REQ_PUBLICAPI"; }
+i_srm()   { cargo binstall --no-confirm cargo-sync-readme --version "$REQ_SYNCREADME" 2>/dev/null || cargo install --locked cargo-sync-readme --version "$REQ_SYNCREADME"; }
 i_sg()    { cargo install --locked ast-grep --version "$REQ_ASTGREP"; }
 crate_ver() { cargo install --list 2>/dev/null | sed -n "s/^$1 v\([0-9.]*\):.*/\1/p" | head -1; }
 

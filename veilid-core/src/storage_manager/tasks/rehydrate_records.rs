@@ -43,6 +43,7 @@ impl StorageManager {
 
                 let _report = match res {
                     Ok(v) => {
+                        self.clear_rehydration_failures(&req.0, &req.1.subkeys);
                         self.mark_rehydration_checked(req.0);
                         v
                     }
@@ -59,7 +60,20 @@ impl StorageManager {
                         } else if matches!(e, VeilidAPIError::KeyNotFound { key: _ }) {
                             veilid_log!(self debug "Rehydration request skipped: {}", e);
                         } else {
-                            veilid_log!(self error "Rehydration request failed: {}", e);
+                            // One failure is the network on a bad day and asks nothing of
+                            // anyone; a run of them on one record does
+                            let failures = self.note_rehydration_failure(req.0.clone(), &req.1.subkeys);
+                            if failures >= REHYDRATION_FAILURE_WARN_THRESHOLD {
+                                // An empty request is the whole record, which displays as nothing
+                                let subkeys = if req.1.subkeys.is_empty() {
+                                    "all subkeys".to_string()
+                                } else {
+                                    format!("subkeys {}", req.1.subkeys)
+                                };
+                                veilid_log!(self warn "Rehydration of {} {} failed {} times in a row: {}", req.0, subkeys, failures, e);
+                            } else {
+                                veilid_log!(self debug "Rehydration request failed: {}", e);
+                            }
                         }
                         return;
                     }

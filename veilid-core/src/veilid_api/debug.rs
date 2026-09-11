@@ -3317,7 +3317,11 @@ impl VeilidAPI {
                 unreachable!("array out of bounds must panic: {}", y);
             }
             "nullptr" => {
-                let x: *const i32 = std::ptr::null();
+                // Laundered through `black_box` so the null is not visible at the read: rustc's
+                // `invalid_null_arguments` rejects a statically-null argument, which is right
+                // everywhere except a crash test that needs the read to actually happen. Still
+                // null at runtime, so the fault is unchanged.
+                let x: *const i32 = std::hint::black_box(std::ptr::null());
                 // SAFETY: none, this crash test reads null on purpose; volatile keeps the load
                 // from folding away. Natively it faults (a signal, not a panic); on wasm address
                 // 0 is readable, so it falls through to the panic below

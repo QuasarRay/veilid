@@ -88,13 +88,22 @@ impl NetworkManager {
                     match relay_kind {
                         RelayKind::Inbound => {
                             // Inbound relay the packet to the desired destination
-                            veilid_log!(self trace "inbound relaying {} bytes to {}", data.len(), relay_nr);
-                            if let Err(e) = pin_future!(
+                            veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "inbound relaying {} bytes to {}", data.len(), relay_nr);
+                            // Kept for the failure message: the node ref moves into the send
+                            let relay_nr_dbg = relay_nr.to_string();
+                            // Throttled: one log per relayed envelope, and a peer sets the rate
+                            match pin_future!(
                                 self.send_inbound_relay_data(relay_nr, sequencing, data)
                             )
                             .await
                             {
-                                veilid_log!(self debug "failed to inbound relay envelope: {}" ,e);
+                                Err(e) => {
+                                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to inbound relay envelope: {}", e);
+                                }
+                                Ok(nres) if !matches!(nres, NetworkResult::Value(_)) => {
+                                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to inbound relay envelope to {}: {}", relay_nr_dbg, nres);
+                                }
+                                Ok(_) => {}
                             }
                         }
                         RelayKind::Outbound => {
@@ -102,9 +111,10 @@ impl NetworkManager {
                             // Because the source was in the client allowlist, this node has opted in
                             // to making new flows and connections for the purposes of relaying
                             let seq_relay_nr = relay_nr.sequencing_filtered(sequencing);
-                            veilid_log!(self trace "outbound relaying {} bytes to {}", data.len(), seq_relay_nr);
+                            veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "outbound relaying {} bytes to {}", data.len(), seq_relay_nr);
                             if let Err(e) = pin_future!(self.send_data(seq_relay_nr, data)).await {
-                                veilid_log!(self debug "failed to outbound relay envelope: {}" ,e);
+                                // Throttled: one log per relayed envelope, and a peer sets the rate
+                                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to outbound relay envelope: {}", e);
                             }
                         }
                     }

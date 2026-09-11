@@ -28,7 +28,7 @@ impl NetworkManager {
         for record_string in record_strings {
             let Some(bootstrap_record) = BootstrapRecord::new_from_v1_str(
                 self,
-                &dial_info_converter,
+                Some(&dial_info_converter),
                 record_string,
                 &signing_keys,
             )
@@ -40,28 +40,6 @@ impl NetworkManager {
             bootstrap_records.push(bootstrap_record);
         }
 
-        let mut merged_bootstrap_records: Vec<BootstrapRecord> = Vec::new();
-
-        for mut bsrec in bootstrap_records {
-            let mut mbi = 0;
-            while mbi < merged_bootstrap_records.len() {
-                let mbr = &mut merged_bootstrap_records[mbi];
-                if mbr
-                    .public_keys()
-                    .contains_any_from_iter(bsrec.public_keys().iter())
-                {
-                    // Merge record, pop this one out
-                    let mbr = merged_bootstrap_records.remove(mbi);
-                    bsrec.merge(mbr);
-                } else {
-                    // No overlap, go to next record
-                    mbi += 1;
-                }
-            }
-            // Append merged record
-            merged_bootstrap_records.push(bsrec);
-        }
-
-        Ok(merged_bootstrap_records)
+        Ok(BootstrapRecord::merge_all(bootstrap_records))
     }
 }

@@ -43,6 +43,7 @@ pub fn fake_veilid_config() -> VeilidConfig {
                     "VLD0:qrxwD1-aM9xiUw4IAPVXE_4qgoIfyR4Y6MEPyaDl_GQ",
                 )
                 .unwrap()],
+                bootstrap_records: vec![],
             },
             rpc: VeilidConfigRPC {
                 default_route_hop_count: 8,

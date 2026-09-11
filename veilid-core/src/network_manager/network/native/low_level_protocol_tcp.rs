@@ -4,6 +4,11 @@ use stop_token::future::FutureExt;
 
 const LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS: usize = 16;
 
+/// Delay before the next accept after one failed. An accept that fails instantly - a listener
+/// whose interface went away, or a process out of file descriptors - is otherwise retried by the
+/// incoming stream as fast as the CPU allows.
+const LISTENER_ACCEPT_ERROR_BACKOFF_MS: u32 = 100;
+
 /////////////////////////////////////////////////////////////////
 
 #[derive(Clone)]
@@ -114,15 +119,20 @@ impl NativeNetwork {
                 let listener_addr = listener_state.read().addr;
                 let n = consecutive_accept_errors.fetch_add(1, Ordering::Relaxed) + 1;
                 if n >= LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS {
-                    veilid_log!(self debug
+                    // Warn, not debug: once per restart, and a transport that gave up is the
+                    // thing an operator most needs to see without having raised the log level
+                    veilid_log!(self warn
                         "TCP acceptor on {} errored {} times consecutively ({}), triggering network restart",
                         listener_addr, n, e);
                     self.inner.lock().network_needs_restart = true;
                 } else {
-                    veilid_log!(self debug
+                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS,
                         "TCP acceptor on {} transient error {}/{} ({})",
                         listener_addr, n, LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS, e);
                 }
+                // The incoming stream keeps yielding after an accept error, so without this the
+                // next accept is attempted immediately and a broken listener spins
+                sleep(LISTENER_ACCEPT_ERROR_BACKOFF_MS).await;
                 return;
             }
         };
@@ -133,7 +143,7 @@ impl NativeNetwork {
         let peer_addr = match tcp_stream.peer_addr() {
             Ok(addr) => addr,
             Err(e) => {
-                veilid_log!(self debug "failed to get peer address: {}", e);
+                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to get peer address: {}", e);
                 return;
             }
         };
@@ -151,33 +161,33 @@ impl NativeNetwork {
             .acquire_inbound_address_lock(peer_addr)
             .await
         else {
-            veilid_log!(self debug "timed out acquiring inbound address lock for {}", peer_addr);
+            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "timed out acquiring inbound address lock for {}", peer_addr);
             return;
         };
 
         let local_addr = match tcp_stream.local_addr() {
             Ok(addr) => addr,
             Err(e) => {
-                veilid_log!(self debug "failed to get local address: {}", e);
+                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to get local address: {}", e);
                 return;
             }
         };
 
         if let Err(e) = set_tcp_stream_linger(&tcp_stream, Some(core::time::Duration::from_secs(0)))
         {
-            veilid_log!(self debug "Couldn't set TCP linger: {} on {:?} -> {:?}", e, peer_addr, local_addr);
+            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Couldn't set TCP linger: {} on {:?} -> {:?}", e, peer_addr, local_addr);
             return;
         }
 
         if let Err(e) = tcp_stream.set_nodelay(true) {
-            veilid_log!(self debug "Couldn't set TCP nodelay: {} on {:?} -> {:?}", e, peer_addr, local_addr);
+            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Couldn't set TCP nodelay: {} on {:?} -> {:?}", e, peer_addr, local_addr);
             return;
         }
 
         let listener_state = listener_state.clone();
         let connection_manager = connection_manager.clone();
 
-        veilid_log!(self trace "TCP connection from: {}", peer_addr);
+        veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "TCP connection from: {}", peer_addr);
 
         // Create a stream we can peek on
         #[cfg(feature = "rt-tokio")]
@@ -185,7 +195,9 @@ impl NativeNetwork {
         let ps = AsyncPeekStream::new(tcp_stream);
 
         /////////////////////////////////////////////////////////////
-        let mut first_packet = [0u8; PEEK_DETECT_LEN];
+        // Only the first byte decides TLS from everything else. Waiting for more would stall
+        // short messages that are complete in themselves, like a direct bootstrap request.
+        let mut first_packet = [0u8; 1];
 
         // read a chunk of the stream
         if timeout(
@@ -197,7 +209,7 @@ impl NativeNetwork {
         {
             // If we fail to get a packet within the connection initial timeout
             // then we punt this connection
-            veilid_log!(self trace "connection initial timeout from: {:?}", peer_addr);
+            veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "connection initial timeout from: {:?}", peer_addr);
             return;
         }
 
@@ -223,19 +235,19 @@ impl NativeNetwork {
 
         let conn = match conn {
             Ok(Some(c)) => {
-                veilid_log!(self trace "protocol handler found for {:?}: {:?}", peer_addr, c);
+                veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "protocol handler found for {:?}: {:?}", peer_addr, c);
                 c
             }
             Ok(None) => {
                 // No protocol handlers matched? drop it.
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self debug "no protocol handler for connection from {:?}", peer_addr);
+                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "no protocol handler for connection from {:?}", peer_addr);
                 return;
             }
             Err(_e) => {
                 // Failed to negotiate connection? drop it.
                 #[cfg(feature = "verbose-tracing")]
-                veilid_log!(self debug "failed to negotiate connection from {:?}: {}", peer_addr, _e);
+                veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to negotiate connection from {:?}: {}", peer_addr, _e);
                 return;
             }
         };
@@ -245,7 +257,7 @@ impl NativeNetwork {
             .on_accepted_protocol_network_connection(conn, address_lock_guard)
             .await
         {
-            veilid_log!(self error "failed to register new connection: {}", e);
+            veilid_log!(self error throttle: PROTOCOL_LOG_THROTTLE_MS, "failed to register new connection: {}", e);
         }
     }
 

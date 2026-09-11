@@ -181,11 +181,20 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
     fn add_bootstrap_peer(&self, bootstrap_peer: NodeRef) {
         self.common.add_bootstrap_peer(bootstrap_peer);
     }
-    fn get_bootstrap_records(&self) -> Vec<BootstrapRecord> {
-        self.common.get_bootstrap_records()
+    fn get_bootstrap_cache(&self) -> Option<BootstrapCache> {
+        self.common.get_bootstrap_cache()
     }
-    fn set_bootstrap_records(&self, bootstrap_records: Vec<BootstrapRecord>) {
-        self.common.set_bootstrap_records(bootstrap_records);
+    fn set_bootstrap_cache(&self, bootstrap_cache: Option<BootstrapCache>) {
+        self.common.set_bootstrap_cache(bootstrap_cache);
+    }
+    fn record_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
+        self.common.record_bootstrap_cache(bootstrap_cache);
+    }
+    fn set_config_bootstrap_cache(&self, bootstrap_cache: BootstrapCache) {
+        self.common.set_config_bootstrap_cache(bootstrap_cache);
+    }
+    fn get_served_bootstrap_cache(&self) -> BootstrapCache {
+        self.common.get_served_bootstrap_cache()
     }
 
     fn update_low_water_mark(&self, low_water_mark: Arc<LowWaterMark>) {

@@ -1,14 +1,11 @@
-variables:
-  NO_DOCKER: 1
-  FORCE_COLOR: 1
-  EARTHLY_EXEC_CMD: "/bin/sh"
-  EARTHLY_DISABLE_REMOTE_REGISTRY_PROXY: 1
-  GIT_SUBMODULE_STRATEGY: normal
+include:
+  - local: .gitlab/ci/common.yml
 
 ###########################################################################
 # Stages
 
 stages:
+  - tools
   - prepare
   - test
   - build_packages
@@ -19,22 +16,6 @@ stages:
 
 ###########################################################################
 # Common YAML fragments
-
-# Base earthly setup for jobs
-.base:
-  tags: [saas-linux-medium-amd64]
-  image: docker
-  services:
-    - docker:dind
-
-# Common earthly setup for jobs
-.earthly: &earthly_setup
-  - apk update && apk add git
-  - wget https://github.com/earthly/earthly/releases/download/v0.8.15/earthly-linux-amd64 -O /usr/local/bin/earthly
-  - chmod +x /usr/local/bin/earthly
-  - earthly bootstrap
-  - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
-  - test "$CI_PROJECT_PATH" != "veilid/veilid" && project_args="--CI_REGISTRY_IMAGE=$CI_REGISTRY_IMAGE"
 
 # Rules for running tests
 # Runs on merge requests and events that cause update to merge requests (like pushing to a branch with an open merge request)
@@ -60,34 +41,35 @@ stages:
 
 # Common unit test base
 .unit_test:
-  extends: .base
+  # Large by default: most users of this template are compile-bound. The three that are not
+  # (census, readme-sync, dart-format do no rust compilation) drop back to medium individually.
+  extends: .base_large
   variables:
     earthly_target: test-all
   stage: test
+  # A superseded pipeline should hand its runners back rather than finish a lint nobody reads.
+  interruptible: true
+  # Stage order alone would make every test wait for the whole prepare stage. These are the only
+  # real dependencies: the tool images, and the crate cache when this lockfile has one.
+  needs:
+    - job: build_images
+      optional: true
   before_script:
-    # Use branch name as tag, sanitize for Docker tag compatibility
+    - !reference [.earthly_setup, script]
+    # Degrade to downloading crates rather than failing on a missing image. The child pipeline's
+    # crate_cache job should have published this tag, so a miss here means that job was skipped
+    # or failed -- worth a slower build, not a failed one.
     - |
-      # Tagged releases first
-      if [[ -n "$CI_COMMIT_TAG" ]]; then
-        CACHE_TAG="main" 
-        CACHE_NAME="build-cache"
-      # Then branch commits
-      elif [[ -n "$CI_COMMIT_BRANCH" ]]; then
-        CACHE_TAG=$(echo "$CI_COMMIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
-        CACHE_NAME="build-cache"
-      # Then MR tests
-      elif [[ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]]; then
-        CACHE_TAG="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-        CACHE_NAME="build-cache"
-      # Catch all fallback to main
+      CRATE_CACHE_TAG=$(sh scripts/cache_tags.sh crate)
+      if docker manifest inspect "$CI_REGISTRY_IMAGE/crate-cache:$CRATE_CACHE_TAG" > /dev/null 2>&1; then
+        crate_cache_args="--CRATE_CACHE_TAG=$CRATE_CACHE_TAG"
+        echo "Using crate cache: crate-cache:$CRATE_CACHE_TAG"
       else
-        CACHE_TAG="main"
-        CACHE_NAME="build-cache"
+        crate_cache_args=""
+        echo "No crate-cache:$CRATE_CACHE_TAG published; crates download during the build"
       fi
-    - 'echo "Using cache from: $CACHE_NAME:$CACHE_TAG"'
-    - *earthly_setup
   script:
-    - earthly --use-inline-cache +$earthly_target --BASE=container $project_args --CACHE_TAG=$CACHE_TAG --CACHE_NAME=$CACHE_NAME
+    - earthly --use-inline-cache +$earthly_target --TOOLS=container --TOOLS_IMAGE=$CI_REGISTRY_IMAGE $project_args $crate_cache_args
   rules:
     - *branch_test_rules
 
@@ -95,8 +77,17 @@ stages:
 # Jobs
 
 format:
+  extends: .runner_small
   stage: test
-  image: rust:slim
+  # Pinned to RUST_VERSION: unpinned `rust:slim` tracks stable (1.98.1 at the time of writing)
+  # while everything else builds with 1.92.0, and rustfmt's output does change between releases --
+  # so the gate could disagree with the local check_all.sh run, which pins the same version.
+  # check_all.sh fails if this literal drifts from .dagger/versions.env.
+  # DELIBERATE EXCEPTION to "test jobs do not install software": no image avoids it. Every
+  # upstream rust image uses --profile minimal (checked: 1.92.0 and 1.92.0-slim both lack rustfmt)
+  # and our own tool-rust installs `-c clippy` only. Using tool-rust here would pull 1757MB rather
+  # than 318MB to skip a ~5MB component on a job that finishes in under a minute.
+  image: rust:1.92.0-slim
   before_script:
     - rustup component add rustfmt
 
@@ -106,78 +97,109 @@ format:
   rules:
     - *branch_format_rules
 
-# Create the build container if:
-#  - no container in the registry
-#  - run as part of a schedule
-#  - run manually from the pipelines web page
-build_cache:
-  extends: .base
-  stage: prepare
+# Which build images are missing, decided in a curl-only container: no docker, no docker-in-docker
+# service, no earthly. The registry v2 API answers 200/404 for a tag given only a JWT, so this is
+# the disqualifier — on a warm pipeline it is the single cheap job that runs before the tests,
+# instead of a chain of earthly jobs each costing ~110s of startup to discover there is nothing
+# to do.
+plan_images:
+  extends: .runner_small
+  stage: tools
+  # curl ships in the image and busybox supplies the sh/sed/sha256sum the scripts need, so this
+  # job installs nothing at run time. entrypoint cleared: the image's own is curl.
+  image:
+    name: alpine/curl:latest
+    entrypoint: [""]
+  interruptible: true
   script:
-    - 'echo "CI_PIPELINE_SOURCE: $CI_PIPELINE_SOURCE"'
-    - 'echo "CI_COMMIT_BRANCH: $CI_COMMIT_BRANCH"'
-    - 'echo "CI_DEFAULT_BRANCH: $CI_DEFAULT_BRANCH"'
-    - 'echo "CI_MERGE_REQUEST_TARGET_BRANCH_NAME: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME"'
-    - apk update && apk add jq && apk add curl
-    # Determine cache tag based on branch use branch name as tag, sanitize for Docker tag compatibility
-    - |
-      # Tagged releases first
-      if [[ -n "$CI_COMMIT_TAG" ]]; then
-        CACHE_TAG="main" 
-        CACHE_NAME="build-cache"
-      # Then branch commits
-      elif [[ -n "$CI_COMMIT_BRANCH" ]]; then
-        CACHE_TAG=$(echo "$CI_COMMIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
-        CACHE_NAME="build-cache"
-      # Then MR tests
-      elif [[ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]]; then
-        CACHE_TAG="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-        CACHE_NAME="build-cache"
-      # Catch all fallback to main
-      else
-        CACHE_TAG="main"
-        CACHE_NAME="build-cache"
-      fi
-    - 'echo "Using cache tag: $CACHE_TAG in image: $CACHE_NAME"'
-    # Check if cache exists
-    - if ! docker manifest inspect $CI_REGISTRY_IMAGE/$CACHE_NAME:$CACHE_TAG > /dev/null 2>&1; then
-    - CACHE_EPOCH=0
-    - echo "Cache not found, will create new cache"
-    - else
-    - 'CONT_REPO_ID=$(curl "https://gitlab.com/api/graphql" --header "Content-Type: application/json" --request POST --data "{\"query\": \"query { project(fullPath: \\\"$CI_PROJECT_PATH\\\" ) { containerRepositories( name: \\\"$CACHE_NAME\\\" ) { nodes { id }}}} \"}" | jq -r ".data.project.containerRepositories.nodes[0].id")'
-    - echo "CONTAINER REPO ID = $CONT_REPO_ID"
-    - 'CACHE_TS=$(curl "https://gitlab.com/api/graphql" --header "Content-Type: application/json" --request POST --data "{\"query\": \"query { containerRepository(id: \\\"$CONT_REPO_ID\\\") { tags( first: 1 name: \\\"$CACHE_TAG\\\" ) { nodes { location publishedAt }}}} \"}" | jq -r ".data.containerRepository.tags.nodes[0].publishedAt" | cut -d "+" -f1 | sed "s/T/ /g" )'
-    - CACHE_EPOCH=$(date -d "$CACHE_TS" +%s)
-    - 'echo "Cache found with timestamp: $CACHE_TS"'
-    # Check if branch cache is older than 7 days
-    - |
-      if [[ "$CI_COMMIT_BRANCH" != "$CI_DEFAULT_BRANCH" ]]; then
-        CURRENT_EPOCH=$(date +%s)
-        SEVEN_DAYS_SECONDS=$((7 * 24 * 60 * 60))
-        CACHE_AGE=$((CURRENT_EPOCH - CACHE_EPOCH))
-        if [[ $CACHE_AGE -gt $SEVEN_DAYS_SECONDS ]]; then
-          echo "Branch cache is older than 7 days, will rebuild"
-          CACHE_EPOCH=0
-        fi
-      fi
-    - fi
-    - EARTHLY_EPOCH=$(git log -1 --format=%ct Earthfile)
-    - echo "CACHE EPOCH = $CACHE_EPOCH, EARTHLY EPOCH = $EARTHLY_EPOCH"
-    # Build cache if needed
-    - if [[ $EARTHLY_EPOCH -gt $CACHE_EPOCH ]] || [[ "$CI_PIPELINE_SOURCE" == "schedule" ]] || [[ "$CI_PIPELINE_SOURCE" == "web" ]] ; then
-    - *earthly_setup
-    - earthly --use-inline-cache --save-inline-cache --strict --push -P +build-linux-cache $project_args --CACHE_TAG=$CACHE_TAG --CACHE_NAME=$CACHE_NAME
-    - else
-    - echo "No need to rebuild cache"
-    - fi
+    - sh scripts/ci/plan_images.sh images.env
+  artifacts:
+    reports:
+      dotenv: images.env
   rules:
-    # Do not run in pipeline dry runs or nightly releases
-    - if: $CI_COMMIT_MESSAGE =~ /\[ci dryrun]/ || $IS_NIGHTLY == "true"
-      when: never
-    # Otherwise, default to whenever tests run
     - *branch_test_rules
 
-# Runs
+# Build only what plan_images found missing, in dependency waves (see .gitlab/ci/images.yml).
+# A trigger job runs on no runner at all, so a fully cached pipeline pays nothing here beyond the
+# child's own no-op job.
+build_images:
+  stage: tools
+  needs: [plan_images]
+  trigger:
+    include:
+      - local: .gitlab/ci/images.yml
+    strategy: depend
+  variables:
+    BUILD_DEPS_BASE: $BUILD_DEPS_BASE
+    BUILD_TOOL_FLUTTER: $BUILD_TOOL_FLUTTER
+    BUILD_TOOL_RUST: $BUILD_TOOL_RUST
+    BUILD_TOOL_ZIG: $BUILD_TOOL_ZIG
+    BUILD_TOOL_BINARYEN: $BUILD_TOOL_BINARYEN
+    BUILD_TOOL_CARGO_BINS: $BUILD_TOOL_CARGO_BINS
+    BUILD_TOOL_ASTGREP: $BUILD_TOOL_ASTGREP
+    BUILD_TOOL_ZIGBUILD: $BUILD_TOOL_ZIGBUILD
+    BUILD_DEPS_LINUX: $BUILD_DEPS_LINUX
+    BUILD_DEPS_FLUTTER: $BUILD_DEPS_FLUTTER
+    BUILD_DEPS_FLUTTER_RUST: $BUILD_DEPS_FLUTTER_RUST
+    BUILD_CRATE_CACHE: $BUILD_CRATE_CACHE
+  rules:
+    - *branch_test_rules
+
+# Keep the 3 most recent tags in each tool-* repository and in crate-cache. The project-wide
+# cleanup policy cannot express this: it matches tag names across every repository and its keep_n
+# is a fixed set of values with no 3 in it. The bulk tag delete API takes an arbitrary keep_n one
+# repository at a time, so this walks them individually. crate-cache accumulates one tag per
+# distinct Cargo.lock and would otherwise grow without limit. The tag the build currently asks
+# for is kept whatever its age, so a revert to an older lockfile or pinned version still finds
+# its image.
+#
+# Needs REGISTRY_CLEANUP_TOKEN (CI/CD variable): a project access token with api scope and at
+# least the Maintainer role. CI_JOB_TOKEN cannot delete registry tags. Without it this no-ops.
+registry_cleanup:
+  # curl and jq only; no earthly, no dind.
+  extends: .runner_small
+  image: alpine:latest
+  stage: cleanup
+  script:
+    - apk update && apk add curl jq
+    - |
+      if [ -z "${REGISTRY_CLEANUP_TOKEN:-}" ]; then
+        echo "REGISTRY_CLEANUP_TOKEN is not set; skipping registry cleanup."
+        exit 0
+      fi
+    - |
+      api="$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories"
+      curl -sSf --header "PRIVATE-TOKEN: $REGISTRY_CLEANUP_TOKEN" "$api?per_page=100" \
+        | jq -r '.[] | select((.name | startswith("tool-")) or .name == "crate-cache" or .name == "deps-linux" or .name == "deps-flutter" or .name == "deps-flutter-rust" or .name == "earthly-buildkitd") | "\(.id) \(.name)"' > /tmp/cache_repos.txt
+      if [ ! -s /tmp/cache_repos.txt ]; then
+        echo "no tool-*, deps-linux or crate-cache repositories in the registry; nothing to clean."
+        exit 0
+      fi
+      while read -r id name; do
+        # The tag this build asks for, kept whatever its age; dots escaped for the re2 regex
+        case "$name" in
+          crate-cache) keep=$(sh scripts/cache_tags.sh crate) ;;
+          deps-linux)  keep=$(sh scripts/tool_tags.sh deps-linux) ;;
+          deps-flutter) keep=$(sh scripts/tool_tags.sh deps-flutter) ;;
+          deps-flutter-rust) keep=$(sh scripts/tool_tags.sh deps-flutter-rust) ;;
+          earthly-buildkitd) keep="v$(. .dagger/versions.env && echo $EARTHLY_VERSION)-.*" ;;
+          *)           keep=$(sh scripts/tool_tags.sh "${name#tool-}") ;;
+        esac
+        keep=$(printf '%s' "$keep" | sed 's/[.]/\\./g')
+        have=$(curl -sSf --header "PRIVATE-TOKEN: $REGISTRY_CLEANUP_TOKEN" "$api/$id/tags?per_page=100" | jq 'length')
+        echo "$name: $have tags, keeping 3 most recent plus ^$keep\$"
+        q="name_regex_delete=$(jq -rn '".*" | @uri')&keep_n=3&name_regex_keep=$(jq -rn --arg v "^$keep\$" '$v | @uri')"
+        curl -sS --fail-with-body --request DELETE \
+          --header "PRIVATE-TOKEN: $REGISTRY_CLEANUP_TOKEN" "$api/$id/tags?$q" || exit 1
+        echo
+      done < /tmp/cache_repos.txt
+  rules:
+    # Maintenance, not part of a code pipeline: the scheduled run, or by hand from the web UI.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - when: never
+
 test_msrv_all:
   extends: .unit_test
   variables:
@@ -185,16 +207,22 @@ test_msrv_all:
 
 test_census:
   extends: .unit_test
+  # No rust compilation here, so the extra cores would go unused.
+  tags: [saas-linux-medium-amd64]
   variables:
     earthly_target: test-census
 
 test_dart_format:
   extends: .unit_test
+  # No rust compilation here, so the extra cores would go unused.
+  tags: [saas-linux-medium-amd64]
   variables:
     earthly_target: test-dart-format
 
 test_readme_sync:
   extends: .unit_test
+  # No rust compilation here, so the extra cores would go unused.
+  tags: [saas-linux-medium-amd64]
   variables:
     earthly_target: test-readme-sync
 
@@ -262,12 +290,21 @@ test_flutter_integration:
 
 semgrep:
   # A Docker image with Semgrep installed.
+  # Small: 157s and nowhere near the critical path (test_unit_tests_all is 901s), so extra cores
+  # would buy pipeline time nothing.
+  extends: .runner_small
   image: semgrep/semgrep
 
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
   variables:
+    # The one job that genuinely needs git history: `semgrep ci` is diff-aware and resolves a
+    # baseline ref to scan only what changed. Under the pipeline-wide GIT_DEPTH: 1 it cannot find
+    # one, and `|| true` below would hide it scanning nothing -- a quiet coverage hole in a
+    # security gate rather than a failure. 0 means a full clone.
+    GIT_DEPTH: 0
+
     # Connect to Semgrep AppSec Platform through your SEMGREP_APP_TOKEN.
     # Generate a token from Semgrep AppSec Platform > Settings
     # and add it as a variable in your GitLab CI/CD project settings.
@@ -325,7 +362,7 @@ package_linux:
     - build-amd64-deb
   script:
     - earthly bootstrap
-    - earthly +package-linux --BASE="uncached"
+    - earthly +package-linux
   artifacts:
     paths:
       - target/packages/*
@@ -508,7 +545,7 @@ nightly_package_linux:
   timeout: 120m
   script:
     - earthly bootstrap
-    - earthly +package-linux --IS_NIGHTLY="$IS_NIGHTLY" --BASE="uncached"
+    - earthly +package-linux --IS_NIGHTLY="$IS_NIGHTLY"
   artifacts:
     paths:
       - target/packages/*

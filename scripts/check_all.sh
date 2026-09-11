@@ -103,28 +103,6 @@ step ./scripts/check_format.sh
 echo "Performing README sync check..."
 step ./scripts/check_readme_sync.sh
 
-# Dagger's ignore patterns are generated from the repo's .gitignore files. Regenerating belongs
-# with a push, not with CI, which has nothing to commit the result to.
-if ! command -v uv > /dev/null 2>&1; then
-    echo "uv is not installed (needed to regenerate the dagger ignore patterns). Install it from:"
-    echo "  https://docs.astral.sh/uv/getting-started/installation/"
-    exit 1
-fi
-IGNORE_PATTERNS=.dagger/src/veilid/ignore_patterns.py
-IGNORE_PATTERNS_BEFORE="$(cat "$IGNORE_PATTERNS")"
-if [ $? -ne 0 ]; then
-    fail "could not read $IGNORE_PATTERNS"
-fi
-echo "Updating dagger ignore patterns..."
-step ./.dagger/update_gitignore_patterns.sh
-IGNORE_PATTERNS_AFTER="$(cat "$IGNORE_PATTERNS")"
-if [ $? -ne 0 ]; then
-    fail "could not read $IGNORE_PATTERNS after regenerating it"
-fi
-if [ "$IGNORE_PATTERNS_BEFORE" != "$IGNORE_PATTERNS_AFTER" ]; then
-    echo "NOTE: $IGNORE_PATTERNS was regenerated and needs committing."
-fi
-
 # CI assembles its container from an explicit Earthfile allowlist, so a root-level config
 # that is not listed there is absent in CI while every local run still finds it.
 echo "Checking Earthfile source coverage..."
@@ -138,7 +116,7 @@ tracked = subprocess.run(
 skip = re.compile(r"\.md$|^LICENSE$|^\.|^Earthfile$|^dagger\.json$|^version_bump\.sh$")
 want = {f for f in tracked if "/" not in f and not skip.search(f)}
 
-targets = ("code-linux", "code-flutter", "code-android")
+targets = ("code-linux", "code-flutter", "code-flutter-rust", "code-android")
 copied, current = {}, None
 for line in open("Earthfile", encoding="utf-8"):
     m = re.match(r"^([A-Za-z0-9_.-]+):\s*$", line)
@@ -157,6 +135,25 @@ sys.exit(rc)
 PY
 then
     fail "the CI container is missing a root-level build config. Add the files above to that target's COPY line in the Earthfile, or exclude them in check_all.sh if CI does not need them."
+fi
+
+# The Earthfile's base FROM runs before .dagger/versions.env has been copied in, so it cannot read
+# the value and duplicates the literal instead. Dagger reads versions.env directly, so a drift here
+# silently builds the two on different images.
+echo "Checking build image agreement..."
+earthfile_image=$(sed -n 's/^ARG --global LINUX_BUILD_IMAGE=\(.*\)$/\1/p' Earthfile)
+versions_image=$(. .dagger/versions.env && echo "$LINUX_BUILD_IMAGE")
+if [ "$earthfile_image" != "$versions_image" ]; then
+    fail "Earthfile LINUX_BUILD_IMAGE ($earthfile_image) does not match .dagger/versions.env ($versions_image)."
+fi
+
+# The format gate runs on the upstream rust image rather than the veilid toolchain (it is a cheap
+# standalone job, not an earthly one), so its version is a literal that can drift from the pin.
+# rustfmt's output changes between releases, so a drift means CI and this script disagree.
+ci_rust=$(sed -n 's/^  image: rust:\(.*\)-slim$/\1/p' .gitlab-ci.yml)
+versions_rust=$(. .dagger/versions.env && echo "$RUST_VERSION")
+if [ "$ci_rust" != "$versions_rust" ]; then
+    fail "format job image (rust:$ci_rust-slim) does not match RUST_VERSION ($versions_rust) in .dagger/versions.env."
 fi
 
 # Source-only and sub-second, so it runs with the format check rather than with the

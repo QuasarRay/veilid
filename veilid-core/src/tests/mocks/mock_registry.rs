@@ -5,7 +5,15 @@ use crate::routing_table::*;
 use crate::storage_manager::*;
 
 pub(crate) async fn init<S: AsRef<str>>(namespace: S) -> VeilidComponentRegistry {
-    let (update_callback, config) = fixture_veilid_core_with_namespace(namespace);
+    init_with_config(namespace, |_| {}).await
+}
+
+pub(crate) async fn init_with_config<S: AsRef<str>>(
+    namespace: S,
+    modify_config: impl FnOnce(&mut VeilidConfig),
+) -> VeilidComponentRegistry {
+    let (update_callback, mut config) = fixture_veilid_core_with_namespace(namespace);
+    modify_config(&mut config);
     let startup_options = VeilidStartupOptions::try_new(config, update_callback).unwrap();
     let registry = VeilidComponentRegistry::new(startup_options);
     registry.enable_mock();

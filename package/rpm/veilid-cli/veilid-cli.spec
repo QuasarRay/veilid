@@ -6,7 +6,6 @@ URL: https://veilid.com
 Group: System
 License: MPL 2.0
 Packager: Veilid Foundation, Inc.
-Requires: glibc-common >= 2.23
 BuildRoot: /rpm-work-dir/veilid-cli
 BuildArch: $ARCH
 

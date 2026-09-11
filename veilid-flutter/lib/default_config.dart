@@ -11,11 +11,14 @@ import 'veilid.dart';
 /// On non-web platforms the store directories are placed under the
 /// application support directory. [bootstrap] and [bootstrapKeys] are
 /// comma-separated; empty strings leave the built-in defaults in place.
+/// [bootstrapRecords] are whole TXT records, which contain commas of their own,
+/// so they are passed as a list.
 Future<VeilidConfig> getDefaultVeilidConfig({
   required bool isWeb,
   required String programName,
   String bootstrap = '',
   String? bootstrapKeys,
+  List<String>? bootstrapRecords,
   String namespace = '',
   String deviceEncryptionKeyPassword = '',
   String? newDeviceEncryptionKeyPassword,
@@ -63,6 +66,9 @@ Future<VeilidConfig> getDefaultVeilidConfig({
                   ? bootstrapKeys.split(',').map(PublicKey.fromString).toList()
                   : []
             : defaultConfig.network.routingTable.bootstrapKeys,
+        bootstrapRecords:
+            bootstrapRecords ??
+            defaultConfig.network.routingTable.bootstrapRecords,
       ),
     ),
   );
