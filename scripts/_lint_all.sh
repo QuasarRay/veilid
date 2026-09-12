@@ -17,24 +17,10 @@ scripts/_clippy_x86_64_unknown_linux_gnu_async_std.sh $@
 scripts/_clippy_mock_api.sh $@
 scripts/_clippy_optional_features.sh $@
 
-# Flutter analyze for every dart/flutter package in the workspace
-FLUTTER_PKGS=(
-    veilid-flutter
-    veilid-flutter/example
-    veilid-flutter/packages/veilid_test
-    veilid-flutter/packages/veilid_integration_test
-)
-
-# Resolve every package before analyzing any: analyzing a parent walks into the nested packages
-# under it, and resolves their imports against their own package config, which pub get creates
-for pkg in "${FLUTTER_PKGS[@]}"; do
-    echo "==> flutter pub get $pkg"
-    (cd "$pkg" && flutter pub get)
-done
-
-for pkg in "${FLUTTER_PKGS[@]}"; do
-    echo "==> flutter analyze $pkg"
-    (cd "$pkg" && flutter analyze)
-done
+# Flutter analyze for the veilid-flutter pub workspace; one resolution covers every member
+echo "==> flutter pub get veilid-flutter"
+(cd veilid-flutter && flutter pub get)
+echo "==> flutter analyze veilid-flutter"
+(cd veilid-flutter && flutter analyze)
 
 popd >/dev/null

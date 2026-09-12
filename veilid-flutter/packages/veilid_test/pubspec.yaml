@@ -5,7 +5,9 @@ publish_to: none
 # repository: https://gitlab.com/veilid/dart_veilid_test
 
 environment:
-  sdk: ">=3.8.0 <4.0.0"
+  sdk: ">=3.10.0 <4.0.0"
+
+resolution: workspace
 
 # Add regular dependencies here.
 dependencies:

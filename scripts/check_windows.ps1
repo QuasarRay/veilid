@@ -150,19 +150,14 @@ if (-not $SkipPython) {
 
 if (-not $SkipFlutter) {
     Write-Host 'Running flutter analyze...'
-    $flutterPkgs = 'veilid-flutter', 'veilid-flutter\example', 'veilid-flutter\packages\veilid_test', 'veilid-flutter\packages\veilid_integration_test'
-    # Resolve every package before analyzing any, as scripts/_lint_all.sh does
-    foreach ($pkg in $flutterPkgs) {
-        Step "flutter pub get $pkg" {
-            Push-Location (Join-Path $RepoRoot $pkg)
-            try { flutter pub get } finally { Pop-Location }
-        }
+    # One pub workspace: resolving veilid-flutter covers every member, as scripts/_lint_all.sh does
+    Step "flutter pub get veilid-flutter" {
+        Push-Location (Join-Path $RepoRoot 'veilid-flutter')
+        try { flutter pub get } finally { Pop-Location }
     }
-    foreach ($pkg in $flutterPkgs) {
-        Step "flutter analyze $pkg" {
-            Push-Location (Join-Path $RepoRoot $pkg)
-            try { flutter analyze } finally { Pop-Location }
-        }
+    Step "flutter analyze veilid-flutter" {
+        Push-Location (Join-Path $RepoRoot 'veilid-flutter')
+        try { flutter analyze } finally { Pop-Location }
     }
 
     Write-Host 'Running headless mock veilid-flutter integration tests...'

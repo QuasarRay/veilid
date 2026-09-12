@@ -44,17 +44,8 @@ pushd veilid-python 2>/dev/null
 uv lock
 popd 2>/dev/null
 
-# Update flutter lockfiles
+# Re-resolve the flutter workspace (one lock for the plugin, example and test packages)
 pushd veilid-flutter 2>/dev/null
-flutter pub get
-popd 2>/dev/null
-
-# Update flutter package lockfiles
-pushd veilid-flutter/packages/veilid_test 2>/dev/null
-flutter pub get
-popd 2>/dev/null
-
-pushd veilid-flutter/packages/veilid_integration_test 2>/dev/null
 flutter pub get
 popd 2>/dev/null
 

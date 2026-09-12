@@ -26,8 +26,9 @@ $(print_common_integration_test_options)
 Env:
   LOG_DIRECTIVES=...   Forwarded as --dart-define=LOG_DIRECTIVES (default '#common=debug')
 
-Extra cargo features go in example/pubspec.yaml under \`hooks: user_defines:\`,
-which apply to a --live run. This script owns the feature set for a mock run.
+Extra cargo features go in veilid-flutter/pubspec.yaml (the workspace root) under
+\`hooks: user_defines:\`, which apply to a --live run. This script owns the feature
+set for a mock run.
 EOF
 }
 

@@ -10,6 +10,21 @@ environment:
   sdk: ">=3.10.0 <4.0.0"
   flutter: ">=3.47.1"
 
+# Members resolve against this package's .dart_tool, so the build hook keeps one rust output tree
+workspace:
+  - example
+  - packages/veilid_test
+  - packages/veilid_integration_test
+
+# Flutter reads hook user-defines from the workspace root pubspec, so they live here for every member.
+# Uncomment for deadlock detection; off by default because the per-lock-acquire overhead
+# inflates latency on the throughput-heavy integration tests.
+# hooks:
+#   user_defines:
+#     veilid:
+#       features:
+#         - debug-locks
+
 dependencies:
   # hook/build.dart compiles veilid-flutter/rust and delivers it as a code asset
   code_assets: ^1.2.1
