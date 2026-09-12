@@ -24,8 +24,6 @@ COPY .dagger/versions.env /etc/veilid-versions.env
 COPY scripts/tool_tags.sh /etc/veilid-tool-tags.sh
 COPY scripts/build_jobs.sh /etc/veilid-build-jobs.sh
 ARG --global ZIG_VERSION=$(. /etc/veilid-versions.env && echo $ZIG_VERSION)
-ARG --global CMAKE_VERSION_MINOR=$(. /etc/veilid-versions.env && echo $CMAKE_VERSION_MINOR)
-ARG --global CMAKE_VERSION_PATCH=$(. /etc/veilid-versions.env && echo $CMAKE_VERSION_PATCH)
 ARG --global BINARYEN_VERSION=$(. /etc/veilid-versions.env && echo $BINARYEN_VERSION)
 ARG --global RUST_VERSION=$(. /etc/veilid-versions.env && echo $RUST_VERSION)
 ARG --global RUST_UNIT_TESTS_NIGHTLY_VERSION=$(. /etc/veilid-versions.env && echo $RUST_UNIT_TESTS_NIGHTLY_VERSION)
@@ -43,6 +41,7 @@ ARG --global NDK_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_NDK_VERSI
 ARG --global ANDROID_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_PLATFORM_VERSION)
 ARG --global ANDROID_BUILD_TOOLS_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_BUILD_TOOLS_VERSION)
 ARG --global ANDROID_CMDLINE_TOOLS_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_CMDLINE_TOOLS_VERSION)
+ARG --global ANDROID_CMAKE_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID_CMAKE_VERSION)
 ARG --global RUST_STABLE_TARGETS=$(. /etc/veilid-versions.env && echo $RUST_STABLE_TARGETS)
 ARG --global RUST_NIGHTLY_TARGETS=$(. /etc/veilid-versions.env && echo $RUST_NIGHTLY_TARGETS)
 ARG --global FLUTTER_BUILD_IMAGE=$(. /etc/veilid-versions.env && echo $FLUTTER_BUILD_IMAGE)
@@ -100,7 +99,7 @@ END
 
 # Install build prerequisites & setup required directories.
 # Cached as its own registry image: this is the heaviest and least frequently changed layer in
-# the stack, and without it every parallel tool job rebuilds the whole apt+cmake install, and
+# the stack, and without it every parallel tool job rebuilds the whole apt install, and
 # every image layered above re-uploads it instead of deduping against blobs already in the registry.
 deps-base-build:
     RUN echo '\
@@ -133,10 +132,6 @@ deps-base-build:
     ELSE
         RUN apt-get install -y gcc-aarch64-linux-gnu gcc-x86-64-linux-gnu
     END
-    RUN retry curl --retry $RETRY_COUNT --retry-connrefused -O https://cmake.org/files/v$CMAKE_VERSION_MINOR/cmake-$CMAKE_VERSION_PATCH-linux-$(arch).sh
-    RUN mkdir /opt/cmake
-    RUN sh cmake-$CMAKE_VERSION_PATCH-linux-$(arch).sh --skip-license --prefix=/opt/cmake
-    RUN ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake
 
     SAVE IMAGE --push $TOOLS_IMAGE/deps-base:$DEPS_BASE_TAG
 
@@ -349,7 +344,7 @@ deps-android:
     RUN mkdir /Android; mkdir /Android/Sdk
     RUN retry curl --retry $RETRY_COUNT --retry-connrefused -L -o /Android/cmdline-tools.zip $ANDROID_COMMAND_LINE_TOOLS
     RUN cd /Android; unzip /Android/cmdline-tools.zip
-    RUN yes | /Android/cmdline-tools/bin/sdkmanager --sdk_root=/Android/Sdk build-tools\;$ANDROID_BUILD_TOOLS_VERSION ndk\;$NDK_VERSION cmake\;$CMAKE_VERSION_PATCH platform-tools platforms\;android-$ANDROID_VERSION cmdline-tools\;latest
+    RUN yes | /Android/cmdline-tools/bin/sdkmanager --sdk_root=/Android/Sdk build-tools\;$ANDROID_BUILD_TOOLS_VERSION ndk\;$NDK_VERSION cmake\;$ANDROID_CMAKE_VERSION platform-tools platforms\;android-$ANDROID_VERSION cmdline-tools\;latest
     RUN rm -rf /Android/cmdline-tools
     RUN apt-get clean
 

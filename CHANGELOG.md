@@ -2,6 +2,7 @@
 
 - veilid-core-optimized:
   - new crate added to hold monomorphic exports for crates that want to be fully speed optimized in all build profiles
+  - BLAKE3 uses its WASM SIMD implementation on wasm32. Adds 14KB to the `.wasm` and requires WASM SIMD support, which browsers have had since Safari 16.4.
 
 - veilid-core:
   - **Security** B01T direct-bootstrap requests are answered from the last successful bootstrap set held by the routing domain, which is persisted across restarts. The handler no longer resolves DNS, so an unauthenticated packet can no longer cause non-veilid traffic or block a worker on a slow resolver. Thanks to quikchaos for reporting this issue!
@@ -45,6 +46,9 @@
   - Table store databases are integrity-checked at open and, if damaged, rebuilt from whatever rows are still readable. The damaged files are kept beside the store for inspection.
   - Disable `stats` feature by default
   - Move API tracing logger to its own thread, add log throttles and queue, and RPC hot-path tight-loop logging cleanup.
+  - `aws-lc-sys`, 23 extra crates, and its cmake build requirement are gone by switching the `geolocation` feature's build script to using `ureq` instead of `reqwest`.
+  - The Android x86_64 build no longer needs to link `libclang_rt.builtins-x86_64-android.a` out of the NDK as a workaround for a missing symbol.
+  - Fix table store per-namespace instance lock on Android.
 
 - veilid-flutter:
   - API Breaking Change: `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `Timestamp.toString()` now write human readable output, not a raw integer. `TimestampDuration` works the same way.

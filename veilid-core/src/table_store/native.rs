@@ -18,6 +18,31 @@ pub(in crate::table_store) struct TableStoreLock {
     _file: std::fs::File,
 }
 
+/// Take the exclusive advisory lock on an open file.
+///
+/// std's `File::try_lock` grew an android implementation only in Rust 1.98, and the build pins
+/// an older toolchain, so on android it answers Unsupported and every core silently starts
+/// unguarded. Calling flock here makes the lock independent of which std compiled the build.
+#[cfg(target_os = "android")]
+fn try_lock_exclusive(file: &std::fs::File) -> Result<(), std::fs::TryLockError> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: `file` owns the descriptor and keeps it open across the call
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    if e.kind() == std::io::ErrorKind::WouldBlock {
+        Err(std::fs::TryLockError::WouldBlock)
+    } else {
+        Err(std::fs::TryLockError::Error(e))
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn try_lock_exclusive(file: &std::fs::File) -> Result<(), std::fs::TryLockError> {
+    file.try_lock()
+}
+
 /// Whether a lock error means the filesystem cannot lock at all, as opposed
 /// to the lock being held; error-code set matches cargo's flock handling
 fn lock_unsupported(e: &std::io::Error) -> bool {
@@ -104,7 +129,7 @@ impl TableStoreDriver {
             .open(&lockpath)
             .map_err(VeilidAPIError::from)?;
         ensure_file_private_owner(&lockpath).map_err(VeilidAPIError::internal)?;
-        match file.try_lock() {
+        match try_lock_exclusive(&file) {
             Ok(()) => Ok(Some(TableStoreLock { _file: file })),
             Err(std::fs::TryLockError::WouldBlock) => Err(VeilidAPIError::generic(format!(
                 "another veilid instance is using table store namespace '{}' ({:?})",

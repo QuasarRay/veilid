@@ -94,6 +94,9 @@ lz4_flex = { version = "0.14.0", default-features = false, features = [
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 # argon2's getrandom needs the browser backend selected
 getrandom = { version = "0.4.2", features = ["wasm_js"] }
+# simd128 has no runtime detection on wasm, so blake3 assumes it; the module then requires a
+# SIMD-capable runtime (Safari 16.4, Chrome 91, Firefox 89)
+blake3 = { version = "1.8.3", optional = true, features = ["wasm32_simd"] }
 
 [package.metadata.cargo-machete]
 # Feature unification only: blake2's size_opt for argon2, curve25519-dalek's tables for the dalek crates

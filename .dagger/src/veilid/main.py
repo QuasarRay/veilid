@@ -35,8 +35,6 @@ _VERSIONS_ENV_TEXT = Path(_versions_env_path()).read_text()
 
 VEILID_REPO = "registry.gitlab.com/veilid/veilid"
 ZIG_VERSION = _V.ZIG_VERSION
-CMAKE_VERSION_MINOR = _V.CMAKE_VERSION_MINOR
-CMAKE_VERSION_PATCH = _V.CMAKE_VERSION_PATCH
 BINARYEN_VERSION = _V.BINARYEN_VERSION
 RUST_VERSION = _V.RUST_VERSION
 RUST_UNIT_TESTS_NIGHTLY_VERSION = _V.RUST_UNIT_TESTS_NIGHTLY_VERSION
@@ -182,17 +180,6 @@ class Veilid:
                 "gcc-aarch64-linux-gnu", "gcc-x86-64-linux-gnu",
                 "libc6-dev-arm64-cross", "libc6-dev-amd64-cross", "gcc-multilib-x86-64-linux-gnu"
             ])
-
-        # Install CMake
-        arch = platform.machine()
-        cmake_url = f"https://cmake.org/files/v{CMAKE_VERSION_MINOR}/cmake-{CMAKE_VERSION_PATCH}-linux-{arch}.sh"
-        container = (
-            container
-            .with_exec(["retry", "curl", "--retry", RETRY_COUNT, "--retry-connrefused", "-O", cmake_url])
-            .with_exec(["mkdir", "/opt/cmake"])
-            .with_exec(["sh", f"cmake-{CMAKE_VERSION_PATCH}-linux-{arch}.sh", "--skip-license", "--prefix=/opt/cmake"])
-            .with_exec(["ln", "-s", "/opt/cmake/bin/cmake", "/usr/local/bin/cmake"])
-        )
 
         return container
 

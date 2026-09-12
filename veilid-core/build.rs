@@ -8,13 +8,12 @@
     reason = "compares file mtimes against the wall clock, not node time"
 )]
 
-use glob::glob;
 use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::io::BufRead;
 use std::io::Write;
 use std::{
-    env, io,
+    io,
     path::Path,
     process::{Command, Stdio},
 };
@@ -183,70 +182,108 @@ fn do_capnp_build() {
     append_hash_and_desired_capnp_version_hash("proto/veilid.capnp", "proto/veilid_capnp.rs");
 }
 
-// Fix for missing __extenddftf2 on Android x86_64 Emulator
-fn fix_android_emulator() {
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    if target_arch == "x86_64" && target_os == "android" {
-        let missing_library = "clang_rt.builtins-x86_64-android";
-        let android_home = env::var("ANDROID_HOME")
-            .or(env::var("ANDROID_SDK_ROOT"))
-            .expect("ANDROID_HOME or ANDROID_SDK_ROOT not set");
-        let lib_path = glob(&format!(
-            "{android_home}/ndk/28.2.13676358/**/lib{missing_library}.a"
-        ))
-        .expect("failed to glob")
-        .next()
-        .expect("Need libclang_rt.builtins-x86_64-android.a")
-        .unwrap();
-        let lib_dir = lib_path.parent().unwrap();
-        println!("cargo:rustc-link-search={}", lib_dir.display());
-        println!("cargo:rustc-link-lib=static={missing_library}");
-    }
-}
-
+// The MaxMind EULA requires the data be refreshed regularly, so this is a live fetch and not a
+// vendored blob. Source: https://github.com/sapics/ip-location-db
 #[cfg(feature = "geolocation")]
-fn download_file(url: &str, filename: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
-    let content = reqwest::blocking::get(url)?.bytes()?;
-    std::fs::write(filename, content)?;
-    Ok(())
-}
+mod geoip {
+    use std::path::Path;
+    use std::time::{Duration, SystemTime};
 
-#[cfg(feature = "geolocation")]
-fn download_geoip_database_files() -> Result<(), Box<dyn std::error::Error>> {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
-    let target_dir = std::path::PathBuf::from(manifest_dir).join("../target");
+    type Error = Box<dyn std::error::Error>;
 
-    // Source: https://github.com/sapics/ip-location-db
-    let files = [
+    const SOURCES: [(&str, &str); 2] = [
         (
             "https://cdn.jsdelivr.net/npm/@ip-location-db/asn-country-mmdb/asn-country-ipv4.mmdb",
-            Path::new(&target_dir).join("ipv4.mmdb"),
+            "ipv4.mmdb",
         ),
         (
             "https://cdn.jsdelivr.net/npm/@ip-location-db/asn-country-mmdb/asn-country-ipv6.mmdb",
-            Path::new(&target_dir).join("ipv6.mmdb"),
+            "ipv6.mmdb",
         ),
     ];
 
-    for (url, filename) in files {
-        if !filename.exists() {
-            println!("Downloading {url}");
-            download_file(url, &filename)?;
-            continue;
+    const MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24);
+    const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+    // the databases are ~1MB and ~2MB today; the cap only has to catch a runaway response
+    const MAX_SIZE: u64 = 64 * 1024 * 1024;
+    const MIN_SIZE: usize = 64 * 1024;
+    // every MaxMind DB file ends with this marker followed by the metadata section
+    const METADATA_MARKER: &[u8] = b"\xab\xcd\xefMaxMind.com";
+
+    fn download(url: &str) -> Result<Vec<u8>, Error> {
+        let agent = ureq::Agent::config_builder()
+            .timeout_global(Some(FETCH_TIMEOUT))
+            .build()
+            .new_agent();
+        let mut res = agent.get(url).call()?;
+        let body = res.body_mut().with_config().limit(MAX_SIZE).read_to_vec()?;
+        validate(&body)?;
+        Ok(body)
+    }
+
+    // a CDN error page is a 200 with an HTML body; embedding one yields a reader that answers
+    // None for every address with nothing in the log to say why
+    fn validate(body: &[u8]) -> Result<(), Error> {
+        if body.len() < MIN_SIZE {
+            return Err(format!(
+                "response too small to be a maxmind database: {} bytes",
+                body.len()
+            )
+            .into());
         }
+        let tail = &body[body.len().saturating_sub(128 * 1024)..];
+        if !tail
+            .windows(METADATA_MARKER.len())
+            .any(|w| w == METADATA_MARKER)
+        {
+            return Err("response has no maxmind metadata marker".into());
+        }
+        Ok(())
+    }
 
-        let modified = std::fs::metadata(&filename)?.modified()?;
-        let now = std::time::SystemTime::now();
-        let time_diff = now.duration_since(modified)?;
+    fn is_fresh(path: &Path) -> bool {
+        path.metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| SystemTime::now().duration_since(t).ok())
+            .is_some_and(|age| age <= MAX_AGE)
+    }
 
-        if time_diff > std::time::Duration::from_secs(60 * 60 * 24) {
-            println!("Downloading {url}");
-            download_file(url, &filename)?;
+    fn refresh(url: &str, path: &Path) -> Result<(), Error> {
+        if is_fresh(path) {
+            return Ok(());
+        }
+        match download(url) {
+            Ok(body) => {
+                // publish atomically: an interrupted write would leave a truncated file whose
+                // fresh mtime keeps it in place for a day
+                let tmp = path.with_extension("mmdb.part");
+                std::fs::write(&tmp, &body)?;
+                std::fs::rename(&tmp, path)?;
+                Ok(())
+            }
+            Err(e) if path.exists() => {
+                println!(
+                    "cargo:warning=geoip: {url} unreachable ({e}), using stale {}",
+                    path.display()
+                );
+                Ok(())
+            }
+            Err(e) => Err(e),
         }
     }
 
-    Ok(())
+    pub fn download_database_files() -> Result<(), Error> {
+        let target_dir =
+            std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?).join("../target");
+        std::fs::create_dir_all(&target_dir)?;
+        for (url, name) in SOURCES {
+            let path = target_dir.join(name);
+            println!("cargo:rerun-if-changed={}", path.display());
+            refresh(url, &path)?;
+        }
+        Ok(())
+    }
 }
 
 fn main() {
@@ -273,8 +310,6 @@ fn main() {
         do_capnp_build();
     }
 
-    fix_android_emulator();
-
     #[cfg(feature = "geolocation")]
-    download_geoip_database_files().expect("failed to download geoip database files");
+    geoip::download_database_files().expect("failed to download geoip database files");
 }

@@ -67,7 +67,7 @@ enable-protocol-wss = ["webpki-roots"]
 json-camel-case = []
 
 # GeoIP
-geolocation = ["maxminddb", "reqwest"]
+geolocation = ["maxminddb", "ureq"]
 
 # Features that go against "Natural Security" concepts
 # https://gitlab.com/veilid/veilid/-/issues/420
@@ -260,15 +260,17 @@ console_error_panic_hook = "0.1.7"
 
 [build-dependencies]
 capnpc = "0.26.0"
-glob = "0.3.2"
 sha2 = "0.11.0"
 hex = "0.4.3"
-reqwest = { version = "0.13.1", features = ["blocking"], optional = true }
+# rustls here is ring-backed; 'platform-verifier' would pull aws-lc-rs and its cmake C build
+ureq = { version = "3.4.1", default-features = false, features = [
+    "rustls",
+], optional = true }
 bosion = { version = "2.0.0", default-features = false }
 
 [package.metadata.cargo-machete]
 # ignore build dependencies and crates that are only used in derives
-ignored = ["capnpc", "glob", "sha2", "reqwest", "serde_bytes", "js-sys"]
+ignored = ["capnpc", "sha2", "ureq", "serde_bytes", "js-sys"]
 
 [lints]
 workspace = true

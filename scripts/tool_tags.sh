@@ -25,8 +25,8 @@ key() {
 # Every tool image is built on one of the base images, so a base bump has to move every tag or
 # CI reuses images built on the old one. The tools key on $LINUX_BUILD_IMAGE rather than on the
 # deps-base tag deliberately: the base image is what changes a tool binary's linkage, whereas
-# DEPS_BASE_REVISION and CMAKE_VERSION_PATCH only change what is installed alongside it. Bumping
-# those does not rebuild the tools; bump a tool's own version pin if it needs rebuilding.
+# DEPS_BASE_REVISION only changes what is installed alongside it. Bumping it does not rebuild the
+# tools; bump a tool's own version pin if it needs rebuilding.
 tag_for() {
     case "$1" in
         # Toolchain layout, not just the compiler: a target added to versions.env has to
@@ -42,9 +42,9 @@ tag_for() {
         # The assembled toolchain image (deps-base + every linux tool merged in). Deliberately
         # not in $TOOLS: it is not a tool, and --list drives the per-tool CI build matrix. Its
         # key is every input that goes into it, so one tool bump moves it and nothing else does.
-        # The OS layer: base image, apt packages and cmake. The heaviest thing in the stack and
+        # The OS layer: base image and apt packages. The heaviest thing in the stack and
         # the least frequently changed, so it is published once and pulled by every tool build.
-        deps-base)  echo "$(key "$LINUX_BUILD_IMAGE|$CMAKE_VERSION_PATCH|$DEPS_BASE_REVISION")" ;;
+        deps-base)  echo "$(key "$LINUX_BUILD_IMAGE|$DEPS_BASE_REVISION")" ;;
         deps-linux) echo "$(key "$(tag_for deps-base)|$(for t in rust cargo-bins astgrep zigbuild zig binaryen; do tag_for "$t"; done)")" ;;
         # The flutter gates' own base: FLUTTER_BUILD_IMAGE + its apt prerequisites + the SDK.
         deps-flutter) echo "$(key "$FLUTTER_BUILD_IMAGE|$DEPS_FLUTTER_REVISION|$(tag_for flutter)")" ;;
