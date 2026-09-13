@@ -19,14 +19,24 @@ stages:
 
 # Rules for running tests
 # Runs on merge requests and events that cause update to merge requests (like pushing to a branch with an open merge request)
-# Only runs if files have been changed in the veilid-* directories or in Cargo files
-# A push to the default branch runs the same gate. A manual run of a branch (Run pipeline in the
-# web UI) has no diff base, so everything runs. Tags are excluded: a tag pipeline is a release.
+# Only runs if the crates, the Cargo files, or the build itself (CI config, Earthfile, scripts,
+# pinned tool versions) changed. A push to the default branch runs the same gate. A manual run
+# of a branch (Run pipeline in the web UI) has no diff base, so everything runs. Tags are
+# excluded: a tag pipeline is a release.
 .branch_test_rules: &branch_test_rules
   - if: $CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)
     changes:
       - veilid-*/**/*
       - "**/*[Cc]argo*"
+      - .gitlab-ci.yml
+      - .gitlab/**/*
+      - Earthfile
+      - .earthlyignore
+      - .dagger/**/*
+      - dev-setup/**/*
+      - scripts/**/*
+      - clippy.toml
+      - sgconfig.yml
     when: on_success
   - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH
     when: on_success
@@ -39,6 +49,8 @@ stages:
     changes:
       - veilid-*/**/*.rs # Should fire when rust source files are changed
       - "**/*[Cc]argo*"
+      - .gitlab-ci.yml
+      - .gitlab/**/*
     when: on_success
   - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH
     when: on_success
