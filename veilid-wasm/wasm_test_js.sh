@@ -13,7 +13,10 @@ FEATURE_LIST=""
 TESTS=""
 CONTEXTS=""
 DEBUG_MODE=""
+CASE_FILTER=""
 MOCK_MODE=""
+# Transaction quality counters ride along with every stress run
+STATS_MODE="${STRESS:+1}"
 
 # Parse arguments
 for arg in "$@"; do
@@ -28,6 +31,9 @@ for arg in "$@"; do
     --tests=*)
       TESTS="${arg#--tests=}"
       ;;
+    --case=*)
+      CASE_FILTER="${arg#--case=}"
+      ;;
     --context=*)
       CONTEXTS="${arg#--context=}"
       ;;
@@ -40,6 +46,12 @@ for arg in "$@"; do
     --mock)
       FEATURE_LIST="$FEATURE_LIST,mock-api"
       MOCK_MODE=1
+      ;;
+    --stats)
+      STATS_MODE=1
+      ;;
+    --no-stats)
+      STATS_MODE=""
       ;;
     --debug)
       DEBUG_MODE=1
@@ -59,6 +71,7 @@ for arg in "$@"; do
       echo "                        routing        - VeilidRoutingContext tests"
       echo "                        dht            - DHT kitchen sink tests"
       echo "                        transactions   - DHT transaction tests"
+      echo "  --case=TEXT         Run only the cases whose name contains TEXT."
       echo "  --context=LIST      Comma-separated list of JS contexts to run the suites in,"
       echo "                      each in turn. If omitted, only 'window' is used."
       echo "                      Available contexts:"
@@ -77,6 +90,9 @@ for arg in "$@"; do
       echo "                      Every suite runs with no attach, no sockets and no live DHT."
       echo "  --verbose-tracing   Enable verbose-tracing cargo feature"
       echo "  --aimd              Enable the aimd-dht cargo feature"
+      echo "  --stats             Enable the stats cargo feature and log transaction quality"
+      echo "                      counters after every case (===TX_QUALITY=== lines). Default"
+      echo "                      when STRESS=1; --no-stats turns it off. Not with --mock."
       echo "  --debug             Set DEBUG=1 environment variable"
       echo "  -- [args]           Pass remaining arguments to wdio"
       echo ""
@@ -85,6 +101,7 @@ for arg in "$@"; do
       echo "  $0 --mock                                   # All suites against the mock"
       echo "  $0 --tests=transactions --debug             # DHT transaction tests, with debug output"
       echo "  $0 --tests=client,crypto                    # Client and crypto suites"
+      echo "  $0 --tests=transactions --case=\"bulk store 4MB\"  # One case, by name substring"
       echo "  $0 --tests=pstore --context=window,dedicated,shared,service,extension"
       echo "  $0 --context=dedicated                      # Every suite, in a dedicated worker"
       echo "  $0 --release-build --tests=routing          # Release build, routing suite only"
@@ -103,6 +120,14 @@ for arg in "$@"; do
   esac
   shift
 done
+
+if [[ -n "$STATS_MODE" ]]; then
+  if [[ -n "$MOCK_MODE" ]]; then
+    echo "--stats cannot be combined with --mock (the mock has no stats)" >&2
+    exit 1
+  fi
+  FEATURE_LIST="$FEATURE_LIST,stats"
+fi
 
 if [ -n "$FEATURE_LIST" ]; then
   CARGO_FEATURES="--features ${FEATURE_LIST#,}"
@@ -172,6 +197,7 @@ if [[ " ${CONTEXT_LIST[*]} " == *" extension "* ]]; then
 fi
 
 export VEILID_TEST_SUITES="$TESTS"
+export VEILID_TEST_CASE="$CASE_FILTER"
 
 status=0
 for context in "${CONTEXT_LIST[@]}"; do

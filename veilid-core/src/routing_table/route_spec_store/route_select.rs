@@ -1,25 +1,44 @@
 use super::*;
 
+/// Safety route request for one send: the safety spec plus what the destination rules out
 #[derive(Clone, Debug)]
 pub struct RouteSelectParams {
+    /// Crypto kind the route's keys must include
     pub crypto_kind: CryptoKind,
+    /// Allocated route to use as-is when it still fits this request
     pub preferred_route: Option<AllocatedRouteSetId>,
+    /// Requested safety route length
     pub hop_count: usize,
+    /// Stability the route should meet; routes that meet it rank first
     pub stability: Stability,
+    /// Requested sequencing; its preferred ordering picks the route pool
     pub sequencing: Sequencing,
+    /// Directions the route must support
     pub directions: DirectionSet,
+    /// Nodes that must not appear as hops
     pub avoid_nodes: Vec<NodeId>,
+    /// Destination is a private route; an unsafe one doubles a short hop count
     pub is_destination_safe: bool,
 }
 
+/// Match for one allocated route in the pool
 #[derive(Clone, Debug)]
 struct FirstAvailableRouteParams {
+    /// Crypto kind the route's keys must include
     pub crypto_kind: CryptoKind,
+    /// Fewest hops accepted
     pub min_hop_count: usize,
+    /// Most hops accepted
     pub max_hop_count: usize,
+    /// Stability the route should meet; routes that meet it rank first
     pub stability: Stability,
+    /// Requested sequencing, matched against the route's live orderings
     pub sequencing: Sequencing,
+    /// The one ordering the route must carry
+    pub ordering: SequenceOrdering,
+    /// Directions the route must support
     pub directions: DirectionSet,
+    /// Nodes that must not appear as hops
     pub avoid_nodes: Vec<NodeId>,
 }
 
@@ -93,6 +112,7 @@ impl RouteSpecStore {
             max_hop_count: params.hop_count,
             stability: params.stability,
             sequencing: params.sequencing,
+            ordering: params.sequencing.preferred_ordering(),
             directions: params.directions,
             avoid_nodes: params.avoid_nodes,
         };
@@ -129,7 +149,7 @@ impl RouteSpecStore {
 
             // Select a safety route from the pool or make one if we don't have one that matches
             // Try this outside of the allocate lock to see if we can do this lock-free first
-            if let Some(sr_route_id_and_public_keys) = Self::first_available_route_inner(
+            if let Some(sr_route_id_and_public_keys) = Self::first_available_route_preferring(
                 &cache,
                 &first_available_route_params,
                 &self.route_selection_counter,
@@ -167,7 +187,7 @@ impl RouteSpecStore {
                 // Must re-check first available route to avoid race condition due to await
                 // Because during the time we didn't hold the allocate lock, the first available route may have been allocated
                 let cache = self.cache.read();
-                if let Some(sr_route_id_and_public_keys) = Self::first_available_route_inner(
+                if let Some(sr_route_id_and_public_keys) = Self::first_available_route_preferring(
                     &cache,
                     &first_available_route_params,
                     &self.route_selection_counter,
@@ -200,9 +220,23 @@ impl RouteSpecStore {
             avoid_nodes: first_available_route_params.avoid_nodes,
             automatic: true,
         };
-        let allocated = self
-            .allocate_route_inner(&allocate_route_lock_guard, params)
+        let mut allocated = self
+            .allocate_route_inner(&allocate_route_lock_guard, params.clone())
             .await;
+        // A preference for datagrams falls back to an ordered route when no datagram route can be built
+        if matches!(allocated, Err(VeilidAPIError::TryAgain { .. }))
+            && params.sequencing == Sequencing::PreferUnordered
+        {
+            allocated = self
+                .allocate_route_inner(
+                    &allocate_route_lock_guard,
+                    AllocateRouteParams {
+                        sequencing: Sequencing::PreferOrdered,
+                        ..params
+                    },
+                )
+                .await;
+        }
         #[cfg(feature = "instrument")]
         {
             let span = tracing::Span::current();
@@ -212,6 +246,28 @@ impl RouteSpecStore {
             }
         }
         allocated
+    }
+
+    /// First available route carrying the preferred ordering; a preference for datagrams
+    /// falls back to an ordered route, a requirement for ordered never does
+    fn first_available_route_preferring(
+        cache: &RouteSpecStoreCache,
+        params: &FirstAvailableRouteParams,
+        route_selection_counter: &AtomicUsize,
+    ) -> Option<RouteIdAndKeys> {
+        if let Some(found) =
+            Self::first_available_route_inner(cache, params, route_selection_counter)
+        {
+            return Some(found);
+        }
+        if params.sequencing != Sequencing::PreferUnordered {
+            return None;
+        }
+        let fallback = FirstAvailableRouteParams {
+            ordering: SequenceOrdering::Ordered,
+            ..params.clone()
+        };
+        Self::first_available_route_inner(cache, &fallback, route_selection_counter)
     }
 
     /// Find first matching unpublished route that fits into the selection criteria
@@ -233,7 +289,8 @@ impl RouteSpecStore {
         // Get all valid routes, allow routes that need testing
         // but definitely prefer routes that have been recently tested
         for (id, arce) in cache.iter_allocated_routes() {
-            if arce.is_live_sequencing_match(params.sequencing)
+            if arce.orderings() == SequenceOrderingSet::only(params.ordering)
+                && arce.is_live_sequencing_match(params.sequencing)
                 && arce.hop_count() >= params.min_hop_count
                 && arce.hop_count() <= params.max_hop_count
                 && arce.directions().is_superset(params.directions)

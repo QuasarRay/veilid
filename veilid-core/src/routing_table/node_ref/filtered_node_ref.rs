@@ -7,6 +7,8 @@ pub(crate) struct FilteredNodeRef {
     entry: Arc<BucketEntry>,
     filter: NodeRefFilter,
     sequencing: Sequencing,
+    /// The inbound flow an answer must go back over, when this ref addresses a questioner
+    reply_flow: Option<Flow>,
     #[cfg(feature = "tracking")]
     track_id: usize,
 }
@@ -30,6 +32,7 @@ impl FilteredNodeRef {
             entry,
             filter,
             sequencing,
+            reply_flow: None,
             #[cfg(feature = "tracking")]
             track_id,
         }
@@ -39,6 +42,17 @@ impl FilteredNodeRef {
         NodeRef::new(self.registry(), self.entry.clone())
     }
 
+    /// Pin the flow an answer goes back over
+    pub fn with_reply_flow(&self, flow: Flow) -> FilteredNodeRef {
+        let mut out = self.clone();
+        out.reply_flow = Some(flow);
+        out
+    }
+
+    pub fn reply_flow(&self) -> Option<Flow> {
+        self.reply_flow
+    }
+
     pub fn merge_filter_clone(&self, filter: NodeRefFilter) -> FilteredNodeRef {
         let mut out = self.clone();
         out.merge_filter(filter);
@@ -46,25 +60,20 @@ impl FilteredNodeRef {
     }
 
     pub fn with_sequencing(&self, sequencing: Sequencing) -> FilteredNodeRef {
-        FilteredNodeRef::new(
-            self.registry.clone(),
-            self.entry.clone(),
-            self.filter(),
-            sequencing,
-        )
+        let mut out = self.clone();
+        out.sequencing = sequencing;
+        out
     }
 
     pub fn with_routing_domain<R: Into<RoutingDomainSet>>(
         &self,
         routing_domain_set: R,
     ) -> FilteredNodeRef {
-        FilteredNodeRef::new(
-            self.registry.clone(),
-            self.entry.clone(),
-            self.filter()
-                .with_routing_domain_set(routing_domain_set.into()),
-            self.sequencing(),
-        )
+        let mut out = self.clone();
+        out.filter = self
+            .filter()
+            .with_routing_domain_set(routing_domain_set.into());
+        out
     }
 
     /// Make a noderef that meets the sequencing requirements, but is not
@@ -213,6 +222,7 @@ impl Clone for FilteredNodeRef {
             entry: self.entry.clone(),
             filter: self.filter,
             sequencing: self.sequencing,
+            reply_flow: self.reply_flow,
             #[cfg(feature = "tracking")]
             track_id: self.entry.track(),
         }

@@ -1,5 +1,8 @@
 use super::*;
 
+/// How often End re-checks for in-flight Sets to settle
+pub(super) const END_QUIESCENCE_POLL_MS: u32 = 50;
+
 /// Frequency to flush record stores to disk
 pub const FLUSH_RECORD_STORES_INTERVAL_SECS: u32 = 1;
 /// Frequency to save metadata to disk

@@ -20,7 +20,6 @@
 
 use super::*;
 use core::fmt::Write as _;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Queue depth. Roughly a second of a bad storm; past this the drop counter takes over.
 const QUEUE_CAPACITY: usize = 4096;

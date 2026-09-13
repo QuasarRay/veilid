@@ -105,7 +105,28 @@ impl RouteSpecStore {
             .await
     }
 
+    /// Allocate, preferring hops that have not recently killed a route on this ordering. After
+    /// an outage every hop is on that list, so when avoidance leaves no route it is dropped.
     pub async fn allocate_route_inner(
+        &self,
+        lock: &AsyncMutexGuard<'_, ()>,
+        params: AllocateRouteParams,
+    ) -> VeilidAPIResult<RouteIdAndKeys> {
+        let dead_hops = self.dead_route_hops_to_avoid(params.sequencing.preferred_ordering());
+        if !dead_hops.is_empty() {
+            let mut avoiding = params.clone();
+            avoiding.avoid_nodes.extend(dead_hops);
+            match self.allocate_route_unavoided(lock, avoiding).await {
+                Err(VeilidAPIError::TryAgain { .. }) => {
+                    veilid_log!(self debug "dead-hop avoidance left no route; allocating without it");
+                }
+                other => return other,
+            }
+        }
+        self.allocate_route_unavoided(lock, params).await
+    }
+
+    async fn allocate_route_unavoided(
         &self,
         _lock: &AsyncMutexGuard<'_, ()>,
         mut params: AllocateRouteParams,
@@ -417,6 +438,7 @@ impl RouteSpecStore {
                 return false;
             };
             veilid_log!(self debug "releasing allocated route {}: keys={}", id, rssd.get_route_set_keys());
+            self.record_route_release_summary(rssd.get_orderings());
 
             // Remove from hop cache
             let id_clone = id.clone();
@@ -525,6 +547,17 @@ impl RouteSpecStore {
 
                 // Exclude nodes with no compatible dialinfo
                 if !their_ni.has_sequencing_matched_dial_info(sequencing) {
+                    return false;
+                }
+
+                // A hop must carry the route's ordering on that ordering's own protocols
+                let ordering_filter =
+                    DialInfoFilter::ensure_ordering(sequencing.preferred_ordering());
+                if !their_ni
+                    .dial_info_detail_list()
+                    .iter()
+                    .any(|did| did.matches_filter(&ordering_filter))
+                {
                     return false;
                 }
 
@@ -833,93 +866,46 @@ impl RouteSpecStore {
                 }
             }
 
-            // Ensure this route is viable by checking that each node can contact the next one
-            let mut orderings = SequenceOrderingSet::all();
-            if params.directions.contains(Direction::Out) {
-                let mut previous_node = published_peer_info.clone();
-                let mut reachable = true;
-                for n in permutation {
-                    let current_node = nodes_pi.get(*n).cloned().unwrap_or_log();
-                    let cm = routing_table.get_best_contact_method(
+            // Ensure this route is viable: every hop pair must carry the route's one ordering,
+            // proven on that ordering's protocols alone since a preference would accept any
+            let ordering = params.sequencing.preferred_ordering();
+            let probe_sequencing = ordering.strict_sequencing();
+            let probe_filter = DialInfoFilter::ensure_ordering(ordering);
+            let hop_pair_viable = |peer_a: &Arc<PeerInfo>, peer_b: &Arc<PeerInfo>| {
+                routing_table
+                    .get_best_contact_method(
                         RoutingDomain::PublicInternet,
                         ContactMethodRequest {
-                            peer_a: previous_node.clone(),
+                            peer_a: peer_a.clone(),
                             peer_a_published: true,
-                            peer_b: current_node.clone(),
-                            dial_info_filter: DialInfoFilter::all(),
-                            sequencing: params.sequencing,
+                            peer_b: peer_b.clone(),
+                            dial_info_filter: probe_filter,
+                            sequencing: probe_sequencing,
                         },
-                    );
-                    if cm.is_none() {
-                        reachable = false;
-                        break;
+                    )
+                    .is_some()
+            };
+            if params.directions.contains(Direction::Out) {
+                let mut previous_node = published_peer_info.clone();
+                for n in permutation {
+                    let current_node = nodes_pi.get(*n).cloned().unwrap_or_log();
+                    if !hop_pair_viable(&previous_node, &current_node) {
+                        return None;
                     }
-
-                    // Check if we can do each ordering strictly
-                    for ordering in orderings {
-                        let cm = routing_table.get_best_contact_method(
-                            RoutingDomain::PublicInternet,
-                            ContactMethodRequest {
-                                peer_a: previous_node.clone(),
-                                peer_a_published: true,
-                                peer_b: current_node.clone(),
-                                dial_info_filter: DialInfoFilter::all(),
-                                sequencing: ordering.strict_sequencing(),
-                            },
-                        );
-                        if cm.is_none() {
-                            orderings.remove(ordering);
-                        }
-                    }
-
                     previous_node = current_node;
-                }
-                if !reachable {
-                    return None;
                 }
             }
             if params.directions.contains(Direction::In) {
                 let mut next_node = published_peer_info.clone();
-                let mut reachable = true;
                 for n in permutation.iter().rev() {
                     let current_node = nodes_pi.get(*n).cloned().unwrap_or_log();
-                    let cm = routing_table.get_best_contact_method(
-                        RoutingDomain::PublicInternet,
-                        ContactMethodRequest {
-                            peer_a: next_node.clone(),
-                            peer_a_published: true,
-                            peer_b: current_node.clone(),
-                            dial_info_filter: DialInfoFilter::all(),
-                            sequencing: params.sequencing,
-                        },
-                    );
-                    if cm.is_none() {
-                        reachable = false;
-                        break;
-                    }
-
-                    // Check if we can do each ordering strictly
-                    for ordering in orderings {
-                        let cm = routing_table.get_best_contact_method(
-                            RoutingDomain::PublicInternet,
-                            ContactMethodRequest {
-                                peer_a: next_node.clone(),
-                                peer_a_published: true,
-                                peer_b: current_node.clone(),
-                                dial_info_filter: DialInfoFilter::all(),
-                                sequencing: ordering.strict_sequencing(),
-                            },
-                        );
-                        if cm.is_none() {
-                            orderings.remove(ordering);
-                        }
+                    if !hop_pair_viable(&next_node, &current_node) {
+                        return None;
                     }
                     next_node = current_node;
                 }
-                if !reachable {
-                    return None;
-                }
             }
+            let orderings = SequenceOrderingSet::only(ordering);
 
             // Apply relay-capable preference per policy. Tier 0 (AllHops) excludes
             // SignalReverse/SignalHolePunch-only first hops and biases the whole

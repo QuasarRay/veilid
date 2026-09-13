@@ -5,6 +5,15 @@
   - BLAKE3 uses its WASM SIMD implementation on wasm32. Adds 14KB to the `.wasm` and requires WASM SIMD support, which browsers have had since Safari 16.4.
 
 - veilid-core:
+  - Safety routes are allocated, tested, and released per sequence ordering, and the hops of a route that died are kept out of new allocations for ten minutes.
+  - A lost loopback no longer schedules another test of its own route, and a multi-hop loopback failure no longer blames the first hop's transport.
+  - Per-ordering loopback tallies, a `route test summary` log line for any minute with a loopback failure or a release, and the `route diag` and `route reallocate` debug commands.
+  - `route allocate` accepts node ids to avoid as hops.
+  - A refused connect is no longer counted as evidence against a transport.
+  - Last flows are kept per remote address, answers return over the flow their question arrived on, and a lost question over a flow we did not dial blames nobody.
+  - Degraded detection counts fresh failures of Reliable peers only, excludes our own relay, and clears its evidence on recovery.
+  - App call results are logged truncated.
+  - A DHT transaction record no longer fails its stage consensus when as many node transactions went unanswered as answered.
   - **Security** B01T direct-bootstrap requests are answered from the last successful bootstrap set held by the routing domain, which is persisted across restarts. The handler no longer resolves DNS, so an unauthenticated packet can no longer cause non-veilid traffic or block a worker on a slow resolver. Thanks to quikchaos for reporting this issue!
   - Bootstrap records are cached verbatim for every record version received, so a node serves what it was told rather than only what it selected for its own bootstrap. A saved routing table that predates the cache is discarded on load and the node bootstraps again, since nothing else ever fetches records: without this a node that restarted with a warm routing table never bootstrapped, held no records, and refused B01T on every protocol.
   - New `network.routing_table.bootstrap_records` config: whole bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them. They are served to direct bootstrap requests with no lookup and can be used to join the network without resolving `bootstrap` at all, so the first bootstrap server on a network can serve records before there is anything to look up. Empty by default.
@@ -12,6 +21,14 @@
   - Bootstrap hostname resolution runs on the blocking pool instead of the executor.
   - Android below API 29 has no system TXT resolver, so a bootstrap hostname is contacted directly on port 5150 over UDP or TCP for a B01T exchange instead. Startup fails on such a device when neither protocol is enabled, since the hostname could never be reached.
   - Stats collection, aggregation, and analysis for all subsystems. Robot-generated python script for reviewing the effect of optimizations.
+  - DHT transaction quality counters under the `stats` feature: per-command fanout outcomes, subkey confirmation coverage at End and Commit, node-set attrition, the cost of each mitigation, and TryAgain reasons; `stats reset` zeroes them.
+  - A DHT transaction ends only at nodes that answered every set, re-sending a node the sets it is missing first, and set answers that arrive after the early consensus exit are recorded instead of dropped.
+  - A DHT transaction commit held by fewer than the required nodes returns TryAgain instead of Ok.
+  - A set that reaches a storage node after End is refused without ending that node's transaction.
+  - The set retry pass in DHT transactions is gone; it re-sent 4 of 6391 set RPCs in a stress run and none once late answers were collected.
+  - A bootstrap name whose TXT lookup returns nothing within ten seconds is direct-bootstrapped over every enabled protocol at once, so a node behind a phone tether whose DNS relay answers A/AAAA but not TXT still joins the network.
+  - DHT transaction keepalives are sent only when no command answer has refreshed the node's lease since the last deadline.
+  - A DHT transaction command returns at consensus instead of waiting up to half a second for stragglers, which now settle in the background.
   - Fix OnlineDetector spurious flap.
   - Properly drop TCP connections when offline condition is detected so they can be recreated in the event of NAT state loss, as is common on cellular.
   - Fix UDP stalls on cellular/CLAT464.
@@ -58,6 +75,9 @@
   - Minimum Flutter version is now 3.47.1 due to improved build hooks support
   - Completely remove 'rust-android-gradle' because it is failing to keep up with the rest of the ecosystem (AGP, Kotlin, etc)
   - Fix multiple-attach idempotency
+
+- veilid-cli:
+  - The interactive console no longer exits or floods `thingbuf receiver has closed` when a log burst overruns the line editor.
 
 - veilid-python:
   - More tests

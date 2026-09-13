@@ -100,6 +100,8 @@ impl StorageManager {
             config.internal().network.dht.set_value_fanout as usize,
         );
         let required_strict_consensus_count = params.record_params.required_strict_consensus_count;
+        #[cfg(feature = "stats")]
+        let begin_start = Timestamp::now();
 
         let timeout = self
             .rpc_processor()
@@ -588,6 +590,20 @@ impl StorageManager {
             );
             ctx.seqs.clone()
         };
+
+        veilid_stats!({
+            let accepted = ctx.accepted_rtts.len();
+            self.transaction_quality().lock().record_command(
+                TransactionCommandKind::Begin,
+                CommandOutcome {
+                    answered_valid: accepted as u64,
+                    answered_invalid: ctx.refused_nodes.len() as u64,
+                    short_of_required: accepted < required_strict_consensus_count,
+                    duration: Timestamp::now().duration_since(begin_start),
+                    ..Default::default()
+                },
+            );
+        });
 
         let result = OutboundTransactBeginResult {
             params,

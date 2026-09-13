@@ -1,7 +1,6 @@
 //! Rolling accounting for the DHT operation gate: per-kind wait/hold
 //! latencies and, with `aimd-dht`, per-direction AIMD decision tallies.
-//! Compiled only with `stats`; the serializable snapshot lives in `stats.rs`.
-use super::gated_operation::GatedOperationKind;
+//! The serializable snapshot lives in `mod.rs`.
 use super::*;
 
 /// Per-kind rolling wait/hold accounting
@@ -17,7 +16,7 @@ struct GatedKindAccounting {
 
 /// One kind's gate telemetry, read by the storage manager stats snapshot
 #[derive(Clone)]
-pub(super) struct GatedKindSnapshot {
+pub(in crate::storage_manager) struct GatedKindSnapshot {
     pub kind: &'static str,
     pub count: u64,
     pub retryable: u64,
@@ -28,7 +27,7 @@ pub(super) struct GatedKindSnapshot {
 /// Gate wait (admission delay) and hold (round-trip proxy) latencies plus a
 /// completion count, per operation kind
 #[derive(Debug, Default)]
-pub(super) struct GatedOperationAccounting {
+pub(in crate::storage_manager) struct GatedOperationAccounting {
     set: GatedKindAccounting,
     get: GatedKindAccounting,
     transact_set: GatedKindAccounting,
@@ -44,20 +43,28 @@ impl GatedOperationAccounting {
             GatedOperationKind::TransactGet => &mut self.transact_get,
         }
     }
-    pub(super) fn record_wait(&mut self, kind: GatedOperationKind, wait: TimestampDuration) {
+    pub(in crate::storage_manager) fn record_wait(
+        &mut self,
+        kind: GatedOperationKind,
+        wait: TimestampDuration,
+    ) {
         self.kind_mut(kind)
             .gate_wait_accounting
             .record_latency(wait);
     }
-    pub(super) fn record_completion(&mut self, kind: GatedOperationKind, held: TimestampDuration) {
+    pub(in crate::storage_manager) fn record_completion(
+        &mut self,
+        kind: GatedOperationKind,
+        held: TimestampDuration,
+    ) {
         let k = self.kind_mut(kind);
         k.count += 1;
         k.held_accounting.record_latency(held);
     }
-    pub(super) fn record_retryable(&mut self, kind: GatedOperationKind) {
+    pub(in crate::storage_manager) fn record_retryable(&mut self, kind: GatedOperationKind) {
         self.kind_mut(kind).retryable += 1;
     }
-    pub(super) fn per_kind(&self) -> [GatedKindSnapshot; 4] {
+    pub(in crate::storage_manager) fn per_kind(&self) -> [GatedKindSnapshot; 4] {
         let snap = |kind, k: &GatedKindAccounting| GatedKindSnapshot {
             kind,
             count: k.count,
@@ -77,7 +84,7 @@ impl GatedOperationAccounting {
 /// Cumulative AIMD decision tallies for one direction
 #[cfg(feature = "aimd-dht")]
 #[derive(Debug, Default)]
-pub(super) struct AimdAccounting {
+pub(in crate::storage_manager) struct AimdAccounting {
     holds: u64,
     lowers: u64,
     clamps: u64,
@@ -89,7 +96,7 @@ pub(super) struct AimdAccounting {
 
 #[cfg(feature = "aimd-dht")]
 impl AimdAccounting {
-    pub(super) fn record(&mut self, step: &AimdStepResult) {
+    pub(in crate::storage_manager) fn record(&mut self, step: &AimdStepResult) {
         match step.decision {
             AimdDecision::Hold => self.holds += 1,
             AimdDecision::Lower(_) => self.lowers += 1,
@@ -100,7 +107,7 @@ impl AimdAccounting {
         self.congested += step.congested;
         self.demand_events += step.demand_events;
     }
-    pub(super) fn counters(&self, limit: u64) -> AimdCounters {
+    pub(in crate::storage_manager) fn counters(&self, limit: u64) -> AimdCounters {
         AimdCounters {
             limit,
             holds: self.holds,
@@ -117,7 +124,7 @@ impl AimdAccounting {
 /// One direction's AIMD telemetry, read by the storage manager stats snapshot
 #[cfg(feature = "aimd-dht")]
 #[derive(Clone, Copy)]
-pub(super) struct AimdCounters {
+pub(in crate::storage_manager) struct AimdCounters {
     pub limit: u64,
     pub holds: u64,
     pub lowers: u64,

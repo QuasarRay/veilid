@@ -106,7 +106,7 @@ pub(crate) fn effective_online_state(
 }
 
 /// Events that drive the online/offline state machine.
-enum OnlineEvent {
+pub(crate) enum OnlineEvent {
     /// Received something from outside.
     Success,
     /// Failures for previously-live nodes on one framing type. `fresh_node_ids` is the
@@ -128,17 +128,17 @@ enum OnlineEvent {
 
 /// Per-routing-domain online/offline tracking.
 #[derive(Debug)]
-struct OnlineDetectionPerDomain {
+pub(crate) struct OnlineDetectionPerDomain {
     /// Previously-live nodes that failed on each framing type since the last success.
     pending_failures: BTreeMap<FramingType, BTreeSet<NodeId>>,
     /// The same breadth over a time window, which an interleaved success cannot erase
-    windowed_failures: BTreeMap<FramingType, BTreeMap<NodeId, Timestamp>>,
+    pub(crate) windowed_failures: BTreeMap<FramingType, BTreeMap<NodeId, Timestamp>>,
     /// Last time the windowed breadth crossed threshold on every enabled framing type
-    last_degraded_evidence_ts: Option<Timestamp>,
+    pub(crate) last_degraded_evidence_ts: Option<Timestamp>,
     /// Last completed round trip; exiting Degraded requires one after the evidence
-    last_success_ts: Option<Timestamp>,
+    pub(crate) last_success_ts: Option<Timestamp>,
     /// Last committed three-state answer, updated on events and lazily on reads
-    effective_state: OnlineState,
+    pub(crate) effective_state: OnlineState,
     /// Consecutive Degraded re-entries within `DEGRADED_REENTRY_SECS`; escalates the exit window
     degraded_reentries: u32,
     /// When Degraded last ended, for the rapid-re-entry test
@@ -146,7 +146,7 @@ struct OnlineDetectionPerDomain {
     /// When we last switched online/offline.
     last_transition_ts: Timestamp,
     /// Current state.
-    online_state: OnlineState,
+    pub(crate) online_state: OnlineState,
     /// Flap detector over online_state.
     flap_detector: FlapDetector<OnlineState>,
     /// Start of the current offline period, if currently offline.
@@ -201,6 +201,17 @@ impl Default for OnlineDetectionPerDomain {
     }
 }
 
+/// Which peers' fresh failures may arm the degraded window
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum DegradedBreadthStrategy {
+    /// Any responsive peer that answered recently and is not already judged failing; the
+    /// pre-2026-09 behavior, kept selectable for comparison runs
+    #[expect(dead_code)]
+    Responsive,
+    /// Only peers in the Reliable state: the ones whose loss is news rather than habit
+    ReliableOnly,
+}
+
 /// Detects if our node is online or offline.
 ///
 /// To determine if network errors are 'our fault' or 'the other side's fault', we need to
@@ -208,6 +219,8 @@ impl Default for OnlineDetectionPerDomain {
 /// changing its state.
 pub struct OnlineDetector {
     registry: VeilidComponentRegistry,
+    /// Which peers' failures count toward degraded breadth
+    breadth_strategy: DegradedBreadthStrategy,
     inner: Mutex<BTreeMap<RoutingDomain, OnlineDetectionPerDomain>>,
     /// Framing types the network uses; only these gate offline detection.
     enabled_framing_types: Mutex<FramingTypeSet>,
@@ -247,6 +260,7 @@ impl OnlineDetector {
     pub fn new(registry: VeilidComponentRegistry) -> Self {
         Self {
             registry,
+            breadth_strategy: DegradedBreadthStrategy::ReliableOnly,
             inner: Mutex::new(BTreeMap::new()),
             // Require both classes until the network reports its protocol config.
             enabled_framing_types: Mutex::new(FramingTypeSet::all()),
@@ -296,10 +310,25 @@ impl OnlineDetector {
         node_ids: impl IntoIterator<Item = NodeId>,
         sent_ts: Timestamp,
         transport: TransportType,
+        remote: Option<SocketAddress>,
     ) {
         if !Self::uses_ping_detection(routing_domain) {
             return;
         }
+        // A send that went through our own relay failed on the relay's side of the relay,
+        // not on our path to it; our connection to the relay is protected and kept alive
+        let via_own_relay = remote.is_some_and(|remote| {
+            self.routing_table()
+                .relays(routing_domain)
+                .iter()
+                .filter_map(|r| r.relay_node.unfiltered().get_peer_info(routing_domain))
+                .any(|pi| {
+                    pi.node_info()
+                        .dial_info_detail_list()
+                        .iter()
+                        .any(|did| did.dial_info.socket_address() == remote)
+                })
+        });
         // Only currently-responsive nodes count. A probe timing out to a node that is
         // Initial/Missing/Dead/Punished is evidence about that node, not about us: a stale
         // routing table loads entries as Initial while their persisted answer history
@@ -320,8 +349,14 @@ impl OnlineDetector {
                 continue;
             };
             let (responsive, fresh) = nr.operate(|e| {
-                let responsive = e.state(cur_ts).is_responsive();
-                let fresh = responsive
+                let state = e.state(cur_ts);
+                let responsive = state.is_responsive();
+                let eligible = match self.breadth_strategy {
+                    DegradedBreadthStrategy::Responsive => responsive,
+                    DegradedBreadthStrategy::ReliableOnly => state == BucketEntryState::Reliable,
+                };
+                let fresh = eligible
+                    && !via_own_relay
                     && e.per_sequence_ordering_stats().get(&so).is_some_and(|s| {
                         s.recent_lost_questions
                             < crate::routing_table::TRANSPORT_FAILING_LOST_QUESTIONS
@@ -546,7 +581,7 @@ impl OnlineDetector {
 
     /// Recompute and commit the effective three-state answer; returns a
     /// transition for the caller to log outside the lock.
-    fn commit_effective(
+    pub(crate) fn commit_effective(
         pd: &mut OnlineDetectionPerDomain,
         local_stall_ts: Option<Timestamp>,
         now: Timestamp,
@@ -566,7 +601,13 @@ impl OnlineDetector {
         }
         // Decided on entry, held for the whole degraded period
         match (old_state, new_state) {
-            (OnlineState::Degraded, _) => pd.degraded_recovered_ts = Some(now),
+            (OnlineState::Degraded, _) => {
+                pd.degraded_recovered_ts = Some(now);
+                // The window outlives the clean period; without this one more failure
+                // re-crosses the threshold on the old entries
+                pd.windowed_failures.clear();
+                pd.last_degraded_evidence_ts = None;
+            }
             (_, OnlineState::Degraded) => {
                 let rapid = pd.degraded_recovered_ts.is_some_and(|ts| {
                     now.duration_since(ts) <= TimestampDuration::new_secs(DEGRADED_REENTRY_SECS)
@@ -750,6 +791,11 @@ impl OnlineDetector {
             self.network_manager()
                 .transport_stats()
                 .reset_routing_domain(routing_domain, "sustained offline ended");
+            if routing_domain == RoutingDomain::PublicInternet {
+                self.routing_table()
+                    .route_spec_store()
+                    .clear_dead_route_hops();
+            }
         }
         if let Some(penalty) = opt_flap_penalty {
             veilid_log!(self debugwarn "{:?} online state FLAPPING (penalty={:.1})", routing_domain, penalty);
@@ -768,7 +814,7 @@ impl OnlineDetector {
     }
 
     /// Handle an event while online.
-    fn process_online_event(
+    pub(crate) fn process_online_event(
         pd: &mut OnlineDetectionPerDomain,
         event: &OnlineEvent,
         enabled_framing_types: FramingTypeSet,

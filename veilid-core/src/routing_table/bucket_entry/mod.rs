@@ -2,9 +2,7 @@ mod state;
 mod state_reason;
 
 use super::*;
-#[cfg(feature = "tracking")]
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::AtomicU32;
 use hashlink::LruCache;
 
 pub(crate) use state::*;
@@ -22,13 +20,19 @@ pub(crate) const CONNECTIONLESS_TIMEOUT: TimestampDuration = TimestampDuration::
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) struct LastFlowKey {
     pub transport: TransportType,
+    /// A node can be reached over several remotes per transport (its own address, its relay,
+    /// our relay); keying on the remote keeps a relayed flow from overwriting a direct one
+    pub remote: SocketAddress,
 }
 
 impl fmt::Display for LastFlowKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", f.to_string(self.transport))
+        write!(f, "{}@{}", f.to_string(self.transport), self.remote)
     }
 }
+
+/// Live flows kept per transport type for one node
+const LAST_FLOWS_PER_TRANSPORT: usize = 4;
 
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) struct LastSenderInfoKey {
@@ -153,7 +157,7 @@ pub(crate) struct BucketEntryInner {
     updated_since_last_network_change: bool,
     /// The last flows used to contact this node, per protocol type
     #[serde(skip)]
-    last_flows: BTreeMap<LastFlowKey, LastFlowEntry>,
+    pub(super) last_flows: BTreeMap<LastFlowKey, LastFlowEntry>,
     /// Last seen senderinfo per protocol/address type
     #[serde(skip)]
     last_sender_info: HashMap<LastSenderInfoKey, SenderInfo>,
@@ -824,16 +828,18 @@ impl BucketEntryInner {
     fn flow_to_key(&self, last_flow: Flow) -> LastFlowKey {
         LastFlowKey {
             transport: last_flow.transport_type(),
+            remote: *last_flow.remote_address(),
         }
     }
 
-    // Stores a flow in this entry's table of last flows
+    // Stores a flow in this entry's table of last flows, keeping the newest few per transport
     pub(super) fn set_last_flow(&mut self, last_flow: Flow, timestamp: Timestamp) {
         if self.punishment.is_some() {
             // Don't record connection if this entry is currently punished
             return;
         }
         let key = self.flow_to_key(last_flow);
+        let transport = key.transport;
         self.last_flows.insert(
             key,
             LastFlowEntry {
@@ -841,6 +847,20 @@ impl BucketEntryInner {
                 timestamp,
             },
         );
+        loop {
+            let same_transport = self
+                .last_flows
+                .iter()
+                .filter(|(k, _)| k.transport == transport)
+                .map(|(k, e)| (e.timestamp, k.clone()));
+            let Some((_, oldest)) = same_transport.clone().min() else {
+                break;
+            };
+            if same_transport.count() <= LAST_FLOWS_PER_TRANSPORT {
+                break;
+            }
+            self.last_flows.remove(&oldest);
+        }
     }
 
     // Removes a flow in this entry's table of last flows

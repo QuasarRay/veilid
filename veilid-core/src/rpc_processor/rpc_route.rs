@@ -24,9 +24,11 @@ impl RPCProcessor {
         };
 
         // Apply sequencing preference and require routing domain to remain the same (for now)
+        let sequencing = routed_operation.sequencing();
         let next_hop_nr = next_hop_nr
-            .sequencing_filtered(routed_operation.sequencing())
+            .sequencing_filtered(sequencing)
             .with_routing_domain(RoutingDomain::PublicInternet);
+        let trace_nr = next_hop_nr.clone();
 
         // Pass along the route
         let next_hop_route = RPCOperationRoute::new(
@@ -40,7 +42,7 @@ impl RPCProcessor {
             RPCStatement::new(RPCStatementDetail::Route(Box::new(next_hop_route)));
 
         // Send the next route statement
-        Box::pin(
+        let res = Box::pin(
             self.statement(
                 Destination::direct(next_hop_nr, None),
                 next_hop_route_stmt,
@@ -51,7 +53,9 @@ impl RPCProcessor {
                 veilid_log!(self debug "process_route_safety_route_hop rpc_route stmt: {:#}", dur);
             }),
         )
-        .await
+        .await;
+        self.trace_route_hop_forward("sr", route_op_id, &trace_nr, sequencing, &res);
+        res
     }
 
     #[cfg_attr(
@@ -76,9 +80,11 @@ impl RPCProcessor {
         };
 
         // Apply sequencing preference and require routing domain to be PublicInternet for now
+        let sequencing = routed_operation.sequencing();
         let next_hop_nr = next_hop_nr
-            .sequencing_filtered(routed_operation.sequencing())
+            .sequencing_filtered(sequencing)
             .with_routing_domain(RoutingDomain::PublicInternet);
+        let trace_nr = next_hop_nr.clone();
 
         // Pass along the route
         let next_hop_route = RPCOperationRoute::new(
@@ -92,7 +98,7 @@ impl RPCProcessor {
             RPCStatement::new(RPCStatementDetail::Route(Box::new(next_hop_route)));
 
         // Send the next route statement
-        Box::pin(
+        let res = Box::pin(
             self.statement(
                 Destination::direct(next_hop_nr, None),
                 next_hop_route_stmt,
@@ -103,7 +109,29 @@ impl RPCProcessor {
                 veilid_log!(self debug "process_route_private_route_hop rpc_route stmt: {:#}", dur);
             }),
         )
-        .await
+        .await;
+        self.trace_route_hop_forward("pr", route_op_id, &trace_nr, sequencing, &res);
+        res
+    }
+
+    /// One opt-in line per forwarded hop so a routed op can be followed across nodes
+    fn trace_route_hop_forward(
+        &self,
+        leg: &str,
+        route_op_id: OperationId,
+        next_hop_nr: &FilteredNodeRef,
+        sequencing: Sequencing,
+        res: &RPCNetworkResult<()>,
+    ) {
+        let outcome = match res {
+            Ok(nr) => format!("{:?}", nr),
+            Err(e) => format!("Err({})", e),
+        };
+        let flow = next_hop_nr
+            .last_flow()
+            .map(|f| format!("{:#}", f))
+            .unwrap_or_else(|| "none".to_owned());
+        veilid_log!(self debug target: "rpc::route", "route hop fwd {} op={:#} next={} seq={:#} -> {} flow={}", leg, route_op_id, next_hop_nr.best_node_id(), sequencing, outcome, flow);
     }
 
     /// Process a routed operation that came in over a safety route but no private route
@@ -148,6 +176,8 @@ impl RPCProcessor {
                 )));
             }
         };
+
+        veilid_log!(self debug target: "rpc::route", "route op terminated op={:#} sr={} pr=stub", route_op_id, remote_sr_pubkey);
 
         // Pass message to RPC system
         self.enqueue_safety_routed_message(
@@ -223,6 +253,8 @@ impl RPCProcessor {
                 "decryption of routed operation failed",
             ));
         };
+
+        veilid_log!(self debug target: "rpc::route", "route op terminated op={:#} sr={} pr={}", route_op_id, remote_sr_pubkey, pr_pubkey);
 
         // Pass message to RPC system
         self.enqueue_private_routed_message(

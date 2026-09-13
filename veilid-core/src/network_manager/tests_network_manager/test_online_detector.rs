@@ -155,7 +155,59 @@ pub fn test_escalated_window_closes_the_gap() {
     );
 }
 
+fn node(n: u8) -> NodeId {
+    let mut b = [0u8; 32];
+    b[0] = n;
+    NodeId::new(CRYPTO_KIND_VLD0, BareNodeId::new(&b))
+}
+
+fn broad_failure(ft: FramingType, first: u8, count: u8, sent_ts: Timestamp) -> OnlineEvent {
+    let ids: Vec<NodeId> = (first..first + count).map(node).collect();
+    OnlineEvent::Failure {
+        live_node_ids: ids.clone(),
+        fresh_node_ids: ids,
+        responsive_count: 0,
+        sent_ts,
+        framing_type: ft,
+    }
+}
+
+pub fn test_recovery_clears_evidence_window() {
+    // A recovered domain must not re-degrade on a single failure: the evidence window
+    // (10s) outlives the clean period (5s), so the old entries have to go with the episode
+    let mut pd = OnlineDetectionPerDomain::default();
+    let framing = FramingTypeSet::all();
+    let threshold = OFFLINE_DETECTION_FAILURE_THRESHOLD_CONNECTION as u8;
+
+    // Enough fresh failures on every framing type: degraded
+    for ft in framing {
+        let ev = broad_failure(ft, 1, threshold, ts(10));
+        // Offline needs the same breadth sustained; here only the degraded overlay matters
+        let _ = OnlineDetector::process_online_event(&mut pd, &ev, framing, ts(10));
+    }
+    assert_eq!(pd.last_degraded_evidence_ts, Some(ts(10)));
+    assert!(OnlineDetector::commit_effective(&mut pd, None, ts(10)).is_some());
+    assert_eq!(pd.effective_state, OnlineState::Degraded);
+
+    // A round trip after the evidence plus the clean period: recovered, window gone
+    pd.last_success_ts = Some(ts(12));
+    let transition = OnlineDetector::commit_effective(&mut pd, None, ts(16));
+    assert_eq!(transition.map(|t| t.1), Some(OnlineState::Online));
+    assert!(pd.windowed_failures.values().all(BTreeMap::is_empty));
+    assert_eq!(pd.last_degraded_evidence_ts, None);
+
+    // One more failure per framing type is not breadth
+    for ft in framing {
+        let ev = broad_failure(ft, 100, 1, ts(17));
+        let _ = OnlineDetector::process_online_event(&mut pd, &ev, framing, ts(17));
+    }
+    assert_eq!(pd.last_degraded_evidence_ts, None);
+    assert!(OnlineDetector::commit_effective(&mut pd, None, ts(17)).is_none());
+    assert_eq!(pd.effective_state, OnlineState::Online);
+}
+
 pub fn test_all() {
+    test_recovery_clears_evidence_window();
     test_no_evidence_is_online();
     test_offline_dominates();
     test_fresh_evidence_degrades();

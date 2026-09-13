@@ -47,11 +47,19 @@ enum ProcessorResult {
 /// Processor object with shared state for synchronous register/unregister
 /// and async keepalive processing
 pub(in crate::storage_manager) struct OutboundTransactionKeepaliveProcessor {
+    /// Registry for logging and component access
     registry: VeilidComponentRegistry,
+    /// Send deadlines by time
     deadlines: Arc<Mutex<OutboundTransactionKeepaliveDeadlines>>,
+    /// Train state by node transaction, so command answers can refresh it
+    states: Mutex<HashMap<LocalNodeTransactionId, Arc<Mutex<OutboundTransactionKeepaliveState>>>>,
+    /// Command channel into the processor loop
     sender: flume::Sender<OutboundTransactionKeepaliveCommand>,
+    /// Command channel out of the processor loop
     receiver: flume::Receiver<OutboundTransactionKeepaliveCommand>,
+    /// The processor loop task
     jh: Mutex<Option<MustJoinHandle<()>>>,
+    /// Stops the processor loop
     stop_source: Mutex<Option<StopSource>>,
 }
 
@@ -81,6 +89,7 @@ impl OutboundTransactionKeepaliveProcessor {
                 .saturating_mul(TRANSACTION_TIMEOUT_RPC_MULTIPLIER);
         let (sender, receiver) = flume::unbounded();
         Self {
+            states: Mutex::new(HashMap::new()),
             deadlines: Arc::new(Mutex::new(OutboundTransactionKeepaliveDeadlines::new(
                 registry.clone(),
                 ttl,
@@ -117,6 +126,7 @@ impl OutboundTransactionKeepaliveProcessor {
             ..Default::default()
         }));
 
+        self.states.lock().insert(params.lnxid, state.clone());
         let keepalive = OutboundTransactionKeepalive::new(params, state);
 
         #[cfg(feature = "verbose-tracing")]
@@ -139,7 +149,27 @@ impl OutboundTransactionKeepaliveProcessor {
         instrument(level = "trace", target = "stor", skip(self))
     )]
     pub fn unregister(&self, lnxid: LocalNodeTransactionId) {
+        self.states.lock().remove(&lnxid);
         self.deadlines.lock().cancel_deadline(lnxid);
+    }
+
+    /// A command answer carried a fresh expiration: the next deadline reschedules
+    /// from it instead of sending a keepalive the node does not need
+    pub fn refresh(
+        &self,
+        lnxid: LocalNodeTransactionId,
+        expiration: Timestamp,
+        opt_rtt: Option<TimestampDuration>,
+    ) {
+        let Some(state) = self.states.lock().get(&lnxid).cloned() else {
+            return;
+        };
+        let mut st = state.lock();
+        st.opt_last_expiration = Some(expiration);
+        if let Some(rtt) = opt_rtt {
+            st.opt_last_rtt = Some(rtt);
+        }
+        st.refreshed = true;
     }
 
     /// Spawn the background processor loop. Must be called before register.
@@ -292,11 +322,28 @@ impl OutboundTransactionKeepaliveProcessor {
         unord: &mut FuturesUnordered<PinBoxFutureStatic<ProcessorResult>>,
         keepalive: OutboundTransactionKeepalive,
     ) {
-        if keepalive.state().lock().dead {
-            return;
-        }
-
         let send_ts = Timestamp::now();
+        {
+            let mut st = keepalive.state().lock();
+            if st.dead {
+                return;
+            }
+            // Refreshed by a command answer since this deadline was set: reschedule only
+            if st.refreshed {
+                st.refreshed = false;
+                drop(st);
+                veilid_stats!(
+                    registry
+                        .storage_manager()
+                        .transaction_quality()
+                        .lock()
+                        .mitigations
+                        .keepalives_skipped += 1
+                );
+                deadlines.lock().schedule_deadline(keepalive, send_ts);
+                return;
+            }
+        }
 
         // Enqueue the next deadline now, before the RPC is awaited.
         deadlines
@@ -318,6 +365,14 @@ impl OutboundTransactionKeepaliveProcessor {
 
         let fut = async move {
             let rpc_processor = registry.rpc_processor();
+            veilid_stats!(
+                registry
+                    .storage_manager()
+                    .transaction_quality()
+                    .lock()
+                    .mitigations
+                    .keepalive_gets_sent += 1
+            );
 
             let start_ts = Timestamp::now();
             let result = rpc_processor

@@ -1,5 +1,4 @@
 use super::*;
-use core::sync::atomic::Ordering;
 
 impl_veilid_log_facility!("rtab");
 

@@ -14,6 +14,7 @@ import { appCallEventTarget, appMessageEventTarget } from './app-events.js';
 import { expect } from './expect.js';
 import {
   caseRequiresNetwork,
+  caseSelected,
   contextSupportsNetwork,
   NETWORK_SKIP_NOTICE,
   type CaseResult,
@@ -23,6 +24,35 @@ import {
 import { suitesByName } from '../suites/registry.js';
 
 let wasmReady: Promise<unknown> | undefined;
+
+// Transaction quality counters are cumulative; one compact line per case lets the stress
+// analyzer diff consecutive snapshots. Absent when the build has no `stats` feature.
+let txQualityAvailable: boolean | undefined;
+async function logTxQuality(label: string): Promise<void> {
+  if (txQualityAvailable === false) {
+    return;
+  }
+  // Without the `stats` feature the command answers with a plain "unsupported" line
+  let stats;
+  try {
+    stats = JSON.parse(await veilidClient.debug('stats print'));
+  } catch {
+    txQualityAvailable = false;
+    return;
+  }
+  txQualityAvailable = true;
+  const late: { kind: string; count: number }[] =
+    stats?.components?.rpc_processor?.answers_after_waiter_dropped ?? [];
+  const line = {
+    case: label,
+    tx: stats?.components?.storage_manager?.transaction_quality,
+    late_answers: late.reduce((sum, k) => sum + Number(k.count), 0),
+    late_transact_answers: late
+      .filter((k) => k.kind === 'TransactCommandA')
+      .reduce((sum, k) => sum + Number(k.count), 0),
+  };
+  console.log(`===TX_QUALITY=== ${JSON.stringify(line)}`);
+}
 
 // VeilidAPIError is a plain object, not an Error, so String() on it yields "[object Object]".
 function describeError(e: unknown): string {
@@ -44,13 +74,14 @@ export async function runSuites(
   suiteNames: string[],
   context: ContextName,
   progress: (step: string) => void = () => {},
+  caseFilter?: string,
 ): Promise<CaseResult[]> {
   await (wasmReady ??= init());
   const suites: Suite[] = suitesByName(suiteNames);
   const results: CaseResult[] = [];
   const plan: { suite: Suite; cases: ReturnType<Suite['cases']> }[] = suites.map((s) => ({
     suite: s,
-    cases: s.cases(),
+    cases: s.cases().filter((c) => caseSelected(c, caseFilter)),
   }));
 
   const networkOk = contextSupportsNetwork(context);
@@ -118,8 +149,10 @@ export async function runSuites(
             error: describeError(e),
           });
         }
+        await logTxQuality(`${suite.name}: ${c.name}`);
       }
     }
+    await logTxQuality('TOTAL');
   } finally {
     progress('shutdownCore');
     await veilidClient.shutdownCore();

@@ -308,6 +308,7 @@ enum DebugRouteSubcommand {
         /// - stability: `rel` or `low`
         /// - hop count: positive integer
         /// - direction: `in` or `out`
+        /// - avoid: node id(s) that must not be hops
         #[arg(allow_hyphen_values = true, value_name = "allocate_arg")]
         params: Vec<String>,
     },
@@ -356,6 +357,16 @@ enum DebugRouteSubcommand {
     #[command(help_template = DEBUG_HELP_TEMPLATE)]
     Test {
         /// Route id (full or prefix).
+        #[arg(value_name = "route_id")]
+        route_id: String,
+    },
+    /// Release the automatic safety route pool and allocate a fresh one now.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Reallocate,
+    /// Show each hop's dial info and the contact methods between adjacent hops per sequencing.
+    #[command(help_template = DEBUG_HELP_TEMPLATE)]
+    Diag {
+        /// Allocated route id (full or prefix).
         #[arg(value_name = "route_id")]
         route_id: String,
     },
@@ -1963,6 +1974,7 @@ impl VeilidAPI {
         let mut stability = Stability::default();
         let mut hop_count = default_route_hop_count;
         let mut directions = DirectionSet::all();
+        let mut avoid_nodes = Vec::new();
 
         while ai < args.len() {
             if let Ok(seq) =
@@ -1981,6 +1993,10 @@ impl VeilidAPI {
                 get_debug_argument_at(&args, ai, "debug_route", "direction_set", get_direction_set)
             {
                 directions = ds;
+            } else if let Ok(node_id) =
+                get_debug_argument_at(&args, ai, "debug_route", "avoid_node_id", get_node_id)
+            {
+                avoid_nodes.push(node_id);
             } else {
                 return Ok(format!("Invalid argument specified: {}", args[ai]));
             }
@@ -1994,7 +2010,7 @@ impl VeilidAPI {
             stability,
             sequencing,
             directions,
-            avoid_nodes: Vec::new(),
+            avoid_nodes,
             automatic: false,
         };
         let out = match rss.allocate_route(allocate_route_params).await {
@@ -2237,7 +2253,132 @@ impl VeilidAPI {
             DebugRouteSubcommand::List => self.debug_route_list(vec![]),
             DebugRouteSubcommand::Import { blob } => self.debug_route_import(vec![blob]),
             DebugRouteSubcommand::Test { route_id } => self.debug_route_test(vec![route_id]).await,
+            DebugRouteSubcommand::Diag { route_id } => self.debug_route_diag(vec![route_id]),
+            DebugRouteSubcommand::Reallocate => self.debug_route_reallocate().await,
         }
+    }
+
+    /// Drop every automatic unpublished route and refill the pool immediately, so a run on a
+    /// warmed-up node can be compared against a cold start
+    async fn debug_route_reallocate(&self) -> VeilidAPIResult<String> {
+        let registry = self.core_context()?.registry();
+        let routing_table = registry.routing_table();
+        let (released, allocated) = routing_table
+            .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>()
+            .reallocate_safety_routes()
+            .await
+            .map_err(VeilidAPIError::internal)?;
+        Ok(format!("released {}, allocated {}", released, allocated))
+    }
+
+    /// Per-leg contact methods for an allocated route, computed from the peer info we hold
+    fn debug_route_diag(&self, args: Vec<String>) -> VeilidAPIResult<String> {
+        // <route id>
+        let registry = self.core_context()?.registry();
+        let routing_table = registry.routing_table();
+        let rss = routing_table.route_spec_store();
+
+        let route_id = get_debug_argument_at(
+            &args,
+            0,
+            "debug_route",
+            "route_id",
+            get_route_id(registry.clone(), true, false),
+        )?;
+        let Some(info) = rss
+            .get_allocated_route_test_info(&AllocatedRouteSetId::from_route_id(route_id.clone()))
+        else {
+            return Ok("Route not found".to_owned());
+        };
+        let Some(our_pi) = routing_table.get_published_peer_info(RoutingDomain::PublicInternet)
+        else {
+            return Ok("No published PublicInternet peer info".to_owned());
+        };
+
+        let mut out = format!(
+            "Route {} hops={} orderings={:?}\n",
+            route_id,
+            info.hops.len(),
+            info.orderings
+        );
+
+        // Legs run self -> hop1 -> ... -> hopN and back
+        let mut legs: Vec<(String, Arc<PeerInfo>)> = vec![("self".to_owned(), our_pi)];
+        for (i, hop) in info.hops.iter().enumerate() {
+            let name = format!("hop{}", i + 1);
+            let Some(pi) = hop.get_peer_info(RoutingDomain::PublicInternet) else {
+                out.push_str(&format!(
+                    "  {}: {} has no PublicInternet peer info\n",
+                    name, hop
+                ));
+                return Ok(out);
+            };
+            let dial_info = pi
+                .node_info()
+                .dial_info_detail_list()
+                .iter()
+                .map(|did| did.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let relays = pi
+                .node_info()
+                .relay_info_list()
+                .iter()
+                .map(|ri| format!("{}:{:?}", ri.node_ids(), ri.relay_kind()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!(
+                "  {}: {} dialinfo=[{}] relays=[{}]\n",
+                name,
+                hop.best_node_id(),
+                dial_info,
+                relays
+            ));
+            legs.push((name, pi));
+        }
+
+        let probes = [
+            ("ENO", Sequencing::EnsureOrdered, DialInfoFilter::all()),
+            ("PRU", Sequencing::PreferUnordered, DialInfoFilter::all()),
+            (
+                "PRU/udp",
+                Sequencing::PreferUnordered,
+                DialInfoFilter::ensure_ordering(SequenceOrdering::Unordered),
+            ),
+        ];
+        let mut describe_leg = |a: &(String, Arc<PeerInfo>), b: &(String, Arc<PeerInfo>)| {
+            let cms = probes
+                .iter()
+                .map(|(label, sequencing, dial_info_filter)| {
+                    let cm = routing_table.get_best_contact_method(
+                        RoutingDomain::PublicInternet,
+                        ContactMethodRequest {
+                            peer_a: a.1.clone(),
+                            peer_a_published: true,
+                            peer_b: b.1.clone(),
+                            dial_info_filter: *dial_info_filter,
+                            sequencing: *sequencing,
+                        },
+                    );
+                    format!(
+                        "{}={}",
+                        label,
+                        cm.map(|cm| cm.to_string())
+                            .unwrap_or_else(|| "none".to_owned())
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push_str(&format!("  {}->{}: {}\n", a.0, b.0, cms));
+        };
+        for pair in legs.windows(2) {
+            describe_leg(&pair[0], &pair[1]);
+        }
+        for pair in legs.windows(2).rev() {
+            describe_leg(&pair[1], &pair[0]);
+        }
+
+        Ok(out)
     }
 
     fn debug_record_list(&self, args: Vec<String>) -> VeilidAPIResult<String> {

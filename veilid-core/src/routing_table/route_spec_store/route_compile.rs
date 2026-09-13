@@ -38,6 +38,8 @@ pub struct CompiledRoute {
     pub first_hop: FilteredNodeRef,
     /// Whether this compiled route was built with optimized hop encoding (NodeId only vs full PeerInfo)
     pub optimized: bool,
+    /// Sequencing the routed operation is sent with: the request's, narrowed to what the safety route carries
+    pub sequencing: Sequencing,
 }
 
 /// The state of a cache lookup for a compiled route
@@ -64,6 +66,8 @@ struct RouteCompileContext {
     optimize: bool,
     /// Whether or not the private route was allocated
     pr_allocated: bool,
+    /// Sequencing narrowed to what the safety route carries
+    sequencing: Sequencing,
 }
 
 impl RouteSpecStore {
@@ -86,7 +90,10 @@ impl RouteSpecStore {
         let first_hop = safety_arce.hop_node_ref(0).unwrap_or_log();
 
         // Ensure sequencing requirement is set on first hop
-        let mut first_hop = first_hop.sequencing_filtered(safety_spec.sequencing);
+        let sequencing = safety_spec
+            .sequencing
+            .for_route_orderings(safety_arce.orderings());
+        let mut first_hop = first_hop.sequencing_filtered(sequencing);
 
         // Enforce the routing domain
         first_hop
@@ -103,6 +110,7 @@ impl RouteSpecStore {
             hop_node_refs,
             optimize,
             pr_allocated,
+            sequencing,
         })
     }
 
@@ -272,6 +280,7 @@ impl RouteSpecStore {
             first_hop: ctx.first_hop,
             optimized: ctx.optimize,
             pr_allocated: ctx.pr_allocated,
+            sequencing: ctx.sequencing,
         }))
     }
 
@@ -373,6 +382,7 @@ impl RouteSpecStore {
                     first_hop,
                     optimized: true, // Stubs are always considered optimized
                     pr_allocated: opt_private_route_id.is_some(),
+                    sequencing: *sequencing,
                 });
 
                 // Cache the compiled route stub

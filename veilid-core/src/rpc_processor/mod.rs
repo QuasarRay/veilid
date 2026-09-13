@@ -170,9 +170,12 @@ pub(crate) struct RPCProcessor {
     reply_pool: FutureRaceCompletionPool,
     /// The context for the startup of the RPC processor
     startup_context: RPCProcessorStartupContext,
+    /// Answers that arrived after the caller stopped waiting, by answer kind
+    #[cfg(feature = "stats")]
+    answers_after_waiter_dropped: Mutex<BTreeMap<&'static str, u64>>,
 }
 
-impl_veilid_component!(RPCProcessor, stats);
+impl_veilid_component!(RPCProcessor, stats, reset);
 
 impl RPCProcessor {
     fn new_inner() -> RPCProcessorInner {
@@ -229,6 +232,8 @@ impl RPCProcessor {
             queue_size,
             concurrency,
             startup_context,
+            #[cfg(feature = "stats")]
+            answers_after_waiter_dropped: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -257,6 +262,9 @@ impl RPCProcessor {
             )
             .with_facility(
                 VeilidComponentLogFacility::try_new_with_tags("fanout", ["#fanout"]).unwrap(),
+            )
+            .with_facility(
+                VeilidComponentLogFacility::try_new_with_tags("rpc::route", ["#verbose"]).unwrap(),
             )
     }
 
@@ -625,6 +633,11 @@ impl RPCProcessor {
         let timeout = waitable_reply.context.timeout;
         let handle = waitable_reply.handle;
         let registry = self.registry();
+        // Dropped with this future, so the pool can tell a late answer from a wanted one
+        #[cfg(feature = "stats")]
+        let caller_alive = Arc::new(());
+        #[cfg(feature = "stats")]
+        let caller_weak = Arc::downgrade(&caller_alive);
         let rx = self
             .reply_pool
             .channel_spawn(async move {
@@ -676,6 +689,13 @@ impl RPCProcessor {
                     Ok(TimeoutOr::Value((rpcreader, latency))) => {
                         // Reply received
                         let recv_ts = Timestamp::now_non_decreasing();
+                        veilid_stats!(if caller_weak.upgrade().is_none() {
+                            *this
+                                .answers_after_waiter_dropped
+                                .lock()
+                                .entry(rpcreader.operation.kind().desc())
+                                .or_default() += 1;
+                        });
 
                         // Record answer received
                         this.record_answer_received(
@@ -784,7 +804,6 @@ impl RPCProcessor {
         };
 
         // Compile the safety route with the private route
-        let sequencing = safety_selection.get_sequencing();
         let params = CompileRouteParams {
             safety_selection,
             private_route: remote_private_route,
@@ -794,6 +813,8 @@ impl RPCProcessor {
             network_result_try!(rss.compile_route(&params).await.to_rpc_network_result()?);
         let sr_is_stub = compiled_route.compiled_safety_route.is_stub();
         let sr_pubkey = compiled_route.compiled_safety_route.public_key.clone();
+        // Hops forward with this; a route that carries no datagram path is used ordered
+        let sequencing = compiled_route.sequencing;
 
         // Encrypt routed operation
         // Xmsg + ENC(Xmsg, DH(PKapr, SKbsr))
@@ -1044,7 +1065,7 @@ impl RPCProcessor {
                                 _ => (None, None),
                             };
 
-                            veilid_log!(rpc_processor debug target: "rpc_message", fields:
+                            veilid_log!(rpc_processor debug target: "rpc_message", msg: "rpc send route", fields:
                                 dir = "send",
                                 kind = "route",
                                 route_op_id,
@@ -1086,7 +1107,7 @@ impl RPCProcessor {
                         _ => (None, None),
                     };
 
-                    veilid_log!(rpc_processor debug target: "rpc_message", fields:
+                    veilid_log!(rpc_processor debug target: "rpc_message", msg: "rpc send route", fields:
                         dir = "send",
                         kind = "route",
                         route_op_id,
@@ -1232,7 +1253,13 @@ impl RPCProcessor {
         // defines broad failures. Direct sends are the unambiguous local-connectivity
         // signal; route stats carry routed failures.
         if let (Some(rd), Some(transport), false) = (opt_rd, opt_transport, is_routed) {
-            online_detector.record_failure(rd, vec![node_ref.best_node_id()], send_ts, transport);
+            online_detector.record_failure(
+                rd,
+                vec![node_ref.best_node_id()],
+                send_ts,
+                transport,
+                None,
+            );
         }
         let suppress_degradation = opt_rd.is_some_and(|rd| online_detector.blame_suppressed(rd));
         let transport_suppressed =
@@ -1293,6 +1320,16 @@ impl RPCProcessor {
             context.node_ref.best_routing_domain()
         };
 
+        // A question sent over a flow we did not dial (one that arrived inbound, possibly
+        // through a relay) says nothing about the peer or about us: drop that flow so the
+        // next contact dials per the contact method, and charge nothing
+        if !context.is_routed() && !context.send_data_result.dialed_evidence() {
+            if let Some(unique_flow) = context.send_data_result.unique_flow() {
+                context.node_ref.clear_last_flow(unique_flow.flow);
+            }
+            return;
+        }
+
         let network_manager = self.network_manager();
         let online_detector = network_manager.online_detector();
         // Routed losses are excluded from offline detection; see record_send_failure
@@ -1304,6 +1341,10 @@ impl RPCProcessor {
                         vec![context.node_ref.best_node_id()],
                         context.send_ts,
                         transport,
+                        context
+                            .send_data_result
+                            .unique_flow()
+                            .map(|uf| *uf.flow.remote_address()),
                     );
                 }
             }
@@ -1362,14 +1403,19 @@ impl RPCProcessor {
             // Trigger an out-of-band route test so silently-degraded routes
             // get released without waiting for the next regular cycle. The safety
             // route ref is always allocated, so use its set id directly.
-            let route_id: RouteId = sr.route_set_id().clone().into();
-            let cur_ts = Timestamp::now();
-            let enqueued = self
-                .routing_table()
-                .enqueue_route_tests(cur_ts, vec![route_id.clone()], 0)
-                .await;
-            if enqueued > 0 {
-                veilid_log!(self debug "scheduling out-of-band route test for {} after %SR timeout", route_id);
+            // A lost loopback is already the test; retesting from it just loops
+            let is_own_loopback = matches!(&context.destination,
+                Destination::PrivateRoute { private_route, .. } if private_route.public_key == *sr.route_key());
+            if !is_own_loopback {
+                let route_id: RouteId = sr.route_set_id().clone().into();
+                let cur_ts = Timestamp::now();
+                let enqueued = self
+                    .routing_table()
+                    .enqueue_route_tests(cur_ts, vec![route_id.clone()], 0)
+                    .await;
+                if enqueued > 0 {
+                    veilid_log!(self debug "scheduling out-of-band route test for {} after %SR timeout", route_id);
+                }
             }
         }
         // If remote private route was used, record question lost there
@@ -1769,7 +1815,7 @@ impl RPCProcessor {
         let signer = signing_params.as_ref().map(|x| x.signer_keypair.key());
 
         // Log rpc send
-        veilid_log!(self debug target: "rpc_message", fields: dir = "send", kind = "question", op_id = op_id.as_u64(), desc = operation.kind().desc(), ?dest, ?signer );
+        veilid_log!(self debug target: "rpc_message", msg: "rpc send question", fields: dir = "send", kind = "question", op_id = op_id.as_u64(), desc = operation.kind().desc(), ?dest, ?signer );
 
         // Produce rendered operation
         let rendered = Box::pin(
@@ -1935,7 +1981,7 @@ impl RPCProcessor {
         let signer = signing_params.as_ref().map(|x| x.signer_keypair.key());
 
         // Log rpc send
-        veilid_log!(self debug target: "rpc_message", fields: dir = "send", kind = "statement", ?route_op_id, op_id = operation.op_id().as_u64(), desc = operation.kind().desc(), ?dest, ?signer);
+        veilid_log!(self debug target: "rpc_message", msg: "rpc send statement", fields: dir = "send", kind = "statement", ?route_op_id, op_id = operation.op_id().as_u64(), desc = operation.kind().desc(), ?dest, ?signer);
 
         // Produce rendered operation
         let RenderedOperation {
@@ -2067,7 +2113,7 @@ impl RPCProcessor {
         let signer = signing_params.as_ref().map(|x| x.signer_keypair.key());
 
         // Log rpc send
-        veilid_log!(self debug target: "rpc_message", fields: dir = "send", kind = "answer", op_id = operation.op_id().as_u64(), desc = operation.kind().desc(), ?dest, ?signer);
+        veilid_log!(self debug target: "rpc_message", msg: "rpc send answer", fields: dir = "send", kind = "answer", op_id = operation.op_id().as_u64(), desc = operation.kind().desc(), ?dest, ?signer);
 
         // Produce rendered operation
         let RenderedOperation {
@@ -2417,19 +2463,19 @@ impl RPCProcessor {
                 self.record_question_received(&msg);
 
                 // Log rpc receive
-                veilid_log!(self debug target: "rpc_message", fields: dir = "recv", kind = "question", ?route_op_id, op_id = msg.operation.op_id().as_u64(), desc, header = ?msg.header, operation = ?msg.operation, signer = ?signer);
+                veilid_log!(self debug target: "rpc_message", msg: "rpc recv question", fields: dir = "recv", kind = "question", ?route_op_id, op_id = msg.operation.op_id().as_u64(), desc, header = ?msg.header, operation = ?msg.operation, signer = ?signer);
             }
             RPCOperationKind::Statement(_) => {
                 self.record_statement_received(&msg);
 
                 // Log rpc receive
-                veilid_log!(self debug target: "rpc_message", fields: dir = "recv", kind = "statement", ?route_op_id, op_id = msg.operation.op_id().as_u64(), desc, header = ?msg.header, operation = ?msg.operation, signer = ?signer);
+                veilid_log!(self debug target: "rpc_message", msg: "rpc recv statement", fields: dir = "recv", kind = "statement", ?route_op_id, op_id = msg.operation.op_id().as_u64(), desc, header = ?msg.header, operation = ?msg.operation, signer = ?signer);
             }
             RPCOperationKind::Answer(_) => {
                 // Answer stats are processed in wait_for_reply
 
                 // Log rpc receive
-                veilid_log!(self debug target: "rpc_message", fields: dir = "recv", kind = "answer", ?route_op_id, op_id = msg.operation.op_id().as_u64(), desc, header = ?msg.header, operation = ?msg.operation, signer = ?signer);
+                veilid_log!(self debug target: "rpc_message", msg: "rpc recv answer", fields: dir = "recv", kind = "answer", ?route_op_id, op_id = msg.operation.op_id().as_u64(), desc, header = ?msg.header, operation = ?msg.operation, signer = ?signer);
             }
         };
 

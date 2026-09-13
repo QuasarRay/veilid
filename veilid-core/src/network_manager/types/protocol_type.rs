@@ -47,17 +47,6 @@ static PROTOCOL_TYPE_ORDERING: LazyLock<BTreeMap<(Sequencing, ProtocolType), usi
         out
     });
 
-static PROTOCOL_TYPE_ALL_ORDERED_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(|| {
-    let mut out = ProtocolTypeSet::new();
-
-    out.insert(ProtocolType::TCP);
-    out.insert(ProtocolType::WS);
-    #[cfg(feature = "enable-protocol-wss")]
-    out.insert(ProtocolType::WSS);
-
-    out
-});
-
 static PROTOCOL_TYPE_ALL_CONNECTION_SET: LazyLock<ProtocolTypeSet> = LazyLock::new(|| {
     let mut out = ProtocolTypeSet::new();
 
@@ -121,10 +110,6 @@ impl ProtocolType {
             .get(&(sequencing, *self))
             .unwrap_or_log()
     }
-    pub fn all_ordered_set() -> ProtocolTypeSet {
-        *PROTOCOL_TYPE_ALL_ORDERED_SET
-    }
-
     pub fn all_connection_set() -> ProtocolTypeSet {
         *PROTOCOL_TYPE_ALL_CONNECTION_SET
     }

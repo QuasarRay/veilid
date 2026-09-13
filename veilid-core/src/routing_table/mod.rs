@@ -160,7 +160,7 @@ pub(crate) struct RoutingTable {
     /// Buckets to kick on our next kick task
     kick_queue: Mutex<BTreeSet<BucketIndex>>,
     /// Set when peerinfo changed on either side; the cm viability task fires only when set
-    cm_viability_dirty: core::sync::atomic::AtomicBool,
+    cm_viability_dirty: AtomicBool,
     /// Last route-test enqueue time per route, so a struggling route is not
     /// re-tested continuously on lossy networks
     route_test_cooldown: Mutex<BTreeMap<RouteId, Timestamp>>,
@@ -238,7 +238,7 @@ impl RoutingTable {
             public_keys: Default::default(),
             secret_keys: Default::default(),
             kick_queue: Default::default(),
-            cm_viability_dirty: core::sync::atomic::AtomicBool::new(true),
+            cm_viability_dirty: AtomicBool::new(true),
             route_test_cooldown: Default::default(),
             deferred_route_tests: Default::default(),
             #[cfg(feature = "stats")]
@@ -1634,14 +1634,12 @@ impl RoutingTable {
     /// Signal that some peerinfo changed (ours or theirs) so contact-method
     /// viability gets recomputed; the task's basis check skips unchanged entries
     pub(crate) fn mark_cm_viability_dirty(&self) {
-        self.cm_viability_dirty
-            .store(true, core::sync::atomic::Ordering::Release);
+        self.cm_viability_dirty.store(true, Ordering::Release);
     }
 
     /// Take the viability dirty flag; changes that land during a recompute re-set it
     pub(crate) fn take_cm_viability_dirty(&self) -> bool {
-        self.cm_viability_dirty
-            .swap(false, core::sync::atomic::Ordering::AcqRel)
+        self.cm_viability_dirty.swap(false, Ordering::AcqRel)
     }
 
     /// Called whenever a routing table entry is:

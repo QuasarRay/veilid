@@ -93,6 +93,35 @@ impl NetworkManager {
         node_ref: FilteredNodeRef,
         data: Bytes,
     ) -> EyreResult<SendDataResult> {
+        // An answer goes back over the flow its question arrived on; only if that flow is
+        // gone does it fall through to the contact method
+        if let Some(flow) = node_ref.reply_flow() {
+            let net = self.net();
+            match pin_future!(net.send_data_to_existing_flow(flow, data.clone())).await? {
+                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
+                    self.set_last_flow_from_send(
+                        node_ref.unfiltered(),
+                        unique_flow.flow,
+                        Timestamp::now(),
+                    );
+                    return Ok(SendDataResult::new(
+                        NodeContactMethodResult::Resolved(ContactMethod::Existing),
+                        NetworkResult::value(unique_flow),
+                    ));
+                }
+                NetworkAttempt::Performed(NetworkResult::Timeout) => {
+                    node_ref.clear_last_flow(flow);
+                    return Ok(SendDataResult::new(
+                        NodeContactMethodResult::Resolved(ContactMethod::Existing),
+                        NetworkResult::timeout(),
+                    ));
+                }
+                _ => {
+                    node_ref.clear_last_flow(flow);
+                }
+            }
+        }
+
         let mut ncm_result =
             self.get_node_contact_method(node_ref.clone(), ContactMethodIntent::Send)?;
 
@@ -106,14 +135,16 @@ impl NetworkManager {
             .await?;
 
             // Outbound health only; says nothing about peers reaching us
-            if let (Some(routing_domain), Some(transport)) =
-                (node_ref.best_routing_domain(), sdr.opt_transport_type())
-            {
+            if let (Some(routing_domain), Some(transport), Some(outcome)) = (
+                node_ref.best_routing_domain(),
+                sdr.opt_transport_type(),
+                TransportSendOutcome::from_send_data_result(&sdr),
+            ) {
                 self.transport_stats().record_send(
                     routing_domain,
                     transport,
                     node_ref.best_node_id(),
-                    TransportSendOutcome::from(&sdr),
+                    outcome,
                 );
             }
 
@@ -199,14 +230,16 @@ impl NetworkManager {
         // so a relay whose downstream flows were all dead read as idle rather than broken. Safe to
         // feed from here: suppression needs failures across several distinct peers, so one dead
         // destination indicts the peer rather than the transport.
-        if let (Some(routing_domain), Some(transport)) =
-            (destination_node_ref.best_routing_domain(), opt_transport)
-        {
+        if let (Some(routing_domain), Some(transport), Some(outcome)) = (
+            destination_node_ref.best_routing_domain(),
+            opt_transport,
+            TransportSendOutcome::from_network_result(&nres),
+        ) {
             self.transport_stats().record_send(
                 routing_domain,
                 transport,
                 destination_node_ref.best_node_id(),
-                TransportSendOutcome::from_network_result(&nres),
+                outcome,
             );
         }
 
@@ -588,13 +621,16 @@ impl NetworkManager {
         dial_info: DialInfo,
         data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
-        // Reuse only the existing flow whose remote address matches the target dial info
+        // Reuse only the existing flow whose remote is the target dial info; a flow that
+        // arrived through a relay has the relay's remote and must not carry a direct send
         let filtered_node_ref =
             node_ref.custom_filtered(NodeRefFilter::from(dial_info.make_filter()));
 
-        let opt_last_flow = filtered_node_ref.last_flow().filter(|flow| {
-            !self.transport_deprioritized(&filtered_node_ref, flow.transport_type())
-        });
+        let opt_last_flow = filtered_node_ref
+            .last_flow_to(dial_info.socket_address())
+            .filter(|flow| {
+                !self.transport_deprioritized(&filtered_node_ref, flow.transport_type())
+            });
 
         let data = if let Some(flow) = opt_last_flow {
             veilid_log!(self debug target:"contact_method",

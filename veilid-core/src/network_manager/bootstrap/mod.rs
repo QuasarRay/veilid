@@ -10,6 +10,8 @@ impl_veilid_log_facility!("net");
 
 /// Port a bootstrap host answers B01T on when a TXT name has to be reached directly
 pub const BOOTSTRAP_DIRECT_PORT: u16 = 5150;
+/// How long a bootstrap name's TXT lookups may take before direct bootstrap is tried
+pub const BOOTSTRAP_TXT_TIMEOUT_MS: u32 = 10_000;
 
 /// Ceiling on cached record strings. Far above any real bootstrap's output, and keeps a hostile
 /// bootstrap from inflating the B01T response of every node that contacted it.

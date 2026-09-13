@@ -43,6 +43,14 @@ impl fmt::Debug for RoutingContext {
     }
 }
 
+/// Blob results in the api log: length plus a truncated human-readable preview
+fn fmt_blob_result(ret: &VeilidAPIResult<Bytes>) -> String {
+    match ret {
+        Ok(b) => format!("Ok(len={} {})", b.len(), human_byte_data(b, Some(64))),
+        Err(e) => format!("Err({})", e),
+    }
+}
+
 impl RoutingContext {
     ////////////////////////////////////////////////////////////////
 
@@ -277,7 +285,7 @@ impl RoutingContext {
             let recorder = DurationRecorder::new("RoutingContext::app_call", |name, start| {
                 veilid_log!(self debug
                     "{}[start={:#}](self: {:?}, target: {:?}, message_len: {})", name, start, self, target, message_len);
-                veilid_log!(self trace "message: {:?}", message);
+                veilid_log!(self trace "message: len={} {}", message.len(), human_byte_data(&message, Some(64)));
             });
             recorder.record_fut(
                 async {
@@ -288,7 +296,7 @@ impl RoutingContext {
                 },
                 |name, start, dur, ret| {
                     veilid_log!(self debug
-                        "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                        "{}[start={:#} dur={:#}](ret: {})", name, start, dur, fmt_blob_result(&ret));
                     ret
                 },
             ).await
@@ -362,7 +370,7 @@ impl RoutingContext {
             let recorder = DurationRecorder::new("RoutingContext::app_message", |name, start| {
                 veilid_log!(self debug
                     "{}[start={:#}](self: {:?}, target: {:?}, message_len: {})", name, start, self, target, message_len);
-                veilid_log!(self trace "message: {:?}", message);
+                veilid_log!(self trace "message: len={} {}", message.len(), human_byte_data(&message, Some(64)));
             });
             recorder.record_fut(
                 async {

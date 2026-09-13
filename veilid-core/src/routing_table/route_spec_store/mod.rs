@@ -46,6 +46,23 @@ const ROUTE_MIN_IDLE_TIME_MS: u32 = 30_000;
 const ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD: usize = 5;
 /// Number of consecutive send failures before invalidating compiled route cache for a safety route
 const ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD: usize = 1;
+/// Consecutive loopback failures that kill an ordering. Datagram legs compound across hops, so
+/// unordered routes get more slack. Provisional until the 2026-09-12 ambient-rate runs settle them.
+const ROUTE_LOOPBACK_FAILURES_INVALIDATE_THRESHOLD_ORDERED: usize = 3;
+const ROUTE_LOOPBACK_FAILURES_INVALIDATE_THRESHOLD_UNORDERED: usize = 5;
+
+/// How long the hops of a route that died on an ordering stay out of new routes for that ordering
+const ROUTE_DEAD_HOP_AVOID_SECS: u32 = 600;
+
+/// Loopback failure threshold for one ordering
+pub(super) fn loopback_failure_threshold(ordering: SequenceOrdering) -> usize {
+    match ordering {
+        SequenceOrdering::Ordered => ROUTE_LOOPBACK_FAILURES_INVALIDATE_THRESHOLD_ORDERED,
+        SequenceOrdering::Unordered => ROUTE_LOOPBACK_FAILURES_INVALIDATE_THRESHOLD_UNORDERED,
+    }
+}
+/// How often the per-ordering loopback tallies are logged
+const ROUTE_TEST_SUMMARY_INTERVAL: TimestampDuration = TimestampDuration::new_secs(60);
 /// The size of the compiled route cache
 const COMPILED_ROUTE_CACHE_SIZE: usize = 1024;
 
@@ -79,6 +96,10 @@ pub(crate) struct RouteSpecStore {
     route_selection_counter: AtomicUsize,
     /// Round-robin counter for distributing route-test destination selection
     test_destination_rotation_counter: AtomicUsize,
+    /// Per-ordering loopback tallies for the periodic summary line
+    route_test_summary: Mutex<RouteTestSummary>,
+    /// Hops of routes that died on an ordering, kept out of that ordering's allocations for a while
+    dead_route_hops: Mutex<BTreeMap<SequenceOrdering, HashMap<NodeId, Timestamp>>>,
 }
 
 impl_veilid_component_accessors!(RouteSpecStore);
@@ -103,6 +124,8 @@ impl RouteSpecStore {
             default_route_hop_count_unsafe,
             route_selection_counter: AtomicUsize::new(0),
             test_destination_rotation_counter: AtomicUsize::new(0),
+            route_test_summary: Mutex::new(RouteTestSummary::default()),
+            dead_route_hops: Mutex::new(BTreeMap::new()),
         }
     }
 

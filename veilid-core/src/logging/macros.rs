@@ -126,6 +126,15 @@ macro_rules! veilid_log_event {
         $($k).+ = $($fields)*,
         concat!($prefix,""))
     };
+    // veilid_log!(self, prefix:"", Level::XXX, target: "facility", msg: "message", fields: field=value, ?other_field)
+    // Sinks that render only the message (journald) show a blank line for a field-only event
+    ($self_expr:expr, prefix: $prefix:literal, level: $lvl:expr, target: $target:expr, msg: $msg:literal, fields: $($k:ident).+ = $($fields:tt)*) => {event!(
+        target: $target,
+        $lvl,
+        __VEILID_LOG_KEY = $self_expr.log_key(),
+        $($k).+ = $($fields)*,
+        concat!($prefix,$msg))
+    };
 }
 pub(crate) use veilid_log_event;
 
@@ -186,6 +195,8 @@ macro_rules! veilid_log {
     ($self_ident:ident error, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident level: $crate::Level::ERROR, fields: $($k).+ = $($fields)*)};
     // veilid_log!(self error target: "facility", fields: field=value, ?other_field)
     ($self_ident:ident error target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::ERROR, target: $target, fields: $($k).+ = $($fields)*)};
+    // veilid_log!(self error target: "facility", msg: "message", fields: field=value, ?other_field)
+    ($self_ident:ident error target: $target:expr, msg: $msg:literal, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::ERROR, target: $target, msg: $msg, fields: $($k).+ = $($fields)*)};
 
     // WARN //////////////////////////////////////////////////////////////////////////
     // veilid_log!(self warn throttle: 1000, "data: {}", data)
@@ -204,6 +215,8 @@ macro_rules! veilid_log {
     ($self_ident:ident warn, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::WARN, fields: $($k).+ = $($fields)*)};
     // veilid_log!(self warn target: "facility", fields: field=value, ?other_field)
     ($self_ident:ident warn target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::WARN, target: $target, fields: $($k).+ = $($fields)*)};
+    // veilid_log!(self warn target: "facility", msg: "message", fields: field=value, ?other_field)
+    ($self_ident:ident warn target: $target:expr, msg: $msg:literal, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::WARN, target: $target, msg: $msg, fields: $($k).+ = $($fields)*)};
 
     // INFO //////////////////////////////////////////////////////////////////////////
     // veilid_log!(self info throttle: 1000, "data: {}", data)
@@ -222,6 +235,8 @@ macro_rules! veilid_log {
     ($self_ident:ident info, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::INFO, fields: $($k).+ = $($fields)*)};
     // veilid_log!(self info target: "facility", fields: field=value, ?other_field)
     ($self_ident:ident info target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::INFO, target: $target, fields: $($k).+ = $($fields)*)};
+    // veilid_log!(self info target: "facility", msg: "message", fields: field=value, ?other_field)
+    ($self_ident:ident info target: $target:expr, msg: $msg:literal, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::INFO, target: $target, msg: $msg, fields: $($k).+ = $($fields)*)};
 
     // DEBUG //////////////////////////////////////////////////////////////////////////
     // veilid_log!(self debug throttle: 1000, "data: {}", data)
@@ -240,6 +255,8 @@ macro_rules! veilid_log {
     ($self_ident:ident debug, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::DEBUG, fields: $($k).+ = $($fields)*)};
     // veilid_log!(self debug target: "facility" fields: field=value, ?other_field)
     ($self_ident:ident debug target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::DEBUG, target: $target, fields: $($k).+ = $($fields)*)};
+    // veilid_log!(self debug target: "facility", msg: "message", fields: field=value, ?other_field)
+    ($self_ident:ident debug target: $target:expr, msg: $msg:literal, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::DEBUG, target: $target, msg: $msg, fields: $($k).+ = $($fields)*)};
 
     // TRACE //////////////////////////////////////////////////////////////////////////
     // veilid_log!(self trace throttle: 1000, "data: {}", data)
@@ -258,6 +275,8 @@ macro_rules! veilid_log {
     ($self_ident:ident trace, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::TRACE, fields: $($k).+ = $($fields)*)};
     // veilid_log!(self trace target: "facility", fields: field=value, ?other_field)
     ($self_ident:ident trace target: $target:expr, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::TRACE, target: $target, fields: $($k).+ = $($fields)*)};
+    // veilid_log!(self trace target: "facility", msg: "message", fields: field=value, ?other_field)
+    ($self_ident:ident trace target: $target:expr, msg: $msg:literal, fields: $($k:ident).+ = $($fields:tt)*) => {veilid_log_event!($self_ident, prefix: "", level: $crate::Level::TRACE, target: $target, msg: $msg, fields: $($k).+ = $($fields)*)};
 
     // DEBUGWARN //////////////////////////////////////////////////////////////////////////
     // veilid_log!(self debugwarn throttle: 1000, "data: {}", data)

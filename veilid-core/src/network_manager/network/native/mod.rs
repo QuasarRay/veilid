@@ -326,13 +326,14 @@ impl PlatformNetwork for NativeNetwork {
             }
             .await;
 
-            if let Ok(nr) = &send_result {
+            if let Some(outcome) = send_result
+                .as_ref()
+                .ok()
+                .and_then(TransportSendOutcome::from_network_result)
+            {
                 self.network_manager()
                     .transport_stats()
-                    .record_unbound_send(
-                        &stats_dial_info,
-                        TransportSendOutcome::from_network_result(nr),
-                    );
+                    .record_unbound_send(&stats_dial_info, outcome);
             }
             let nr = send_result?;
             if !matches!(nr, NetworkResult::Value(_)) {
@@ -398,10 +399,12 @@ impl PlatformNetwork for NativeNetwork {
                             .send_message(data, peer_socket_addr, "unbound_recv")
                             .await
                             .wrap_err("send message failure")?;
-                        network_manager.transport_stats().record_unbound_send(
-                            &dial_info,
-                            TransportSendOutcome::from_network_result(&send_res),
-                        );
+                        if let Some(outcome) = TransportSendOutcome::from_network_result(&send_res)
+                        {
+                            network_manager
+                                .transport_stats()
+                                .record_unbound_send(&dial_info, outcome);
+                        }
                         network_result_try!(send_res);
                         network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
 
@@ -468,19 +471,24 @@ impl PlatformNetwork for NativeNetwork {
                         let pnc = match connect_res {
                             NetworkResult::Value(pnc) => pnc,
                             nr => {
-                                network_manager.transport_stats().record_unbound_send(
-                                    &stats_dial_info,
-                                    TransportSendOutcome::from_network_result(&nr),
-                                );
+                                if let Some(outcome) =
+                                    TransportSendOutcome::from_network_result(&nr)
+                                {
+                                    network_manager
+                                        .transport_stats()
+                                        .record_unbound_send(&stats_dial_info, outcome);
+                                }
                                 // PANIC-CENSUS: provably-dead the non-Value arm carries no value to map
                                 return Ok(nr.map(|_| unreachable!()));
                             }
                         };
                         let send_res = pnc.send(data).await.wrap_err("send failure")?;
-                        network_manager.transport_stats().record_unbound_send(
-                            &stats_dial_info,
-                            TransportSendOutcome::from_network_result(&send_res),
-                        );
+                        if let Some(outcome) = TransportSendOutcome::from_network_result(&send_res)
+                        {
+                            network_manager
+                                .transport_stats()
+                                .record_unbound_send(&stats_dial_info, outcome);
+                        }
                         network_result_try!(send_res);
                         network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
 

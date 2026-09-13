@@ -1,4 +1,12 @@
+//! Storage manager stats: the serializable snapshot plus the accounting the
+//! record sites feed. Compiled only with `stats`.
+mod gated_operation_accounting;
+mod transaction_quality_accounting;
+
 use super::*;
+
+pub(in crate::storage_manager) use gated_operation_accounting::*;
+pub(in crate::storage_manager) use transaction_quality_accounting::*;
 
 #[derive(Debug, Serialize)]
 pub(super) struct StorageManagerStats {
@@ -11,8 +19,28 @@ pub(super) struct StorageManagerStats {
     transactions: TransactionStats,
     gated_operations: Vec<GatedOperationKindStats>,
     locks: Vec<LockStatsEntry>,
+    transaction_quality: TransactionQualityStats,
     #[cfg(feature = "aimd-dht")]
     aimd: AimdStats,
+}
+
+/// Transaction quality counters since the last `stats reset`
+#[derive(Debug, Serialize)]
+struct TransactionQualityStats {
+    /// Per command kind
+    commands: Vec<CommandStats>,
+    /// Coverage at End
+    end_coverage: EndCoverageStats,
+    /// Coverage at Commit
+    commit_coverage: CommitCoverageStats,
+    /// Node-set attrition
+    node_sets: NodeSetStats,
+    /// Mitigation costs and outcomes
+    mitigations: MitigationStats,
+    /// End wait window
+    end_wait_duration: LatencyStats,
+    /// Storage-node side refusals
+    inbound: InboundStats,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +103,10 @@ impl From<AimdCounters> for AimdDirectionStats {
 }
 
 impl StorageManager {
+    pub(super) fn reset_stats_impl(&self) {
+        *self.transaction_quality.lock() = TransactionQualityAccounting::default();
+    }
+
     pub(super) fn stats_impl(&self) -> Option<Box<dyn VeilidComponentStats>> {
         let (
             opened_records,
@@ -121,6 +153,19 @@ impl StorageManager {
             held: lock.held,
         }];
 
+        let transaction_quality = {
+            let q = self.transaction_quality.lock();
+            TransactionQualityStats {
+                commands: q.commands().to_vec(),
+                end_coverage: q.end_coverage.clone(),
+                commit_coverage: q.commit_coverage.clone(),
+                node_sets: q.node_sets.clone(),
+                mitigations: q.mitigations.clone(),
+                end_wait_duration: q.end_wait_duration(),
+                inbound: q.inbound.clone(),
+            }
+        };
+
         Some(Box::new(StorageManagerStats {
             online: self.is_online.load(Ordering::Acquire),
             gated_operations_active: self.gate_active.load(Ordering::Acquire) as u32,
@@ -131,6 +176,7 @@ impl StorageManager {
             transactions,
             gated_operations,
             locks,
+            transaction_quality,
             #[cfg(feature = "aimd-dht")]
             aimd: AimdStats {
                 upload: self.upload_budget.aimd_counters().into(),

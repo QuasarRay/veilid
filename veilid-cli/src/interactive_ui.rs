@@ -360,6 +360,24 @@ pub struct InteractiveUISender {
     connection_state_sender: flume::Sender<ConnectionState>,
 }
 
+impl InteractiveUISender {
+    // console writer: a full buffer drops the line, a gone readline stops all writes
+    fn write_console_line(&self, line: &str) {
+        use std::io::Write;
+
+        let Some(mut stdout) = self.inner.lock().stdout.clone() else {
+            return;
+        };
+        match writeln!(stdout, "{}", line) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(_) => {
+                self.inner.lock().stdout = None;
+            }
+        }
+    }
+}
+
 impl UISender for InteractiveUISender {
     fn clone_uisender(&self) -> Box<dyn UISender> {
         Box::new(InteractiveUISender {
@@ -422,28 +440,15 @@ impl UISender for InteractiveUISender {
     }
 
     fn add_node_event(&self, _log_color: Level, event: &str) {
-        use std::io::Write;
-
-        let Some(mut stdout) = self.inner.lock().stdout.clone() else {
-            return;
-        };
-        if let Err(e) = writeln!(stdout, "{}", event) {
-            self.inner.lock().error = Some(e.to_string());
-        }
+        self.write_console_line(event);
     }
     fn add_log_event(&self, log_color: Level, event: &str) {
-        use std::io::Write;
-
-        let (enable_color, mut stdout) = {
+        let enable_color = {
             let inner = self.inner.lock();
-            if !inner.log_enabled {
+            if !inner.log_enabled || inner.stdout.is_none() {
                 return;
             }
-            let Some(stdout) = inner.stdout.clone() else {
-                return;
-            };
-
-            (inner.enable_color, stdout)
+            inner.enable_color
         };
 
         let log_line = format!(
@@ -459,10 +464,7 @@ impl UISender for InteractiveUISender {
                 Level::Debug => style(log_line).green().bright().to_string(),
                 Level::Trace => style(log_line).blue().bright().to_string(),
             };
-            if let Err(e) = writeln!(stdout, "{}", log_line) {
-                eprintln!("Error: {:?}", e);
-                self.inner.lock().done.take();
-            }
+            self.write_console_line(&log_line);
         } else {
             println!("{}", log_line);
         }

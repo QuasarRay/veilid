@@ -34,6 +34,14 @@ pub struct RouteOrderingStats {
     pub failed_to_send: usize,
     /// Consecutive loopback failures deferred under blame suppression
     pub deferred_loopback_failures: usize,
+    /// Loopback passes this session
+    pub loopback_pass: u64,
+    /// Loopback failures this session
+    pub loopback_fail: u64,
+    /// Current run of loopback failures
+    pub consecutive_loopback_failures: usize,
+    /// Longest run of loopback failures this session
+    pub max_consecutive_loopback_failures: usize,
     /// Per-destination lost question tracking: destination pubkey -> lost count
     pub lost_question_destinations: HashMap<PublicKey, usize>,
     /// When this ordering was last known valid (loopback pass / rcvd traffic)
@@ -53,9 +61,12 @@ pub struct RouteOrderingStats {
 }
 
 impl RouteOrderingStats {
-    /// Disposition of this single ordering (route-level Locked handled by caller).
-    pub fn disposition(&self) -> RouteStatsDisposition {
-        if self.failed_to_send >= ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD {
+    /// Disposition of this single ordering; `loopback_threshold` is the run of loopback
+    /// failures that kills it (route-level Locked handled by caller).
+    pub fn disposition(&self, loopback_threshold: usize) -> RouteStatsDisposition {
+        if self.failed_to_send >= ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD
+            || self.consecutive_loopback_failures >= loopback_threshold
+        {
             RouteStatsDisposition::InvalidSendFailure
         } else if self.lost_question_destinations.len()
             >= ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD
@@ -68,7 +79,10 @@ impl RouteOrderingStats {
 
     /// Does this ordering need (re)testing?
     pub fn needs_testing(&self, cur_ts: Timestamp) -> bool {
-        if !self.lost_question_destinations.is_empty() || self.failed_to_send > 0 {
+        if !self.lost_question_destinations.is_empty()
+            || self.failed_to_send > 0
+            || self.consecutive_loopback_failures > 0
+        {
             return true;
         }
         if let Some(last_tested_ts) = self.last_known_valid_ts {
@@ -78,6 +92,30 @@ impl RouteOrderingStats {
             true
         }
     }
+}
+
+/// Loopback tally for one ordering after a result: on a pass, `streak` is the run of failures
+/// the pass ended; on a failure, the current run
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct RouteLoopbackTally {
+    pub streak: usize,
+    pub pass: u64,
+    pub fail: u64,
+}
+
+/// Loopback and release tallies for one ordering since the last summary line
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RouteTestSummaryEntry {
+    pub pass: u64,
+    pub fail: u64,
+    pub releases: u64,
+}
+
+/// Per-ordering route test tallies, logged and reset on an interval
+#[derive(Debug, Default)]
+pub struct RouteTestSummary {
+    pub by_ordering: BTreeMap<SequenceOrdering, RouteTestSummaryEntry>,
+    pub last_log_ts: Option<Timestamp>,
 }
 
 #[derive(Clone, Debug)]
@@ -135,7 +173,7 @@ impl fmt::Display for RouteStats {
         for (ordering, os) in self.per_ordering.iter() {
             writeln!(
                 f,
-                "  [{}] valid={} sent={} rq={} ra={} lost-dests/failed={}/{} answer={}",
+                "  [{}] valid={} sent={} rq={} ra={} lost-dests/failed={}/{} loopback={}/{} streak={} max={} answer={}",
                 ordering,
                 f.to_string_opt(os.last_known_valid_ts),
                 f.to_string_opt(os.last_sent_ts),
@@ -143,6 +181,10 @@ impl fmt::Display for RouteStats {
                 f.to_string_opt(os.last_rcvd_answer_ts),
                 os.lost_question_destinations.len(),
                 os.failed_to_send,
+                os.loopback_pass,
+                os.loopback_fail,
+                os.consecutive_loopback_failures,
+                os.max_consecutive_loopback_failures,
                 f.to_string(&os.answer),
             )?;
         }
@@ -238,7 +280,7 @@ impl RouteStats {
         // No entry => untested, treated as Valid (optimistic; not dead).
         self.per_ordering
             .get(&ordering)
-            .map(|o| o.disposition())
+            .map(|o| o.disposition(loopback_failure_threshold(ordering)))
             .unwrap_or(RouteStatsDisposition::Valid)
     }
 
@@ -253,11 +295,25 @@ impl RouteStats {
         !orderings.is_empty() && orderings.iter().all(|o| self.is_dead_for_ordering(o))
     }
 
+    /// Dead on every ordering by evidence that spans the route (a loopback run, or lost questions
+    /// to several destinations); a bare send failure names the first hop, which its own liveness
+    /// covers, and says nothing about the others
+    pub fn death_blames_hops_for(&self, orderings: SequenceOrderingSet) -> bool {
+        !orderings.is_empty()
+            && orderings.iter().all(|o| {
+                self.per_ordering.get(&o).is_some_and(|s| {
+                    s.consecutive_loopback_failures >= loopback_failure_threshold(o)
+                        || s.lost_question_destinations.len()
+                            >= ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD
+                })
+            })
+    }
+
     /// Disposition aggregated over all orderings (any ordering Valid => Valid).
     pub fn aggregate_disposition(&self) -> RouteStatsDisposition {
         let mut worst = RouteStatsDisposition::Valid;
-        for o in self.per_ordering.values() {
-            match o.disposition() {
+        for (ordering, o) in self.per_ordering.iter() {
+            match o.disposition(loopback_failure_threshold(*ordering)) {
                 RouteStatsDisposition::Valid => return RouteStatsDisposition::Valid,
                 d => worst = d,
             }
@@ -326,23 +382,38 @@ impl RouteStats {
     }
 
     /// Record a loopback route test result for an ordering. A pass marks the
-    /// ordering valid and clears its failures; a fail counts as a send failure
-    /// for that ordering, so repeated loopback failures drive the ordering (and
-    /// eventually the route) to dead.
+    /// ordering valid and clears its failures; failures count consecutively and a run of
+    /// them (per-ordering threshold) kills the ordering. Returns the tally after the result.
     pub fn record_loopback_result(
         &mut self,
         ordering: SequenceOrdering,
         ok: bool,
         cur_ts: Timestamp,
-    ) {
+    ) -> RouteLoopbackTally {
         let os = self.ordering_mut(ordering);
         os.deferred_loopback_failures = 0;
+        let ended_streak = os.consecutive_loopback_failures;
         if ok {
             os.last_known_valid_ts = Some(cur_ts);
             os.failed_to_send = 0;
             os.lost_question_destinations.clear();
+            os.loopback_pass += 1;
+            os.consecutive_loopback_failures = 0;
         } else {
-            os.failed_to_send += 1;
+            os.loopback_fail += 1;
+            os.consecutive_loopback_failures += 1;
+            os.max_consecutive_loopback_failures = os
+                .max_consecutive_loopback_failures
+                .max(os.consecutive_loopback_failures);
+        }
+        RouteLoopbackTally {
+            streak: if ok {
+                ended_streak
+            } else {
+                os.consecutive_loopback_failures
+            },
+            pass: os.loopback_pass,
+            fail: os.loopback_fail,
         }
     }
 
@@ -487,6 +558,9 @@ impl RouteSpecStore {
             {
                 veilid_log!(self debug "Marking dead route for release: {}", key);
                 arce.mark_for_release();
+                if arce.with_stats(|s| s.death_blames_hops_for(arce.orderings())) {
+                    self.avoid_dead_route_hops(arce.orderings(), &arce.hop_node_refs());
+                }
                 // Nothing holds it right now -> release immediately
                 (!arce.is_locked()).then_some(rid)
             } else {
@@ -496,6 +570,96 @@ impl RouteSpecStore {
         if let Some(rid) = opt_release_rid {
             self.release_allocated_route(rid);
         }
+    }
+
+    /// Keep a dead route's hops out of its orderings' allocations for a while, otherwise the
+    /// pool refills with the same dead hop pair
+    fn avoid_dead_route_hops(&self, orderings: SequenceOrderingSet, hops: &[NodeRef]) {
+        let cur_ts = Timestamp::now();
+        let mut dead_route_hops = self.dead_route_hops.lock();
+        for ordering in orderings {
+            let avoided = dead_route_hops.entry(ordering).or_default();
+            for hop in hops {
+                avoided.insert(hop.best_node_id(), cur_ts);
+            }
+        }
+    }
+
+    /// Hops to avoid when allocating a route for this ordering; expired entries are dropped
+    pub(super) fn dead_route_hops_to_avoid(&self, ordering: SequenceOrdering) -> Vec<NodeId> {
+        let cur_ts = Timestamp::now();
+        let avoid_for = TimestampDuration::new_secs(ROUTE_DEAD_HOP_AVOID_SECS);
+        let mut dead_route_hops = self.dead_route_hops.lock();
+        let Some(avoided) = dead_route_hops.get_mut(&ordering) else {
+            return Vec::new();
+        };
+        avoided.retain(|_, ts| cur_ts.duration_since(*ts) < avoid_for);
+        avoided.keys().cloned().collect()
+    }
+
+    /// Forget dead hops; routes that died during our own outage say nothing about their hops
+    pub(crate) fn clear_dead_route_hops(&self) {
+        self.dead_route_hops.lock().clear();
+    }
+
+    /// Tally a loopback outcome for the periodic summary
+    pub fn record_route_test_summary(&self, ordering: SequenceOrdering, ok: bool) {
+        let mut summary = self.route_test_summary.lock();
+        let entry = summary.by_ordering.entry(ordering).or_default();
+        if ok {
+            entry.pass += 1;
+        } else {
+            entry.fail += 1;
+        }
+    }
+
+    /// Tally a route release under each ordering it carried
+    pub fn record_route_release_summary(&self, orderings: SequenceOrderingSet) {
+        let mut summary = self.route_test_summary.lock();
+        for ordering in orderings {
+            summary.by_ordering.entry(ordering).or_default().releases += 1;
+        }
+    }
+
+    /// Log the per-ordering loopback tallies for an interval that saw a failure or a release, then reset them
+    pub fn log_route_test_summary(&self, cur_ts: Timestamp) {
+        let taken = {
+            let mut summary = self.route_test_summary.lock();
+            if summary
+                .last_log_ts
+                .is_some_and(|ts| cur_ts.duration_since(ts) < ROUTE_TEST_SUMMARY_INTERVAL)
+            {
+                return;
+            }
+            summary.last_log_ts = Some(cur_ts);
+            mem::take(&mut summary.by_ordering)
+        };
+        // A clean interval stays quiet
+        if taken.values().all(|e| e.fail == 0 && e.releases == 0) {
+            return;
+        }
+        let mut route_counts = BTreeMap::<SequenceOrdering, usize>::new();
+        self.list_allocated_routes(|_k, v| {
+            for ordering in v.orderings() {
+                *route_counts.entry(ordering).or_default() += 1;
+            }
+            Option::<()>::None
+        });
+        let parts = SequenceOrderingSet::all()
+            .iter()
+            .map(|ordering| {
+                let entry = taken.get(&ordering).copied().unwrap_or_default();
+                format!(
+                    "{:#} pass/fail={}/{} (routes {}, releases {})",
+                    ordering,
+                    entry.pass,
+                    entry.fail,
+                    route_counts.get(&ordering).copied().unwrap_or(0),
+                    entry.releases
+                )
+            })
+            .collect::<Vec<_>>();
+        veilid_log!(self debug target: "rtab::route", "route test summary: {}", parts.join(" "));
     }
 
     /// Modify the route statistics for remote routes

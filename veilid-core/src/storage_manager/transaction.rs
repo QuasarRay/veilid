@@ -114,7 +114,7 @@ impl StorageManager {
                     Err(_) => {
                         veilid_log!(self debug target:"network_result", "transaction begin contended on records: [{}] (source=background)",
                             opaque_record_keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "));
-                        apibail_try_again!("transaction begin contended");
+                        tx_try_again!(self, BeginContended, "transaction begin contended");
                     }
                 }
             }
@@ -143,7 +143,7 @@ impl StorageManager {
 
         // Early rejection if dht is not online
         if !self.dht_is_online() {
-            apibail_try_again!("dht is not online");
+            tx_try_again!(self, NotOnline, "dht is not online");
         }
 
         // Resolve config
@@ -170,7 +170,11 @@ impl StorageManager {
 
                 // Can't begin a transaction on a record with pending offline subkey writes
                 if inner.offline_subkey_writes.contains_key(&opaque_record_key) {
-                    apibail_try_again!("record has pending offline writes, try again later");
+                    tx_try_again!(
+                        self,
+                        OfflineWrites,
+                        "record has pending offline writes, try again later"
+                    );
                 }
 
                 let Some(opened_record) = inner.opened_records.get(&opaque_record_key) else {
@@ -380,7 +384,7 @@ impl StorageManager {
                     }
                     Some(OutboundTransactionKind::Foreground) => {
                         veilid_log!(self debug target:"network_result", "transaction begin contended on record {} (foreground holder)", opaque_record_key);
-                        apibail_try_again!("transaction begin contended");
+                        tx_try_again!(self, BeginContended, "transaction begin contended");
                     }
                     None => {}
                 }
@@ -445,7 +449,11 @@ impl StorageManager {
 
         // Yield to foreground transaction activity
         if !self.background_transactions_allowed() {
-            apibail_try_again!("background transaction deferred for foreground activity");
+            tx_try_again!(
+                self,
+                BackgroundDeferred,
+                "background transaction deferred for foreground activity"
+            );
         }
 
         let local_record_store = self.get_local_record_store()?;
@@ -456,7 +464,11 @@ impl StorageManager {
             .record_lock_table
             .try_peek_locks(membership.record_set.clone())
         else {
-            apibail_try_again!("background transaction set peek contended");
+            tx_try_again!(
+                self,
+                BackgroundDeferred,
+                "background transaction set peek contended"
+            );
         };
 
         // Safety selection for temporarily-opened members comes from the triggering record.
@@ -490,7 +502,9 @@ impl StorageManager {
                     .get_transaction_by_record(opaque)
                     .is_some()
                 {
-                    apibail_try_again!(
+                    tx_try_again!(
+                        self,
+                        InTransaction,
                         "background transaction member already in a transaction: {}",
                         opaque
                     );
@@ -752,7 +766,7 @@ impl StorageManager {
 
         // Early rejection if dht is not online
         if !self.dht_is_online() {
-            apibail_try_again!("dht is not online");
+            tx_try_again!(self, NotOnline, "dht is not online");
         }
 
         let (transaction_keys, transaction_kind) = {
@@ -825,6 +839,13 @@ impl StorageManager {
         )
         .await;
 
+        veilid_stats!(
+            self.transaction_quality
+                .lock()
+                .mitigations
+                .transactions_committed += 1
+        );
+
         Ok(())
     }
 
@@ -833,6 +854,14 @@ impl StorageManager {
     /// or a transaction can not be performed at this time, this will fail.
     /// Returns Err(VeilidAPIError::TryAgain) if the transaction could not be ended at this time
     /// Returns Err(_) if the transaction end failed and resulted in rollback or drop
+    /// End a transaction over a set of records.
+    ///
+    /// End goes only to nodes that answered every Set and have none in flight, so
+    /// nothing can land at a voter after its End. Nodes missing a confirmation get
+    /// one targeted completion pass first; in-flight Sets get a wait bounded by the
+    /// RPC timeout; a record still short of the required voters fails with TryAgain
+    /// rather than committing torn. Non-voters are marked Failed and the rollback
+    /// guard rolls them back once End is recorded.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip(self, records_lock))
@@ -846,22 +875,73 @@ impl StorageManager {
             records_lock.clone(),
             transaction_handle,
             async move {
-                let command_params_list = {
-                    let mut inner = self.inner.lock();
-
-                    // Obtain the outbound transaction manager
-                    let otm = &mut inner.outbound_transaction_manager;
-
-                    // Prepare for rollback
-                    otm.prepare_transact_end_params(transaction_handle)
-                        .inspect_err(|e| {
-                            veilid_log!(self debug "error in prepare_transact_end_params: {}", e);
-                        })?
-                };
-
                 let rpc_timeout = TimestampDuration::new_ms(
                     self.config().internal().network.rpc.timeout_ms.into(),
                 );
+
+                // Vote only where nothing can land after End; see the doc comment
+                let wait_deadline = Timestamp::now().later(rpc_timeout);
+                #[cfg(feature = "stats")]
+                let mut opt_wait_start: Option<Timestamp> = None;
+                let (command_params_list, non_voters) = loop {
+                    let plan = self
+                        .inner
+                        .lock()
+                        .outbound_transaction_manager
+                        .plan_transact_end(transaction_handle)
+                        .inspect_err(|e| {
+                            veilid_log!(self debug "error in plan_transact_end: {}", e);
+                        })?;
+                    if !plan.short {
+                        veilid_stats!(if let Some(wait_start) = opt_wait_start {
+                            self.transaction_quality()
+                                .lock()
+                                .record_end_wait(Timestamp::now().duration_since(wait_start));
+                        });
+                        break (plan.end_params, plan.non_voters);
+                    }
+                    if !plan.completion_params.is_empty() {
+                        veilid_stats!(
+                            self.transaction_quality()
+                                .lock()
+                                .mitigations
+                                .completion_pass_rpcs += plan.completion_params.len() as u64
+                        );
+                        let mut unord = FuturesUnordered::new();
+                        for command_params in plan.completion_params {
+                            unord.push(self.outbound_transact_command(command_params));
+                        }
+                        let mut results = vec![];
+                        while let Some(res) = unord.next().await {
+                            results.push(res?);
+                        }
+                        self.inner
+                            .lock()
+                            .outbound_transaction_manager
+                            .record_transact_completion_results(transaction_handle, results)?;
+                        continue;
+                    }
+                    if plan.outstanding > 0 && Timestamp::now() < wait_deadline {
+                        #[cfg(feature = "stats")]
+                        {
+                            opt_wait_start.get_or_insert_with(Timestamp::now);
+                        }
+                        sleep(END_QUIESCENCE_POLL_MS).await;
+                        continue;
+                    }
+                    tx_try_again!(
+                        self,
+                        EndIncomplete,
+                        "fewer than required complete nodes to end transaction {}",
+                        transaction_handle
+                    );
+                };
+
+                // Non-voters leave now; the rollback guard rolls them back after End
+                self.inner
+                    .lock()
+                    .outbound_transaction_manager
+                    .commit_end_plan(transaction_handle, &non_voters)?;
 
                 // End transactions on all records.
                 let mut unord = FuturesUnordered::new();
@@ -1158,7 +1238,7 @@ impl StorageManager {
 
         // Early rejection if dht is not online
         if !self.dht_is_online() {
-            apibail_try_again!("dht is not online");
+            tx_try_again!(self, NotOnline, "dht is not online");
         }
 
         // Send all rollbacks to the network
@@ -1168,6 +1248,13 @@ impl StorageManager {
         // Transaction is done successfully, drop it and wait for background tasks to complete if any
         self.drop_transaction_and_wait_locked(&records_lock, transaction_handle)
             .await;
+
+        veilid_stats!(
+            self.transaction_quality
+                .lock()
+                .mitigations
+                .transactions_rolled_back += 1
+        );
 
         Ok(())
     }
@@ -1279,7 +1366,7 @@ impl StorageManager {
 
         // Early rejection if dht is not online
         if !self.dht_is_online() {
-            apibail_try_again!("dht is not online");
+            tx_try_again!(self, NotOnline, "dht is not online");
         }
 
         let command_params = {
@@ -1353,7 +1440,9 @@ impl StorageManager {
                 let begin_network_seq = record_state.begin_network_seq(subkey)?;
                 if begin_network_seq.is_some() {
                     // Sequence number existed at begin time, so we should have gotten a value
-                    apibail_try_again!(
+                    tx_try_again!(
+                        self,
+                        Other,
                         "sequence number existed at transaction begin, but no value was returned"
                     );
                 }
@@ -1405,7 +1494,7 @@ impl StorageManager {
 
         // Early rejection if dht is not online
         if !self.dht_is_online() {
-            apibail_try_again!("dht is not online");
+            tx_try_again!(self, NotOnline, "dht is not online");
         }
 
         // Build the signed value data for this set from the raw data and the record's writer
@@ -1571,7 +1660,7 @@ impl StorageManager {
                 let required = record_state.required_strict_consensus_count();
                 if updated_consensus.strict_consensus_count < required {
                     // Otherwise, ask the app to try the set again to continue to attempt consensus
-                    apibail_try_again!("set did not reach consensus");
+                    tx_try_again!(self, SetConsensus, "set did not reach consensus");
                 }
                 // Return that the set updated with consensus successfully
                 return Ok(None);
@@ -1834,6 +1923,12 @@ impl StorageManager {
         records_lock: Arc<StorageManagerRecordsLockGuard>,
         transaction_handle: OutboundTransactionHandle,
     ) {
+        veilid_stats!(
+            self.transaction_quality
+                .lock()
+                .mitigations
+                .transactions_failed += 1
+        );
         let (rollback_params, opt_cleanup) = {
             let mut inner = self.inner.lock();
             let otm = &mut inner.outbound_transaction_manager;

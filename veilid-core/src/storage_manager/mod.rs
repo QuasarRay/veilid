@@ -1,3 +1,11 @@
+// Count a TryAgain by reason, then bail with it
+macro_rules! tx_try_again {
+    ($self:expr, $reason:ident, $($arg:tt)*) => {{
+        veilid_stats!($self.transaction_quality().lock().try_again(TryAgainReason::$reason));
+        apibail_try_again!($($arg)*);
+    }};
+}
+
 mod close_record;
 mod constants;
 mod create_record;
@@ -6,8 +14,6 @@ mod debug;
 mod delete_record;
 mod flush_record;
 mod gated_operation;
-#[cfg(feature = "stats")]
-mod gated_operation_accounting;
 mod get_value;
 mod inspect_record;
 mod local_record_detail;
@@ -46,13 +52,10 @@ pub mod tests_storage_manager;
 use super::*;
 
 use hashlink::{LinkedHashMap, LruCache};
-use std::sync::atomic::{AtomicU64, AtomicUsize};
 
 use crate::network_manager::OnlineState;
 use constants::*;
 use gated_operation::*;
-#[cfg(feature = "stats")]
-use gated_operation_accounting::*;
 use inspect_record::{InspectFanoutStop, OutboundInspectValueResult};
 use local_record_detail::*;
 use offline_subkey_writes::*;
@@ -64,6 +67,8 @@ use rehydrate::*;
 use remote_record_detail::*;
 use routing_table::*;
 use rpc_processor::*;
+#[cfg(feature = "stats")]
+use stats::*;
 use stop_token::future::FutureExt as _;
 use storage_manager_locks::*;
 
@@ -218,6 +223,10 @@ pub(crate) struct StorageManager {
     // Per-kind gate wait/hold telemetry
     #[cfg(feature = "stats")]
     gate_accounting: Arc<Mutex<GatedOperationAccounting>>,
+    // Transaction quality counters, shared with the outbound transaction manager.
+    // A leaf lock: never held while taking any other lock.
+    #[cfg(feature = "stats")]
+    transaction_quality: Arc<Mutex<TransactionQualityAccounting>>,
 }
 
 impl fmt::Debug for StorageManager {
@@ -237,7 +246,7 @@ impl fmt::Debug for StorageManager {
     }
 }
 
-impl_veilid_component!(StorageManager, stats);
+impl_veilid_component!(StorageManager, stats, reset);
 
 impl StorageManager {
     pub fn new(registry: VeilidComponentRegistry) -> StorageManager {
@@ -257,6 +266,10 @@ impl StorageManager {
             (registry.config().network.dht.max_concurrent_operations as usize).max(1),
         ));
 
+        let outbound_transaction_manager = OutboundTransactionManager::new(registry.clone());
+        #[cfg(feature = "stats")]
+        let transaction_quality = outbound_transaction_manager.transaction_quality().clone();
+
         let this = StorageManager {
             inner: StatsMutex::new(
                 StorageManagerInner {
@@ -267,7 +280,7 @@ impl StorageManager {
                     offline_subkey_writes: Default::default(),
                     rehydration_requests: Default::default(),
                     flush_record_waiters: Default::default(),
-                    outbound_transaction_manager: OutboundTransactionManager::new(registry.clone()),
+                    outbound_transaction_manager,
                     metadata_db: Default::default(),
                     routing_domain_ready_subscription: None,
                     online_state_change_subscription: None,
@@ -327,11 +340,18 @@ impl StorageManager {
             gate_active: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "stats")]
             gate_accounting: Arc::new(Mutex::new(GatedOperationAccounting::default())),
+            #[cfg(feature = "stats")]
+            transaction_quality,
         };
 
         this.setup_tasks();
 
         this
+    }
+
+    #[cfg(feature = "stats")]
+    fn transaction_quality(&self) -> &Arc<Mutex<TransactionQualityAccounting>> {
+        &self.transaction_quality
     }
 
     pub(crate) fn local_limits_from_config(c: Arc<VeilidConfig>) -> RecordStoreLimits {

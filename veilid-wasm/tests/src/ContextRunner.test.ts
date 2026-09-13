@@ -1,8 +1,8 @@
 import init from 'veilid-wasm';
 import { driveContext } from './harness/drive.js';
-import { selectedContext, selectedSuiteNames } from './harness/select.js';
+import { selectedCaseFilter, selectedContext, selectedSuiteNames } from './harness/select.js';
 import { suitesByName } from './suites/registry.js';
-import type { CaseResult } from './harness/types.js';
+import { caseSelected, type CaseResult } from './harness/types.js';
 
 await init();
 
@@ -10,6 +10,7 @@ await init();
 // then reported as its own mocha test so the spec reporter shows what actually ran where.
 const context = selectedContext();
 const suiteNames = selectedSuiteNames();
+const caseFilter = selectedCaseFilter();
 const suites = suitesByName(suiteNames);
 
 let resultsPromise: Promise<CaseResult[]>;
@@ -33,12 +34,12 @@ async function ensureRun(): Promise<CaseResult[]> {
 describe(`veilid-wasm [${context}]`, () => {
   before('run selected suites in context', () => {
     // Kick the run off once; each case below waits on it and reports its own outcome.
-    resultsPromise = driveContext(context, suiteNames);
+    resultsPromise = driveContext(context, suiteNames, caseFilter);
   });
 
   for (const suite of suites) {
     describe(suite.name, () => {
-      for (const testCase of suite.cases()) {
+      for (const testCase of suite.cases().filter((c) => caseSelected(c, caseFilter))) {
         it(testCase.name, async function () {
           const all = await ensureRun();
           const result = all.find(

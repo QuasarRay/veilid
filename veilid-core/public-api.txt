@@ -128,7 +128,9 @@ pub veilid_core::Sequencing::EnsureOrdered = 2
 pub veilid_core::Sequencing::PreferOrdered = 1
 pub veilid_core::Sequencing::PreferUnordered = 0
 impl veilid_core::Sequencing
+pub fn veilid_core::Sequencing::for_route_orderings(&self, veilid_core::SequenceOrderingSet) -> veilid_core::Sequencing
 pub fn veilid_core::Sequencing::matches_ordering(&self, veilid_core::SequenceOrdering) -> bool
+pub fn veilid_core::Sequencing::preferred_ordering(&self) -> veilid_core::SequenceOrdering
 impl core::fmt::Display for veilid_core::Sequencing
 pub fn veilid_core::Sequencing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for veilid_core::Sequencing

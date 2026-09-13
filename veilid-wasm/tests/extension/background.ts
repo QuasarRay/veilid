@@ -24,7 +24,7 @@ chrome.runtime.onMessageExternal.addListener(
     }
     (async () => {
       try {
-        const results = await runSuites(message.suites ?? [], 'extension');
+        const results = await runSuites(message.suites ?? [], 'extension', undefined, message.caseFilter);
         sendResponse({ type: 'done', ok: true, results });
       } catch (err) {
         sendResponse({ type: 'done', ok: false, error: String(err) });

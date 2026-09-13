@@ -26,6 +26,12 @@ export function selectedSuiteNames(): string[] {
   return names;
 }
 
+// Case-name substring selected with --case; unset runs every case.
+export function selectedCaseFilter(): string | undefined {
+  const text = (env.VEILID_TEST_CASE ?? '').trim();
+  return text.length > 0 ? text : undefined;
+}
+
 // Context selected with --context, defaulting to the page. The runner script invokes wdio once
 // per context, so a single run only ever has one.
 export function selectedContext(): ContextName {

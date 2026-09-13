@@ -42,6 +42,14 @@ impl TerminalDelivery {
                 veilid_log!(registry debug target: "network_result",
                     "terminal delivery expired after {} attempts: {:?} xid={} node={} record={}",
                     attempts, self.command, self.rnxid, self.node_ref, self.opaque_record_key);
+                veilid_stats!(
+                    registry
+                        .storage_manager()
+                        .transaction_quality()
+                        .lock()
+                        .mitigations
+                        .terminal_delivery_expired += 1
+                );
                 return;
             }
 
@@ -71,6 +79,14 @@ impl TerminalDelivery {
                 veilid_log!(registry debug target: "network_result",
                     "terminal delivery complete (attempt {}): {:?} xid={} node={} record={}",
                     attempts, self.command, self.rnxid, self.node_ref, self.opaque_record_key);
+                veilid_stats!(
+                    registry
+                        .storage_manager()
+                        .transaction_quality()
+                        .lock()
+                        .mitigations
+                        .terminal_delivery_completed += 1
+                );
                 return;
             }
 

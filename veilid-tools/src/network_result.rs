@@ -31,6 +31,19 @@ pub trait IoNetworkResultExt<T> {
     fn into_network_result(self) -> io::Result<NetworkResult<T>>;
 }
 
+/// A refused connect proves the path carried packets both ways (an RST or ICMP unreachable
+/// came back). Keyed on the os error only: wasm reports every failure as refused by kind.
+#[must_use]
+pub fn is_connection_refused(e: &io::Error) -> bool {
+    #[cfg(unix)]
+    let refused = libc::ECONNREFUSED;
+    #[cfg(windows)]
+    let refused = winapi::um::winsock2::WSAECONNREFUSED;
+    #[cfg(not(any(unix, windows)))]
+    let refused = i32::MIN;
+    e.raw_os_error() == Some(refused)
+}
+
 fn io_error_kind_from_error<T>(e: io::Error) -> io::Result<NetworkResult<T>> {
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     if let Some(os_err) = e.raw_os_error() {

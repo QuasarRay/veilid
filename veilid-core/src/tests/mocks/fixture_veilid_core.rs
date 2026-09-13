@@ -250,8 +250,8 @@ pub fn fixture_startup_options() -> VeilidStartupOptions {
         .unwrap()
 }
 
-static VEILID_TEST_INSTANCE: LazyLock<Arc<core::sync::atomic::AtomicUsize>> =
-    LazyLock::new(|| Arc::new(core::sync::atomic::AtomicUsize::new(0)));
+static VEILID_TEST_INSTANCE: LazyLock<Arc<AtomicUsize>> =
+    LazyLock::new(|| Arc::new(AtomicUsize::new(0)));
 
 #[must_use]
 pub fn fixture_veilid_test_instance() -> String {

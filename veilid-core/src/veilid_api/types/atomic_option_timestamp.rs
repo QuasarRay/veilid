@@ -1,5 +1,3 @@
-use std::sync::atomic::AtomicU64;
-
 use super::*;
 
 /// Atomic wrapper for optional timestamps used in structs so we can avoid locks

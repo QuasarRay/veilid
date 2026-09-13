@@ -1,7 +1,6 @@
 //! Monotonically non-decreasing and monotonically increasing microseconds-since epoch timestamp
 
 use super::*;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 aligned_u64_type!(Timestamp);
 aligned_u64_type_default_debug_impl!(Timestamp);

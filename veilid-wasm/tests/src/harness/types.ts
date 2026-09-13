@@ -42,6 +42,10 @@ export const NETWORK_SKIP_NOTICE =
   'needs an attached node, and this context has no usable WebSocket. ' +
   'These require a secure context and will be enabled when WebTransport support lands.';
 
+export function caseSelected(c: TestCase, caseFilter?: string): boolean {
+  return caseFilter === undefined || c.name.includes(caseFilter);
+}
+
 export function caseRequiresNetwork(suite: Suite, c: TestCase): boolean {
   return c.requiresNetwork ?? suite.requiresNetwork ?? false;
 }

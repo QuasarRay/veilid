@@ -310,6 +310,7 @@ where
                 .try_remove_transaction(transaction_id)
                 .inspect_err(veilid_log_err!(self));
             veilid_log!(self debug "{}","end snapshot mismatch");
+            veilid_stats!(self.transaction_quality_inbound(|i| i.end_snapshot_mismatch += 1));
             return Ok(InboundTransactCommandResult::InvalidTransaction);
         }
 
@@ -362,6 +363,7 @@ where
                     .remove_transaction(transaction_id)
                     .unwrap_or_else(veilid_log_err!(self));
                 veilid_log!(self debug "{}","bad lock state");
+                veilid_stats!(self.transaction_quality_inbound(|i| i.commit_bad_lock_state += 1));
                 return Ok(InboundTransactCommandResult::InvalidTransaction);
             }
 
@@ -550,11 +552,12 @@ where
             return Ok(InboundTransactCommandResult::InvalidTransaction);
         };
 
+        // A Set landing after End is refused but does not end the transaction: the
+        // writer only counts a node that answered every Set before voting, so this
+        // one is a straggler whose Commit or Rollback is still on its way
         if active_transaction_list.is_locked_by(transaction_id) {
-            self.inbound_transactions
-                .remove_transaction(transaction_id)
-                .unwrap_or_else(veilid_log_err!(self));
             veilid_log!(self debug "{}","set after end");
+            veilid_stats!(self.transaction_quality_inbound(|i| i.set_after_end += 1));
             return Ok(InboundTransactCommandResult::InvalidTransaction);
         }
 

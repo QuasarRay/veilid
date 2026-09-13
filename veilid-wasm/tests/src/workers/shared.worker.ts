@@ -14,7 +14,7 @@ type SharedWorkerScope = { onconnect: (e: MessageEvent) => void };
     }
     try {
       const { runSuites } = await import('../harness/run-suites.js');
-      const results = await runSuites(ev.data.suites, 'shared', step);
+      const results = await runSuites(ev.data.suites, 'shared', step, ev.data.caseFilter);
       port.postMessage({ type: 'done', ok: true, results });
     } catch (err) {
       port.postMessage({ type: 'done', ok: false, error: String(err) });

@@ -57,6 +57,17 @@ where
     }
 }
 
+#[cfg(feature = "stats")]
+impl<D> RecordStoreInner<D>
+where
+    D: RecordDetail,
+{
+    fn transaction_quality_inbound(&self, f: impl FnOnce(&mut InboundStats)) {
+        let storage_manager = self.registry().storage_manager();
+        f(&mut storage_manager.transaction_quality().lock().inbound);
+    }
+}
+
 impl<D> fmt::Debug for RecordStoreInner<D>
 where
     D: RecordDetail,

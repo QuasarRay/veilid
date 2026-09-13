@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 
 /// Identifies one open transaction on a simulated node.

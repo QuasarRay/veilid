@@ -84,10 +84,7 @@ impl RoutingTable {
         self.rolling_answers_task.tick().await?;
 
         // Recompute contact-method viability when peerinfo changed on either side
-        if self
-            .cm_viability_dirty
-            .load(core::sync::atomic::Ordering::Acquire)
-        {
+        if self.cm_viability_dirty.load(Ordering::Acquire) {
             self.update_cm_viability_task.tick().await?;
         }
 

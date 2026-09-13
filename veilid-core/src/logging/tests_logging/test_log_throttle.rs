@@ -1,5 +1,4 @@
 use super::*;
-use core::sync::atomic::AtomicUsize;
 
 impl_veilid_log_facility!("test");
 

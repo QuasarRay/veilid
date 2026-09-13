@@ -20,6 +20,25 @@ pub enum Sequencing {
 }
 
 impl Sequencing {
+    /// The ordering a route allocated for this sequencing carries
+    pub fn preferred_ordering(&self) -> SequenceOrdering {
+        match self {
+            Sequencing::PreferUnordered => SequenceOrdering::Unordered,
+            Sequencing::PreferOrdered | Sequencing::EnsureOrdered => SequenceOrdering::Ordered,
+        }
+    }
+
+    /// What to send over a route carrying only `orderings`: a preference the route cannot
+    /// honor becomes the one it has, a requirement never changes
+    pub fn for_route_orderings(&self, orderings: SequenceOrderingSet) -> Sequencing {
+        match self {
+            Sequencing::PreferUnordered if !orderings.contains(SequenceOrdering::Unordered) => {
+                Sequencing::PreferOrdered
+            }
+            _ => *self,
+        }
+    }
+
     /// Returns true if the given ordering satisfies this sequencing requirement.
     #[must_use]
     pub fn matches_ordering(&self, ordering: SequenceOrdering) -> bool {

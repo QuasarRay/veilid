@@ -7,6 +7,9 @@ pub(super) struct OutboundTransactionKeepaliveState {
     pub opt_last_rtt: Option<TimestampDuration>,
     /// Most recent server-reported expiration; drives the next send time.
     pub opt_last_expiration: Option<Timestamp>,
+    /// A command answer refreshed the expiration since the last deadline was set,
+    /// so that deadline reschedules instead of sending
+    pub refreshed: bool,
     /// Server told us the inbound transaction is gone. Future fires should bail.
     pub dead: bool,
 }

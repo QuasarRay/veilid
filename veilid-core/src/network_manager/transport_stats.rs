@@ -73,17 +73,18 @@ impl TransportSendOutcome {
         matches!(self, TransportSendOutcome::Sent)
     }
 
-    pub(crate) fn from_network_result<T>(nr: &NetworkResult<T>) -> Self {
+    /// What a send result says about the transport; None when it says nothing
+    pub(crate) fn from_network_result<T>(nr: &NetworkResult<T>) -> Option<Self> {
         match nr {
-            NetworkResult::Value(_) => TransportSendOutcome::Sent,
-            NetworkResult::Timeout => TransportSendOutcome::Timeout,
-            _ => TransportSendOutcome::FailedToSend,
+            NetworkResult::Value(_) => Some(TransportSendOutcome::Sent),
+            NetworkResult::Timeout => Some(TransportSendOutcome::Timeout),
+            // Refused proves the path works; it is no evidence against the transport
+            NetworkResult::NoConnection(e) if is_connection_refused(e) => None,
+            _ => Some(TransportSendOutcome::FailedToSend),
         }
     }
-}
 
-impl From<&SendDataResult> for TransportSendOutcome {
-    fn from(sdr: &SendDataResult) -> Self {
+    pub(crate) fn from_send_data_result(sdr: &SendDataResult) -> Option<Self> {
         Self::from_network_result(sdr.network_result())
     }
 }

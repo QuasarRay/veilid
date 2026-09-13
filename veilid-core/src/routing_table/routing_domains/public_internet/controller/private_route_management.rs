@@ -10,6 +10,13 @@ const MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT: usize = 2;
 /// or a recent route test has already bumped `last_known_valid_ts` within the same window.
 const SR_LOOPBACK_KEEPALIVE_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
 
+/// The one ordering a pool route carries; None for legacy routes that carried both
+fn single_ordering(orderings: SequenceOrderingSet) -> Option<SequenceOrdering> {
+    (orderings.len() == 1)
+        .then(|| orderings.iter().next())
+        .flatten()
+}
+
 impl PublicInternetRoutingDomainController {
     /// Fastest routes sort
     fn route_sort_latency_fn(
@@ -45,7 +52,9 @@ impl PublicInternetRoutingDomainController {
 
         rss.list_allocated_routes(|_k, v| {
             let is_known_valid = v.with_stats(|stats| stats.last_known_valid_ts().is_some());
-            if is_known_valid && v.is_automatic() {
+            // Ordered routes gate readiness; unordered ones are best effort
+            let is_ordered = single_ordering(v.orderings()) == Some(SequenceOrdering::Ordered);
+            if is_known_valid && v.is_automatic() && is_ordered {
                 if v.hop_count() == rss.get_default_route_hop_count_safe() {
                     safe_route_count += 1;
                 } else if v.hop_count() == rss.get_default_route_hop_count_unsafe() {
@@ -82,8 +91,9 @@ impl PublicInternetRoutingDomainController {
         let default_route_hop_count_unsafe = rss.get_default_route_hop_count_unsafe();
 
         let mut must_test_routes = Vec::<AllocatedRouteSetId>::new();
-        let mut automatic_safe_routes = Vec::<(AllocatedRouteSetId, u64)>::new();
-        let mut automatic_unsafe_routes = Vec::<(AllocatedRouteSetId, u64)>::new();
+        // Pool routes by (hop count, ordering) cell, with latency for the speed sort
+        let mut pool =
+            BTreeMap::<(usize, SequenceOrdering), Vec<(AllocatedRouteSetId, u64)>>::new();
         let mut expired_routes = Vec::<AllocatedRouteSetId>::new();
         rss.list_allocated_routes(|k, v| {
             // A route a test confirmed dead is marked for release; release it once its refcount
@@ -96,6 +106,12 @@ impl PublicInternetRoutingDomainController {
                 return Option::<()>::None;
             }
             let route_orderings = v.orderings();
+            // Pool routes carry one ordering each; a legacy route that carried both makes way
+            let opt_ordering = single_ordering(route_orderings);
+            if v.is_automatic() && opt_ordering.is_none() {
+                expired_routes.push(k.clone());
+                return Option::<()>::None;
+            }
             v.with_stats(|stats| {
                 // Ignore routes that don't need or want testing
                 if !stats.needs_testing(route_orderings, cur_ts) {
@@ -106,13 +122,16 @@ impl PublicInternetRoutingDomainController {
                 if v.is_published() || stats.last_known_valid_ts().is_none() {
                     must_test_routes.push(k.clone());
                 }
-                // If this is of default safe route hop length, include it in routes to keep alive
-                else if v.is_automatic() && v.hop_count() == default_route_hop_count_safe {
-                    automatic_safe_routes.push((k.clone(), stats.latency.average.as_u64()));
-                }
-                // If this is a default unsafe route hop length, include it in routes to keep alive
-                else if v.is_automatic() && v.hop_count() == default_route_hop_count_unsafe {
-                    automatic_unsafe_routes.push((k.clone(), stats.latency.average.as_u64()));
+                // Pool routes of a default length are kept alive per cell
+                else if v.is_automatic()
+                    && (v.hop_count() == default_route_hop_count_safe
+                        || v.hop_count() == default_route_hop_count_unsafe)
+                {
+                    if let Some(ordering) = opt_ordering {
+                        pool.entry((v.hop_count(), ordering))
+                            .or_default()
+                            .push((k.clone(), stats.latency.average.as_u64()));
+                    }
                 }
                 // Else tear down only automatic (pool-managed) routes; manual routes are caller-owned
                 else if v.is_automatic() {
@@ -122,33 +141,15 @@ impl PublicInternetRoutingDomainController {
             })
         });
 
-        // Sort automatic routes by speed if we know the speed
-        automatic_safe_routes.sort_unstable_by(Self::route_sort_latency_fn);
-        automatic_unsafe_routes.sort_unstable_by(Self::route_sort_latency_fn);
-
-        // Save up to N unpublished routes and test them
-        let background_safety_route_count = DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT;
-
-        let safe_routes_to_keep =
-            usize::min(background_safety_route_count, automatic_safe_routes.len());
-        for automatic_safe_route in automatic_safe_routes.iter().take(safe_routes_to_keep) {
-            must_test_routes.push(automatic_safe_route.0.clone());
-        }
-        let unsafe_routes_to_keep =
-            usize::min(background_safety_route_count, automatic_unsafe_routes.len());
-        for automatic_unsafe_route in automatic_unsafe_routes.iter().take(unsafe_routes_to_keep) {
-            must_test_routes.push(automatic_unsafe_route.0.clone());
-        }
-
-        // Kill off all but N unpublished routes rather than testing them
-        if automatic_safe_routes.len() > safe_routes_to_keep {
-            for x in &automatic_safe_routes[safe_routes_to_keep..] {
-                expired_routes.push(x.0.clone());
+        // Per cell: keep and test the fastest N, kill off the rest rather than testing them
+        for routes in pool.values_mut() {
+            routes.sort_unstable_by(Self::route_sort_latency_fn);
+            let keep = usize::min(DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT, routes.len());
+            for route in routes.iter().take(keep) {
+                must_test_routes.push(route.0.clone());
             }
-        }
-        if automatic_unsafe_routes.len() > unsafe_routes_to_keep {
-            for x in &automatic_unsafe_routes[unsafe_routes_to_keep..] {
-                expired_routes.push(x.0.clone());
+            for route in routes.iter().skip(keep) {
+                expired_routes.push(route.0.clone());
             }
         }
 
@@ -204,6 +205,49 @@ impl PublicInternetRoutingDomainController {
         out
     }
 
+    /// Release the automatic unpublished routes and run the management routine now so the
+    /// pool refills without waiting for its tick. Returns (released, allocated).
+    #[cfg(feature = "debug-api")]
+    pub(crate) async fn reallocate_safety_routes(&self) -> EyreResult<(usize, usize)> {
+        let routing_table = self.routing_table();
+        let rss = routing_table.route_spec_store();
+        let pool = rss.list_allocated_routes(|k, v| {
+            (v.is_automatic() && !v.is_published()).then(|| k.clone())
+        });
+        let released = pool.len();
+        for id in pool {
+            rss.release_route(id.into());
+        }
+        // A tick already in flight is skipped by try_tick_now; retry until one of ours starts.
+        // The routine runs detached, so wait for the pool count to settle rather than for it.
+        for _ in 0..20 {
+            if self.private_route_management_task.try_tick_now().await? {
+                break;
+            }
+            sleep(100).await;
+        }
+        let pool_size = || {
+            rss.list_allocated_routes(|_k, v| (v.is_automatic() && !v.is_published()).then_some(()))
+                .len()
+        };
+        let mut allocated = pool_size();
+        let mut settled = 0;
+        for _ in 0..100 {
+            sleep(100).await;
+            let now = pool_size();
+            settled = if now == allocated && now > 0 {
+                settled + 1
+            } else {
+                0
+            };
+            allocated = now;
+            if settled >= 5 {
+                break;
+            }
+        }
+        Ok((released, allocated))
+    }
+
     /// Keep private routes assigned and accessible
     #[cfg_attr(
         feature = "instrument",
@@ -257,47 +301,40 @@ impl PublicInternetRoutingDomainController {
                 .await;
         }
 
-        // Ensure we have a minimum of N allocated local, unpublished routes with the default number of hops
-        // and all our supported crypto kinds. Also allocate some routes of twice the default length for
-        // safety routes to direct nodes.
+        // Ensure we have a minimum of N allocated local, unpublished routes per (hop count, ordering)
+        // cell, with all our supported crypto kinds: the default length for safe destinations and
+        // twice that for direct ones, each for ordered and for unordered traffic.
         let default_route_hop_count_safe = rss.get_default_route_hop_count_safe();
         let default_route_hop_count_unsafe = rss.get_default_route_hop_count_unsafe();
 
-        let mut local_safety_route_count_safe = 0usize;
-        let mut local_safety_route_count_unsafe = 0usize;
-
+        let mut pool_counts = BTreeMap::<(usize, SequenceOrdering), usize>::new();
         rss.list_allocated_routes(|_k, v| {
             if !v.is_published() && v.is_automatic() {
-                if v.hop_count() == default_route_hop_count_safe {
-                    local_safety_route_count_safe += 1;
-                } else if v.hop_count() == default_route_hop_count_unsafe {
-                    local_safety_route_count_unsafe += 1;
+                if let Some(ordering) = single_ordering(v.orderings()) {
+                    *pool_counts.entry((v.hop_count(), ordering)).or_default() += 1;
                 }
             }
             Option::<()>::None
         });
 
-        let background_safety_route_count = DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT;
-
-        // Newly allocated routes, separated by type for interleaving
-        let mut newly_safe_routes = Vec::new();
-        let mut newly_unsafe_routes = Vec::new();
-
-        // Allocate more routes if needed
-        for (route_count, hop_count, is_safe) in [
-            (
-                local_safety_route_count_safe,
-                default_route_hop_count_safe,
-                true,
-            ),
-            (
-                local_safety_route_count_unsafe,
-                default_route_hop_count_unsafe,
-                false,
-            ),
-        ] {
-            if route_count < background_safety_route_count {
-                let routes_to_allocate = background_safety_route_count - route_count;
+        // Ordered cells first (they gate readiness), safe and unsafe lengths interleaved so the
+        // first batch of parallel tests covers both lengths
+        let mut newly_allocated_routes = Vec::new();
+        for ordering in [SequenceOrdering::Ordered, SequenceOrdering::Unordered] {
+            let mut newly_safe_routes = Vec::new();
+            let mut newly_unsafe_routes = Vec::new();
+            for (hop_count, is_safe) in [
+                (default_route_hop_count_safe, true),
+                (default_route_hop_count_unsafe, false),
+            ] {
+                let route_count = pool_counts
+                    .get(&(hop_count, ordering))
+                    .copied()
+                    .unwrap_or(0);
+                if route_count >= DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT {
+                    continue;
+                }
+                let routes_to_allocate = DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT - route_count;
 
                 // Parameters here must be the most inclusive route allocation spec
                 // These will be used by test_remote_route as well
@@ -305,7 +342,7 @@ impl PublicInternetRoutingDomainController {
                     crypto_kinds: VALID_CRYPTO_KINDS.to_vec(),
                     hop_count,
                     stability: Stability::Reliable,
-                    sequencing: Sequencing::PreferOrdered,
+                    sequencing: ordering.minimum_sequencing(),
                     directions: DirectionSet::all(),
                     avoid_nodes: Vec::new(),
                     automatic: true,
@@ -313,7 +350,8 @@ impl PublicInternetRoutingDomainController {
                 for _n in 0..routes_to_allocate {
                     match rss.allocate_route(params.clone()).await {
                         Err(VeilidAPIError::TryAgain { message }) => {
-                            veilid_log!(self debug "Route allocation unavailable: {}", message);
+                            veilid_log!(self debug "Route allocation unavailable ({:#} {} hops): {}", ordering, hop_count, message);
+                            break;
                         }
                         Err(e) => return Err(e.into()),
                         Ok(v) => {
@@ -326,28 +364,21 @@ impl PublicInternetRoutingDomainController {
                     }
                 }
             }
-        }
-
-        // Interleave safe and unsafe routes so the first batch of parallel tests
-        // includes both types. This ensures safety_routes_ready() sees both safe=1+
-        // and unsafe=1+ after the first batch completes, rather than having to wait
-        // for all safe routes to finish before any unsafe routes start.
-        let mut newly_allocated_routes = Vec::new();
-        let max_len = newly_safe_routes.len().max(newly_unsafe_routes.len());
-        for i in 0..max_len {
-            if let Some(r) = newly_safe_routes.get(i) {
-                newly_allocated_routes.push(r.clone());
-            }
-            if let Some(r) = newly_unsafe_routes.get(i) {
-                newly_allocated_routes.push(r.clone());
+            let max_len = newly_safe_routes.len().max(newly_unsafe_routes.len());
+            for i in 0..max_len {
+                if let Some(r) = newly_safe_routes.get(i) {
+                    newly_allocated_routes.push(r.clone());
+                }
+                if let Some(r) = newly_unsafe_routes.get(i) {
+                    newly_allocated_routes.push(r.clone());
+                }
             }
         }
 
         // Enqueue tests for newly allocated routes
         if !newly_allocated_routes.is_empty() {
             #[cfg(feature = "verbose-tracing")]
-            veilid_log!(self debug "Enqueuing {} newly allocated route tests ({} safe, {} unsafe)",
-                newly_allocated_routes.len(), newly_safe_routes.len(), newly_unsafe_routes.len());
+            veilid_log!(self debug "Enqueuing {} newly allocated route tests", newly_allocated_routes.len());
             routing_table
                 .enqueue_route_tests(
                     cur_ts,
@@ -382,6 +413,8 @@ impl PublicInternetRoutingDomainController {
                 )
                 .await;
         }
+
+        rss.log_route_test_summary(cur_ts);
 
         // Send update (also may send updates for released routes done by other parts of the program)
         rss.send_route_update();

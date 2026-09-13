@@ -171,9 +171,10 @@ impl StatsManager {
         }
     }
 
-    /// Start a fresh collection window.
+    /// Start a fresh collection window and zero the cumulative counters.
     #[cfg(feature = "debug-api")]
     pub(crate) fn reset(&self) {
+        self.registry().reset_component_stats();
         self.inner.lock().since_ts = Timestamp::now();
     }
 

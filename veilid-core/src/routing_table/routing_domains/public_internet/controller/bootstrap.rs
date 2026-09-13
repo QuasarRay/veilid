@@ -45,7 +45,7 @@ impl PublicInternetRoutingDomainController {
             } else if Resolver::supports_txt() {
                 bootstrap_txt_names.push(bootstrap);
             } else {
-                // No TXT resolver here, so the bootstrap host answers B01T directly instead
+                // No TXT resolver here, so the bootstrap host is asked directly instead
                 for url in self.direct_bootstrap_urls(&bootstrap) {
                     match dial_info_converter.try_vec_from_url(&url).await {
                         Ok(bootstrap_di_vec) => bootstrap_dialinfos.extend(bootstrap_di_vec),
@@ -79,11 +79,22 @@ impl PublicInternetRoutingDomainController {
             }));
         }
         for bstn in bootstrap_txt_names {
-            // TXT bootstrap
+            // TXT bootstrap, then the host directly if the resolver gave nothing in
+            // time: a tethered phone's DNS relay answers A/AAAA but not TXT
             unord.push(pin_dyn_future!(async {
                 let bstn = bstn;
                 veilid_log!(self debug "TXT bootstrap with: {}", bstn);
-                pin_future!(network_manager.txt_bootstrap(bstn)).await
+                let txt_timeout = TimestampDuration::new_ms(BOOTSTRAP_TXT_TIMEOUT_MS.into());
+                match pin_future!(network_manager.txt_bootstrap(bstn.clone()))
+                    .timeout_duration(txt_timeout)
+                    .await
+                {
+                    Ok(Ok(peers)) if !peers.peers.is_empty() => Ok(peers),
+                    _ => {
+                        veilid_log!(self debug "TXT bootstrap gave nothing, trying direct bootstrap on: {}", bstn);
+                        self.direct_bootstrap_by_name(&bstn).await
+                    }
+                }
             }));
         }
 
@@ -211,6 +222,46 @@ impl PublicInternetRoutingDomainController {
         }
 
         Ok(())
+    }
+
+    /// Direct bootstrap from every address a bootstrap name resolves to, every
+    /// protocol at once, results merged
+    async fn direct_bootstrap_by_name(&self, hostname: &str) -> EyreResult<BootstrapPeers> {
+        let dial_info_converter = BootstrapDialInfoConverter::default();
+        let mut unord = FuturesUnordered::new();
+        for url in self.direct_bootstrap_urls(hostname) {
+            match dial_info_converter.try_vec_from_url(&url).await {
+                Ok(dial_infos) => {
+                    for dial_info in dial_infos {
+                        let registry = self.registry();
+                        unord.push(async move {
+                            let network_manager = registry.network_manager();
+                            let res =
+                                pin_future!(network_manager.direct_bootstrap(dial_info.clone()))
+                                    .await;
+                            (dial_info, res)
+                        });
+                    }
+                }
+                Err(e) => {
+                    veilid_log!(self debug "Could not resolve direct bootstrap {}: {}", url, e);
+                }
+            }
+        }
+        let mut out = BootstrapPeers::default();
+        while let Some((dial_info, res)) = unord.next().await {
+            match res {
+                Ok(peers) => {
+                    out.peers.extend(peers.peers);
+                    out.records.extend(peers.records);
+                    out.record_strings.extend(peers.record_strings);
+                }
+                Err(e) => {
+                    veilid_log!(self debug "Direct bootstrap {} failed: {}", dial_info, e);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Direct bootstrap urls for a TXT bootstrap name, one per enabled outbound protocol

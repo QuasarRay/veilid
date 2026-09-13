@@ -2,6 +2,7 @@ pub mod veilid_tools
 pub use veilid_tools::<<tokio_util::compat::*>>
 pub use veilid_tools::Arc
 pub use veilid_tools::AtomicBool
+pub use veilid_tools::AtomicU64
 pub use veilid_tools::AtomicUsize
 pub use veilid_tools::BTreeMap
 pub use veilid_tools::BTreeSet
@@ -822,6 +823,7 @@ pub trait veilid_tools::network_result::NetworkResultResultExt<T, E>
 pub fn veilid_tools::network_result::NetworkResultResultExt::into_result_network_result(self) -> core::result::Result<veilid_tools::NetworkResult<T>, E>
 impl<T, E> veilid_tools::NetworkResultResultExt<T, E> for veilid_tools::NetworkResult<core::result::Result<T, E>>
 pub fn veilid_tools::NetworkResult<core::result::Result<T, E>>::into_result_network_result(self) -> core::result::Result<veilid_tools::NetworkResult<T>, E>
+pub fn veilid_tools::network_result::is_connection_refused(&core::io::error::Error) -> bool
 pub mod veilid_tools::pin
 pub type veilid_tools::pin::PinBox<T> = core::pin::Pin<alloc::boxed::Box<T>>
 pub type veilid_tools::pin::PinBoxFuture<'a, T> = veilid_tools::PinBox<(dyn core::future::future::Future<Output = T> + core::marker::Send + 'a)>
@@ -2085,6 +2087,7 @@ pub fn veilid_tools::ipv6addr_is_unicast_site_local(&core::net::ip_addr::Ipv6Add
 pub fn veilid_tools::ipv6addr_is_unique_local(&core::net::ip_addr::Ipv6Addr) -> bool
 pub fn veilid_tools::ipv6addr_is_unspecified(&core::net::ip_addr::Ipv6Addr) -> bool
 pub fn veilid_tools::ipv6addr_multicast_scope(&core::net::ip_addr::Ipv6Addr) -> core::option::Option<veilid_tools::Ipv6MulticastScope>
+pub fn veilid_tools::is_connection_refused(&core::io::error::Error) -> bool
 pub fn veilid_tools::is_ipc_socket_path<P: core::convert::AsRef<std::path::Path>>(P) -> bool
 pub fn veilid_tools::is_ipv4_supported() -> bool
 pub fn veilid_tools::is_ipv6_supported() -> bool

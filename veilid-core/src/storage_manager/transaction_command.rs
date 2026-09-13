@@ -42,8 +42,10 @@ pub(in crate::storage_manager) enum TransactCommandDisposition {
     Valid,
     /// The node responded but the transaction is no longer valid
     Invalid,
-    /// The node was not waited for due to early consensus exit
+    /// The node did not answer within the RPC timeout
     Skipped,
+    /// Still in flight when the command returned; the answer is collected in the background
+    Pending,
 }
 
 /// The result of the outbound_transact_command operation
@@ -125,7 +127,6 @@ impl StorageManager {
                 command = ?params.command,
                 nodes = params.nodes.len(),
                 pre_authorized = params.pre_authorized_valid_count,
-                post_consensus_window_ms = tracing::field::Empty,
             ))
     )]
     pub(in crate::storage_manager) async fn outbound_transact_command(
@@ -179,7 +180,13 @@ impl StorageManager {
                 .ok_or_else(|| VeilidAPIError::internal("record does not exist in transaction"))?
         };
 
+        #[cfg(feature = "verbose-tracing")]
         let total_nodes = params.nodes.len();
+
+        #[cfg(feature = "stats")]
+        let cmd_start = Timestamp::now();
+        #[cfg(feature = "stats")]
+        let mut outcome = CommandOutcome::default();
 
         #[cfg(feature = "verbose-tracing")]
         let diag_start = {
@@ -193,306 +200,241 @@ impl StorageManager {
             Timestamp::now()
         };
 
-        // Retry unanswered nodes (with a new safety route each attempt) until
-        // consensus is reached or no progress is made.
         let mut per_node_results: Vec<OutboundTransactCommandPerNodeResult> = Vec::new();
         // Seed with auto-promoted nodes (e.g. Commit's no-op set); the fanout
         // can then trip consensus on fewer RPC responses.
         let mut valid_response_count = params.pre_authorized_valid_count;
-        let mut nodes_to_send = params.nodes.clone();
-        #[cfg(feature = "verbose-tracing")]
-        let mut attempt = 0usize;
+        let nodes_to_send = &params.nodes;
+        let mut pending_lnxids: HashSet<LocalNodeTransactionId> = HashSet::new();
 
-        loop {
-            if nodes_to_send.is_empty() {
-                break;
-            }
+        // Wait the full rpc timeout per node; consensus early-exit below ends the
+        // wait sooner, and a shorter bound drops in-flight answers under load
+        let rpc_timeout =
+            TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
 
-            #[cfg(feature = "verbose-tracing")]
-            {
-                attempt += 1;
-                if attempt > 1 {
-                    veilid_log!(self debug "TransactCmd retry: cmd={} key={}{} attempt={} retrying_nodes={} valid_so_far={}/{}",
+        // Best-effort cleanup (rollback, required==0): fire RPCs in the background so
+        // the records lock isn't held on a dead node's full timeout.
+        let fire_and_forget = params.required_strict_consensus_count == 0;
+        let mut unord = FuturesUnordered::new();
+        let mut in_flight: HashSet<LocalNodeTransactionId> =
+            nodes_to_send.iter().map(|n| n.lnxid).collect();
+
+        veilid_stats!(outcome.rpcs_sent += nodes_to_send.len() as u64);
+
+        for n in nodes_to_send {
+            let registry = self.registry();
+            let lnxid = n.lnxid;
+            let rnxid = n.rnxid.clone();
+            let node_ref = n.node_ref.clone();
+            let descriptor = descriptor.clone();
+            let params = params.clone();
+            #[cfg(feature = "instrument")]
+            let command = params.command;
+            let node_start = Timestamp::now();
+            let per_node_timeout = rpc_timeout;
+
+            let fut = async move {
+                let rpc_processor = registry.rpc_processor();
+
+                let result = rpc_processor
+                    .rpc_call_transact_command(
+                        Destination::direct(
+                            node_ref.routing_domain_filtered(routing_domain),
+                            Some(params.safety_selection.clone()),
+                        ),
+                        params.opaque_record_key.clone(),
+                        descriptor,
+                        rnxid.xid(),
                         params.command,
-                        params.opaque_record_key,
-                        if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
-                        attempt,
-                        nodes_to_send.len(),
-                        valid_response_count,
-                        params.required_strict_consensus_count,
-                    );
-                }
-            }
+                        params.opt_seqs.clone(),
+                        params.opt_subkey,
+                        params.opt_value.clone(),
+                    )
+                    .await
+                    .map_err(VeilidAPIError::from)?;
 
-            let prev_valid_count = valid_response_count;
-            #[cfg(feature = "verbose-tracing")]
-            let attempt_node_count = nodes_to_send.len();
+                let node_elapsed = Timestamp::now().duration_since(node_start);
 
-            // Wait the full rpc timeout per node; consensus early-exit below ends the
-            // wait sooner, and a shorter bound drops in-flight answers under load
-            let rpc_timeout =
-                TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
-
-            // Best-effort cleanup (rollback, required==0): fire RPCs in the background so
-            // the records lock isn't held on a dead node's full timeout.
-            let fire_and_forget = params.required_strict_consensus_count == 0;
-            let mut unord = FuturesUnordered::new();
-
-            for n in &nodes_to_send {
-                let registry = self.registry();
-                let lnxid = n.lnxid;
-                let rnxid = n.rnxid.clone();
-                let node_ref = n.node_ref.clone();
-                let descriptor = descriptor.clone();
-                let params = params.clone();
-                #[cfg(feature = "instrument")]
-                let command = params.command;
-                let node_start = Timestamp::now();
-                let per_node_timeout = rpc_timeout;
-
-                let fut = async move {
-                    let rpc_processor = registry.rpc_processor();
-
-                    let result = rpc_processor
-                        .rpc_call_transact_command(
-                            Destination::direct(
-                                node_ref.routing_domain_filtered(routing_domain),
-                                Some(params.safety_selection.clone()),
-                            ),
-                            params.opaque_record_key.clone(),
-                            descriptor,
-                            rnxid.xid(),
-                            params.command,
-                            params.opt_seqs.clone(),
-                            params.opt_subkey,
-                            params.opt_value.clone(),
-                        )
-                        .await
-                        .map_err(VeilidAPIError::from)?;
-
-                    let node_elapsed = Timestamp::now().duration_since(node_start);
-
-                    match result {
-                        NetworkResult::Timeout | NetworkResult::NoConnection(_) => {
-                            #[cfg(feature = "verbose-tracing")]
-                            {
-                                let dial_info_str = node_ref
-                                    .node_info(routing_domain)
-                                    .map(|ni| {
-                                        let dids = ni.dial_info_detail_list();
-                                        if dids.is_empty() {
-                                            "no_dialinfo".to_string()
-                                        } else {
-                                            dids.iter()
-                                                .map(|d| format!("{}", d))
-                                                .collect::<Vec<_>>()
-                                                .join(",")
-                                        }
-                                    })
-                                    .unwrap_or_else(|| "no_nodeinfo".to_string());
-                                let caps = node_ref
-                                    .node_info(routing_domain)
-                                    .map(|ni| format!("{:?}", ni.capabilities()))
-                                    .unwrap_or_default();
-                                veilid_log!(registry debug "TransactCmd node NO_RESPONSE: cmd={} key={}{} node={} elapsed={} dial_info=[{}] caps={}",
-                                    params.command, params.opaque_record_key,
-                                    if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
-                                    node_ref, node_elapsed,
-                                    dial_info_str, caps);
-                            }
-                            VeilidAPIResult::Ok(None)
+                match result {
+                    NetworkResult::Timeout | NetworkResult::NoConnection(_) => {
+                        #[cfg(feature = "verbose-tracing")]
+                        {
+                            let dial_info_str = node_ref
+                                .node_info(routing_domain)
+                                .map(|ni| {
+                                    let dids = ni.dial_info_detail_list();
+                                    if dids.is_empty() {
+                                        "no_dialinfo".to_string()
+                                    } else {
+                                        dids.iter()
+                                            .map(|d| format!("{}", d))
+                                            .collect::<Vec<_>>()
+                                            .join(",")
+                                    }
+                                })
+                                .unwrap_or_else(|| "no_nodeinfo".to_string());
+                            let caps = node_ref
+                                .node_info(routing_domain)
+                                .map(|ni| format!("{:?}", ni.capabilities()))
+                                .unwrap_or_default();
+                            veilid_log!(registry debug "TransactCmd node NO_RESPONSE: cmd={} key={}{} node={} elapsed={} dial_info=[{}] caps={}",
+                                params.command, params.opaque_record_key,
+                                if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
+                                node_ref, node_elapsed,
+                                dial_info_str, caps);
                         }
-                        NetworkResult::ServiceUnavailable(_)
-                        | NetworkResult::AlreadyExists(_)
-                        | NetworkResult::InvalidMessage(_) => {
+                        VeilidAPIResult::Ok(None)
+                    }
+                    NetworkResult::ServiceUnavailable(_)
+                    | NetworkResult::AlreadyExists(_)
+                    | NetworkResult::InvalidMessage(_) => {
+                        #[cfg(feature = "verbose-tracing")]
+                        veilid_log!(registry debug "TransactCmd node result: cmd={} key={}{} node={} result=SERVICE_ERROR elapsed={}",
+                            params.command, params.opaque_record_key,
+                            if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
+                            node_ref, node_elapsed,
+                        );
+                        Ok(None)
+                    }
+                    NetworkResult::Value(tva) => {
+                        let disposition = if tva.answer.transaction_valid {
                             #[cfg(feature = "verbose-tracing")]
-                            veilid_log!(registry debug "TransactCmd node result: cmd={} key={}{} node={} result=SERVICE_ERROR elapsed={}",
+                            veilid_log!(registry debug "TransactCmd node result: cmd={} key={}{} node={} result=VALID elapsed={}",
                                 params.command, params.opaque_record_key,
                                 if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
                                 node_ref, node_elapsed,
                             );
-                            Ok(None)
-                        }
-                        NetworkResult::Value(tva) => {
-                            let disposition = if tva.answer.transaction_valid {
-                                #[cfg(feature = "verbose-tracing")]
-                                veilid_log!(registry debug "TransactCmd node result: cmd={} key={}{} node={} result=VALID elapsed={}",
-                                    params.command, params.opaque_record_key,
-                                    if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
-                                    node_ref, node_elapsed,
-                                );
-                                TransactCommandDisposition::Valid
-                            } else {
-                                #[cfg(feature = "verbose-tracing")]
-                                veilid_log!(registry debug "TransactCmd node INVALID (no longer valid): cmd={} key={}{} node={} elapsed={}",
-                                    params.command, params.opaque_record_key,
-                                    if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
-                                    node_ref, node_elapsed,
-                                );
-                                TransactCommandDisposition::Invalid
-                            };
+                            TransactCommandDisposition::Valid
+                        } else {
+                            #[cfg(feature = "verbose-tracing")]
+                            veilid_log!(registry debug "TransactCmd node INVALID (no longer valid): cmd={} key={}{} node={} elapsed={}",
+                                params.command, params.opaque_record_key,
+                                if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
+                                node_ref, node_elapsed,
+                            );
+                            TransactCommandDisposition::Invalid
+                        };
 
-                            // Only record RTT for Valid responses — Invalid means
-                            // the server rejected the transaction, which can be a
-                            // fast/cheap response that doesn't reflect real RTT.
-                            let opt_rtt = matches!(disposition, TransactCommandDisposition::Valid)
-                                .then_some(node_elapsed);
+                        // Only record RTT for Valid responses — Invalid means
+                        // the server rejected the transaction, which can be a
+                        // fast/cheap response that doesn't reflect real RTT.
+                        let opt_rtt = matches!(disposition, TransactCommandDisposition::Valid)
+                            .then_some(node_elapsed);
 
-                            Ok(Some(OutboundTransactCommandPerNodeResult {
-                                lnxid,
-                                rnxid,
-                                disposition,
-                                opt_seqs: tva.answer.opt_seqs,
-                                opt_subkey: tva.answer.opt_subkey,
-                                opt_value: tva.answer.opt_value,
-                                opt_expiration: tva.answer.opt_expiration,
-                                opt_rtt,
-                            }))
-                        }
+                        Ok(Some(OutboundTransactCommandPerNodeResult {
+                            lnxid,
+                            rnxid,
+                            disposition,
+                            opt_seqs: tva.answer.opt_seqs,
+                            opt_subkey: tva.answer.opt_subkey,
+                            opt_value: tva.answer.opt_value,
+                            opt_expiration: tva.answer.opt_expiration,
+                            opt_rtt,
+                        }))
                     }
-                };
-                #[cfg(feature = "instrument")]
-                let fut = fut.instrument(tracing::trace_span!(
-                    target: "dht",
-                    "outbound_transact_command per-node",
-                    command = ?command,
-                ));
-                // RTT-bounded per-node wait; timeout reports no-response (retry-eligible).
-                let fut = async move {
-                    match Box::pin(fut.timeout_duration(per_node_timeout)).await {
-                        Ok(inner) => inner,
-                        Err(_) => VeilidAPIResult::Ok(None),
-                    }
-                };
-                if fire_and_forget {
-                    self.background_operation_processor.add_future(async move {
-                        let _ = fut.await;
-                    });
-                } else {
-                    unord.push(Box::pin(fut));
                 }
-            }
+            };
+            #[cfg(feature = "instrument")]
+            let fut = fut.instrument(tracing::trace_span!(
+                target: "dht",
+                "outbound_transact_command per-node",
+                command = ?command,
+            ));
+            // Bounded per-node wait; a timeout reports no response
+            let fut = async move {
+                let res = match Box::pin(fut.timeout_duration(per_node_timeout)).await {
+                    Ok(inner) => inner,
+                    Err(_) => VeilidAPIResult::Ok(None),
+                };
+                (lnxid, res)
+            };
             if fire_and_forget {
-                // RPCs fired in the background; no consensus to await.
-                break;
+                self.background_operation_processor.add_future(async move {
+                    let _ = fut.await;
+                });
+            } else {
+                unord.push(Box::pin(fut));
             }
+        }
+        if fire_and_forget {
+            // RPCs fired in the background; no consensus to await
+            return Ok(self.finish_transact_command(
+                params,
+                per_node_results,
+                pending_lnxids,
+                #[cfg(feature = "stats")]
+                outcome,
+                #[cfg(feature = "stats")]
+                cmd_start,
+                valid_response_count,
+            ));
+        }
 
-            // Collect results. Once consensus is reached, keep collecting up to
-            // a per-node-RTT-bounded post-consensus deadline; anything still in
-            // flight at deadline is detached so rpc_processor sees natural
-            // per-RPC completion (no abandoned-wait stigma on slow nodes).
+        // Collect answers until consensus; stragglers settle in the background
+        #[cfg(feature = "verbose-tracing")]
+        let mut responded_xids = HashSet::new();
+
+        while let Some((lnxid, result)) = unord.next().await {
+            in_flight.remove(&lnxid);
+            let opt_pnr = result.inspect_err(|e| {
+                veilid_log!(self error target:"network_result",
+                    "Error performing transaction command: {}", e);
+            })?;
+
+            let Some(pnr) = opt_pnr else {
+                // No answer within the wait
+                veilid_stats!(outcome.no_response += 1);
+                continue;
+            };
+
+            if pnr.disposition == TransactCommandDisposition::Valid {
+                valid_response_count += 1;
+                veilid_stats!(outcome.answered_valid += 1);
+            } else {
+                veilid_stats!(outcome.answered_invalid += 1);
+            }
             #[cfg(feature = "verbose-tracing")]
-            let attempt_node_count_diag = attempt_node_count;
-            let mut attempt_responded_xids = HashSet::new();
-            let mut consensus_reached = false;
-            let mut post_consensus_deadline: Option<Timestamp> = None;
-            let rpc_timeout_us = ms_to_us(self.config().internal().network.rpc.timeout_ms);
+            responded_xids.insert(pnr.lnxid);
+            per_node_results.push(pnr);
 
-            loop {
-                let result = match post_consensus_deadline {
-                    Some(deadline) => {
-                        let now = Timestamp::now_non_decreasing();
-                        if now >= deadline {
-                            break;
-                        }
-                        let remaining = deadline
-                            .duration_since(now)
-                            .max(TimestampDuration::new_ms(1));
-                        match unord.next().timeout_duration(remaining).await {
-                            Ok(Some(x)) => x,
-                            Ok(None) => break,
-                            Err(_) => break,
-                        }
-                    }
-                    None => match unord.next().await {
-                        Some(x) => x,
-                        None => break,
-                    },
-                };
-
-                let opt_pnr = result.inspect_err(|e| {
-                    veilid_log!(self error target:"network_result",
-                        "Error performing transaction command: {}", e);
-                })?;
-
-                let Some(pnr) = opt_pnr else {
-                    // None (timeout/no-response): excluded from responded set, eligible for retry.
-                    continue;
-                };
-
-                if pnr.disposition == TransactCommandDisposition::Valid {
-                    valid_response_count += 1;
-                }
-                attempt_responded_xids.insert(pnr.lnxid);
-                per_node_results.push(pnr);
-
-                // Arm the post-consensus deadline once, at first consensus
-                // - bound: max of the fastest required_strict_consensus_count Valid RTTs
-                // - capped by POST_CONSENSUS_GRACE_MS, for the answer wave trailing
-                //   consensus rather than dead stragglers
-                if !consensus_reached
-                    && valid_response_count >= params.required_strict_consensus_count
-                {
-                    consensus_reached = true;
-                    let mut valid_rtts_us: Vec<u64> = per_node_results
-                        .iter()
-                        .filter(|pnr| pnr.disposition == TransactCommandDisposition::Valid)
-                        .filter_map(|pnr| pnr.opt_rtt.map(|rtt| rtt.as_u64()))
-                        .collect();
-                    valid_rtts_us.sort_unstable();
-                    let take = params
-                        .required_strict_consensus_count
-                        .min(valid_rtts_us.len());
-                    let max_bound_us: u64 = valid_rtts_us
-                        .into_iter()
-                        .take(take)
-                        .max()
-                        .unwrap_or(0)
-                        .saturating_mul(POST_CONSENSUS_RTT_FACTOR)
-                        .min(rpc_timeout_us)
-                        .min(ms_to_us(POST_CONSENSUS_GRACE_MS as u32));
-                    let now = Timestamp::now_non_decreasing();
-                    post_consensus_deadline =
-                        Some(Timestamp::new(now.as_u64().saturating_add(max_bound_us)));
-                    #[cfg(feature = "instrument")]
-                    tracing::Span::current()
-                        .record("post_consensus_window_ms", max_bound_us / 1000);
-                    #[cfg(feature = "verbose-tracing")]
-                    {
-                        let responded = attempt_responded_xids.len();
-                        veilid_log!(self debug "TransactCmd consensus reached: cmd={} key={}{} valid={}/{} responded={}/{} post_consensus_window_ms={}",
-                            params.command,
-                            params.opaque_record_key,
-                            if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
-                            valid_response_count,
-                            params.required_strict_consensus_count,
-                            responded,
-                            attempt_node_count_diag,
-                            max_bound_us / 1000,
-                        );
-                    }
-                }
+            if valid_response_count >= params.required_strict_consensus_count {
+                #[cfg(feature = "verbose-tracing")]
+                veilid_log!(self debug "TransactCmd consensus reached: cmd={} key={}{} valid={}/{} responded={}/{}",
+                    params.command,
+                    params.opaque_record_key,
+                    if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
+                    valid_response_count,
+                    params.required_strict_consensus_count,
+                    responded_xids.len(),
+                    total_nodes,
+                );
+                break;
             }
+        }
 
-            // Pending futures (deadline expired) are dropped here. The RPC
-            // questions inside are protected by `RPCProcessor`'s race-completion
-            // pool, so the answers still arrive and complete naturally.
+        veilid_stats!({
+            let n = unord.len() as u64;
+            outcome.abandoned_in_flight += n;
+            if n > 0 {
+                outcome.post_consensus_window_expired = true;
+            }
+        });
+        // In-flight Set answers still settle into node state; other commands drop
+        // theirs, and the reply pool completes the question either way
+        if params.command == TransactCommand::Set && !unord.is_empty() {
+            pending_lnxids.extend(in_flight.drain());
+            let registry = self.registry();
+            let subkey = params.opt_subkey.unwrap_or_log();
+            let value = params.opt_value.clone().unwrap_or_log();
+            self.background_operation_processor.add_future(async move {
+                while let Some((lnxid, res)) = unord.next().await {
+                    registry
+                        .storage_manager()
+                        .record_late_transact_set_result(lnxid, subkey, &value, res);
+                }
+            });
+        } else {
             drop(unord);
-
-            // If consensus reached, we're done — don't retry.
-            if consensus_reached {
-                break;
-            }
-
-            // Check if progress was made this attempt
-            if valid_response_count <= prev_valid_count {
-                // No new valid responses — stop retrying
-                break;
-            }
-
-            // Progress was made but consensus not yet reached.
-            // Identify non-responding nodes from this attempt for retry.
-            nodes_to_send.retain(|n| !attempt_responded_xids.contains(&n.lnxid));
         }
 
         // Log summary
@@ -505,7 +447,7 @@ impl StorageManager {
             let responded_count = per_node_results.len();
             let no_response_count = total_nodes.saturating_sub(responded_count);
             let diag_elapsed = Timestamp::now().duration_since(diag_start);
-            veilid_log!(self debug "TransactCmd done: cmd={} key={}{} valid={} invalid={} no_response={} skipped={} total={} required={} elapsed={} attempts={} result={}",
+            veilid_log!(self debug "TransactCmd done: cmd={} key={}{} valid={} invalid={} no_response={} skipped={} total={} required={} elapsed={} result={}",
                 params.command,
                 params.opaque_record_key,
                 if let Some(subkey) = params.opt_subkey { format!(" #{}", subkey) } else { "".to_string() },
@@ -516,22 +458,58 @@ impl StorageManager {
                 total_nodes,
                 params.required_strict_consensus_count,
                 diag_elapsed,
-                attempt,
                 if valid_response_count >= params.required_strict_consensus_count { "CONSENSUS" } else { "FAILED" },
             );
         }
 
-        // Add Skipped entries for nodes that never responded across all attempts
+        Ok(self.finish_transact_command(
+            params,
+            per_node_results,
+            pending_lnxids,
+            #[cfg(feature = "stats")]
+            outcome,
+            #[cfg(feature = "stats")]
+            cmd_start,
+            valid_response_count,
+        ))
+    }
+
+    /// Record the command's outcome and fill in the nodes that never answered:
+    /// Pending if their answer is still being collected, Skipped if the wait ran out
+    fn finish_transact_command(
+        &self,
+        params: Arc<OutboundTransactCommandParams>,
+        mut per_node_results: Vec<OutboundTransactCommandPerNodeResult>,
+        pending_lnxids: HashSet<LocalNodeTransactionId>,
+        #[cfg(feature = "stats")] mut outcome: CommandOutcome,
+        #[cfg(feature = "stats")] cmd_start: Timestamp,
+        valid_response_count: usize,
+    ) -> OutboundTransactCommandResult {
+        #[cfg(not(feature = "stats"))]
+        let _ = valid_response_count;
+        veilid_stats!({
+            outcome.short_of_required = params.required_strict_consensus_count > 0
+                && valid_response_count < params.required_strict_consensus_count;
+            outcome.duration = Timestamp::now().duration_since(cmd_start);
+            self.transaction_quality()
+                .lock()
+                .record_command(params.command.into(), outcome);
+        });
+
         let responded_lnxids: HashSet<_> = per_node_results.iter().map(|pnr| pnr.lnxid).collect();
-        if responded_lnxids.len() < total_nodes {
-            let skipped: Vec<_> = params
+        if responded_lnxids.len() < params.nodes.len() {
+            let unanswered: Vec<_> = params
                 .nodes
                 .iter()
                 .filter(|n| !responded_lnxids.contains(&n.lnxid))
                 .map(|n| OutboundTransactCommandPerNodeResult {
                     lnxid: n.lnxid,
                     rnxid: n.rnxid.clone(),
-                    disposition: TransactCommandDisposition::Skipped,
+                    disposition: if pending_lnxids.contains(&n.lnxid) {
+                        TransactCommandDisposition::Pending
+                    } else {
+                        TransactCommandDisposition::Skipped
+                    },
                     opt_seqs: None,
                     opt_subkey: None,
                     opt_value: None,
@@ -539,7 +517,7 @@ impl StorageManager {
                     opt_rtt: None,
                 })
                 .collect();
-            per_node_results.extend(skipped);
+            per_node_results.extend(unanswered);
         }
 
         // Sort per node results by distance from record to assist with strict consensus checking
@@ -556,10 +534,31 @@ impl StorageManager {
             dist_a.cmp(&dist_b)
         });
 
-        Ok(OutboundTransactCommandResult {
+        OutboundTransactCommandResult {
             params,
             per_node_results,
-        })
+        }
+    }
+
+    /// A Set answer that arrived after its command returned
+    fn record_late_transact_set_result(
+        &self,
+        lnxid: LocalNodeTransactionId,
+        subkey: ValueSubkey,
+        value: &Arc<SignedValueData>,
+        res: VeilidAPIResult<Option<OutboundTransactCommandPerNodeResult>>,
+    ) {
+        let opt_pnr = match res {
+            Ok(opt_pnr) => opt_pnr,
+            Err(e) => {
+                veilid_log!(self debug "late transaction set answer failed: {}", e);
+                None
+            }
+        };
+        let mut inner = self.inner.lock();
+        inner
+            .outbound_transaction_manager
+            .record_late_transact_set_result(lnxid, subkey, value, opt_pnr);
     }
 
     ////////////////////////////////////////////////////////////////////////

@@ -6,7 +6,17 @@
 FLUTTER_SDK_DIR="${FLUTTER_SDK_DIR:-$HOME/.local/share/veilid-flutter}"
 
 # flutter --version -> "Flutter 3.47.1 • channel stable • ..."; empty when flutter isn't installed.
-flutter_ver() { command -v flutter >/dev/null 2>&1 && flutter --version 2>/dev/null | head -1; }
+# The tool's first run in a fresh container prints only its spinner and update banner and no
+# version line, so ask twice
+flutter_ver() {
+    command -v flutter >/dev/null 2>&1 || return 0
+    local v
+    for _ in 1 2; do
+        v="$(flutter --version 2>/dev/null | grep -m1 '^Flutter ')"
+        [ -n "$v" ] && break
+    done
+    echo "$v"
+}
 
 # Put the flutter bin on this session's PATH + persist it to the user's shell rc (idempotent).
 _flutter_persist_path() {

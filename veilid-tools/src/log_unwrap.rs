@@ -223,7 +223,7 @@ fn failed_with(msg: &str, value: &dyn fmt::Debug) -> ! {
             location.line(),
             location.column(),
             msg,
-            &value
+            value
         );
     }
 
@@ -252,7 +252,7 @@ fn discarded_with(msg: &str, value: &dyn fmt::Debug) {
             location.line(),
             location.column(),
             msg,
-            &value
+            value
         );
     }
 

@@ -8,7 +8,7 @@ self.onmessage = async (e: MessageEvent) => {
   const step = (s: string) => self.postMessage({ type: 'progress', step: s });
   try {
     const { runSuites } = await import('../harness/run-suites.js');
-    const results = await runSuites(e.data.suites, 'dedicated', step);
+    const results = await runSuites(e.data.suites, 'dedicated', step, e.data.caseFilter);
     self.postMessage({ type: 'done', ok: true, results });
   } catch (err) {
     self.postMessage({ type: 'done', ok: false, error: String(err) });

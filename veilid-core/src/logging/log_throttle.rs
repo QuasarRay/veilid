@@ -9,7 +9,6 @@
 //! Used through the `throttle:` option on `veilid_log!` rather than directly.
 
 use super::*;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Per-call-site emission gate: lets one event through per interval and counts what it drops.
 ///

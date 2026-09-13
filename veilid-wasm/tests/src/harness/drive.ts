@@ -11,20 +11,21 @@ const RUN_TIMEOUT_MS = 50 * 60 * 1000;
 export async function driveContext(
   context: ContextName,
   suites: string[],
+  caseFilter?: string,
 ): Promise<CaseResult[]> {
   switch (context) {
     case 'window': {
       const { runSuites } = await import('./run-suites.js');
-      return runSuites(suites, context, (s) => console.log(`[window] ${s}`));
+      return runSuites(suites, context, (s) => console.log(`[window] ${s}`), caseFilter);
     }
     case 'dedicated':
-      return driveWorker(context, suites);
+      return driveWorker(context, suites, caseFilter);
     case 'shared':
-      return driveSharedWorker(context, suites);
+      return driveSharedWorker(context, suites, caseFilter);
     case 'service':
-      return driveServiceWorker(context, suites);
+      return driveServiceWorker(context, suites, caseFilter);
     case 'extension':
-      return driveExtension(context, suites);
+      return driveExtension(context, suites, caseFilter);
   }
 }
 
@@ -36,6 +37,7 @@ function collect(
   onMessage: (handler: (data: any) => void) => void,
   onError: (handler: (message: string) => void) => void,
   suites: string[],
+  caseFilter?: string,
 ): Promise<CaseResult[]> {
   return new Promise((resolve, reject) => {
     let lastStep = 'startup';
@@ -63,11 +65,15 @@ function collect(
       reject(new Error(`${context} error: ${message} (last step: ${lastStep})`));
     });
 
-    post({ type: 'run', suites });
+    post({ type: 'run', suites, caseFilter });
   });
 }
 
-function driveWorker(context: ContextName, suites: string[]): Promise<CaseResult[]> {
+function driveWorker(
+  context: ContextName,
+  suites: string[],
+  caseFilter?: string,
+): Promise<CaseResult[]> {
   const worker = new Worker(new URL('../workers/dedicated.worker.ts', import.meta.url), {
     type: 'module',
   });
@@ -80,10 +86,15 @@ function driveWorker(context: ContextName, suites: string[]): Promise<CaseResult
       worker.onmessageerror = () => h('message deserialization error');
     },
     suites,
+    caseFilter,
   ).finally(() => worker.terminate());
 }
 
-function driveSharedWorker(context: ContextName, suites: string[]): Promise<CaseResult[]> {
+function driveSharedWorker(
+  context: ContextName,
+  suites: string[],
+  caseFilter?: string,
+): Promise<CaseResult[]> {
   const worker = new SharedWorker(
     new URL('../workers/shared.worker.ts', import.meta.url),
     { type: 'module' },
@@ -95,12 +106,14 @@ function driveSharedWorker(context: ContextName, suites: string[]): Promise<Case
     (h) => (worker.port.onmessage = (e) => h(e.data)),
     (h) => (worker.onerror = (e) => h(e.message)),
     suites,
+    caseFilter,
   );
 }
 
 async function driveServiceWorker(
   context: ContextName,
   suites: string[],
+  caseFilter?: string,
 ): Promise<CaseResult[]> {
   // Pre-bundled by `npm run build:sw`; vite's dev-server module output cannot start in a SW.
   const reg = await navigator.serviceWorker.register('/service-worker.js', {
@@ -121,6 +134,7 @@ async function driveServiceWorker(
       (h) => (channel.port1.onmessage = (e) => h(e.data)),
       () => {},
       suites,
+      caseFilter,
     );
   } finally {
     // A busy worker can leave unregister() pending; never block teardown on it.
@@ -167,6 +181,7 @@ async function waitUntilServiceWorkerResponds(sw: ServiceWorker, timeoutMs = 600
 async function driveExtension(
   _context: ContextName,
   suites: string[],
+  caseFilter?: string,
 ): Promise<CaseResult[]> {
   if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
     throw new Error(
@@ -209,7 +224,7 @@ async function driveExtension(
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  const result = await send({ type: 'run', suites }, RUN_TIMEOUT_MS);
+  const result = await send({ type: 'run', suites, caseFilter }, RUN_TIMEOUT_MS);
   if (!result?.ok) {
     throw new Error(result?.error ?? 'extension run failed');
   }

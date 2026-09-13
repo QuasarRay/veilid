@@ -46,6 +46,12 @@ pub(super) struct NodeTransaction {
     /// Per-subkey seqs this node reported in its Begin answer
     #[serde(default)]
     begin_seqs: Vec<ValueSeqNum>,
+    /// Subkeys this node answered a Set for, whether it took the value or held a newer one
+    #[serde(default)]
+    confirmed_subkeys: BTreeSet<ValueSubkey>,
+    /// Set questions still in flight to this node; never survive a restart
+    #[serde(skip)]
+    outstanding_sets: u32,
 }
 
 impl VeilidComponentRegistryAccessor for NodeTransaction {
@@ -76,6 +82,8 @@ impl NodeTransaction {
             updated_values: Default::default(),
             opt_last_rtt: opt_initial_rtt,
             begin_seqs,
+            confirmed_subkeys: BTreeSet::new(),
+            outstanding_sets: 0,
         }
     }
 
@@ -172,6 +180,47 @@ impl NodeTransaction {
     /// Record the most recent RTT measured for this node after a successful RPC.
     pub(super) fn record_rtt(&mut self, rtt: TimestampDuration) {
         self.opt_last_rtt = Some(rtt);
+    }
+
+    pub(super) fn confirm_subkey(&mut self, subkey: ValueSubkey) {
+        self.confirmed_subkeys.insert(subkey);
+    }
+
+    pub fn confirmed_subkeys(&self) -> &BTreeSet<ValueSubkey> {
+        &self.confirmed_subkeys
+    }
+
+    pub fn outstanding_sets(&self) -> u32 {
+        self.outstanding_sets
+    }
+
+    pub(super) fn add_outstanding_set(&mut self) {
+        self.outstanding_sets += 1;
+    }
+
+    pub(super) fn finish_outstanding_set(&mut self) {
+        self.outstanding_sets = self.outstanding_sets.saturating_sub(1);
+    }
+
+    /// A Set answer settles this node's view of the subkey: the value landed, or the
+    /// node holds a newer one that the commit will keep
+    pub(super) fn record_set_answer(
+        &mut self,
+        subkey: ValueSubkey,
+        value: &Arc<SignedValueData>,
+        pnr: OutboundTransactCommandPerNodeResult,
+    ) {
+        self.update_expiration(pnr.opt_expiration);
+        if let Some(rtt) = pnr.opt_rtt {
+            self.record_rtt(rtt);
+        }
+        self.confirm_subkey(subkey);
+        if let Some(newer) = pnr.opt_value {
+            self.record_current_subkey_value(subkey, Some(newer));
+            self.record_updated_subkey_value(subkey, None);
+        } else {
+            self.record_updated_subkey_value(subkey, Some(value.clone()));
+        }
     }
 
     pub fn commit_will_change_remote(&self) -> bool {

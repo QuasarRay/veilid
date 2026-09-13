@@ -71,6 +71,10 @@ pub(crate) trait VeilidComponent:
 {
     fn name(&self) -> &'static str;
     fn log_facilities(&self) -> VeilidComponentLogFacilities;
+    /// Zero the component's cumulative stats counters, if it keeps any.
+    #[cfg(feature = "stats")]
+    fn reset_stats(&self) {}
+
     /// A JSON-serializable stats snapshot, or None if the component has no stats.
     #[cfg(feature = "stats")]
     fn stats(&self) -> Option<Box<dyn VeilidComponentStats>> {
@@ -419,6 +423,14 @@ impl VeilidComponentRegistry {
         serde_json::Value::Object(map)
     }
 
+    // Zero every component's cumulative counters; the registry lock is dropped first
+    #[cfg(feature = "stats")]
+    pub(crate) fn reset_component_stats(&self) {
+        for component in self.get_init_order() {
+            component.reset_stats();
+        }
+    }
+
     //////////////////////////////////////////////////////////////
 
     pub fn lookup<'a, T: VeilidComponent + Send + Sync + 'static>(
@@ -524,6 +536,18 @@ macro_rules! impl_veilid_component {
             #[cfg(feature = "stats")]
             fn stats(&self) -> Option<Box<dyn VeilidComponentStats>> {
                 <$component_name>::stats_impl(self)
+            }
+        );
+    };
+    ($component_name:ty, stats, reset) => {
+        impl_veilid_component!(@inner $component_name,
+            #[cfg(feature = "stats")]
+            fn stats(&self) -> Option<Box<dyn VeilidComponentStats>> {
+                <$component_name>::stats_impl(self)
+            }
+            #[cfg(feature = "stats")]
+            fn reset_stats(&self) {
+                <$component_name>::reset_stats_impl(self)
             }
         );
     };

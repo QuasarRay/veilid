@@ -218,27 +218,19 @@ pub(crate) trait NodeRefCommonTrait:
         })
     }
 
-    /// Get the most recent 'last connection' flow whose remote matches the given address.
-    /// Prefers an exact (IP, port) match. Falls back to any flow with the same remote IP,
-    /// which covers incoming connections from a peer (ephemeral source port) where exact
-    /// port match would miss. Relay-mediated flows have a different remote IP and don't match.
-    #[expect(dead_code)]
+    /// The most recent live flow whose remote is exactly the given address. Veilid nodes bind
+    /// their outbound source port, so one connection exists between two nodes and its remote
+    /// is the dial info; a flow relayed in from elsewhere has a different remote and never matches.
     fn last_flow_to(&self, remote: SocketAddress) -> Option<Flow> {
         self.operate(|e| {
             let routing_table = self.routing_table();
             let sequencing = self.sequencing();
             let filter = self.filter();
             let (_ordering, filter) = filter.apply_sequencing(sequencing);
-            let mut last_flows = e.last_flows(&routing_table, true, filter);
-            last_flows.retain(|(flow, _)| flow.remote_address().address() == remote.address());
-            // Prefer exact port match
-            if let Some(exact) = last_flows
-                .iter()
+            e.last_flows(&routing_table, true, filter)
+                .into_iter()
                 .find(|(flow, _)| flow.remote_address() == &remote)
-            {
-                return Some(exact.0);
-            }
-            last_flows.first().map(|x| x.0)
+                .map(|x| x.0)
         })
     }
 

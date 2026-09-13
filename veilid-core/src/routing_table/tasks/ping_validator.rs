@@ -756,7 +756,7 @@ impl RoutingTable {
     /// Completion callback for a per-ordering route loopback ping. On Sent we record a
     /// per-ordering pass on the route (drives last_known_valid_ts / clears failures). On Failed
     /// we record a per-ordering failure on the route (drives the ordering, and eventually the
-    /// route, to dead) and attribute failure to the transport actually used at the first hop.
+    /// route, to dead); a single-hop route also charges that hop on the transport we used.
     /// NotSent is treated as a non-network failure and left for next cycle.
     fn make_loopback_probe_callback(
         route_id: RouteId,
@@ -776,10 +776,15 @@ impl RoutingTable {
                         veilid_log!(registry debug target: "rtab::stats", "Route loopback rtt: route={:#} ord={:#} rtt={:#} hops={}", route_key, ordering, status_answer.answer.answer_context.latency, hops.len());
 
                         let cur_ts = Timestamp::now();
+                        let mut tally = RouteLoopbackTally::default();
                         rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
-                            s.record_loopback_result(ordering, true, cur_ts);
+                            tally = s.record_loopback_result(ordering, true, cur_ts);
                             Ok(())
                         });
+                        rss.record_route_test_summary(ordering, true);
+                        if tally.streak > 0 {
+                            veilid_log!(registry debug "Route loopback recovered: {:#} ord={:#} after {} failures pass/fail={}/{}", route_id, ordering, tally.streak, tally.pass, tally.fail);
+                        }
                         return Vec::new();
                     }
                     Ok(StatusResult::Failed(sdr)) => sdr,
@@ -830,20 +835,29 @@ impl RoutingTable {
                 // Record a per-ordering failure on the route so repeated loopback failures
                 // drive this ordering (and eventually the route) to dead and release.
                 let cur_ts = Timestamp::now();
+                let mut tally = RouteLoopbackTally::default();
                 rss.update_allocated_route_stats(cur_ts, &route_key, |s| {
-                    s.record_loopback_result(ordering, false, cur_ts);
+                    tally = s.record_loopback_result(ordering, false, cur_ts);
                     Ok(())
                 });
+                rss.record_route_test_summary(ordering, false);
                 // If this failure leaves the route dead for all orderings, mark it for release
                 // now (sticky) so it gets released once its refcount drains.
                 rss.mark_allocated_route_for_release_if_dead(&route_key);
 
+                let hop_ids = hops
+                    .iter()
+                    .map(|h| h.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
                 let Some(transport) = opt_transport else {
-                    veilid_log!(registry debug "Route loopback FAILED with no transport recorded: {:#} ({:#})", route_id, ordering);
+                    veilid_log!(registry debug "Route loopback FAILED with no transport recorded: {:#} ord={:#} fails={} pass/fail={}/{} hops=[{}]", route_id, ordering, tally.streak, tally.pass, tally.fail, hop_ids);
                     return Vec::new();
                 };
-                veilid_log!(registry debug "Route loopback FAILED: {:#} ({:#} via {:#})", route_id, ordering, transport);
-                for hop in &hops {
+                // first_hop is only our leg's transport; the ordering is what the hops forward with
+                veilid_log!(registry debug "Route loopback FAILED: {:#} ord={:#} first_hop={:#} fails={} pass/fail={}/{} hops=[{}]", route_id, ordering, transport, tally.streak, tally.pass, tally.fail, hop_ids);
+                // A multi-hop failure cannot isolate a hop; only a single hop's legs are ours
+                if let [hop] = hops.as_slice() {
                     hop.report_failed_route_test(transport);
                 }
 

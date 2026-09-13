@@ -542,8 +542,8 @@ impl RPCProcessor {
                     }
                 };
 
-                // Get the filtered noderef of the sender
-                let sender_noderef = detail.sender_noderef.clone();
+                // Answers go back over the flow the question arrived on
+                let sender_noderef = detail.sender_noderef.with_reply_flow(detail.flow);
                 NetworkResult::value(Destination::direct(sender_noderef, None))
             }
             RespondTo::PrivateRoute(pr) => {

@@ -29,10 +29,94 @@ pub(in crate::storage_manager) struct OutboundTransactionRecordStageConsensus {
 }
 
 /// Which node transaction ids at what stage
-type StageConsensusMap = HashMap<OutboundTransactionStage, BTreeSet<LocalNodeTransactionId>>;
+pub(in crate::storage_manager) type StageConsensusMap =
+    HashMap<OutboundTransactionStage, BTreeSet<LocalNodeTransactionId>>;
+
+/// The one stage at least `required` node transactions share. Failed marks a missing answer, not
+/// a stage a node reached, so it never competes; two live stages meeting the bar, or none, is Failed
+pub(in crate::storage_manager) fn record_consensus_stage(
+    stage_consensus_map: &StageConsensusMap,
+    required: usize,
+) -> OutboundTransactionStage {
+    let mut opt_best_stage = None;
+    for (st, stn) in stage_consensus_map.iter() {
+        if *st == OutboundTransactionStage::Failed || stn.len() < required {
+            continue;
+        }
+        if opt_best_stage.is_some() {
+            return OutboundTransactionStage::Failed;
+        }
+        opt_best_stage = Some(*st);
+    }
+    opt_best_stage.unwrap_or(OutboundTransactionStage::Failed)
+}
 
 /// Filter for get_transact_command_nodes
 type GetTransactCommandNodesFilter<'a> = Box<dyn Fn(&'a NodeTransaction) -> bool + 'a>;
+
+/// Minimum over desired subkeys of the number of nodes confirming it, or None
+/// when nothing was desired
+pub(in crate::storage_manager) fn min_subkey_coverage(
+    desired: &[ValueSubkey],
+    nodes: &[&BTreeSet<ValueSubkey>],
+) -> Option<usize> {
+    desired
+        .iter()
+        .map(|sk| nodes.iter().filter(|c| c.contains(sk)).count())
+        .min()
+}
+
+/// What one node looks like when End is being planned
+pub(in crate::storage_manager) struct EndCandidate {
+    /// Local node transaction id
+    pub lnxid: LocalNodeTransactionId,
+    /// Subkeys the node answered a Set for
+    pub confirmed: BTreeSet<ValueSubkey>,
+    /// Set questions still in flight to the node
+    pub outstanding_sets: u32,
+}
+
+/// Which Begin nodes may vote End, which need a completion pass, and whether the
+/// record is short of voters
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(in crate::storage_manager) struct EndSelection {
+    /// Every desired subkey confirmed and nothing in flight
+    pub voters: Vec<LocalNodeTransactionId>,
+    /// Quiescent but missing subkeys, with what to re-send
+    pub completion: Vec<(LocalNodeTransactionId, Vec<ValueSubkey>)>,
+    /// Set questions still in flight across all candidates
+    pub outstanding: u32,
+    /// Fewer voters than required
+    pub short: bool,
+}
+
+/// A node votes End only when nothing can land at it afterwards; a node with an
+/// answer in flight is neither a voter nor a completion target until it settles
+pub(in crate::storage_manager) fn select_end_voters(
+    candidates: &[EndCandidate],
+    desired: &[ValueSubkey],
+    required: usize,
+) -> EndSelection {
+    let mut out = EndSelection::default();
+    for c in candidates {
+        out.outstanding += c.outstanding_sets;
+        if c.outstanding_sets > 0 {
+            continue;
+        }
+        let missing: Vec<ValueSubkey> = desired
+            .iter()
+            .copied()
+            .filter(|sk| !c.confirmed.contains(sk))
+            .collect();
+        if missing.is_empty() {
+            out.voters.push(c.lnxid);
+        } else {
+            out.completion.push((c.lnxid, missing));
+        }
+    }
+    out.short = out.voters.len() < required;
+    out
+}
 
 /// State per record
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -144,30 +228,15 @@ impl OutboundTransactionRecordState {
         let stage_consensus_map = self.get_stage_consensus_map();
 
         // Find a singular consensus
-        let stage = {
-            let mut opt_best_stage = None;
-            for (st, stn) in stage_consensus_map.iter().map(|(st, stn)| (*st, stn)) {
-                if stn.len() >= self.record_params.required_strict_consensus_count {
-                    if opt_best_stage.is_none() {
-                        opt_best_stage = Some(st);
-                    } else {
-                        // Multiple stages met strict consensus (should not happen) — log and mark Failed.
-                        #[cfg(feature = "verbose-tracing")]
-                        veilid_log!(self debug target: "dht", "stage_consensus: ambiguous — multiple stages met threshold {} for record {}: {:?}",
-                            self.record_params.required_strict_consensus_count, self.record_params.record_key.opaque(), stage_consensus_map);
-                        opt_best_stage = Some(OutboundTransactionStage::Failed);
-                        break;
-                    }
-                }
-            }
-            // If no stage has met the strict consensus, this is also failed
-            #[cfg(feature = "verbose-tracing")]
-            if opt_best_stage.is_none() {
-                veilid_log!(self debug target: "dht", "stage_consensus: no stage reached required threshold={} for record {}: stage_map={:?}",
-                    self.record_params.required_strict_consensus_count, self.record_params.record_key.opaque(), stage_consensus_map);
-            }
-            opt_best_stage.unwrap_or(OutboundTransactionStage::Failed)
-        };
+        let stage = record_consensus_stage(
+            &stage_consensus_map,
+            self.record_params.required_strict_consensus_count,
+        );
+        #[cfg(feature = "verbose-tracing")]
+        if stage == OutboundTransactionStage::Failed {
+            veilid_log!(self debug target: "dht", "stage_consensus: no single live stage met threshold {} for record {}: stage_map={:?}",
+                self.record_params.required_strict_consensus_count, self.record_params.record_key.opaque(), stage_consensus_map);
+        }
 
         // If the consensus stage has some requred state at this point, validate it
         let stage = match stage {
@@ -630,6 +699,38 @@ impl OutboundTransactionRecordState {
 
     pub(super) fn set_desired_subkey(&mut self, subkey: ValueSubkey, value: Arc<SignedValueData>) {
         self.desired_subkeys.insert(subkey, value);
+    }
+
+    pub fn desired_subkeys(&self) -> Vec<ValueSubkey> {
+        self.desired_subkeys.keys().copied().collect()
+    }
+
+    /// Begin-stage nodes as End candidates
+    pub fn end_candidates(&self) -> Vec<EndCandidate> {
+        self.node_transactions_by_id
+            .iter()
+            .filter(|(_, nt)| nt.stage() == OutboundTransactionStage::Begin)
+            .map(|(lnxid, nt)| EndCandidate {
+                lnxid: *lnxid,
+                confirmed: nt.confirmed_subkeys().clone(),
+                outstanding_sets: nt.outstanding_sets(),
+            })
+            .collect()
+    }
+
+    pub fn desired_subkey_value(&self, subkey: ValueSubkey) -> Option<Arc<SignedValueData>> {
+        self.desired_subkeys.get(&subkey).cloned()
+    }
+
+    /// Minimum over desired subkeys of the nodes at `stage` that confirmed it
+    pub fn stage_subkey_coverage(&self, stage: OutboundTransactionStage) -> Option<usize> {
+        let nodes: Vec<&BTreeSet<ValueSubkey>> = self
+            .node_transactions_by_id
+            .values()
+            .filter(|nt| nt.stage() == stage)
+            .map(|nt| nt.confirmed_subkeys())
+            .collect();
+        min_subkey_coverage(&self.desired_subkeys(), &nodes)
     }
 
     pub fn current_consensus(&self) -> &OutboundTransactionConsensus {

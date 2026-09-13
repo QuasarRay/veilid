@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use stop_token::future::FutureExt;
 
 const LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS: usize = 16;

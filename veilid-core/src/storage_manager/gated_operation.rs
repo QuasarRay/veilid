@@ -12,8 +12,6 @@
 //! budget. The initial budget is sized so the byte gate cannot bind while
 //! the concurrency cap does; only a congestion-driven decrease makes it
 //! bind, so a healthy network sees no behavior change at all.
-#[cfg(feature = "stats")]
-use super::gated_operation_accounting::*;
 use super::transaction_command::OutboundTransactCommandResult;
 #[cfg(any(feature = "aimd-dht", feature = "stats"))]
 use super::transaction_command::TransactCommandDisposition;
@@ -146,7 +144,9 @@ fn transact_result_congested(result: &OutboundTransactCommandResult) -> bool {
         match pnr.disposition {
             TransactCommandDisposition::Valid => valid_total += 1,
             TransactCommandDisposition::Invalid => {}
-            TransactCommandDisposition::Skipped => skipped += 1,
+            TransactCommandDisposition::Skipped | TransactCommandDisposition::Pending => {
+                skipped += 1
+            }
         }
     }
     transact_counts_congested(

@@ -328,10 +328,9 @@ impl RouteSpecStore {
 
         let healthy = loopback_ok && (any_direct_ok || direct_count == 0);
         if !healthy {
-            if let Some(probe_transport) = probe_transport {
-                for hop in hops {
-                    hop.report_failed_route_test(probe_transport);
-                }
+            // A multi-hop failure cannot isolate a hop; only a single hop's legs are ours
+            if let (Some(probe_transport), [hop]) = (probe_transport, hops.as_slice()) {
+                hop.report_failed_route_test(probe_transport);
             }
             return Ok(Some(false));
         }

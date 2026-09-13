@@ -194,7 +194,7 @@ pub use std::str::FromStr;
 #[doc(no_inline)]
 pub use std::string::{String, ToString};
 #[doc(no_inline)]
-pub use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+pub use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 #[doc(no_inline)]
 pub use std::sync::{Arc, LazyLock, Weak};
 #[doc(no_inline)]

@@ -204,7 +204,43 @@ pub fn test_unbound_sends_count_toward_diversity() {
     assert_eq!(w.verdict(now()), TransportVerdict::Unknown);
 }
 
+pub fn test_refused_connect_is_not_evidence() {
+    info!("--- test_refused_connect_is_not_evidence ---");
+
+    // A refused connect made the round trip, so it says nothing against the transport
+    #[cfg(unix)]
+    {
+        let refused: NetworkResult<()> =
+            NetworkResult::NoConnection(std::io::Error::from_raw_os_error(libc::ECONNREFUSED));
+        assert_eq!(TransportSendOutcome::from_network_result(&refused), None);
+
+        // No route to the network is exactly the broken local path suppression is for
+        let unreachable: NetworkResult<()> =
+            NetworkResult::NoConnection(std::io::Error::from_raw_os_error(libc::ENETUNREACH));
+        assert_eq!(
+            TransportSendOutcome::from_network_result(&unreachable),
+            Some(TransportSendOutcome::FailedToSend)
+        );
+    }
+
+    // The wasm shape: refused by kind with no os error stays evidence
+    let kind_only: NetworkResult<()> =
+        NetworkResult::NoConnection(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+    assert_eq!(
+        TransportSendOutcome::from_network_result(&kind_only),
+        Some(TransportSendOutcome::FailedToSend)
+    );
+
+    // The debug `transport disable` driver must keep latching
+    let disabled: NetworkResult<()> = NetworkResult::no_connection_other("transport disabled");
+    assert_eq!(
+        TransportSendOutcome::from_network_result(&disabled),
+        Some(TransportSendOutcome::FailedToSend)
+    );
+}
+
 pub fn test_all() {
+    test_refused_connect_is_not_evidence();
     test_verdict_needs_min_samples();
     test_verdict_any_success_is_healthy();
     test_window_keeps_min_samples_when_quiet();

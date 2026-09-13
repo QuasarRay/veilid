@@ -100,19 +100,22 @@ impl DialInfoFilter {
     pub fn is_dead(&self) -> bool {
         self.protocol_type_set.is_empty() || self.address_type_set.is_empty()
     }
+    /// Only the protocols that carry this ordering
+    pub fn ensure_ordering(ordering: SequenceOrdering) -> DialInfoFilter {
+        DialInfoFilter::all()
+            .with_protocol_type_set(ProtocolType::all_sequence_ordering_set(ordering))
+    }
+
+    /// The ordering to prefer and the filter with any ensure requirement applied. A preference
+    /// leaves the filter open; only ordered has an ensure variant until the wire gains one for
+    /// unordered, so callers that must have datagrams pair PreferUnordered with `ensure_ordering`.
     pub fn apply_sequencing(self, sequencing: Sequencing) -> (SequenceOrdering, DialInfoFilter) {
-        // Get first filtered dialinfo
-        match sequencing {
-            Sequencing::PreferUnordered => (SequenceOrdering::Unordered, self),
-            Sequencing::PreferOrdered => (SequenceOrdering::Ordered, self),
-            Sequencing::EnsureOrdered => (
-                SequenceOrdering::Ordered,
-                self.filtered(
-                    DialInfoFilter::all().with_protocol_type_set(ProtocolType::all_ordered_set()),
-                ),
-            ),
-        }
-        // return ordered sort and filter with ensure applied
+        let ordering = sequencing.preferred_ordering();
+        let filter = match sequencing {
+            Sequencing::PreferUnordered | Sequencing::PreferOrdered => self,
+            Sequencing::EnsureOrdered => self.filtered(DialInfoFilter::ensure_ordering(ordering)),
+        };
+        (ordering, filter)
     }
     pub fn is_ordered_only(&self) -> bool {
         for pt in self.protocol_type_set {

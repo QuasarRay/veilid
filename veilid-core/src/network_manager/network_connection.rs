@@ -1,6 +1,5 @@
 use super::*;
 use futures_util::{FutureExt, StreamExt};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{io, sync::Arc};
 use stop_token::prelude::*;
 
@@ -577,10 +576,10 @@ impl NetworkConnection {
             // latter, and matching only on `Err` swallowed it
             match protocol_connection.close().await {
                 Err(e) => {
-                    veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close error: {}", e);
+                    veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close error: {} flow={:#}", e, flow);
                 }
                 Ok(nres) if !matches!(nres, NetworkResult::Value(_)) => {
-                    veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close incomplete: {}", nres);
+                    veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close incomplete: {} flow={:#}", nres, flow);
                 }
                 Ok(_) => {}
             }

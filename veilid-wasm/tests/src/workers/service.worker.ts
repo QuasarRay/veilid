@@ -12,7 +12,7 @@ import { runSuites } from '../harness/run-suites.js';
 const sw = self as any;
 type ExtendableEventLike = { waitUntil: (p: Promise<unknown>) => void };
 type ExtendableMessageEventLike = ExtendableEventLike & {
-  data?: { type?: string; suites?: string[] };
+  data?: { type?: string; suites?: string[]; caseFilter?: string };
   ports: MessagePort[];
 };
 
@@ -32,7 +32,7 @@ sw.addEventListener('message', (event: ExtendableMessageEventLike) => {
   event.waitUntil(
     (async () => {
       try {
-        const results = await runSuites(event.data?.suites ?? [], 'service', step);
+        const results = await runSuites(event.data?.suites ?? [], 'service', step, event.data?.caseFilter);
         port?.postMessage({ type: 'done', ok: true, results });
       } catch (err) {
         port?.postMessage({ type: 'done', ok: false, error: String(err) });
