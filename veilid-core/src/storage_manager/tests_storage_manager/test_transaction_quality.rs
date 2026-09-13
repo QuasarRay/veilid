@@ -7,6 +7,7 @@ use super::*;
 use crate::storage_manager::outbound_transaction_manager::{
     min_subkey_coverage, select_end_voters, EndCandidate, LocalNodeTransactionId,
 };
+use crate::storage_manager::transaction_command::exits_at_consensus;
 use std::collections::BTreeSet;
 
 const DESIRED: [ValueSubkey; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
@@ -119,9 +120,22 @@ pub fn test_end_coverage_accounting() {
     assert_eq!(q.end_coverage.coverage_min, 2);
 }
 
+pub fn test_end_collects_every_voter() {
+    info!("--- test_end_collects_every_voter ---");
+    assert!(!exits_at_consensus(TransactCommand::End));
+    for command in [
+        TransactCommand::Set,
+        TransactCommand::Commit,
+        TransactCommand::Get,
+    ] {
+        assert!(exits_at_consensus(command));
+    }
+}
+
 pub fn test_all() {
     test_select_end_voters();
     test_min_subkey_coverage_is_per_subkey();
     #[cfg(feature = "stats")]
     test_end_coverage_accounting();
+    test_end_collects_every_voter();
 }

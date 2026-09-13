@@ -113,13 +113,20 @@ pub(crate) struct TransactCommandSuccess {
     pub opt_value: Option<Arc<SignedValueData>>,
 }
 
+/// End collects every voter: Commit targets End-stage nodes, and the plan's spare
+/// voters are the only margin a lost Commit answer has
+pub(in crate::storage_manager) fn exits_at_consensus(command: TransactCommand) -> bool {
+    command != TransactCommand::End
+}
+
 impl StorageManager {
     ////////////////////////////////////////////////////////////////////////
 
     /// Perform transact command queries on the network for a single record.
     ///
     /// Fans out transact commands to all nodes concurrently via FuturesUnordered.
-    /// Results are collected as they complete. Early exit once strict consensus is reached.
+    /// Results are collected as they complete. Early exit once strict consensus is reached,
+    /// except for End, which waits for every voter.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "dht", skip_all, err,
@@ -397,7 +404,9 @@ impl StorageManager {
             responded_xids.insert(pnr.lnxid);
             per_node_results.push(pnr);
 
-            if valid_response_count >= params.required_strict_consensus_count {
+            if exits_at_consensus(params.command)
+                && valid_response_count >= params.required_strict_consensus_count
+            {
                 #[cfg(feature = "verbose-tracing")]
                 veilid_log!(self debug "TransactCmd consensus reached: cmd={} key={}{} valid={}/{} responded={}/{}",
                     params.command,
