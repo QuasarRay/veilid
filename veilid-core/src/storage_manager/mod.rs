@@ -163,68 +163,63 @@ impl fmt::Debug for StorageManagerInner {
 }
 
 pub(crate) struct StorageManager {
+    /// Component registry this manager belongs to
     registry: VeilidComponentRegistry,
+    /// Record and transaction state, behind the manager's main lock
     inner: StatsMutex<StorageManagerInner>,
-    /// Outbound watch state, on its own lock so the watch sweeps and every inbound
-    /// ValueChanged stop queueing behind record operations. Lock order: record lock,
-    /// then `inner`, then this; never take `inner` while holding it.
+    /// Outbound watch state on its own lock; lock order is record lock, then `inner`, then this
     outbound_watch_manager: StatsMutex<OutboundWatchManager>,
+    /// Gates operations against startup and shutdown
     startup_lock: Arc<StartupLock>,
 
     // Background processes
+    /// Persists the manager metadata
     save_metadata_task: TickTask<EyreReport>,
+    /// Flushes the record stores
     flush_record_stores_task: TickTask<EyreReport>,
+    /// Commits offline subkey writes to the network
     offline_subkey_writes_task: TickTask<EyreReport>,
+    /// Delivers value changes to inbound watchers
     send_value_changes_task: TickTask<EyreReport>,
+    /// Sweeps outbound watches
     check_outbound_watches_task: TickTask<EyreReport>,
+    /// Sweeps inbound watches
     check_inbound_watches_task: TickTask<EyreReport>,
+    /// Sweeps outbound transactions
     check_outbound_transactions_task: TickTask<EyreReport>,
+    /// Sweeps inbound transactions
     check_inbound_transactions_task: TickTask<EyreReport>,
+    /// Pushes records the network is missing back out
     rehydrate_records_task: TickTask<EyreReport>,
 
-    // Anonymous watch keys that will be used when watching or transacting on records or we opened without a writer
+    /// Anonymous watch keys, for watching or transacting on records opened without a writer
     anonymous_signing_keys: KeyPairGroup,
-
-    // Record operation lock for local/outbound record operations
-    // Keeps changes to records to one-at-a-time per record
+    /// Keeps local and outbound record operations to one at a time per record
     record_lock_table: StorageManagerRecordLockTable,
-
-    // Background operation processor
-    // for offline subkey writes, watch changes, and any other
-    // background operations the storage manager wants to perform
+    /// Runs offline subkey writes, watch changes and other background operations
     background_operation_processor: DeferredStreamProcessor,
-
-    // Cache of which nodes have seen descriptors for which records to optimize outbound set_value and transact_begin operations
+    /// Which nodes have seen which record descriptors, so outbound ops skip resending them
     descriptor_cache: Arc<Mutex<LruCache<DescriptorCacheKey, ()>>>,
-
-    // When each record's last rehydration check completed, so an open/close/reopen
-    // pattern does not fan out the same check every time (open enqueues one)
+    /// When each record's last rehydration check completed, so a reopen does not fan out another
     rehydration_checked: Mutex<LruCache<OpaqueRecordKey, Timestamp>>,
-    /// Consecutive hard rehydration failures per record subkey, cleared by a
-    /// success. Per subkey rather than per record: an unreachable record is
-    /// asked for in chunks, and counting the record would read one outage as
-    /// a run. `None` is a request for the whole record.
-    rehydration_failures: Mutex<LruCache<OpaqueRecordKey, HashMap<Option<ValueSubkey>, u32>>>,
-
-    // Online check
+    /// Consecutive hard rehydration failures per record, cleared by a success
+    rehydration_failures: Mutex<RehydrationFailureRuns>,
+    /// The DHT-online gate
     is_online: AtomicBool,
-
-    // Last foreground transaction activity, including failed begin attempts (usec)
+    /// Last foreground transaction activity, including failed begin attempts (usec)
     last_foreground_transaction_ts: AtomicU64,
-
-    // Per-direction byte budgets (adaptive with aimd-dht, never binding
-    // without) + a count cap, shared by all DHT network ops. Local-only ops
-    // acquire none.
+    /// Upload byte budget for DHT network ops; adaptive with aimd-dht, never binding without
     upload_budget: GatedOperationBandwidthBudget,
+    /// Download byte budget for DHT network ops; adaptive with aimd-dht, never binding without
     download_budget: GatedOperationBandwidthBudget,
+    /// Count cap on DHT network ops; local-only ops acquire none
     gated_operation_concurrency: Arc<AsyncSemaphore>,
-    // Ops currently admitted through the gate, for telemetry
+    /// Ops currently admitted through the gate, for telemetry
     gate_active: Arc<AtomicUsize>,
-    // Per-kind gate wait/hold telemetry
+    /// Per-kind gate wait/hold telemetry
     #[cfg(feature = "stats")]
     gate_accounting: Arc<Mutex<GatedOperationAccounting>>,
-    // Transaction quality counters, shared with the outbound transaction manager.
-    // A leaf lock: never held while taking any other lock.
+    /// Transaction quality counters shared with the outbound transaction manager; a leaf lock
     #[cfg(feature = "stats")]
     transaction_quality: Arc<Mutex<TransactionQualityAccounting>>,
 }
@@ -333,7 +328,9 @@ impl StorageManager {
             last_foreground_transaction_ts: AtomicU64::new(0),
             descriptor_cache: Arc::new(Mutex::new(LruCache::new(DESCRIPTOR_CACHE_SIZE))),
             rehydration_checked: Mutex::new(LruCache::new(REHYDRATION_CHECKED_CACHE_SIZE)),
-            rehydration_failures: Mutex::new(LruCache::new(REHYDRATION_CHECKED_CACHE_SIZE)),
+            rehydration_failures: Mutex::new(RehydrationFailureRuns::new(
+                REHYDRATION_CHECKED_CACHE_SIZE,
+            )),
             upload_budget,
             download_budget,
             gated_operation_concurrency,

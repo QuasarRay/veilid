@@ -851,10 +851,12 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     bool closeSelf = false,
   }) {
     _ctx.ensureValid();
+    final nativeSafetySelection = jsonEncode(safetySelection).toNativeUtf8();
     final newId = VeilidFFI._routingContextWithSafety(
       _ctx.id!,
-      jsonEncode(safetySelection).toNativeUtf8(),
+      nativeSafetySelection,
     );
+    malloc.free(nativeSafetySelection);
     final out = VeilidRoutingContextFFI._(_Ctx(newId));
     if (closeSelf) {
       close();
@@ -868,10 +870,12 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
     bool closeSelf = false,
   }) {
     _ctx.ensureValid();
+    final nativeSequencing = jsonEncode(sequencing).toNativeUtf8();
     final newId = VeilidFFI._routingContextWithSequencing(
       _ctx.id!,
-      jsonEncode(sequencing).toNativeUtf8(),
+      nativeSequencing,
     );
+    malloc.free(nativeSequencing);
     final out = VeilidRoutingContextFFI._(_Ctx(newId));
     if (closeSelf) {
       close();
@@ -906,6 +910,8 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeTarget,
       nativeEncodedRequest,
     );
+    malloc.free(nativeTarget);
+    malloc.free(nativeEncodedRequest);
     final out = await processFuturePlain<String>(recvPort.first);
     return base64UrlNoPadDecode(out);
   }
@@ -924,6 +930,8 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeTarget,
       nativeEncodedMessage,
     );
+    malloc.free(nativeTarget);
+    malloc.free(nativeEncodedMessage);
     return processFutureVoid(recvPort.first);
   }
 
@@ -948,6 +956,10 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeSchema,
       nativeOwner,
     );
+    malloc.free(nativeSchema);
+    if (nativeOwner != nullptr) {
+      malloc.free(nativeOwner);
+    }
     final dhtRecordDescriptor = await processFutureJson(
       DHTRecordDescriptor.fromJson,
       recvPort.first,
@@ -973,6 +985,10 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeKey,
       nativeWriter,
     );
+    malloc.free(nativeKey);
+    if (nativeWriter != nullptr) {
+      malloc.free(nativeWriter);
+    }
     final dhtRecordDescriptor = await processFutureJson(
       DHTRecordDescriptor.fromJson,
       recvPort.first,
@@ -991,6 +1007,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       _ctx.id!,
       nativeKey,
     );
+    malloc.free(nativeKey);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1005,6 +1022,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       _ctx.id!,
       nativeKey,
     );
+    malloc.free(nativeKey);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1025,6 +1043,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       subkey,
       forceRefresh,
     );
+    malloc.free(nativeKey);
     final valueData = await processFutureOptJson(
       ValueData.fromJson,
       recvPort.first,
@@ -1056,6 +1075,11 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeData,
       nativeOptions,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeData);
+    if (nativeOptions != nullptr) {
+      malloc.free(nativeOptions);
+    }
     final valueData = await processFutureOptJson(
       ValueData.fromJson,
       recvPort.first,
@@ -1089,6 +1113,8 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeExpiration,
       count,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeSubkeys);
     final active = await processFuturePlain<bool>(recvPort.first);
     return active;
   }
@@ -1112,6 +1138,8 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeKey,
       nativeSubkeys,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeSubkeys);
     final active = await processFuturePlain<bool>(recvPort.first);
     return active;
   }
@@ -1138,6 +1166,11 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeSubkeys,
       nativeScope,
     );
+    malloc.free(nativeKey);
+    if (nativeSubkeys != nullptr) {
+      malloc.free(nativeSubkeys);
+    }
+    malloc.free(nativeScope);
     final report = await processFutureJson(
       DHTRecordReport.fromJson,
       recvPort.first,
@@ -1158,6 +1191,7 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       nativeKey,
       timeout?.inMilliseconds ?? 0,
     );
+    malloc.free(nativeKey);
     return processFuturePlain<bool>(recvPort.first);
   }
 }
@@ -1233,6 +1267,10 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
       nativeRecordKeys,
       nativeOptions,
     );
+    malloc.free(nativeRecordKeys);
+    if (nativeOptions != nullptr) {
+      malloc.free(nativeOptions);
+    }
     await processFutureVoid(recvPort.first);
   }
 
@@ -1243,6 +1281,7 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
     final recvPort = ReceivePort('veilid_dht_transaction_get');
     final sendPort = recvPort.sendPort;
     VeilidFFI._dhtTransactionGet(sendPort.nativePort, id, nativeKey, subkey);
+    malloc.free(nativeKey);
     final valueData = await processFutureOptJson(
       ValueData.fromJson,
       recvPort.first,
@@ -1274,6 +1313,11 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
       nativeData,
       nativeOptions,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeData);
+    if (nativeOptions != nullptr) {
+      malloc.free(nativeOptions);
+    }
     final valueData = await processFutureOptJson(
       ValueData.fromJson,
       recvPort.first,
@@ -1303,6 +1347,11 @@ class VeilidDHTTransactionFFI extends VeilidDHTTransaction {
       nativeSubkeys,
       nativeScope,
     );
+    malloc.free(nativeKey);
+    if (nativeSubkeys != nullptr) {
+      malloc.free(nativeSubkeys);
+    }
+    malloc.free(nativeScope);
     final report = await processFutureJson(
       DHTRecordReport.fromJson,
       recvPort.first,
@@ -1378,6 +1427,8 @@ class VeilidTableDBTransactionFFI extends VeilidTableDBTransaction {
       nativeEncodedKey,
       nativeEncodedValue,
     );
+    malloc.free(nativeEncodedKey);
+    malloc.free(nativeEncodedValue);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1394,6 +1445,7 @@ class VeilidTableDBTransactionFFI extends VeilidTableDBTransaction {
       col,
       nativeEncodedKey,
     );
+    malloc.free(nativeEncodedKey);
     return processFuturePlain(recvPort.first);
   }
 }
@@ -1476,6 +1528,8 @@ class VeilidTableDBFFI extends VeilidTableDB {
       nativeEncodedKey,
       nativeEncodedValue,
     );
+    malloc.free(nativeEncodedKey);
+    malloc.free(nativeEncodedValue);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1492,6 +1546,7 @@ class VeilidTableDBFFI extends VeilidTableDB {
       col,
       nativeEncodedKey,
     );
+    malloc.free(nativeEncodedKey);
     final out = await processFuturePlain<String?>(recvPort.first);
     if (out == null) {
       return null;
@@ -1512,6 +1567,7 @@ class VeilidTableDBFFI extends VeilidTableDB {
       col,
       nativeEncodedKey,
     );
+    malloc.free(nativeEncodedKey);
     final out = await processFuturePlain<String?>(recvPort.first);
     if (out == null) {
       return null;
@@ -1542,6 +1598,8 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeKey,
       nativeSecret,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeSecret);
     return processFutureJson(SharedSecret.fromJson, recvPort.first);
   }
 
@@ -1558,6 +1616,8 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeKey,
       nativeSecret,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeSecret);
     return processFutureJson(SharedSecret.fromJson, recvPort.first);
   }
 
@@ -1580,6 +1640,9 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeSecret,
       nativeDomain,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeSecret);
+    malloc.free(nativeDomain);
     return processFutureJson(SharedSecret.fromJson, recvPort.first);
   }
 
@@ -1602,6 +1665,9 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeAad,
       nativePlaintext,
     );
+    malloc.free(nativeRecipient);
+    malloc.free(nativeAad);
+    malloc.free(nativePlaintext);
     final out = await processFuturePlain<String>(recvPort.first);
     return base64UrlNoPadDecode(out);
   }
@@ -1625,6 +1691,9 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeAad,
       nativeSealed,
     );
+    malloc.free(nativeSecret);
+    malloc.free(nativeAad);
+    malloc.free(nativeSealed);
     final out = await processFuturePlain<String>(recvPort.first);
     return base64UrlNoPadDecode(out);
   }
@@ -1728,6 +1797,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       _kind,
       nativeSecret,
     );
+    malloc.free(nativeSecret);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1737,6 +1807,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final recvPort = ReceivePort('crypto_check_nonce');
     final sendPort = recvPort.sendPort;
     VeilidFFI._cryptoCheckNonce(sendPort.nativePort, _kind, nativeNonce);
+    malloc.free(nativeNonce);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1746,6 +1817,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final recvPort = ReceivePort('crypto_check_hash_digest');
     final sendPort = recvPort.sendPort;
     VeilidFFI._cryptoCheckHashDigest(sendPort.nativePort, _kind, nativeDigest);
+    malloc.free(nativeDigest);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1755,6 +1827,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final recvPort = ReceivePort('crypto_check_public_key');
     final sendPort = recvPort.sendPort;
     VeilidFFI._cryptoCheckPublicKey(sendPort.nativePort, _kind, nativeKey);
+    malloc.free(nativeKey);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1764,6 +1837,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
     final recvPort = ReceivePort('crypto_check_secret_key');
     final sendPort = recvPort.sendPort;
     VeilidFFI._cryptoCheckSecretKey(sendPort.nativePort, _kind, nativeKey);
+    malloc.free(nativeKey);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1777,6 +1851,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       _kind,
       nativeSignature,
     );
+    malloc.free(nativeSignature);
     return processFutureVoid(recvPort.first);
   }
 
@@ -1793,6 +1868,8 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeEncodedPassword,
       nativeEncodedSalt,
     );
+    malloc.free(nativeEncodedPassword);
+    malloc.free(nativeEncodedSalt);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1809,6 +1886,8 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeEncodedPassword,
       nativeEncodedPasswordHash,
     );
+    malloc.free(nativeEncodedPassword);
+    malloc.free(nativeEncodedPasswordHash);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1825,6 +1904,8 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeEncodedPassword,
       nativeEncodedSalt,
     );
+    malloc.free(nativeEncodedPassword);
+    malloc.free(nativeEncodedSalt);
     return processFutureJson(SharedSecret.fromJson, recvPort.first);
   }
 
@@ -1871,6 +1952,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       _kind,
       nativeKey,
     );
+    malloc.free(nativeKey);
     return processFutureJson(EncapsulationKey.fromJson, recvPort.first);
   }
 
@@ -1887,6 +1969,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       _kind,
       nativeSecret,
     );
+    malloc.free(nativeSecret);
     return processFutureJson(DecapsulationKey.fromJson, recvPort.first);
   }
 
@@ -1901,6 +1984,7 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       _kind,
       nativeEncodedData,
     );
+    malloc.free(nativeEncodedData);
     return processFutureJson(HashDigest.fromJson, recvPort.first);
   }
 
@@ -1917,6 +2001,8 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeKey,
       nativeSecret,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeSecret);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1933,6 +2019,8 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeEncodedData,
       nativeHash,
     );
+    malloc.free(nativeEncodedData);
+    malloc.free(nativeHash);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1951,6 +2039,9 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeSecret,
       nativeEncodedData,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeSecret);
+    malloc.free(nativeEncodedData);
     return processFutureJson(Signature.fromJson, recvPort.first);
   }
 
@@ -1969,6 +2060,9 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeEncodedData,
       nativeSignature,
     );
+    malloc.free(nativeKey);
+    malloc.free(nativeEncodedData);
+    malloc.free(nativeSignature);
     return processFuturePlain(recvPort.first);
   }
 
@@ -1996,6 +2090,12 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeSharedSecret,
       nativeSignature,
     );
+    malloc.free(nativeEncodedBody);
+    malloc.free(nativeNonce);
+    malloc.free(nativeSharedSecret);
+    if (nativeSignature != nullptr) {
+      malloc.free(nativeSignature);
+    }
     final out = await processFuturePlain<String>(recvPort.first);
     return base64UrlNoPadDecode(out);
   }
@@ -2024,6 +2124,12 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeSharedSecret,
       nativeSignature,
     );
+    malloc.free(nativeEncodedBody);
+    malloc.free(nativeNonce);
+    malloc.free(nativeSharedSecret);
+    if (nativeSignature != nullptr) {
+      malloc.free(nativeSignature);
+    }
     final out = await processFuturePlain<String>(recvPort.first);
     return base64UrlNoPadDecode(out);
   }
@@ -2047,6 +2153,9 @@ class VeilidCryptoSystemFFI extends VeilidCryptoSystem {
       nativeNonce,
       nativeSharedSecret,
     );
+    malloc.free(nativeEncodedBody);
+    malloc.free(nativeNonce);
+    malloc.free(nativeSharedSecret);
     final out = await processFuturePlain<String>(recvPort.first);
     return base64UrlNoPadDecode(out);
   }
@@ -2852,12 +2961,12 @@ class VeilidFFI extends Veilid {
 
   VeilidFFI() {
     _eagerResolveNativeSymbols();
-    _initializeVeilidFlutter(
-      NativeApi.postCObject,
-      // Allow environment to configure
-      // ignore: avoid_redundant_argument_values, do_not_use_environment
-      const String.fromEnvironment('VEILID_CRASH_PATH').toNativeUtf8(),
-    );
+    // Allow environment to configure
+    // ignore: avoid_redundant_argument_values, do_not_use_environment
+    final nativeCrashPath = const String.fromEnvironment('VEILID_CRASH_PATH')
+        .toNativeUtf8();
+    _initializeVeilidFlutter(NativeApi.postCObject, nativeCrashPath);
+    malloc.free(nativeCrashPath);
   }
 
   @override
@@ -2865,7 +2974,6 @@ class VeilidFFI extends Veilid {
     final nativePlatformConfig = jsonEncode(platformConfigJson).toNativeUtf8();
 
     _initializeVeilidCore(nativePlatformConfig);
-
     malloc.free(nativePlatformConfig);
   }
 
@@ -2982,10 +3090,9 @@ class VeilidFFI extends Veilid {
   Future<MemberId> generateMemberId(PublicKey writerKey) {
     final recvPort = ReceivePort('generate_member_id');
     final sendPort = recvPort.sendPort;
-    _generateMemberId(
-      sendPort.nativePort,
-      jsonEncode(writerKey).toNativeUtf8(),
-    );
+    final nativeWriterKey = jsonEncode(writerKey).toNativeUtf8();
+    _generateMemberId(sendPort.nativePort, nativeWriterKey);
+    malloc.free(nativeWriterKey);
     return processFutureJson(MemberId.fromJson, recvPort.first);
   }
 
@@ -3008,6 +3115,11 @@ class VeilidFFI extends Veilid {
       nativeOwner,
       nativeEncryptionKey,
     );
+    malloc.free(nativeSchema);
+    malloc.free(nativeOwner);
+    if (nativeEncryptionKey != nullptr) {
+      malloc.free(nativeEncryptionKey);
+    }
     return processFutureJson(RecordKey.fromJson, recvPort.first);
   }
 
@@ -3023,6 +3135,10 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('transact_dht_records');
     final sendPort = recvPort.sendPort;
     _transactDHTRecords(sendPort.nativePort, nativeRecordKeys, nativeOptions);
+    malloc.free(nativeRecordKeys);
+    if (nativeOptions != nullptr) {
+      malloc.free(nativeOptions);
+    }
 
     final id = await processFuturePlain<int>(recvPort.first);
     return VeilidDHTTransactionFFI._(_DTX(id));
@@ -3040,10 +3156,9 @@ class VeilidFFI extends Veilid {
   Future<RouteBlob> newCustomPrivateRoute(PrivateSpec privateSpec) {
     final recvPort = ReceivePort('new_custom_private_route');
     final sendPort = recvPort.sendPort;
-    _newCustomPrivateRoute(
-      sendPort.nativePort,
-      jsonEncode(privateSpec).toNativeUtf8(),
-    );
+    final nativePrivateSpec = jsonEncode(privateSpec).toNativeUtf8();
+    _newCustomPrivateRoute(sendPort.nativePort, nativePrivateSpec);
+    malloc.free(nativePrivateSpec);
 
     return processFutureJson(RouteBlob.fromJson, recvPort.first);
   }
@@ -3055,6 +3170,7 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('import_remote_private_route');
     final sendPort = recvPort.sendPort;
     _importRemotePrivateRoute(sendPort.nativePort, nativeEncodedBlob);
+    malloc.free(nativeEncodedBlob);
     return processFutureJson(RouteId.fromJson, recvPort.first);
   }
 
@@ -3065,6 +3181,7 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('release_private_route');
     final sendPort = recvPort.sendPort;
     _releasePrivateRoute(sendPort.nativePort, nativeRouteId);
+    malloc.free(nativeRouteId);
     return processFutureVoid(recvPort.first);
   }
 
@@ -3075,6 +3192,8 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('app_call_reply');
     final sendPort = recvPort.sendPort;
     _appCallReply(sendPort.nativePort, nativeCallId, nativeEncodedMessage);
+    malloc.free(nativeCallId);
+    malloc.free(nativeEncodedMessage);
     return processFutureVoid(recvPort.first);
   }
 
@@ -3082,7 +3201,9 @@ class VeilidFFI extends Veilid {
   Future<VeilidTableDB> openTableDB(String name, int columnCount) async {
     final recvPort = ReceivePort('open_table_db');
     final sendPort = recvPort.sendPort;
-    _openTableDb(sendPort.nativePort, name.toNativeUtf8(), columnCount);
+    final nativeName = name.toNativeUtf8();
+    _openTableDb(sendPort.nativePort, nativeName, columnCount);
+    malloc.free(nativeName);
     final id = await processFuturePlain<int>(recvPort.first);
     return VeilidTableDBFFI._(_TDB(id));
   }
@@ -3091,7 +3212,9 @@ class VeilidFFI extends Veilid {
   Future<bool> deleteTableDB(String name) {
     final recvPort = ReceivePort('delete_table_db');
     final sendPort = recvPort.sendPort;
-    _deleteTableDb(sendPort.nativePort, name.toNativeUtf8());
+    final nativeName = name.toNativeUtf8();
+    _deleteTableDb(sendPort.nativePort, nativeName);
+    malloc.free(nativeName);
     return processFuturePlain(recvPort.first);
   }
 
@@ -3099,11 +3222,11 @@ class VeilidFFI extends Veilid {
   Future<void> renameTableDB(String oldName, String newName) {
     final recvPort = ReceivePort('rename_table_db');
     final sendPort = recvPort.sendPort;
-    _renameTableDb(
-      sendPort.nativePort,
-      oldName.toNativeUtf8(),
-      newName.toNativeUtf8(),
-    );
+    final nativeOldName = oldName.toNativeUtf8();
+    final nativeNewName = newName.toNativeUtf8();
+    _renameTableDb(sendPort.nativePort, nativeOldName, nativeNewName);
+    malloc.free(nativeOldName);
+    malloc.free(nativeNewName);
     return processFutureVoid(recvPort.first);
   }
 
@@ -3141,6 +3264,9 @@ class VeilidFFI extends Veilid {
       nativeData,
       nativeSignatures,
     );
+    malloc.free(nativeNodeIds);
+    malloc.free(nativeData);
+    malloc.free(nativeSignatures);
     return processFutureOptJson(
       jsonListConstructor<PublicKey>(PublicKey.fromJson),
       recvPort.first,
@@ -3158,6 +3284,8 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('generate_signatures');
     final sendPort = recvPort.sendPort;
     _generateSignatures(sendPort.nativePort, nativeData, nativeKeyPairs);
+    malloc.free(nativeData);
+    malloc.free(nativeKeyPairs);
     return processFutureJson(
       jsonListConstructor<Signature>(Signature.fromJson),
       recvPort.first,
@@ -3196,6 +3324,7 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('debug');
     final sendPort = recvPort.sendPort;
     _debug(sendPort.nativePort, nativeCommand);
+    malloc.free(nativeCommand);
     return processFuturePlain(recvPort.first);
   }
 
@@ -3206,6 +3335,8 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('save_user_secret');
     final sendPort = recvPort.sendPort;
     _saveUserSecret(sendPort.nativePort, nativeKey, nativeValue);
+    malloc.free(nativeKey);
+    malloc.free(nativeValue);
     return processFuturePlain(recvPort.first);
   }
 
@@ -3215,6 +3346,7 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('load_user_secret');
     final sendPort = recvPort.sendPort;
     _loadUserSecret(sendPort.nativePort, nativeKey);
+    malloc.free(nativeKey);
     final out = await processFuturePlain<String?>(recvPort.first);
     if (out == null) {
       return null;
@@ -3228,6 +3360,7 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('remove_user_secret');
     final sendPort = recvPort.sendPort;
     _removeUserSecret(sendPort.nativePort, nativeKey);
+    malloc.free(nativeKey);
     return processFuturePlain(recvPort.first);
   }
 
