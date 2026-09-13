@@ -20,10 +20,10 @@ stages:
 # Rules for running tests
 # Runs on merge requests and events that cause update to merge requests (like pushing to a branch with an open merge request)
 # Only runs if files have been changed in the veilid-* directories or in Cargo files
-# A manual run of a branch (Run pipeline in the web UI) is the same gate with no diff base, so
-# everything runs. Tags are excluded: a manual run of a tag stays a release pipeline.
+# A push to the default branch runs the same gate. A manual run of a branch (Run pipeline in the
+# web UI) has no diff base, so everything runs. Tags are excluded: a tag pipeline is a release.
 .branch_test_rules: &branch_test_rules
-  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)
     changes:
       - veilid-*/**/*
       - "**/*[Cc]argo*"
@@ -35,7 +35,7 @@ stages:
 
 # Rules for running formatting checks
 .branch_format_rules: &branch_format_rules
-  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)
     changes:
       - veilid-*/**/*.rs # Should fire when rust source files are changed
       - "**/*[Cc]argo*"
