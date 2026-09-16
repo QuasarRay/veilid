@@ -4,7 +4,7 @@ use super::*;
 
 mod buffer;
 
-pub(crate) use buffer::*;
+pub use buffer::*;
 
 #[cfg(any(feature = "enable-crypto-vld0", feature = "enable-crypto-none"))]
 pub(crate) mod hpke;

@@ -102,9 +102,9 @@ mod table_store;
 pub use self::component::VeilidComponentGuard;
 pub use self::core_context::{api_startup, api_startup_json, UpdateCallback};
 pub use self::logging::{
-    ApiTracingLayer, FmtStripVeilidFields, VeilidLayerFilter, VeilidLayerFilterConfig,
-    VeilidLayerLogKeyFilter, VeilidLogDirective, VeilidLogKey, VeilidLogKeyFilterMode,
-    VEILID_LOG_KEY_FIELD,
+    ApiTracingLayer, FmtStripVeilidFields, TryIntoIterVeilidLogDirective, VeilidLayerFilter,
+    VeilidLayerFilterConfig, VeilidLayerLogKeyFilter, VeilidLogDirective, VeilidLogKey,
+    VeilidLogKeyFilterMode, VEILID_LOG_KEY_FIELD,
 };
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub use self::logging::{LogOutput, LogOutputKind, VeilidTracing};
@@ -187,6 +187,9 @@ mod veilid_capnp {
         clippy::unused_async,
         clippy::ptr_cast_constness
     )]
+    // capnp emits `pub` everywhere; this module is crate-only, and capnp's own trait impls
+    // on the generated types are what make them externally reachable
+    #![allow(unnameable_types)]
     include!("../proto/veilid_capnp.rs");
 }
 

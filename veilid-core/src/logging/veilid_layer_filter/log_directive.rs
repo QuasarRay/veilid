@@ -216,7 +216,13 @@ impl IntoIterator for VeilidLogDirective {
     }
 }
 
+/// What the `try_*_directives` entry points accept: either a single [`VeilidLogDirective`] or
+/// anything iterable whose items convert into one, so a `Vec<&str>`, a `Vec<String>` or a list
+/// of directives are all valid.
 pub trait TryIntoIterVeilidLogDirective {
+    /// Convert into a directive iterator.
+    ///
+    /// Errors `VeilidAPIError::ParseError` if any item is not a valid directive.
     fn try_into_iter(self) -> VeilidAPIResult<impl Iterator<Item = VeilidLogDirective>>;
 }
 

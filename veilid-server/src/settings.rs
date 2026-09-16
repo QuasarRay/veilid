@@ -152,7 +152,7 @@ pub fn load_config(cfg: config::Config, config_file: &Path) -> EyreResult<config
 
 /// Logging level threshold (`Off` disables logging).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum, Default)]
-pub enum LogLevel {
+pub(crate) enum LogLevel {
     Off,
     Error,
     Warn,

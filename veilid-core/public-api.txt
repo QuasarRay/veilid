@@ -1186,7 +1186,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -1690,7 +1690,7 @@ pub fn veilid_core::LogOutput::file<P: core::convert::AsRef<std::path::Path>>(P,
 pub fn veilid_core::LogOutput::layer<L>(alloc::string::String, alloc::boxed::Box<(dyn tracing_subscriber::layer::Layer<tracing_subscriber::registry::sharded::Registry> + core::marker::Send + core::marker::Sync + 'static)>) -> Self
 pub fn veilid_core::LogOutput::stderr(bool) -> Self
 pub fn veilid_core::LogOutput::stdout(bool) -> Self
-pub fn veilid_core::LogOutput::try_with_directives<C: veilid_core::logging::veilid_layer_filter::log_directive::TryIntoIterVeilidLogDirective>(self, C) -> veilid_core::VeilidAPIResult<Self>
+pub fn veilid_core::LogOutput::try_with_directives<C: veilid_core::TryIntoIterVeilidLogDirective>(self, C) -> veilid_core::VeilidAPIResult<Self>
 pub fn veilid_core::LogOutput::with_common_log_level(self, veilid_core::VeilidConfigLogLevel) -> Self
 pub struct veilid_core::MemberId
 impl veilid_core::MemberId
@@ -3041,7 +3041,7 @@ pub fn veilid_core::VeilidLayerFilter::new_with_config(veilid_core::VeilidLayerF
 pub fn veilid_core::VeilidLayerFilter::set_log_key(&self, alloc::string::String)
 pub fn veilid_core::VeilidLayerFilter::set_log_key_filter(&self, veilid_core::VeilidLayerLogKeyFilter)
 pub fn veilid_core::VeilidLayerFilter::try_apply_default_env(&self) -> veilid_core::VeilidAPIResult<()>
-pub fn veilid_core::VeilidLayerFilter::try_apply_directives<C: veilid_core::logging::veilid_layer_filter::log_directive::TryIntoIterVeilidLogDirective>(&self, C) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::VeilidLayerFilter::try_apply_directives<C: veilid_core::TryIntoIterVeilidLogDirective>(&self, C) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidLayerFilter::try_apply_directives_string<S: core::convert::AsRef<str>>(&self, S) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidLayerFilter::try_apply_env<S: core::convert::AsRef<std::ffi::os_str::OsStr>>(&self, S) -> veilid_core::VeilidAPIResult<()>
 impl core::default::Default for veilid_core::VeilidLayerFilter
@@ -3058,11 +3058,11 @@ pub fn veilid_core::VeilidLayerFilterConfig::apply_directives<C: core::iter::tra
 pub fn veilid_core::VeilidLayerFilterConfig::directives(&self) -> impl core::iter::traits::iterator::Iterator<Item = &veilid_core::VeilidLogDirective>
 pub fn veilid_core::VeilidLayerFilterConfig::new() -> Self
 pub fn veilid_core::VeilidLayerFilterConfig::try_apply_default_env(&mut self) -> veilid_core::VeilidAPIResult<()>
-pub fn veilid_core::VeilidLayerFilterConfig::try_apply_directives<C: veilid_core::logging::veilid_layer_filter::log_directive::TryIntoIterVeilidLogDirective>(&mut self, C) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::VeilidLayerFilterConfig::try_apply_directives<C: veilid_core::TryIntoIterVeilidLogDirective>(&mut self, C) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidLayerFilterConfig::try_apply_directives_string<S: core::convert::AsRef<str>>(&mut self, S) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidLayerFilterConfig::try_apply_env<S: core::convert::AsRef<std::ffi::os_str::OsStr>>(&mut self, S) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidLayerFilterConfig::try_with_default_env(self) -> veilid_core::VeilidAPIResult<Self>
-pub fn veilid_core::VeilidLayerFilterConfig::try_with_directives<C: veilid_core::logging::veilid_layer_filter::log_directive::TryIntoIterVeilidLogDirective>(self, C) -> veilid_core::VeilidAPIResult<Self>
+pub fn veilid_core::VeilidLayerFilterConfig::try_with_directives<C: veilid_core::TryIntoIterVeilidLogDirective>(self, C) -> veilid_core::VeilidAPIResult<Self>
 pub fn veilid_core::VeilidLayerFilterConfig::try_with_directives_string<S: core::convert::AsRef<str>>(self, S) -> veilid_core::VeilidAPIResult<Self>
 pub fn veilid_core::VeilidLayerFilterConfig::try_with_env<S: core::convert::AsRef<std::ffi::os_str::OsStr>>(self, S) -> veilid_core::VeilidAPIResult<Self>
 pub fn veilid_core::VeilidLayerFilterConfig::with_common_log_level(self, veilid_core::VeilidConfigLogLevel) -> Self
@@ -3095,6 +3095,8 @@ pub fn veilid_core::VeilidLogDirective::into_iter(self) -> Self::IntoIter
 impl core::str::traits::FromStr for veilid_core::VeilidLogDirective
 pub type veilid_core::VeilidLogDirective::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::VeilidLogDirective::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl veilid_core::TryIntoIterVeilidLogDirective for veilid_core::VeilidLogDirective
+pub fn veilid_core::VeilidLogDirective::try_into_iter(self) -> veilid_core::VeilidAPIResult<impl core::iter::traits::iterator::Iterator<Item = veilid_core::VeilidLogDirective>>
 pub struct veilid_core::VeilidRouteChange
 pub veilid_core::VeilidRouteChange::dead_remote_routes: alloc::vec::Vec<veilid_core::RouteId>
 pub veilid_core::VeilidRouteChange::dead_routes: alloc::vec::Vec<veilid_core::RouteId>
@@ -3149,8 +3151,8 @@ pub fn veilid_core::VeilidTracing::stderr() -> Self
 pub fn veilid_core::VeilidTracing::stdout() -> Self
 pub fn veilid_core::VeilidTracing::try_apply_default_env(&self) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidTracing::try_apply_default_env_for_output<S: core::convert::AsRef<std::ffi::os_str::OsStr>>(&self, veilid_core::LogOutputKind) -> veilid_core::VeilidAPIResult<()>
-pub fn veilid_core::VeilidTracing::try_apply_directives<C: veilid_core::logging::veilid_layer_filter::log_directive::TryIntoIterVeilidLogDirective>(&self, C) -> veilid_core::VeilidAPIResult<()>
-pub fn veilid_core::VeilidTracing::try_apply_directives_for_output<C: veilid_core::logging::veilid_layer_filter::log_directive::TryIntoIterVeilidLogDirective>(&self, veilid_core::LogOutputKind, C) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::VeilidTracing::try_apply_directives<C: veilid_core::TryIntoIterVeilidLogDirective>(&self, C) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::VeilidTracing::try_apply_directives_for_output<C: veilid_core::TryIntoIterVeilidLogDirective>(&self, veilid_core::LogOutputKind, C) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidTracing::try_apply_directives_string<S: core::convert::AsRef<str>>(&self, S) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidTracing::try_apply_directives_string_for_output<S: core::convert::AsRef<str>>(&self, veilid_core::LogOutputKind, S) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidTracing::try_apply_env<S: core::convert::AsRef<std::ffi::os_str::OsStr>>(&self, S) -> veilid_core::VeilidAPIResult<()>
@@ -3217,13 +3219,13 @@ pub fn veilid_core::CryptoSystem::crypto(&self) -> veilid_core::VeilidComponentG
 pub fn veilid_core::CryptoSystem::decapsulation_key_from_signing_secret(&self, &veilid_core::SecretKey) -> veilid_core::VeilidAPIResult<veilid_core::DecapsulationKey>
 pub fn veilid_core::CryptoSystem::decapsulation_key_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::decrypt_aead(&self, &[u8], &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
-pub fn veilid_core::CryptoSystem::decrypt_in_place_aead(&self, &mut dyn veilid_core::crypto::crypto_system::buffer::CryptoSystemBuffer, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::CryptoSystem::decrypt_in_place_aead(&self, &mut dyn veilid_core::CryptoSystemBuffer, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::CryptoSystem::default_salt_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::derive_shared_secret(&self, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<veilid_core::SharedSecret>
 pub fn veilid_core::CryptoSystem::encapsulation_key_from_signing_key(&self, &veilid_core::PublicKey) -> veilid_core::VeilidAPIResult<veilid_core::EncapsulationKey>
 pub fn veilid_core::CryptoSystem::encapsulation_key_length(&self) -> usize
 pub fn veilid_core::CryptoSystem::encrypt_aead(&self, &[u8], &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<u8>>
-pub fn veilid_core::CryptoSystem::encrypt_in_place_aead(&self, &mut dyn veilid_core::crypto::crypto_system::buffer::CryptoSystemBuffer, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::CryptoSystem::encrypt_in_place_aead(&self, &mut dyn veilid_core::CryptoSystemBuffer, &veilid_core::Nonce, &veilid_core::SharedSecret, core::option::Option<&[u8]>) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::CryptoSystem::generate_hash(&self, &[u8]) -> veilid_core::HashDigest
 pub fn veilid_core::CryptoSystem::generate_hash_reader(&self, &mut dyn alloc::io::read::Read) -> veilid_core::VeilidAPIResult<veilid_core::PublicKey>
 pub fn veilid_core::CryptoSystem::generate_kem_keypair(&self) -> veilid_core::KemKeyPair
@@ -3250,6 +3252,21 @@ pub fn veilid_core::CryptoSystem::validate_keypair(&self, &veilid_core::PublicKe
 pub fn veilid_core::CryptoSystem::verify(&self, &veilid_core::PublicKey, &[u8], &veilid_core::Signature) -> veilid_core::VeilidAPIResult<bool>
 pub fn veilid_core::CryptoSystem::verify_in_place(&self, &veilid_core::PublicKey, &[u8], core::ops::range::Range<usize>, usize) -> veilid_core::VeilidAPIResult<bool>
 pub fn veilid_core::CryptoSystem::verify_password(&self, &[u8], &str) -> veilid_core::VeilidAPIResult<bool>
+pub trait veilid_core::CryptoSystemBuffer: core::convert::AsRef<[u8]> + core::convert::AsMut<[u8]>
+pub fn veilid_core::CryptoSystemBuffer::extend_from_slice(&mut self, &[u8])
+pub fn veilid_core::CryptoSystemBuffer::is_empty(&self) -> bool
+pub fn veilid_core::CryptoSystemBuffer::len(&self) -> usize
+pub fn veilid_core::CryptoSystemBuffer::truncate(&mut self, usize)
+impl veilid_core::CryptoSystemBuffer for alloc::vec::Vec<u8>
+pub fn alloc::vec::Vec<u8>::extend_from_slice(&mut self, &[u8])
+pub fn alloc::vec::Vec<u8>::is_empty(&self) -> bool
+pub fn alloc::vec::Vec<u8>::len(&self) -> usize
+pub fn alloc::vec::Vec<u8>::truncate(&mut self, usize)
+impl veilid_core::CryptoSystemBuffer for bytes::bytes_mut::BytesMut
+pub fn bytes::bytes_mut::BytesMut::extend_from_slice(&mut self, &[u8])
+pub fn bytes::bytes_mut::BytesMut::is_empty(&self) -> bool
+pub fn bytes::bytes_mut::BytesMut::len(&self) -> usize
+pub fn bytes::bytes_mut::BytesMut::truncate(&mut self, usize)
 pub trait veilid_core::OkVeilidAPIResult<T>
 pub fn veilid_core::OkVeilidAPIResult::ok_try_again(self) -> veilid_core::VeilidAPIResult<core::option::Option<T>>
 pub fn veilid_core::OkVeilidAPIResult::ok_try_again_timeout(self) -> veilid_core::VeilidAPIResult<core::option::Option<T>>
@@ -3354,6 +3371,12 @@ impl<T: veilid_core::ToVeilidAPIErrorArgument + ?core::marker::Sized> veilid_cor
 pub fn &T::to_veilid_api_error_argument(&self) -> alloc::string::String
 impl<T: veilid_core::ToVeilidAPIErrorArgument> veilid_core::ToVeilidAPIErrorArgument for core::ops::range::Range<T>
 pub fn core::ops::range::Range<T>::to_veilid_api_error_argument(&self) -> alloc::string::String
+pub trait veilid_core::TryIntoIterVeilidLogDirective
+pub fn veilid_core::TryIntoIterVeilidLogDirective::try_into_iter(self) -> veilid_core::VeilidAPIResult<impl core::iter::traits::iterator::Iterator<Item = veilid_core::VeilidLogDirective>>
+impl veilid_core::TryIntoIterVeilidLogDirective for veilid_core::VeilidLogDirective
+pub fn veilid_core::VeilidLogDirective::try_into_iter(self) -> veilid_core::VeilidAPIResult<impl core::iter::traits::iterator::Iterator<Item = veilid_core::VeilidLogDirective>>
+impl<I, C> veilid_core::TryIntoIterVeilidLogDirective for I where C: core::convert::TryInto<veilid_core::VeilidLogDirective, Error = veilid_core::VeilidAPIError>, I: core::iter::traits::collect::IntoIterator<Item = C>
+pub fn I::try_into_iter(self) -> veilid_core::VeilidAPIResult<impl core::iter::traits::iterator::Iterator<Item = veilid_core::VeilidLogDirective>>
 pub async fn veilid_core::api_startup(veilid_core::UpdateCallback, veilid_core::VeilidConfig) -> veilid_core::VeilidAPIResult<veilid_core::VeilidAPI>
 pub async fn veilid_core::api_startup_json(veilid_core::UpdateCallback, alloc::string::String) -> veilid_core::VeilidAPIResult<veilid_core::VeilidAPI>
 pub fn veilid_core::common_crypto_kinds(&[veilid_core::CryptoKind], &[veilid_core::CryptoKind]) -> alloc::vec::Vec<veilid_core::CryptoKind>

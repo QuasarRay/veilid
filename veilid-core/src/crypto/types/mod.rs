@@ -5,7 +5,7 @@ use core::convert::TryInto;
 use core::fmt;
 use core::hash::Hash;
 
-fourcc_type!(CryptoKind);
+fourcc_type!(pub CryptoKind);
 
 /// Sort best crypto kinds first
 /// Better crypto kinds are 'less', ordered toward the front of a list

@@ -3,7 +3,7 @@ use cursive_table_view::*;
 use std::cmp::Ordering;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub enum PeerTableColumn {
+pub(crate) enum PeerTableColumn {
     NodeId,
     Address,
     LatencyAvg,

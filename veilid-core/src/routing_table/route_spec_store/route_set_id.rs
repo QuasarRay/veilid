@@ -8,17 +8,11 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 #[must_use]
-pub struct AllocatedRouteSetId(RouteId);
+pub(crate) struct AllocatedRouteSetId(RouteId);
 
 impl AllocatedRouteSetId {
     pub fn from_route_id(id: RouteId) -> Self {
         Self(id)
-    }
-    pub fn as_route_id(&self) -> &RouteId {
-        &self.0
-    }
-    pub fn into_route_id(self) -> RouteId {
-        self.0
     }
 }
 
@@ -47,17 +41,11 @@ impl fmt::Display for AllocatedRouteSetId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 #[must_use]
-pub struct RemoteRouteSetId(RouteId);
+pub(crate) struct RemoteRouteSetId(RouteId);
 
 impl RemoteRouteSetId {
     pub fn from_route_id(id: RouteId) -> Self {
         Self(id)
-    }
-    pub fn as_route_id(&self) -> &RouteId {
-        &self.0
-    }
-    pub fn into_route_id(self) -> RouteId {
-        self.0
     }
 }
 

@@ -239,4 +239,6 @@ mutable_key_type = "allow" # Until this is merged (NodeRef is safe to hash/eq): 
 
 [workspace.lints.rust]
 unused_must_use = "deny"
+# A type reachable through the public API but not nameable by a user is unusable there
+unnameable_types = "deny"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }

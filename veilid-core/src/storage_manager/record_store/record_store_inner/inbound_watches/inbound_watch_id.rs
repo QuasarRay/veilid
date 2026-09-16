@@ -3,7 +3,7 @@ use super::*;
 /// An individual watch id
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct InboundWatchId(u64);
+pub(crate) struct InboundWatchId(u64);
 
 impl InboundWatchId {
     pub(super) fn new(raw_id: u64) -> VeilidAPIResult<Self> {

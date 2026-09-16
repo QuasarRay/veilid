@@ -82,7 +82,7 @@ pub fn load_config(
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum LogLevel {
+pub(crate) enum LogLevel {
     Error,
     Warn,
     Info,

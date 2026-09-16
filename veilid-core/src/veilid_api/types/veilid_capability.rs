@@ -1,6 +1,6 @@
 use super::*;
 
-fourcc_type!(VeilidCapability);
+fourcc_type!(pub VeilidCapability);
 
 /// Node can relay private routes for other nodes.
 pub const VEILID_CAPABILITY_ROUTE: VeilidCapability = VeilidCapability::new(*b"ROUT");

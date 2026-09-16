@@ -4,7 +4,7 @@ use num_traits::{PrimInt, Unsigned};
 impl_veilid_log_facility!("stor");
 
 #[derive(ThisError, Debug, Clone, Eq, PartialEq)]
-pub enum ConcurrencyError {
+pub(crate) enum ConcurrencyError {
     #[error("ConcurrentAccess({description})")]
     ConcurrentAccess { description: String },
 }
@@ -15,7 +15,7 @@ impl From<ConcurrencyError> for VeilidAPIError {
 }
 
 #[derive(ThisError, Debug, Clone, Copy, Eq, PartialEq)]
-pub enum LimitError<T>
+pub(crate) enum LimitError<T>
 where
     T: PrimInt + Unsigned + fmt::Display + fmt::Debug,
 {
@@ -34,11 +34,9 @@ where
 }
 
 #[derive(ThisError, Debug, Clone, Copy, Eq, PartialEq)]
-pub enum NumericError<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> {
+pub(crate) enum NumericError<T: PrimInt + Unsigned + fmt::Display + fmt::Debug> {
     #[error("Overflow(current={current},added={added})")]
     Overflow { current: T, added: T },
-    #[error("Underflow(current={current},removed={removed})")]
-    Underflow { current: T, removed: T },
 }
 impl<T> From<NumericError<T>> for VeilidAPIError
 where

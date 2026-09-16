@@ -4,7 +4,7 @@ use super::*;
 use core::convert::TryInto;
 
 // Version number of receipt format
-fourcc_type!(ReceiptVersion);
+fourcc_type!(pub(crate) ReceiptVersion);
 
 // RCP0
 pub const RECEIPT_VERSION_RCP0: ReceiptVersion = ReceiptVersion::new(*b"RCP0");

@@ -5,7 +5,7 @@ impl_veilid_log_facility!("stor");
 /// An individual transaction id
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct InboundTransactionId(u64);
+pub(crate) struct InboundTransactionId(u64);
 
 impl InboundTransactionId {
     pub(super) fn new(raw_id: u64) -> VeilidAPIResult<Self> {

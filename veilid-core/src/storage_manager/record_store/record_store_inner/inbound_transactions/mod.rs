@@ -6,7 +6,7 @@ mod inbound_transaction_list;
 use super::*;
 
 pub use inbound_transaction::*;
-pub use inbound_transaction_id::*;
+pub(crate) use inbound_transaction_id::*;
 pub use inbound_transaction_id_allocator::*;
 pub use inbound_transaction_list::*;
 

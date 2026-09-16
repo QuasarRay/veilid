@@ -2,7 +2,7 @@ use super::*;
 use core::convert::TryInto;
 
 // Version number of envelope format
-fourcc_type!(EnvelopeVersion);
+fourcc_type!(pub(crate) EnvelopeVersion);
 
 // ENV0
 pub const ENVELOPE_VERSION_ENV0: EnvelopeVersion = EnvelopeVersion::new(*b"ENV0");

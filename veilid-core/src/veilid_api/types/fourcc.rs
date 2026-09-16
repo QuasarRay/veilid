@@ -1,7 +1,10 @@
 /// Define a named four-character-code newtype wrapping `[u8; 4]`, with
 /// conversions to and from `String` and the raw byte array.
+///
+/// `$vis` is the type's visibility: the conversions below are impls of public traits, so a
+/// `pub` code is reachable from outside the crate and must be re-exported to stay nameable.
 macro_rules! fourcc_type {
-    ($name:ident) => {
+    ($vis:vis $name:ident) => {
         pastey::paste! {
             /// A four-character code
             #[derive(
@@ -25,7 +28,7 @@ macro_rules! fourcc_type {
                 tsify(type_suffix = "Inner"),
             )]
             #[cfg_attr(feature = "json-camel-case", serde(rename_all = "camelCase"))]
-            pub struct $name(#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"),tsify(type = "string"))] [u8; 4]);
+            $vis struct $name(#[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"),tsify(type = "string"))] [u8; 4]);
 
             impl $name {
                 /// Make a code from four bytes.
@@ -34,6 +37,7 @@ macro_rules! fourcc_type {
                 }
                 /// Get the four bytes of the code.
                 #[must_use]
+                #[allow(dead_code, reason = "uniform accessor; not every code's callers need it")]
                 pub fn bytes(&self) -> &[u8; 4] {
                     &self.0
                 }

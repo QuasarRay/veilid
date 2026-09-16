@@ -6,7 +6,7 @@ mod inbound_watch_list;
 use super::*;
 
 use inbound_watch::*;
-pub use inbound_watch_id::*;
+pub(crate) use inbound_watch_id::*;
 pub use inbound_watch_id_allocator::*;
 pub use inbound_watch_list::*;
 
