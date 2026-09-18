@@ -8,8 +8,11 @@ import 'veilid.dart';
 /// Build a [VeilidConfig] from veilid-core's defaults, overriding the
 /// program/storage/network fields most callers need to set.
 ///
-/// On non-web platforms the store directories are placed under the
-/// application support directory. [bootstrap] and [bootstrapKeys] are
+/// On non-web platforms the store directories are placed under
+/// [storageDirectory], or under the application support directory when that is
+/// not given. Pass it from an embedder that starts a node off the main isolate:
+/// path_provider is a platform-channel call, and such an isolate has no
+/// messenger bound to make one. [bootstrap] and [bootstrapKeys] are
 /// comma-separated; empty strings leave the built-in defaults in place.
 /// [bootstrapRecords] are whole TXT records, which contain commas of their own,
 /// so they are passed as a list.
@@ -23,35 +26,26 @@ Future<VeilidConfig> getDefaultVeilidConfig({
   String deviceEncryptionKeyPassword = '',
   String? newDeviceEncryptionKeyPassword,
   String networkKeyPassword = '',
+  String? storageDirectory,
 }) async {
   final defaultConfigStr = Veilid.instance.defaultVeilidConfig();
   final defaultConfig = VeilidConfig.fromJson(jsonDecode(defaultConfigStr));
+  // Resolved once, and not at all on web or when the caller supplied it
+  final storageDir = isWeb
+      ? ''
+      : storageDirectory ??
+            (await getApplicationSupportDirectory()).absolute.path;
   return defaultConfig.copyWith(
     programName: programName,
     namespace: namespace,
     tableStore: defaultConfig.tableStore.copyWith(
-      directory: isWeb
-          ? ''
-          : p.join(
-              (await getApplicationSupportDirectory()).absolute.path,
-              'table_store',
-            ),
+      directory: isWeb ? '' : p.join(storageDir, 'table_store'),
     ),
     blockStore: defaultConfig.blockStore.copyWith(
-      directory: isWeb
-          ? ''
-          : p.join(
-              (await getApplicationSupportDirectory()).absolute.path,
-              'block_store',
-            ),
+      directory: isWeb ? '' : p.join(storageDir, 'block_store'),
     ),
     protectedStore: defaultConfig.protectedStore.copyWith(
-      directory: isWeb
-          ? ''
-          : p.join(
-              (await getApplicationSupportDirectory()).absolute.path,
-              'protected_store',
-            ),
+      directory: isWeb ? '' : p.join(storageDir, 'protected_store'),
       deviceEncryptionKeyPassword: deviceEncryptionKeyPassword,
       newDeviceEncryptionKeyPassword: newDeviceEncryptionKeyPassword,
     ),
