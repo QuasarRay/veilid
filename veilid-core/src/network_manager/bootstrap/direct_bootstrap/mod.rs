@@ -15,6 +15,11 @@ impl NetworkManager {
         instrument(level = "trace", target = "net", err, skip(self), fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     pub async fn direct_bootstrap(&self, dial_info: DialInfo) -> EyreResult<BootstrapPeers> {
+        if self.routing_table().matches_own_dial_info(&dial_info) {
+            veilid_log!(self debug "Ignoring own dial info in bootstrap list: {}", dial_info);
+            return Ok(BootstrapPeers::default());
+        }
+
         let direct_boot_version = if self
             .config()
             .network
@@ -129,14 +134,9 @@ impl NetworkManager {
         // bootstrap record has an unspecified IP address, and as such a routing domain can not
         // be determined for it by the code that receives the FindNodeA result.
         // The rest fall back to unsigned peer info built from the record itself.
-        let routing_table = self.routing_table();
         let mut peers = Vec::<Arc<PeerInfo>>::new();
         let mut unsigned_bsrecs = Vec::<BootstrapRecord>::new();
         for bsrec in bsrecs.iter() {
-            if routing_table.matches_own_public_key(bsrec.public_keys()) {
-                veilid_log!(self debug "Ignoring own node in bootstrap list");
-                continue;
-            }
             match bootv1response.peers.iter().find(|pi| {
                 pi.node_info()
                     .public_keys()

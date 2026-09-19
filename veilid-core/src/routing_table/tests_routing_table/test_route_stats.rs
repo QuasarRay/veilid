@@ -65,17 +65,34 @@ pub fn test_send_does_not_clear_loopback_run() {
     assert!(stats.is_dead_for_ordering(SequenceOrdering::Ordered));
 }
 
-pub fn test_send_failure_death_does_not_blame_hops() {
-    info!("--- test_send_failure_death_does_not_blame_hops ---");
+pub fn test_send_failure_does_not_kill_the_route() {
+    info!("--- test_send_failure_does_not_kill_the_route ---");
+    // A send failure names us and the first hop, not the route
     let mut stats = RouteStats::new(now());
     stats.record_send_failed(SequenceOrdering::Ordered);
-    assert!(stats.is_dead_for(only(SequenceOrdering::Ordered)));
+    assert!(!stats.is_dead_for(only(SequenceOrdering::Ordered)));
     assert!(!stats.death_blames_hops_for(only(SequenceOrdering::Ordered)));
+    // but it is still a reason to recompile and retest
+    assert!(stats
+        .ordering_disposition(SequenceOrdering::Ordered)
+        .needs_recompile());
+    assert!(stats.needs_testing(only(SequenceOrdering::Ordered), now()));
 
+    // A send failure must not pre-empt the loopback threshold
+    let mut stats = RouteStats::new(now());
+    stats.record_send_failed(SequenceOrdering::Ordered);
+    stats.record_loopback_result(SequenceOrdering::Ordered, false, now());
+    assert!(
+        !stats.is_dead_for(only(SequenceOrdering::Ordered)),
+        "one bad loopback is not a dead route, whether or not a send failed"
+    );
+
+    // Evidence spanning the route kills it, and blames the hops
     let mut stats = RouteStats::new(now());
     for _ in 0..loopback_failure_threshold(SequenceOrdering::Ordered) {
         stats.record_loopback_result(SequenceOrdering::Ordered, false, now());
     }
+    assert!(stats.is_dead_for(only(SequenceOrdering::Ordered)));
     assert!(stats.death_blames_hops_for(only(SequenceOrdering::Ordered)));
     assert!(!stats.death_blames_hops_for(only(SequenceOrdering::Unordered)));
 }
@@ -117,7 +134,7 @@ pub fn test_sequencing_narrows_to_route_orderings() {
 }
 
 pub fn test_all() {
-    test_send_failure_death_does_not_blame_hops();
+    test_send_failure_does_not_kill_the_route();
     test_loopback_failure_run_kills_ordering();
     test_loopback_pass_resets_run();
     test_send_does_not_clear_loopback_run();

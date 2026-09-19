@@ -44,7 +44,7 @@ const REMOTE_PRIVATE_ROUTE_CACHE_EXPIRY: TimestampDuration = TimestampDuration::
 const ROUTE_MIN_IDLE_TIME_MS: u32 = 30_000;
 /// Number of unique failing destinations before invalidating compiled route cache for a route
 const ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD: usize = 5;
-/// Number of consecutive send failures before invalidating compiled route cache for a safety route
+/// Number of consecutive send failures before invalidating compiled route cache for a safety route.
 const ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD: usize = 1;
 /// Consecutive loopback failures that kill an ordering. Datagram legs compound across hops, so
 /// unordered routes get more slack. Provisional until the 2026-09-12 ambient-rate runs settle them.

@@ -69,6 +69,19 @@ async fn test_txt_then_direct() -> BTreeSet<String> {
         strings_a
     );
 
+    // A never bootstraps from itself, so a request to its own dial info is not sent
+    let own_dial_info = BootstrapDialInfoConverter::default()
+        .try_vec_from_url(&local_udp_bootstrap_url(&api_a))
+        .await
+        .expect("bad bootstrap url")
+        .remove(0);
+    let own_peers = registry(&api_a)
+        .network_manager()
+        .direct_bootstrap(own_dial_info)
+        .await
+        .expect("direct bootstrap failed");
+    assert!(own_peers.peers.is_empty() && own_peers.record_strings.is_empty());
+
     info!("test_txt_then_direct: starting node B");
     let url = local_udp_bootstrap_url(&api_a);
     let (update_callback, mut config) = fixture_veilid_core();

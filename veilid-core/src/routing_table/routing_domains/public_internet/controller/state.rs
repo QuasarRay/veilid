@@ -182,6 +182,8 @@ impl PublicInternetRoutingDomainController {
         let mut needs_more_tested_nodes = Vec::new();
 
         let min_peer_count = self.config().internal().network.dht.min_peer_count as usize;
+        // Silence sends a node back to bootstrap only if it has a bootstrap other than itself
+        let can_bootstrap_again = self.bootstrap_standoff_until.get().is_none();
         let cur_ts = Timestamp::now();
         let mut no_responsive_since = self.no_responsive_since.lock();
         for ck in VALID_CRYPTO_KINDS {
@@ -206,7 +208,7 @@ impl PublicInternetRoutingDomainController {
             };
 
             // Track how long this kind has had zero responsive nodes
-            let no_responsive_elapsed = if counts.responsive == 0 {
+            let no_responsive_elapsed = if counts.responsive == 0 && can_bootstrap_again {
                 let since = *no_responsive_since.entry(ck).or_insert(cur_ts);
                 Some(cur_ts.duration_since(since))
             } else {

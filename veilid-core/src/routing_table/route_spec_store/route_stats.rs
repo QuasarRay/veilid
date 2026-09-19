@@ -7,19 +7,31 @@ use hashlink::LruCache;
 pub enum RouteStatsDisposition {
     /// Route (or ordering) is still valid
     Valid,
-    /// Invalid because it has failed to send too many times
+    /// Invalid because we could not send, which names us and the first hop
     InvalidSendFailure,
+    /// Invalid because loopbacks failed end to end often enough to blame the route
+    InvalidLoopbackFailures,
     /// Invalid because it has lost too many answers
     InvalidLostQuestions,
 }
 
 impl RouteStatsDisposition {
-    /// Whether this disposition means the route/ordering is dead (failed).
-    pub fn is_invalid(&self) -> bool {
+    /// Whether the route is dead, rather than merely unusable right now.
+    ///
+    /// Only evidence spanning the route counts. A send failure is excluded: it
+    /// names us and the first hop, whose own liveness covers it.
+    pub fn means_route_dead(&self) -> bool {
         matches!(
             self,
-            RouteStatsDisposition::InvalidSendFailure | RouteStatsDisposition::InvalidLostQuestions
+            RouteStatsDisposition::InvalidLoopbackFailures
+                | RouteStatsDisposition::InvalidLostQuestions
         )
+    }
+
+    /// Whether a compiled route built from this should be rebuilt. Send
+    /// failures count: a recompile may pick a first hop we can reach.
+    pub fn needs_recompile(&self) -> bool {
+        !matches!(self, RouteStatsDisposition::Valid)
     }
 }
 
@@ -64,14 +76,15 @@ impl RouteOrderingStats {
     /// Disposition of this single ordering; `loopback_threshold` is the run of loopback
     /// failures that kills it (route-level Locked handled by caller).
     pub fn disposition(&self, loopback_threshold: usize) -> RouteStatsDisposition {
-        if self.failed_to_send >= ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD
-            || self.consecutive_loopback_failures >= loopback_threshold
-        {
-            RouteStatsDisposition::InvalidSendFailure
+        // Route-spanning evidence first, or a dead route carrying a send failure reads as alive
+        if self.consecutive_loopback_failures >= loopback_threshold {
+            RouteStatsDisposition::InvalidLoopbackFailures
         } else if self.lost_question_destinations.len()
             >= ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD
         {
             RouteStatsDisposition::InvalidLostQuestions
+        } else if self.failed_to_send >= ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD {
+            RouteStatsDisposition::InvalidSendFailure
         } else {
             RouteStatsDisposition::Valid
         }
@@ -284,9 +297,27 @@ impl RouteStats {
             .unwrap_or(RouteStatsDisposition::Valid)
     }
 
-    /// Is the route dead for a given ordering (its ordering disposition is invalid)?
+    /// Is the route dead for a given ordering
     pub fn is_dead_for_ordering(&self, ordering: SequenceOrdering) -> bool {
-        self.ordering_disposition(ordering).is_invalid()
+        self.ordering_disposition(ordering).means_route_dead()
+    }
+
+    /// Per-ordering counters behind a death, for the release log
+    pub fn death_reason(&self, orderings: SequenceOrderingSet) -> String {
+        orderings
+            .iter()
+            .map(|o| match self.per_ordering.get(&o) {
+                Some(s) => format!(
+                    "{}: send={} loopback_streak={} lost_dests={}",
+                    o,
+                    s.failed_to_send,
+                    s.consecutive_loopback_failures,
+                    s.lost_question_destinations.len()
+                ),
+                None => format!("{o}: untested"),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Dead for *every* ordering it provides. An `EnsureOrdered` route
@@ -556,7 +587,8 @@ impl RouteSpecStore {
             };
             if arce.with_stats(|s| s.is_dead_for(arce.orderings())) && !arce.is_marked_for_release()
             {
-                veilid_log!(self debug "Marking dead route for release: {}", key);
+                let why = arce.with_stats(|st| st.death_reason(arce.orderings()));
+                veilid_log!(self debug "Marking dead route for release: {} ({})", key, why);
                 arce.mark_for_release();
                 if arce.with_stats(|s| s.death_blames_hops_for(arce.orderings())) {
                     self.avoid_dead_route_hops(arce.orderings(), &arce.hop_node_refs());

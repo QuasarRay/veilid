@@ -2,6 +2,9 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
+/// How long a node stands off from bootstrapping after finding itself to be its only bootstrap
+const BOOTSTRAP_STANDOFF: TimestampDuration = TimestampDuration::new_secs(60);
+
 impl PublicInternetRoutingDomainController {
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn bootstrap_task_routine(
@@ -25,6 +28,15 @@ impl PublicInternetRoutingDomainController {
             (rt.bootstrap.clone(), !rt.bootstrap_records.is_empty())
         };
         if bootstraps.is_empty() && !has_config_records {
+            return Ok(());
+        }
+
+        // Stand off while this node is the only bootstrap it knows of
+        if self
+            .bootstrap_standoff_until
+            .get()
+            .is_some_and(|until| Timestamp::now() < until)
+        {
             return Ok(());
         }
 
@@ -79,7 +91,7 @@ impl PublicInternetRoutingDomainController {
             }));
         }
         for bstn in bootstrap_txt_names {
-            // TXT bootstrap, then the host directly if the resolver gave nothing in
+            // TXT bootstrap, then the host directly if the resolver gave no records in
             // time: a tethered phone's DNS relay answers A/AAAA but not TXT
             unord.push(pin_dyn_future!(async {
                 let bstn = bstn;
@@ -89,7 +101,7 @@ impl PublicInternetRoutingDomainController {
                     .timeout_duration(txt_timeout)
                     .await
                 {
-                    Ok(Ok(peers)) if !peers.peers.is_empty() => Ok(peers),
+                    Ok(Ok(peers)) if !peers.records.is_empty() => Ok(peers),
                     _ => {
                         veilid_log!(self debug "TXT bootstrap gave nothing, trying direct bootstrap on: {}", bstn);
                         self.direct_bootstrap_by_name(&bstn).await
@@ -102,6 +114,7 @@ impl PublicInternetRoutingDomainController {
         let mut bootstrapped_peers = vec![];
         let mut bootstrapped_records = vec![];
         let mut bootstrapped_record_strings = vec![];
+        let mut own_node_seen = false;
         loop {
             match unord.next().timeout_at(stop_token.clone()).await {
                 Ok(Some(res)) => match res {
@@ -123,7 +136,8 @@ impl PublicInternetRoutingDomainController {
                                 .any(|x| bootstrapped_peer_id_set.contains(x))
                             {
                                 if routing_table.matches_own_node_id(peer_node_ids) {
-                                    veilid_log!(self debug "Ignoring own node in bootstrap response");
+                                    veilid_log!(self debug "Ignoring own node in bootstrap list");
+                                    own_node_seen = true;
                                 } else {
                                     for nid in peer.node_ids().iter().cloned() {
                                         bootstrapped_peer_id_set.insert(nid);
@@ -155,6 +169,17 @@ impl PublicInternetRoutingDomainController {
         // keys, so relaying a string it does not trust costs response size and nothing else.
         let bootstrap_cache =
             BootstrapCache::new(bootstrapped_record_strings, bootstrapped_records);
+
+        // Only this node among the bootstraps: nothing to bootstrap from until other nodes connect
+        if own_node_seen && bootstrapped_peers.is_empty() {
+            self.record_bootstrap_cache(bootstrap_cache);
+            let until = Timestamp::now().later(BOOTSTRAP_STANDOFF);
+            if self.bootstrap_standoff_until.swap(Some(until)).is_none() {
+                veilid_log!(self info "This node is its only bootstrap, waiting for other nodes to connect");
+            }
+            return Ok(());
+        }
+        self.bootstrap_standoff_until.set(None);
 
         if self
             .unlocked_inner

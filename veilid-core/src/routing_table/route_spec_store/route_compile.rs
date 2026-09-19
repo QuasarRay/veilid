@@ -618,15 +618,12 @@ impl RouteSpecStore {
                 // Check #3a: Remote route orderings aren't tracked locally, so fall back to the
                 // aggregate disposition here (conservative: only invalidate when all orderings dead).
                 let disposition = rrce.with_stats(|stats| stats.aggregate_disposition());
-                match disposition {
-                    RouteStatsDisposition::Valid => {}
-                    _ => {
-                        #[cfg(feature = "verbose-tracing")]
-                        veilid_log!(self debug "Private route was {:?} for id {} with key={}, invalidating cache entry {:?}", disposition, private_route_id, private_route_key, key);
-                        drop(cache);
-                        entry.remove();
-                        return RouteCompileCacheDisposition::Compile(entry);
-                    }
+                if disposition.needs_recompile() {
+                    #[cfg(feature = "verbose-tracing")]
+                    veilid_log!(self debug "Private route was {:?} for id {} with key={}, invalidating cache entry {:?}", disposition, private_route_id, private_route_key, key);
+                    drop(cache);
+                    entry.remove();
+                    return RouteCompileCacheDisposition::Compile(entry);
                 }
             }
         }

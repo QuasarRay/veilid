@@ -2,6 +2,7 @@ pub mod mocks;
 pub mod test_bucket_entry_state;
 pub mod test_network_estimator;
 pub mod test_nodes_needed;
+pub mod test_own_dial_info;
 pub mod test_persisted_reset;
 pub mod test_route_stats;
 pub mod test_routing_metrics;
@@ -39,6 +40,7 @@ pub async fn test_all() {
     test_nodes_needed::test_nodes_needed_low_water_mark_term_capped();
     test_nodes_needed::test_nodes_needed_fallback_bootstrap_timing();
     test_nodes_needed::test_nodes_needed_peer_minimum_refresh_scoped_to_attach();
+    test_own_dial_info::test_matches_own_dial_info().await;
     test_persisted_reset::test_persisted_reset_no_recorded_bootstrap();
     test_persisted_reset::test_persisted_reset_recorded_empty();
     test_persisted_reset::test_persisted_reset_recorded_records();

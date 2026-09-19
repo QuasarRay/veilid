@@ -83,6 +83,9 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
 
     /// Bootstrap wait detector (to prevent spamming logs)
     bootstrap_wait_detector: AtomicOptionTimestamp,
+    /// Set when a round found only this node: rounds are skipped until this time, and silence
+    /// cannot send the node back to bootstrap while it is set
+    bootstrap_standoff_until: AtomicOptionTimestamp,
     /// Per crypto kind, when we first observed zero responsive connectivity nodes
     no_responsive_since: Mutex<BTreeMap<CryptoKind, Timestamp>>,
 }
@@ -170,6 +173,7 @@ impl PublicInternetRoutingDomainController {
             commit_subscription: Default::default(),
             peer_info_subscription: Default::default(),
             bootstrap_wait_detector: AtomicOptionTimestamp::new(None),
+            bootstrap_standoff_until: AtomicOptionTimestamp::new(None),
             no_responsive_since: Default::default(),
         };
         let this = Self {
@@ -220,6 +224,7 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
 
             // Don't let detached time count toward the fallback-bootstrap delay
             self.no_responsive_since.lock().clear();
+            self.bootstrap_standoff_until.set(None);
 
             // Serve the configured bootstrap records, whether or not we ever bootstrap
             let config_cache = self.network_manager().config_bootstrap_cache().await;

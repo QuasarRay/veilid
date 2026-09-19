@@ -100,11 +100,6 @@ impl NetworkManager {
         bsrecs
             .iter()
             .filter_map(|bsrec| {
-                if routing_table.matches_own_public_key(bsrec.public_keys()) {
-                    veilid_log!(self debug "Ignoring own node in bootstrap list");
-                    return None;
-                }
-
                 // Get crypto support from list of node ids
                 let crypto_info_list: Vec<CryptoInfo> = bsrec.public_keys().iter().filter_map(|pk| {
                     match pk.kind() {

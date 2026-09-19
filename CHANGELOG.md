@@ -27,6 +27,7 @@
   - A set that reaches a storage node after End is refused without ending that node's transaction.
   - The set retry pass in DHT transactions is gone; it re-sent 4 of 6391 set RPCs in a stress run and none once late answers were collected.
   - A bootstrap name whose TXT lookup returns nothing within ten seconds is direct-bootstrapped over every enabled protocol at once, so a node behind a phone tether whose DNS relay answers A/AAAA but not TXT still joins the network.
+  - A node never bootstraps from itself: a bootstrap request is not sent to its own dial info.
   - DHT transaction keepalives are sent only when no command answer has refreshed the node's lease since the last deadline.
   - A DHT transaction command returns at consensus instead of waiting up to half a second for stragglers, which now settle in the background.
   - Fix OnlineDetector spurious flap.

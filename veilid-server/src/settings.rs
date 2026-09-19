@@ -784,6 +784,11 @@ impl Default for Dht {
 }
 
 /// Routing table identity and bootstrap configuration.
+///
+/// Bootstrap records, if specified are served to direct bootstrap requests without any lookup,
+/// and usable to bootstrap this node itself. Both record versions are served.
+/// Bootstrapping from them follows the same rule as a TXT bootstrap, so v0 records are only
+/// used when no bootstrap keys are set. Empty means use records from the bootstrap servers.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct RoutingTable {
@@ -796,10 +801,6 @@ pub struct RoutingTable {
     /// Public keys trusted to sign bootstrap records.
     pub bootstrap_keys: Vec<veilid_core::PublicKey>,
     /// Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.
-    /// Served to direct bootstrap requests without any lookup, and usable to bootstrap this
-    /// node itself. Both record versions are served; bootstrapping from them follows the same
-    /// rule as a TXT bootstrap, so v0 records are only used when no bootstrap keys are set.
-    /// Empty by default, in which case records come from the bootstrap servers.
     pub bootstrap_records: Vec<String>,
 }
 impl Default for RoutingTable {

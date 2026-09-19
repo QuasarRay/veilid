@@ -638,6 +638,17 @@ impl RoutingTable {
         false
     }
 
+    /// Whether a dial info reaches this node: one of our own, or loopback on one of their ports
+    pub fn matches_own_dial_info(&self, dial_info: &DialInfo) -> bool {
+        let target = dial_info.socket_address();
+        RoutingDomainSet::all().iter().any(|rd| {
+            self.dial_info_details(rd).iter().any(|did| {
+                let own = did.dial_info.socket_address();
+                own == target || (target.address().is_loopback() && own.port() == target.port())
+            })
+        })
+    }
+
     #[cfg(not(test))]
     async fn setup_public_key(
         &self,
