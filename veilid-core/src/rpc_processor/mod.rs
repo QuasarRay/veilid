@@ -324,11 +324,29 @@ impl RPCProcessor {
             .await
             .expect_or_log("should be started up");
 
-        self.shutdown_rpc_workers().await;
+        // Release everything waiting on an answer now. Without this the reply pool drain below
+        // waits out each question's full RPC timeout, which no answer can beat: the network is
+        // already down by the time we get here.
+        let cancelled = self.waiting_rpc_table.cancel_all_op_waiters()
+            + self.waiting_app_call_table.cancel_all_op_waiters();
+        if cancelled > 0 {
+            veilid_log!(self debug "cancelled {} rpc operations waiting for a reply", cancelled);
+        }
+
+        self.shutdown_rpc_workers()
+            .measure(|dur| {
+                veilid_log!(self debug "rpc workers stopped in {:#}", dur);
+            })
+            .await;
 
         // Wait for any reply-pool tasks (in-flight wait_for_reply futures
         // whose callers have moved on) to complete naturally.
-        self.reply_pool.shutdown().await;
+        self.reply_pool
+            .shutdown()
+            .measure(|dur| {
+                veilid_log!(self debug "rpc reply pool drained in {:#}", dur);
+            })
+            .await;
 
         veilid_log!(self debug "resetting rpc processor state");
 
@@ -645,6 +663,11 @@ impl RPCProcessor {
                 let res = waiter.wait_for_op(handle, timeout).await;
                 match res {
                     Err(e) => {
+                        // A wait cancelled by our own shutdown is not the peer's fault
+                        if this.startup_context.startup_lock.is_shut_down() {
+                            return Err(e);
+                        }
+
                         #[cfg(feature = "verbose-tracing")]
                         let context_debug = {
                             let routing_table = &*this.routing_table();

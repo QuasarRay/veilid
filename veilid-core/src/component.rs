@@ -363,7 +363,13 @@ impl VeilidComponentRegistry {
         self.terminate_inner(init_order).await;
 
         // Event bus shuts down last
-        self.unlocked_inner.event_bus.shutdown().await;
+        self.unlocked_inner
+            .event_bus
+            .shutdown()
+            .measure(|dur| {
+                veilid_log!(self debug "terminate 'EventBus' took {:#}", dur);
+            })
+            .await;
 
         // Remoave all registered component log facilities from VeilidLayerFilter for this log key
         if let Err(e) = VeilidLayerFilter::terminate_veilid_component_log_facilities(self.log_key())
@@ -385,7 +391,13 @@ impl VeilidComponentRegistry {
         pre_initialized: Vec<Arc<dyn VeilidComponent + Send + Sync>>,
     ) {
         for component in pre_initialized.iter().rev() {
-            component.pre_terminate().await;
+            let name = component.name();
+            component
+                .pre_terminate()
+                .measure(|dur| {
+                    veilid_log!(self debug "pre_terminate '{}' took {:#}", name, dur);
+                })
+                .await;
         }
     }
     async fn terminate_inner(&self, initialized: Vec<Arc<dyn VeilidComponent + Send + Sync>>) {
@@ -398,7 +410,13 @@ impl VeilidComponentRegistry {
                     refs - 2
                 );
             }
-            component.terminate().await;
+            let name = component.name();
+            component
+                .terminate()
+                .measure(|dur| {
+                    veilid_log!(self debug "terminate '{}' took {:#}", name, dur);
+                })
+                .await;
         }
     }
 

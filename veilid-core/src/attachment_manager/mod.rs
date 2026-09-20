@@ -21,6 +21,8 @@ impl_veilid_log_facility!("attach");
 const TICK_INTERVAL_MSEC: u32 = 1000;
 const ATTACHMENT_MAINTAINER_INTERVAL_MSEC: u32 = 1000;
 const BIND_WAIT_DELAY: TimestampDuration = TimestampDuration::new_ms(10000);
+/// How often shutdown re-kicks the maintainer while waiting for it to reach the detached state
+const DETACH_WAIT_INTERVAL_MSEC: u32 = 5;
 /// Tick lag past this is reported; matches the detector's local-stall floor
 const TICK_LAG_REPORT: TimestampDuration =
     TimestampDuration::new_ms(2 * (TICK_INTERVAL_MSEC as u64));
@@ -280,12 +282,18 @@ impl AttachmentManager {
             .await
             .expect_or_log("should be initialized");
 
-        // Wait for detached state
+        // The maintainer task performs the detach when it finds the attachment lock closed. Kick it
+        // rather than waiting out a tick period, and keep kicking: a run still winding down from
+        // before the lock closed holds off a new one without having done the detach itself.
         while !matches!(
             self.inner.lock().attachment_state,
             AttachmentState::Detached
         ) {
-            sleep(100).await;
+            if let Err(e) = self.attachment_maintainer_task.try_tick_now().await {
+                veilid_log!(self warn "attachment_maintainer not ticked: {}", e);
+                break;
+            }
+            sleep(DETACH_WAIT_INTERVAL_MSEC).await;
         }
 
         let sub = self.inner.lock().routing_domain_ready_subscription.take();
@@ -345,7 +353,6 @@ impl AttachmentManager {
     }
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    #[allow(clippy::unused_async)]
     pub async fn detach(&self) -> bool {
         let Ok(_guard) = self.startup_context.initialize_lock.enter() else {
             return false;
@@ -360,6 +367,11 @@ impl AttachmentManager {
             }
             // Wants to be detached
             inner.maintain_peers = false;
+        }
+
+        // Act on the state change now rather than at the next tick
+        if let Err(e) = self.attachment_maintainer_task.try_tick_now().await {
+            veilid_log!(self warn "attachment_maintainer not ticked: {}", e);
         }
 
         true

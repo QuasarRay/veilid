@@ -162,6 +162,15 @@ where
         inner.waiting_op_table.remove(&op_id);
     }
 
+    /// Drop every waiting op, releasing its waiter immediately rather than at its timeout.
+    /// Returns how many were waiting. Used at shutdown; an answer arriving after this is unmatched.
+    pub fn cancel_all_op_waiters(&self) -> usize {
+        let mut inner = self.inner.lock();
+        let count = inner.waiting_op_table.len();
+        inner.waiting_op_table.clear();
+        count
+    }
+
     /// Complete the waiting op
     #[cfg_attr(
         feature = "instrument",

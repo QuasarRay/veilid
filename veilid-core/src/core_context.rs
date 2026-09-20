@@ -203,11 +203,21 @@ impl VeilidCoreContext {
         // Run pre-termination
         // This should shut down background processes that may require the existence of
         // other subsystems that may not exist during final termination
-        self.registry.pre_terminate().await;
+        self.registry
+            .pre_terminate()
+            .measure(|dur| {
+                veilid_log!(self debug "pre_terminate phase took {:#}", dur);
+            })
+            .await;
 
         // Run termination
         // This should finish any shutdown operations for the subsystems
-        self.registry.terminate().await;
+        self.registry
+            .terminate()
+            .measure(|dur| {
+                veilid_log!(self debug "terminate phase took {:#}", dur);
+            })
+            .await;
 
         veilid_log!(self info "Veilid API shutdown complete");
 
@@ -435,7 +445,12 @@ pub(crate) async fn api_shutdown(context: VeilidCoreContext) {
     };
 
     // Only allow one startup/shutdown per program_name+namespace combination simultaneously
-    let _tag_guard = STARTUP_TABLE.lock_tag(init_key.clone()).await;
+    let _tag_guard = STARTUP_TABLE
+        .lock_tag(init_key.clone())
+        .measure(|dur| {
+            veilid_log!(context debug "shutdown startup-tag wait took {:#}", dur);
+        })
+        .await;
 
     // See if we have an API started up already
     if !INITIALIZED.lock().contains(&init_key) {

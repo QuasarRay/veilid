@@ -5,11 +5,12 @@ use crate::settings::*;
 use crate::tools::block_on;
 use std::ffi::OsString;
 use std::io::{Read as _, Write as _};
-use std::net::{IpAddr, TcpStream, UdpSocket};
+use std::net::{IpAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use tracing_subscriber::prelude::*;
 use veilid_core::tools::sleep;
 use veilid_core::*;
 
@@ -90,6 +91,8 @@ fn settings_for(path: &Path) -> Settings {
 }
 
 async fn start(path: &Path) -> VeilidAPI {
+    // Before the first node, so a later timeout has a log to show
+    let _ = core_log_path();
     let settings = settings_for(path);
     assert!(
         settings.unknown_keys.is_empty(),
@@ -105,7 +108,7 @@ async fn start(path: &Path) -> VeilidAPI {
         .expect("should start")
 }
 
-async fn wait_for_network(api: &VeilidAPI) {
+async fn wait_for_network(api: &VeilidAPI, port: u16) {
     let mut waited_ms = 0;
     while !api
         .get_state()
@@ -116,20 +119,97 @@ async fn wait_for_network(api: &VeilidAPI) {
     {
         assert!(
             waited_ms < NETWORK_START_TIMEOUT_MS,
-            "network never started"
+            "network never started on port {} after {} ms\nudp bindable now: {}, tcp bindable now: {}\n--- core log tail ---\n{}",
+            port,
+            waited_ms,
+            UdpSocket::bind(("0.0.0.0", port)).is_ok(),
+            TcpListener::bind(("0.0.0.0", port)).is_ok(),
+            core_log_tail(60),
         );
         sleep(POLL_MS).await;
         waited_ms += POLL_MS;
     }
 }
 
-/// A port nothing is using right now. The node binds it a moment later.
+/// Core's own log, so a timeout assert can say what the node was doing. One file per test process
+/// (nextest gives each test its own), opened on first use and kept only if the test fails.
+fn core_log_path() -> &'static Path {
+    static CORE_LOG: OnceLock<PathBuf> = OnceLock::new();
+    CORE_LOG.get_or_init(|| {
+        let path =
+            std::env::temp_dir().join(format!("veilid-server-test-{}.log", std::process::id()));
+        let file = std::fs::File::create(&path).expect("should make a log file");
+        let (writer, guard) = tracing_appender::non_blocking(file);
+        // The appender flushes on drop, so its guard has to outlive every node in the process
+        Box::leak(Box::new(guard));
+        let filter = VeilidLayerFilter::new_with_config(
+            VeilidLayerFilterConfig::new()
+                .with_common_log_level(VeilidConfigLogLevel::Info)
+                .try_with_directives_string("net=debug,attach=debug,rtab=debug")
+                .expect("should parse directives"),
+        );
+        let layer = tracing_subscriber::fmt::Layer::new()
+            .with_ansi(false)
+            .with_writer(writer)
+            .with_filter(filter);
+        let _ = tracing_subscriber::registry().with(layer).try_init();
+        path
+    })
+}
+
+/// How long the node took to bind, or None if it never did within the budget
+async fn network_start_delay(api: &VeilidAPI, budget_ms: u32) -> Option<u32> {
+    let mut waited_ms = 0;
+    loop {
+        if api
+            .get_state()
+            .await
+            .expect("should get state")
+            .network
+            .started
+        {
+            return Some(waited_ms);
+        }
+        if waited_ms >= budget_ms {
+            return None;
+        }
+        sleep(POLL_MS).await;
+        waited_ms += POLL_MS;
+    }
+}
+
+/// Nothing failed, so the log has nothing to say
+fn discard_core_log() {
+    let _ = std::fs::remove_file(core_log_path());
+}
+
+fn core_log_tail(lines: usize) -> String {
+    let Ok(text) = std::fs::read_to_string(core_log_path()) else {
+        return "(no core log)".to_owned();
+    };
+    let all: Vec<&str> = text.lines().collect();
+    all[all.len().saturating_sub(lines)..].join("\n")
+}
+
+/// A port free on BOTH protocols right now, because the node binds it for UDP and TCP a moment
+/// later. An ephemeral port the OS hands out for UDP says nothing about TCP, and a desktop keeps
+/// a few hundred ephemeral-range ports open on TCP; a node that loses that bind retries only
+/// every BIND_WAIT_DELAY, which outlives this test's own timeout.
 fn free_port() -> u16 {
-    UdpSocket::bind("0.0.0.0:0")
-        .expect("should bind an ephemeral port")
-        .local_addr()
-        .expect("should have a local address")
-        .port()
+    for _ in 0..64 {
+        let Ok(udp) = UdpSocket::bind("0.0.0.0:0") else {
+            continue;
+        };
+        let port = udp
+            .local_addr()
+            .expect("should have a local address")
+            .port();
+        // Held together: releasing the udp socket first would let another process take the port
+        if TcpListener::bind(("0.0.0.0", port)).is_ok() {
+            return port;
+        }
+    }
+    panic!("no port free on both udp and tcp");
 }
 
 /// This host's own LAN address. A loopback flow belongs to no routing domain, so that is the
@@ -379,7 +459,7 @@ async fn serves_configured_records(bootstrap: &str) {
 
     let api = start(&path).await;
     api.attach().await.expect("should attach");
-    wait_for_network(&api).await;
+    wait_for_network(&api, port).await;
 
     let addr = local_address();
     assert_eq!(probe_udp(addr, port), vec![record.clone()]);
@@ -387,6 +467,7 @@ async fn serves_configured_records(bootstrap: &str) {
 
     api.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
+    discard_core_log();
 }
 
 pub fn test_serves_configured_records() {
@@ -420,7 +501,7 @@ pub fn test_txt_records_survive_restart() {
 
         let api = start(&path).await;
         api.attach().await.expect("should attach");
-        wait_for_network(&api).await;
+        wait_for_network(&api, port).await;
 
         let mut records = Vec::new();
         let mut waited_ms = 0;
@@ -440,7 +521,7 @@ pub fn test_txt_records_survive_restart() {
         // The same node, same table store, answering before it could have bootstrapped again
         let api = start(&path).await;
         api.attach().await.expect("should attach");
-        wait_for_network(&api).await;
+        wait_for_network(&api, port).await;
         assert_eq!(
             probe_udp(addr, port),
             records,
@@ -449,7 +530,42 @@ pub fn test_txt_records_survive_restart() {
         api.shutdown().await;
 
         let _ = std::fs::remove_dir_all(&dir);
+        discard_core_log();
     });
+}
+
+/// The failure `free_port` exists to prevent, on demand. A node that loses either bind retries
+/// only every BIND_WAIT_DELAY (10 s in veilid-core), so a port held for the length of a test run
+/// shows up as `network never started` and nothing else. Holding UDP and holding TCP are separate
+/// cases because an ephemeral port the OS hands out for one says nothing about the other, which
+/// is how this reached the gate in the first place.
+async fn run_port_held_case(label: &str, hold_udp: bool, release_after_ms: u32) -> Option<u32> {
+    let dir = test_dir(label);
+    let port = free_port();
+    let path = write_config(&dir, &network_block(port, "            bootstrap: []"));
+
+    let mut udp_hold =
+        hold_udp.then(|| UdpSocket::bind(("0.0.0.0", port)).expect("should hold udp"));
+    let mut tcp_hold =
+        (!hold_udp).then(|| TcpListener::bind(("0.0.0.0", port)).expect("should hold tcp"));
+
+    let api = start(&path).await;
+    api.attach().await.expect("should attach");
+
+    let delay = if release_after_ms == u32::MAX {
+        network_start_delay(&api, NETWORK_START_TIMEOUT_MS).await
+    } else {
+        // Nothing should have bound while the port was held
+        assert_eq!(network_start_delay(&api, release_after_ms).await, None);
+        udp_hold.take();
+        tcp_hold.take();
+        network_start_delay(&api, NETWORK_START_TIMEOUT_MS).await
+    };
+
+    api.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+    discard_core_log();
+    delay
 }
 
 #[cfg(test)]
@@ -479,5 +595,32 @@ mod tests {
     #[test]
     fn txt_records_survive_restart() {
         test_txt_records_survive_restart();
+    }
+
+    /// Not a gate: it spends 30 s per held case waiting for something that must not happen.
+    /// Run it with `cargo nextest run -p veilid-server --run-ignored all -E 'test(port_held)'`.
+    #[test]
+    #[ignore = "reproduction; ~90s of deliberate waiting"]
+    fn port_held_stalls_network_start() {
+        block_on(async {
+            assert!(
+                run_port_held_case("held-udp", true, u32::MAX)
+                    .await
+                    .is_none(),
+                "a held udp port should stall the bind for the whole budget"
+            );
+            assert!(
+                run_port_held_case("held-tcp", false, u32::MAX)
+                    .await
+                    .is_none(),
+                "a held tcp port should stall the bind for the whole budget"
+            );
+            // Released early it recovers, but only at the next retry, which is what makes a
+            // longer-lived holder fatal rather than slow
+            let delay = run_port_held_case("released-tcp", false, 5_000)
+                .await
+                .expect("should bind once the port is free");
+            assert!(delay >= 5_000, "bound too early to have waited for a retry");
+        });
     }
 }
