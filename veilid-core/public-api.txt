@@ -1186,7 +1186,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor

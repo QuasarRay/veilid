@@ -236,6 +236,15 @@ impl AllocatedRouteCacheEntry {
         })
     }
 
+    /// Whether a question to [dest_key] was lost on any ordering [sequencing] may send on
+    pub fn lost_question_to(&self, sequencing: Sequencing, dest_key: &PublicKey) -> bool {
+        self.with_stats(|stats| {
+            self.orderings.iter().any(|ordering| {
+                sequencing.matches_ordering(ordering) && stats.lost_question_to(ordering, dest_key)
+            })
+        })
+    }
+
     pub fn is_route_optimizable(&self) -> bool {
         self.with_stats(|stats| stats.last_known_valid_ts().is_some())
     }

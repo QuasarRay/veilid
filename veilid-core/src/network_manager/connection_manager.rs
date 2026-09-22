@@ -895,10 +895,14 @@ impl ConnectionManager {
             let last_ts = self.arc.last_empty_table_confirm_ts.get();
             if cur_ts >= last_ts && cur_ts.duration_since(last_ts) >= EMPTY_TABLE_CONFIRM_INTERVAL {
                 self.arc.last_empty_table_confirm_ts.set(cur_ts);
-                veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
-                self.network_manager()
-                    .net()
-                    .routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
+                let net = self.network_manager().net();
+                // Dead sockets alone (a thaw, peer churn) are not a moved network
+                if net.interfaces_changed_since_confirm() {
+                    veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
+                    net.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
+                } else {
+                    veilid_log!(self debug "Connection table is empty, keeping dial info: interfaces unchanged since confirmation");
+                }
             }
         }
     }

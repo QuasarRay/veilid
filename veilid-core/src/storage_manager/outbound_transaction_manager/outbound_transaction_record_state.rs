@@ -118,6 +118,82 @@ pub(in crate::storage_manager) fn select_end_voters(
     out
 }
 
+/// One End-stage node with something to commit
+pub(in crate::storage_manager) struct CommitCandidate {
+    /// Local node transaction id
+    pub lnxid: LocalNodeTransactionId,
+    /// When its End window closes; None once the server has let it go
+    pub opt_expiration: Option<Timestamp>,
+}
+
+/// Which nodes get a Commit this round and how long the round may wait
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(in crate::storage_manager) struct CommitRound {
+    /// Nodes whose End window is still open
+    pub lnxids: Vec<LocalNodeTransactionId>,
+    /// The last of those windows to close
+    pub opt_deadline: Option<Timestamp>,
+}
+
+/// A node is worth a Commit while its End window is open; the round waits no
+/// longer than the last window
+pub(in crate::storage_manager) fn plan_commit_round(
+    candidates: &[CommitCandidate],
+    cur_ts: Timestamp,
+) -> CommitRound {
+    let mut round = CommitRound::default();
+    for c in candidates {
+        let Some(expiration) = c.opt_expiration.filter(|e| *e > cur_ts) else {
+            continue;
+        };
+        round.lnxids.push(c.lnxid);
+        round.opt_deadline = Some(round.opt_deadline.map_or(expiration, |d| d.max(expiration)));
+    }
+    round
+}
+
+/// One record's commit coverage against its requirement
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::storage_manager) struct CommitCoverage {
+    /// The record
+    pub opaque_record_key: OpaqueRecordKey,
+    /// The subkeys the transaction wrote to it
+    pub subkeys: ValueSubkeyRangeSet,
+    /// Nodes holding every written subkey
+    pub coverage: usize,
+    /// Nodes required
+    pub required: usize,
+}
+
+/// Where a commit stands once its answers are in
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::storage_manager) enum CommitOutcome {
+    /// Every record is held by the required nodes
+    Reached,
+    /// The records held by fewer nodes than required, while the transaction is held somewhere
+    Partial(Vec<CommitCoverage>),
+    /// No node holds any of it
+    Missed(CommitCoverage),
+}
+
+/// Reached when no record is short. Missed when nothing landed anywhere, so the
+/// caller may try again. Partial otherwise: the nodes holding it cannot be
+/// un-committed, so the short records are rehydrated instead
+pub(in crate::storage_manager) fn commit_outcome(coverages: Vec<CommitCoverage>) -> CommitOutcome {
+    let landed = coverages.iter().any(|c| c.coverage > 0);
+    let mut short: Vec<CommitCoverage> = coverages
+        .into_iter()
+        .filter(|c| c.coverage < c.required)
+        .collect();
+    if short.is_empty() {
+        CommitOutcome::Reached
+    } else if landed {
+        CommitOutcome::Partial(short)
+    } else {
+        CommitOutcome::Missed(short.swap_remove(0))
+    }
+}
+
 /// State per record
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundTransactionRecordState {
@@ -714,6 +790,20 @@ impl OutboundTransactionRecordState {
                 lnxid: *lnxid,
                 confirmed: nt.confirmed_subkeys().clone(),
                 outstanding_sets: nt.outstanding_sets(),
+            })
+            .collect()
+    }
+
+    /// End-stage nodes with something to commit
+    pub fn commit_candidates(&self) -> Vec<CommitCandidate> {
+        self.node_transactions_by_id
+            .iter()
+            .filter(|(_, nt)| {
+                nt.stage() == OutboundTransactionStage::End && nt.commit_will_change_remote()
+            })
+            .map(|(lnxid, nt)| CommitCandidate {
+                lnxid: *lnxid,
+                opt_expiration: nt.opt_expiration(),
             })
             .collect()
     }

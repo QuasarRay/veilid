@@ -206,7 +206,118 @@ pub fn test_recovery_clears_evidence_window() {
     assert_eq!(pd.effective_state, OnlineState::Online);
 }
 
+pub fn test_stall_is_credited_as_untestable() {
+    // A 100s stall noticed at t=200 is the interval (100, 200): the entries
+    // could not be tested, and the thaw reads as a reattach
+    let mut pd = OnlineDetectionPerDomain::default();
+    OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100));
+    assert_eq!(
+        pd.recent_offline_intervals.back(),
+        Some(&(ts(100), ts(200)))
+    );
+
+    // Degraded going into the stall: that window closes at the freeze and restarts
+    // at the thaw, and the stall between them is untestable
+    let mut pd = OnlineDetectionPerDomain::default();
+    pd.degraded_started_ts = Some(ts(50));
+    assert_eq!(
+        OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100)),
+        Some((ts(100), ts(200)))
+    );
+    assert_eq!(
+        pd.recent_degraded_intervals.back(),
+        Some(&(ts(50), ts(100)))
+    );
+    assert_eq!(pd.degraded_started_ts, Some(ts(200)));
+
+    // Degraded going into the stall and recovered at the thaw before this tick: the
+    // recorded window is cut back to the freeze, and the stall is credited up to the
+    // failure storm that followed
+    let mut pd = OnlineDetectionPerDomain::default();
+    pd.recent_degraded_intervals.push_back((ts(90), ts(199)));
+    pd.degraded_started_ts = Some(ts(199));
+    assert_eq!(
+        OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100)),
+        Some((ts(100), ts(199)))
+    );
+    assert_eq!(
+        pd.recent_degraded_intervals.back(),
+        Some(&(ts(90), ts(100)))
+    );
+
+    // Offline going into the stall already credits it: nothing more is recorded
+    let mut pd = OnlineDetectionPerDomain::default();
+    pd.offline_started_ts = Some(ts(50));
+    assert_eq!(
+        OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100)),
+        None
+    );
+    assert!(pd.recent_offline_intervals.is_empty());
+
+    // A recorded interval ending inside the stall clips the start rather than overlapping
+    let mut pd = OnlineDetectionPerDomain::default();
+    pd.recent_offline_intervals.push_back((ts(80), ts(150)));
+    OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100));
+    assert_eq!(
+        pd.recent_offline_intervals.back(),
+        Some(&(ts(150), ts(200)))
+    );
+
+    // The failure storm at the thaw took the domain Degraded before this tick ran:
+    // the stall is still credited, up to where that interval began
+    let mut pd = OnlineDetectionPerDomain::default();
+    pd.degraded_started_ts = Some(ts(199));
+    assert_eq!(
+        OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100)),
+        Some((ts(100), ts(199)))
+    );
+    assert_eq!(
+        pd.recent_offline_intervals.back(),
+        Some(&(ts(100), ts(199)))
+    );
+
+    // A thaw-time offline blip already recorded past the stall clips the end
+    // and the credit slots in before it
+    let mut pd = OnlineDetectionPerDomain::default();
+    pd.recent_offline_intervals.push_back((ts(198), ts(199)));
+    pd.degraded_started_ts = Some(ts(199));
+    OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100));
+    assert_eq!(
+        pd.recent_offline_intervals
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![(ts(100), ts(198)), (ts(198), ts(199))]
+    );
+
+    // The degraded overlay is untouched: the stall is evidence at the thaw, not before
+    let mut pd = OnlineDetectionPerDomain::default();
+    OnlineDetector::credit_stall(&mut pd, ts(200), TimestampDuration::new_secs(100));
+    assert!(OnlineDetector::commit_effective(&mut pd, Some(ts(200)), ts(200)).is_some());
+    assert_eq!(pd.degraded_started_ts, Some(ts(200)));
+}
+
+pub fn test_credit_is_kept_by_count() {
+    // Freezes far older than the reliable ping span still credit a streak that
+    // has had no chance to complete; only the count bounds the deque
+    let mut pd = OnlineDetectionPerDomain::default();
+    for i in 0..70u64 {
+        OnlineDetector::credit_stall(&mut pd, ts(100 * i + 10), TimestampDuration::new_secs(5));
+    }
+    assert_eq!(pd.recent_offline_intervals.len(), 64);
+    assert_eq!(
+        pd.recent_offline_intervals.front(),
+        Some(&(ts(605), ts(610)))
+    );
+    assert_eq!(
+        pd.recent_offline_intervals.back(),
+        Some(&(ts(6905), ts(6910)))
+    );
+}
+
 pub fn test_all() {
+    test_credit_is_kept_by_count();
+    test_stall_is_credited_as_untestable();
     test_recovery_clears_evidence_window();
     test_no_evidence_is_online();
     test_offline_dominates();

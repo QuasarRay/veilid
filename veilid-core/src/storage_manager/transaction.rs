@@ -750,6 +750,8 @@ impl StorageManager {
     /// Finalize a transaction over a set of records
     /// If an existing transaction does not exist over these records
     /// or a transaction can not be performed at this time, this will fail.
+    /// A commit held by some but not all of the required nodes returns Ok and
+    /// rehydrates the short records in the background.
     /// Returns Err(VeilidAPIError::TryAgain) if the transaction could not be finalized at this time
     /// Returns Err(_) if the transaction finalize failed and resulted in rollback or drop
     #[cfg_attr(
@@ -808,7 +810,7 @@ impl StorageManager {
         )
         .await?;
 
-        DurationRecorder::new(
+        let short = DurationRecorder::new(
             "StorageManager::commit_transaction_locked",
             |name, start| {
                 veilid_log!(self debug "{}[start={:#}](transaction_handle: {})", name, start, transaction_handle);
@@ -838,6 +840,21 @@ impl StorageManager {
             },
         )
         .await;
+
+        // Records held by fewer nodes than required are brought back up in the
+        // background; a rehydration that itself fell short waits for the recheck interval
+        for coverage in short {
+            if transaction_kind != Some(OutboundTransactionKind::Foreground)
+                && !self.rehydration_recheck_due(&coverage.opaque_record_key)
+            {
+                continue;
+            }
+            self.add_rehydration_request(
+                coverage.opaque_record_key,
+                coverage.subkeys,
+                coverage.required,
+            );
+        }
 
         veilid_stats!(
             self.transaction_quality
@@ -1005,10 +1022,14 @@ impl StorageManager {
         Ok(())
     }
 
-    /// Commit a transaction over a set of records
-    /// If an existing transaction does not exist over these records
-    /// or a transaction can not be performed at this time, this will fail.
-    /// Returns Err(VeilidAPIError::TryAgain) if the transaction could not be committed at this time
+    /// Commit a transaction over a set of records.
+    ///
+    /// Commit rounds go to the End-stage nodes still owed an answer until every
+    /// record is held by the required nodes or the last End window closes; a
+    /// node's window is one transaction timeout from its End, never extended.
+    /// A commit held somewhere but short on some record cannot be undone, so it
+    /// returns Ok with those records for rehydration; one held nowhere returns
+    /// Err(VeilidAPIError::TryAgain).
     /// Returns Err(_) if the transaction commit failed and resulted in rollback or drop
     #[cfg_attr(
         feature = "instrument",
@@ -1018,79 +1039,138 @@ impl StorageManager {
         &self,
         records_lock: Arc<StorageManagerRecordsLockGuard>,
         transaction_handle: OutboundTransactionHandle,
-    ) -> VeilidAPIResult<()> {
-        let (opt_cleanup, ()) = Box::pin(self.rollback_guard_locked(
+    ) -> VeilidAPIResult<Vec<CommitCoverage>> {
+        let (opt_cleanup, short) = Box::pin(self.rollback_guard_locked(
             records_lock.clone(),
             transaction_handle,
             async move {
-                let command_params_list = {
-                    let mut inner = self.inner.lock();
-
-                    // Obtain the outbound transaction manager
-                    let otm = &mut inner.outbound_transaction_manager;
-
-                    // Prepare for commit
-                    otm.prepare_transact_commit_params(transaction_handle)
-                    .inspect_err(|e| {
-                        veilid_log!(self debug "error in prepare_transact_commit_params: {}", e);
-                    })?
-                };
-
                 let rpc_timeout = TimestampDuration::new_ms(
                     self.config().internal().network.rpc.timeout_ms.into(),
                 );
 
-                // Commit transactions on all records
-                let mut unord = FuturesUnordered::new();
-                for command_params in command_params_list {
-                    let fut = self
-                        .outbound_transact_command(command_params)
-                        .measure_debug(
-                            rpc_timeout,
-                            veilid_log_dbg!(
-                            self,
-                            "StorageManager::commit_transaction_locked outbound_transact_command"
-                        ),
-                        );
-                    unord.push(fut);
-                }
-                let mut results = vec![];
-                let mut opt_commit_error = None;
-                while let Some(res) = unord.next().await {
-                    match res {
-                        Ok(v) => {
-                            //
-                            results.push(v);
+                let mut rounds = 0u32;
+                let outcome = loop {
+                    let command_params_list = {
+                        let inner = self.inner.lock();
+                        inner
+                            .outbound_transaction_manager
+                            .prepare_transact_commit_params(transaction_handle, Timestamp::now())
+                            .inspect_err(|e| {
+                                veilid_log!(self debug "error in prepare_transact_commit_params: {}", e);
+                            })?
+                    };
+
+                    // Nothing left to send after the first round: every End window has closed
+                    if rounds > 0 && command_params_list.iter().all(|p| p.nodes.is_empty()) {
+                        break self
+                            .inner
+                            .lock()
+                            .outbound_transaction_manager
+                            .transact_commit_outcome(transaction_handle)?;
+                    }
+                    rounds += 1;
+                    let round_start = Timestamp::now();
+                    if rounds > 1 {
+                        let nodes: usize = command_params_list.iter().map(|p| p.nodes.len()).sum();
+                        veilid_log!(self debug "Commit round {} for {}: {} nodes still owed an answer", rounds, transaction_handle, nodes);
+                    }
+
+                    // Commit transactions on all records
+                    let mut unord = FuturesUnordered::new();
+                    for command_params in command_params_list {
+                        let fut = self
+                            .outbound_transact_command(command_params)
+                            .measure_debug(
+                                rpc_timeout,
+                                veilid_log_dbg!(
+                                self,
+                                "StorageManager::commit_transaction_locked outbound_transact_command"
+                            ),
+                            );
+                        unord.push(fut);
+                    }
+                    let mut results = vec![];
+                    let mut opt_commit_error = None;
+                    while let Some(res) = unord.next().await {
+                        match res {
+                            Ok(v) => {
+                                results.push(v);
+                            }
+                            Err(e) => {
+                                veilid_log!(self debug "Commit transaction failed: {}", e);
+
+                                if opt_commit_error.is_none() {
+                                    opt_commit_error = Some(e);
+                                }
+                            }
                         }
-                        Err(e) => {
-                            veilid_log!(self debug "Commit transaction failed: {}", e);
+                    }
+
+                    // Store commit results
+                    let outcome = {
+                        let mut inner = self.inner.lock();
+                        let otm = &mut inner.outbound_transaction_manager;
+                        if let Err(e) =
+                            otm.record_transact_commit_results(transaction_handle, results)
+                        {
+                            veilid_log!(self debug "Recording commit transaction failed: {}", e);
 
                             if opt_commit_error.is_none() {
                                 opt_commit_error = Some(e);
                             }
                         }
-                    }
-                }
 
-                // Store commit results
-                {
-                    let mut inner = self.inner.lock();
-                    if let Err(e) = inner
-                        .outbound_transaction_manager
-                        .record_transact_commit_results(transaction_handle, results)
-                    {
-                        veilid_log!(self debug "Recording commit transaction failed: {}", e);
-
-                        if opt_commit_error.is_none() {
-                            opt_commit_error = Some(e);
+                        if let Some(err) = opt_commit_error {
+                            return Err(err);
                         }
+                        otm.transact_commit_outcome(transaction_handle)?
+                    };
+                    if matches!(outcome, CommitOutcome::Reached) {
+                        break outcome;
                     }
+                    let elapsed_ms = Timestamp::now().duration_since(round_start).as_u64() / 1_000;
+                    if elapsed_ms < u64::from(COMMIT_ROUND_MIN_INTERVAL_MS) {
+                        sleep(COMMIT_ROUND_MIN_INTERVAL_MS - elapsed_ms as u32).await;
+                    }
+                };
+                veilid_stats!(
+                    self.transaction_quality()
+                        .lock()
+                        .commit_coverage
+                        .commit_retry_rounds += u64::from(rounds.saturating_sub(1))
+                );
 
-                    if let Some(err) = opt_commit_error {
-                        return Err(err);
+                match outcome {
+                    CommitOutcome::Reached => Ok(vec![]),
+                    CommitOutcome::Partial(short) => {
+                        veilid_stats!({
+                            let mut q = self.transaction_quality().lock();
+                            q.commit_coverage.commits_ok_below_required += 1;
+                            q.commit_coverage.records_below_required_coverage +=
+                                short.len() as u64;
+                        });
+                        for coverage in &short {
+                            veilid_log!(self debug "Commit of {} held by {} of {} required nodes, rehydrating", coverage.opaque_record_key, coverage.coverage, coverage.required);
+                        }
+                        Ok(short)
+                    }
+                    CommitOutcome::Missed(coverage) => {
+                        veilid_stats!(
+                            self.transaction_quality()
+                                .lock()
+                                .commit_coverage
+                                .records_below_required_coverage += 1
+                        );
+                        tx_try_again!(
+                            self,
+                            CommitConsensus,
+                            "commit held by {} of {} required nodes for record {}",
+                            coverage.coverage,
+                            coverage.required,
+                            coverage.opaque_record_key
+                        );
                     }
                 }
-                Ok(())
             },
         ))
         .await?;
@@ -1102,7 +1182,7 @@ impl StorageManager {
         }
         drop(records_lock);
 
-        Ok(())
+        Ok(short)
     }
 
     /// Removes the transaction from the transaction manager
@@ -1562,6 +1642,7 @@ impl StorageManager {
                 record_key.clone(),
                 subkey,
                 signed_value_data,
+                false,
             )
             .await?;
 
@@ -1577,7 +1658,8 @@ impl StorageManager {
 
     /// The second half of `transaction_set`: set an already-signed value within the transaction.
     /// Used by `transaction_set` (freshly signed) and by rehydration (an existing SignedValueData
-    /// from the local store, pushed unchanged). The caller must hold the TransactSet subkey lock.
+    /// from the local store, pushed unchanged, with `skip_holders` so nodes already at that seq
+    /// are not asked). The caller must hold the TransactSet subkey lock.
     /// Returns the raw signed value found online if it was newer/different than what was set; the
     /// caller is responsible for any decryption.
     pub(super) async fn transaction_set_signed_value_data(
@@ -1586,6 +1668,7 @@ impl StorageManager {
         record_key: RecordKey,
         subkey: ValueSubkey,
         signed_value_data: Arc<SignedValueData>,
+        skip_holders: bool,
     ) -> VeilidAPIResult<Option<Arc<SignedValueData>>> {
         let opaque_record_key = record_key.opaque();
         let rpc_timeout =
@@ -1603,6 +1686,7 @@ impl StorageManager {
                 &opaque_record_key,
                 subkey,
                 signed_value_data,
+                skip_holders,
             )
             .inspect_err(|e| {
                 veilid_log!(self debug "error in prepare_transact_set_params: {}", e);

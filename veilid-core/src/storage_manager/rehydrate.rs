@@ -470,6 +470,7 @@ impl StorageManager {
                                             member,
                                             subkey,
                                             signed_value_data,
+                                            true,
                                         )
                                         .await?;
                                         VeilidAPIResult::Ok(subkey)

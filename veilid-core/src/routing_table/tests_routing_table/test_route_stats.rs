@@ -133,7 +133,28 @@ pub fn test_sequencing_narrows_to_route_orderings() {
     );
 }
 
+/// A lost question is remembered per destination and ordering, short of killing the
+/// route, until the ordering answers or passes a loopback again
+pub fn test_lost_question_marks_destination_until_answer() {
+    info!("--- test_lost_question_marks_destination_until_answer ---");
+    let mut stats = RouteStats::new(now());
+    let dest = PublicKey::new(CRYPTO_KIND_VLD0, BarePublicKey::new(&[7u8; 32]));
+    let other = PublicKey::new(CRYPTO_KIND_VLD0, BarePublicKey::new(&[8u8; 32]));
+    assert!(!stats.lost_question_to(SequenceOrdering::Unordered, &dest));
+
+    stats.record_lost_question_to(SequenceOrdering::Unordered, dest.clone());
+    assert!(stats.lost_question_to(SequenceOrdering::Unordered, &dest));
+    assert!(!stats.lost_question_to(SequenceOrdering::Unordered, &other));
+    assert!(!stats.lost_question_to(SequenceOrdering::Ordered, &dest));
+    assert!(!stats.is_dead_for_ordering(SequenceOrdering::Unordered));
+    assert!(stats.needs_testing(only(SequenceOrdering::Unordered), now()));
+
+    stats.record_loopback_result(SequenceOrdering::Unordered, true, now());
+    assert!(!stats.lost_question_to(SequenceOrdering::Unordered, &dest));
+}
+
 pub fn test_all() {
+    test_lost_question_marks_destination_until_answer();
     test_send_failure_does_not_kill_the_route();
     test_loopback_failure_run_kills_ordering();
     test_loopback_pass_resets_run();

@@ -1010,6 +1010,8 @@ impl OutboundTransactionManager {
                 opt_value: None,
                 required_strict_consensus_count: 0,
                 pre_authorized_valid_count: 0,
+                opt_deadline: None,
+                pre_satisfied: Default::default(),
             }));
         }
 
@@ -1117,6 +1119,8 @@ impl OutboundTransactionManager {
                             opt_value: Some(value),
                             required_strict_consensus_count: 1,
                             pre_authorized_valid_count: 0,
+                            opt_deadline: None,
+                            pre_satisfied: Default::default(),
                         }));
                 }
             }
@@ -1146,6 +1150,8 @@ impl OutboundTransactionManager {
                     opt_value: None,
                     required_strict_consensus_count,
                     pre_authorized_valid_count: 0,
+                    opt_deadline: None,
+                    pre_satisfied: Default::default(),
                 }));
         }
 
@@ -1335,6 +1341,29 @@ impl OutboundTransactionManager {
             }
         });
 
+        // Fewer End voters than required can never commit; the app tries again
+        let mut opt_short = None;
+        for record_state in outbound_transaction_state.get_record_states() {
+            let required = record_state.required_strict_consensus_count();
+            if let Some(coverage) = record_state
+                .stage_subkey_coverage(OutboundTransactionStage::End)
+                .filter(|c| *c < required)
+            {
+                opt_short = Some((record_state.record_key().opaque(), coverage, required));
+                break;
+            }
+        }
+        if let Some((opaque_record_key, coverage, required)) = opt_short {
+            tx_try_again!(
+                self,
+                EndIncomplete,
+                "end held by {} of {} required nodes for record {}",
+                coverage,
+                required,
+                opaque_record_key
+            );
+        }
+
         Ok(())
     }
 
@@ -1356,19 +1385,17 @@ impl OutboundTransactionManager {
             .count() as u64
     }
 
-    /// Prepare to commit a transaction
-    pub fn prepare_transact_commit_params(
-        &self,
-        transaction_handle: OutboundTransactionHandle,
-    ) -> VeilidAPIResult<Vec<Arc<OutboundTransactCommandParams>>> {
-        // Get transaction
-        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
-
-        // Assert stage
-        let stage = outbound_transaction_state
+    /// The first commit round starts from End consensus; later rounds continue
+    /// from whatever mix of End and Commit the answers left, which the stage
+    /// consensus reads as Failed
+    fn check_commit_stage(&self, state: &OutboundTransactionState) -> VeilidAPIResult<()> {
+        let stage = state
             .stage_consensus()
             .ok_or_else(|| VeilidAPIError::generic("transaction not started"))?
             .stage;
+        if state.commit_rounds() > 0 {
+            return Ok(());
+        }
         match stage {
             OutboundTransactionStage::End => {}
             OutboundTransactionStage::Failed => {
@@ -1384,24 +1411,46 @@ impl OutboundTransactionManager {
                 apibail_transaction_not_found!("stage was {:?}, wanted End", stage);
             }
         }
+        Ok(())
+    }
+
+    /// Prepare a commit round: each record still short of its requirement gets a
+    /// Commit to every End-stage node whose window is open at `cur_ts`
+    pub fn prepare_transact_commit_params(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+        cur_ts: Timestamp,
+    ) -> VeilidAPIResult<Vec<Arc<OutboundTransactCommandParams>>> {
+        // Get transaction
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
+        self.check_commit_stage(outbound_transaction_state)?;
 
         let mut out = vec![];
 
         for record_state in outbound_transaction_state.get_record_states() {
+            let required_strict_consensus_count = record_state.required_strict_consensus_count();
+            // A record already held by enough nodes has nothing left to send
+            let short = matches!(
+                record_state.stage_subkey_coverage(OutboundTransactionStage::Commit),
+                Some(coverage) if coverage < required_strict_consensus_count
+            );
+            if !short {
+                continue;
+            }
             let opaque_record_key = record_state.record_key().opaque();
             let safety_selection = record_state.safety_selection().clone();
+            let round = plan_commit_round(&record_state.commit_candidates(), cur_ts);
+            let nodes = record_state
+                .get_transact_command_nodes(Some(round.lnxids.into_iter().collect()), None)?;
+            // Nodes at Commit already, answered or promoted for a no-op commit, count
+            // toward consensus without an RPC, so seed the fanout's valid count.
             // commit_will_change_remote() logs internally when returning false
-            let nodes = record_state.get_transact_command_nodes(
-                None,
-                Some(Box::new(|nt: &NodeTransaction| {
-                    nt.commit_will_change_remote()
-                })),
-            )?;
-            // Nodes pre-promoted to Commit stage (no-op commits) count toward
-            // consensus without an RPC, so seed the fanout's valid count.
             let pre_authorized_valid_count = record_state
                 .get_node_transactions()
-                .filter(|(_, nt)| !nt.commit_will_change_remote())
+                .filter(|(_, nt)| {
+                    nt.stage() == OutboundTransactionStage::Commit
+                        || !nt.commit_will_change_remote()
+                })
                 .count();
             #[cfg(feature = "verbose-tracing")]
             veilid_log!(self debug target: "dht", "prepare_commit: record={} nodes_requiring_commit_rpc={} pre_authorized={} total_nodes={}",
@@ -1409,11 +1458,12 @@ impl OutboundTransactionManager {
                 nodes.len(),
                 pre_authorized_valid_count,
                 record_state.get_node_transactions_count());
-            let required_strict_consensus_count = record_state.required_strict_consensus_count();
             veilid_stats!({
                 let mut q = self.quality.lock();
                 q.node_sets.commit_sent_nodes += nodes.len() as u64;
-                q.commit_coverage.pre_authorized_nodes += pre_authorized_valid_count as u64;
+                if outbound_transaction_state.commit_rounds() == 0 {
+                    q.commit_coverage.pre_authorized_nodes += pre_authorized_valid_count as u64;
+                }
             });
 
             out.push(Arc::new(OutboundTransactCommandParams {
@@ -1426,13 +1476,15 @@ impl OutboundTransactionManager {
                 opt_value: None,
                 required_strict_consensus_count,
                 pre_authorized_valid_count,
+                opt_deadline: round.opt_deadline,
+                pre_satisfied: Default::default(),
             }));
         }
 
         Ok(out)
     }
 
-    /// Record commit transaction
+    /// Record a commit round; where the commit stands is read separately
     pub fn record_transact_commit_results(
         &mut self,
         transaction_handle: OutboundTransactionHandle,
@@ -1441,29 +1493,8 @@ impl OutboundTransactionManager {
         #[cfg(feature = "stats")]
         let quality = self.quality.clone();
 
-        // Get transaction
+        self.check_commit_stage(self.get_transaction_state(transaction_handle)?)?;
         let outbound_transaction_state = self.get_transaction_state_mut(transaction_handle)?;
-
-        // Assert stage
-        let stage = outbound_transaction_state
-            .stage_consensus()
-            .ok_or_else(|| VeilidAPIError::generic("transaction not started"))?
-            .stage;
-        match stage {
-            OutboundTransactionStage::End => {}
-            OutboundTransactionStage::Failed => {
-                tx_try_again!(
-                    self,
-                    StageFailed,
-                    "transaction stage was Failed, wanted End; try again"
-                );
-            }
-            OutboundTransactionStage::Begin
-            | OutboundTransactionStage::Rollback
-            | OutboundTransactionStage::Commit => {
-                apibail_transaction_not_found!("stage was {:?}, wanted End", stage);
-            }
-        }
 
         veilid_stats!({
             let mut q = quality.lock();
@@ -1489,52 +1520,51 @@ impl OutboundTransactionManager {
             Box::new(
                 |node_transaction: &mut NodeTransaction,
                  _: OutboundTransactCommandPerNodeResult| {
-                    // Transition to end stage
+                    // Transition to commit stage
                     node_transaction.set_stage(OutboundTransactionStage::Commit, None);
                     Ok(())
                 },
             ) as OutboundTransactionPerNodeResultHandler,
         )?;
 
-        // Below the per-subkey minimum the app retries instead of hearing Ok
-        let mut opt_short = None;
-        for record_state in outbound_transaction_state.get_record_states() {
-            let required = record_state.required_strict_consensus_count();
-            if let Some(coverage) = record_state
-                .stage_subkey_coverage(OutboundTransactionStage::Commit)
-                .filter(|c| *c < required)
-            {
-                veilid_stats!(
-                    quality
-                        .lock()
-                        .commit_coverage
-                        .records_below_required_coverage += 1
-                );
-                opt_short = Some((record_state.record_key().opaque(), coverage, required));
-                break;
-            }
-        }
-        if let Some((opaque_record_key, coverage, required)) = opt_short {
-            tx_try_again!(
-                self,
-                CommitConsensus,
-                "commit held by {} of {} required nodes for record {}",
-                coverage,
-                required,
-                opaque_record_key
-            );
-        }
+        outbound_transaction_state.note_commit_round();
 
         Ok(())
     }
 
-    /// Prepare to set a value in a transaction
+    /// Where the commit stands after a round, over the records that wrote anything
+    pub fn transact_commit_outcome(
+        &self,
+        transaction_handle: OutboundTransactionHandle,
+    ) -> VeilidAPIResult<CommitOutcome> {
+        let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
+        let coverages = outbound_transaction_state
+            .get_record_states()
+            .iter()
+            .filter_map(|record_state| {
+                let coverage =
+                    record_state.stage_subkey_coverage(OutboundTransactionStage::Commit)?;
+                Some(CommitCoverage {
+                    opaque_record_key: record_state.record_key().opaque(),
+                    subkeys: record_state.desired_subkeys().into_iter().collect(),
+                    coverage,
+                    required: record_state.required_strict_consensus_count(),
+                })
+            })
+            .collect();
+        Ok(commit_outcome(coverages))
+    }
+
+    /// Prepare to set a value in a transaction. With `skip_holders`, a Begin node
+    /// already at the value's seq is answered locally instead of asked; only a
+    /// rehydration may do that, since it pushes the copy those nodes hold
     pub fn prepare_transact_set_params(
         &self,
         transaction_handle: OutboundTransactionHandle,
         opaque_record_key: &OpaqueRecordKey,
         subkey: ValueSubkey,
         signed_value_data: Arc<SignedValueData>,
+        skip_holders: bool,
     ) -> VeilidAPIResult<Arc<OutboundTransactCommandParams>> {
         // Get transaction
         let outbound_transaction_state = self.get_transaction_state(transaction_handle)?;
@@ -1588,6 +1618,23 @@ impl OutboundTransactionManager {
             })),
         )?;
         let required_strict_consensus_count = record_state.required_strict_consensus_count();
+        let seq = signed_value_data.value_data().seq();
+        // A rehydration pushes the copy these nodes already hold, so they are
+        // answered locally instead of asked
+        let pre_satisfied: LocalNodeTransactionIdSet = if skip_holders {
+            record_state
+                .get_node_transactions()
+                .filter(|(_, nt)| {
+                    nt.stage() == OutboundTransactionStage::Begin && nt.begin_seq(subkey) == seq
+                })
+                .map(|(lnxid, _)| *lnxid)
+                .collect()
+        } else {
+            Default::default()
+        };
+        if !pre_satisfied.is_empty() {
+            veilid_log!(self debug "Set of {}:{} skips {} of {} nodes already at seq {}", opaque_record_key, subkey, pre_satisfied.len(), nodes.len(), seq);
+        }
 
         Ok(Arc::new(OutboundTransactCommandParams {
             opaque_record_key: opaque_record_key.clone(),
@@ -1599,6 +1646,8 @@ impl OutboundTransactionManager {
             opt_value: Some(signed_value_data),
             required_strict_consensus_count,
             pre_authorized_valid_count: 0,
+            opt_deadline: None,
+            pre_satisfied,
         }))
     }
 
@@ -1654,7 +1703,10 @@ impl OutboundTransactionManager {
             |node_transaction: &mut NodeTransaction, pnr: OutboundTransactCommandPerNodeResult| {
                 // Check if node id transactions reached consensus
 
-                node_transaction.update_expiration(pnr.opt_expiration);
+                if pnr.opt_expiration.is_some() {
+                    // A locally answered holder carries no expiration to record
+                    node_transaction.update_expiration(pnr.opt_expiration);
+                }
                 node_transaction.confirm_subkey(subkey);
                 Self::refresh_keepalive(&opt_keepalive_processor, &pnr);
 
@@ -1799,11 +1851,25 @@ impl OutboundTransactionManager {
         }
 
         let safety_selection = record_state.safety_selection().clone();
-        let nodes = record_state.get_transact_command_nodes(None, None)?;
-        // Use get_value_count as GET consensus threshold so a single non-responding node
-        // won't force a costly retry that exceeds the outer timeout. (get_value_count <= set_value_count by config.)
+        // Begin's per-node seqs say which nodes hold the newest value; the rest
+        // cannot answer with it, so only the holders are asked. Transactions read
+        // a snapshot, so nothing lands on the others while this one is open
+        let newest = record_state.begin_network_seq(subkey)?;
+        let nodes = if newest.is_none() {
+            vec![]
+        } else {
+            record_state.get_transact_command_nodes(
+                None,
+                Some(Box::new(move |nt: &NodeTransaction| {
+                    nt.begin_seq(subkey) >= newest
+                })),
+            )?
+        };
+        // The exit needs get_value_count holders, or every holder when fewer exist;
+        // fewer than get_value_count is not a shortfall, a value is (get_value_count
+        // <= set_value_count by config)
         let required_strict_consensus_count =
-            self.config().internal().network.dht.get_value_count as usize;
+            (self.config().internal().network.dht.get_value_count as usize).min(nodes.len());
 
         Ok(Arc::new(OutboundTransactCommandParams {
             opaque_record_key: opaque_record_key.clone(),
@@ -1815,6 +1881,8 @@ impl OutboundTransactionManager {
             opt_value: None,
             required_strict_consensus_count,
             pre_authorized_valid_count: 0,
+            opt_deadline: None,
+            pre_satisfied: Default::default(),
         }))
     }
 

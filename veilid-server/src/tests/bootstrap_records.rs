@@ -192,18 +192,18 @@ fn core_log_tail(lines: usize) -> String {
 }
 
 /// A port free on BOTH protocols right now, because the node binds it for UDP and TCP a moment
-/// later. An ephemeral port the OS hands out for UDP says nothing about TCP, and a desktop keeps
-/// a few hundred ephemeral-range ports open on TCP; a node that loses that bind retries only
-/// every BIND_WAIT_DELAY, which outlives this test's own timeout.
+/// later, and below every platform's ephemeral range (Linux 32768+, macOS and Windows 49152+):
+/// an ephemeral pick can be handed to any process's next outbound connection between this probe
+/// and the node's bind and then stays taken on TCP for that connection's life, while a node that
+/// loses its bind retries only every BIND_WAIT_DELAY, which outlives this test's own timeout.
 fn free_port() -> u16 {
-    for _ in 0..64 {
-        let Ok(udp) = UdpSocket::bind("0.0.0.0:0") else {
+    let micros = Timestamp::now().as_u64();
+    let base = 10_000 + ((u64::from(std::process::id()) ^ micros) % 22_000) as u16;
+    for i in 0..64 {
+        let port = base + i;
+        let Ok(_udp) = UdpSocket::bind(("0.0.0.0", port)) else {
             continue;
         };
-        let port = udp
-            .local_addr()
-            .expect("should have a local address")
-            .port();
         // Held together: releasing the udp socket first would let another process take the port
         if TcpListener::bind(("0.0.0.0", port)).is_ok() {
             return port;

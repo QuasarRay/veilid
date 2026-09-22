@@ -90,6 +90,10 @@ pub(super) struct NetworkUnlockedInner {
 
     // Network
     interfaces: NetworkInterfaces,
+    // Bumped whenever the interface address state changes
+    interface_address_generation: AtomicU64,
+    // Generation the public internet dial info was last confirmed on; 0 = never
+    confirmed_interface_address_generation: AtomicU64,
 
     // Background processes
     confirm_dial_info_tasks: BTreeMap<RoutingDomain, TickTask<EyreReport>>,
@@ -799,6 +803,12 @@ impl PlatformNetwork for NativeNetwork {
         editor.commit();
         true
     }
+
+    fn interfaces_changed_since_confirm(&self) -> bool {
+        self.confirmed_interface_address_generation
+            .load(Ordering::Relaxed)
+            != self.interface_address_generation.load(Ordering::Relaxed)
+    }
 }
 
 impl NativeNetwork {
@@ -854,6 +864,8 @@ impl NativeNetwork {
         NetworkUnlockedInner {
             startup_lock: StartupLock::new(),
             interfaces: NetworkInterfaces::new(),
+            interface_address_generation: AtomicU64::new(0),
+            confirmed_interface_address_generation: AtomicU64::new(0),
             confirm_dial_info_tasks,
             network_interfaces_task: TickTask::new(
                 "network_interfaces_task",

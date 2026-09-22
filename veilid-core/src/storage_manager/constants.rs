@@ -2,6 +2,8 @@ use super::*;
 
 /// How often End re-checks for in-flight Sets to settle
 pub(super) const END_QUIESCENCE_POLL_MS: u32 = 50;
+/// Least time between commit round starts, so a round that fails fast does not spin
+pub(super) const COMMIT_ROUND_MIN_INTERVAL_MS: u32 = 1_000;
 
 /// Frequency to flush record stores to disk
 pub const FLUSH_RECORD_STORES_INTERVAL_SECS: u32 = 1;

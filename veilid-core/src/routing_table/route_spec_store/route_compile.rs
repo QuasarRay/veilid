@@ -516,9 +516,10 @@ impl RouteSpecStore {
         // 2. If the private route being compiled with is allocated it must still exist
         // 3. Check the safety route and private route for validity and optimizability:
         //    a. If the route has a bad stats disposition, it should be invalidated so we have a chance at a different route selection
-        //    b. If the route is optimizable, and the cache is optimized it is valid
-        //    c. If the route is not optimizable, and the cache is unoptimized it is valid
-        //    d. If there is no optimizability match, then we either need to compile, or optimize
+        //    b. If the safety route lost a question to this destination, it is invalidated for this destination only, so the retry compiles onto another route
+        //    c. If the route is optimizable, and the cache is optimized it is valid
+        //    d. If the route is not optimizable, and the cache is unoptimized it is valid
+        //    e. If there is no optimizability match, then we either need to compile, or optimize
         //
         // While allocated routes themselves are only valid while our node info is equivalent to
         // the node info at time of allocation, we do not need to check for this here because
@@ -561,6 +562,14 @@ impl RouteSpecStore {
             if !arce.is_live_sequencing_match(sequencing) {
                 #[cfg(feature = "verbose-tracing")]
                 veilid_log!(self debug "Safety route dead for sequencing {} for id {} with key={}, invalidating cache entry {:?}", sequencing, safety_route_id, safety_route_key, key);
+                drop(cache);
+                entry.remove();
+                return RouteCompileCacheDisposition::Compile(entry);
+            }
+            // Check #3b: a question lost to this destination over this route sends the next one
+            // over another; the route keeps serving other destinations until it is tested
+            if arce.lost_question_to(sequencing, &key.pr_pubkey) {
+                veilid_log!(self debug "Safety route {} lost a question to {}, compiling another for it", safety_route_id, key.pr_pubkey);
                 drop(cache);
                 entry.remove();
                 return RouteCompileCacheDisposition::Compile(entry);

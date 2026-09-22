@@ -234,6 +234,8 @@ impl NativeNetwork {
         }
 
         let interface_address_state = self.interfaces.interface_address_state();
+        self.interface_address_generation
+            .fetch_add(1, Ordering::Relaxed);
 
         let routing_domain_detect_address_changes = if let Some(last_interface_address_state) =
             opt_last_network_state.map(|x| x.interface_address_state.clone())
@@ -245,11 +247,12 @@ impl NativeNetwork {
                 indent_all_string(format!("{:?}", interface_address_state))
             );
 
-            // Close connections whose local address departed so we don't reuse zombies
+            // Close connections whose local address departed so we don't reuse zombies. Any
+            // address still on an interface keeps its connections, published or not
             let valid_local_addresses: HashSet<Address> = interface_address_state
-                .interface_addresses
+                .own_addresses
                 .iter()
-                .map(|a| Address::from_ip_addr(a.ip()))
+                .map(|ip| Address::from_ip_addr(*ip))
                 .collect();
             self.network_manager()
                 .connection_manager()

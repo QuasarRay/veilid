@@ -14,10 +14,15 @@ impl NativeNetwork {
         let Some(igd_manager) = &self.igd_manager else {
             return Ok(());
         };
-        if !igd_manager.tick().await? {
+        let outcome = igd_manager.tick().await?;
+        if outcome.needs_restart {
             veilid_log!(self info "upnp port mapping renew failed, triggering network restart");
             let mut inner = self.inner.lock();
             inner.network_needs_restart = true;
+        } else if outcome.remapped
+            && self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
+        {
+            veilid_log!(self info "upnp port mapping moved, detecting dial info");
         }
 
         Ok(())

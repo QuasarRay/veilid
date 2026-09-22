@@ -162,8 +162,10 @@ pub(in crate::storage_manager) struct EndCoverageStats {
 pub(in crate::storage_manager) struct CommitCoverageStats {
     /// Records with a desired subkey held by fewer committed nodes than required
     pub records_below_required_coverage: u64,
-    /// Commits that returned Ok while below required, which the commit gate makes impossible
+    /// Commits that returned Ok below required, with rehydration scheduled
     pub commits_ok_below_required: u64,
+    /// Commit rounds sent after the first, inside the End window
+    pub commit_retry_rounds: u64,
     /// Commit answers of InvalidTransaction
     pub commit_refusals: u64,
     /// Nodes promoted to Commit without an RPC

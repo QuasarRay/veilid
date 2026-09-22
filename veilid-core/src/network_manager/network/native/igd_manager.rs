@@ -9,6 +9,15 @@ const UPNP_GATEWAY_DETECT_TIMEOUT_MS: u32 = 3_000;
 const UPNP_MAPPING_ATTEMPTS: u32 = 3;
 const UPNP_MAPPING_LIFETIME: TimestampDuration = TimestampDuration::new_ms(120_000);
 
+/// What one renewal pass did
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IgdTickOutcome {
+    /// a mapping could not be renewed at all; the network must restart
+    pub needs_restart: bool,
+    /// a mapping came back on a different external port, so the dial info moved
+    pub remapped: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct PortMapKey {
     protocol_type: IGDProtocolType,
@@ -423,9 +432,8 @@ impl IGDManager {
             fields(__VEILID_LOG_KEY = self.log_key())
         )
     )]
-    pub async fn tick(&self) -> EyreResult<bool> {
+    pub async fn tick(&self) -> EyreResult<IgdTickOutcome> {
         // Refresh mappings if we have them
-        // If an error is received, then return false to restart the local network
         let mut full_renews: Vec<(PortMapKey, PortMapValue)> = Vec::new();
         let mut renews: Vec<(PortMapKey, PortMapValue)> = Vec::new();
         {
@@ -448,13 +456,14 @@ impl IGDManager {
             // See if we need to do some blocking operations
             if full_renews.is_empty() && renews.is_empty() {
                 // Just return now since there's nothing to renew
-                return Ok(true);
+                return Ok(IgdTickOutcome::default());
             }
         }
 
         let this = self.clone();
         let fut = blocking_wrapper(move || {
             let mut inner = this.inner.lock();
+            let mut outcome = IgdTickOutcome::default();
 
             // Process full renewals
             for (k, v) in full_renews {
@@ -474,40 +483,63 @@ impl IGDManager {
                     }
                 };
 
-                // Delete the mapping if it exists, ignore any errors here
-                let _ = gw.remove_port(convert_protocol_type(k.protocol_type), v.mapped_port);
-                inner.port_maps.remove(&k);
-
                 let desc = this.get_description(k.protocol_type, k.local_port);
-                match gw.add_any_port(
-                    convert_protocol_type(k.protocol_type),
-                    SocketAddr::new(local_ip, k.local_port),
-                    UPNP_MAPPING_LIFETIME
-                        .millis_u32()
-                        .unwrap_or_log()
-                        .div_ceil(1000),
-                    &desc,
-                ) {
-                    Ok(mapped_port) => {
-                        veilid_log!(this debug "full-renewed mapped port {:?} -> {:?}", v, k);
-                        inner.port_maps.insert(
-                            k,
-                            PortMapValue {
-                                ext_ip: v.ext_ip,
-                                mapped_port,
-                                timestamp: Timestamp::now(),
-                                renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
-                                renewal_attempts: 0,
-                            },
-                        );
-                    }
-                    Err(e) => {
-                        veilid_log!(this info "failed to full-renew mapped port {:?} -> {:?}: {}", v, k, e);
+                let local_addr = SocketAddr::new(local_ip, k.local_port);
+                let lease_secs = UPNP_MAPPING_LIFETIME
+                    .millis_u32()
+                    .unwrap_or_log()
+                    .div_ceil(1000);
+                // A lapsed lease is usually still free, so ask for the published port first
+                let same_port = v.renewal_attempts < UPNP_MAPPING_ATTEMPTS
+                    && match gw.add_port(
+                        convert_protocol_type(k.protocol_type),
+                        v.mapped_port,
+                        local_addr,
+                        lease_secs,
+                        &desc,
+                    ) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            veilid_log!(this debug "could not re-add mapped port {:?} -> {:?}: {}", v, k, e);
+                            false
+                        }
+                    };
+                let mapped_port = if same_port {
+                    v.mapped_port
+                } else {
+                    // Delete the mapping if it exists, ignore any errors here
+                    let _ = gw.remove_port(convert_protocol_type(k.protocol_type), v.mapped_port);
+                    inner.port_maps.remove(&k);
+                    match gw.add_any_port(
+                        convert_protocol_type(k.protocol_type),
+                        local_addr,
+                        lease_secs,
+                        &desc,
+                    ) {
+                        Ok(mapped_port) => mapped_port,
+                        Err(e) => {
+                            veilid_log!(this info "failed to full-renew mapped port {:?} -> {:?}: {}", v, k, e);
 
-                        // Must restart network now :(
-                        return Ok(false);
+                            // Must restart network now :(
+                            outcome.needs_restart = true;
+                            return Ok(outcome);
+                        }
                     }
                 };
+                if mapped_port != v.mapped_port {
+                    outcome.remapped = true;
+                }
+                veilid_log!(this debug "full-renewed mapped port {:?} -> {:?} on external port {}", v, k, mapped_port);
+                inner.port_maps.insert(
+                    k,
+                    PortMapValue {
+                        ext_ip: v.ext_ip,
+                        mapped_port,
+                        timestamp: Timestamp::now(),
+                        renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
+                        renewal_attempts: 0,
+                    },
+                );
             }
             // Process normal renewals
             for (k, mut v) in renews {
@@ -566,8 +598,7 @@ impl IGDManager {
                 };
             }
 
-            // Normal exit, no restart
-            Ok(true)
+            Ok(outcome)
         });
         #[cfg(feature = "instrument")]
         let fut = fut.instrument(tracing::trace_span!("igd tick fut"));

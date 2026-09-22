@@ -82,11 +82,11 @@ cfg_if! {
 
             impl Write for AndroidLog {
                 fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                    // Each buf is one formatted event; AndroidLogWriter emits on flush
+                    // Each buf is one formatted event, emitted once when the writer
+                    // drops: AndroidLogWriter flushes in Drop and does not clear
+                    // its buffer, so an explicit flush here logged every line twice
                     let mut writer = self.0.make_writer();
-                    let written = writer.write(buf)?;
-                    writer.flush()?;
-                    Ok(written)
+                    writer.write(buf)
                 }
                 fn flush(&mut self) -> std::io::Result<()> {
                     Ok(())

@@ -141,4 +141,9 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
     /// Returns `true` if the routing domain transitioned from confirmed to unconfirmed,
     /// `false` if it was already unconfirmed (so the caller can suppress redundant work).
     fn routing_domain_request_confirm_dial_info(&self, routing_domain: RoutingDomain) -> bool;
+
+    /// Whether the interface addresses have changed since PublicInternet dial info was
+    /// last confirmed. Dead sockets alone (a thaw, peer churn) say nothing about the
+    /// dial info; platforms without interface visibility answer `true`.
+    fn interfaces_changed_since_confirm(&self) -> bool;
 }

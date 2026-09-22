@@ -33,6 +33,10 @@ pub(in crate::storage_manager) struct OutboundTransactCommandParams {
     pub required_strict_consensus_count: usize,
     /// Nodes already counted as valid before any RPCs run (e.g. Commit's auto-promoted set)
     pub pre_authorized_valid_count: usize,
+    /// Latest time an answer can still count, bounding each node's wait
+    pub opt_deadline: Option<Timestamp>,
+    /// Nodes already holding the value being set, answered as equal without an RPC
+    pub pre_satisfied: LocalNodeTransactionIdSet,
 }
 
 /// Disposition of a per-node transaction command result
@@ -113,8 +117,8 @@ pub(crate) struct TransactCommandSuccess {
     pub opt_value: Option<Arc<SignedValueData>>,
 }
 
-/// End collects every voter: Commit targets End-stage nodes, and the plan's spare
-/// voters are the only margin a lost Commit answer has
+/// End collects every voter: Commit targets End-stage nodes, so the plan's spare
+/// voters and the commit rounds are the margin a lost Commit answer has
 pub(in crate::storage_manager) fn exits_at_consensus(command: TransactCommand) -> bool {
     command != TransactCommand::End
 }
@@ -214,21 +218,43 @@ impl StorageManager {
         let nodes_to_send = &params.nodes;
         let mut pending_lnxids: HashSet<LocalNodeTransactionId> = HashSet::new();
 
-        // Wait the full rpc timeout per node; consensus early-exit below ends the
-        // wait sooner, and a shorter bound drops in-flight answers under load
+        // Wait the full rpc timeout per node, or to the command's deadline if sooner;
+        // consensus early-exit below ends the wait sooner, and a shorter bound drops
+        // in-flight answers under load
         let rpc_timeout =
             TimestampDuration::new_ms(self.config().internal().network.rpc.timeout_ms.into());
+        let per_node_timeout = params.opt_deadline.map_or(rpc_timeout, |deadline| {
+            rpc_timeout.min(deadline.duration_since(Timestamp::now()))
+        });
 
         // Best-effort cleanup (rollback, required==0): fire RPCs in the background so
         // the records lock isn't held on a dead node's full timeout.
         let fire_and_forget = params.required_strict_consensus_count == 0;
         let mut unord = FuturesUnordered::new();
-        let mut in_flight: HashSet<LocalNodeTransactionId> =
-            nodes_to_send.iter().map(|n| n.lnxid).collect();
+        let mut in_flight: HashSet<LocalNodeTransactionId> = nodes_to_send
+            .iter()
+            .filter(|n| !params.pre_satisfied.contains(&n.lnxid))
+            .map(|n| n.lnxid)
+            .collect();
 
-        veilid_stats!(outcome.rpcs_sent += nodes_to_send.len() as u64);
+        veilid_stats!(outcome.rpcs_sent += in_flight.len() as u64);
 
         for n in nodes_to_send {
+            // A node already at this value answers as an equal-seq holder would
+            if params.pre_satisfied.contains(&n.lnxid) {
+                per_node_results.push(OutboundTransactCommandPerNodeResult {
+                    lnxid: n.lnxid,
+                    rnxid: n.rnxid.clone(),
+                    disposition: TransactCommandDisposition::Valid,
+                    opt_seqs: None,
+                    opt_subkey: params.opt_subkey,
+                    opt_value: params.opt_value.clone(),
+                    opt_expiration: None,
+                    opt_rtt: None,
+                });
+                valid_response_count += 1;
+                continue;
+            }
             let registry = self.registry();
             let lnxid = n.lnxid;
             let rnxid = n.rnxid.clone();
@@ -238,7 +264,6 @@ impl StorageManager {
             #[cfg(feature = "instrument")]
             let command = params.command;
             let node_start = Timestamp::now();
-            let per_node_timeout = rpc_timeout;
 
             let fut = async move {
                 let rpc_processor = registry.rpc_processor();

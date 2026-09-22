@@ -51,6 +51,9 @@ pub(crate) const DEGRADED_MAX_HOLD_SECS: u32 = 60;
 /// Local pipeline stalls at or above this consume enough of the rpc timeout to void peer evidence
 const LOCAL_STALL_MIN_MS: u64 = 2500;
 
+/// Credit intervals kept per domain; a streak needs its whole untested history, however long
+const CREDIT_INTERVALS_KEPT: usize = 64;
+
 /// Degraded breadth scales with the table: at least this fraction (1/divisor) of live
 /// entries must fail fresh in-window per framing type. A big table always carries a few
 /// flapping peers (a flat count false-fires on healthy networks), while a lossy uplink
@@ -150,17 +153,17 @@ pub(crate) struct OnlineDetectionPerDomain {
     /// Flap detector over online_state.
     flap_detector: FlapDetector<OnlineState>,
     /// Start of the current offline period, if currently offline.
-    offline_started_ts: Option<Timestamp>,
+    pub(crate) offline_started_ts: Option<Timestamp>,
     /// Whether this offline period's connection purge has already run.
     offline_purged: bool,
-    /// Recently-completed offline intervals (start, end), pruned to
-    /// `RELIABLE_PING_INTERVAL_MAX` old. Credits node reliability for time we
+    /// Completed offline intervals (start, end), oldest first, the last
+    /// `CREDIT_INTERVALS_KEPT` kept. Credits node reliability for time we
     /// couldn't test.
-    recent_offline_intervals: VecDeque<(Timestamp, Timestamp)>,
+    pub(crate) recent_offline_intervals: VecDeque<(Timestamp, Timestamp)>,
     /// Start of the current degraded period, if effectively degraded
-    degraded_started_ts: Option<Timestamp>,
+    pub(crate) degraded_started_ts: Option<Timestamp>,
     /// The same for degraded periods, where we could test but must not believe the answer.
-    recent_degraded_intervals: VecDeque<(Timestamp, Timestamp)>,
+    pub(crate) recent_degraded_intervals: VecDeque<(Timestamp, Timestamp)>,
     /// Cumulative online<->offline transition count
     #[cfg(feature = "stats")]
     total_transitions: u64,
@@ -425,15 +428,101 @@ impl OnlineDetector {
             if !Self::uses_ping_detection(routing_domain) {
                 continue;
             }
-            let opt_transition = {
+            let (credited, opt_transition) = {
                 let mut inner = self.inner.lock();
                 let pd = inner.entry(routing_domain).or_default();
+                let credited = Self::credit_stall(pd, now, duration);
                 let opt_transition = Self::commit_effective(pd, Some(now), now);
                 self.publish_overlap_data(routing_domain, pd);
-                opt_transition
+                (credited, opt_transition)
             };
+            if let Some((start, end)) = credited {
+                veilid_log!(self debug "{:?} stall credited: {:#} untestable, ending {:#} ago", routing_domain, end.duration_since(start), now.duration_since(end));
+            }
             self.log_effective_transition(routing_domain, opt_transition, "local stall");
         }
+    }
+
+    /// Credit the stall itself as time nobody could be tested.
+    ///
+    /// The degraded window that follows starts at the thaw, so on its own it
+    /// credits nothing for the stall: a process frozen for minutes came back to
+    /// find every entry's silence counted against it and demoted its reliable
+    /// peers for its own absence. Recorded as an offline interval, which is what
+    /// a stall is to the entries - no test was possible - and which also makes
+    /// the thaw a reattach for `online_since`, so a peer last seen before the
+    /// freeze keeps its standing until it has been re-tested.
+    ///
+    /// Overlapping intervals credit twice, so the stall is trimmed to what no
+    /// interval covers: one that began before it clips the start, one that began
+    /// at the thaw, before this tick ran, clips the end. Degraded time is unblamed
+    /// but not untestable, so a degraded window never covers a stall: an open one
+    /// is split at it and recorded ones are cut back to their part before it.
+    /// Returns what was credited.
+    pub(crate) fn credit_stall(
+        pd: &mut OnlineDetectionPerDomain,
+        now: Timestamp,
+        duration: TimestampDuration,
+    ) -> Option<(Timestamp, Timestamp)> {
+        let stall_start = now.earlier(duration);
+        if let Some(s) = pd.degraded_started_ts.filter(|s| *s < stall_start) {
+            pd.recent_degraded_intervals.push_back((s, stall_start));
+            veilid_stats!(
+                pd.total_time_degraded = pd
+                    .total_time_degraded
+                    .saturating_add(stall_start.duration_since(s))
+            );
+            pd.degraded_started_ts = Some(now);
+        }
+        for iv in pd.recent_degraded_intervals.iter_mut() {
+            if iv.0 < stall_start && iv.1 > stall_start {
+                iv.1 = stall_start;
+            }
+        }
+        pd.recent_degraded_intervals
+            .retain(|(s, _)| *s < stall_start);
+        let mut covered: Vec<(Timestamp, Timestamp)> = pd
+            .recent_offline_intervals
+            .iter()
+            .chain(pd.recent_degraded_intervals.iter())
+            .copied()
+            .chain(
+                [pd.offline_started_ts, pd.degraded_started_ts]
+                    .into_iter()
+                    .flatten()
+                    .map(|s| (s, now)),
+            )
+            .collect();
+        covered.sort_unstable();
+        let mut start = stall_start;
+        let mut end = now;
+        for (s, e) in covered {
+            if e <= start {
+                continue;
+            }
+            if s <= start {
+                start = e;
+            } else {
+                end = s;
+                break;
+            }
+        }
+        if start >= end {
+            return None;
+        }
+        // A blip recorded at the thaw already sits past the stall; keep the order
+        let at = pd
+            .recent_offline_intervals
+            .iter()
+            .position(|(s, _)| *s > start)
+            .unwrap_or(pd.recent_offline_intervals.len());
+        pd.recent_offline_intervals.insert(at, (start, end));
+        let excess = pd
+            .recent_offline_intervals
+            .len()
+            .saturating_sub(CREDIT_INTERVALS_KEPT);
+        pd.recent_offline_intervals.drain(..excess);
+        Some((start, end))
     }
 
     /// Whether blame writers should hold fire for this routing domain.
@@ -630,11 +719,11 @@ impl OnlineDetector {
                     .saturating_add(now.duration_since(start))
             );
             pd.recent_degraded_intervals.push_back((start, now));
-            while pd.recent_degraded_intervals.front().is_some_and(|(_, e)| {
-                now.duration_since(*e) > crate::routing_table::RELIABLE_PING_INTERVAL_MAX
-            }) {
-                pd.recent_degraded_intervals.pop_front();
-            }
+            let excess = pd
+                .recent_degraded_intervals
+                .len()
+                .saturating_sub(CREDIT_INTERVALS_KEPT);
+            pd.recent_degraded_intervals.drain(..excess);
         }
         Some((
             old_state,
@@ -715,13 +804,11 @@ impl OnlineDetector {
                                     .total_time_offline
                                     .saturating_add(now.duration_since(start))
                             );
-                            // Prune intervals older than the reliable ping span.
-                            while pd.recent_offline_intervals.front().is_some_and(|(_, e)| {
-                                now.duration_since(*e)
-                                    > crate::routing_table::RELIABLE_PING_INTERVAL_MAX
-                            }) {
-                                pd.recent_offline_intervals.pop_front();
-                            }
+                            let excess = pd
+                                .recent_offline_intervals
+                                .len()
+                                .saturating_sub(CREDIT_INTERVALS_KEPT);
+                            pd.recent_offline_intervals.drain(..excess);
                         }
                     }
                 }

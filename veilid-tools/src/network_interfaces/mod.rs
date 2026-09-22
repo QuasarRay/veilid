@@ -624,7 +624,8 @@ pub struct NetworkInterfaceAddressState {
     /// deduplicated. Privacy, CLAT and CGNAT addresses are excluded from peer info.
     pub interface_addresses: Vec<IfAddr>,
     /// IDENTITY set: every address on a running non-loopback interface, sorted and
-    /// deduplicated. Includes the privacy addresses we send from but never publish.
+    /// deduplicated. Includes privacy addresses, which a peer may report back as our
+    /// external address. Not part of change detection.
     pub own_addresses: Vec<IpAddr>,
 }
 
@@ -713,11 +714,12 @@ impl NetworkInterfaces {
         inner.interface_address_state_cache = Arc::new(NetworkInterfaceAddressState::default());
         inner.valid = false;
     }
-    /// Re-enumerate the platform's interfaces. Returns `true` if the best-address cache changed.
+    /// Re-enumerate the platform's interfaces. Returns `true` when the publication set or the
+    /// gateways changed; identity-only churn, a privacy address rotating, refreshes the cache
+    /// without reporting a change.
     ///
     /// Errors with an `io::Error` if the platform's interface enumeration fails; the interface set is
     /// left unchanged in that case.
-    // returns false if refresh had no changes, true if changes were present
     pub async fn refresh(&self) -> std::io::Result<bool> {
         let mut last_interfaces = {
             let mut last_interfaces = BTreeMap::<String, NetworkInterface>::new();
@@ -728,27 +730,29 @@ impl NetworkInterfaces {
             last_interfaces
         };
 
-        // Drop globally-routable addresses from interfaces that aren't the kernel's
-        // primary outbound source for that family (e.g. iOS cellular IPv6 while wifi
-        // is primary). Private/local addresses are kept so the LocalNetwork routing
-        // domain still works. Don't do this on wasm32-unknown-unknown because we don't have
-        // access to the network stack.
+        // Drop globally-routable addresses from interfaces other than the one carrying the
+        // kernel's primary outbound source for that family (e.g. iOS cellular IPv6 while wifi
+        // is primary). Private/local addresses are kept so the LocalNetwork routing domain
+        // still works. Don't do this on wasm32-unknown-unknown because we don't have access to
+        // the network stack.
         #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-        Self::filter_non_primary_global_addresses(&mut last_interfaces);
+        Self::filter_non_primary_global_addresses(
+            &mut last_interfaces,
+            primary_source_ipv4(),
+            primary_source_ipv6(),
+        );
 
         let mut inner = self.inner.lock();
         core::mem::swap(&mut inner.interfaces, &mut last_interfaces);
         inner.valid = true;
 
         if last_interfaces != inner.interfaces {
-            // get last address cache
-            let old_interface_address_state = inner.interface_address_state_cache.clone();
-
-            // redo the address cache
+            let old = inner.interface_address_state_cache.clone();
             Self::cache_interface_address_state(&mut inner);
-
-            // See if our best addresses have changed
-            if old_interface_address_state != inner.interface_address_state_cache {
+            let new = &inner.interface_address_state_cache;
+            if old.gateway_addresses != new.gateway_addresses
+                || old.interface_addresses != new.interface_addresses
+            {
                 return Ok(true);
             }
         }
@@ -803,24 +807,35 @@ impl NetworkInterfaces {
 
     /////////////////////////////////////////////
 
-    // For each interface, keep only addresses that are either non-global (private/
-    // link-local/ULA, needed by LocalNetwork) or match the kernel's primary outbound
-    // source for that family. A global address on a non-primary interface is
-    // unreachable from peers; publishing it as our dial info causes timeouts.
-    // Interfaces that end up with no addresses are dropped entirely.
-
+    // Keep global addresses only on the interface carrying the kernel's primary outbound
+    // source for that family; a global on any other interface (iOS cellular beside wifi) is
+    // unreachable from peers, and publishing it causes timeouts. The interface decides, not
+    // the exact address: the kernel sends from a privacy address, which must not choose the
+    // stable global that gets published. Private, link-local and ULA addresses stay for
+    // LocalNetwork. Interfaces left with no addresses are dropped.
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-    fn filter_non_primary_global_addresses(interfaces: &mut BTreeMap<String, NetworkInterface>) {
-        let primary_v4 = primary_source_ipv4();
-        let primary_v6 = primary_source_ipv6();
+    pub(crate) fn filter_non_primary_global_addresses(
+        interfaces: &mut BTreeMap<String, NetworkInterface>,
+        primary_v4: Option<Ipv4Addr>,
+        primary_v6: Option<Ipv6Addr>,
+    ) {
+        let owner_of = |ip: IpAddr| {
+            interfaces
+                .iter()
+                .find(|(_, intf)| intf.addrs.iter().any(|a| a.if_addr().ip() == ip))
+                .map(|(name, _)| name.clone())
+        };
+        let primary_v4_intf = primary_v4.and_then(|p| owner_of(IpAddr::V4(p)));
+        let primary_v6_intf = primary_v6.and_then(|p| owner_of(IpAddr::V6(p)));
 
-        interfaces.retain(|_, intf| {
+        interfaces.retain(|name, intf| {
             intf.addrs.retain(|addr| match addr.if_addr() {
                 IfAddr::V4(v4) => {
-                    !ipv4addr_is_global(&v4.ip) || primary_v4.is_some_and(|p| p == v4.ip)
+                    !ipv4addr_is_global(&v4.ip) || primary_v4_intf.as_deref() == Some(name.as_str())
                 }
                 IfAddr::V6(v6) => {
-                    !ipv6addr_is_unicast_global(&v6.ip) || primary_v6.is_some_and(|p| p == v6.ip)
+                    !ipv6addr_is_unicast_global(&v6.ip)
+                        || primary_v6_intf.as_deref() == Some(name.as_str())
                 }
             });
             !intf.addrs.is_empty()
@@ -828,11 +843,19 @@ impl NetworkInterfaces {
     }
 
     fn cache_interface_address_state(inner: &mut NetworkInterfacesInner) {
+        inner.interface_address_state_cache =
+            Arc::new(Self::interface_address_state_for(&inner.interfaces));
+    }
+
+    /// The gateway, publication and identity sets distilled from `interfaces`
+    pub(crate) fn interface_address_state_for(
+        interfaces: &BTreeMap<String, NetworkInterface>,
+    ) -> NetworkInterfaceAddressState {
         // Reduce interfaces to their best routable ip addresses
         let mut intf_addrs = Vec::new();
         let mut gateway_addresses = Vec::new();
         let mut own_addresses = Vec::new();
-        for intf in inner.interfaces.values() {
+        for intf in interfaces.values() {
             // Skip down, loopback, and CLAT virtual interfaces (Android: clat4*/v4-*)
             if !intf.is_running() || intf.is_loopback() || intf.is_clat() {
                 continue;
@@ -883,11 +906,10 @@ impl NetworkInterfaces {
         own_addresses.sort();
         own_addresses.dedup();
 
-        // Now export just the addresses
-        inner.interface_address_state_cache = Arc::new(NetworkInterfaceAddressState {
+        NetworkInterfaceAddressState {
             gateway_addresses,
             interface_addresses,
             own_addresses,
-        });
+        }
     }
 }

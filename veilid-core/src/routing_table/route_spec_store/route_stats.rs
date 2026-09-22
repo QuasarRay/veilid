@@ -362,14 +362,29 @@ impl RouteStats {
 
     /// Mark a route as having lost an answer for a destination at the given ordering
     pub fn record_lost_question(&mut self, ordering: SequenceOrdering, destination: &Destination) {
+        let Ok(dest_key) = destination.destination_key() else {
+            self.ordering_mut(ordering)
+                .answer_stats_accounting
+                .record_lost_question(Timestamp::now());
+            return;
+        };
+        self.record_lost_question_to(ordering, dest_key);
+    }
+
+    /// Mark a route as having lost an answer for a destination key at the given ordering
+    pub fn record_lost_question_to(&mut self, ordering: SequenceOrdering, dest_key: PublicKey) {
         let cur_ts = Timestamp::now();
         let os = self.ordering_mut(ordering);
         os.answer_stats_accounting.record_lost_question(cur_ts);
-
-        let Ok(dest_key) = destination.destination_key() else {
-            return;
-        };
         *os.lost_question_destinations.entry(dest_key).or_insert(0) += 1;
+    }
+
+    /// Whether a question to [dest_key] was lost at this ordering since it last answered or
+    /// passed a loopback
+    pub fn lost_question_to(&self, ordering: SequenceOrdering, dest_key: &PublicKey) -> bool {
+        self.per_ordering
+            .get(&ordering)
+            .is_some_and(|os| os.lost_question_destinations.contains_key(dest_key))
     }
 
     /// Mark a route as having received a question or statement at the given ordering

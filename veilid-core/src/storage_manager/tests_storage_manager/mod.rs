@@ -1,5 +1,6 @@
 use super::*;
 
+mod test_commit_rounds;
 mod test_encrypted_value_data;
 #[cfg(feature = "aimd-dht")]
 mod test_gated_operation;
@@ -15,6 +16,7 @@ mod test_watch_route_pinning;
 mod test_watch_subkey_filter;
 
 pub async fn test_all() {
+    test_commit_rounds::test_all();
     test_encrypted_value_data::test_all().await;
     #[cfg(feature = "aimd-dht")]
     test_gated_operation::test_all();

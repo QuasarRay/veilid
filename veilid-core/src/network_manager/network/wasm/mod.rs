@@ -551,6 +551,10 @@ impl PlatformNetwork for WasmNetwork {
 
         self.reset_address_family_confirm_state(routing_domain)
     }
+
+    fn interfaces_changed_since_confirm(&self) -> bool {
+        true
+    }
 }
 
 /////////////////////////////////////////////////////////////////

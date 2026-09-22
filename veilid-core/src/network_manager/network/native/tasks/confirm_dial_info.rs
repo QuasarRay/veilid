@@ -23,6 +23,14 @@ enum DialInfoDetectionOutcome {
 }
 
 impl NativeNetwork {
+    /// Dial info is known good on the current interface state
+    fn record_confirmed_interface_generation(&self) {
+        self.confirmed_interface_address_generation.store(
+            self.interface_address_generation.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+    }
+
     /// Get routing domains that need dial info confirmation
     pub(super) fn routing_domains_needing_confirm_dial_info(&self) -> RoutingDomainSet {
         let mut needs_confirm_dial_info = RoutingDomainSet::empty();
@@ -539,6 +547,7 @@ impl NativeNetwork {
                 && confirmation_result.external_address_types == current_node_info.address_types()
             {
                 veilid_log!(self debug "DialInfo re-confirmed unchanged with {} validators", validator_capable_count);
+                self.record_confirmed_interface_generation();
                 return Ok(true);
             }
         }
@@ -562,6 +571,7 @@ impl NativeNetwork {
 
         editor.set_confirmed(true);
         editor.commit();
+        self.record_confirmed_interface_generation();
 
         // Publish the peer info (idempotent if it hasn't changed)
         rdc.publish_peer_info();

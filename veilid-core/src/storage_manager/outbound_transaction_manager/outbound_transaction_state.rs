@@ -53,6 +53,9 @@ pub(in crate::storage_manager) struct OutboundTransactionState {
     /// Refs to routes used during this transaction, held to keep them locked
     #[serde(skip)]
     route_refs: Vec<AllocatedRouteRef>,
+    /// Commit rounds recorded so far
+    #[serde(default)]
+    commit_rounds: u32,
 }
 
 impl fmt::Display for OutboundTransactionState {
@@ -117,11 +120,20 @@ impl OutboundTransactionState {
             record_states: vec![],
             background_tokens: vec![],
             route_refs: Vec::new(),
+            commit_rounds: 0,
         }
     }
 
     pub fn kind(&self) -> OutboundTransactionKind {
         self.kind
+    }
+
+    pub fn commit_rounds(&self) -> u32 {
+        self.commit_rounds
+    }
+
+    pub(super) fn note_commit_round(&mut self) {
+        self.commit_rounds += 1;
     }
 
     pub(super) fn prepare(&mut self, routing_table: &RoutingTable, cur_ts: Timestamp) {
