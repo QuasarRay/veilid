@@ -12,9 +12,14 @@ part 'veilid_state.g.dart';
 /// AttachmentState
 
 /// Network attachment level, expressed as a 'signal strength'.
+///
+/// Declared from least to most attached.
 enum AttachmentState {
   /// Not attached to the network.
   detached,
+
+  /// Detaching from the network and shutting down connections.
+  detaching,
 
   /// Attaching, but not yet able to perform network operations.
   attaching,
@@ -32,10 +37,7 @@ enum AttachmentState {
   attachedStrong,
 
   /// Attached with the strongest signal strength.
-  attachedFull,
-
-  /// Detaching from the network and shutting down connections.
-  detaching;
+  attachedFull;
 
   /// Decode from its serialized PascalCase name.
   factory AttachmentState.fromJson(dynamic j) =>
@@ -75,7 +77,7 @@ enum AttachmentState {
       case AttachmentState.attachedGood:
       case AttachmentState.attachedStrong:
       case AttachmentState.attachedFull:
-        return true;
+        return false;
     }
   }
 
@@ -278,6 +280,47 @@ sealed class VeilidStateAttachment with _$VeilidStateAttachment {
 
   factory VeilidStateAttachment.fromJson(dynamic json) =>
       _$VeilidStateAttachmentFromJson(json as Map<String, dynamic>);
+}
+
+//////////////////////////////////////
+/// VeilidAppLifecycleState
+
+/// Where the host application stands in its lifecycle, as the host reports
+/// it.
+enum VeilidAppLifecycleState {
+  /// In front of the user, or doing work its platform keeps it awake for.
+  active,
+
+  /// Put away: its platform may freeze or terminate it without further
+  /// notice.
+  background;
+
+  /// Decode from its serialized PascalCase name.
+  factory VeilidAppLifecycleState.fromJson(dynamic j) =>
+      VeilidAppLifecycleState.values.byName((j as String).toCamelCase());
+
+  /// Encode to its serialized PascalCase name.
+  String toJson() => name.toPascalCase();
+}
+
+//////////////////////////////////////
+/// VeilidStateAttachmentCondition
+
+/// A condition on [VeilidStateAttachment], for
+/// [Veilid.waitForAttachmentCondition]. A field left null is not checked.
+@freezed
+sealed class VeilidStateAttachmentCondition
+    with _$VeilidStateAttachmentCondition {
+  const factory VeilidStateAttachmentCondition({
+    AttachmentState? optMinState,
+    AttachmentState? optMaxState,
+    bool? optPublicInternetReady,
+    bool? optLocalNetworkReady,
+  }) = _VeilidStateAttachmentCondition;
+
+  /// Decode a [VeilidStateAttachmentCondition] from its JSON representation.
+  factory VeilidStateAttachmentCondition.fromJson(dynamic json) =>
+      _$VeilidStateAttachmentConditionFromJson(json as Map<String, dynamic>);
 }
 
 //////////////////////////////////////

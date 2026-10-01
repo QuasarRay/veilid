@@ -23,9 +23,14 @@ impl StorageManager {
                 .take(REHYDRATE_REQUESTS_PER_TICK)
                 .cloned()
                 .collect::<Vec<_>>();
-            keys.into_iter()
+            let reqs = keys
+                .into_iter()
                 .filter_map(|k| inner.rehydration_requests.remove_entry(&k))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            if !reqs.is_empty() {
+                self.mark_metadata_dirty();
+            }
+            reqs
         };
 
         let mut futs = Vec::new();

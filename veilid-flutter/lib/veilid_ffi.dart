@@ -75,6 +75,12 @@ void _eagerResolveNativeSymbols() {
     ),
     Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._attach),
     Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._detach),
+    Native.addressOf<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>(
+      VeilidFFI._reportAppLifecycleState,
+    ),
+    Native.addressOf<
+      NativeFunction<Void Function(Int64, Pointer<Utf8>, Uint64)>
+    >(VeilidFFI._waitForAttachmentCondition),
     Native.addressOf<NativeFunction<Void Function(Int64, Int64)>>(
       VeilidFFI._shutdownVeilidCore,
     ),
@@ -108,7 +114,15 @@ void _eagerResolveNativeSymbols() {
       >
     >(VeilidFFI._routingContextCreateDHTRecord),
     Native.addressOf<
-      NativeFunction<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>
+      NativeFunction<
+        Void Function(
+          Int64,
+          Uint32,
+          Pointer<Utf8>,
+          Pointer<Utf8>,
+          Pointer<Utf8>,
+        )
+      >
     >(VeilidFFI._routingContextOpenDHTRecord),
     Native.addressOf<
       NativeFunction<Void Function(Int64, Uint32, Pointer<Utf8>)>
@@ -971,11 +985,15 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
   Future<DHTRecordDescriptor> openDHTRecord(
     RecordKey key, {
     KeyPair? writer,
+    OpenDHTRecordOptions? options,
   }) async {
     _ctx.ensureValid();
     final nativeKey = jsonEncode(key).toNativeUtf8();
     final nativeWriter = writer != null
         ? jsonEncode(writer).toNativeUtf8()
+        : nullptr;
+    final nativeOptions = options != null
+        ? jsonEncode(options).toNativeUtf8()
         : nullptr;
     final recvPort = ReceivePort('routing_context_open_dht_record');
     final sendPort = recvPort.sendPort;
@@ -984,10 +1002,14 @@ class VeilidRoutingContextFFI extends VeilidRoutingContext {
       _ctx.id!,
       nativeKey,
       nativeWriter,
+      nativeOptions,
     );
     malloc.free(nativeKey);
     if (nativeWriter != nullptr) {
       malloc.free(nativeWriter);
+    }
+    if (nativeOptions != nullptr) {
+      malloc.free(nativeOptions);
     }
     final dhtRecordDescriptor = await processFutureJson(
       DHTRecordDescriptor.fromJson,
@@ -2211,6 +2233,20 @@ class VeilidFFI extends Veilid {
   @Native<Void Function(Int64)>(symbol: 'detach')
   external static void _detach(int port);
 
+  @Native<Void Function(Int64, Pointer<Utf8>)>(
+    symbol: 'report_app_lifecycle_state',
+  )
+  external static void _reportAppLifecycleState(int port, Pointer<Utf8> state);
+
+  @Native<Void Function(Int64, Pointer<Utf8>, Uint64)>(
+    symbol: 'wait_for_attachment_condition',
+  )
+  external static void _waitForAttachmentCondition(
+    int port,
+    Pointer<Utf8> condition,
+    int timeoutMs,
+  );
+
   @Native<Void Function(Int64, Int64)>(symbol: 'shutdown_veilid_core')
   external static void _shutdownVeilidCore(int port, int streamPort);
 
@@ -2275,14 +2311,15 @@ class VeilidFFI extends Veilid {
     Pointer<Utf8> owner,
   );
 
-  @Native<Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>)>(
-    symbol: 'routing_context_open_dht_record',
-  )
+  @Native<
+    Void Function(Int64, Uint32, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+  >(symbol: 'routing_context_open_dht_record')
   external static void _routingContextOpenDHTRecord(
     int port,
     int id,
     Pointer<Utf8> key,
     Pointer<Utf8> writer,
+    Pointer<Utf8> options,
   );
 
   @Native<Void Function(Int64, Uint32, Pointer<Utf8>)>(
@@ -3061,6 +3098,37 @@ class VeilidFFI extends Veilid {
     final sendPort = recvPort.sendPort;
     _detach(sendPort.nativePort);
     return processFutureVoid(recvPort.first);
+  }
+
+  @override
+  Future<void> reportAppLifecycleState(VeilidAppLifecycleState state) {
+    final nativeState = jsonEncode(state).toNativeUtf8();
+    final recvPort = ReceivePort('report_app_lifecycle_state');
+    final sendPort = recvPort.sendPort;
+    _reportAppLifecycleState(sendPort.nativePort, nativeState);
+    malloc.free(nativeState);
+    return processFutureVoid(recvPort.first);
+  }
+
+  @override
+  Future<VeilidStateAttachment> waitForAttachmentCondition({
+    VeilidStateAttachmentCondition? condition,
+    Duration? timeout,
+  }) {
+    final nativeCondition = condition != null
+        ? jsonEncode(condition).toNativeUtf8()
+        : nullptr;
+    final recvPort = ReceivePort('wait_for_attachment_condition');
+    final sendPort = recvPort.sendPort;
+    _waitForAttachmentCondition(
+      sendPort.nativePort,
+      nativeCondition,
+      timeout?.inMilliseconds ?? 0,
+    );
+    if (nativeCondition != nullptr) {
+      malloc.free(nativeCondition);
+    }
+    return processFutureJson(VeilidStateAttachment.fromJson, recvPort.first);
   }
 
   @override

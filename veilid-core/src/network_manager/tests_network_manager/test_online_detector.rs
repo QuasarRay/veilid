@@ -183,7 +183,7 @@ pub fn test_recovery_clears_evidence_window() {
     for ft in framing {
         let ev = broad_failure(ft, 1, threshold, ts(10));
         // Offline needs the same breadth sustained; here only the degraded overlay matters
-        let _ = OnlineDetector::process_online_event(&mut pd, &ev, framing, ts(10));
+        let _ = OnlineDetector::process_online_event(&mut pd, &ev, framing, None, ts(10));
     }
     assert_eq!(pd.last_degraded_evidence_ts, Some(ts(10)));
     assert!(OnlineDetector::commit_effective(&mut pd, None, ts(10)).is_some());
@@ -199,11 +199,48 @@ pub fn test_recovery_clears_evidence_window() {
     // One more failure per framing type is not breadth
     for ft in framing {
         let ev = broad_failure(ft, 100, 1, ts(17));
-        let _ = OnlineDetector::process_online_event(&mut pd, &ev, framing, ts(17));
+        let _ = OnlineDetector::process_online_event(&mut pd, &ev, framing, None, ts(17));
     }
     assert_eq!(pd.last_degraded_evidence_ts, None);
     assert!(OnlineDetector::commit_effective(&mut pd, None, ts(17)).is_none());
     assert_eq!(pd.effective_state, OnlineState::Online);
+}
+
+pub fn test_failures_across_a_stall_are_void() {
+    // RPCs in flight across a freeze time out at the thaw, and that storm is about us
+    let mut pd = OnlineDetectionPerDomain::default();
+    let framing = FramingTypeSet::all();
+    let threshold = OFFLINE_DETECTION_FAILURE_THRESHOLD_CONNECTION as u8;
+    let stall = Some(ts(200));
+    assert_eq!(
+        OnlineDetector::commit_effective(&mut pd, stall, ts(200)),
+        Some((
+            OnlineState::Online,
+            OnlineState::Degraded,
+            DEGRADED_EXIT_CLEAN_SECS
+        ))
+    );
+    for ft in framing {
+        let ev = broad_failure(ft, 1, threshold, ts(170));
+        assert_eq!(
+            OnlineDetector::process_online_event(&mut pd, &ev, framing, stall, ts(200)),
+            None
+        );
+    }
+    assert!(pd.windowed_failures.values().all(BTreeMap::is_empty));
+    assert_eq!(pd.last_degraded_evidence_ts, None);
+    assert!(OnlineDetector::commit_effective(&mut pd, stall, ts(200)).is_none());
+
+    // Sent after the thaw, the same breadth is evidence again
+    let states: Vec<_> = framing
+        .iter()
+        .map(|ft| {
+            let ev = broad_failure(ft, 1, threshold, ts(201));
+            OnlineDetector::process_online_event(&mut pd, &ev, framing, stall, ts(206))
+        })
+        .collect();
+    assert_eq!(states.last(), Some(&Some(OnlineState::Offline)));
+    assert_eq!(pd.last_degraded_evidence_ts, Some(ts(206)));
 }
 
 pub fn test_stall_is_credited_as_untestable() {
@@ -318,6 +355,7 @@ pub fn test_credit_is_kept_by_count() {
 pub fn test_all() {
     test_credit_is_kept_by_count();
     test_stall_is_credited_as_untestable();
+    test_failures_across_a_stall_are_void();
     test_recovery_clears_evidence_window();
     test_no_evidence_is_online();
     test_offline_dominates();

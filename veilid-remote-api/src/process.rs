@@ -346,16 +346,18 @@ impl JsonRequestProcessor {
                         .map(Box::new),
                 ),
             },
-            RoutingContextRequestOp::OpenDhtRecord { key, writer } => {
-                RoutingContextResponseOp::OpenDhtRecord {
-                    result: to_json_api_result(
-                        routing_context
-                            .open_dht_record(key, writer)
-                            .await
-                            .map(Box::new),
-                    ),
-                }
-            }
+            RoutingContextRequestOp::OpenDhtRecord {
+                key,
+                writer,
+                options,
+            } => RoutingContextResponseOp::OpenDhtRecord {
+                result: to_json_api_result(
+                    routing_context
+                        .open_dht_record(key, writer, options)
+                        .await
+                        .map(Box::new),
+                ),
+            },
             RoutingContextRequestOp::CloseDhtRecord { key } => {
                 RoutingContextResponseOp::CloseDhtRecord {
                     result: to_json_api_result(routing_context.close_dht_record(key).await),
@@ -840,6 +842,20 @@ impl JsonRequestProcessor {
         }
     }
 
+    /// Hands the report to a node built with `app-lifecycle`
+    #[cfg(feature = "app-lifecycle")]
+    fn report_app_lifecycle_state(&self, state: VeilidAppLifecycleState) -> VeilidAPIResult<()> {
+        self.api.report_app_lifecycle_state(state)
+    }
+
+    /// Answers Unimplemented: the node was built without `app-lifecycle`
+    #[cfg(not(feature = "app-lifecycle"))]
+    fn report_app_lifecycle_state(&self, _state: VeilidAppLifecycleState) -> VeilidAPIResult<()> {
+        Err(VeilidAPIError::unimplemented(
+            "report_app_lifecycle_state needs the app-lifecycle feature",
+        ))
+    }
+
     #[instrument(level = "trace", target = "json_api", skip_all)]
     /// Dispatch a top-level request, looking up any referenced handle and
     /// routing the operation to the matching `VeilidAPI` call.
@@ -878,6 +894,23 @@ impl JsonRequestProcessor {
             },
             RequestOp::Detach => ResponseOp::Detach {
                 result: to_json_api_result(self.api.detach().await),
+            },
+            RequestOp::ReportAppLifecycleState { state } => ResponseOp::ReportAppLifecycleState {
+                result: to_json_api_result(self.report_app_lifecycle_state(state)),
+            },
+            RequestOp::WaitForAttachmentCondition {
+                condition,
+                timeout_ms,
+            } => ResponseOp::WaitForAttachmentCondition {
+                result: to_json_api_result(
+                    self.api
+                        .wait_for_attachment_condition(
+                            condition,
+                            timeout_ms.map(Duration::from_millis),
+                        )
+                        .await
+                        .map(Box::new),
+                ),
             },
             RequestOp::GenerateMemberId { writer_key } => ResponseOp::GenerateMemberId {
                 result: to_json_api_result_with_string(self.api.generate_member_id(&writer_key)),

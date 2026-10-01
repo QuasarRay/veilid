@@ -732,6 +732,45 @@ pub extern "C" fn detach(port: i64) {
 
 #[no_mangle]
 #[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn report_app_lifecycle_state(port: i64, state: FfiStr) {
+    let state = state.into_opt_string();
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let state: VeilidAppLifecycleState = deserialize_opt_json(state)?;
+            let veilid_api = get_veilid_api().await?;
+            veilid_api.report_app_lifecycle_state(state)?;
+            VeilidAPIResult::Ok(())
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn wait_for_attachment_condition(port: i64, condition: FfiStr, timeout_ms: u64) {
+    let condition = condition.into_opt_string();
+    let timeout = if timeout_ms == 0 {
+        None
+    } else {
+        Some(Duration::from_millis(timeout_ms))
+    };
+
+    DartIsolateWrapper::new(port).spawn_result_json(
+        async move {
+            let condition: Option<VeilidStateAttachmentCondition> =
+                deserialize_optional_json(condition)?;
+            let veilid_api = get_veilid_api().await?;
+            let attachment = veilid_api
+                .wait_for_attachment_condition(condition, timeout)
+                .await?;
+            VeilidAPIResult::Ok(attachment)
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
 pub extern "C" fn shutdown_veilid_core(port: i64, stream_port: i64) {
     DartIsolateWrapper::new(port).spawn_result(
         async move {
@@ -986,16 +1025,26 @@ pub extern "C" fn routing_context_create_dht_record(
 
 #[no_mangle]
 #[instrument(level = "trace", target = "ffi", skip_all)]
-pub extern "C" fn routing_context_open_dht_record(port: i64, id: u32, key: FfiStr, writer: FfiStr) {
+pub extern "C" fn routing_context_open_dht_record(
+    port: i64,
+    id: u32,
+    key: FfiStr,
+    writer: FfiStr,
+    options: FfiStr,
+) {
     let key = key.into_opt_string();
     let writer = writer.into_opt_string();
+    let options = options.into_opt_string();
     DartIsolateWrapper::new(port).spawn_result_json(
         async move {
             let key: RecordKey = deserialize_opt_json(key)?;
             let writer: Option<KeyPair> = deserialize_optional_json(writer)?;
+            let options: Option<OpenDHTRecordOptions> = deserialize_optional_json(options)?;
             let routing_context = get_routing_context(id, "routing_context_open_dht_record")?;
 
-            let dht_record_descriptor = routing_context.open_dht_record(key, writer).await?;
+            let dht_record_descriptor = routing_context
+                .open_dht_record(key, writer, options)
+                .await?;
             VeilidAPIResult::Ok(dht_record_descriptor)
         }
         .in_current_span(),

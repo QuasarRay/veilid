@@ -228,62 +228,19 @@ class DefaultVeilidFixture implements VeilidFixture {
   @override
   Future<void> attach() async {
     await Veilid.instance.attach();
-
-    // Wait for attached state
-    while (true) {
-      final state = await Veilid.instance.getVeilidState();
-      var done = false;
-      if (state.attachment.publicInternetReady) {
-        switch (state.attachment.state) {
-          case AttachmentState.detached:
-            break;
-          case AttachmentState.attaching:
-            break;
-          case AttachmentState.detaching:
-            break;
-          case AttachmentState.attachedWeak:
-          case AttachmentState.attachedFair:
-          case AttachmentState.attachedGood:
-          case AttachmentState.attachedStrong:
-          case AttachmentState.attachedFull:
-            done = true;
-        }
-      }
-      if (done) {
-        logFixture?.debug("Veilid attached: ${state.attachment}");
-        break;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    }
+    final attachment = await Veilid.instance.waitForAttachmentCondition();
+    logFixture?.debug("Veilid attached: $attachment");
   }
 
   @override
   Future<void> detach() async {
     await Veilid.instance.detach();
-
-    // Wait for detached state
-    while (true) {
-      final state = await Veilid.instance.getVeilidState();
-      var done = false;
-      switch (state.attachment.state) {
-        case AttachmentState.detached:
-          done = true;
-          break;
-        case AttachmentState.attaching:
-        case AttachmentState.detaching:
-        case AttachmentState.attachedWeak:
-        case AttachmentState.attachedFair:
-        case AttachmentState.attachedGood:
-        case AttachmentState.attachedStrong:
-        case AttachmentState.attachedFull:
-          break;
-      }
-      if (done) {
-        logFixture?.debug("Veilid detached: ${state.attachment}");
-        break;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    }
+    final attachment = await Veilid.instance.waitForAttachmentCondition(
+      condition: const VeilidStateAttachmentCondition(
+        optMaxState: AttachmentState.detached,
+      ),
+    );
+    logFixture?.debug("Veilid detached: $attachment");
   }
 
   @override

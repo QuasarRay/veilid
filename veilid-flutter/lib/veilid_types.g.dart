@@ -149,6 +149,14 @@ Map<String, dynamic> _$DHTRecordReportToJson(_DHTRecordReport instance) =>
       'networkSeqs': instance.networkSeqs,
     };
 
+_OpenDHTRecordOptions _$OpenDHTRecordOptionsFromJson(
+  Map<String, dynamic> json,
+) => _OpenDHTRecordOptions(rehydrate: json['rehydrate'] as bool?);
+
+Map<String, dynamic> _$OpenDHTRecordOptionsToJson(
+  _OpenDHTRecordOptions instance,
+) => <String, dynamic>{'rehydrate': instance.rehydrate};
+
 _SetDHTValueOptions _$SetDHTValueOptionsFromJson(Map<String, dynamic> json) =>
     _SetDHTValueOptions(
       writer: json['writer'] == null ? null : KeyPair.fromJson(json['writer']),

@@ -1258,6 +1258,15 @@ impl NetworkManager {
                     );
                     return Ok(false);
                 }
+                TimestampError::SentWhileStalled { .. } => {
+                    veilid_log!(self debug throttle: 1000,
+                        "Envelope from {} ({}) sent while stalled: {:?}",
+                        envelope.get_sender_id(),
+                        flow.remote(),
+                        e
+                    );
+                    return Ok(false);
+                }
             },
         }
 

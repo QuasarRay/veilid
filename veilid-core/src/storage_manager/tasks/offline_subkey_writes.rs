@@ -305,13 +305,20 @@ impl StorageManager {
         // Ensure nothing is left in-flight when returning even due to an error
         {
             let mut inner = self.inner.lock();
+            let mut changed = false;
             inner.offline_subkey_writes.retain(|_, v| {
+                changed |= !v.subkeys_in_flight.is_empty();
                 v.subkeys = v.subkeys.union(&mem::take(&mut v.subkeys_in_flight));
-                !v.subkeys.is_empty()
+                let keep = !v.subkeys.is_empty();
+                changed |= !keep;
+                keep
             });
             let mut waiters = mem::take(&mut inner.flush_record_waiters);
             waiters.retain(|k, _| inner.offline_subkey_writes.contains_key(k));
             inner.flush_record_waiters = waiters;
+            if changed {
+                self.mark_metadata_dirty();
+            }
         }
 
         Ok(())

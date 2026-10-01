@@ -2652,6 +2652,272 @@ as BigInt,
 
 
 /// @nodoc
+mixin _$VeilidStateAttachmentCondition {
+
+ AttachmentState? get optMinState; AttachmentState? get optMaxState; bool? get optPublicInternetReady; bool? get optLocalNetworkReady;
+/// Create a copy of VeilidStateAttachmentCondition
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VeilidStateAttachmentConditionCopyWith<VeilidStateAttachmentCondition> get copyWith => _$VeilidStateAttachmentConditionCopyWithImpl<VeilidStateAttachmentCondition>(this as VeilidStateAttachmentCondition, _$identity);
+
+  /// Serializes this VeilidStateAttachmentCondition to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidStateAttachmentCondition&&(identical(other.optMinState, optMinState) || other.optMinState == optMinState)&&(identical(other.optMaxState, optMaxState) || other.optMaxState == optMaxState)&&(identical(other.optPublicInternetReady, optPublicInternetReady) || other.optPublicInternetReady == optPublicInternetReady)&&(identical(other.optLocalNetworkReady, optLocalNetworkReady) || other.optLocalNetworkReady == optLocalNetworkReady));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,optMinState,optMaxState,optPublicInternetReady,optLocalNetworkReady);
+
+@override
+String toString() {
+  return 'VeilidStateAttachmentCondition(optMinState: $optMinState, optMaxState: $optMaxState, optPublicInternetReady: $optPublicInternetReady, optLocalNetworkReady: $optLocalNetworkReady)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VeilidStateAttachmentConditionCopyWith<$Res>  {
+  factory $VeilidStateAttachmentConditionCopyWith(VeilidStateAttachmentCondition value, $Res Function(VeilidStateAttachmentCondition) _then) = _$VeilidStateAttachmentConditionCopyWithImpl;
+@useResult
+$Res call({
+ AttachmentState? optMinState, AttachmentState? optMaxState, bool? optPublicInternetReady, bool? optLocalNetworkReady
+});
+
+
+
+
+}
+/// @nodoc
+class _$VeilidStateAttachmentConditionCopyWithImpl<$Res>
+    implements $VeilidStateAttachmentConditionCopyWith<$Res> {
+  _$VeilidStateAttachmentConditionCopyWithImpl(this._self, this._then);
+
+  final VeilidStateAttachmentCondition _self;
+  final $Res Function(VeilidStateAttachmentCondition) _then;
+
+/// Create a copy of VeilidStateAttachmentCondition
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? optMinState = freezed,Object? optMaxState = freezed,Object? optPublicInternetReady = freezed,Object? optLocalNetworkReady = freezed,}) {
+  return _then(_self.copyWith(
+optMinState: freezed == optMinState ? _self.optMinState : optMinState // ignore: cast_nullable_to_non_nullable
+as AttachmentState?,optMaxState: freezed == optMaxState ? _self.optMaxState : optMaxState // ignore: cast_nullable_to_non_nullable
+as AttachmentState?,optPublicInternetReady: freezed == optPublicInternetReady ? _self.optPublicInternetReady : optPublicInternetReady // ignore: cast_nullable_to_non_nullable
+as bool?,optLocalNetworkReady: freezed == optLocalNetworkReady ? _self.optLocalNetworkReady : optLocalNetworkReady // ignore: cast_nullable_to_non_nullable
+as bool?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [VeilidStateAttachmentCondition].
+extension VeilidStateAttachmentConditionPatterns on VeilidStateAttachmentCondition {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VeilidStateAttachmentCondition value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VeilidStateAttachmentCondition() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VeilidStateAttachmentCondition value)  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidStateAttachmentCondition():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VeilidStateAttachmentCondition value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VeilidStateAttachmentCondition() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( AttachmentState? optMinState,  AttachmentState? optMaxState,  bool? optPublicInternetReady,  bool? optLocalNetworkReady)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VeilidStateAttachmentCondition() when $default != null:
+return $default(_that.optMinState,_that.optMaxState,_that.optPublicInternetReady,_that.optLocalNetworkReady);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( AttachmentState? optMinState,  AttachmentState? optMaxState,  bool? optPublicInternetReady,  bool? optLocalNetworkReady)  $default,) {final _that = this;
+switch (_that) {
+case _VeilidStateAttachmentCondition():
+return $default(_that.optMinState,_that.optMaxState,_that.optPublicInternetReady,_that.optLocalNetworkReady);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( AttachmentState? optMinState,  AttachmentState? optMaxState,  bool? optPublicInternetReady,  bool? optLocalNetworkReady)?  $default,) {final _that = this;
+switch (_that) {
+case _VeilidStateAttachmentCondition() when $default != null:
+return $default(_that.optMinState,_that.optMaxState,_that.optPublicInternetReady,_that.optLocalNetworkReady);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VeilidStateAttachmentCondition implements VeilidStateAttachmentCondition {
+  const _VeilidStateAttachmentCondition({this.optMinState, this.optMaxState, this.optPublicInternetReady, this.optLocalNetworkReady});
+  factory _VeilidStateAttachmentCondition.fromJson(Map<String, dynamic> json) => _$VeilidStateAttachmentConditionFromJson(json);
+
+@override final  AttachmentState? optMinState;
+@override final  AttachmentState? optMaxState;
+@override final  bool? optPublicInternetReady;
+@override final  bool? optLocalNetworkReady;
+
+/// Create a copy of VeilidStateAttachmentCondition
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VeilidStateAttachmentConditionCopyWith<_VeilidStateAttachmentCondition> get copyWith => __$VeilidStateAttachmentConditionCopyWithImpl<_VeilidStateAttachmentCondition>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VeilidStateAttachmentConditionToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidStateAttachmentCondition&&(identical(other.optMinState, optMinState) || other.optMinState == optMinState)&&(identical(other.optMaxState, optMaxState) || other.optMaxState == optMaxState)&&(identical(other.optPublicInternetReady, optPublicInternetReady) || other.optPublicInternetReady == optPublicInternetReady)&&(identical(other.optLocalNetworkReady, optLocalNetworkReady) || other.optLocalNetworkReady == optLocalNetworkReady));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,optMinState,optMaxState,optPublicInternetReady,optLocalNetworkReady);
+
+@override
+String toString() {
+  return 'VeilidStateAttachmentCondition(optMinState: $optMinState, optMaxState: $optMaxState, optPublicInternetReady: $optPublicInternetReady, optLocalNetworkReady: $optLocalNetworkReady)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VeilidStateAttachmentConditionCopyWith<$Res> implements $VeilidStateAttachmentConditionCopyWith<$Res> {
+  factory _$VeilidStateAttachmentConditionCopyWith(_VeilidStateAttachmentCondition value, $Res Function(_VeilidStateAttachmentCondition) _then) = __$VeilidStateAttachmentConditionCopyWithImpl;
+@override @useResult
+$Res call({
+ AttachmentState? optMinState, AttachmentState? optMaxState, bool? optPublicInternetReady, bool? optLocalNetworkReady
+});
+
+
+
+
+}
+/// @nodoc
+class __$VeilidStateAttachmentConditionCopyWithImpl<$Res>
+    implements _$VeilidStateAttachmentConditionCopyWith<$Res> {
+  __$VeilidStateAttachmentConditionCopyWithImpl(this._self, this._then);
+
+  final _VeilidStateAttachmentCondition _self;
+  final $Res Function(_VeilidStateAttachmentCondition) _then;
+
+/// Create a copy of VeilidStateAttachmentCondition
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? optMinState = freezed,Object? optMaxState = freezed,Object? optPublicInternetReady = freezed,Object? optLocalNetworkReady = freezed,}) {
+  return _then(_VeilidStateAttachmentCondition(
+optMinState: freezed == optMinState ? _self.optMinState : optMinState // ignore: cast_nullable_to_non_nullable
+as AttachmentState?,optMaxState: freezed == optMaxState ? _self.optMaxState : optMaxState // ignore: cast_nullable_to_non_nullable
+as AttachmentState?,optPublicInternetReady: freezed == optPublicInternetReady ? _self.optPublicInternetReady : optPublicInternetReady // ignore: cast_nullable_to_non_nullable
+as bool?,optLocalNetworkReady: freezed == optLocalNetworkReady ? _self.optLocalNetworkReady : optLocalNetworkReady // ignore: cast_nullable_to_non_nullable
+as bool?,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
 mixin _$VeilidStateNetwork {
 
  bool get started; BigInt get bpsDown; BigInt get bpsUp; List<PeerTableData> get peers;

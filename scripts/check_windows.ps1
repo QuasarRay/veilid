@@ -95,7 +95,7 @@ if (-not $SkipFlutter) {
 Write-Host 'Running clippy...'
 Step 'cargo clippy (host)' { cargo clippy --locked --all-targets }
 Step 'cargo clippy (veilid-core mock-api)' {
-    cargo clippy --locked --all-targets -p veilid-core --no-default-features --features=default-tokio,debug-api,backtrace,mock-api
+    cargo clippy --locked --all-targets -p veilid-core --no-default-features --features=default-tokio,mock-api
 }
 Step 'cargo clippy (veilid-server mock-api)' {
     cargo clippy --locked --all-targets -p veilid-server --no-default-features --features=mock-api
@@ -114,7 +114,7 @@ Step 'cargo nextest (remaining crates)' {
 }
 # The DHT and transaction suites run only against the mock
 Step 'cargo nextest (veilid-core mock-api)' {
-    cargo nextest run --tests --all-targets --locked -p veilid-core --no-default-features --features=default-tokio,debug-api,backtrace,debug-locks,mock-api
+    cargo nextest run --tests --all-targets --locked -p veilid-core --no-default-features --features=default-tokio,debug-locks,mock-api
 }
 
 if (-not $SkipPython) {

@@ -71,6 +71,7 @@ for arg in "$@"; do
       echo "                        routing        - VeilidRoutingContext tests"
       echo "                        dht            - DHT kitchen sink tests"
       echo "                        transactions   - DHT transaction tests"
+      echo "                        lifecycle      - host application lifecycle tests"
       echo "  --case=TEXT         Run only the cases whose name contains TEXT."
       echo "  --context=LIST      Comma-separated list of JS contexts to run the suites in,"
       echo "                      each in turn. If omitted, only 'window' is used."
@@ -95,6 +96,11 @@ for arg in "$@"; do
       echo "                      when STRESS=1; --no-stats turns it off. Not with --mock."
       echo "  --debug             Set DEBUG=1 environment variable"
       echo "  -- [args]           Pass remaining arguments to wdio"
+      echo ""
+      echo "Environment:"
+      echo "  WDIO_BROWSER        chrome (default), firefox or safari"
+      echo "  WDIO_HEADLESS       set empty to run the browser in a visible window"
+      echo "  LIFECYCLE_SOAK_MINUTES  run the hidden-page soak instead of the suites"
       echo ""
       echo "Examples:"
       echo "  $0                                          # All suites, window context, live network"
@@ -143,7 +149,7 @@ original_tmpdir=$TMPDIR
 mkdir -p ~/tmp
 export TMPDIR=~/tmp
 
-ALL_SUITES="client,crypto,table,pstore,routing,dht,transactions"
+ALL_SUITES="client,crypto,table,pstore,routing,dht,transactions,lifecycle"
 
 # Suites are selected by name and run inside each requested context; the runner spec reads both
 # out of the environment.
@@ -211,7 +217,8 @@ for context in "${CONTEXT_LIST[@]}"; do
     WDIO_CONFIG="./wdio.conf.ts"
   fi
 
-  WDIO_HEADLESS=true npx wdio run "$WDIO_CONFIG" $@
+  # Headless unless the caller set WDIO_HEADLESS, empty for a visible browser
+  WDIO_HEADLESS="${WDIO_HEADLESS-true}" npx wdio run "$WDIO_CONFIG" $@
   context_status=$?
   if [[ $context_status -ne 0 ]]; then
     status=$context_status

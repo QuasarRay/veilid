@@ -10,8 +10,8 @@ impl StorageManager {
         &self,
         _stop_token: StopToken,
         _last_ts: Timestamp,
-        _cur_ts: Timestamp,
+        cur_ts: Timestamp,
     ) -> EyreResult<()> {
-        self.save_metadata().await
+        self.save_metadata_if_due(cur_ts).await
     }
 }

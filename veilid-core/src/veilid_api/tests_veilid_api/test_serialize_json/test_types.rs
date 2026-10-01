@@ -220,6 +220,18 @@ pub fn test_veilid_state_attachment() {
     assert_eq!(orig, copy);
 }
 
+pub fn test_veilid_state_attachment_condition() {
+    let orig = VeilidStateAttachmentCondition {
+        opt_min_state: Some(AttachmentState::AttachedWeak),
+        opt_max_state: Some(AttachmentState::AttachedFull),
+        opt_public_internet_ready: Some(true),
+        opt_local_network_ready: None,
+    };
+    let copy = deserialize_json(&serialize_json(&orig)).unwrap();
+
+    assert_eq!(orig, copy);
+}
+
 pub fn test_peer_table_data() {
     let orig = fake_peer_table_data();
     let copy = deserialize_json(&serialize_json(&orig)).unwrap();

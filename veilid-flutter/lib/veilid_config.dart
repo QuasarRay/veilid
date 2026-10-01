@@ -561,6 +561,33 @@ sealed class VeilidConfigCapabilities with _$VeilidConfigCapabilities {
 }
 
 ////////////
+
+/// How the node lives through its host application moving between foreground
+/// and background.
+@freezed
+sealed class VeilidConfigAppLifecycle with _$VeilidConfigAppLifecycle {
+  const factory VeilidConfigAppLifecycle({
+    /// While attached, keep a hidden desktop app from being throttled; no
+    /// effect on mobile.
+    @Default(true) bool preferForeground,
+  }) = _VeilidConfigAppLifecycle;
+
+  factory VeilidConfigAppLifecycle.fromJson(dynamic json) =>
+      _$VeilidConfigAppLifecycleFromJson(json as Map<String, dynamic>);
+}
+
+/// Attachment configuration, owned by the attachment manager.
+@freezed
+sealed class VeilidConfigAttachment with _$VeilidConfigAttachment {
+  const factory VeilidConfigAttachment({
+    @Default(VeilidConfigAppLifecycle()) VeilidConfigAppLifecycle appLifecycle,
+  }) = _VeilidConfigAttachment;
+
+  factory VeilidConfigAttachment.fromJson(dynamic json) =>
+      _$VeilidConfigAttachmentFromJson(json as Map<String, dynamic>);
+}
+
+////////////
 // "Footgun" internal tuning tree, parallel to the main config. Only honored when
 // veilid-core is built with the `footgun-config` feature; otherwise ignored.
 
@@ -687,6 +714,7 @@ sealed class VeilidConfig with _$VeilidConfig {
     required VeilidConfigTableStore tableStore,
     required VeilidConfigBlockStore blockStore,
     required VeilidConfigNetwork network,
+    @Default(VeilidConfigAttachment()) VeilidConfigAttachment attachment,
     VeilidConfigInternal? internal,
   }) = _VeilidConfig;
 

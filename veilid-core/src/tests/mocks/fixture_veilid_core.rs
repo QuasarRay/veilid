@@ -307,16 +307,3 @@ pub fn fixture_veilid_config() -> VeilidConfig {
         ..Default::default()
     }
 }
-
-// Network-related code to make sure veilid node is connetected to other peers
-pub async fn fixture_wait_for_public_internet_ready(api: &VeilidAPI) {
-    info!("wait_for_public_internet_ready");
-    loop {
-        let state = api.get_state().await.unwrap();
-        if state.attachment.public_internet_ready {
-            break;
-        }
-        sleep(1000).await;
-    }
-    info!("wait_for_public_internet_ready, done");
-}

@@ -27,7 +27,8 @@ PUBLIC_API_FILE_VEILID_CORE=veilid-core/$PUBLIC_API_TXT_FILE
 PUBLIC_API_FILE_VEILID_TOOLS=veilid-tools/$PUBLIC_API_TXT_FILE
 PUBLIC_API_FILE_VEILID_CORE_OPTIMIZED=veilid-core-optimized/$PUBLIC_API_TXT_FILE
 PUBLIC_API_FILE_VEILID_REMOTE_API=veilid-remote-api/$PUBLIC_API_TXT_FILE
-PUBLIC_API_FEATURES_VEILID_CORE="geolocation,footgun-nodeid-target,footgun-config"
+PUBLIC_API_FEATURES_VEILID_CORE="geolocation,footgun-nodeid-target,footgun-config,app-lifecycle"
+PUBLIC_API_FEATURES_VEILID_TOOLS="app-lifecycle"
 PUBLIC_API_FEATURES_VEILID_CORE_OPTIMIZED="enable-crypto-vld0,enable-crypto-none"
 
 # Make temporary file for the public API output
@@ -47,7 +48,7 @@ trap "rm -f $PUBLIC_API_TMP_FILE_VEILID_CORE $PUBLIC_API_TMP_FILE_VEILID_CORE_DI
 echo "Checking public API for 'veilid-core'..."
 cargo public-api -sss -p veilid-core --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_CORE > $PUBLIC_API_TMP_FILE_VEILID_CORE
 echo "Checking public API for 'veilid-tools'..."
-cargo public-api -sss -p veilid-tools --target $PUBLIC_API_TARGET --color never > $PUBLIC_API_TMP_FILE_VEILID_TOOLS
+cargo public-api -sss -p veilid-tools --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_TOOLS > $PUBLIC_API_TMP_FILE_VEILID_TOOLS
 echo "Checking public API for 'veilid-core-optimized'..."
 cargo public-api -sss -p veilid-core-optimized --target $PUBLIC_API_TARGET --color never --features $PUBLIC_API_FEATURES_VEILID_CORE_OPTIMIZED > $PUBLIC_API_TMP_FILE_VEILID_CORE_OPTIMIZED
 echo "Checking public API for 'veilid-remote-api'..."

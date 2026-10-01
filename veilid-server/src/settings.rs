@@ -2001,6 +2001,7 @@ impl Settings {
                     server_address: inner.core.network.virtual_network.server_address.clone(),
                 },
             },
+            attachment: VeilidConfigAttachment::default(),
             // Footgun tuning passes through unchanged; veilid-core's runtime gate
             // ignores it (with a warning) unless built with `footgun-config`.
             internal: Some(inner.core.internal.clone()),

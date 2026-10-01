@@ -55,7 +55,10 @@ async fn test_txt_then_direct() -> BTreeSet<String> {
         .await
         .expect("startup failed");
     api_a.attach().await.unwrap();
-    fixture_wait_for_public_internet_ready(&api_a).await;
+    let _ = api_a
+        .wait_for_attachment_condition(None, None)
+        .await
+        .unwrap();
 
     let cache_a = wait_for_bootstrap_records(&api_a).await;
     assert!(!cache_a.is_empty(), "TXT bootstrap stored no records");
@@ -119,7 +122,10 @@ async fn test_txt_then_direct() -> BTreeSet<String> {
     assert!(as_set(cache_b.record_strings()).is_subset(&strings_a));
 
     // Having recorded a bootstrap, neither node's saved table is condemned on the next start
-    registry(&api_a).routing_table().flush().await;
+    registry(&api_a)
+        .routing_table()
+        .flush(SaveReason::Bootstrap)
+        .await;
     assert!(!persisted_state_requires_reset(&api_a).await);
 
     info!("test_txt_then_direct: shutting down");
@@ -159,7 +165,10 @@ async fn test_config_records_bootstrap(strings_a: &BTreeSet<String>) {
     assert_eq!(as_set(served.record_strings()), *strings_a);
 
     // And good enough to actually join with
-    fixture_wait_for_public_internet_ready(&api_c).await;
+    let _ = api_c
+        .wait_for_attachment_condition(None, None)
+        .await
+        .unwrap();
 
     info!("test_config_records_bootstrap: shutting down");
     api_c.shutdown().await;

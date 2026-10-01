@@ -369,12 +369,12 @@ impl BucketEntryInner {
     /// rare out-of-order record, which shows up as a zero-length span in debug stats.
     pub fn state_reason(&self, cur_ts: Timestamp) -> BucketEntryStateReason {
         let reason = self.compute_state_reason(cur_ts);
-        if let Some(state_reason_change_span) = self
+        let change = self
             .state_stats_accounting
             .lock()
-            .record_state_reason(cur_ts, reason)
-        {
-            veilid_log!(self debug target: "rtab::state::node", "{:#}: {:#}", self.best_node_id(), state_reason_change_span);
+            .record_state_reason(cur_ts, reason);
+        if let Some(change) = change {
+            self.on_state_reason_change(change);
         }
         reason
     }
@@ -391,12 +391,20 @@ impl BucketEntryInner {
         state_stats_accounting: &mut StateStatsAccounting,
     ) -> BucketEntryStateReason {
         let reason = self.compute_state_reason(cur_ts);
-        if let Some(state_reason_change_span) =
-            state_stats_accounting.record_state_reason(cur_ts, reason)
-        {
-            veilid_log!(self debug target: "rtab::state::node", "{:#}: {:#}", self.best_node_id(), state_reason_change_span);
+        if let Some(change) = state_stats_accounting.record_state_reason(cur_ts, reason) {
+            self.on_state_reason_change(change);
         }
         reason
+    }
+
+    /// Log a state reason change, and count a change of state toward the next routing table save
+    fn on_state_reason_change(&self, change: StateReasonSpanChange) {
+        veilid_log!(self debug target: "rtab::state::node", "{:#}: {:#}", self.best_node_id(), change);
+        if change.is_state_change() {
+            if let Some(routing_table) = self.registry().lookup::<RoutingTable>() {
+                routing_table.mark_entry_state_changed();
+            }
+        }
     }
 
     /// If a node is dead or missing, reset it to the 'initial' state to give it another chance.

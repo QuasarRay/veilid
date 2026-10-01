@@ -37,7 +37,7 @@ impl WasmRuntimeContext {
     }
 }
 
-fn global_property(path: &[&str]) -> Option<JsValue> {
+pub(crate) fn global_property(path: &[&str]) -> Option<JsValue> {
     let mut cur: JsValue = global().into();
     for key in path {
         cur = Reflect::get(&cur, &JsValue::from_str(key)).ok()?;

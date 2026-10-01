@@ -24,8 +24,8 @@ impl StorageManager {
         subkey: ValueSubkey,
         safety_selection: SafetySelection,
     ) {
-        self.inner
-            .lock()
+        let mut inner = self.inner.lock();
+        inner
             .offline_subkey_writes
             .entry(opaque_record_key)
             .and_modify(|x| {
@@ -36,6 +36,7 @@ impl StorageManager {
                 subkeys: ValueSubkeyRangeSet::single(subkey),
                 subkeys_in_flight: ValueSubkeyRangeSet::new(),
             });
+        self.mark_metadata_dirty();
     }
 
     /// If we write to a subkey, we first clear out any existing offline write to that subkey.
@@ -68,6 +69,7 @@ impl StorageManager {
                     o.remove();
                     inner.flush_record_waiters.remove(opaque_record_key);
                 }
+                self.mark_metadata_dirty();
             }
             hashlink::linked_hash_map::Entry::Vacant(_) => {}
         }
@@ -113,6 +115,7 @@ impl StorageManager {
                     o.remove();
                     inner.flush_record_waiters.remove(opaque_record_key);
                 }
+                self.mark_metadata_dirty();
             }
             hashlink::linked_hash_map::Entry::Vacant(_) => {
                 veilid_log!(self warn "can't finish missing offline subkey write: ignoring key {}", opaque_record_key);

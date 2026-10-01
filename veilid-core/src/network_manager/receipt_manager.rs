@@ -1,5 +1,6 @@
 use crate::*;
 use core::fmt;
+use futures_util::future::{select, Either};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use network_manager::*;
 use routing_table::*;
@@ -143,10 +144,25 @@ impl PartialOrd for ReceiptRecordTimestampSort {
 ///////////////////////////////////
 
 struct ReceiptManagerInner {
+    /// Receipts waiting to be returned or to expire
     records_by_nonce: BTreeMap<Nonce, Arc<Mutex<ReceiptRecord>>>,
+    /// The earliest expiration among the recorded receipts
     next_oldest_ts: Option<Timestamp>,
+    /// Stops the expiry timer and any expiry callbacks in flight
     stop_source: Option<StopSource>,
-    timeout_task: MustJoinSingleFuture<()>,
+    /// Wakes the expiry timer so it sees a newly recorded receipt's expiration
+    expiry_wakeup: Option<flume::Sender<()>>,
+    /// Expires each receipt at its expiration
+    expiry_timer: Option<MustJoinHandle<()>>,
+}
+
+impl Drop for ReceiptManagerInner {
+    fn drop(&mut self) {
+        // Detach so MustJoinHandle::drop doesn't panic if cancel_tasks() didn't run
+        if let Some(jh) = self.expiry_timer.take() {
+            jh.detach();
+        }
+    }
 }
 
 struct ReceiptManagerUnlockedInner {
@@ -168,7 +184,8 @@ impl ReceiptManager {
             records_by_nonce: BTreeMap::new(),
             next_oldest_ts: None,
             stop_source: None,
-            timeout_task: MustJoinSingleFuture::new(),
+            expiry_wakeup: None,
+            expiry_timer: None,
         }
     }
 
@@ -186,8 +203,17 @@ impl ReceiptManager {
         let guard = self.unlocked_inner.startup_lock.startup()?;
         veilid_log!(self debug "startup receipt manager");
 
+        let stop_source = StopSource::new();
+        let (expiry_wakeup, wakeup_rx) = flume::bounded(1);
+        let expiry_timer = spawn(
+            "receipt expiry timer",
+            self.clone().expiry_timer(stop_source.token(), wakeup_rx),
+        );
+
         let mut inner = self.inner.lock();
-        inner.stop_source = Some(StopSource::new());
+        inner.stop_source = Some(stop_source);
+        inner.expiry_wakeup = Some(expiry_wakeup);
+        inner.expiry_timer = Some(expiry_timer);
 
         guard.success();
         Ok(())
@@ -220,7 +246,7 @@ impl ReceiptManager {
         feature = "instrument",
         instrument(level = "trace", target = "receipt", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
-    async fn timeout_task_routine(self, now: Timestamp, stop_token: StopToken) {
+    async fn expire_receipts(&self, now: Timestamp, stop_token: StopToken) {
         // Go through all receipts and build a list of expired nonces
         let mut new_next_oldest_ts: Option<Timestamp> = None;
         let mut expired_records = Vec::new();
@@ -271,64 +297,50 @@ impl ReceiptManager {
         }
     }
 
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(
-            level = "trace",
-            target = "receipt",
-            name = "ReceiptManager::tick",
-            skip_all,
-            err,
-            fields(__VEILID_LOG_KEY = self.log_key())
-        )
-    )]
-    pub async fn tick(&self) -> EyreResult<()> {
-        let Ok(_guard) = self.unlocked_inner.startup_lock.enter() else {
-            return Ok(());
-        };
-
-        let (next_oldest_ts, timeout_task, stop_token) = {
-            let inner = self.inner.lock();
-            let stop_token = match inner.stop_source.as_ref() {
-                Some(ss) => ss.token(),
-                None => {
-                    // Do nothing if we're shutting down
-                    return Ok(());
+    /// Sleeps until the earliest expiration, or until a new receipt might expire sooner, so a
+    /// receipt expires when its time comes rather than on a later tick
+    async fn expiry_timer(self, stop_token: StopToken, wakeup: flume::Receiver<()>) {
+        loop {
+            let next_oldest_ts = self.inner.lock().next_oldest_ts;
+            let woken = match next_oldest_ts {
+                Some(ts) => {
+                    let wait_us = ts.duration_since(Timestamp::now_non_decreasing()).as_u64();
+                    let wait_ms = u32::try_from(wait_us.div_ceil(1000)).unwrap_or(u32::MAX);
+                    match select(Box::pin(sleep(wait_ms)), wakeup.recv_async())
+                        .timeout_at(stop_token.clone())
+                        .await
+                    {
+                        Ok(Either::Left(_)) => false,
+                        Ok(Either::Right((Ok(()), _))) => true,
+                        Ok(Either::Right((Err(_), _))) | Err(_) => return,
+                    }
                 }
+                None => match wakeup.recv_async().timeout_at(stop_token.clone()).await {
+                    Ok(Ok(())) => true,
+                    Ok(Err(_)) | Err(_) => return,
+                },
             };
-            (inner.next_oldest_ts, inner.timeout_task.clone(), stop_token)
-        };
-        let now = Timestamp::now_non_decreasing();
-        // If we have at least one timestamp to expire, lets do it
-        if let Some(next_oldest_ts) = next_oldest_ts {
-            if now >= next_oldest_ts {
-                // Single-spawn the timeout task routine
-                let _ = timeout_task
-                    .single_spawn("receipt timeout", || {
-                        self.clone()
-                            .timeout_task_routine(now, stop_token)
-                            .instrument(trace_span!(parent: None, "receipt timeout task"))
-                    })
-                    .in_current_span()
+            if !woken {
+                self.expire_receipts(Timestamp::now_non_decreasing(), stop_token.clone())
                     .await;
             }
         }
-        Ok(())
     }
 
     pub async fn cancel_tasks(&self) {
         // Stop all tasks
-        let timeout_task = {
+        let expiry_timer = {
             let mut inner = self.inner.lock();
             // Drop the stop
             drop(inner.stop_source.take());
-            inner.timeout_task.clone()
+            inner.expiry_wakeup = None;
+            inner.expiry_timer.take()
         };
 
         // Wait for everything to stop
-        veilid_log!(self debug "waiting for timeout task to stop");
-        if timeout_task.join().await.is_err() {
-            veilid_log!(self error "joining timeout task failed");
+        veilid_log!(self debug "waiting for expiry timer to stop");
+        if let Some(expiry_timer) = expiry_timer {
+            expiry_timer.await;
         }
     }
 
@@ -372,6 +384,7 @@ impl ReceiptManager {
         inner.records_by_nonce.insert(receipt_nonce, record);
 
         Self::update_next_oldest_timestamp(&mut inner);
+        Self::wake_expiry_timer(&inner);
     }
 
     #[cfg_attr(
@@ -398,6 +411,14 @@ impl ReceiptManager {
         inner.records_by_nonce.insert(receipt_nonce, record);
 
         Self::update_next_oldest_timestamp(&mut inner);
+        Self::wake_expiry_timer(&inner);
+    }
+
+    fn wake_expiry_timer(inner: &ReceiptManagerInner) {
+        // A wakeup already pending covers this receipt too
+        if let Some(expiry_wakeup) = &inner.expiry_wakeup {
+            let _ = expiry_wakeup.try_send(());
+        }
     }
 
     fn update_next_oldest_timestamp(inner: &mut ReceiptManagerInner) {

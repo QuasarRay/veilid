@@ -234,8 +234,6 @@ impl NativeNetwork {
         }
 
         let interface_address_state = self.interfaces.interface_address_state();
-        self.interface_address_generation
-            .fetch_add(1, Ordering::Relaxed);
 
         let routing_domain_detect_address_changes = if let Some(last_interface_address_state) =
             opt_last_network_state.map(|x| x.interface_address_state.clone())
@@ -259,33 +257,16 @@ impl NativeNetwork {
                 .close_dead_connections(&valid_local_addresses);
 
             // See if any of the addresses that have changed are routable
-            let last_routable_addresses: HashSet<Address> = last_interface_address_state
-                .interface_addresses
-                .iter()
-                .filter_map(|a| {
-                    let addr = Address::from_ip_addr(a.ip());
-                    if addr.is_routable() {
-                        Some(addr)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            let new_routable_addresses: HashSet<Address> = interface_address_state
-                .interface_addresses
-                .iter()
-                .filter_map(|a| {
-                    let addr = Address::from_ip_addr(a.ip());
-                    if addr.is_routable() {
-                        Some(addr)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+            let last_routable_addresses =
+                routable_interface_addresses(&last_interface_address_state);
+            let new_routable_addresses = routable_interface_addresses(&interface_address_state);
             let routable_addresses_changed = last_routable_addresses != new_routable_addresses;
 
             if routable_addresses_changed {
+                // Dial info rests on these alone, so a link-local change must not re-confirm it
+                self.interface_address_generation
+                    .fetch_add(1, Ordering::Relaxed);
+
                 // Our addresses moved, so transport failures we blamed on peers may have been ours
                 self.routing_table().clear_all_transport_evidence();
 
@@ -322,6 +303,8 @@ impl NativeNetwork {
             self.routing_domains_detecting_address_changes()
         } else {
             // First time, pre-startup initial network refresh
+            self.interface_address_generation
+                .fetch_add(1, Ordering::Relaxed);
             veilid_log!(self debug
                 "Network interface address state:\n{}\n",
                 indent_all_string(format!("{:?}", interface_address_state))

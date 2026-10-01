@@ -4,7 +4,12 @@ from abc import ABC, abstractmethod
 from typing import Optional, Self
 
 from . import types
-from .state import VeilidState
+from .state import (
+    VeilidAppLifecycleState,
+    VeilidState,
+    VeilidStateAttachment,
+    VeilidStateAttachmentCondition,
+)
 
 
 class RoutingContext(ABC):
@@ -143,7 +148,10 @@ class RoutingContext(ABC):
 
     @abstractmethod
     async def open_dht_record(
-        self, key: types.RecordKey, writer: Optional[types.KeyPair] = None
+        self,
+        key: types.RecordKey,
+        writer: Optional[types.KeyPair] = None,
+        options: Optional[types.OpenDHTRecordOptions] = None,
     ) -> types.DHTRecordDescriptor:
         """Open a DHT record at a specific key.
 
@@ -151,12 +159,15 @@ class RoutingContext(ABC):
         set_dht_value can override. Re-opening an already-open record adopts the new writer and
         routing context while keeping active watches. Returns the opened record's descriptor.
 
+        Opening a record this node already holds queues a check that the network still carries
+        it, which republishes the local copy if not. options.rehydrate=False skips that check.
+
         Leaves the record open; close it with close_dht_record. Blocks on the network.
 
         Raises VeilidAPIErrorGeneric if key is an unsupported kind or malformed, or writer is a
         malformed keypair. Raises VeilidAPIErrorTryAgain (retryable) if the record is not yet local
-        and the node is offline, VeilidAPIErrorKeyNotFound if the record does not exist on the
-        network, and VeilidAPIErrorNotInitialized if the node is shut down.
+        and the node is offline or no node answered, VeilidAPIErrorKeyNotFound if the record does
+        not exist on the network, and VeilidAPIErrorNotInitialized if the node is shut down.
         """
         pass
 
@@ -1043,6 +1054,37 @@ class VeilidAPI(ABC):
 
         Raises VeilidAPIErrorGeneric if already detached, or VeilidAPIErrorNotInitialized if the
         node is shut down.
+        """
+        pass
+
+    @abstractmethod
+    async def report_app_lifecycle_state(self, state: VeilidAppLifecycleState):
+        """Report where the host application stands in its lifecycle.
+
+        The node follows this itself in an iOS, Android or macOS app, a web page and a service
+        worker, and a report counts there only when attachment.app_lifecycle.auto_detect_state is
+        off. Elsewhere the host's reports are all it has.
+
+        Raises VeilidAPIErrorUnimplemented if the node was built without the app-lifecycle
+        feature, as veilid-server is, or VeilidAPIErrorNotInitialized if the node is shut down.
+        """
+        pass
+
+    @abstractmethod
+    async def wait_for_attachment_condition(
+        self,
+        condition: Optional[VeilidStateAttachmentCondition] = None,
+        timeout_ms: Optional[int] = None,
+    ) -> VeilidStateAttachment:
+        """Wait until the attachment state satisfies a condition.
+
+        Returns the first VeilidStateAttachment that satisfies condition, at once if the current
+        state does. A condition field left None is not checked. Without a condition, waits until
+        the node is attached, at any strength, with PublicInternet ready. With a timeout, raises
+        VeilidAPIErrorTimeout once it elapses; without one, waits indefinitely.
+
+        Raises VeilidAPIErrorInvalidArgument if the condition's least state is above its most, or
+        VeilidAPIErrorNotInitialized if the node shuts down while waiting.
         """
         pass
 

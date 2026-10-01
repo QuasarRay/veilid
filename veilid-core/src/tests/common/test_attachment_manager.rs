@@ -1,14 +1,19 @@
 use super::*;
 
-// Real attachment needs time to progress; the mock reports its final state at once
-#[cfg(not(feature = "mock-api"))]
-const ATTACH_SETTLE_MS: u32 = 5000;
-#[cfg(not(feature = "mock-api"))]
-const DETACH_SETTLE_MS: u32 = 2000;
-#[cfg(feature = "mock-api")]
-const ATTACH_SETTLE_MS: u32 = 0;
-#[cfg(feature = "mock-api")]
-const DETACH_SETTLE_MS: u32 = 0;
+/// The attach has taken effect, whether or not any peer answers
+const ATTACH_STARTED: VeilidStateAttachmentCondition = VeilidStateAttachmentCondition {
+    opt_min_state: Some(AttachmentState::Attaching),
+    opt_max_state: None,
+    opt_public_internet_ready: None,
+    opt_local_network_ready: None,
+};
+const DETACHED: VeilidStateAttachmentCondition = VeilidStateAttachmentCondition {
+    opt_min_state: None,
+    opt_max_state: Some(AttachmentState::Detached),
+    opt_public_internet_ready: None,
+    opt_local_network_ready: None,
+};
+const ATTACHMENT_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 async fn test_startup_shutdown() {
     info!("test_startup_shutdown: starting");
@@ -52,9 +57,15 @@ async fn test_attach_detach() {
         .await
         .expect("startup failed");
     api.attach().await.unwrap();
-    sleep(ATTACH_SETTLE_MS).await;
+    let _ = api
+        .wait_for_attachment_condition(Some(ATTACH_STARTED), Some(ATTACHMENT_WAIT_TIMEOUT))
+        .await
+        .unwrap();
     api.detach().await.unwrap();
-    sleep(DETACH_SETTLE_MS).await;
+    let _ = api
+        .wait_for_attachment_condition(Some(DETACHED), Some(ATTACHMENT_WAIT_TIMEOUT))
+        .await
+        .unwrap();
     api.shutdown().await;
 
     info!("test_attach_detach: --- test auto detach ---");
@@ -63,7 +74,10 @@ async fn test_attach_detach() {
         .await
         .expect("startup failed");
     api.attach().await.unwrap();
-    sleep(ATTACH_SETTLE_MS).await;
+    let _ = api
+        .wait_for_attachment_condition(Some(ATTACH_STARTED), Some(ATTACHMENT_WAIT_TIMEOUT))
+        .await
+        .unwrap();
     api.shutdown().await;
 
     info!("test_attach_detach: --- test detach without attach ---");
@@ -73,6 +87,47 @@ async fn test_attach_detach() {
         .expect("startup failed");
     assert!(api.detach().await.is_err());
     api.shutdown().await;
+}
+
+async fn test_wait_for_attachment_condition() {
+    info!("test_wait_for_attachment_condition: starting");
+    let (update_callback, config) = fixture_veilid_core();
+    let api = api_startup(update_callback, config)
+        .await
+        .expect("startup failed");
+
+    let state = api
+        .wait_for_attachment_condition(Some(DETACHED), None)
+        .await
+        .unwrap();
+    assert_eq!(state.state, AttachmentState::Detached);
+
+    // Never attached, so the default condition cannot hold
+    assert!(matches!(
+        api.wait_for_attachment_condition(None, Some(Duration::from_millis(500)))
+            .await,
+        Err(VeilidAPIError::Timeout)
+    ));
+
+    let inverted = VeilidStateAttachmentCondition {
+        opt_min_state: Some(AttachmentState::AttachedFull),
+        opt_max_state: Some(AttachmentState::AttachedWeak),
+        ..Default::default()
+    };
+    assert!(matches!(
+        api.wait_for_attachment_condition(Some(inverted), None)
+            .await,
+        Err(VeilidAPIError::InvalidArgument { .. })
+    ));
+
+    // An unbounded wait must not hold up shutdown
+    let waiting = spawn("test_wait_for_attachment_condition", {
+        let api = api.clone();
+        async move { api.wait_for_attachment_condition(None, None).await }
+    });
+    api.shutdown().await;
+    assert!(matches!(waiting.await, Err(VeilidAPIError::NotInitialized)));
+    info!("test_wait_for_attachment_condition: finished");
 }
 
 async fn test_startup_shutdown_multiple() {
@@ -126,11 +181,21 @@ async fn test_attach_detach_multiple() {
     for api in &apis {
         api.attach().await.unwrap();
     }
-    sleep(ATTACH_SETTLE_MS).await;
+    for api in &apis {
+        let _ = api
+            .wait_for_attachment_condition(Some(ATTACH_STARTED), Some(ATTACHMENT_WAIT_TIMEOUT))
+            .await
+            .unwrap();
+    }
     for api in &apis {
         api.detach().await.unwrap();
     }
-    sleep(DETACH_SETTLE_MS).await;
+    for api in &apis {
+        let _ = api
+            .wait_for_attachment_condition(Some(DETACHED), Some(ATTACHMENT_WAIT_TIMEOUT))
+            .await
+            .unwrap();
+    }
     for api in apis {
         api.shutdown().await;
     }
@@ -148,7 +213,12 @@ async fn test_attach_detach_multiple() {
     for api in &apis {
         api.attach().await.unwrap();
     }
-    sleep(ATTACH_SETTLE_MS).await;
+    for api in &apis {
+        let _ = api
+            .wait_for_attachment_condition(Some(ATTACH_STARTED), Some(ATTACHMENT_WAIT_TIMEOUT))
+            .await
+            .unwrap();
+    }
     for api in apis {
         api.shutdown().await;
     }
@@ -174,6 +244,7 @@ pub async fn test_all() {
     test_startup_shutdown().await;
     test_startup_shutdown_from_config().await;
     test_attach_detach().await;
+    test_wait_for_attachment_condition().await;
     test_startup_shutdown_multiple().await;
     test_startup_shutdown_from_config_multiple().await;
     test_attach_detach_multiple().await;

@@ -23,7 +23,7 @@ const ATTACHMENT_MAINTAINER_INTERVAL_MSEC: u32 = 1000;
 const BIND_WAIT_DELAY: TimestampDuration = TimestampDuration::new_ms(10000);
 /// How often shutdown re-kicks the maintainer while waiting for it to reach the detached state
 const DETACH_WAIT_INTERVAL_MSEC: u32 = 5;
-/// Tick lag past this is reported; matches the detector's local-stall floor
+/// Tick lag past this is logged and offered to the stall handlers, which apply their own floors
 const TICK_LAG_REPORT: TimestampDuration =
     TimestampDuration::new_ms(2 * (TICK_INTERVAL_MSEC as u64));
 
@@ -55,6 +55,65 @@ pub struct TickEvent {
     pub cur_tick_ts: Timestamp,
 }
 
+/// Event sent when the host application moves in or out of the background, on platforms that
+/// report it
+#[cfg(feature = "app-lifecycle")]
+#[derive(Debug, Clone)]
+pub struct AppLifecycleEvent {
+    /// Where the host application now stands
+    pub state: VeilidAppLifecycleState,
+    /// Background time claimed on the move; a handler with state to write holds a clone until done
+    pub background_time: Option<Arc<BackgroundTimeGuard>>,
+}
+
+/// The lifecycle state the node acts on: the platform's where it reports one, the host's otherwise,
+/// and only the host's with detection off
+#[cfg(feature = "app-lifecycle")]
+pub(crate) fn effective_app_lifecycle_state(
+    detected: Option<VeilidAppLifecycleState>,
+    reported: Option<VeilidAppLifecycleState>,
+    auto_detect_state: bool,
+) -> Option<VeilidAppLifecycleState> {
+    if auto_detect_state {
+        detected.or(reported)
+    } else {
+        reported
+    }
+}
+
+#[cfg(feature = "app-lifecycle")]
+impl From<AppLifecycleState> for VeilidAppLifecycleState {
+    fn from(state: AppLifecycleState) -> Self {
+        match state {
+            AppLifecycleState::Active => Self::Active,
+            AppLifecycleState::Background => Self::Background,
+        }
+    }
+}
+
+/// A caller waiting for the attachment to satisfy a condition
+struct AttachmentWaiter {
+    /// The condition that ends the wait
+    condition: VeilidStateAttachmentCondition,
+    /// Receives the first state that satisfies the condition
+    sender: flume::Sender<VeilidStateAttachment>,
+}
+
+impl AttachmentWaiter {
+    /// Hands over `state` if it satisfies the condition; true once the waiter is done
+    fn resolve(&self, state: &VeilidStateAttachment) -> bool {
+        if self.sender.is_disconnected() {
+            return true;
+        }
+        if !self.condition.is_satisfied_by(state) {
+            return false;
+        }
+        // Fails only if the caller has left, which ends the wait too
+        let _ = self.sender.try_send(state.clone());
+        true
+    }
+}
+
 struct AttachmentManagerInner {
     /// The current attachment state
     attachment_state: AttachmentState,
@@ -74,6 +133,18 @@ struct AttachmentManagerInner {
     bind_retry_ts: Option<Timestamp>,
     /// The timestamp of the last tick
     last_tick_ts: Option<Timestamp>,
+    /// The host application's lifecycle state as last seen
+    #[cfg(feature = "app-lifecycle")]
+    app_lifecycle_state: Option<VeilidAppLifecycleState>,
+    /// The host application's own report of its lifecycle state
+    #[cfg(feature = "app-lifecycle")]
+    reported_app_lifecycle_state: Option<VeilidAppLifecycleState>,
+    /// The platform's reports of the host application's lifecycle, while initialized
+    #[cfg(feature = "app-lifecycle")]
+    app_lifecycle_monitor: Option<AppLifecycleMonitor>,
+    /// Held while attached, when the config prefers the foreground
+    #[cfg(feature = "app-lifecycle")]
+    foreground_guard: Option<ForegroundGuard>,
     /// The future for the attachment maintainer task
     tick_future: Option<PinBoxFutureStatic<()>>,
     /// OS-thread lateness reporter, alive while the ticker is
@@ -81,6 +152,10 @@ struct AttachmentManagerInner {
     process_watchdog: Option<ProcessWatchdog>,
     /// Subscription to RoutingDomainReadyEvent
     routing_domain_ready_subscription: Option<EventBusSubscription>,
+    /// Callers waiting for the attachment to satisfy a condition
+    attachment_waiters: Vec<AttachmentWaiter>,
+    /// Send the next attachment state even if nothing in it changed
+    resend_attachment: bool,
     /// Attachment state time-in-state and transition accounting
     #[cfg(feature = "stats")]
     stats_accounting: stats::AttachmentStatsAccounting,
@@ -88,8 +163,8 @@ struct AttachmentManagerInner {
 
 impl fmt::Debug for AttachmentManagerInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AttachmentManagerInner")
-            .field("attachment_state", &self.attachment_state)
+        let mut out = f.debug_struct("AttachmentManagerInner");
+        out.field("attachment_state", &self.attachment_state)
             .field(
                 "last_veilid_state_attachment",
                 &self.last_veilid_state_attachment,
@@ -106,8 +181,15 @@ impl fmt::Debug for AttachmentManagerInner {
             .field("started_ts", &self.started_ts)
             .field("attach_ts", &self.attach_ts)
             .field("bind_retry_ts", &self.bind_retry_ts)
-            .field("last_tick_ts", &self.last_tick_ts)
-            .finish()
+            .field("last_tick_ts", &self.last_tick_ts);
+        #[cfg(feature = "app-lifecycle")]
+        out.field("app_lifecycle_state", &self.app_lifecycle_state)
+            .field(
+                "reported_app_lifecycle_state",
+                &self.reported_app_lifecycle_state,
+            )
+            .field("foreground_guard", &self.foreground_guard);
+        out.finish()
     }
 }
 
@@ -144,11 +226,21 @@ impl AttachmentManager {
             started_ts: Timestamp::now(),
             attach_ts: None,
             last_tick_ts: None,
+            #[cfg(feature = "app-lifecycle")]
+            app_lifecycle_state: None,
+            #[cfg(feature = "app-lifecycle")]
+            reported_app_lifecycle_state: None,
+            #[cfg(feature = "app-lifecycle")]
+            app_lifecycle_monitor: None,
+            #[cfg(feature = "app-lifecycle")]
+            foreground_guard: None,
             bind_retry_ts: None,
             tick_future: None,
             #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
             process_watchdog: None,
             routing_domain_ready_subscription: None,
+            attachment_waiters: Vec::new(),
+            resend_attachment: false,
             #[cfg(feature = "stats")]
             stats_accounting: stats::AttachmentStatsAccounting::default(),
         }
@@ -213,8 +305,23 @@ impl AttachmentManager {
         let routing_domain_ready_subscription =
             impl_subscribe_event_bus!(self, Self, routing_domain_ready_event_handler);
 
+        #[cfg(feature = "app-lifecycle")]
+        let app_lifecycle_monitor = {
+            let registry = self.registry();
+            AppLifecycleMonitor::new(move || {
+                // Acted on as reported, not at the next tick: a page can be frozen before then
+                if let Some(this) = registry.lookup::<AttachmentManager>() {
+                    this.post_app_lifecycle_change();
+                }
+            })
+        };
+
         let mut inner = self.inner.lock();
         inner.routing_domain_ready_subscription = Some(routing_domain_ready_subscription);
+        #[cfg(feature = "app-lifecycle")]
+        {
+            inner.app_lifecycle_monitor = Some(app_lifecycle_monitor);
+        }
 
         // Let the attachment maintainer run
         let guard = self.startup_context.attachment_lock.startup()?;
@@ -249,6 +356,12 @@ impl AttachmentManager {
                     let this = registry.attachment_manager();
                     veilid_log!(this debug "process watchdog: OS thread late by {} (rust ts {:#})",
                         TimestampDuration::new(late_us), Timestamp::new(now_us));
+                    // First to run after a freeze, so the stall is known before its envelopes
+                    let slept_us = late_us + (TICK_INTERVAL_MSEC as u64) * 1000;
+                    registry.network_manager().address_filter().record_stall(
+                        Timestamp::new(now_us.saturating_sub(slept_us)),
+                        Timestamp::new(now_us),
+                    );
                 },
             ));
         }
@@ -307,6 +420,15 @@ impl AttachmentManager {
         let tick_future = self.inner.lock().tick_future.take();
         if let Some(tick_future) = tick_future {
             tick_future.await;
+        }
+        // Detached now, and no tick is left to let the foreground go
+        #[cfg(feature = "app-lifecycle")]
+        drop(self.inner.lock().foreground_guard.take());
+        // Its callback holds the registry, so it goes before the registry can
+        #[cfg(feature = "app-lifecycle")]
+        {
+            let app_lifecycle_monitor = self.inner.lock().app_lifecycle_monitor.take();
+            drop(app_lifecycle_monitor);
         }
 
         // Stop background operations
@@ -389,27 +511,120 @@ impl AttachmentManager {
         };
 
         // Log if we're seeing missed ticks
-        if let Some(lag) = last_tick_ts.map(|x| cur_tick_ts.duration_since(x)) {
+        if let Some(last_tick_ts) = last_tick_ts {
+            let lag = cur_tick_ts.duration_since(last_tick_ts);
             if lag > TICK_LAG_REPORT {
                 veilid_log!(self debug "tick lag: {}{}", lag, executor_snapshot_suffix());
                 // A stalled executor stalls every in-flight RPC; their timeouts are about us
-                self.network_manager()
+                let stalled = self
+                    .network_manager()
                     .online_detector()
                     .record_local_stall(lag);
+                // No watchdog thread here, so the tick is the only witness to a frozen tab
+                #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+                self.network_manager()
+                    .address_filter()
+                    .record_stall(last_tick_ts, cur_tick_ts);
+                // An app in the background hears on its return instead
+                if stalled && !self.in_background() {
+                    self.resend_veilid_state_attachment();
+                }
             }
         }
 
         // Tick our own ticktask for the attachment maintainer state machine
         self.attachment_maintainer_task.tick().await?;
 
+        #[cfg(feature = "app-lifecycle")]
+        self.update_foreground_preference();
+
+        // Ahead of the tick event, so a background save runs on this tick
+        #[cfg(feature = "app-lifecycle")]
+        self.post_app_lifecycle_change();
+
         // Send a 'tick' event for the rest of the system to get ticks
-        let event_bus = self.event_bus();
-        event_bus.post(TickEvent {
+        self.event_bus().post(TickEvent {
             last_tick_ts,
             cur_tick_ts,
         })?;
 
         Ok(())
+    }
+
+    /// Holds the foreground while attached, when the config prefers it
+    #[cfg(feature = "app-lifecycle")]
+    fn update_foreground_preference(&self) {
+        let prefer_foreground = self.config().attachment.app_lifecycle.prefer_foreground;
+        let mut inner = self.inner.lock();
+        let wanted = prefer_foreground && !inner.attachment_state.is_detached();
+        if wanted == inner.foreground_guard.is_some() {
+            return;
+        }
+        inner.foreground_guard = if wanted {
+            ForegroundGuard::begin("Veilid node attached")
+        } else {
+            None
+        };
+        if inner.foreground_guard.is_some() == wanted {
+            veilid_log!(self debug "foreground preferred while attached: {}", wanted);
+        }
+    }
+
+    /// Takes the host application's report of its lifecycle state
+    #[cfg(feature = "app-lifecycle")]
+    pub fn report_app_lifecycle_state(&self, state: VeilidAppLifecycleState) {
+        self.inner.lock().reported_app_lifecycle_state = Some(state);
+        self.post_app_lifecycle_change();
+    }
+
+    #[cfg(feature = "app-lifecycle")]
+    fn post_app_lifecycle_change(&self) {
+        let Some(evt) = self.app_lifecycle_change() else {
+            return;
+        };
+        if let Err(e) = self.event_bus().post(evt) {
+            veilid_log!(self debug "app lifecycle event not posted: {}", e);
+        }
+    }
+
+    /// The host application's lifecycle, when it changed or brought background time to hold
+    #[cfg(feature = "app-lifecycle")]
+    fn app_lifecycle_change(&self) -> Option<AppLifecycleEvent> {
+        let auto_detect_state = self.config().attachment.app_lifecycle.auto_detect_state;
+        let mut inner = self.inner.lock();
+        let monitor = inner.app_lifecycle_monitor.as_ref()?;
+        let detected = monitor.state().map(VeilidAppLifecycleState::from);
+        let state = effective_app_lifecycle_state(
+            detected,
+            inner.reported_app_lifecycle_state,
+            auto_detect_state,
+        )?;
+        // A return to the background between two ticks brings time without a change
+        let background_time = (state == VeilidAppLifecycleState::Background)
+            .then(|| monitor.take_background_entry_time())
+            .flatten();
+        let previous = inner.app_lifecycle_state.replace(state);
+        let changed = previous != Some(state);
+        // Back from the background, the app hears what it missed with the next update
+        let returned = previous == Some(VeilidAppLifecycleState::Background)
+            && state == VeilidAppLifecycleState::Active;
+        if returned {
+            inner.resend_attachment = true;
+        }
+        drop(inner);
+        if !changed && background_time.is_none() {
+            return None;
+        }
+        if changed {
+            veilid_log!(self info "app lifecycle: {:?}", state);
+        }
+        if returned {
+            veilid_log!(self debug "resending attachment state on return from the background");
+        }
+        Some(AppLifecycleEvent {
+            state,
+            background_time: background_time.map(Arc::new),
+        })
     }
 
     // Manage attachment state
@@ -748,9 +963,12 @@ impl AttachmentManager {
         }
 
         // Send update if one of:
+        // * a resend was asked for
         // * the attachment state has changed
         // * routing domain readiness has changed
-        let send_update = inner.last_veilid_state_attachment.state != veilid_state_attachment.state
+        let resend = std::mem::take(&mut inner.resend_attachment);
+        let send_update = resend
+            || inner.last_veilid_state_attachment.state != veilid_state_attachment.state
             || public_internet_ready_changed
             || local_network_ready_changed;
 
@@ -761,6 +979,13 @@ impl AttachmentManager {
         };
 
         inner.last_veilid_state_attachment = veilid_state_attachment;
+
+        // Under the lock that stored the state, so no waiter misses a change
+        let inner_mut = &mut *inner;
+        let state = &inner_mut.last_veilid_state_attachment;
+        inner_mut
+            .attachment_waiters
+            .retain(|waiter| !waiter.resolve(state));
 
         if let Some(callback) = opt_callback {
             callback(inner);
@@ -774,41 +999,124 @@ impl AttachmentManager {
         }
     }
 
-    pub fn get_veilid_state(&self) -> Box<VeilidStateAttachment> {
-        // Update the attachment state immediately
-        let out_state = Arc::new(Mutex::new(None));
-        let out_state_clone = out_state.clone();
-        let update_out_state = Box::new(move |inner: MutexGuard<AttachmentManagerInner>| {
-            *out_state_clone.lock() = Some(inner.last_veilid_state_attachment.clone())
-        });
-        {
-            let inner = self.inner.lock();
-            let current_attachment_state = inner.attachment_state;
-            match current_attachment_state {
-                AttachmentState::Attaching
-                | AttachmentState::AttachedWeak
-                | AttachmentState::AttachedFair
-                | AttachmentState::AttachedGood
-                | AttachmentState::AttachedStrong
-                | AttachmentState::AttachedFull => {
-                    // Update the attachment state immediately, possibly sending an update
-                    self.update_attached_state(inner, Some(update_out_state));
-                }
-                AttachmentState::Detached | AttachmentState::Detaching => {
-                    // Transition to the current state just returns the current state,
-                    // possibly sending an update
-                    self.transition_to_non_attached_state(
-                        inner,
-                        current_attachment_state,
-                        Some(update_out_state),
-                    )
-                }
+    /// Recompute the attachment state now, possibly sending an update, then run `callback` under
+    /// the lock that stored it
+    fn refresh_veilid_state(&self, callback: UpdateStateCallback) {
+        let inner = self.inner.lock();
+        let current_attachment_state = inner.attachment_state;
+        match current_attachment_state {
+            AttachmentState::Attaching
+            | AttachmentState::AttachedWeak
+            | AttachmentState::AttachedFair
+            | AttachmentState::AttachedGood
+            | AttachmentState::AttachedStrong
+            | AttachmentState::AttachedFull => {
+                self.update_attached_state(inner, Some(callback));
+            }
+            AttachmentState::Detached | AttachmentState::Detaching => {
+                // Transition to the current state just returns the current state
+                self.transition_to_non_attached_state(
+                    inner,
+                    current_attachment_state,
+                    Some(callback),
+                )
             }
         }
+    }
+
+    /// Whether the host application is in the background, as last seen
+    fn in_background(&self) -> bool {
+        cfg_if! {
+            if #[cfg(feature = "app-lifecycle")] {
+                self.inner.lock().app_lifecycle_state == Some(VeilidAppLifecycleState::Background)
+            } else {
+                false
+            }
+        }
+    }
+
+    /// Sends the attachment state even if unchanged: after a stall an app has heard nothing
+    fn resend_veilid_state_attachment(&self) {
+        veilid_log!(self debug "resending attachment state after a stall");
+        self.inner.lock().resend_attachment = true;
+        self.refresh_veilid_state(Box::new(|_| {}));
+    }
+
+    pub fn get_veilid_state(&self) -> Box<VeilidStateAttachment> {
+        let out_state = Arc::new(Mutex::new(None));
+        let out_state_clone = out_state.clone();
+        self.refresh_veilid_state(Box::new(move |inner| {
+            *out_state_clone.lock() = Some(inner.last_veilid_state_attachment.clone())
+        }));
 
         // Return the last attachment state
         let out = { out_state.lock().take() };
         out.unwrap_or_default()
+    }
+
+    /// Wait until the attachment satisfies `condition`, returning the state that did
+    pub async fn wait_for_condition(
+        &self,
+        condition: VeilidStateAttachmentCondition,
+        timeout: Option<Duration>,
+    ) -> VeilidAPIResult<VeilidStateAttachment> {
+        let Ok(_guard) = self.startup_context.initialize_lock.enter() else {
+            apibail_not_initialized!();
+        };
+        let Some(shutdown_token) = self.startup_context.initialize_lock.stop_token() else {
+            apibail_not_initialized!();
+        };
+
+        let (sender, receiver) = flume::bounded(1);
+        let waiter = AttachmentWaiter { condition, sender };
+        self.refresh_veilid_state(Box::new(move |mut inner| {
+            if !waiter.resolve(&inner.last_veilid_state_attachment) {
+                inner.attachment_waiters.push(waiter);
+            }
+        }));
+
+        let received = receiver.into_recv_async().timeout_at(shutdown_token);
+        let result = match timeout {
+            Some(timeout) => {
+                let timeout_ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
+                crate::timeout(timeout_ms, received).await
+            }
+            None => Ok(received.await),
+        };
+
+        // A caller that stopped waiting leaves a waiter nobody receives from
+        self.inner
+            .lock()
+            .attachment_waiters
+            .retain(|waiter| !waiter.sender.is_disconnected());
+
+        match result {
+            Ok(Ok(Ok(state))) => Ok(state),
+            Err(_) => apibail_timeout!(),
+            Ok(Err(_)) | Ok(Ok(Err(_))) => apibail_not_initialized!(),
+        }
+    }
+
+    #[cfg(feature = "app-lifecycle")]
+    #[cfg_attr(not(feature = "debug-api"), allow(dead_code))]
+    pub fn debug_info_lifecycle(&self) -> String {
+        let auto_detect_state = self.config().attachment.app_lifecycle.auto_detect_state;
+        let inner = self.inner.lock();
+        let detected = inner
+            .app_lifecycle_monitor
+            .as_ref()
+            .and_then(|monitor| monitor.state())
+            .map(VeilidAppLifecycleState::from);
+        let show = |state: Option<VeilidAppLifecycleState>| {
+            state.map_or_else(|| "-".to_owned(), |state| format!("{:?}", state))
+        };
+        format!(
+            "Lifecycle...\n  state: {}\n  detected: {}\n  reported: {}\n  auto_detect_state: {}\n",
+            show(inner.app_lifecycle_state),
+            show(detected),
+            show(inner.reported_app_lifecycle_state),
+            auto_detect_state
+        )
     }
 
     #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]

@@ -86,6 +86,29 @@ class TestDHT {
     await routingContext.deleteDHTRecord(rec.key);
   }
 
+  Future<void> testOpenDHTRecordWithoutRehydration() async {
+    final rec = await routingContext.createDHTRecord(
+      cryptoKind,
+      const DHTSchema.dflt(oCnt: 1),
+    );
+    final va = utf8.encode('HELD LOCALLY');
+    expect(await routingContext.setDHTValue(rec.key, 0, va), isNull);
+    await routingContext.closeDHTRecord(rec.key);
+
+    // A record this node holds reopens from its local copy either way
+    final reopened = await routingContext.openDHTRecord(
+      rec.key,
+      options: const OpenDHTRecordOptions(rehydrate: false),
+    );
+    expect(reopened.key, equals(rec.key));
+    final vd = await routingContext.getDHTValue(rec.key, 0);
+    expect(vd, isNotNull);
+    expect(vd!.data, equals(va));
+
+    await routingContext.closeDHTRecord(rec.key);
+    await routingContext.deleteDHTRecord(rec.key);
+  }
+
   Future<void> testSetGetDHTValue() async {
     final rec = await routingContext.createDHTRecord(
       cryptoKind,

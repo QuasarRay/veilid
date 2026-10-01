@@ -293,6 +293,28 @@ Map<String, dynamic> _$VeilidStateAttachmentToJson(
   'overAttachedNodes': instance.overAttachedNodes.toString(),
 };
 
+_VeilidStateAttachmentCondition _$VeilidStateAttachmentConditionFromJson(
+  Map<String, dynamic> json,
+) => _VeilidStateAttachmentCondition(
+  optMinState: json['optMinState'] == null
+      ? null
+      : AttachmentState.fromJson(json['optMinState']),
+  optMaxState: json['optMaxState'] == null
+      ? null
+      : AttachmentState.fromJson(json['optMaxState']),
+  optPublicInternetReady: json['optPublicInternetReady'] as bool?,
+  optLocalNetworkReady: json['optLocalNetworkReady'] as bool?,
+);
+
+Map<String, dynamic> _$VeilidStateAttachmentConditionToJson(
+  _VeilidStateAttachmentCondition instance,
+) => <String, dynamic>{
+  'optMinState': instance.optMinState?.toJson(),
+  'optMaxState': instance.optMaxState?.toJson(),
+  'optPublicInternetReady': instance.optPublicInternetReady,
+  'optLocalNetworkReady': instance.optLocalNetworkReady,
+};
+
 _VeilidStateNetwork _$VeilidStateNetworkFromJson(Map<String, dynamic> json) =>
     _VeilidStateNetwork(
       started: json['started'] as bool,

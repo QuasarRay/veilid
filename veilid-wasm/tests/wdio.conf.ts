@@ -44,7 +44,10 @@ export const config: Options.Testrunner = {
   // will be called from there.
   //
   // One spec drives whichever context is selected; see harness/select.ts.
-  specs: ['./src/ContextRunner.test.ts'],
+  // LIFECYCLE_SOAK_MINUTES swaps the suites for the hidden-page soak, a measurement rather than a test.
+  specs: process.env.LIFECYCLE_SOAK_MINUTES
+    ? ['./src/LifecycleSoak.test.ts']
+    : ['./src/ContextRunner.test.ts'],
   // Patterns to exclude.
   exclude: [],
   //
@@ -71,15 +74,37 @@ export const config: Options.Testrunner = {
   // Sauce Labs platform configurator - a great tool to configure your capabilities:
   // https://saucelabs.com/platform/platform-configurator
   //
-  capabilities: [
+  capabilities: process.env.WDIO_BROWSER === 'safari'
+  ? [
+      {
+        browserName: 'safari',
+      } as WebdriverIO.Capabilities,
+    ]
+  : process.env.WDIO_BROWSER === 'firefox'
+  ? [
+      {
+        browserName: 'firefox',
+        'moz:firefoxOptions': {
+          ...(process.env.FIREFOX_BIN ? { binary: process.env.FIREFOX_BIN } : {}),
+          args: process.env.WDIO_HEADLESS ? ['-headless'] : [],
+        },
+        ...(process.env.GECKODRIVER_PATH
+          ? { 'wdio:geckodriverOptions': { binary: process.env.GECKODRIVER_PATH } }
+          : {}),
+      } as WebdriverIO.Capabilities,
+    ]
+  : [
     {
       // capabilities for local browser web tests
       browserName: 'chrome', // or "firefox", "microsoftedge", "safari"
       'goog:chromeOptions': {
+        ...(process.env.CHROME_BIN ? { binary: process.env.CHROME_BIN } : {}),
         args: [
           '--use-fake-device-for-media-stream',
           '--use-fake-ui-for-media-stream',
-          ...(process.env.WDIO_HEADLESS ? ['headless', 'disable-gpu'] : []),
+          ...(process.env.WDIO_HEADLESS
+            ? ['--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage']
+            : []),
         ],
       },
       // Disable browser log capture. Chrome logs benign P2P WebSocket connect failures as
@@ -94,6 +119,9 @@ export const config: Options.Testrunner = {
       // starves wdio's health poll (hardcoded 60s timeout), killing the worker
       // mid-suite. Console capture uses the vite websocket and is unaffected.
       'wdio:enforceWebDriverClassic': true,
+      ...(process.env.CHROMEDRIVER_PATH
+        ? { 'wdio:chromedriverOptions': { binary: process.env.CHROMEDRIVER_PATH } }
+        : {}),
     } as WebdriverIO.Capabilities & { 'goog:loggingPrefs': { browser: string } },
   ],
 

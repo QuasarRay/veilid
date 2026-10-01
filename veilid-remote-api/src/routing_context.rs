@@ -77,6 +77,8 @@ pub enum RoutingContextRequestOp {
         /// Default writer keypair to associate for writer capability.
         #[schemars(with = "Option<String>")]
         writer: Option<KeyPair>,
+        /// Optional open options, such as skipping rehydration.
+        options: Option<OpenDHTRecordOptions>,
     },
     /// Close an opened DHT record, allowing it to be re-opened.
     CloseDhtRecord {

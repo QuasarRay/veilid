@@ -104,6 +104,13 @@ pub fn fake_veilid_config() -> VeilidConfig {
                 server_address: "".to_owned(),
             },
         },
+        attachment: VeilidConfigAttachment {
+            #[cfg(feature = "app-lifecycle")]
+            app_lifecycle: VeilidConfigAppLifecycle {
+                prefer_foreground: false,
+                auto_detect_state: false,
+            },
+        },
         internal: Some(VeilidConfigInternal {
             network: VeilidConfigInternalNetwork {
                 connection_initial_timeout_ms: 1000,

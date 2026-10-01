@@ -32,6 +32,16 @@ pub struct StateReasonSpanChange {
     new_span: StateReasonSpan,
 }
 
+impl StateReasonSpanChange {
+    /// Whether the node's state changed, not only the reason for it
+    pub fn is_state_change(&self) -> bool {
+        self.old_span.is_some_and(|old_span| {
+            BucketEntryState::from(old_span.state_reason)
+                != BucketEntryState::from(self.new_span.state_reason)
+        })
+    }
+}
+
 impl fmt::Display for StateReasonSpanChange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(old_span) = self.old_span {

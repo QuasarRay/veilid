@@ -11,7 +11,7 @@ import veilid
 from veilid import *
 from veilid.types import *
 
-from .conftest import dht_retry, wait_for_public_internet_ready
+from .conftest import dht_retry
 from .test_dht import sync
 
 ##################################################################
@@ -2011,7 +2011,7 @@ async def test_dht_transaction_rehydration():
         # ensure attached and online
         if not (await api0.get_state()).attachment.public_internet_ready:
             await api0.attach()
-        await wait_for_public_internet_ready(api0)
+        await api0.wait_for_attachment_condition()
 
         # start fresh
         await api0.debug("record purge local")
@@ -2077,9 +2077,9 @@ async def test_dht_transaction_rehydration():
 
                 # detach so the node stops republishing while the network is purged
                 await api0.detach()
-                detach_deadline = time.time() + 30
-                while (await api0.get_state()).attachment.public_internet_ready and time.time() < detach_deadline:
-                    await asyncio.sleep(0.25)
+                await api0.wait_for_attachment_condition(
+                    VeilidStateAttachmentCondition(opt_max_state=AttachmentState.DETACHED), 30_000
+                )
 
                 # age out the network: delete these records from every dev node's remote store
                 print(f"deleting {len(opaque_keys)} records from the network via {delete_script}")
@@ -2091,7 +2091,7 @@ async def test_dht_transaction_rehydration():
 
                 # reattach
                 await api0.attach()
-                await wait_for_public_internet_ready(api0)
+                await api0.wait_for_attachment_condition()
 
                 # reopen each record, which enqueues rehydration since the local copy exists
                 for desc in all_records:

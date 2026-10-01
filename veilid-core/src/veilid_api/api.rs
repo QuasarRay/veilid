@@ -2,6 +2,15 @@ use super::*;
 
 impl_veilid_log_facility!("veilid_api");
 
+/// What [VeilidAPI::wait_for_attachment_condition] waits for without a condition
+const DEFAULT_ATTACHMENT_CONDITION: VeilidStateAttachmentCondition =
+    VeilidStateAttachmentCondition {
+        opt_min_state: Some(AttachmentState::AttachedWeak),
+        opt_max_state: Some(AttachmentState::AttachedFull),
+        opt_public_internet_ready: Some(true),
+        opt_local_network_ready: None,
+    };
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub(super) struct VeilidAPIInner {
@@ -478,6 +487,83 @@ impl VeilidAPI {
         }
         .await
         .inspect_err(log_veilid_api_error!(self))
+    }
+
+    /// Wait until the attachment state satisfies a condition.
+    ///
+    /// Returns the first [VeilidStateAttachment] that satisfies `condition`, at once if the current state does.
+    /// A field of `condition` left `None` is not checked. Without a `condition`, waits until the node is
+    /// attached, at any strength, with PublicInternet ready.
+    /// When a `timeout` is specified, errors with [VeilidAPIError::Timeout] once it elapses; without one, waits indefinitely.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] if the condition's least state is above its most,
+    /// or [VeilidAPIError::NotInitialized] if the API shuts down while waiting.
+    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
+    pub async fn wait_for_attachment_condition(
+        &self,
+        condition: Option<VeilidStateAttachmentCondition>,
+        timeout: Option<Duration>,
+    ) -> VeilidAPIResult<VeilidStateAttachment> {
+        async {
+            let condition = condition.unwrap_or(DEFAULT_ATTACHMENT_CONDITION);
+            if let (Some(min), Some(max)) = (condition.opt_min_state, condition.opt_max_state) {
+                if min > max {
+                    apibail_invalid_argument!(
+                        "wait_for_attachment_condition",
+                        "condition",
+                        format!("min {} above max {}", min, max)
+                    );
+                }
+            }
+            cfg_if! {
+                if #[cfg(feature = "mock-api")] {
+                    veilid_log!(self debug "wait_for_attachment_condition(condition: {:?}, timeout: {:?})", condition, timeout);
+                    self.mock_wait_for_attachment_condition(condition, timeout).await
+                } else {
+                    let attachment_manager = self.core_context()?.attachment_manager();
+                    let recorder = DurationRecorder::new("VeilidAPI::wait_for_attachment_condition", |name, start| {
+                        veilid_log!(self debug "{}[start={:#}](condition: {:?}, timeout: {:?})", name, start, condition, timeout);
+                    });
+                    recorder.record_fut(
+                        Box::pin(attachment_manager.wait_for_condition(condition, timeout)),
+                        |name, start, dur, ret| {
+                            veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
+                            ret
+                        },
+                    ).await
+                }
+            }
+        }
+        .await
+        .inspect_err(log_veilid_api_error!(self))
+    }
+
+    /// Report where the host application stands in its lifecycle.
+    ///
+    /// The node follows this itself in an iOS, Android or macOS app, a web page and a service
+    /// worker, and a report counts there only when `attachment.app_lifecycle.auto_detect_state`
+    /// is off. Elsewhere, as in a dedicated or shared worker or a Linux or Windows app, the host's
+    /// reports are all it has.
+    ///
+    /// Errors with [VeilidAPIError::NotInitialized] if the API has been shut down.
+    #[cfg(feature = "app-lifecycle")]
+    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(__VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
+    pub fn report_app_lifecycle_state(
+        &self,
+        state: VeilidAppLifecycleState,
+    ) -> VeilidAPIResult<()> {
+        veilid_log!(self debug "VeilidAPI::report_app_lifecycle_state(state: {:?})", state);
+        cfg_if! {
+            if #[cfg(feature = "mock-api")] {
+                // The mock makes no saves for a lifecycle to drive
+                self.mock_key()?;
+            } else {
+                self.core_context()?
+                    .attachment_manager()
+                    .report_app_lifecycle_state(state);
+            }
+        }
+        Ok(())
     }
 
     ////////////////////////////////////////////////////////////////

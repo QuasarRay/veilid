@@ -85,6 +85,18 @@ pub enum RequestOp {
     Attach,
     /// Disconnect from the network.
     Detach,
+    /// Report where the host application stands in its lifecycle.
+    ReportAppLifecycleState {
+        /// Where the host application now stands.
+        state: VeilidAppLifecycleState,
+    },
+    /// Wait until the attachment state satisfies a condition.
+    WaitForAttachmentCondition {
+        /// Condition to wait for, or attached with PublicInternet ready if None.
+        condition: Option<VeilidStateAttachmentCondition>,
+        /// Timeout in milliseconds, or wait indefinitely if None.
+        timeout_ms: Option<u64>,
+    },
     /// Create a new `MemberId` for use in building `DHTSchema`s.
     GenerateMemberId {
         /// Writer public key the member id is derived from.
@@ -290,6 +302,18 @@ pub enum ResponseOp {
         /// Success, or error.
         #[serde(flatten)]
         result: ApiResult<()>,
+    },
+    /// Result of `ReportAppLifecycleState`.
+    ReportAppLifecycleState {
+        /// Success, or error; Unimplemented without the `app-lifecycle` feature.
+        #[serde(flatten)]
+        result: ApiResult<()>,
+    },
+    /// Result of `WaitForAttachmentCondition`.
+    WaitForAttachmentCondition {
+        /// The attachment state that satisfied the condition, or error.
+        #[serde(flatten)]
+        result: ApiResult<Box<VeilidStateAttachment>>,
     },
     /// Result of `GenerateMemberId`.
     GenerateMemberId {

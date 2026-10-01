@@ -1,98 +1,125 @@
 **UNRELEASED**
 
 - veilid-core-optimized:
-  - new crate added to hold monomorphic exports for crates that want to be fully speed optimized in all build profiles
-  - BLAKE3 uses its WASM SIMD implementation on wasm32. Adds 14KB to the `.wasm` and requires WASM SIMD support, which browsers have had since Safari 16.4.
+  - New crate holding monomorphic exports, for crates that want full speed optimization in every build profile.
+  - BLAKE3 uses its WASM SIMD implementation on wasm32, which adds 14 KB to the `.wasm` and needs WASM SIMD, supported by browsers since Safari 16.4.
 
 - veilid-core:
-  - Safety routes are allocated, tested, and released per sequence ordering, and the hops of a route that died are kept out of new allocations for ten minutes.
+  - **Breaking** `open_dht_record()` takes an `OpenDHTRecordOptions` argument whose `rehydrate` flag, default true, can be turned off so that opening a record you are only checking for does not count as interest and trigger rehydration.
+  - **Breaking** `ProtectedStore` is reached through `VeilidAPI`, and its old Rust interface is gone.
+  - **Breaking** `TableStore` is reached through `VeilidAPI`, and its old Rust interface is gone.
+  - **Breaking** The `get-size2` crate is gone, taking the `GetSize` impls and `get_heap_size()` off the API types, and StorageManager computes data sizes more simply.
+  - **Breaking** The WASM boundary uses tsify 0.5.7 `Ts<T>` types, so a serialization failure throws a catchable error instead of leaking or panicking, and in TypeScript the group `contains_kind` is renamed `containsKind` and typed-value constructors take the branded `CryptoKind` instead of a bare string.
+  - **Breaking** `VeilidAPIError` derives from the JavaScript `Error`, closing [#441](https://gitlab.com/veilid/veilid/-/work_items/441).
+  - **Breaking** `AttachmentState` variants are reordered from least to most attached, and the type is now `Ord`.
+  - **Security** B01T direct-bootstrap requests are answered from the routing domain's last successful bootstrap set, persisted across restarts, without resolving DNS, so an unauthenticated packet can no longer trigger non-veilid traffic or block a worker on a slow resolver (thanks to quikchaos for reporting it).
+  - Safety routes are allocated, tested and released per sequence ordering, and a dead route's hops stay out of new allocations for ten minutes.
   - A lost loopback no longer schedules another test of its own route, and a multi-hop loopback failure no longer blames the first hop's transport.
-  - Per-ordering loopback tallies, a `route test summary` log line for any minute with a loopback failure or a release, and the `route diag` and `route reallocate` debug commands.
+  - Per-ordering loopback tallies, a `route test summary` log line for each minute with a loopback failure or release, and the `route diag` and `route reallocate` debug commands.
   - `route allocate` accepts node ids to avoid as hops.
-  - A refused connect is no longer counted as evidence against a transport.
+  - A refused connect no longer counts as evidence against a transport.
   - Last flows are kept per remote address, answers return over the flow their question arrived on, and a lost question over a flow we did not dial blames nobody.
   - Degraded detection counts fresh failures of Reliable peers only, excludes our own relay, and clears its evidence on recovery.
   - App call results are logged truncated.
   - A DHT transaction record no longer fails its stage consensus when as many node transactions went unanswered as answered.
-  - **Security** B01T direct-bootstrap requests are answered from the last successful bootstrap set held by the routing domain, which is persisted across restarts. The handler no longer resolves DNS, so an unauthenticated packet can no longer cause non-veilid traffic or block a worker on a slow resolver. Thanks to quikchaos for reporting this issue!
-  - Bootstrap records are cached verbatim for every record version received, so a node serves what it was told rather than only what it selected for its own bootstrap. A saved routing table that predates the cache is discarded on load and the node bootstraps again, since nothing else ever fetches records: without this a node that restarted with a warm routing table never bootstrapped, held no records, and refused B01T on every protocol.
-  - New `network.routing_table.bootstrap_records` config: whole bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them. They are served to direct bootstrap requests with no lookup and can be used to join the network without resolving `bootstrap` at all, so the first bootstrap server on a network can serve records before there is anything to look up. Empty by default.
-  - A direct bootstrap request over raw TCP is 8 bytes, but the accept path waited for 64 before inspecting a connection, so the request timed out unanswered. Each peek now reads only what it examines.
+  - Bootstrap records are cached verbatim for every record version received, and a saved routing table from before the cache is discarded on load, so a restarted node bootstraps again instead of holding no records and refusing B01T.
+  - New `network.routing_table.bootstrap_records` config, empty by default, takes whole bootstrap records as `veilid-server --dump-txt-record` prints them and serves them to direct bootstrap requests without resolving `bootstrap`.
+  - A direct bootstrap request over raw TCP, which is 8 bytes, is answered because each peek reads only what it examines instead of waiting for 64 bytes.
   - Bootstrap hostname resolution runs on the blocking pool instead of the executor.
-  - Android below API 29 has no system TXT resolver, so a bootstrap hostname is contacted directly on port 5150 over UDP or TCP for a B01T exchange instead. Startup fails on such a device when neither protocol is enabled, since the hostname could never be reached.
-  - Stats collection, aggregation, and analysis for all subsystems. Robot-generated python script for reviewing the effect of optimizations.
-  - DHT transaction quality counters under the `stats` feature: per-command fanout outcomes, subkey confirmation coverage at End and Commit, node-set attrition, the cost of each mitigation, and TryAgain reasons; `stats reset` zeroes them.
-  - A DHT transaction ends only at nodes that answered every set, re-sending a node the sets it is missing first, and set answers that arrive after the early consensus exit are recorded instead of dropped.
+  - On Android below API 29, which has no system TXT resolver, a bootstrap hostname is contacted directly on port 5150 over UDP or TCP for a B01T exchange, and startup fails if neither protocol is enabled.
+  - Stats collection, aggregation and analysis for all subsystems, with a Python script for reviewing the effect of optimizations.
+  - DHT transaction quality counters under the `stats` feature cover per-command fanout outcomes, subkey confirmation coverage at End and Commit, node-set attrition, mitigation costs and TryAgain reasons, and `stats reset` zeroes them.
+  - A DHT transaction ends only at nodes that answered every set, first re-sending a node the sets it is missing, and set answers that arrive after the early consensus exit are recorded instead of dropped.
   - A DHT transaction commit held by fewer than the required nodes returns TryAgain instead of Ok.
   - A set that reaches a storage node after End is refused without ending that node's transaction.
-  - The set retry pass in DHT transactions is gone; it re-sent 4 of 6391 set RPCs in a stress run and none once late answers were collected.
-  - A bootstrap name whose TXT lookup returns nothing within ten seconds is direct-bootstrapped over every enabled protocol at once, so a node behind a phone tether whose DNS relay answers A/AAAA but not TXT still joins the network.
-  - A node never bootstraps from itself: a bootstrap request is not sent to its own dial info.
-  - IPV6 interface address tracking changes: Global addresses are now correctly kept per interface, and a privacy/temporary address rotating is no longer considered an interface change.
-  - RPC safety-route round-robin is now destination-aware, so a lost question to some node rotates the route chosen for the retry, without rotating the route for all other destinations.
-  - DHT transaction keepalives are sent only when no command answer has refreshed the node's lease since the last deadline.
-  - A DHT transaction command returns at consensus instead of waiting up to half a second for stragglers, which now settle in the background.
-  - Fix OnlineDetector spurious flap.
-  - Properly drop TCP connections when offline condition is detected so they can be recreated in the event of NAT state loss, as is common on cellular.
-  - Fix UDP stalls on cellular/CLAT464.
+  - DHT transactions drop the set retry pass, which re-sent 4 of 6391 set RPCs in a stress run and none once late answers were collected.
+  - A bootstrap name whose TXT lookup returns nothing within ten seconds is direct-bootstrapped over every enabled protocol at once, so a node behind a phone tether whose DNS relay answers A/AAAA but not TXT still joins.
+  - A node never sends a bootstrap request to its own dial info.
+  - IPv6 global addresses are kept per interface, and a rotating privacy address no longer counts as an interface change.
+  - RPC safety-route round-robin is destination-aware, so a lost question rotates the route for that destination's retry without rotating it for every other destination.
+  - DHT transaction keepalives go out only when no command answer has refreshed the node's lease since the last deadline.
+  - A DHT transaction command returns at consensus instead of waiting up to half a second for stragglers, which settle in the background.
+  - Fix a spurious OnlineDetector flap.
+  - TCP connections are dropped when the node goes offline, so they are recreated after the NAT state loss common on cellular.
+  - Fix UDP stalls on cellular and CLAT464.
   - Correct timeout for native WS connects.
   - Timeout-bound public internet dial info detection.
-  - AIMD experiment for DHT operations. Off by default for now behind `aimd-dht` feature.
-  - Fix background transaction pre-empt on foreground record open.
-  - ProtectedStore is now exported correctly through the VeilidAPI object and the old rust interface is removed. Switch to accessing ProtectedStore through VeilidAPI.
-  - TableStore is now exported correctly through the VeilidAPI object and the old rust interface is removed. Switch to accessing TableStore through VeilidAPI.
-  - Loosen IPv6 detection for environments where the default route might not be enumerable due to sandboxing.
-  - Fix `inspect_dht_record` excessive search duration.
-  - `set_dht_value` and `DHTTransaction::set` options now expose `min_seqnum`, which raises the written sequence number after the automatic increment. `ValueSeqNum::MAX` minus `n` leaves `n` writes on the subkey. `DHTReportScope::UpdateSet` no longer fails on a subkey at the maximum sequence number.
-  - Eliminate locks from holepunching, using best-effort TTL instead.
-  - Fix per-transport statistical suppression so broken protocols stop being selected constantly.
-  - Backoff on 'outbound-only' address change detection frequency.
-  - Rejected/disqualified nodes do not contribute to inspect_dht_record consensus width cap.
-  - Transaction post-consensus grace period reduced to avoid waiting for unnecessary slow additional-consensus nodes.
-  - OnlineDetector now tracks local stalls, and local degradation is no longer blamed on specific nodes.
+  - AIMD experiment for DHT operations, off by default behind the `aimd-dht` feature.
+  - Fix a background transaction pre-empting a foreground record open.
+  - Looser IPv6 detection where sandboxing hides the default route.
+  - Fix excessive `inspect_dht_record` search duration.
+  - `set_dht_value` and `DHTTransaction::set` options expose `min_seqnum`, which raises the written sequence number after the automatic increment (`ValueSeqNum::MAX` minus `n` leaves `n` writes), and `DHTReportScope::UpdateSet` no longer fails on a subkey at the maximum sequence number.
+  - Holepunching uses a best-effort TTL instead of locks.
+  - Fix per-transport statistical suppression so broken protocols stop being selected.
+  - Outbound-only address change detection backs off.
+  - Rejected and disqualified nodes do not count toward the `inspect_dht_record` consensus width cap.
+  - A shorter post-consensus grace period keeps transactions from waiting on slow nodes beyond consensus.
+  - OnlineDetector tracks local stalls and no longer blames local degradation on specific nodes.
   - Better watch reporting coalescing.
-  - Added `mock-api` feature, which must be used with `--no-default-features`, but enables testing apps against a stubbed-out `VeilidAPI` that performs no network access, and uses in-memory maps for all API functionality. Integration tests should use this so network access does not have to be performed in CI tests for repeatability. It also completely eliminated network latency andreturns results immediately, so your tests will complete faster too.
-  - Strip out 'get-size2' crate and simplify StorageManager calculation of data sizes.
-  - Fix watch routes and make route failures not contribute excessively to offline detection.
-  - Dial info discovery scales its validation quorum down to the available validator pool (minimum 2), so small networks can still confirm dial info and settle instead of retrying forever.
-  - Node liveness probing is quieter. Never-answered nodes are declared dead after three lost questions instead of a 60-second span, missing and initial nodes are probed at the unreliable interval instead of every tick, and a persistently failing transport backs off. Steady-state ping traffic roughly halves.
-  - Degraded detection no longer false-fires on healthy networks. Only failures from transports that answered recently count, and they must span several percent of the live routing table.
-  - Ping outcome and queue statistics per purpose and transport in stats output, and an `entries liveness` debug command showing per-node probe ages, transport health, and steady-loss spans.
-  - Migrated to tsify 0.5.7 `Ts<T>` boundaries. WASM serialization failures now throw catchable errors instead of leaking or panicking at the ABI boundary. TypeScript declarations are unchanged, except group `contains_kind` is renamed `containsKind` to match the rest of the API, typed-value constructors take the branded `CryptoKind` rather than a bare string, and raw-string artifacts in doc comments are fixed.
-  - VeilidAPIError now derives from JS Error, closing [#441](https://gitlab.com/veilid/veilid/-/work_items/441)
-  - Latency statistics are computed when they are read rather than on every sample. Recording used to sort a rolling window while holding a lock, on every crypto operation and every guarded lock section, which made stats accounting the most contended lock in the process and starved the executor under load.
+  - New `mock-api` feature, used with `--no-default-features`, tests apps against a stubbed `VeilidAPI` backed by in-memory maps with no network access, so integration tests run repeatably and fast in CI.
+  - Fix watch routes, and route failures weigh less in offline detection.
+  - Dial info discovery scales its validation quorum down to the available validator pool (minimum 2), so small networks confirm dial info and settle instead of retrying forever.
+  - Node liveness probing sends about half the steady-state pings: never-answered nodes are dead after three lost questions instead of 60 seconds, missing and initial nodes are probed at the unreliable interval instead of every tick, and a failing transport backs off.
+  - Degraded detection no longer fires on healthy networks, counting only failures from recently answering transports that span several percent of the live routing table.
+  - Stats output reports ping outcomes and queues per purpose and transport, and a new `entries liveness` debug command shows per-node probe ages, transport health and steady-loss spans.
+  - Latency statistics are computed when read instead of sorting a rolling window under a lock on every sample, which had made stats accounting the most contended lock in the process and starved the executor under load.
   - Online detector interval data is published as a read-mostly snapshot, so per-node state computation no longer queues behind the detector's state machine.
-  - Route loopback failures deferred while offline or degraded are now capped, so a dead route cannot stay allocated forever on a chronically degraded node.
-  - Table store databases are integrity-checked at open and, if damaged, rebuilt from whatever rows are still readable. The damaged files are kept beside the store for inspection.
-  - Disable `stats` feature by default
-  - Move API tracing logger to its own thread, add log throttles and queue, and RPC hot-path tight-loop logging cleanup.
-  - `aws-lc-sys`, 23 extra crates, and its cmake build requirement are gone by switching the `geolocation` feature's build script to using `ureq` instead of `reqwest`.
-  - The Android x86_64 build no longer needs to link `libclang_rt.builtins-x86_64-android.a` out of the NDK as a workaround for a missing symbol.
-  - Fix table store per-namespace instance lock on Android.
+  - Route loopback failures deferred while offline or degraded are capped, so a dead route cannot stay allocated forever on a node that stays degraded.
+  - Table store databases are integrity-checked at open, and a damaged one is rebuilt from its readable rows with the damaged files kept beside the store for inspection.
+  - The `stats` feature is off by default.
+  - The API tracing logger runs on its own thread with log throttles and a queue, and RPC hot-path logging is trimmed.
+  - `aws-lc-sys`, 23 other crates and the cmake build requirement are gone, since the `geolocation` feature's build script uses `ureq` instead of `reqwest`.
+  - The Android x86_64 build no longer links `libclang_rt.builtins-x86_64-android.a` from the NDK to work around a missing symbol.
+  - Fix the table store per-namespace instance lock on Android.
+  - New `wait_for_attachment_condition()` API, in every binding, waits until the attachment state satisfies a condition, by default until the node is attached with PublicInternet ready.
+  - New `app-lifecycle` feature, on in veilid-flutter and veilid-wasm, saves the routing table and storage metadata when the app moves to the background, holding iOS background time until the saves land.
+  - New `attachment.app_lifecycle.prefer_foreground` config, default true, keeps macOS App Nap and Windows power throttling off while attached.
+  - In a browser, `app-lifecycle` follows a page's visibility, back/forward cache and freeze events, and treats a service worker as in the background, keeping it alive until a pending save lands.
+  - New `report_app_lifecycle_state()` API lets a host report its lifecycle where the node cannot detect it, and the `attachment.app_lifecycle.auto_detect_state` config, default true, turns detection off.
+  - An API call whose feature is compiled out stays callable from the remote API and Python and fails with `Unimplemented`.
+  - After a stall of 2.5 s or more the attachment state is sent again even if unchanged, or on the app's return when the stall came while it was in the background.
+  - A second browser `online` or `offline` event while a detached node was not listening no longer panics.
+  - A detach or shutdown no longer waits for a UPnP request to an unresponsive router or for a bootstrap hostname lookup.
+  - Storage metadata that changes while the app is in the background is saved within a second instead of at the next 30s save, holding iOS background time until the save lands.
+  - Timeouts of RPCs in flight across a local stall no longer count toward offline or degraded detection, which sometimes took a thawed node offline and back and doubled its degraded hold to 10s.
+  - `inspect_dht_record` returns TryAgain when no node answered, instead of a report whose empty network sequence numbers read as nothing newer online.
+  - A failed change inspection of a watched record retries in 5s instead of backing off to 10 minutes, and a watch that never established is inspected every 2 minutes instead of 10.
+  - A watch reconcile that no node answered retries in 5s instead of waiting 60s, and watch cancels, renewals, reconciles and change inspections wait while the node is offline.
 
 - veilid-flutter:
-  - API Breaking Change: `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `Timestamp.toString()` now write human readable output, not a raw integer. `TimestampDuration` works the same way.
-  - `DHT_TRACE` is now a `--dart-define` that turns on logging of `DHTRecordPool` and DHT collections operations.
-  - Full conversion to Native Assets and rust build hooks. Apps must drop any extra build steps for building veilid-flutter and linking its output; Flutter handles it.
-  - CocoaPods support removed.
-  - Minimum Flutter version is now 3.47.1 due to improved build hooks support
-  - Completely remove 'rust-android-gradle' because it is failing to keep up with the rest of the ecosystem (AGP, Kotlin, etc)
-  - Fix multiple-attach idempotency
+  - **Breaking** `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `toString()` on `Timestamp` and `TimestampDuration` writes human-readable output instead of a raw integer.
+  - **Breaking** Full conversion to native assets and Rust build hooks, so apps drop their own steps for building and linking veilid-flutter and let Flutter do it.
+  - **Breaking** CocoaPods support is removed.
+  - **Breaking** The minimum Flutter version is 3.47.1, for its build hook support.
+  - **Breaking** `VeilidProcessorInterface` is a pure interface that declares `waitPublicInternetReady()` and `waitReadyOrDelay()`, and the new `DefaultVeilidProcessor` implements both by asking core through `waitForAttachmentCondition()` instead of reading the cached connection state.
+  - `DHT_TRACE` is a `--dart-define` that logs `DHTRecordPool` and DHT collection operations.
+  - `rust-android-gradle` is removed, since it no longer keeps up with AGP and Kotlin.
+  - Fix multiple-attach idempotency.
+  - `AttachmentState.isDetached` no longer returns true for every state.
 
 - veilid-cli:
   - The interactive console no longer exits or floods `thingbuf receiver has closed` when a log burst overruns the line editor.
 
 - veilid-python:
-  - More tests
+  - More tests.
+
+- veilid-server:
+  - The process exits at most 500 ms after the node shuts down instead of waiting out system DNS lookups left on the blocking pool.
 
 - veilid-tools:
-  - AIMD congestion control system (behind `aimd` feature)
-  - socket_tools UDP best-effort send-with-ttl implementation
-  - `hickory-resolver` removed, dropping 13 crates from the dependency graph. Every DNS lookup now goes through the platform's own resolver, so the system's DNS privacy settings apply: `DNSServiceQueryRecord` on macOS and iOS (encrypted DNS profiles, VPN and per-interface resolvers), `res_query` on Linux and the BSDs, `android_res_nquery` on Android (per-network and private DNS, API 29 and up), `DnsQuery` on Windows (DoH), and `getnameinfo` for reverse lookups. veilid sends no DNS queries of its own and has no fallback nameservers. `Resolver::supports_txt()` reports whether the platform can resolve TXT at all, and `ResolverError::Unsupported` is returned when it cannot.
+  - **Breaking** `hickory-resolver` is gone, 13 crates with it, and every DNS lookup goes through the platform's own resolver so the system's DNS privacy settings apply, with `Resolver::supports_txt()` reporting whether TXT lookups work and `ResolverError::Unsupported` returned when they do not.
+  - **Breaking** `MustJoinSingleFuture`'s `single_spawn()`, `single_spawn_local()`, `check()` and `join()` fail with `SingleFutureLockedError` instead of `()` when another caller is polling the future.
+  - **Breaking** `socket2_operation()` takes an `AsFd` socket instead of `AsRawFd` and passes the closure a `&Socket` instead of a `&mut Socket`.
+  - **Breaking** `scaled_yielding()` drops its `yield_n` threshold, running the closure inline below `cpu_n` and on the CPU pool from there up.
+  - **Breaking** The unsafe `aligned_8_u8_vec_uninit()` and `unaligned_u8_vec_uninit()` are replaced by the safe `zeroed_u8_vec()`.
+  - **Breaking** `igd::search_gateway()` and the `igd::Gateway` request methods are async, so dropping one ends its router request at once, and `minreq` is gone.
+  - AIMD congestion control, behind the `aimd` feature.
+  - Best-effort UDP send-with-TTL in `socket_tools`.
 
 - veilid-wasm:
-  - BREAKING: veilid-wasm no longer automatically loads the wasm file at import-time, which had used a top-level await. Instead, the default export is now an `init()` function that you await as part of your loading logic for your application: `import init from "veilid-wasm";`. You must call `await init()` at some point before calling any other export.
-  - BREAKING: thrown errors are now real `Error` instances instead of plain objects. `VeilidAPIError` extends `Error` and each variant has its own subclass, so `catch` blocks can use `err instanceof VeilidAPIError`, `err instanceof VeilidAPIErrorTimeout`, and the usual `message`, `name` and `stack`. Reading `err.kind` and the per-variant fields still works, so code that switches on `kind` needs no change; code that compared a caught error to a plain object by structural equality does. The classes are exported from the package entry point, and the `VeilidAPIError` TypeScript type that described the old plain object is gone, its name now belonging to the class.
+  - **Breaking** The wasm file no longer loads at import time through a top-level await, so you must `await` the default export `init()` (`import init from "veilid-wasm"`) before calling any other export.
+  - **Breaking** Thrown errors are `Error` instances instead of plain objects, with `VeilidAPIError` extending `Error` and a subclass per variant, so code that switches on `kind` still works but code that compares a caught error to a plain object must change.
+  - **Breaking** A constant whose feature is compiled out throws `Unimplemented` instead of reading as undefined.
 
 **Changed in Veilid 0.5.7**
 

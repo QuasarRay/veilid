@@ -11,6 +11,8 @@ const EXTERNAL_INFO_CONCURRENCY: usize = 20;
 pub(super) const EXTERNAL_INFO_VALIDATIONS: usize = 5;
 // NAT classification compares answers from two validators, so fewer than this is starvation
 pub(super) const MIN_EXTERNAL_INFO_VALIDATIONS: usize = 2;
+// Time allowed to get a validation request to its validator, before the receipt wait begins
+const VALIDATE_DIAL_INFO_SEND_BUDGET_MS: u32 = 1_500;
 
 /// Entry filters a dial info validator must pass, independent of protocol and address type
 pub(super) fn make_validator_entry_filters(
@@ -459,21 +461,39 @@ impl DiscoveryContext {
         dial_info: DialInfo,
         redirect: bool,
     ) -> DialInfoValidationOutcome {
+        // An unreachable validator ends inconclusive, so don't wait out its connect timeout
+        let deadline_ms = self
+            .config()
+            .internal()
+            .network
+            .dht
+            .validate_dial_info_receipt_time_ms
+            .saturating_add(VALIDATE_DIAL_INFO_SEND_BUDGET_MS);
+
         // ask the node to send us a dial info validation receipt
         // no need to clear_last_flows here, because the dial_info is always returned via the
         // send_out_of_band_receipt mechanism, which will always create a new flow
         // and the outgoing rpc call is safely able to use existing flows
-        match self
-            .rpc_processor()
-            .rpc_call_validate_dial_info(node_ref.clone(), dial_info, redirect)
-            .await
+        match timeout(
+            deadline_ms,
+            pin_future!(self.rpc_processor().rpc_call_validate_dial_info(
+                node_ref.clone(),
+                dial_info,
+                redirect
+            )),
+        )
+        .await
         {
-            Err(e) => {
+            Err(_) => {
+                veilid_log!(self debug "validate_dial_info to {:?} got no answer in {}ms", node_ref, deadline_ms);
+                DialInfoValidationOutcome::Inconclusive
+            }
+            Ok(Err(e)) => {
                 // Our own RPC failure; says nothing about whether peers can reach us
                 veilid_log!(self trace "failed to send validate_dial_info to {:?}: {}", node_ref, e);
                 DialInfoValidationOutcome::Inconclusive
             }
-            Ok(v) => v,
+            Ok(Ok(v)) => v,
         }
     }
 
@@ -495,9 +515,14 @@ impl DiscoveryContext {
         let igd_manager = self.network.igd_manager.clone()?;
 
         // Attempt a port mapping. If this doesn't succeed, it's not going to
-        let mapped_external_address = igd_manager
+        let Ok(mapped_external_address) = igd_manager
             .map_any_port(igd_protocol_type, igd_address_type, local_port, None)
-            .await?;
+            .timeout_at(self.stop_token.clone())
+            .await
+        else {
+            return None;
+        };
+        let mapped_external_address = mapped_external_address?;
 
         // Make dial info from the port mapping
         let external_mapped_dial_info = self.network.make_dial_info(
@@ -949,6 +974,8 @@ impl DiscoveryContext {
     /// Returns Some(DetectionResult) with the best detection result for this context
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip(self), fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn discover(self) -> Option<DetectionResult> {
+        let start_ts = Timestamp::now_non_decreasing();
+
         // Do this right away because it's fast and every detection is going to need it
         // Get our external addresses from a bunch of fast nodes
         if !self.discover_external_addresses().await {
@@ -1071,8 +1098,10 @@ impl DiscoveryContext {
             }
         }
 
-        #[cfg(feature = "verbose-tracing")]
-        veilid_log!(self debug "DialInfo discovery {:?}: {:?}", self.config, opt_best_detection_result.as_ref().map(|r| &r.ddi));
+        veilid_log!(self debug "DialInfo discovery {:?} finished in {:#}: {:?}",
+            self.config,
+            TimestampDuration::since_non_decreasing(start_ts),
+            opt_best_detection_result.as_ref().map(|r| &r.ddi));
 
         opt_best_detection_result
     }

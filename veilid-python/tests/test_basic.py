@@ -27,6 +27,38 @@ async def test_get_node_ids(api_connection: veilid.VeilidAPI):
 
 
 @pytest.mark.asyncio
+async def test_wait_for_attachment_condition(api_connection: veilid.VeilidAPI):
+    # The fixture waited for the default condition, so it holds at once
+    attachment = await api_connection.wait_for_attachment_condition()
+    assert attachment.public_internet_ready
+
+    with pytest.raises(veilid.VeilidAPIErrorTimeout):
+        await api_connection.wait_for_attachment_condition(
+            veilid.VeilidStateAttachmentCondition(opt_max_state=veilid.AttachmentState.DETACHED),
+            500,
+        )
+
+    with pytest.raises(veilid.VeilidAPIErrorInvalidArgument):
+        await api_connection.wait_for_attachment_condition(
+            veilid.VeilidStateAttachmentCondition(
+                opt_min_state=veilid.AttachmentState.ATTACHED_FULL,
+                opt_max_state=veilid.AttachmentState.ATTACHED_WEAK,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_report_app_lifecycle_state(api_connection: veilid.VeilidAPI):
+    background = veilid.VeilidAppLifecycleState.BACKGROUND
+    if "app-lifecycle" in await api_connection.veilid_features():
+        await api_connection.report_app_lifecycle_state(background)
+    else:
+        # The call is always there, and a node built without the feature says so
+        with pytest.raises(veilid.VeilidAPIErrorUnimplemented):
+            await api_connection.report_app_lifecycle_state(background)
+
+
+@pytest.mark.asyncio
 async def test_fail_connect():
     with pytest.raises(socket.gaierror) as exc:
         await veilid.json_api_connect("fuahwelifuh32luhwafluehawea", 1, simple_update_callback)

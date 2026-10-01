@@ -31,6 +31,20 @@ pub(crate) use address_family_confirm_logic::*;
 pub use platform_network::*;
 pub use platform_protocol_network_connection::*;
 
+/// The interface addresses dial info can be built on: all but loopback and link-local.
+/// A change outside this set, such as a new link-local address, leaves dial info valid.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn routable_interface_addresses(
+    state: &NetworkInterfaceAddressState,
+) -> HashSet<Address> {
+    state
+        .interface_addresses
+        .iter()
+        .map(|a| Address::from_ip_addr(a.ip()))
+        .filter(|addr| addr.is_routable())
+        .collect()
+}
+
 /// The set of address types enabled by config; an empty `network.address_types`
 /// list means all address types are enabled.
 pub(crate) fn configured_address_type_set(config: &VeilidConfig) -> AddressTypeSet {

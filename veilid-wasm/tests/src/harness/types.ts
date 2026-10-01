@@ -5,12 +5,15 @@ import type { expect } from './expect.js';
 // entries pull this graph in dynamically.
 export interface CaseContext {
   expect: typeof expect;
+  context: ContextName;
 }
 
 export interface TestCase {
   name: string;
   // Needs an attached node. Defaults to the suite's setting.
   requiresNetwork?: boolean;
+  // Why this build or context cannot run the case; reported as skipped.
+  skipReason?: (context: ContextName) => string | undefined;
   run: (c: CaseContext) => Promise<void> | void;
 }
 

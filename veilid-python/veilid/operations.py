@@ -8,6 +8,8 @@ class Operation(StrEnum):
     IS_SHUTDOWN = "IsShutdown"
     ATTACH = "Attach"
     DETACH = "Detach"
+    REPORT_APP_LIFECYCLE_STATE = "ReportAppLifecycleState"
+    WAIT_FOR_ATTACHMENT_CONDITION = "WaitForAttachmentCondition"
     GENERATE_MEMBER_ID = "GenerateMemberId"
     GET_DHT_RECORD_KEY = "GetDhtRecordKey"
     TRANSACT_DHT_RECORDS = "TransactDhtRecords"

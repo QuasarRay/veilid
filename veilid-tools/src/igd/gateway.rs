@@ -50,23 +50,25 @@ pub(crate) fn parse_soap_response(text: &str, ok: &str) -> Result<xml::Element, 
 }
 
 impl Gateway {
-    fn perform_request(
+    async fn perform_request(
         &self,
         header: &str,
         body: &str,
         ok: &str,
     ) -> Result<xml::Element, IgdError> {
-        let text = http::http_post_soap(self.addr, &self.control_url, header, body)?;
+        let text = http::http_post_soap(self.addr, &self.control_url, header, body).await?;
         parse_soap_response(&text, ok)
     }
 
     /// Get the external IP address of the gateway.
-    pub fn get_external_ip(&self) -> Result<IpAddr, IgdError> {
-        let response = self.perform_request(
-            messages::GET_EXTERNAL_IP_HEADER,
-            &messages::format_get_external_ip_message(),
-            "GetExternalIPAddressResponse",
-        )?;
+    pub async fn get_external_ip(&self) -> Result<IpAddr, IgdError> {
+        let response = self
+            .perform_request(
+                messages::GET_EXTERNAL_IP_HEADER,
+                &messages::format_get_external_ip_message(),
+                "GetExternalIPAddressResponse",
+            )
+            .await?;
         response
             .child_text("NewExternalIPAddress")
             .and_then(|ip| ip.parse().ok())
@@ -76,7 +78,7 @@ impl Gateway {
     /// Add a port mapping with any external port; returns the mapped external port.
     ///
     /// The `lease_duration` is in seconds; zero means infinite.
-    pub fn add_any_port(
+    pub async fn add_any_port(
         &self,
         protocol: PortMappingProtocol,
         local_addr: SocketAddr,
@@ -89,28 +91,31 @@ impl Gateway {
 
         if let Some(schema) = self.control_schema.get("AddAnyPortMapping") {
             let external_port = random_port();
-            let response = self.perform_request(
-                messages::ADD_ANY_PORT_MAPPING_HEADER,
-                &messages::format_add_any_port_mapping_message(
-                    schema,
-                    protocol,
-                    external_port,
-                    local_addr,
-                    lease_duration,
-                    description,
-                ),
-                "AddAnyPortMappingResponse",
-            )?;
+            let response = self
+                .perform_request(
+                    messages::ADD_ANY_PORT_MAPPING_HEADER,
+                    &messages::format_add_any_port_mapping_message(
+                        schema,
+                        protocol,
+                        external_port,
+                        local_addr,
+                        lease_duration,
+                        description,
+                    ),
+                    "AddAnyPortMappingResponse",
+                )
+                .await?;
             response
                 .child_text("NewReservedPort")
                 .and_then(|p| p.parse().ok())
                 .ok_or_else(|| IgdError::parse("invalid reserved port"))
         } else {
             self.retry_add_random_port_mapping(protocol, local_addr, lease_duration, description)
+                .await
         }
     }
 
-    fn retry_add_random_port_mapping(
+    async fn retry_add_random_port_mapping(
         &self,
         protocol: PortMappingProtocol,
         local_addr: SocketAddr,
@@ -121,13 +126,16 @@ impl Gateway {
 
         for _ in 0..ATTEMPTS {
             let external_port = random_port();
-            match self.add_port_mapping(
-                protocol,
-                external_port,
-                local_addr,
-                lease_duration,
-                description,
-            ) {
+            match self
+                .add_port_mapping(
+                    protocol,
+                    external_port,
+                    local_addr,
+                    lease_duration,
+                    description,
+                )
+                .await
+            {
                 Ok(()) => return Ok(external_port),
                 Err(e) if e.soap_code() == Some(SAME_PORT_VALUES_REQUIRED) => {
                     return self
@@ -138,6 +146,7 @@ impl Gateway {
                             lease_duration,
                             description,
                         )
+                        .await
                         .map(|()| local_addr.port());
                 }
                 Err(_) => {}
@@ -146,7 +155,7 @@ impl Gateway {
         Err(IgdError::message("no ports available"))
     }
 
-    fn add_port_mapping(
+    async fn add_port_mapping(
         &self,
         protocol: PortMappingProtocol,
         external_port: u16,
@@ -169,14 +178,15 @@ impl Gateway {
                 description,
             ),
             "AddPortMappingResponse",
-        )?;
+        )
+        .await?;
         Ok(())
     }
 
     /// Add a port mapping with a specific external port.
     ///
     /// The `lease_duration` is in seconds; zero means infinite.
-    pub fn add_port(
+    pub async fn add_port(
         &self,
         protocol: PortMappingProtocol,
         external_port: u16,
@@ -197,10 +207,11 @@ impl Gateway {
             lease_duration,
             description,
         )
+        .await
     }
 
     /// Remove a port mapping.
-    pub fn remove_port(
+    pub async fn remove_port(
         &self,
         protocol: PortMappingProtocol,
         external_port: u16,
@@ -213,7 +224,8 @@ impl Gateway {
             messages::DELETE_PORT_MAPPING_HEADER,
             &messages::format_delete_port_message(schema, protocol, external_port),
             "DeletePortMappingResponse",
-        )?;
+        )
+        .await?;
         Ok(())
     }
 }

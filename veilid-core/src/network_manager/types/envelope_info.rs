@@ -54,15 +54,30 @@ impl TimestampOffset {
     }
 }
 
+/// One envelope in a node's timestamp log
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EnvelopeLogEntry {
+    /// When it was received
+    pub local: Timestamp,
+    /// Whether it passed the timestamp check, and so counts toward the offset
+    pub accepted: bool,
+}
+
 /// Per-node envelope timestamp logging
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct EnvelopeInfo {
     /// Most recent calculated average timestamp offset
     pub timestamp_offset: TimestampOffset,
-    /// Internal total offset for calculating average
+    /// Internal total offset for calculating average, over accepted envelopes only
     pub total_offset: i128,
-    /// Timestamp log for envelopes (map from claimed timestamp to received timestamp)
-    pub envelope_timestamp_log: LinkedHashMap<Timestamp, Timestamp>,
+    /// Accepted envelopes in the log
+    pub accepted_count: usize,
+    /// Envelopes by claimed timestamp, rejected ones too so every duplicate is caught
+    pub envelope_timestamp_log: LinkedHashMap<Timestamp, EnvelopeLogEntry>,
+    /// The (claimed, received) timestamps of the envelope the offset was seeded from
+    pub seed: (Timestamp, Timestamp),
+    /// When envelopes started failing the check, with none passing since
+    pub rejecting_since: Option<Timestamp>,
 }
 
 impl fmt::Debug for EnvelopeInfo {
@@ -80,7 +95,7 @@ impl fmt::Debug for EnvelopeInfo {
                 write!(
                     f,
                     "offset: {:?} log(len={}): {:?}->{:?} ... {:?}->{:?}",
-                    self.timestamp_offset, len, front.0, front.1, back.0, back.1
+                    self.timestamp_offset, len, front.0, front.1.local, back.0, back.1.local
                 )
             } else {
                 write!(f, "offset: {:?} log(len={})", self.timestamp_offset, len)
@@ -98,7 +113,7 @@ impl fmt::Display for EnvelopeInfo {
             write!(
                 f,
                 "offset: {:?} log(len={}): {}->{} ... {}->{}",
-                self.timestamp_offset, len, front.0, front.1, back.0, back.1
+                self.timestamp_offset, len, front.0, front.1.local, back.0, back.1.local
             )
         } else {
             write!(f, "offset: {:?} log(len={})", self.timestamp_offset, len)
@@ -109,41 +124,69 @@ impl fmt::Display for EnvelopeInfo {
 impl EnvelopeInfo {
     pub fn new(local_timestamp: Timestamp, remote_timestamp: Timestamp) -> Self {
         let mut envelope_timestamp_log = LinkedHashMap::new();
-        envelope_timestamp_log.insert(remote_timestamp, local_timestamp);
+        envelope_timestamp_log.insert(
+            remote_timestamp,
+            EnvelopeLogEntry {
+                local: local_timestamp,
+                accepted: true,
+            },
+        );
 
         Self {
             timestamp_offset: TimestampOffset::new(local_timestamp, remote_timestamp),
             total_offset: (remote_timestamp.as_u64() as i128) - (local_timestamp.as_u64() as i128),
+            accepted_count: 1,
             envelope_timestamp_log,
+            seed: (remote_timestamp, local_timestamp),
+            rejecting_since: None,
         }
     }
 
-    /// Add an envelope timestamp to the log
+    /// Add an envelope timestamp to the log. Only an accepted one moves the offset, so
+    /// stale or replayed envelopes cannot drag it.
     pub fn add_timestamp(
         &mut self,
         local_timestamp: Timestamp,
         remote_timestamp: Timestamp,
+        accepted: bool,
         oldest_local_timestamp: Timestamp,
     ) {
-        self.envelope_timestamp_log
-            .insert(remote_timestamp, local_timestamp);
-        self.total_offset +=
-            (remote_timestamp.as_u64() as i128) - (local_timestamp.as_u64() as i128);
+        self.envelope_timestamp_log.insert(
+            remote_timestamp,
+            EnvelopeLogEntry {
+                local: local_timestamp,
+                accepted,
+            },
+        );
+        if accepted {
+            self.total_offset +=
+                (remote_timestamp.as_u64() as i128) - (local_timestamp.as_u64() as i128);
+            self.accepted_count += 1;
+            self.rejecting_since = None;
+        } else {
+            self.rejecting_since.get_or_insert(local_timestamp);
+        }
 
         // Trim log
         while self.envelope_timestamp_log.len() > ENVELOPE_TIMESTAMP_LOG_LENGTH
             || self
                 .envelope_timestamp_log
                 .front()
-                .map(|tt| *tt.1 < oldest_local_timestamp)
+                .map(|tt| tt.1.local < oldest_local_timestamp)
                 .unwrap_or(false)
         {
-            let (rts, lts) = self.envelope_timestamp_log.pop_front().unwrap_or_log();
-            self.total_offset -= (rts.as_u64() as i128) - (lts.as_u64() as i128);
+            let (rts, entry) = self.envelope_timestamp_log.pop_front().unwrap_or_log();
+            if entry.accepted {
+                self.total_offset -= (rts.as_u64() as i128) - (entry.local.as_u64() as i128);
+                self.accepted_count -= 1;
+            }
         }
 
-        // Update average offset
-        let average_offset = self.total_offset / self.envelope_timestamp_log.len() as i128;
+        // With nothing accepted in the window the last average stands
+        if self.accepted_count == 0 {
+            return;
+        }
+        let average_offset = self.total_offset / self.accepted_count as i128;
         let offset_cur_ts = if average_offset < 0 {
             local_timestamp.earlier(TimestampDuration::new((-average_offset) as u64))
         } else {
@@ -151,5 +194,26 @@ impl EnvelopeInfo {
         };
 
         self.timestamp_offset = TimestampOffset::new(local_timestamp, offset_cur_ts);
+    }
+
+    /// Start the offset over from this envelope, keeping the log for duplicates
+    pub fn reseed(
+        &mut self,
+        local_timestamp: Timestamp,
+        remote_timestamp: Timestamp,
+        oldest_local_timestamp: Timestamp,
+    ) {
+        for entry in self.envelope_timestamp_log.values_mut() {
+            entry.accepted = false;
+        }
+        self.total_offset = 0;
+        self.accepted_count = 0;
+        self.seed = (remote_timestamp, local_timestamp);
+        self.add_timestamp(
+            local_timestamp,
+            remote_timestamp,
+            true,
+            oldest_local_timestamp,
+        );
     }
 }

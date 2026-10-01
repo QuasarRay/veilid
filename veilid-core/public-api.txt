@@ -21,8 +21,8 @@ pub mod veilid_core::public_key_try_untyped_vld0
 pub fn veilid_core::public_key_try_untyped_vld0::deserialize<'de, D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<veilid_core::PublicKey, <D as serde_core::de::Deserializer>::Error>
 pub fn veilid_core::public_key_try_untyped_vld0::serialize<S: serde_core::ser::Serializer>(&veilid_core::PublicKey, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 pub mod veilid_core::serialize_arc
-pub fn veilid_core::serialize_arc::deserialize<'de, T: serde_core::de::Deserialize<'de>, D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<alloc::sync::Arc<T>, <D as serde_core::de::Deserializer>::Error>
-pub fn veilid_core::serialize_arc::serialize<T: serde_core::ser::Serialize, S: serde_core::ser::Serializer>(&alloc::sync::Arc<T>, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub fn veilid_core::serialize_arc::deserialize<'de, T: serde_core::de::Deserialize<'de>, D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<alloc::rcs::arc::Arc<T>, <D as serde_core::de::Deserializer>::Error>
+pub fn veilid_core::serialize_arc::serialize<T: serde_core::ser::Serialize, S: serde_core::ser::Serializer>(&alloc::rcs::arc::Arc<T>, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 pub mod veilid_core::serialize_hash_map_as_pairs
 pub fn veilid_core::serialize_hash_map_as_pairs::deserialize<'de, K, V, D>(D) -> core::result::Result<std::collections::hash::map::HashMap<K, V>, <D as serde_core::de::Deserializer>::Error> where K: serde_core::de::Deserialize<'de> + core::cmp::Eq + core::hash::Hash, V: serde_core::de::Deserialize<'de>, D: serde_core::de::Deserializer<'de>
 pub fn veilid_core::serialize_hash_map_as_pairs::serialize<K: serde_core::ser::Serialize, V: serde_core::ser::Serialize, S: serde_core::ser::Serializer>(&std::collections::hash::map::HashMap<K, V>, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
@@ -46,14 +46,14 @@ pub macro veilid_core::apibail_timeout!
 pub macro veilid_core::apibail_transaction_not_found!
 pub macro veilid_core::apibail_try_again!
 pub enum veilid_core::AttachmentState
-pub veilid_core::AttachmentState::AttachedFair = 3
-pub veilid_core::AttachmentState::AttachedFull = 6
-pub veilid_core::AttachmentState::AttachedGood = 4
-pub veilid_core::AttachmentState::AttachedStrong = 5
-pub veilid_core::AttachmentState::AttachedWeak = 2
-pub veilid_core::AttachmentState::Attaching = 1
+pub veilid_core::AttachmentState::AttachedFair = 4
+pub veilid_core::AttachmentState::AttachedFull = 7
+pub veilid_core::AttachmentState::AttachedGood = 5
+pub veilid_core::AttachmentState::AttachedStrong = 6
+pub veilid_core::AttachmentState::AttachedWeak = 3
+pub veilid_core::AttachmentState::Attaching = 2
 pub veilid_core::AttachmentState::Detached = 0
-pub veilid_core::AttachmentState::Detaching = 7
+pub veilid_core::AttachmentState::Detaching = 1
 impl veilid_core::AttachmentState
 pub fn veilid_core::AttachmentState::bar_count(&self) -> u8
 pub fn veilid_core::AttachmentState::is_attached(&self) -> bool
@@ -197,6 +197,11 @@ pub fn veilid_core::VeilidAPIError::try_again<T: veilid_core::ToVeilidAPIErrorAr
 pub fn veilid_core::VeilidAPIError::unimplemented<T: alloc::string::ToString>(T) -> Self
 impl core::convert::From<core::io::error::Error> for veilid_core::VeilidAPIError
 pub fn veilid_core::VeilidAPIError::from(core::io::error::Error) -> Self
+pub enum veilid_core::VeilidAppLifecycleState
+pub veilid_core::VeilidAppLifecycleState::Active
+pub veilid_core::VeilidAppLifecycleState::Background
+impl core::convert::From<veilid_tools::app_lifecycle::AppLifecycleState> for veilid_core::VeilidAppLifecycleState
+pub fn veilid_core::VeilidAppLifecycleState::from(veilid_tools::app_lifecycle::AppLifecycleState) -> Self
 pub enum veilid_core::VeilidConfigAddressType
 pub veilid_core::VeilidConfigAddressType::Ipv4
 pub veilid_core::VeilidConfigAddressType::Ipv6
@@ -1186,7 +1191,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -2031,6 +2036,8 @@ pub fn veilid_core::OpaqueRecordKeyGroup::deref(&self) -> &[veilid_core::OpaqueR
 impl core::str::traits::FromStr for veilid_core::OpaqueRecordKeyGroup
 pub type veilid_core::OpaqueRecordKeyGroup::Err = veilid_core::VeilidAPIError
 pub fn veilid_core::OpaqueRecordKeyGroup::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub struct veilid_core::OpenDHTRecordOptions
+pub veilid_core::OpenDHTRecordOptions::rehydrate: core::option::Option<bool>
 #[repr(C, align(8))] pub struct veilid_core::OperationId(_)
 impl veilid_core::OperationId
 pub const fn veilid_core::OperationId::as_u64(self) -> u64
@@ -2327,7 +2334,7 @@ pub async fn veilid_core::RoutingContext::delete_dht_record(&self, veilid_core::
 pub async fn veilid_core::RoutingContext::flush_dht_record(&self, veilid_core::RecordKey, core::option::Option<core::time::Duration>) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::RoutingContext::get_dht_value(&self, veilid_core::RecordKey, veilid_core::ValueSubkey, bool) -> veilid_core::VeilidAPIResult<core::option::Option<veilid_core::ValueData>>
 pub async fn veilid_core::RoutingContext::inspect_dht_record(&self, veilid_core::RecordKey, core::option::Option<veilid_core::ValueSubkeyRangeSet>, veilid_core::DHTReportScope) -> veilid_core::VeilidAPIResult<veilid_core::DHTRecordReport>
-pub async fn veilid_core::RoutingContext::open_dht_record(&self, veilid_core::RecordKey, core::option::Option<veilid_core::KeyPair>) -> veilid_core::VeilidAPIResult<veilid_core::DHTRecordDescriptor>
+pub async fn veilid_core::RoutingContext::open_dht_record(&self, veilid_core::RecordKey, core::option::Option<veilid_core::KeyPair>, core::option::Option<veilid_core::OpenDHTRecordOptions>) -> veilid_core::VeilidAPIResult<veilid_core::DHTRecordDescriptor>
 pub fn veilid_core::RoutingContext::safety(&self) -> veilid_core::SafetySelection
 pub fn veilid_core::RoutingContext::sequencing(&self) -> veilid_core::Sequencing
 pub async fn veilid_core::RoutingContext::set_dht_value(&self, veilid_core::RecordKey, veilid_core::ValueSubkey, alloc::vec::Vec<u8>, core::option::Option<veilid_core::SetDHTValueOptions>) -> veilid_core::VeilidAPIResult<core::option::Option<veilid_core::ValueData>>
@@ -2791,7 +2798,7 @@ pub struct veilid_core::VeilidAPI
 impl veilid_core::VeilidAPI
 pub async fn veilid_core::VeilidAPI::app_call_reply(&self, veilid_core::OperationId, alloc::vec::Vec<u8>) -> veilid_core::VeilidAPIResult<()>
 pub async fn veilid_core::VeilidAPI::attach(&self) -> veilid_core::VeilidAPIResult<()>
-pub fn veilid_core::VeilidAPI::config(&self) -> veilid_core::VeilidAPIResult<alloc::sync::Arc<veilid_core::VeilidConfig>>
+pub fn veilid_core::VeilidAPI::config(&self) -> veilid_core::VeilidAPIResult<alloc::rcs::arc::Arc<veilid_core::VeilidConfig>>
 pub fn veilid_core::VeilidAPI::crypto(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidComponentGuard<'_, veilid_core::Crypto>>
 pub async fn veilid_core::VeilidAPI::delete_all_user_secrets(&self) -> veilid_core::VeilidAPIResult<()>
 pub async fn veilid_core::VeilidAPI::delete_table_db(&self, &str) -> veilid_core::VeilidAPIResult<bool>
@@ -2810,10 +2817,12 @@ pub async fn veilid_core::VeilidAPI::open_table_db(&self, &str, u32) -> veilid_c
 pub fn veilid_core::VeilidAPI::release_private_route(&self, veilid_core::RouteId) -> veilid_core::VeilidAPIResult<()>
 pub async fn veilid_core::VeilidAPI::remove_user_secret(&self, alloc::string::String) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::VeilidAPI::rename_table_db(&self, &str, &str) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::VeilidAPI::report_app_lifecycle_state(&self, veilid_core::VeilidAppLifecycleState) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidAPI::routing_context(&self) -> veilid_core::VeilidAPIResult<veilid_core::RoutingContext>
 pub async fn veilid_core::VeilidAPI::save_user_secret(&self, alloc::string::String, alloc::vec::Vec<u8>) -> veilid_core::VeilidAPIResult<bool>
 pub async fn veilid_core::VeilidAPI::shutdown(self)
 pub async fn veilid_core::VeilidAPI::transact_dht_records(&self, alloc::vec::Vec<veilid_core::RecordKey>, core::option::Option<veilid_core::TransactDHTRecordsOptions>) -> veilid_core::VeilidAPIResult<veilid_core::DHTTransaction>
+pub async fn veilid_core::VeilidAPI::wait_for_attachment_condition(&self, core::option::Option<veilid_core::VeilidStateAttachmentCondition>, core::option::Option<core::time::Duration>) -> veilid_core::VeilidAPIResult<veilid_core::VeilidStateAttachment>
 impl veilid_core::VeilidAPI
 pub async fn veilid_core::VeilidAPI::debug(&self, alloc::string::String) -> veilid_core::VeilidAPIResult<alloc::string::String>
 pub struct veilid_core::VeilidAppCall
@@ -2865,6 +2874,7 @@ impl<T> core::ops::deref::Deref for veilid_core::VeilidComponentGuard<'_, T> whe
 pub type veilid_core::VeilidComponentGuard<'_, T>::Target = T
 pub fn veilid_core::VeilidComponentGuard<'_, T>::deref(&self) -> &Self::Target
 pub struct veilid_core::VeilidConfig
+pub veilid_core::VeilidConfig::attachment: veilid_core::VeilidConfigAttachment
 pub veilid_core::VeilidConfig::block_store: veilid_core::VeilidConfigBlockStore
 pub veilid_core::VeilidConfig::capabilities: veilid_core::VeilidConfigCapabilities
 pub veilid_core::VeilidConfig::internal: core::option::Option<veilid_core::VeilidConfigInternal>
@@ -2877,8 +2887,15 @@ impl veilid_core::VeilidConfig
 pub fn veilid_core::VeilidConfig::get_key_json(&self, &str, bool) -> veilid_core::VeilidAPIResult<alloc::string::String>
 pub fn veilid_core::VeilidConfig::internal(&self) -> &veilid_core::VeilidConfigInternal
 pub fn veilid_core::VeilidConfig::new(&str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> Self
-pub fn veilid_core::VeilidConfig::safe(&self) -> alloc::sync::Arc<veilid_core::VeilidConfig>
+pub fn veilid_core::VeilidConfig::safe(&self) -> alloc::rcs::arc::Arc<veilid_core::VeilidConfig>
 pub fn veilid_core::VeilidConfig::validate(&self) -> veilid_core::VeilidAPIResult<()>
+pub struct veilid_core::VeilidConfigAppLifecycle
+pub veilid_core::VeilidConfigAppLifecycle::auto_detect_state: bool
+pub veilid_core::VeilidConfigAppLifecycle::prefer_foreground: bool
+impl core::default::Default for veilid_core::VeilidConfigAppLifecycle
+pub fn veilid_core::VeilidConfigAppLifecycle::default() -> Self
+pub struct veilid_core::VeilidConfigAttachment
+pub veilid_core::VeilidConfigAttachment::app_lifecycle: veilid_core::VeilidConfigAppLifecycle
 pub struct veilid_core::VeilidConfigBlockStore
 pub veilid_core::VeilidConfigBlockStore::delete: bool
 pub veilid_core::VeilidConfigBlockStore::directory: alloc::string::String
@@ -3104,7 +3121,7 @@ impl core::fmt::Display for veilid_core::VeilidRouteChange
 pub fn veilid_core::VeilidRouteChange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error>
 pub struct veilid_core::VeilidStartupOptions
 impl veilid_core::VeilidStartupOptions
-pub fn veilid_core::VeilidStartupOptions::config(&self) -> alloc::sync::Arc<veilid_core::VeilidConfig>
+pub fn veilid_core::VeilidStartupOptions::config(&self) -> alloc::rcs::arc::Arc<veilid_core::VeilidConfig>
 pub fn veilid_core::VeilidStartupOptions::update_callback(&self) -> veilid_core::UpdateCallback
 impl core::fmt::Debug for veilid_core::VeilidStartupOptions
 pub fn veilid_core::VeilidStartupOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -3125,6 +3142,13 @@ pub veilid_core::VeilidStateAttachment::state: veilid_core::AttachmentState
 pub veilid_core::VeilidStateAttachment::uptime: veilid_core::TimestampDuration
 impl core::fmt::Display for veilid_core::VeilidStateAttachment
 pub fn veilid_core::VeilidStateAttachment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::result::Result<(), core::fmt::Error>
+pub struct veilid_core::VeilidStateAttachmentCondition
+pub veilid_core::VeilidStateAttachmentCondition::opt_local_network_ready: core::option::Option<bool>
+pub veilid_core::VeilidStateAttachmentCondition::opt_max_state: core::option::Option<veilid_core::AttachmentState>
+pub veilid_core::VeilidStateAttachmentCondition::opt_min_state: core::option::Option<veilid_core::AttachmentState>
+pub veilid_core::VeilidStateAttachmentCondition::opt_public_internet_ready: core::option::Option<bool>
+impl veilid_core::VeilidStateAttachmentCondition
+pub fn veilid_core::VeilidStateAttachmentCondition::is_satisfied_by(&self, &veilid_core::VeilidStateAttachment) -> bool
 pub struct veilid_core::VeilidStateConfig
 pub veilid_core::VeilidStateConfig::config: veilid_core::VeilidConfig
 impl core::fmt::Display for veilid_core::VeilidStateConfig
@@ -3395,8 +3419,8 @@ pub fn veilid_core::veilid_features() -> alloc::vec::Vec<alloc::string::String>
 pub fn veilid_core::veilid_version() -> (u32, u32, u32)
 pub fn veilid_core::veilid_version_string() -> alloc::string::String
 pub type veilid_core::SequenceOrderingSet = enumset::impl_set::EnumSet<veilid_core::SequenceOrdering>
-pub type veilid_core::UpdateCallback = alloc::sync::Arc<(dyn core::ops::function::Fn(veilid_core::VeilidUpdate) + core::marker::Send + core::marker::Sync)>
+pub type veilid_core::UpdateCallback = alloc::rcs::arc::Arc<(dyn core::ops::function::Fn(veilid_core::VeilidUpdate) + core::marker::Send + core::marker::Sync)>
 pub type veilid_core::ValueSubkey = u32
 pub type veilid_core::VeilidAPIResult<T> = core::result::Result<T, veilid_core::VeilidAPIError>
-pub type veilid_core::VeilidLayerLogKeyFilter = alloc::sync::Arc<(dyn core::ops::function::Fn(&str) -> bool + core::marker::Send + core::marker::Sync)>
+pub type veilid_core::VeilidLayerLogKeyFilter = alloc::rcs::arc::Arc<(dyn core::ops::function::Fn(&str) -> bool + core::marker::Send + core::marker::Sync)>
 pub type veilid_core::VeilidLogKey = &'static str

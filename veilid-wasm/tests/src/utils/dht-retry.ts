@@ -7,8 +7,7 @@
 // set/get, extend, commit, rollback). Local-only ops (create, close,
 // delete) don't need it.
 
-import { VeilidAPIError } from 'veilid-wasm';
-import { waitForPublicAttachment } from './wait-utils.js';
+import { VeilidAPIError, veilidClient } from 'veilid-wasm';
 
 export interface DhtRetryOptions {
   timeout?: number;
@@ -29,7 +28,7 @@ export const dhtRetry = async <T>(
       throw new Error(`${tag} timeout`);
     }
 
-    await waitForPublicAttachment();
+    await veilidClient.waitForAttachmentCondition();
 
     try {
       return await op();

@@ -1,26 +1,28 @@
 use super::*;
 
 /// Attachment abstraction for network 'signal strength'.
+///
+/// Ordered from least to most attached.
 #[apply(api_data_enum!)]
-#[api(eq, copy, default, ts(namespace))]
+#[api(eq, copy, ord, default, ts(namespace))]
 pub enum AttachmentState {
     /// Not attached to the network.
     #[default]
     Detached = 0,
-    /// Attaching, but not yet able to perform network operations.
-    Attaching = 1,
-    /// Attached with the weakest signal strength.
-    AttachedWeak = 2,
-    /// Attached with fair signal strength.
-    AttachedFair = 3,
-    /// Attached with good signal strength.
-    AttachedGood = 4,
-    /// Attached with strong signal strength.
-    AttachedStrong = 5,
-    /// Attached with the strongest signal strength.
-    AttachedFull = 6,
     /// Detaching from the network and shutting down connections.
-    Detaching = 7,
+    Detaching = 1,
+    /// Attaching, but not yet able to perform network operations.
+    Attaching = 2,
+    /// Attached with the weakest signal strength.
+    AttachedWeak = 3,
+    /// Attached with fair signal strength.
+    AttachedFair = 4,
+    /// Attached with good signal strength.
+    AttachedGood = 5,
+    /// Attached with strong signal strength.
+    AttachedStrong = 6,
+    /// Attached with the strongest signal strength.
+    AttachedFull = 7,
 }
 impl AttachmentState {
     /// Returns true when the node is fully detached from the network.
@@ -156,6 +158,41 @@ impl fmt::Display for VeilidStateAttachment {
             f.to_string_opt(self.median_latency.as_ref()),
             self.over_attached_nodes,
         )
+    }
+}
+
+/// A condition on [VeilidStateAttachment], for [VeilidAPI::wait_for_attachment_condition].
+///
+/// A field left `None` is not checked, so the default condition holds for every state.
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
+pub struct VeilidStateAttachmentCondition {
+    /// The least attached state that satisfies the condition.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub opt_min_state: Option<AttachmentState>,
+    /// The most attached state that satisfies the condition.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub opt_max_state: Option<AttachmentState>,
+    /// The PublicInternet readiness that satisfies the condition.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub opt_public_internet_ready: Option<bool>,
+    /// The LocalNetwork readiness that satisfies the condition.
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub opt_local_network_ready: Option<bool>,
+}
+
+impl VeilidStateAttachmentCondition {
+    /// Returns true when `attachment` satisfies every field that is set.
+    #[must_use]
+    pub fn is_satisfied_by(&self, attachment: &VeilidStateAttachment) -> bool {
+        self.opt_min_state.is_none_or(|min| attachment.state >= min)
+            && self.opt_max_state.is_none_or(|max| attachment.state <= max)
+            && self
+                .opt_public_internet_ready
+                .is_none_or(|ready| attachment.public_internet_ready == ready)
+            && self
+                .opt_local_network_ready
+                .is_none_or(|ready| attachment.local_network_ready == ready)
     }
 }
 

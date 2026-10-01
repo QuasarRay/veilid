@@ -30,7 +30,7 @@ crypto-test = ["rt-tokio", "veilid-core/crypto-test"]
 # (non-default) stats feature. Self-contained feature sets:
 #   cargo build -p veilid-flutter --no-default-features --features mock-api
 #   cargo build -p veilid-flutter --no-default-features --features mock-api-wasm --target wasm32-unknown-unknown
-mock-api = ["rt-tokio", "veilid-core/mock-api", "veilid-core/default-tokio", "debug-api"]
+mock-api = ["rt-tokio", "veilid-core/mock-api", "veilid-core/default-tokio"]
 mock-api-wasm = ["default-wasm", "veilid-core/mock-api", "debug-api"]
 rt-async-std = ["veilid-core/rt-async-std", "async-std"]
 rt-tokio = ["veilid-core/rt-tokio", "tokio"]
@@ -53,6 +53,7 @@ opentelemetry = [
 [dependencies]
 veilid-core = { path = "../../veilid-core", default-features = false, features = [
     "json-camel-case",
+    "app-lifecycle",
 ] }
 tracing = { version = "0.1.41", features = ["log", "attributes"] }
 tracing-subscriber = { version = "0.3.23", features = ["time"] }

@@ -71,7 +71,7 @@ impl RoutingTable {
             return Ok(());
         };
 
-        // Do flush every ROUTING_TABLE_FLUSH_INTERVAL_SECS secs
+        // Save to disk when the save schedule says
         self.flush_task.tick().await?;
 
         // Do rolling transfers every ROLLING_TRANSFERS_INTERVAL_SECS secs

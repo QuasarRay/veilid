@@ -1,16 +1,15 @@
 import 'dart:async';
 
-import 'processor_connection_state.dart';
-import 'retry.dart';
+import 'veilid.dart';
 
 /// Abstraction over Veilid attachment + network state.
 ///
-/// Production app code implements this against the live Veilid attachment
-/// state (see veilidchat's `VeilidProcessorRepository`). Integration-test
-/// harnesses provide their own implementation backed by their fixture-side
-/// connection-state stream so code under test doesn't depend on the
+/// Production app code extends [DefaultVeilidProcessor] against the live
+/// Veilid attachment state (see veilidchat's `VeilidProcessorRepository`).
+/// Integration-test harnesses extend it too, backed by their fixture-side
+/// connection-state stream, so code under test doesn't depend on the
 /// singletons the production app stands up.
-abstract class VeilidProcessorInterface {
+abstract interface class VeilidProcessorInterface {
   /// Latest snapshot of the Veilid attachment + network state.
   ProcessorConnectionState get processorConnectionState;
 
@@ -18,28 +17,33 @@ abstract class VeilidProcessorInterface {
   /// whether to emit on every update or only on changes; treat values as
   /// current-state snapshots.
   Stream<ProcessorConnectionState> streamProcessorConnectionState();
-}
 
-/// Network-aware retry, shared across every [VeilidProcessorInterface].
-extension VeilidProcessorRetry on VeilidProcessorInterface {
-  /// Complete once `publicInternetReady` is (or becomes) true.
-  Future<void> waitPublicInternetReady({Duration? timeout}) async {
-    if (processorConnectionState.isPublicInternetReady) {
-      return;
-    }
-    var stream = streamProcessorConnectionState().where(
-      (s) => s.isPublicInternetReady,
-    );
-    if (timeout != null) {
-      stream = stream.timeout(timeout);
-    }
-    await stream.first;
-  }
+  /// Complete once the node is attached with PublicInternet ready. Throws
+  /// [TimeoutException] if [timeout] elapses first.
+  Future<void> waitPublicInternetReady({Duration? timeout});
 
   /// Wait until ready; if already ready, wait [fallbackDelay] instead so a
   /// retry that failed despite being online doesn't hammer.
+  Future<void> waitReadyOrDelay([Duration? fallbackDelay]);
+}
+
+/// A [VeilidProcessorInterface] whose readiness waits ask core rather than
+/// [processorConnectionState], which holds what core last reported and is
+/// stale after the process was frozen.
+abstract class DefaultVeilidProcessor implements VeilidProcessorInterface {
+  @override
+  Future<void> waitPublicInternetReady({Duration? timeout}) async {
+    try {
+      await Veilid.instance.waitForAttachmentCondition(timeout: timeout);
+    } on VeilidAPIExceptionTimeout {
+      throw TimeoutException('PublicInternet not ready', timeout);
+    }
+  }
+
+  @override
   Future<void> waitReadyOrDelay([Duration? fallbackDelay]) async {
-    if (processorConnectionState.isPublicInternetReady) {
+    final state = await Veilid.instance.getVeilidState();
+    if (state.attachment.publicInternetReady) {
       if (fallbackDelay != null) {
         await Future<void>.delayed(fallbackDelay);
       }
@@ -47,7 +51,10 @@ extension VeilidProcessorRetry on VeilidProcessorInterface {
       await waitPublicInternetReady();
     }
   }
+}
 
+/// Network-aware retry, shared across every [VeilidProcessorInterface].
+extension VeilidProcessorRetry on VeilidProcessorInterface {
   /// Run [closure], retrying VeilidAPI transients per [strategy] (default
   /// [VeilidAPIRetryStrategy], waiting on network readiness before a tryAgain
   /// retry).

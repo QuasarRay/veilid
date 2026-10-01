@@ -32,8 +32,11 @@ else
     # txt_records_survive_restart are the native tests that reach the network. The mock pass covers
     # the attachment lifecycle and run_test_resolver covers answer decoding, so all four are
     # excluded to keep this script offline.
+    #
+    # app-lifecycle is on here, as the app bindings ship it, so its tests run; clippy's
+    # `-p veilid-core` pass compiles it off, as veilid-server ships it.
     native_pass() {
-        cargo nextest run "$@" --tests --target $TARGET --all-targets --locked --features=debug-locks -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core-optimized -p veilid-core -p veilid-remote-api \
+        cargo nextest run "$@" --tests --target $TARGET --all-targets --locked --features=debug-locks,veilid-core/app-lifecycle -p veilid-server -p veilid-cli -p veilid-tools -p veilid-core-optimized -p veilid-core -p veilid-remote-api \
             -E 'not (test(=tests::native::run_test_attachment_manager) + test(=tests::native::run_test_bootstrap) + test(=tests::native::run_test_resolver_live) + test(=tests::bootstrap_records::tests::txt_records_survive_restart))'
     }
     # A second pass over veilid-core against the mock, where the DHT and transaction suites run.
@@ -41,7 +44,7 @@ else
     mock_pass() {
         cargo nextest run "$@" --tests --target $TARGET --all-targets --locked \
             -p veilid-core --no-default-features \
-            --features=default-tokio,debug-api,backtrace,debug-locks,mock-api
+            --features=default-tokio,debug-locks,mock-api
     }
 
     # Wall time per phase. Each pass is built with --no-run and then run, so the log says

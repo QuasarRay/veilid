@@ -122,10 +122,18 @@ abstract class VeilidRoutingContext {
   ///
   /// Throws [VeilidAPIExceptionGeneric] if [key] is an unsupported kind or
   /// malformed, or [writer] is a malformed keypair; [VeilidAPIExceptionTryAgain]
-  /// if the record is not yet local and the node is offline (retry);
+  /// if the record is not yet local and the node is offline or no node answered
+  /// (retry);
   /// [VeilidAPIExceptionKeyNotFound] if the record does not exist on the
   /// network; [VeilidAPIExceptionNotInitialized] if the node is shut down.
-  Future<DHTRecordDescriptor> openDHTRecord(RecordKey key, {KeyPair? writer});
+  ///
+  /// Opening a record this node already holds queues a check that the network
+  /// still carries it; [options] with `rehydrate: false` skips it.
+  Future<DHTRecordDescriptor> openDHTRecord(
+    RecordKey key, {
+    KeyPair? writer,
+    OpenDHTRecordOptions? options,
+  });
 
   /// Close an opened DHT record so it can be re-opened with a different routing
   /// context.

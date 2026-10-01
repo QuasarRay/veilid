@@ -52,6 +52,15 @@ impl VeilidClient {
         crate::VEILID_CAPABILITY_TUNNEL.to_string().into()
     }
 
+    /// The TUNL capability, which this build lacks: throws Unimplemented
+    #[cfg(not(feature = "unstable-tunnels"))]
+    #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
+    pub fn VEILID_CAPABILITY_TUNNEL() -> VeilidAPIResult<JsValue> {
+        Err(VeilidAPIError::unimplemented(
+            "VEILID_CAPABILITY_TUNNEL needs the unstable-tunnels feature",
+        ))
+    }
+
     /// The SGNL capability
     #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
     #[must_use]
@@ -95,6 +104,15 @@ impl VeilidClient {
     #[must_use]
     pub fn VEILID_CAPABILITY_BLOCKSTORE() -> JsValue {
         crate::VEILID_CAPABILITY_BLOCKSTORE.to_string().into()
+    }
+
+    /// The BLOC capability, which this build lacks: throws Unimplemented
+    #[cfg(not(feature = "unstable-blockstore"))]
+    #[wasm_bindgen(getter, unchecked_return_type = "VeilidCapability")]
+    pub fn VEILID_CAPABILITY_BLOCKSTORE() -> VeilidAPIResult<JsValue> {
+        Err(VeilidAPIError::unimplemented(
+            "VEILID_CAPABILITY_BLOCKSTORE needs the unstable-blockstore feature",
+        ))
     }
 
     /// All distance metric capabilites of this version of Veilid
@@ -349,6 +367,36 @@ impl VeilidClient {
     pub async fn detach() -> VeilidAPIResult<()> {
         let veilid_api = get_veilid_api()?;
         veilid_api.detach().await
+    }
+
+    /// Report where the host application stands in its lifecycle.
+    ///
+    /// The node follows this itself in a web page and a service worker, and a report counts there only when `attachment.appLifecycle.autoDetectState` is off. A dedicated or shared worker sees no lifecycle, so there the host page's reports are all it has.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::report_app_lifecycle_state` returns: `NotInitialized` if the node is not started.
+    pub fn reportAppLifecycleState(state: Ts<VeilidAppLifecycleState>) -> VeilidAPIResult<()> {
+        let veilid_api = get_veilid_api()?;
+        veilid_api.report_app_lifecycle_state(from_ts(state)?)
+    }
+
+    /// Wait until the attachment state satisfies a condition.
+    ///
+    /// Returns the first attachment state that satisfies `condition`, at once if the current state does. A `condition` field left unset is not checked. Without a `condition`, waits until the node is attached, at any strength, with PublicInternet ready.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::wait_for_attachment_condition` returns: `Timeout` once `timeoutMs` elapses (without one it waits indefinitely), `InvalidArgument` if the condition's least state is above its most, and `NotInitialized` if the node shuts down while waiting.
+    pub async fn waitForAttachmentCondition(
+        condition: Option<Ts<VeilidStateAttachmentCondition>>,
+        timeoutMs: Option<u32>,
+    ) -> VeilidAPIResult<Ts<VeilidStateAttachment>> {
+        let veilid_api = get_veilid_api()?;
+        let condition = from_opt_ts(condition)?;
+        let attachment = veilid_api
+            .wait_for_attachment_condition(
+                condition,
+                timeoutMs.map(|ms| Duration::from_millis(ms as u64)),
+            )
+            .await?;
+        to_ts(&attachment)
     }
 
     /// Get a cryptosystem by its kind

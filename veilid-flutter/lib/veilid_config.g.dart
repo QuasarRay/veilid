@@ -545,6 +545,28 @@ Map<String, dynamic> _$VeilidConfigCapabilitiesToJson(
   _VeilidConfigCapabilities instance,
 ) => <String, dynamic>{'disable': instance.disable};
 
+_VeilidConfigAppLifecycle _$VeilidConfigAppLifecycleFromJson(
+  Map<String, dynamic> json,
+) => _VeilidConfigAppLifecycle(
+  preferForeground: json['preferForeground'] as bool? ?? true,
+);
+
+Map<String, dynamic> _$VeilidConfigAppLifecycleToJson(
+  _VeilidConfigAppLifecycle instance,
+) => <String, dynamic>{'preferForeground': instance.preferForeground};
+
+_VeilidConfigAttachment _$VeilidConfigAttachmentFromJson(
+  Map<String, dynamic> json,
+) => _VeilidConfigAttachment(
+  appLifecycle: json['appLifecycle'] == null
+      ? const VeilidConfigAppLifecycle()
+      : VeilidConfigAppLifecycle.fromJson(json['appLifecycle']),
+);
+
+Map<String, dynamic> _$VeilidConfigAttachmentToJson(
+  _VeilidConfigAttachment instance,
+) => <String, dynamic>{'appLifecycle': instance.appLifecycle.toJson()};
+
 _VeilidConfigInternalUDP _$VeilidConfigInternalUDPFromJson(
   Map<String, dynamic> json,
 ) => _VeilidConfigInternalUDP(
@@ -701,6 +723,9 @@ _VeilidConfig _$VeilidConfigFromJson(Map<String, dynamic> json) =>
       tableStore: VeilidConfigTableStore.fromJson(json['tableStore']),
       blockStore: VeilidConfigBlockStore.fromJson(json['blockStore']),
       network: VeilidConfigNetwork.fromJson(json['network']),
+      attachment: json['attachment'] == null
+          ? const VeilidConfigAttachment()
+          : VeilidConfigAttachment.fromJson(json['attachment']),
       internal: json['internal'] == null
           ? null
           : VeilidConfigInternal.fromJson(json['internal']),
@@ -715,5 +740,6 @@ Map<String, dynamic> _$VeilidConfigToJson(_VeilidConfig instance) =>
       'tableStore': instance.tableStore.toJson(),
       'blockStore': instance.blockStore.toJson(),
       'network': instance.network.toJson(),
+      'attachment': instance.attachment.toJson(),
       'internal': instance.internal?.toJson(),
     };

@@ -35,7 +35,7 @@ fn format_args(schema: &[String], value_for: impl Fn(&str) -> Option<String>) ->
         .iter()
         .filter_map(|argument| {
             let Some(value) = value_for(argument) else {
-                log::warn!("Unknown argument: {}", argument);
+                warn!("Unknown argument: {}", argument);
                 return None;
             };
             Some(format!("<{argument}>{value}</{argument}>"))

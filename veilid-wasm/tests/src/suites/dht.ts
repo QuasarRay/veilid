@@ -94,6 +94,19 @@ export const dhtSuite: Suite = {
       });
 
       cases.push({
+        name: `should reopen a held record without rehydration for ${cryptoKind}`,
+        run: withRecord(cryptoKind, async ({ expect }, rc, rec) => {
+          await rc.closeDHTRecord(rec.key);
+
+          const reopened = await dhtRetry(
+            () => rc.openDHTRecord(rec.key, undefined, { rehydrate: false }),
+            { label: 'openDHTRecord without rehydration' },
+          );
+          expect(reopened).toBeDefined();
+        }),
+      });
+
+      cases.push({
         name: `should open writable record for ${cryptoKind}`,
         run: withRecord(cryptoKind, async ({ expect }, rc, rec) => {
           await rc.closeDHTRecord(rec.key);

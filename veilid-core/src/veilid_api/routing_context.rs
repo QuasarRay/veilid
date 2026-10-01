@@ -498,22 +498,28 @@ impl RoutingContext {
     ///
     /// Returns the DHT record descriptor for the opened record if successful.
     ///
+    /// Opening a record already held locally queues a check that the network still carries it,
+    /// unless [OpenDHTRecordOptions::rehydrate] is false.
+    ///
     /// Half of an open/close pair: close it with [RoutingContext::close_dht_record] or the open handle and its watches leak.
     /// Re-opening an already-open record is safe and replaces the writer and safety selection in place, preserving active watches.
     /// Returns from the local store without a network round-trip when the record is already local; otherwise blocks on a network inspect (subkey 0), and returns `TryAgain` if offline.
     ///
     /// Errors with `VeilidAPIError::Generic` if `record_key` is an unsupported kind or malformed, or `default_writer`
     /// is a malformed keypair. Errors with `VeilidAPIError::TryAgain` if the record is not yet local and the node is
-    /// offline (retryable), `::KeyNotFound` if the record does not exist on the network, and `::NotInitialized` if the
-    /// node is shut down.
+    /// offline or no node answered (retryable), `::KeyNotFound` if the record does not exist on the network, and
+    /// `::NotInitialized` if the node is shut down.
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     pub async fn open_dht_record(
         &self,
         record_key: RecordKey,
         default_writer: Option<KeyPair>,
+        options: Option<OpenDHTRecordOptions>,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
         #[cfg(feature = "mock-api")]
-        return self.api.mock_open_dht_record(record_key, default_writer);
+        return self
+            .api
+            .mock_open_dht_record(record_key, default_writer, options);
         #[cfg(not(feature = "mock-api"))]
         return
         async {
@@ -526,15 +532,18 @@ impl RoutingContext {
             }
             let storage_manager = self.api.core_context()?.storage_manager();
 
+            let options = options.unwrap_or_default();
+
             let recorder = DurationRecorder::new("RoutingContext::open_dht_record", |name, start| {
                 veilid_log!(self debug
-                    "{}[start={:#}](self: {:?}, key: {:?}, default_writer: {:?})", name, start, self, record_key, default_writer);
+                    "{}[start={:#}](self: {:?}, key: {:?}, default_writer: {:?}, options: {:?})", name, start, self, record_key, default_writer, options);
             });
             recorder.record_fut(
                 storage_manager.open_record(
                     record_key,
                     default_writer,
                     self.unlocked_inner.safety_selection.clone(),
+                    options.rehydrate.unwrap_or(true),
                 ),
                 |name, start, dur, ret| {
                     veilid_log!(self debug

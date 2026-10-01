@@ -20,7 +20,13 @@ from .operations import (
     TableDbTransactionOperation,
     DhtTransactionOperation,
 )
-from .state import VeilidState, VeilidUpdate
+from .state import (
+    VeilidAppLifecycleState,
+    VeilidState,
+    VeilidStateAttachment,
+    VeilidStateAttachmentCondition,
+    VeilidUpdate,
+)
 from .types import (
     CryptoKind,
     DecapsulationKey,
@@ -34,6 +40,7 @@ from .types import (
     KeyPair,
     RouteBlob,
     Nonce,
+    OpenDHTRecordOptions,
     OperationId,
     PublicKey,
     RouteId,
@@ -342,6 +349,31 @@ class _JsonVeilidAPI(VeilidAPI):
 
     async def detach(self):
         raise_api_result(await self.send_ndjson_request(Operation.DETACH))
+
+    async def report_app_lifecycle_state(self, state: VeilidAppLifecycleState):
+        assert isinstance(state, VeilidAppLifecycleState)
+
+        raise_api_result(
+            await self.send_ndjson_request(Operation.REPORT_APP_LIFECYCLE_STATE, state=state)
+        )
+
+    async def wait_for_attachment_condition(
+        self,
+        condition: Optional[VeilidStateAttachmentCondition] = None,
+        timeout_ms: Optional[int] = None,
+    ) -> VeilidStateAttachment:
+        assert condition is None or isinstance(condition, VeilidStateAttachmentCondition)
+        assert timeout_ms is None or isinstance(timeout_ms, int)
+
+        return VeilidStateAttachment.from_json(
+            raise_api_result(
+                await self.send_ndjson_request(
+                    Operation.WAIT_FOR_ATTACHMENT_CONDITION,
+                    condition=condition,
+                    timeout_ms=timeout_ms,
+                )
+            )
+        )
 
     async def generate_member_id(self, writer_key: PublicKey) -> MemberId:
         assert isinstance(writer_key, PublicKey)
@@ -764,10 +796,14 @@ class _JsonRoutingContext(RoutingContext):
         )
 
     async def open_dht_record(
-        self, key: RecordKey, writer: Optional[KeyPair] = None
+        self,
+        key: RecordKey,
+        writer: Optional[KeyPair] = None,
+        options: Optional[OpenDHTRecordOptions] = None,
     ) -> DHTRecordDescriptor:
         assert isinstance(key, RecordKey)
         assert writer is None or isinstance(writer, KeyPair)
+        assert options is None or isinstance(options, OpenDHTRecordOptions)
 
         return DHTRecordDescriptor.from_json(
             raise_api_result(
@@ -778,6 +814,7 @@ class _JsonRoutingContext(RoutingContext):
                     rc_op=RoutingContextOperation.OPEN_DHT_RECORD,
                     key=key,
                     writer=writer,
+                    options=options,
                 )
             )
         )

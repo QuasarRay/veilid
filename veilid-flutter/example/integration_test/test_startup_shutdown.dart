@@ -264,4 +264,54 @@ class TestStartupShutdown {
       throwsA(isA<VeilidAPIExceptionNotInitialized>()),
     );
   }
+
+  Future<void> testReportAppLifecycleState() async {
+    final updates = _UpdateCollector(
+      await Veilid.instance.startupVeilidCore(config),
+    );
+
+    await Veilid.instance.reportAppLifecycleState(
+      VeilidAppLifecycleState.background,
+    );
+    await Veilid.instance.reportAppLifecycleState(
+      VeilidAppLifecycleState.active,
+    );
+
+    await Veilid.instance.shutdownVeilidCore();
+    await updates.done.timeout(_updateTimeout);
+  }
+
+  Future<void> testWaitForAttachmentCondition() async {
+    final updates = _UpdateCollector(
+      await Veilid.instance.startupVeilidCore(config),
+    );
+
+    final detached = await Veilid.instance.waitForAttachmentCondition(
+      condition: const VeilidStateAttachmentCondition(
+        optMaxState: AttachmentState.detached,
+      ),
+    );
+    expect(detached.state, equals(AttachmentState.detached));
+
+    // never attached, so the default condition cannot hold
+    await expectLater(
+      Veilid.instance.waitForAttachmentCondition(
+        timeout: const Duration(milliseconds: 500),
+      ),
+      throwsA(isA<VeilidAPIExceptionTimeout>()),
+    );
+
+    await expectLater(
+      Veilid.instance.waitForAttachmentCondition(
+        condition: const VeilidStateAttachmentCondition(
+          optMinState: AttachmentState.attachedFull,
+          optMaxState: AttachmentState.attachedWeak,
+        ),
+      ),
+      throwsA(isA<VeilidAPIExceptionInvalidArgument>()),
+    );
+
+    await Veilid.instance.shutdownVeilidCore();
+    await updates.done.timeout(_updateTimeout);
+  }
 }

@@ -2279,6 +2279,263 @@ as List<int?>,
 
 
 /// @nodoc
+mixin _$OpenDHTRecordOptions {
+
+ bool? get rehydrate;
+/// Create a copy of OpenDHTRecordOptions
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$OpenDHTRecordOptionsCopyWith<OpenDHTRecordOptions> get copyWith => _$OpenDHTRecordOptionsCopyWithImpl<OpenDHTRecordOptions>(this as OpenDHTRecordOptions, _$identity);
+
+  /// Serializes this OpenDHTRecordOptions to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is OpenDHTRecordOptions&&(identical(other.rehydrate, rehydrate) || other.rehydrate == rehydrate));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,rehydrate);
+
+@override
+String toString() {
+  return 'OpenDHTRecordOptions(rehydrate: $rehydrate)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $OpenDHTRecordOptionsCopyWith<$Res>  {
+  factory $OpenDHTRecordOptionsCopyWith(OpenDHTRecordOptions value, $Res Function(OpenDHTRecordOptions) _then) = _$OpenDHTRecordOptionsCopyWithImpl;
+@useResult
+$Res call({
+ bool? rehydrate
+});
+
+
+
+
+}
+/// @nodoc
+class _$OpenDHTRecordOptionsCopyWithImpl<$Res>
+    implements $OpenDHTRecordOptionsCopyWith<$Res> {
+  _$OpenDHTRecordOptionsCopyWithImpl(this._self, this._then);
+
+  final OpenDHTRecordOptions _self;
+  final $Res Function(OpenDHTRecordOptions) _then;
+
+/// Create a copy of OpenDHTRecordOptions
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? rehydrate = freezed,}) {
+  return _then(_self.copyWith(
+rehydrate: freezed == rehydrate ? _self.rehydrate : rehydrate // ignore: cast_nullable_to_non_nullable
+as bool?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [OpenDHTRecordOptions].
+extension OpenDHTRecordOptionsPatterns on OpenDHTRecordOptions {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _OpenDHTRecordOptions value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _OpenDHTRecordOptions() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _OpenDHTRecordOptions value)  $default,){
+final _that = this;
+switch (_that) {
+case _OpenDHTRecordOptions():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _OpenDHTRecordOptions value)?  $default,){
+final _that = this;
+switch (_that) {
+case _OpenDHTRecordOptions() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool? rehydrate)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _OpenDHTRecordOptions() when $default != null:
+return $default(_that.rehydrate);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool? rehydrate)  $default,) {final _that = this;
+switch (_that) {
+case _OpenDHTRecordOptions():
+return $default(_that.rehydrate);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool? rehydrate)?  $default,) {final _that = this;
+switch (_that) {
+case _OpenDHTRecordOptions() when $default != null:
+return $default(_that.rehydrate);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _OpenDHTRecordOptions implements OpenDHTRecordOptions {
+  const _OpenDHTRecordOptions({this.rehydrate});
+  factory _OpenDHTRecordOptions.fromJson(Map<String, dynamic> json) => _$OpenDHTRecordOptionsFromJson(json);
+
+@override final  bool? rehydrate;
+
+/// Create a copy of OpenDHTRecordOptions
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$OpenDHTRecordOptionsCopyWith<_OpenDHTRecordOptions> get copyWith => __$OpenDHTRecordOptionsCopyWithImpl<_OpenDHTRecordOptions>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$OpenDHTRecordOptionsToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _OpenDHTRecordOptions&&(identical(other.rehydrate, rehydrate) || other.rehydrate == rehydrate));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,rehydrate);
+
+@override
+String toString() {
+  return 'OpenDHTRecordOptions(rehydrate: $rehydrate)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$OpenDHTRecordOptionsCopyWith<$Res> implements $OpenDHTRecordOptionsCopyWith<$Res> {
+  factory _$OpenDHTRecordOptionsCopyWith(_OpenDHTRecordOptions value, $Res Function(_OpenDHTRecordOptions) _then) = __$OpenDHTRecordOptionsCopyWithImpl;
+@override @useResult
+$Res call({
+ bool? rehydrate
+});
+
+
+
+
+}
+/// @nodoc
+class __$OpenDHTRecordOptionsCopyWithImpl<$Res>
+    implements _$OpenDHTRecordOptionsCopyWith<$Res> {
+  __$OpenDHTRecordOptionsCopyWithImpl(this._self, this._then);
+
+  final _OpenDHTRecordOptions _self;
+  final $Res Function(_OpenDHTRecordOptions) _then;
+
+/// Create a copy of OpenDHTRecordOptions
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? rehydrate = freezed,}) {
+  return _then(_OpenDHTRecordOptions(
+rehydrate: freezed == rehydrate ? _self.rehydrate : rehydrate // ignore: cast_nullable_to_non_nullable
+as bool?,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
 mixin _$SetDHTValueOptions {
 
  KeyPair? get writer; bool? get allowOffline; int? get minSeqnum;

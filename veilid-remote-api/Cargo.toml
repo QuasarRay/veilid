@@ -21,6 +21,8 @@ default-async-std = ["rt-async-std"]
 rt-tokio = ["veilid-core/default-tokio"]
 rt-async-std = ["veilid-core/default-async-std"]
 debug-locks = ["veilid-core/debug-locks"]
+# Off by default, as in veilid-server: without it ReportAppLifecycleState answers Unimplemented
+app-lifecycle = ["veilid-core/app-lifecycle"]
 
 [lib]
 crate-type = ["staticlib", "rlib"]

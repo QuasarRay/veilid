@@ -4,8 +4,10 @@ pub mod test_network_estimator;
 pub mod test_nodes_needed;
 pub mod test_own_dial_info;
 pub mod test_persisted_reset;
+pub mod test_relay_info;
 pub mod test_route_stats;
 pub mod test_routing_metrics;
+pub mod test_save_schedule;
 pub mod test_serialize_routing_table;
 pub mod test_signed_node_info;
 
@@ -21,6 +23,7 @@ pub async fn test_all() {
     test_serialize_routing_table::test_routingtable_buckets_round_trip().await;
     test_serialize_routing_table::test_round_trip_peerinfo().await;
     test_signed_node_info::test_signed_node_info().await;
+    test_relay_info::test_relay_info_equivalent();
     test_routing_metrics::test_bucket_depth();
     test_routing_metrics::test_practical_max_size_zero();
     test_routing_metrics::test_practical_max_size_small_network_holds_most_nodes();
@@ -63,4 +66,14 @@ pub async fn test_all() {
     test_bucket_entry_state::test_state_transition_reliable_degrades_to_missing();
     test_bucket_entry_state::test_state_offline_credit_steady_lost_questions();
     test_bucket_entry_state::test_state_offline_credit_unreliable_answer();
+    test_save_schedule::test_save_schedule_change_waits_to_settle();
+    test_save_schedule::test_save_schedule_change_waits_for_min_interval();
+    test_save_schedule::test_save_schedule_periodic_without_changes();
+    test_save_schedule::test_save_schedule_state_changes_add_up();
+    test_save_schedule::test_save_schedule_saving_covers_earlier_changes_only();
+    #[cfg(feature = "app-lifecycle")]
+    {
+        test_save_schedule::test_save_schedule_background_saves_at_once();
+        test_save_schedule::test_save_schedule_return_from_background_restarts_period();
+    }
 }

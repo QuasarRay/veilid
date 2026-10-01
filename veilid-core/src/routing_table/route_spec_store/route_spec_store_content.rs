@@ -37,7 +37,7 @@ impl RouteSpecStoreContent {
         let mut content = RouteSpecStoreContent::new(registry);
 
         // Deserialize what we can
-        let rsstdb = table_store.open("RouteSpecStore", 1).await?;
+        let rsstdb = table_store.open(ROUTE_SPEC_STORE_TABLE, 1).await?;
 
         content.data = rsstdb.load_json(0, b"content").await?.unwrap_or_default();
 
@@ -46,10 +46,7 @@ impl RouteSpecStoreContent {
 
     /// Save all the fields we care about to the frozen blob in table storage
     /// This skips #[with(Skip)] saving the secret keys, we save them in the protected store instead
-    pub async fn save(&self) -> EyreResult<()> {
-        let table_store = self.table_store();
-
-        let rsstdb = table_store.open("RouteSpecStore", 1).await?;
+    pub async fn save(&self, rsstdb: &TableDB) -> EyreResult<()> {
         rsstdb.store_json(0, b"content", &self.data).await?;
 
         Ok(())

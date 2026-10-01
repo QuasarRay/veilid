@@ -274,7 +274,9 @@ async fn test_open_writer_dht_value(api: VeilidAPI) {
     // 4. Check that subkey 1 can be overwritten
     // 5. Read data from subkey 1 with force_refresh, check data
 
-    let rec = rc.open_dht_record(key.clone(), Some(keypair.clone())).await;
+    let rec = rc
+        .open_dht_record(key.clone(), Some(keypair.clone()), None)
+        .await;
     assert!(rec.is_ok());
     let rec = rec.unwrap();
     assert_eq!(rec.ref_key().value(), key.value());
@@ -327,7 +329,9 @@ async fn test_open_writer_dht_value(api: VeilidAPI) {
         .expect("should succeed"));
     let other_keypair = cs.generate_keypair();
 
-    let rec = rc.open_dht_record(key.clone(), Some(other_keypair)).await;
+    let rec = rc
+        .open_dht_record(key.clone(), Some(other_keypair), None)
+        .await;
     assert!(rec.is_ok());
     let rec = rec.unwrap();
     assert_eq!(rec.ref_key().value(), key.value());
@@ -534,7 +538,7 @@ async fn test_watch_value_change_is_decrypted() {
         .expect("startup failed");
     let rc = api.routing_context().unwrap();
     let _ = api.attach().await;
-    fixture_wait_for_public_internet_ready(&api).await;
+    let _ = api.wait_for_attachment_condition(None, None).await.unwrap();
 
     let rec = rc
         .create_dht_record(TEST_CRYPTO_KIND, DHTSchema::dflt(1).unwrap(), None)
@@ -579,7 +583,7 @@ pub async fn test_all() {
     test_set_dht_value_allow_offline(api.clone()).await;
 
     let _ = api.attach().await;
-    fixture_wait_for_public_internet_ready(&api).await;
+    let _ = api.wait_for_attachment_condition(None, None).await.unwrap();
 
     test_get_dht_value_unopened(api.clone()).await;
     test_open_dht_record_nonexistent_no_writer(api.clone()).await;

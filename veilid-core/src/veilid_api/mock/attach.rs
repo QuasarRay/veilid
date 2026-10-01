@@ -1,5 +1,8 @@
 use super::*;
 
+/// How often a waiting condition rechecks, since nothing wakes it: there is no tick task under mock.
+const ATTACHMENT_POLL_INTERVAL_MS: u32 = 100;
+
 /// A simulated node's attachment state.
 ///
 /// Attaching binds nothing and reaches no network: it reports the fully-ready state directly, so
@@ -42,6 +45,30 @@ impl VeilidAPI {
             apibail_try_again!("dht is not online");
         }
         Ok(())
+    }
+
+    /// Wait until this node's attachment satisfies `condition`, returning the state that did.
+    pub(crate) async fn mock_wait_for_attachment_condition(
+        &self,
+        condition: VeilidStateAttachmentCondition,
+        timeout: Option<Duration>,
+    ) -> VeilidAPIResult<VeilidStateAttachment> {
+        let deadline = timeout.map(|t| {
+            Timestamp::now().later(TimestampDuration::new(
+                u64::try_from(t.as_micros()).unwrap_or(u64::MAX),
+            ))
+        });
+        loop {
+            let state =
+                MockNetwork::with_node(&self.mock_key()?, |node| node.attachment.to_state())?;
+            if condition.is_satisfied_by(&state) {
+                return Ok(state);
+            }
+            if deadline.is_some_and(|d| Timestamp::now() >= d) {
+                apibail_timeout!();
+            }
+            sleep(ATTACHMENT_POLL_INTERVAL_MS).await;
+        }
     }
 }
 

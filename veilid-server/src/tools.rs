@@ -19,6 +19,10 @@ cfg_if! {
         }
     } else if #[cfg(feature="rt-tokio")] {
         pub use tokio::io::BufReader;
+
+        /// Longest the exit waits for work left on the blocking pool, such as a system DNS lookup
+        const BLOCKING_POOL_EXIT_WAIT_MS: u64 = 500;
+
         pub fn block_on<F: Future<Output = T>, T>(f: F) -> T {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -29,7 +33,10 @@ cfg_if! {
                 .unwrap();
 
             let local = tokio::task::LocalSet::new();
-            local.block_on(&rt, f)
+            let out = local.block_on(&rt, f);
+            drop(local);
+            rt.shutdown_timeout(std::time::Duration::from_millis(BLOCKING_POOL_EXIT_WAIT_MS));
+            out
         }
     } else {
         compile_error!("needs executor implementation");

@@ -277,7 +277,11 @@ class VeilidRoutingContextJS extends VeilidRoutingContext {
   }
 
   @override
-  Future<DHTRecordDescriptor> openDHTRecord(RecordKey key, {KeyPair? writer}) {
+  Future<DHTRecordDescriptor> openDHTRecord(
+    RecordKey key, {
+    KeyPair? writer,
+    OpenDHTRecordOptions? options,
+  }) {
     final id = _ctx.requireId();
     return _wasmPromiseJson(
       'routing_context_open_dht_record',
@@ -286,6 +290,7 @@ class VeilidRoutingContextJS extends VeilidRoutingContext {
         id.toJS,
         jsonEncode(key).toJS,
         if (writer != null) jsonEncode(writer).toJS else null,
+        if (options != null) jsonEncode(options).toJS else null,
       ],
     );
   }
@@ -1105,6 +1110,23 @@ class VeilidJS extends Veilid {
 
   @override
   Future<void> detach() => _wasmPromiseVoid('detach', []);
+
+  @override
+  Future<void> reportAppLifecycleState(VeilidAppLifecycleState state) =>
+      _wasmPromiseVoid('report_app_lifecycle_state', [jsonEncode(state).toJS]);
+
+  @override
+  Future<VeilidStateAttachment> waitForAttachmentCondition({
+    VeilidStateAttachmentCondition? condition,
+    Duration? timeout,
+  }) => _wasmPromiseJson(
+    'wait_for_attachment_condition',
+    VeilidStateAttachment.fromJson,
+    [
+      if (condition != null) jsonEncode(condition).toJS else null,
+      if (timeout != null) timeout.inMilliseconds.toJS else null,
+    ],
+  );
 
   @override
   Future<void> shutdownVeilidCore() {

@@ -128,6 +128,16 @@ pub mod ts {
             .map_err(|err| alloc::format!("{}", err))
     }
 
+    /// Options that override defaults for open_dht_record
+    #[derive(Serialize, Deserialize, Clone, Tsify)]
+    #[serde(rename_all = "camelCase")]
+    pub struct OpenDHTRecordOptions {
+        /// Defaults to true. If false, opening a record this node already holds does not queue a
+        /// check that the network still carries it.
+        #[tsify(optional)]
+        pub rehydrate: Option<bool>,
+    }
+
     /// Options that override defaults for set_dht_value
     #[derive(Serialize, Deserialize, Clone, Tsify)]
     #[serde(rename_all = "camelCase")]
@@ -325,6 +335,14 @@ pub mod ts {
             #[serde(with = "serde_wasm_bindgen::preserve")]
             JsValue,
         ),
+    }
+}
+
+impl From<ts::OpenDHTRecordOptions> for OpenDHTRecordOptions {
+    fn from(value: ts::OpenDHTRecordOptions) -> Self {
+        OpenDHTRecordOptions {
+            rehydrate: value.rehydrate,
+        }
     }
 }
 

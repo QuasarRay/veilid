@@ -36,6 +36,7 @@ pub fn test_serialize_json() {
     test_veilid_log();
     test_attachment_state();
     test_veilid_state_attachment();
+    test_veilid_state_attachment_condition();
     test_peer_table_data();
     test_veilid_state_network();
     test_veilid_route_change();

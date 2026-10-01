@@ -46,7 +46,7 @@ impl StorageManager {
     }
 
     // Check if client-side watches on opened records either have dead nodes or if the watch has expired
-    pub(super) fn check_outbound_watches_task_routine(
+    pub(in crate::storage_manager) fn check_outbound_watches_task_routine(
         &self,
         _stop_token: StopToken,
         _last_ts: Timestamp,
@@ -57,6 +57,7 @@ impl StorageManager {
             // No local record store, so no watches to check
             return Ok(());
         };
+        // Per-tick progress rides the periodic save, not a background save every second
         let owm = &mut *self.outbound_watch_manager.lock();
 
         // Update per-node watch states
@@ -74,6 +75,12 @@ impl StorageManager {
             });
         }
 
+        let hold_network_work = Self::holds_watch_network_work(
+            self.network_manager()
+                .online_detector()
+                .online_state(RoutingDomain::PublicInternet),
+        );
+
         // Iterate all outbound watches and determine what work needs doing if any
         for outbound_watch in owm.outbound_watches.values_mut() {
             // Operate on this watch only if it isn't already being operated on.
@@ -88,10 +95,15 @@ impl StorageManager {
                     record_lock,
                     cur_ts,
                     outbound_watch,
+                    hold_network_work,
                 ) {
                     self.background_operation_processor.add_future(op_fut);
                 };
             }
+        }
+
+        if hold_network_work {
+            return Ok(());
         }
 
         // Run queued change inspections that are due, leaving backed-off retries and

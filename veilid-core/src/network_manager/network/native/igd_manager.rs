@@ -39,6 +39,7 @@ enum IGDCommand {
     Probe(IGDAddressType),
 }
 
+/// Never locked across a router request: shutdown and callers on the executor lock it too
 struct IGDManagerInner {
     /// Routed local IP per address type; `None` value = probed, no routable IP
     local_ip_addrs: BTreeMap<IGDAddressType, Option<IpAddr>>,
@@ -50,6 +51,12 @@ struct IGDManagerInner {
     port_maps: BTreeMap<PortMapKey, PortMapValue>,
     /// Worker holds during `do_probe`; cache readers lock to wait for fresh cache
     probe_locks: BTreeMap<IGDAddressType, Arc<AsyncMutex<()>>>,
+    /// Probes triggered and not yet finished, per address type
+    pending_probes: BTreeMap<IGDAddressType, usize>,
+    /// Address types a detection skipped mapping for because their probe had not finished
+    deferred_maps: BTreeSet<IGDAddressType>,
+    /// Bumped by `clear_caches`, so a mapping made against the old caches is not stored
+    cache_generation: u64,
     /// Worker command sender
     cmd_tx: Option<flume::Sender<IGDCommand>>,
     /// Worker stop source
@@ -125,6 +132,9 @@ impl IGDManager {
                 external_ips: BTreeMap::new(),
                 port_maps: BTreeMap::new(),
                 probe_locks: BTreeMap::new(),
+                pending_probes: BTreeMap::new(),
+                deferred_maps: BTreeSet::new(),
+                cache_generation: 0,
                 cmd_tx: None,
                 stop_source: None,
                 worker_jh: None,
@@ -146,9 +156,8 @@ impl IGDManager {
         // Wait for any in-flight probe for this address type so the cache below is fresh
         let _probe_guard = self.wait_for_probe(address_type).await;
 
-        let this = self.clone();
-        blocking_wrapper(move || {
-            let mut inner = this.inner.lock();
+        let gw = {
+            let mut inner = self.inner.lock();
 
             // If we already have this port mapped, just return the existing portmap
             let mut found = None;
@@ -171,20 +180,22 @@ impl IGDManager {
             let local_ip = Self::find_local_ip_inner(&inner, address_type)?;
 
             // Find gateway
-            let gw = Self::find_gateway_inner(&inner, local_ip)?;
+            Self::find_gateway_inner(&inner, local_ip)?
+        };
 
-            // Unmap port
-            match gw.remove_port(convert_protocol_type(protocol_type), mapped_port) {
-                Ok(()) => (),
-                Err(e) => {
-                    // Failed to map external port
-                    veilid_log!(this debug "upnp failed to remove external port: {}", e);
-                    return None;
-                }
-            };
-            Some(())
-        })
-        .await
+        // Unmap port
+        match gw
+            .remove_port(convert_protocol_type(protocol_type), mapped_port)
+            .await
+        {
+            Ok(()) => (),
+            Err(e) => {
+                // Failed to map external port
+                veilid_log!(self debug "upnp failed to remove external port: {}", e);
+                return None;
+            }
+        };
+        Some(())
     }
 
     #[cfg_attr(
@@ -198,19 +209,30 @@ impl IGDManager {
         local_port: u16,
         expected_external_address: Option<IpAddr>,
     ) -> Option<SocketAddr> {
-        // Hold the probe lock across the blocking_wrapper so a probe can't repopulate
-        // the cache mid-mapping
-        let _probe_guard = self.wait_for_probe(address_type).await;
+        // A search can run for seconds: skip, and `has_mappable_deferred` asks for a new detection
+        let probe_lock = {
+            let mut inner = self.inner.lock();
+            if inner.pending_probes.contains_key(&address_type) {
+                inner.deferred_maps.insert(address_type);
+                return None;
+            }
+            inner.deferred_maps.remove(&address_type);
+            inner.probe_locks.get(&address_type).cloned()
+        };
 
-        let this = self.clone();
-        blocking_wrapper(move || {
-            let mut inner = this.inner.lock();
+        // Hold the probe lock across the mapping so a probe can't repopulate the cache mid-mapping
+        let _probe_guard = match probe_lock {
+            Some(lock) => Some(lock.lock_arc().await),
+            None => None,
+        };
 
-            let pmkey = PortMapKey {
-                protocol_type,
-                address_type,
-                local_port,
-            };
+        let pmkey = PortMapKey {
+            protocol_type,
+            address_type,
+            local_port,
+        };
+        let (local_ip, gw, ext_ip, cache_generation) = {
+            let inner = self.inner.lock();
             if let Some(pmval) = inner.port_maps.get(&pmkey) {
                 return Some(SocketAddr::new(pmval.ext_ip, pmval.mapped_port));
             }
@@ -218,52 +240,65 @@ impl IGDManager {
             let local_ip = Self::find_local_ip_inner(&inner, address_type)?;
             let gw = Self::find_gateway_inner(&inner, local_ip)?;
             let ext_ip = Self::find_external_ip_inner(&inner, local_ip)?;
+            (local_ip, gw, ext_ip, inner.cache_generation)
+        };
 
-            // Ensure external IP matches address type
-            if ext_ip.is_ipv4() && address_type != IGDAddressType::IPV4 {
-                veilid_log!(this debug "mismatched ip address type from igd, wanted v4, got v6");
-                return None;
-            } else if ext_ip.is_ipv6() && address_type != IGDAddressType::IPV6 {
-                veilid_log!(this debug "mismatched ip address type from igd, wanted v6, got v4");
+        // Ensure external IP matches address type
+        if ext_ip.is_ipv4() && address_type != IGDAddressType::IPV4 {
+            veilid_log!(self debug "mismatched ip address type from igd, wanted v4, got v6");
+            return None;
+        } else if ext_ip.is_ipv6() && address_type != IGDAddressType::IPV6 {
+            veilid_log!(self debug "mismatched ip address type from igd, wanted v6, got v4");
+            return None;
+        }
+
+        if let Some(expected_external_address) = expected_external_address {
+            if ext_ip != expected_external_address {
+                veilid_log!(self debug "gateway external address does not match calculated external address: expected={} vs gateway={}", expected_external_address, ext_ip);
                 return None;
             }
+        }
 
-            if let Some(expected_external_address) = expected_external_address {
-                if ext_ip != expected_external_address {
-                    veilid_log!(this debug "gateway external address does not match calculated external address: expected={} vs gateway={}", expected_external_address, ext_ip);
-                    return None;
-                }
+        // Map any port
+        let desc = self.get_description(protocol_type, local_port);
+        let mapped_port = match gw
+            .add_any_port(
+                convert_protocol_type(protocol_type),
+                SocketAddr::new(local_ip, local_port),
+                UPNP_MAPPING_LIFETIME
+                    .millis_u32()
+                    .unwrap_or_log()
+                    .div_ceil(1000),
+                &desc,
+            )
+            .await
+        {
+            Ok(mapped_port) => mapped_port,
+            Err(e) => {
+                // Failed to map external port
+                veilid_log!(self debug "upnp failed to map external port: {}", e);
+                return None;
             }
+        };
 
-            // Map any port
-            let desc = this.get_description(protocol_type, local_port);
-            let mapped_port = match gw.add_any_port(convert_protocol_type(protocol_type), SocketAddr::new(local_ip, local_port), UPNP_MAPPING_LIFETIME.millis_u32().unwrap_or_log().div_ceil(1000), &desc) {
-                Ok(mapped_port) => mapped_port,
-                Err(e) => {
-                    // Failed to map external port
-                    veilid_log!(this debug "upnp failed to map external port: {}", e);
-                    return None;
-                }
-            };
-
-            // Add to mapping list to keep alive
-            let timestamp = Timestamp::now();
-            inner.port_maps.insert(PortMapKey {
-                protocol_type,
-                address_type,
-                local_port,
-            }, PortMapValue {
+        // Add to mapping list to keep alive
+        let timestamp = Timestamp::now();
+        if !self.store_port_map(
+            cache_generation,
+            pmkey,
+            Some(PortMapValue {
                 ext_ip,
                 mapped_port,
                 timestamp,
                 renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
                 renewal_attempts: 0,
-            });
+            }),
+        ) {
+            return None;
+        }
 
-            // Succeeded, return the externally mapped port
-            Some(SocketAddr::new(ext_ip, mapped_port))
-        })
-        .await
+        // Succeeded, return the externally mapped port
+        Some(SocketAddr::new(ext_ip, mapped_port))
     }
 
     /// Spawn the background worker. Idempotent.
@@ -304,6 +339,34 @@ impl IGDManager {
         inner.gateways.clear();
         inner.external_ips.clear();
         inner.port_maps.clear();
+        inner.deferred_maps.clear();
+        inner.cache_generation += 1;
+    }
+
+    /// Whether a mapping skipped while its probe ran could now be made. Deferred address types
+    /// whose probe found nothing to map through are forgotten.
+    pub fn has_mappable_deferred(&self) -> bool {
+        let mut inner = self.inner.lock();
+        let finished: Vec<IGDAddressType> = inner
+            .deferred_maps
+            .iter()
+            .filter(|at| !inner.pending_probes.contains_key(at))
+            .copied()
+            .collect();
+        let mut mappable = false;
+        for address_type in finished {
+            if Self::can_map_inner(&inner, address_type) {
+                mappable = true;
+            } else {
+                inner.deferred_maps.remove(&address_type);
+            }
+        }
+        mappable
+    }
+
+    /// Forget skipped mappings once a new detection will attempt them
+    pub fn clear_deferred(&self) {
+        self.inner.lock().deferred_maps.clear();
     }
 
     /// Asynchronously probe for the given address type; returns immediately.
@@ -314,10 +377,16 @@ impl IGDManager {
             .probe_locks
             .entry(address_type)
             .or_insert_with(|| Arc::new(AsyncMutex::new(())));
-        if let Some(tx) = inner.cmd_tx.as_ref() {
-            if let Err(e) = tx.send(IGDCommand::Probe(address_type)) {
-                veilid_log!(self debug "failed to send IGD probe command: {}", e);
-            }
+        let Some(sent) = inner
+            .cmd_tx
+            .as_ref()
+            .map(|tx| tx.send(IGDCommand::Probe(address_type)))
+        else {
+            return;
+        };
+        match sent {
+            Ok(()) => *inner.pending_probes.entry(address_type).or_default() += 1,
+            Err(e) => veilid_log!(self debug "failed to send IGD probe command: {}", e),
         }
     }
 
@@ -343,8 +412,7 @@ impl IGDManager {
                     let Some(lock) = lock else {
                         continue;
                     };
-                    // Wrap awaits in stop_token; spawn_blocking inside do_probe can't be
-                    // cancelled mid-flight, but dropping our await still lets the worker exit
+                    // Wrap awaits in stop_token so a stop ends a probe mid-request
                     let Ok(_guard) = lock.lock_arc().timeout_at(stop_token.clone()).await else {
                         return;
                     };
@@ -356,6 +424,13 @@ impl IGDManager {
                     {
                         return;
                     }
+                    let mut inner = self.inner.lock();
+                    if let Some(pending) = inner.pending_probes.get_mut(&address_type) {
+                        *pending -= 1;
+                        if *pending == 0 {
+                            inner.pending_probes.remove(&address_type);
+                        }
+                    }
                 }
             }
         }
@@ -363,62 +438,59 @@ impl IGDManager {
 
     /// Probe local IP, gateway, and external IP for an address type and cache the result
     async fn do_probe(&self, address_type: IGDAddressType) {
-        let this = self.clone();
-        blocking_wrapper(move || {
-            let local_ip = this.get_routed_local_ip_address(address_type);
-            this.inner
-                .lock()
-                .local_ip_addrs
-                .insert(address_type, local_ip);
+        let local_ip = self.get_routed_local_ip_address(address_type);
+        self.inner
+            .lock()
+            .local_ip_addrs
+            .insert(address_type, local_ip);
 
-            let Some(local_ip) = local_ip else {
-                veilid_log!(this debug "no routable local ip for address_type={:?}", address_type);
-                return;
-            };
+        let Some(local_ip) = local_ip else {
+            veilid_log!(self debug "no routable local ip for address_type={:?}", address_type);
+            return;
+        };
 
-            let gateway_opt = match local_ip {
-                IpAddr::V4(v4) => {
-                    let mut opts = SearchOptions::new_v4(UPNP_GATEWAY_DETECT_TIMEOUT_MS as u64);
-                    opts.bind_addr = SocketAddr::V4(SocketAddrV4::new(v4, 0));
-                    match igd::search_gateway(opts) {
-                        Ok(v) => Some(Arc::new(v)),
-                        Err(e) => {
-                            veilid_log!(this debug "couldn't find ipv4 igd: {}", e);
-                            None
-                        }
-                    }
-                }
-                IpAddr::V6(v6) => {
-                    let mut opts = SearchOptions::new_v6(
-                        Ipv6SearchScope::LinkLocal,
-                        UPNP_GATEWAY_DETECT_TIMEOUT_MS as u64,
-                    );
-                    opts.bind_addr = SocketAddr::V6(SocketAddrV6::new(v6, 0, 0, 0));
-                    match igd::search_gateway(opts) {
-                        Ok(v) => Some(Arc::new(v)),
-                        Err(e) => {
-                            veilid_log!(this debug "couldn't find ipv6 igd: {}", e);
-                            None
-                        }
-                    }
-                }
-            };
-
-            let ext_ip = gateway_opt
-                .as_ref()
-                .and_then(|gw| match gw.get_external_ip() {
-                    Ok(ip) => Some(ip),
+        let gateway_opt = match local_ip {
+            IpAddr::V4(v4) => {
+                let mut opts = SearchOptions::new_v4(UPNP_GATEWAY_DETECT_TIMEOUT_MS as u64);
+                opts.bind_addr = SocketAddr::V4(SocketAddrV4::new(v4, 0));
+                match igd::search_gateway(opts).await {
+                    Ok(v) => Some(Arc::new(v)),
                     Err(e) => {
-                        veilid_log!(this debug "couldn't get external ip from igd: {}", e);
+                        veilid_log!(self debug "couldn't find ipv4 igd: {}", e);
                         None
                     }
-                });
+                }
+            }
+            IpAddr::V6(v6) => {
+                let mut opts = SearchOptions::new_v6(
+                    Ipv6SearchScope::LinkLocal,
+                    UPNP_GATEWAY_DETECT_TIMEOUT_MS as u64,
+                );
+                opts.bind_addr = SocketAddr::V6(SocketAddrV6::new(v6, 0, 0, 0));
+                match igd::search_gateway(opts).await {
+                    Ok(v) => Some(Arc::new(v)),
+                    Err(e) => {
+                        veilid_log!(self debug "couldn't find ipv6 igd: {}", e);
+                        None
+                    }
+                }
+            }
+        };
 
-            let mut inner = this.inner.lock();
-            inner.gateways.insert(local_ip, gateway_opt);
-            inner.external_ips.insert(local_ip, ext_ip);
-        })
-        .await;
+        let ext_ip = match &gateway_opt {
+            Some(gw) => match gw.get_external_ip().await {
+                Ok(ip) => Some(ip),
+                Err(e) => {
+                    veilid_log!(self debug "couldn't get external ip from igd: {}", e);
+                    None
+                }
+            },
+            None => None,
+        };
+
+        let mut inner = self.inner.lock();
+        inner.gateways.insert(local_ip, gateway_opt);
+        inner.external_ips.insert(local_ip, ext_ip);
     }
 
     #[cfg_attr(
@@ -436,7 +508,7 @@ impl IGDManager {
         // Refresh mappings if we have them
         let mut full_renews: Vec<(PortMapKey, PortMapValue)> = Vec::new();
         let mut renews: Vec<(PortMapKey, PortMapValue)> = Vec::new();
-        {
+        let cache_generation = {
             let inner = self.inner.lock();
             let now = Timestamp::now();
 
@@ -453,114 +525,94 @@ impl IGDManager {
                 }
             }
 
-            // See if we need to do some blocking operations
+            // See if any mapping is due
             if full_renews.is_empty() && renews.is_empty() {
                 // Just return now since there's nothing to renew
                 return Ok(IgdTickOutcome::default());
             }
-        }
+            inner.cache_generation
+        };
 
-        let this = self.clone();
-        let fut = blocking_wrapper(move || {
-            let mut inner = this.inner.lock();
-            let mut outcome = IgdTickOutcome::default();
+        let mut outcome = IgdTickOutcome::default();
 
-            // Process full renewals
-            for (k, v) in full_renews {
-                // Get local ip for address type
-                let local_ip = match Self::find_local_ip_inner(&inner, k.address_type) {
-                    Some(ip) => ip,
-                    None => {
-                        return Err(eyre!("local ip missing for address type"));
-                    }
-                };
+        // Process full renewals
+        for (k, v) in full_renews {
+            let (local_ip, gw) = self.find_route(k.address_type)?;
 
-                // Get gateway for interface
-                let gw = match Self::find_gateway_inner(&inner, local_ip) {
-                    Some(gw) => gw,
-                    None => {
-                        return Err(eyre!("gateway missing for interface"));
-                    }
-                };
-
-                let desc = this.get_description(k.protocol_type, k.local_port);
-                let local_addr = SocketAddr::new(local_ip, k.local_port);
-                let lease_secs = UPNP_MAPPING_LIFETIME
-                    .millis_u32()
-                    .unwrap_or_log()
-                    .div_ceil(1000);
-                // A lapsed lease is usually still free, so ask for the published port first
-                let same_port = v.renewal_attempts < UPNP_MAPPING_ATTEMPTS
-                    && match gw.add_port(
+            let desc = self.get_description(k.protocol_type, k.local_port);
+            let local_addr = SocketAddr::new(local_ip, k.local_port);
+            let lease_secs = UPNP_MAPPING_LIFETIME
+                .millis_u32()
+                .unwrap_or_log()
+                .div_ceil(1000);
+            // A lapsed lease is usually still free, so ask for the published port first
+            let same_port = v.renewal_attempts < UPNP_MAPPING_ATTEMPTS
+                && match gw
+                    .add_port(
                         convert_protocol_type(k.protocol_type),
                         v.mapped_port,
                         local_addr,
                         lease_secs,
                         &desc,
-                    ) {
-                        Ok(()) => true,
-                        Err(e) => {
-                            veilid_log!(this debug "could not re-add mapped port {:?} -> {:?}: {}", v, k, e);
-                            false
-                        }
-                    };
-                let mapped_port = if same_port {
-                    v.mapped_port
-                } else {
-                    // Delete the mapping if it exists, ignore any errors here
-                    let _ = gw.remove_port(convert_protocol_type(k.protocol_type), v.mapped_port);
-                    inner.port_maps.remove(&k);
-                    match gw.add_any_port(
+                    )
+                    .await
+                {
+                    Ok(()) => true,
+                    Err(e) => {
+                        veilid_log!(self debug "could not re-add mapped port {:?} -> {:?}: {}", v, k, e);
+                        false
+                    }
+                };
+            let mapped_port = if same_port {
+                v.mapped_port
+            } else {
+                // Delete the mapping if it exists, ignore any errors here
+                let _ = gw
+                    .remove_port(convert_protocol_type(k.protocol_type), v.mapped_port)
+                    .await;
+                self.store_port_map(cache_generation, k, None);
+                match gw
+                    .add_any_port(
                         convert_protocol_type(k.protocol_type),
                         local_addr,
                         lease_secs,
                         &desc,
-                    ) {
-                        Ok(mapped_port) => mapped_port,
-                        Err(e) => {
-                            veilid_log!(this info "failed to full-renew mapped port {:?} -> {:?}: {}", v, k, e);
+                    )
+                    .await
+                {
+                    Ok(mapped_port) => mapped_port,
+                    Err(e) => {
+                        veilid_log!(self info "failed to full-renew mapped port {:?} -> {:?}: {}", v, k, e);
 
-                            // Must restart network now :(
-                            outcome.needs_restart = true;
-                            return Ok(outcome);
-                        }
+                        // Must restart network now :(
+                        outcome.needs_restart = true;
+                        return Ok(outcome);
                     }
-                };
-                if mapped_port != v.mapped_port {
-                    outcome.remapped = true;
                 }
-                veilid_log!(this debug "full-renewed mapped port {:?} -> {:?} on external port {}", v, k, mapped_port);
-                inner.port_maps.insert(
-                    k,
-                    PortMapValue {
-                        ext_ip: v.ext_ip,
-                        mapped_port,
-                        timestamp: Timestamp::now(),
-                        renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
-                        renewal_attempts: 0,
-                    },
-                );
+            };
+            if mapped_port != v.mapped_port {
+                outcome.remapped = true;
             }
-            // Process normal renewals
-            for (k, mut v) in renews {
-                // Get local ip for address type
-                let local_ip = match Self::find_local_ip_inner(&inner, k.address_type) {
-                    Some(ip) => ip,
-                    None => {
-                        return Err(eyre!("local ip missing for address type"));
-                    }
-                };
+            veilid_log!(self debug "full-renewed mapped port {:?} -> {:?} on external port {}", v, k, mapped_port);
+            self.store_port_map(
+                cache_generation,
+                k,
+                Some(PortMapValue {
+                    ext_ip: v.ext_ip,
+                    mapped_port,
+                    timestamp: Timestamp::now(),
+                    renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
+                    renewal_attempts: 0,
+                }),
+            );
+        }
+        // Process normal renewals
+        for (k, mut v) in renews {
+            let (local_ip, gw) = self.find_route(k.address_type)?;
 
-                // Get gateway for interface
-                let gw = match Self::find_gateway_inner(&inner, local_ip) {
-                    Some(gw) => gw,
-                    None => {
-                        return Err(eyre!("gateway missing for address type"));
-                    }
-                };
-
-                let desc = this.get_description(k.protocol_type, k.local_port);
-                match gw.add_port(
+            let desc = self.get_description(k.protocol_type, k.local_port);
+            match gw
+                .add_port(
                     convert_protocol_type(k.protocol_type),
                     v.mapped_port,
                     SocketAddr::new(local_ip, k.local_port),
@@ -569,40 +621,39 @@ impl IGDManager {
                         .unwrap_or_log()
                         .div_ceil(1000),
                     &desc,
-                ) {
-                    Ok(()) => {
-                        veilid_log!(this trace "renewed mapped port {:?} -> {:?}", v, k);
+                )
+                .await
+            {
+                Ok(()) => {
+                    veilid_log!(self trace "renewed mapped port {:?} -> {:?}", v, k);
 
-                        inner.port_maps.insert(
-                            k,
-                            PortMapValue {
-                                ext_ip: v.ext_ip,
-                                mapped_port: v.mapped_port,
-                                timestamp: Timestamp::now(),
-                                renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
-                                renewal_attempts: 0,
-                            },
-                        );
-                    }
-                    Err(e) => {
-                        veilid_log!(this debug "failed to renew mapped port {:?} -> {:?}: {}", v, k, e);
+                    self.store_port_map(
+                        cache_generation,
+                        k,
+                        Some(PortMapValue {
+                            ext_ip: v.ext_ip,
+                            mapped_port: v.mapped_port,
+                            timestamp: Timestamp::now(),
+                            renewal_lifetime: UPNP_MAPPING_LIFETIME.div(2),
+                            renewal_attempts: 0,
+                        }),
+                    );
+                }
+                Err(e) => {
+                    veilid_log!(self debug "failed to renew mapped port {:?} -> {:?}: {}", v, k, e);
 
-                        // Get closer to the maximum renewal timeline by a factor of two each time
-                        v.renewal_lifetime =
-                            (v.renewal_lifetime.saturating_add(UPNP_MAPPING_LIFETIME)).div(2);
-                        v.renewal_attempts += 1;
+                    // Get closer to the maximum renewal timeline by a factor of two each time
+                    v.renewal_lifetime =
+                        (v.renewal_lifetime.saturating_add(UPNP_MAPPING_LIFETIME)).div(2);
+                    v.renewal_attempts += 1;
 
-                        // Store new value to try again
-                        inner.port_maps.insert(k, v);
-                    }
-                };
-            }
+                    // Store new value to try again
+                    self.store_port_map(cache_generation, k, Some(v));
+                }
+            };
+        }
 
-            Ok(outcome)
-        });
-        #[cfg(feature = "instrument")]
-        let fut = fut.instrument(tracing::trace_span!("igd tick fut"));
-        fut.await
+        Ok(outcome)
     }
 
     /////////////////////////////////////////////////////////////////////
@@ -660,6 +711,53 @@ impl IGDManager {
     /// Read the external IP from the cache; `None` if unprobed or no external IP
     fn find_external_ip_inner(inner: &IGDManagerInner, local_ip: IpAddr) -> Option<IpAddr> {
         inner.external_ips.get(&local_ip).copied().flatten()
+    }
+
+    /// Whether the cache holds a gateway that reports an external IP of this address type
+    fn can_map_inner(inner: &IGDManagerInner, address_type: IGDAddressType) -> bool {
+        let Some(local_ip) = Self::find_local_ip_inner(inner, address_type) else {
+            return false;
+        };
+        if Self::find_gateway_inner(inner, local_ip).is_none() {
+            return false;
+        }
+        Self::find_external_ip_inner(inner, local_ip).is_some_and(|ext_ip| match address_type {
+            IGDAddressType::IPV4 => ext_ip.is_ipv4(),
+            IGDAddressType::IPV6 => ext_ip.is_ipv6(),
+        })
+    }
+
+    /// The routed local IP and its gateway for an address type, from the cache
+    fn find_route(&self, address_type: IGDAddressType) -> EyreResult<(IpAddr, Arc<Gateway>)> {
+        let inner = self.inner.lock();
+        let local_ip = Self::find_local_ip_inner(&inner, address_type)
+            .ok_or_else(|| eyre!("local ip missing for address type"))?;
+        let gw = Self::find_gateway_inner(&inner, local_ip)
+            .ok_or_else(|| eyre!("gateway missing for interface"))?;
+        Ok((local_ip, gw))
+    }
+
+    /// Store a mapping, or forget it with `None`; false if the caches were cleared since
+    /// `cache_generation` was read
+    fn store_port_map(
+        &self,
+        cache_generation: u64,
+        key: PortMapKey,
+        value: Option<PortMapValue>,
+    ) -> bool {
+        let mut inner = self.inner.lock();
+        if inner.cache_generation != cache_generation {
+            return false;
+        }
+        match value {
+            Some(value) => {
+                inner.port_maps.insert(key, value);
+            }
+            None => {
+                inner.port_maps.remove(&key);
+            }
+        }
+        true
     }
 
     fn get_description(&self, protocol_type: IGDProtocolType, local_port: u16) -> String {

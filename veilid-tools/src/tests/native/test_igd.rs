@@ -1,4 +1,5 @@
 use crate::igd::gateway::parse_soap_response;
+use crate::igd::http::parse_response;
 use crate::igd::search::{find_connection_service, parse_schemas, parse_search_result};
 use crate::igd::xml;
 
@@ -134,10 +135,55 @@ pub fn test_parse_soap_response() {
     assert!(err.to_string().contains("SamePortValuesRequired"));
 }
 
+pub fn test_parse_response() {
+    let sized = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
+    assert_eq!(
+        parse_response(sized, false).expect("sized"),
+        Some((200, b"hello".to_vec()))
+    );
+    assert_eq!(
+        parse_response(&sized[..sized.len() - 2], false).expect("short"),
+        None,
+        "waits for the rest of the body"
+    );
+    assert!(parse_response(&sized[..sized.len() - 2], true).is_err());
+
+    let chunked =
+        b"HTTP/1.1 500 Internal Server Error\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nfaul\r\n1\r\nt\r\n0\r\n\r\n";
+    assert_eq!(
+        parse_response(chunked, false).expect("chunked"),
+        Some((500, b"fault".to_vec())),
+        "a fault's status still comes with its body"
+    );
+    assert_eq!(
+        parse_response(&chunked[..chunked.len() - 5], false).expect("no last chunk"),
+        None,
+        "waits for the last chunk"
+    );
+
+    let unframed = b"HTTP/1.0 200 OK\r\n\r\nall of it";
+    assert_eq!(
+        parse_response(unframed, false).expect("open"),
+        None,
+        "an unframed body runs to the close"
+    );
+    assert_eq!(
+        parse_response(unframed, true).expect("closed"),
+        Some((200, b"all of it".to_vec()))
+    );
+
+    assert_eq!(
+        parse_response(b"HTTP/1.1 200 OK\r\nContent-", false).expect("head"),
+        None
+    );
+    assert!(parse_response(b"HTTP/1.1 200 OK\r\nContent-", true).is_err());
+}
+
 pub fn test_all() {
     test_xml_parse();
     test_find_connection_service();
     test_parse_schemas();
     test_parse_search_result();
     test_parse_soap_response();
+    test_parse_response();
 }

@@ -216,6 +216,8 @@ enum DebugCommand {
     },
     /// show process and attachment uptime
     Uptime,
+    /// show where the host application stands in its lifecycle
+    Lifecycle,
     /// print or reset internal optimization stats
     #[cfg(feature = "stats")]
     Stats {
@@ -1746,7 +1748,7 @@ impl VeilidAPI {
     async fn debug_detach(&self) -> VeilidAPIResult<String> {
         if matches!(
             self.get_state().await?.attachment.state,
-            AttachmentState::Detaching
+            AttachmentState::Detached | AttachmentState::Detaching
         ) {
             apibail_internal!("Not attached");
         };
@@ -2561,7 +2563,7 @@ impl VeilidAPI {
         };
 
         // Do a record open
-        let record = match rc.open_dht_record(key.clone(), writer).await {
+        let record = match rc.open_dht_record(key.clone(), writer, None).await {
             Err(e) => return Ok(format!("Can't open DHT record: {}", e)),
             Ok(v) => v,
         };
@@ -3378,6 +3380,19 @@ impl VeilidAPI {
         }
     }
 
+    /// Show where the host application stands in its lifecycle.
+    fn debug_lifecycle(&self) -> VeilidAPIResult<String> {
+        cfg_if! {
+            if #[cfg(feature = "app-lifecycle")] {
+                Ok(self.core_context()?.attachment_manager().debug_info_lifecycle())
+            } else {
+                Err(VeilidAPIError::unimplemented(
+                    "lifecycle needs the app-lifecycle feature",
+                ))
+            }
+        }
+    }
+
     /// Get node uptime info.
     async fn debug_uptime(&self) -> VeilidAPIResult<String> {
         let mut result = String::new();
@@ -3559,6 +3574,7 @@ impl VeilidAPI {
                 DebugCommand::Record { command } => self.debug_record(command).await,
                 DebugCommand::Table { command } => self.debug_table(command).await,
                 DebugCommand::Uptime => self.debug_uptime().await,
+                DebugCommand::Lifecycle => self.debug_lifecycle(),
                 #[cfg(feature = "stats")]
                 DebugCommand::Stats { command } => self.debug_stats(command).await,
                 #[cfg(debug_assertions)]

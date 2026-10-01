@@ -193,25 +193,28 @@ impl VeilidRoutingContext {
     /// @returns the DHT record descriptor for the opened record if successful.
     /// @param {string} recordKey - key of the DHT record.
     /// @param {string} defaultWriter - the writer keypair to use for set value operations by default
+    /// @param {OpenDHTRecordOptions} options - `rehydrate: false` skips queueing a check that the network still carries a record this node already holds
     ///
     /// The open half of the open/close pair; release with [VeilidRoutingContext::closeDHTRecord] or it leaks. Re-opening an already-open record replaces its writer and routing context while keeping active watches. May await network.
     ///
-    /// Throws the same error its core twin `RoutingContext::open_dht_record` returns: `Generic` if `recordKey` is an unsupported kind or malformed or `defaultWriter` is a malformed keypair; `TryAgain` (retryable) if the record is not yet local and the node is offline; `KeyNotFound` if the record does not exist on the network; and `NotInitialized` if the node is not started. Also throws a parse error if `defaultWriter` fails to deserialize.
+    /// Throws the same error its core twin `RoutingContext::open_dht_record` returns: `Generic` if `recordKey` is an unsupported kind or malformed or `defaultWriter` is a malformed keypair; `TryAgain` (retryable) if the record is not yet local and the node is offline or no node answered; `KeyNotFound` if the record does not exist on the network; and `NotInitialized` if the node is not started. Also throws a parse error if `defaultWriter` fails to deserialize, and `Generic` if `options` fails to deserialize.
     pub async fn openDHTRecord(
         &self,
         recordKey: &RecordKey,
         defaultWriter: Option<TypeStubKeyPair>,
+        options: Option<Ts<ts::OpenDHTRecordOptions>>,
     ) -> VeilidAPIResult<Ts<ts::DHTRecordDescriptor>> {
         let default_writer = match defaultWriter {
             Some(default_writer) => try_from_js_option::<KeyPair>(default_writer)
                 .map_err(|e| VeilidAPIError::parse_error("failed to parse default writer", e))?,
             None => None,
         };
+        let options = from_opt_ts(options)?.map(OpenDHTRecordOptions::from);
 
         let routing_context = self.getRoutingContext()?;
         to_ts(
             &routing_context
-                .open_dht_record(recordKey.clone(), default_writer)
+                .open_dht_record(recordKey.clone(), default_writer, options)
                 .await?
                 .into(),
         )

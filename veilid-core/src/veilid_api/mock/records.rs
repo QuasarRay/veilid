@@ -208,11 +208,13 @@ impl VeilidAPI {
     /// A record already in the local store opens with no network at all, which is what
     /// `open_record` does - it returns the local descriptor and only queues a rehydration.
     /// Only a record this node has never held has to be fetched, and that is the one case
-    /// that needs to be attached.
+    /// that needs to be attached. The shared DHT never loses a value, so there is nothing to
+    /// rehydrate and [OpenDHTRecordOptions::rehydrate] changes nothing here.
     pub(crate) fn mock_open_dht_record(
         &self,
         record_key: RecordKey,
         default_writer: Option<KeyPair>,
+        _options: Option<OpenDHTRecordOptions>,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
         check_fault(MockFaultOp::Open, Some(&record_key), None)?;
         let local = MockNetwork::with_node(&self.mock_key()?, |node| {

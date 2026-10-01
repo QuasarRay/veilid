@@ -5,7 +5,7 @@ import 'package:veilid/veilid.dart';
 
 import 'veilid_fixture.dart';
 
-class UpdateProcessorFixture implements VeilidProcessorInterface {
+class UpdateProcessorFixture extends DefaultVeilidProcessor {
   static final _fixtureMutex = Mutex();
 
   VeilidFixture veilidFixture;

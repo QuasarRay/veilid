@@ -127,6 +127,32 @@ abstract class Veilid {
   /// Throws [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
   Future<void> detach();
 
+  /// Report where the host application stands in its lifecycle.
+  ///
+  /// The node follows this itself in an iOS, Android or macOS app and in a
+  /// web page, and a report counts there only when
+  /// `attachment.appLifecycle.autoDetectState` is off. Elsewhere, as in a
+  /// Linux or Windows app, the host's reports are all it has.
+  ///
+  /// Throws [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
+  Future<void> reportAppLifecycleState(VeilidAppLifecycleState state);
+
+  /// Wait until the attachment state satisfies a condition.
+  ///
+  /// Returns the first [VeilidStateAttachment] that satisfies [condition], at
+  /// once if the current state does. A [condition] field left null is not
+  /// checked. Without a [condition], waits until the node is attached, at any
+  /// strength, with PublicInternet ready.
+  ///
+  /// Throws [VeilidAPIExceptionTimeout] once [timeout] elapses; without one,
+  /// waits indefinitely. Throws [VeilidAPIExceptionInvalidArgument] if the
+  /// condition's least state is above its most, and
+  /// [VeilidAPIExceptionNotInitialized] if Veilid shuts down while waiting.
+  Future<VeilidStateAttachment> waitForAttachmentCondition({
+    VeilidStateAttachmentCondition? condition,
+    Duration? timeout,
+  });
+
   /// Release this caller's reference to the running node, shutting it down and
   /// terminating the API when the last reference goes.
   ///

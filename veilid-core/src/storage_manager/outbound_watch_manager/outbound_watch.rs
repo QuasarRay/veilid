@@ -53,8 +53,7 @@ impl OutboundWatch {
 
     /// Whether this watch is due a fallback change inspection, and over which subkeys.
     /// A wanted but never-established watch has no state to keep a timer in, so it is
-    /// covered here at the slowest rate: reconcile is already retrying establishment,
-    /// and a record no node will serve has nothing to report either way.
+    /// covered here at [UNESTABLISHED_WATCH_INSPECT_INTERVAL].
     pub fn needs_fallback_inspect(&self, cur_ts: Timestamp) -> Option<ValueSubkeyRangeSet> {
         if let Some(state) = self.state.as_ref() {
             return state

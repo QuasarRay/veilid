@@ -23,12 +23,30 @@ impl VeilidCrypto {
         crate::CRYPTO_KIND_VLD0.to_string().into()
     }
 
+    /// The VLD0 crypto kind, which this build lacks: throws Unimplemented
+    #[cfg(not(feature = "enable-crypto-vld0"))]
+    #[wasm_bindgen(getter, unchecked_return_type = "CryptoKind")]
+    pub fn CRYPTO_KIND_VLD0() -> VeilidAPIResult<JsValue> {
+        Err(VeilidAPIError::unimplemented(
+            "CRYPTO_KIND_VLD0 needs the enable-crypto-vld0 feature",
+        ))
+    }
+
     /// The NONE crypto kind
     #[cfg(feature = "enable-crypto-none")]
     #[wasm_bindgen(getter, unchecked_return_type = "CryptoKind")]
     #[must_use]
     pub fn CRYPTO_KIND_NONE() -> JsValue {
         crate::CRYPTO_KIND_NONE.to_string().into()
+    }
+
+    /// The NONE crypto kind, which this build lacks: throws Unimplemented
+    #[cfg(not(feature = "enable-crypto-none"))]
+    #[wasm_bindgen(getter, unchecked_return_type = "CryptoKind")]
+    pub fn CRYPTO_KIND_NONE() -> VeilidAPIResult<JsValue> {
+        Err(VeilidAPIError::unimplemented(
+            "CRYPTO_KIND_NONE needs the enable-crypto-none feature",
+        ))
     }
 
     // /// The VLD1 crypto kind

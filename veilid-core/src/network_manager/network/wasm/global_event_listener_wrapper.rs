@@ -20,34 +20,35 @@ where
     pub fn new(event_name: &str, handler: GlobalEventListenerHandler<T>) -> EyreResult<Self> {
         let global_obj = js_sys::global();
 
+        // One pending event is all a receiver needs, so a full channel drops the rest
         let (sender, receiver) = flume::bounded(1);
 
         let event_listener = if global_obj.is_instance_of::<Window>() {
             let obj: Window = global_obj.unchecked_into();
             EventListener::new(&obj, event_name.to_static_str(), move |e: &Event| {
                 if let Some(v) = handler(e) {
-                    sender.try_send(v).unwrap();
+                    let _ = sender.try_send(v);
                 }
             })
         } else if global_obj.is_instance_of::<DedicatedWorkerGlobalScope>() {
             let obj: DedicatedWorkerGlobalScope = global_obj.unchecked_into();
             EventListener::new(&obj, event_name.to_static_str(), move |e: &Event| {
                 if let Some(v) = handler(e) {
-                    sender.try_send(v).unwrap();
+                    let _ = sender.try_send(v);
                 }
             })
         } else if global_obj.is_instance_of::<SharedWorkerGlobalScope>() {
             let obj: SharedWorkerGlobalScope = global_obj.unchecked_into();
             EventListener::new(&obj, event_name.to_static_str(), move |e: &Event| {
                 if let Some(v) = handler(e) {
-                    sender.try_send(v).unwrap();
+                    let _ = sender.try_send(v);
                 }
             })
         } else if global_obj.is_instance_of::<ServiceWorkerGlobalScope>() {
             let obj: ServiceWorkerGlobalScope = global_obj.unchecked_into();
             EventListener::new(&obj, event_name.to_static_str(), move |e: &Event| {
                 if let Some(v) = handler(e) {
-                    sender.try_send(v).unwrap();
+                    let _ = sender.try_send(v);
                 }
             })
         } else {

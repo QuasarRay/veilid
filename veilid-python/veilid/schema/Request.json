@@ -87,6 +87,57 @@
       ]
     },
     {
+      "description": "Report where the host application stands in its lifecycle.",
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "ReportAppLifecycleState"
+        },
+        "state": {
+          "description": "Where the host application now stands.",
+          "$ref": "#/$defs/VeilidAppLifecycleState"
+        }
+      },
+      "required": [
+        "op",
+        "state"
+      ]
+    },
+    {
+      "description": "Wait until the attachment state satisfies a condition.",
+      "type": "object",
+      "properties": {
+        "condition": {
+          "description": "Condition to wait for, or attached with PublicInternet ready if None.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VeilidStateAttachmentCondition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "op": {
+          "type": "string",
+          "const": "WaitForAttachmentCondition"
+        },
+        "timeout_ms": {
+          "description": "Timeout in milliseconds, or wait indefinitely if None.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "op"
+      ]
+    },
+    {
       "description": "Create a new `MemberId` for use in building `DHTSchema`s.",
       "type": "object",
       "properties": {
@@ -718,6 +769,51 @@
     "AllowOffline": {
       "description": "Whether a DHT write may be deferred for later when the node is offline. Defaults to true.",
       "type": "boolean"
+    },
+    "AttachmentState": {
+      "description": "Attachment abstraction for network 'signal strength'.\n\nOrdered from least to most attached.",
+      "oneOf": [
+        {
+          "description": "Not attached to the network.",
+          "type": "string",
+          "const": "Detached"
+        },
+        {
+          "description": "Detaching from the network and shutting down connections.",
+          "type": "string",
+          "const": "Detaching"
+        },
+        {
+          "description": "Attaching, but not yet able to perform network operations.",
+          "type": "string",
+          "const": "Attaching"
+        },
+        {
+          "description": "Attached with the weakest signal strength.",
+          "type": "string",
+          "const": "AttachedWeak"
+        },
+        {
+          "description": "Attached with fair signal strength.",
+          "type": "string",
+          "const": "AttachedFair"
+        },
+        {
+          "description": "Attached with good signal strength.",
+          "type": "string",
+          "const": "AttachedGood"
+        },
+        {
+          "description": "Attached with strong signal strength.",
+          "type": "string",
+          "const": "AttachedStrong"
+        },
+        {
+          "description": "Attached with the strongest signal strength.",
+          "type": "string",
+          "const": "AttachedFull"
+        }
+      ]
     },
     "CryptoKind": {
       "description": "A four-character code",
@@ -1865,6 +1961,19 @@
         "dhttx_id"
       ]
     },
+    "OpenDHTRecordOptions": {
+      "description": "Options that override defaults for open_dht_record",
+      "type": "object",
+      "properties": {
+        "rehydrate": {
+          "description": "Defaults to true. If false, opening a record this node already holds does not queue a\ncheck that the network still carries it.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
     "PrivateSpec": {
       "description": "Options for private routes (receiver privacy).",
       "type": "object",
@@ -2066,6 +2175,17 @@
             "key": {
               "description": "Record key to open.",
               "type": "string"
+            },
+            "options": {
+              "description": "Optional open options, such as skipping rehydration.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OpenDHTRecordOptions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "rc_op": {
               "type": "string",
@@ -2797,6 +2917,63 @@
             "minimum": 0
           }
         ]
+      }
+    },
+    "VeilidAppLifecycleState": {
+      "description": "Where the host application stands in its lifecycle, as the host reports it.",
+      "oneOf": [
+        {
+          "description": "In front of the user, or doing work its platform keeps it awake for.",
+          "type": "string",
+          "const": "Active"
+        },
+        {
+          "description": "Put away: its platform may freeze or terminate it without further notice.",
+          "type": "string",
+          "const": "Background"
+        }
+      ]
+    },
+    "VeilidStateAttachmentCondition": {
+      "description": "A condition on [VeilidStateAttachment], for [VeilidAPI::wait_for_attachment_condition].\n\nA field left `None` is not checked, so the default condition holds for every state.",
+      "type": "object",
+      "properties": {
+        "opt_local_network_ready": {
+          "description": "The LocalNetwork readiness that satisfies the condition.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "opt_max_state": {
+          "description": "The most attached state that satisfies the condition.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachmentState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opt_min_state": {
+          "description": "The least attached state that satisfies the condition.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachmentState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opt_public_internet_ready": {
+          "description": "The PublicInternet readiness that satisfies the condition.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
       }
     }
   }

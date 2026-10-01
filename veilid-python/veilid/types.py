@@ -800,6 +800,33 @@ class DHTRecordReport:
         return self.__dict__
 
 
+class OpenDHTRecordOptions:
+    """Options that override defaults for open_dht_record: whether opening the record queues a
+    rehydration check."""
+
+    rehydrate: Optional[bool]
+
+    def __init__(
+        self,
+        rehydrate: Optional[bool] = None,
+    ):
+        self.rehydrate = rehydrate
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__}(rehydrate={self.rehydrate!r})>"
+
+    @classmethod
+    def from_json(cls, j: dict) -> Self:
+        """Build from its JSON representation."""
+        return cls(
+            j["rehydrate"] if "rehydrate" in j else None,
+        )
+
+    def to_json(self) -> dict:
+        """Convert to its JSON representation."""
+        return self.__dict__
+
+
 class SetDHTValueOptions:
     """Options that override defaults for set_dht_value: an override writer, the offline-write policy, and a minimum sequence number."""
 

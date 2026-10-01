@@ -6,7 +6,7 @@ impl NativeNetwork {
     #[cfg_attr(feature = "instrument", instrument(parent = None, level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(super) async fn upnp_task_routine(
         &self,
-        _stop_token: StopToken,
+        stop_token: StopToken,
         _l: Timestamp,
         _t: Timestamp,
     ) -> EyreResult<()> {
@@ -14,7 +14,10 @@ impl NativeNetwork {
         let Some(igd_manager) = &self.igd_manager else {
             return Ok(());
         };
-        let outcome = igd_manager.tick().await?;
+        let Ok(outcome) = igd_manager.tick().timeout_at(stop_token).await else {
+            return Ok(());
+        };
+        let outcome = outcome?;
         if outcome.needs_restart {
             veilid_log!(self info "upnp port mapping renew failed, triggering network restart");
             let mut inner = self.inner.lock();
@@ -23,6 +26,12 @@ impl NativeNetwork {
             && self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
         {
             veilid_log!(self info "upnp port mapping moved, detecting dial info");
+        } else if igd_manager.has_mappable_deferred()
+            && self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
+        {
+            // Retried every tick until the detection skipping the mapping has finished
+            igd_manager.clear_deferred();
+            veilid_log!(self info "upnp gateway found after dial info detection, detecting dial info");
         }
 
         Ok(())

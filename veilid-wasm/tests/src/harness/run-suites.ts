@@ -7,7 +7,6 @@ import {
 import {
   asyncCallWithTimeout,
   getLogTimestamp,
-  waitForPublicAttachment,
   waitForShutdown,
 } from '../utils/wait-utils.js';
 import { appCallEventTarget, appMessageEventTarget } from './app-events.js';
@@ -132,14 +131,19 @@ export async function runSuites(
     if (needsNetwork) {
       progress('attach');
       await veilidClient.attach();
-      await asyncCallWithTimeout(waitForPublicAttachment(), 60_000);
+      await veilidClient.waitForAttachmentCondition(undefined, 60_000);
     }
 
     for (const { suite, cases } of runnable) {
       for (const c of cases) {
+        const skipped = c.skipReason?.(context);
+        if (skipped !== undefined) {
+          results.push({ suite: suite.name, name: c.name, ok: true, skipped });
+          continue;
+        }
         progress(`${suite.name}:${c.name}`);
         try {
-          await c.run({ expect });
+          await c.run({ expect, context });
           results.push({ suite: suite.name, name: c.name, ok: true });
         } catch (e) {
           results.push({

@@ -31,7 +31,7 @@ fi
 echo "Running clippy for x86_64-unknown-linux-gnu with mock-api..."
 cargo-zigbuild clippy --target x86_64-unknown-linux-gnu --all-targets --locked \
     -p veilid-core --no-default-features \
-    --features=default-tokio,debug-api,backtrace,mock-api $@
+    --features=default-tokio,mock-api $@
 cargo-zigbuild clippy --target x86_64-unknown-linux-gnu --all-targets --locked \
     -p veilid-server --no-default-features --features=mock-api $@
 

@@ -20,56 +20,6 @@ export const asyncCallWithTimeout = async<T>(asyncPromise: Promise<T>, timeLimit
   })
 }
 
-export const waitForPublicAttachment = async () => {
-  //console.log('waitForPublicAttachment...');
-
-  const startTime = Date.now();
-  let looped = false;
-  while (true) {
-
-    const state = await veilidClient.getState();
-    if (state.attachment.publicInternetReady) {
-      let attached = false
-      switch (state.attachment.state) {
-        case "Detached":
-        case "Detaching":
-        case "Attaching":
-          break;
-        default:
-          attached = true;
-          break;
-      }
-      if (attached) {
-        break;
-      }
-    }
-    await waitForMs(250);
-    //console.log('waitForPublicAttachment loop...');
-    looped = true;
-  }
-  if (looped) {
-    console.log(`waitForPublicAttachment took ${Date.now() - startTime}ms`);
-  }
-}
-
-export const waitForDetached = async () => {
-  while (true) {
-    const state = await veilidClient.getState();
-    let detached = false
-    switch (state.attachment.state) {
-      case "Detached":
-        detached = true;
-        break;
-      default:
-        break;
-    }
-    if (detached) {
-      break;
-    }
-    await waitForMs(250);
-  }
-}
-
 export const waitForShutdown = async () => {
   while (true) {
     const isShutdown = veilidClient.isShutdown();
@@ -143,7 +93,7 @@ export const sendUntilReceived = async <T extends Event>(
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     if (attempt > 1) {
-      await asyncCallWithTimeout(waitForPublicAttachment(), perAttemptMs).catch(() => { });
+      await veilidClient.waitForAttachmentCondition(undefined, perAttemptMs).catch(() => { });
     }
     await send();
     try {

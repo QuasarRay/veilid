@@ -416,10 +416,10 @@ impl OnlineDetector {
     ///
     /// A peer cannot answer inside a timeout we spent ourselves, so long stalls void
     /// timeout evidence. Short ones are filtered here, so call sites report unconditionally
-    /// from their slow branches.
-    pub fn record_local_stall(&self, duration: TimestampDuration) {
+    /// from their slow branches. Returns whether the stall was long enough to record.
+    pub fn record_local_stall(&self, duration: TimestampDuration) -> bool {
         if duration < TimestampDuration::new_ms(LOCAL_STALL_MIN_MS) {
-            return;
+            return false;
         }
         let now = Timestamp::now();
         *self.last_local_stall.lock() = Some(now);
@@ -441,6 +441,21 @@ impl OnlineDetector {
             }
             self.log_effective_transition(routing_domain, opt_transition, "local stall");
         }
+
+        // Past the inactivity timeout the far end or the NAT has dropped every connection
+        let inactivity_timeout = TimestampDuration::new_ms(
+            self.config()
+                .internal()
+                .network
+                .connection_inactivity_timeout_ms as u64,
+        );
+        if duration >= inactivity_timeout {
+            if let Some(connection_manager) = self.network_manager().opt_connection_manager() {
+                veilid_log!(self debug "purging connections: stalled {:#}", duration);
+                connection_manager.close_all_connections();
+            }
+        }
+        true
     }
 
     /// Credit the stall itself as time nobody could be tested.
@@ -778,9 +793,13 @@ impl OnlineDetector {
             }
             let opt_new_state = match pd.online_state {
                 OnlineState::Offline => Self::process_offline_event(&event),
-                OnlineState::Online | OnlineState::Degraded => {
-                    Self::process_online_event(pd, &event, enabled_framing_types, now)
-                }
+                OnlineState::Online | OnlineState::Degraded => Self::process_online_event(
+                    pd,
+                    &event,
+                    enabled_framing_types,
+                    local_stall_ts,
+                    now,
+                ),
             };
             let mut opt_flap_penalty = None;
             let mut do_wipe = false;
@@ -905,6 +924,7 @@ impl OnlineDetector {
         pd: &mut OnlineDetectionPerDomain,
         event: &OnlineEvent,
         enabled_framing_types: FramingTypeSet,
+        local_stall_ts: Option<Timestamp>,
         now: Timestamp,
     ) -> Option<OnlineState> {
         match event {
@@ -919,8 +939,10 @@ impl OnlineDetector {
                 sent_ts,
                 framing_type,
             } => {
-                // Ignore failures from RPCs sent before this online period began.
-                if *sent_ts < pd.last_transition_ts {
+                // Ignore RPCs sent before this online period began or the last stall ended
+                if *sent_ts < pd.last_transition_ts
+                    || local_stall_ts.is_some_and(|ts| *sent_ts < ts)
+                {
                     return None;
                 }
                 let bucket = pd.pending_failures.entry(*framing_type).or_default();

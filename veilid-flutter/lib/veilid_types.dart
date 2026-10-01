@@ -513,6 +513,21 @@ enum DHTReportScope {
 }
 
 //////////////////////////////////////
+/// OpenDHTRecordOptions
+
+/// Options that override defaults for open_dht_record.
+@freezed
+sealed class OpenDHTRecordOptions with _$OpenDHTRecordOptions {
+  /// `rehydrate` defaults to true: opening a record this node already holds
+  /// queues a check that the network still carries it. False skips the check.
+  const factory OpenDHTRecordOptions({bool? rehydrate}) = _OpenDHTRecordOptions;
+
+  /// Decode an [OpenDHTRecordOptions] from its JSON representation.
+  factory OpenDHTRecordOptions.fromJson(dynamic json) =>
+      _$OpenDHTRecordOptionsFromJson(json as Map<String, dynamic>);
+}
+
+//////////////////////////////////////
 /// SetDHTValueOptions
 
 /// Options that override defaults for set_dht_value.

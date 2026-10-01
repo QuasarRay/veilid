@@ -681,6 +681,58 @@ pub struct VeilidConfigCapabilities {
     pub disable: Vec<VeilidCapability>,
 }
 
+/// How the node lives through its host application moving between foreground and background.
+///
+/// ```yaml
+/// app_lifecycle:
+///     prefer_foreground: true
+///     auto_detect_state: true
+/// ```
+#[cfg(feature = "app-lifecycle")]
+#[apply(api_data_struct!)]
+#[api(eq, ts)]
+pub struct VeilidConfigAppLifecycle {
+    /// While attached, keep a hidden desktop app from being throttled (macOS App Nap, Windows power throttling); no effect on mobile.
+    pub prefer_foreground: bool,
+    /// Follow the platform's own lifecycle reports where it has them; when false, only `report_app_lifecycle_state` counts.
+    #[serde(default = "default_auto_detect_state")]
+    pub auto_detect_state: bool,
+}
+
+#[cfg(feature = "app-lifecycle")]
+impl Default for VeilidConfigAppLifecycle {
+    fn default() -> Self {
+        Self {
+            prefer_foreground: true,
+            auto_detect_state: default_auto_detect_state(),
+        }
+    }
+}
+
+/// Default for auto_detect_state (single source for serde + Default).
+#[cfg(feature = "app-lifecycle")]
+fn default_auto_detect_state() -> bool {
+    true
+}
+
+/// Attachment configuration, owned by the attachment manager.
+///
+/// ```yaml
+/// attachment:
+///     app_lifecycle: # only with `--features=app-lifecycle`
+///         prefer_foreground: true
+///         auto_detect_state: true
+/// ```
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
+pub struct VeilidConfigAttachment {
+    /// Host application lifecycle handling (requires `app-lifecycle`).
+    #[cfg(feature = "app-lifecycle")]
+    #[serde(default)]
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub app_lifecycle: VeilidConfigAppLifecycle,
+}
+
 /// Logging level threshold (`Off` disables logging).
 #[apply(api_data_enum!)]
 #[api(eq, copy, ord, default, ts(namespace))]
@@ -1050,6 +1102,10 @@ pub struct VeilidConfig {
     pub block_store: VeilidConfigBlockStore,
     /// Configuring how Veilid interacts with the low level network
     pub network: VeilidConfigNetwork,
+    /// Configuring how the node attaches to the network
+    #[serde(default)]
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub attachment: VeilidConfigAttachment,
     /// Internal "footgun" tuning. `None` uses safe defaults. Only honored with the
     /// `footgun-config` feature; otherwise ignored (a warning is logged at startup).
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]

@@ -81,7 +81,7 @@ impl RelayInfo {
         let adids = self.dial_info_detail_list();
         let bdids = other.dial_info_detail_list();
         let aor = self.relay_kind();
-        let bor = self.relay_kind();
+        let bor = other.relay_kind();
 
         ani == bni && aop == bop && aat == bat && adids == bdids && aor == bor
     }

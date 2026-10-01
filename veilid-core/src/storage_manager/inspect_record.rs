@@ -45,6 +45,8 @@ struct OutboundInspectValueContext {
     pub convergence: usize,
     /// The convergence counter as of the previous done check
     pub checked_convergence: usize,
+    /// Nodes that answered, holding the record or not
+    pub answered: usize,
     /// Safety routes that carried an accepted answer
     #[cfg(feature = "verbose-tracing")]
     pub answered_safety_routes: BTreeSet<PublicKey>,
@@ -57,6 +59,8 @@ pub(in crate::storage_manager) struct OutboundInspectValueResult {
     pub subkey_fanout_results: Vec<FanoutResult>,
     /// The inspection that was retrieved
     pub inspect_result: InspectResult,
+    /// Nodes that answered, holding the record or not; zero means every call failed
+    pub answered: usize,
     /// Safety routes that carried an accepted answer
     #[cfg(feature = "verbose-tracing")]
     pub answered_safety_routes: Vec<PublicKey>,
@@ -307,21 +311,9 @@ impl StorageManager {
             )
             .await?;
 
-        // A fanout that ran out of time before any subkey reached consensus
-        // has not finished looking. The report cannot say so, and a caller
-        // reads its missing seqs as "nothing on the network". Timeout rather
-        // than TryAgain: TryAgain is contention, which a caller retries soon,
-        // and reaching nobody is what its backoff is for.
-        let results = &outbound_inspect_result.subkey_fanout_results;
-        if !results.is_empty()
-            && results.iter().all(|r| {
-                matches!(
-                    r.kind,
-                    FanoutResultKind::Timeout | FanoutResultKind::Incomplete
-                )
-            })
-        {
-            apibail_timeout!();
+        // Every node answers an inspect, holding the record or not, so silence is our network
+        if outbound_inspect_result.answered == 0 {
+            apibail_try_again!("no node answered the inspect");
         }
 
         // Pairs with the watch route diagnosis on a productive change inspect
@@ -455,6 +447,7 @@ impl StorageManager {
             opt_descriptor_info,
             convergence: 0,
             checked_convergence: 0,
+            answered: 0,
             #[cfg(feature = "verbose-tracing")]
             answered_safety_routes: BTreeSet::new(),
         }));
@@ -517,6 +510,7 @@ impl StorageManager {
 
                         // Check if we got an accepted result
                         if !answer.accepted {
+                            context.lock().answered += 1;
                             // Return peers if we have some
                             veilid_log!(registry debug target:"network_result", "InspectValue missed, fanout call returned peers {}", answer.peers.len());
                             return Ok(FanoutCallOutput {
@@ -562,6 +556,7 @@ impl StorageManager {
 
                         // Keep the value if we got one and it is newer and it passes schema validation
                         if answer.seqs.is_empty() {
+                            context.lock().answered += 1;
                             veilid_log!(registry debug target:"network_result", "InspectValue returned no seq, fanout call returned peers {}", answer.peers.len());
                             return Ok(FanoutCallOutput {
                                 peer_info_list: answer.peers,
@@ -673,6 +668,8 @@ impl StorageManager {
                             ctx.convergence += convergence;
                         }
 
+                        ctx.answered += 1;
+
                         // Return peers if we have some
                         veilid_log!(registry debug target:"network_result", "InspectValue fanout call returned peers {}", answer.peers.len());
 
@@ -781,6 +778,7 @@ impl StorageManager {
 
         let result = OutboundInspectValueResult {
             subkey_fanout_results,
+            answered: ctx.answered,
             #[cfg(feature = "verbose-tracing")]
             answered_safety_routes: ctx.answered_safety_routes.iter().cloned().collect(),
             inspect_result: InspectResult::new(

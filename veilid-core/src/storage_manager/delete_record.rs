@@ -81,6 +81,7 @@ impl StorageManager {
         inner
             .rehydration_requests
             .retain(|k, _| !dead_records_set.contains(k));
+        self.mark_metadata_dirty();
 
         // A recreated record must be checked afresh
         for k in &dead_records_set {

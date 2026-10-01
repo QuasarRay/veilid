@@ -4,7 +4,6 @@ from typing import AsyncGenerator, Awaitable, Callable, Optional, TypeVar
 
 import pytest
 import pytest_asyncio
-import asyncio
 
 import veilid
 from veilid.json_api import _JsonVeilidAPI
@@ -16,12 +15,6 @@ async def simple_update_callback(update: veilid.VeilidUpdate):
 
 
 T = TypeVar("T")
-
-
-async def wait_for_public_internet_ready(api: _JsonVeilidAPI) -> None:
-    """Block until the attached node reports PublicInternet ready."""
-    while not (await api.get_state()).attachment.public_internet_ready:
-        await asyncio.sleep(0.25)
 
 
 async def dht_retry(
@@ -45,7 +38,7 @@ async def dht_retry(
             cnt += 1
             tag = label or "dht_retry"
             print(f"  {tag} retry #{cnt}: {e}")
-            await wait_for_public_internet_ready(api)
+            await api.wait_for_attachment_condition()
             continue
 
 
@@ -57,6 +50,6 @@ async def api_connection() -> AsyncGenerator[_JsonVeilidAPI, None]:
         pytest.skip("Unable to connect to veilid-server.")
 
     async with api:
-        await wait_for_public_internet_ready(api)
+        await api.wait_for_attachment_condition()
 
         yield api

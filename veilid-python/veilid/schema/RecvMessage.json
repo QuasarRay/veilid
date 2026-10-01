@@ -34,12 +34,17 @@
   ],
   "$defs": {
     "AttachmentState": {
-      "description": "Attachment abstraction for network 'signal strength'.",
+      "description": "Attachment abstraction for network 'signal strength'.\n\nOrdered from least to most attached.",
       "oneOf": [
         {
           "description": "Not attached to the network.",
           "type": "string",
           "const": "Detached"
+        },
+        {
+          "description": "Detaching from the network and shutting down connections.",
+          "type": "string",
+          "const": "Detaching"
         },
         {
           "description": "Attaching, but not yet able to perform network operations.",
@@ -70,11 +75,6 @@
           "description": "Attached with the strongest signal strength.",
           "type": "string",
           "const": "AttachedFull"
-        },
-        {
-          "description": "Detaching from the network and shutting down connections.",
-          "type": "string",
-          "const": "Detaching"
         }
       ]
     },
@@ -2129,6 +2129,88 @@
                 "value": {
                   "description": "The returned value.",
                   "type": "null"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "description": "Result of `ReportAppLifecycleState`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "ReportAppLifecycleState"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "null"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "description": "Result of `WaitForAttachmentCondition`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "WaitForAttachmentCondition"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "$ref": "#/$defs/VeilidStateAttachment"
                 }
               },
               "required": [
@@ -5012,6 +5094,11 @@
       "description": "Top level of the Veilid configuration tree",
       "type": "object",
       "properties": {
+        "attachment": {
+          "description": "Configuring how the node attaches to the network",
+          "$ref": "#/$defs/VeilidConfigAttachment",
+          "default": {}
+        },
         "block_store": {
           "description": "Configuring the block store (storage of large content-addressable content)",
           "$ref": "#/$defs/VeilidConfigBlockStore"
@@ -5076,6 +5163,10 @@
           "const": "IPV6"
         }
       ]
+    },
+    "VeilidConfigAttachment": {
+      "description": "Attachment configuration, owned by the attachment manager.\n\n```yaml\nattachment:\n    app_lifecycle: # only with `--features=app-lifecycle`\n        prefer_foreground: true\n        auto_detect_state: true\n```",
+      "type": "object"
     },
     "VeilidConfigBlockStore": {
       "description": "Block store configuration: content-addressed block storage.",

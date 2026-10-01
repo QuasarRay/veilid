@@ -218,6 +218,11 @@ void main() => runWithIntegrationLog(() {
             tags: ['dht'],
           );
           test('get dht value nonexistent', testDHT.testGetDHTValueNonexistent);
+          test(
+            'open dht record without rehydration',
+            testDHT.testOpenDHTRecordWithoutRehydration,
+            tags: ['dht'],
+          );
           test('set get dht value', testDHT.testSetGetDHTValue, tags: ['dht']);
           test(
             'set get dht value with owner',
@@ -373,6 +378,18 @@ void main() => runWithIntegrationLog(() {
     test(
       'a reaped sink holds no reference and leaves the node running',
       testStartupShutdown.testReapedSinkHoldsNoReference,
+      timeout: const Timeout(Duration(seconds: 120)),
+      tags: ['startup'],
+    );
+    test(
+      'wait for an attachment condition',
+      testStartupShutdown.testWaitForAttachmentCondition,
+      timeout: const Timeout(Duration(seconds: 120)),
+      tags: ['startup'],
+    );
+    test(
+      'report the app lifecycle state',
+      testStartupShutdown.testReportAppLifecycleState,
       timeout: const Timeout(Duration(seconds: 120)),
       tags: ['startup'],
     );

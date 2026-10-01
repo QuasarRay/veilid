@@ -193,6 +193,8 @@ mod veilid_capnp {
     include!("../proto/veilid_capnp.rs");
 }
 
+#[cfg(all(not(feature = "mock-api"), feature = "app-lifecycle"))]
+use self::attachment_manager::AppLifecycleEvent;
 #[cfg(not(feature = "mock-api"))]
 use self::attachment_manager::TickEvent;
 use self::component::*;

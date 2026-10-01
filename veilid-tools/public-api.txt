@@ -50,6 +50,25 @@ pub use veilid_tools::mem
 pub use veilid_tools::parking_lot
 pub use veilid_tools::shell_words
 pub use veilid_tools::task
+pub mod veilid_tools::app_lifecycle
+pub enum veilid_tools::app_lifecycle::AppLifecycleState
+pub veilid_tools::app_lifecycle::AppLifecycleState::Active
+pub veilid_tools::app_lifecycle::AppLifecycleState::Background
+pub struct veilid_tools::app_lifecycle::AppLifecycleMonitor
+impl veilid_tools::AppLifecycleMonitor
+pub fn veilid_tools::AppLifecycleMonitor::new(impl core::ops::function::Fn() + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn veilid_tools::AppLifecycleMonitor::state(&self) -> core::option::Option<veilid_tools::AppLifecycleState>
+pub fn veilid_tools::AppLifecycleMonitor::take_background_entry_time(&self) -> core::option::Option<veilid_tools::BackgroundTimeGuard>
+impl core::ops::drop::Drop for veilid_tools::AppLifecycleMonitor
+pub fn veilid_tools::AppLifecycleMonitor::drop(&mut self)
+pub struct veilid_tools::app_lifecycle::BackgroundTimeGuard
+impl veilid_tools::BackgroundTimeGuard
+pub fn veilid_tools::BackgroundTimeGuard::begin(&'static str) -> core::option::Option<Self>
+pub struct veilid_tools::app_lifecycle::ForegroundGuard
+impl veilid_tools::ForegroundGuard
+pub fn veilid_tools::ForegroundGuard::begin(&'static str) -> core::option::Option<Self>
+impl core::ops::drop::Drop for veilid_tools::ForegroundGuard
+pub fn veilid_tools::ForegroundGuard::drop(&mut self)
 pub mod veilid_tools::assembly_buffer
 pub struct veilid_tools::assembly_buffer::AssemblyBuffer
 impl veilid_tools::AssemblyBuffer
@@ -74,10 +93,10 @@ pub fn veilid_tools::AsyncKeyedCacheEntry<K, V>::remove(&self) -> core::option::
 pub struct veilid_tools::async_locks::AsyncMutex<T: ?core::marker::Sized>
 impl<T: ?core::marker::Sized> veilid_tools::AsyncMutex<T>
 pub async fn veilid_tools::AsyncMutex<T>::lock(&self) -> veilid_tools::AsyncMutexGuard<'_, T>
-pub async fn veilid_tools::AsyncMutex<T>::lock_arc(&alloc::sync::Arc<Self>) -> veilid_tools::AsyncMutexGuardArc<T>
+pub async fn veilid_tools::AsyncMutex<T>::lock_arc(&alloc::rcs::arc::Arc<Self>) -> veilid_tools::AsyncMutexGuardArc<T>
 pub fn veilid_tools::AsyncMutex<T>::new(T) -> Self where T: core::marker::Sized
 pub fn veilid_tools::AsyncMutex<T>::try_lock(&self) -> core::option::Option<veilid_tools::AsyncMutexGuard<'_, T>>
-pub fn veilid_tools::AsyncMutex<T>::try_lock_arc(&alloc::sync::Arc<Self>) -> core::option::Option<veilid_tools::AsyncMutexGuardArc<T>>
+pub fn veilid_tools::AsyncMutex<T>::try_lock_arc(&alloc::rcs::arc::Arc<Self>) -> core::option::Option<veilid_tools::AsyncMutexGuardArc<T>>
 impl<T> core::convert::From<T> for veilid_tools::AsyncMutex<T>
 pub fn veilid_tools::AsyncMutex<T>::from(T) -> Self
 pub struct veilid_tools::async_locks::AsyncMutexGuard<'a, T: ?core::marker::Sized>
@@ -101,13 +120,13 @@ impl<T: ?core::marker::Sized> veilid_tools::AsyncRwLock<T>
 pub async fn veilid_tools::AsyncRwLock<T>::read(&self) -> veilid_tools::AsyncRwLockReadGuard<'_, T>
 pub fn veilid_tools::AsyncRwLock<T>::try_read(&self) -> core::option::Option<veilid_tools::AsyncRwLockReadGuard<'_, T>>
 pub fn veilid_tools::AsyncRwLock<T>::try_write(&self) -> core::option::Option<veilid_tools::AsyncRwLockWriteGuard<'_, T>>
-pub fn veilid_tools::AsyncRwLock<T>::try_write_arc(&alloc::sync::Arc<Self>) -> core::option::Option<veilid_tools::AsyncRwLockWriteGuardArc<T>>
+pub fn veilid_tools::AsyncRwLock<T>::try_write_arc(&alloc::rcs::arc::Arc<Self>) -> core::option::Option<veilid_tools::AsyncRwLockWriteGuardArc<T>>
 pub async fn veilid_tools::AsyncRwLock<T>::write(&self) -> veilid_tools::AsyncRwLockWriteGuard<'_, T>
-pub async fn veilid_tools::AsyncRwLock<T>::write_arc(&alloc::sync::Arc<Self>) -> veilid_tools::AsyncRwLockWriteGuardArc<T>
+pub async fn veilid_tools::AsyncRwLock<T>::write_arc(&alloc::rcs::arc::Arc<Self>) -> veilid_tools::AsyncRwLockWriteGuardArc<T>
 impl<T> veilid_tools::AsyncRwLock<T>
 pub fn veilid_tools::AsyncRwLock<T>::new(T) -> veilid_tools::AsyncRwLock<T>
-pub async fn veilid_tools::AsyncRwLock<T>::read_arc(&alloc::sync::Arc<Self>) -> veilid_tools::AsyncRwLockReadGuardArc<T>
-pub fn veilid_tools::AsyncRwLock<T>::try_read_arc(&alloc::sync::Arc<Self>) -> core::option::Option<veilid_tools::AsyncRwLockReadGuardArc<T>>
+pub async fn veilid_tools::AsyncRwLock<T>::read_arc(&alloc::rcs::arc::Arc<Self>) -> veilid_tools::AsyncRwLockReadGuardArc<T>
+pub fn veilid_tools::AsyncRwLock<T>::try_read_arc(&alloc::rcs::arc::Arc<Self>) -> core::option::Option<veilid_tools::AsyncRwLockReadGuardArc<T>>
 impl<T> core::convert::From<T> for veilid_tools::AsyncRwLock<T>
 pub fn veilid_tools::AsyncRwLock<T>::from(T) -> veilid_tools::AsyncRwLock<T>
 pub struct veilid_tools::async_locks::AsyncRwLockReadGuard<'a, T: ?core::marker::Sized>
@@ -141,10 +160,10 @@ pub fn veilid_tools::AsyncRwLockWriteGuardArc<T>::fmt(&self, &mut core::fmt::For
 pub struct veilid_tools::async_locks::AsyncSemaphore
 impl veilid_tools::AsyncSemaphore
 pub async fn veilid_tools::AsyncSemaphore::acquire(&self) -> veilid_tools::AsyncSemaphoreGuard<'_>
-pub async fn veilid_tools::AsyncSemaphore::acquire_arc(&alloc::sync::Arc<Self>) -> veilid_tools::AsyncSemaphoreGuardArc
+pub async fn veilid_tools::AsyncSemaphore::acquire_arc(&alloc::rcs::arc::Arc<Self>) -> veilid_tools::AsyncSemaphoreGuardArc
 pub fn veilid_tools::AsyncSemaphore::new(usize) -> veilid_tools::AsyncSemaphore
 pub fn veilid_tools::AsyncSemaphore::try_acquire(&self) -> core::option::Option<veilid_tools::AsyncSemaphoreGuard<'_>>
-pub fn veilid_tools::AsyncSemaphore::try_acquire_arc(&alloc::sync::Arc<Self>) -> core::option::Option<veilid_tools::AsyncSemaphoreGuardArc>
+pub fn veilid_tools::AsyncSemaphore::try_acquire_arc(&alloc::rcs::arc::Arc<Self>) -> core::option::Option<veilid_tools::AsyncSemaphoreGuardArc>
 pub struct veilid_tools::async_locks::AsyncSemaphoreGuard<'a>
 pub struct veilid_tools::async_locks::AsyncSemaphoreGuardArc
 pub struct veilid_tools::async_locks::AsyncTagLockGuard<T> where T: core::hash::Hash + core::cmp::Eq + core::clone::Clone + core::fmt::Debug
@@ -161,13 +180,13 @@ impl<T> core::default::Default for veilid_tools::AsyncTagLockTable<T> where T: c
 pub fn veilid_tools::AsyncTagLockTable<T>::default() -> Self
 pub struct veilid_tools::async_locks::AsyncWeightedSemaphore
 impl veilid_tools::AsyncWeightedSemaphore
-pub async fn veilid_tools::AsyncWeightedSemaphore::acquire(&alloc::sync::Arc<Self>, u64) -> veilid_tools::AsyncWeightedSemaphoreGuard
+pub async fn veilid_tools::AsyncWeightedSemaphore::acquire(&alloc::rcs::arc::Arc<Self>, u64) -> veilid_tools::AsyncWeightedSemaphoreGuard
 pub fn veilid_tools::AsyncWeightedSemaphore::in_flight(&self) -> u64
 pub fn veilid_tools::AsyncWeightedSemaphore::limit(&self) -> u64
-pub fn veilid_tools::AsyncWeightedSemaphore::new(u64) -> alloc::sync::Arc<Self>
+pub fn veilid_tools::AsyncWeightedSemaphore::new(u64) -> alloc::rcs::arc::Arc<Self>
 pub fn veilid_tools::AsyncWeightedSemaphore::raise_limit(&self, u64) -> u64
 pub fn veilid_tools::AsyncWeightedSemaphore::set_limit(&self, u64)
-pub fn veilid_tools::AsyncWeightedSemaphore::try_acquire(&alloc::sync::Arc<Self>, u64) -> core::option::Option<veilid_tools::AsyncWeightedSemaphoreGuard>
+pub fn veilid_tools::AsyncWeightedSemaphore::try_acquire(&alloc::rcs::arc::Arc<Self>, u64) -> core::option::Option<veilid_tools::AsyncWeightedSemaphoreGuard>
 pub struct veilid_tools::async_locks::AsyncWeightedSemaphoreGuard
 impl core::ops::drop::Drop for veilid_tools::AsyncWeightedSemaphoreGuard
 pub fn veilid_tools::AsyncWeightedSemaphoreGuard::drop(&mut self)
@@ -265,7 +284,7 @@ pub fn veilid_tools::EventBus::new() -> Self
 pub fn veilid_tools::EventBus::post<E: core::any::Any + core::marker::Send + core::marker::Sync + 'static>(&self, E) -> core::result::Result<(), veilid_tools::StartupLockNotStartedError>
 pub async fn veilid_tools::EventBus::shutdown(&self)
 pub fn veilid_tools::EventBus::startup(&self) -> core::result::Result<(), veilid_tools::StartupLockAlreadyStartedError>
-pub fn veilid_tools::EventBus::subscribe<E: core::any::Any + core::marker::Send + core::marker::Sync + 'static, F: core::ops::function::Fn(alloc::sync::Arc<E>) -> veilid_tools::PinBoxFutureStatic<()> + core::marker::Send + core::marker::Sync + 'static>(&self, F) -> veilid_tools::EventBusSubscription
+pub fn veilid_tools::EventBus::subscribe<E: core::any::Any + core::marker::Send + core::marker::Sync + 'static, F: core::ops::function::Fn(alloc::rcs::arc::Arc<E>) -> veilid_tools::PinBoxFutureStatic<()> + core::marker::Send + core::marker::Sync + 'static>(&self, F) -> veilid_tools::EventBusSubscription
 pub fn veilid_tools::EventBus::unsubscribe(&self, veilid_tools::EventBusSubscription)
 impl core::default::Default for veilid_tools::EventBus
 pub fn veilid_tools::EventBus::default() -> Self
@@ -509,10 +528,10 @@ pub veilid_tools::igd::Gateway::control_schema_url: alloc::string::String
 pub veilid_tools::igd::Gateway::control_url: alloc::string::String
 pub veilid_tools::igd::Gateway::root_url: alloc::string::String
 impl veilid_tools::igd::Gateway
-pub fn veilid_tools::igd::Gateway::add_any_port(&self, veilid_tools::igd::PortMappingProtocol, core::net::socket_addr::SocketAddr, u32, &str) -> core::result::Result<u16, veilid_tools::igd::IgdError>
-pub fn veilid_tools::igd::Gateway::add_port(&self, veilid_tools::igd::PortMappingProtocol, u16, core::net::socket_addr::SocketAddr, u32, &str) -> core::result::Result<(), veilid_tools::igd::IgdError>
-pub fn veilid_tools::igd::Gateway::get_external_ip(&self) -> core::result::Result<core::net::ip_addr::IpAddr, veilid_tools::igd::IgdError>
-pub fn veilid_tools::igd::Gateway::remove_port(&self, veilid_tools::igd::PortMappingProtocol, u16) -> core::result::Result<(), veilid_tools::igd::IgdError>
+pub async fn veilid_tools::igd::Gateway::add_any_port(&self, veilid_tools::igd::PortMappingProtocol, core::net::socket_addr::SocketAddr, u32, &str) -> core::result::Result<u16, veilid_tools::igd::IgdError>
+pub async fn veilid_tools::igd::Gateway::add_port(&self, veilid_tools::igd::PortMappingProtocol, u16, core::net::socket_addr::SocketAddr, u32, &str) -> core::result::Result<(), veilid_tools::igd::IgdError>
+pub async fn veilid_tools::igd::Gateway::get_external_ip(&self) -> core::result::Result<core::net::ip_addr::IpAddr, veilid_tools::igd::IgdError>
+pub async fn veilid_tools::igd::Gateway::remove_port(&self, veilid_tools::igd::PortMappingProtocol, u16) -> core::result::Result<(), veilid_tools::igd::IgdError>
 impl core::fmt::Display for veilid_tools::igd::Gateway
 pub fn veilid_tools::igd::Gateway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct veilid_tools::igd::IgdError
@@ -528,7 +547,7 @@ pub fn veilid_tools::igd::SearchOptions::new_v4(u64) -> Self
 pub fn veilid_tools::igd::SearchOptions::new_v6(veilid_tools::igd::Ipv6SearchScope, u64) -> Self
 impl core::default::Default for veilid_tools::igd::SearchOptions
 pub fn veilid_tools::igd::SearchOptions::default() -> Self
-pub fn veilid_tools::igd::search_gateway(veilid_tools::igd::SearchOptions) -> core::result::Result<veilid_tools::igd::Gateway, veilid_tools::igd::IgdError>
+pub async fn veilid_tools::igd::search_gateway(veilid_tools::igd::SearchOptions) -> core::result::Result<veilid_tools::igd::Gateway, veilid_tools::igd::IgdError>
 pub mod veilid_tools::interval
 pub fn veilid_tools::interval::interval<F, FUT>(&str, u32, bool, F) -> veilid_tools::PinBoxFutureStatic<()> where F: core::ops::function::Fn() -> FUT + core::marker::Send + core::marker::Sync + 'static, FUT: core::future::future::Future<Output = ()> + core::marker::Send
 pub mod veilid_tools::ip_addr_port
@@ -758,7 +777,7 @@ pub fn veilid_tools::NetworkInterfaceAddressState::is_own_address(&self, core::n
 pub struct veilid_tools::network_interfaces::NetworkInterfaces
 impl veilid_tools::NetworkInterfaces
 pub fn veilid_tools::NetworkInterfaces::clear(&self)
-pub fn veilid_tools::NetworkInterfaces::interface_address_state(&self) -> alloc::sync::Arc<veilid_tools::NetworkInterfaceAddressState>
+pub fn veilid_tools::NetworkInterfaces::interface_address_state(&self) -> alloc::rcs::arc::Arc<veilid_tools::NetworkInterfaceAddressState>
 pub fn veilid_tools::NetworkInterfaces::is_valid(&self) -> bool
 pub fn veilid_tools::NetworkInterfaces::new() -> Self
 pub fn veilid_tools::NetworkInterfaces::raw_address_summary(&self) -> veilid_tools::RawAddressSummary
@@ -1171,6 +1190,9 @@ pub macro veilid_tools::pin_dyn_future_closure!
 pub macro veilid_tools::pin_future!
 pub macro veilid_tools::pin_future_closure!
 pub macro veilid_tools::timeout_or_try!
+pub enum veilid_tools::AppLifecycleState
+pub veilid_tools::AppLifecycleState::Active
+pub veilid_tools::AppLifecycleState::Background
 pub enum veilid_tools::DebuggerState
 pub veilid_tools::DebuggerState::Attached
 pub veilid_tools::DebuggerState::Detached
@@ -1290,6 +1312,13 @@ pub fn veilid_tools::AlternateDisplayFormat::to_string<T: core::fmt::Display>(&s
 pub fn veilid_tools::AlternateDisplayFormat::to_string_opt<T: core::fmt::Display>(&self, core::option::Option<T>) -> alloc::string::String
 pub fn veilid_tools::AlternateDisplayFormat::to_table_string<T: core::fmt::Display>(&self, &[T]) -> alloc::string::String
 pub fn veilid_tools::AlternateDisplayFormat::to_table_string_custom<T: core::fmt::Display, I: core::iter::traits::collect::IntoIterator<Item = T>>(&self, I, usize, usize, bool, bool) -> alloc::string::String
+pub struct veilid_tools::AppLifecycleMonitor
+impl veilid_tools::AppLifecycleMonitor
+pub fn veilid_tools::AppLifecycleMonitor::new(impl core::ops::function::Fn() + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn veilid_tools::AppLifecycleMonitor::state(&self) -> core::option::Option<veilid_tools::AppLifecycleState>
+pub fn veilid_tools::AppLifecycleMonitor::take_background_entry_time(&self) -> core::option::Option<veilid_tools::BackgroundTimeGuard>
+impl core::ops::drop::Drop for veilid_tools::AppLifecycleMonitor
+pub fn veilid_tools::AppLifecycleMonitor::drop(&mut self)
 pub struct veilid_tools::AssemblyBuffer
 impl veilid_tools::AssemblyBuffer
 pub fn veilid_tools::AssemblyBuffer::insert_frame(&self, &[u8], core::net::socket_addr::SocketAddr) -> veilid_tools::NetworkResult<core::option::Option<bytes::bytes::Bytes>>
@@ -1311,10 +1340,10 @@ pub fn veilid_tools::AsyncKeyedCacheEntry<K, V>::remove(&self) -> core::option::
 pub struct veilid_tools::AsyncMutex<T: ?core::marker::Sized>
 impl<T: ?core::marker::Sized> veilid_tools::AsyncMutex<T>
 pub async fn veilid_tools::AsyncMutex<T>::lock(&self) -> veilid_tools::AsyncMutexGuard<'_, T>
-pub async fn veilid_tools::AsyncMutex<T>::lock_arc(&alloc::sync::Arc<Self>) -> veilid_tools::AsyncMutexGuardArc<T>
+pub async fn veilid_tools::AsyncMutex<T>::lock_arc(&alloc::rcs::arc::Arc<Self>) -> veilid_tools::AsyncMutexGuardArc<T>
 pub fn veilid_tools::AsyncMutex<T>::new(T) -> Self where T: core::marker::Sized
 pub fn veilid_tools::AsyncMutex<T>::try_lock(&self) -> core::option::Option<veilid_tools::AsyncMutexGuard<'_, T>>
-pub fn veilid_tools::AsyncMutex<T>::try_lock_arc(&alloc::sync::Arc<Self>) -> core::option::Option<veilid_tools::AsyncMutexGuardArc<T>>
+pub fn veilid_tools::AsyncMutex<T>::try_lock_arc(&alloc::rcs::arc::Arc<Self>) -> core::option::Option<veilid_tools::AsyncMutexGuardArc<T>>
 impl<T> core::convert::From<T> for veilid_tools::AsyncMutex<T>
 pub fn veilid_tools::AsyncMutex<T>::from(T) -> Self
 pub struct veilid_tools::AsyncMutexGuard<'a, T: ?core::marker::Sized>
@@ -1350,13 +1379,13 @@ impl<T: ?core::marker::Sized> veilid_tools::AsyncRwLock<T>
 pub async fn veilid_tools::AsyncRwLock<T>::read(&self) -> veilid_tools::AsyncRwLockReadGuard<'_, T>
 pub fn veilid_tools::AsyncRwLock<T>::try_read(&self) -> core::option::Option<veilid_tools::AsyncRwLockReadGuard<'_, T>>
 pub fn veilid_tools::AsyncRwLock<T>::try_write(&self) -> core::option::Option<veilid_tools::AsyncRwLockWriteGuard<'_, T>>
-pub fn veilid_tools::AsyncRwLock<T>::try_write_arc(&alloc::sync::Arc<Self>) -> core::option::Option<veilid_tools::AsyncRwLockWriteGuardArc<T>>
+pub fn veilid_tools::AsyncRwLock<T>::try_write_arc(&alloc::rcs::arc::Arc<Self>) -> core::option::Option<veilid_tools::AsyncRwLockWriteGuardArc<T>>
 pub async fn veilid_tools::AsyncRwLock<T>::write(&self) -> veilid_tools::AsyncRwLockWriteGuard<'_, T>
-pub async fn veilid_tools::AsyncRwLock<T>::write_arc(&alloc::sync::Arc<Self>) -> veilid_tools::AsyncRwLockWriteGuardArc<T>
+pub async fn veilid_tools::AsyncRwLock<T>::write_arc(&alloc::rcs::arc::Arc<Self>) -> veilid_tools::AsyncRwLockWriteGuardArc<T>
 impl<T> veilid_tools::AsyncRwLock<T>
 pub fn veilid_tools::AsyncRwLock<T>::new(T) -> veilid_tools::AsyncRwLock<T>
-pub async fn veilid_tools::AsyncRwLock<T>::read_arc(&alloc::sync::Arc<Self>) -> veilid_tools::AsyncRwLockReadGuardArc<T>
-pub fn veilid_tools::AsyncRwLock<T>::try_read_arc(&alloc::sync::Arc<Self>) -> core::option::Option<veilid_tools::AsyncRwLockReadGuardArc<T>>
+pub async fn veilid_tools::AsyncRwLock<T>::read_arc(&alloc::rcs::arc::Arc<Self>) -> veilid_tools::AsyncRwLockReadGuardArc<T>
+pub fn veilid_tools::AsyncRwLock<T>::try_read_arc(&alloc::rcs::arc::Arc<Self>) -> core::option::Option<veilid_tools::AsyncRwLockReadGuardArc<T>>
 impl<T> core::convert::From<T> for veilid_tools::AsyncRwLock<T>
 pub fn veilid_tools::AsyncRwLock<T>::from(T) -> veilid_tools::AsyncRwLock<T>
 pub struct veilid_tools::AsyncRwLockReadGuard<'a, T: ?core::marker::Sized>
@@ -1390,10 +1419,10 @@ pub fn veilid_tools::AsyncRwLockWriteGuardArc<T>::fmt(&self, &mut core::fmt::For
 pub struct veilid_tools::AsyncSemaphore
 impl veilid_tools::AsyncSemaphore
 pub async fn veilid_tools::AsyncSemaphore::acquire(&self) -> veilid_tools::AsyncSemaphoreGuard<'_>
-pub async fn veilid_tools::AsyncSemaphore::acquire_arc(&alloc::sync::Arc<Self>) -> veilid_tools::AsyncSemaphoreGuardArc
+pub async fn veilid_tools::AsyncSemaphore::acquire_arc(&alloc::rcs::arc::Arc<Self>) -> veilid_tools::AsyncSemaphoreGuardArc
 pub fn veilid_tools::AsyncSemaphore::new(usize) -> veilid_tools::AsyncSemaphore
 pub fn veilid_tools::AsyncSemaphore::try_acquire(&self) -> core::option::Option<veilid_tools::AsyncSemaphoreGuard<'_>>
-pub fn veilid_tools::AsyncSemaphore::try_acquire_arc(&alloc::sync::Arc<Self>) -> core::option::Option<veilid_tools::AsyncSemaphoreGuardArc>
+pub fn veilid_tools::AsyncSemaphore::try_acquire_arc(&alloc::rcs::arc::Arc<Self>) -> core::option::Option<veilid_tools::AsyncSemaphoreGuardArc>
 pub struct veilid_tools::AsyncSemaphoreGuard<'a>
 pub struct veilid_tools::AsyncSemaphoreGuardArc
 pub struct veilid_tools::AsyncTagLockGuard<T> where T: core::hash::Hash + core::cmp::Eq + core::clone::Clone + core::fmt::Debug
@@ -1410,16 +1439,19 @@ impl<T> core::default::Default for veilid_tools::AsyncTagLockTable<T> where T: c
 pub fn veilid_tools::AsyncTagLockTable<T>::default() -> Self
 pub struct veilid_tools::AsyncWeightedSemaphore
 impl veilid_tools::AsyncWeightedSemaphore
-pub async fn veilid_tools::AsyncWeightedSemaphore::acquire(&alloc::sync::Arc<Self>, u64) -> veilid_tools::AsyncWeightedSemaphoreGuard
+pub async fn veilid_tools::AsyncWeightedSemaphore::acquire(&alloc::rcs::arc::Arc<Self>, u64) -> veilid_tools::AsyncWeightedSemaphoreGuard
 pub fn veilid_tools::AsyncWeightedSemaphore::in_flight(&self) -> u64
 pub fn veilid_tools::AsyncWeightedSemaphore::limit(&self) -> u64
-pub fn veilid_tools::AsyncWeightedSemaphore::new(u64) -> alloc::sync::Arc<Self>
+pub fn veilid_tools::AsyncWeightedSemaphore::new(u64) -> alloc::rcs::arc::Arc<Self>
 pub fn veilid_tools::AsyncWeightedSemaphore::raise_limit(&self, u64) -> u64
 pub fn veilid_tools::AsyncWeightedSemaphore::set_limit(&self, u64)
-pub fn veilid_tools::AsyncWeightedSemaphore::try_acquire(&alloc::sync::Arc<Self>, u64) -> core::option::Option<veilid_tools::AsyncWeightedSemaphoreGuard>
+pub fn veilid_tools::AsyncWeightedSemaphore::try_acquire(&alloc::rcs::arc::Arc<Self>, u64) -> core::option::Option<veilid_tools::AsyncWeightedSemaphoreGuard>
 pub struct veilid_tools::AsyncWeightedSemaphoreGuard
 impl core::ops::drop::Drop for veilid_tools::AsyncWeightedSemaphoreGuard
 pub fn veilid_tools::AsyncWeightedSemaphoreGuard::drop(&mut self)
+pub struct veilid_tools::BackgroundTimeGuard
+impl veilid_tools::BackgroundTimeGuard
+pub fn veilid_tools::BackgroundTimeGuard::begin(&'static str) -> core::option::Option<Self>
 pub struct veilid_tools::BytesWriter
 impl veilid_tools::BytesWriter
 pub fn veilid_tools::BytesWriter::bytes_mut(&self) -> &bytes::bytes_mut::BytesMut
@@ -1486,7 +1518,7 @@ pub fn veilid_tools::EventBus::new() -> Self
 pub fn veilid_tools::EventBus::post<E: core::any::Any + core::marker::Send + core::marker::Sync + 'static>(&self, E) -> core::result::Result<(), veilid_tools::StartupLockNotStartedError>
 pub async fn veilid_tools::EventBus::shutdown(&self)
 pub fn veilid_tools::EventBus::startup(&self) -> core::result::Result<(), veilid_tools::StartupLockAlreadyStartedError>
-pub fn veilid_tools::EventBus::subscribe<E: core::any::Any + core::marker::Send + core::marker::Sync + 'static, F: core::ops::function::Fn(alloc::sync::Arc<E>) -> veilid_tools::PinBoxFutureStatic<()> + core::marker::Send + core::marker::Sync + 'static>(&self, F) -> veilid_tools::EventBusSubscription
+pub fn veilid_tools::EventBus::subscribe<E: core::any::Any + core::marker::Send + core::marker::Sync + 'static, F: core::ops::function::Fn(alloc::rcs::arc::Arc<E>) -> veilid_tools::PinBoxFutureStatic<()> + core::marker::Send + core::marker::Sync + 'static>(&self, F) -> veilid_tools::EventBusSubscription
 pub fn veilid_tools::EventBus::unsubscribe(&self, veilid_tools::EventBusSubscription)
 impl core::default::Default for veilid_tools::EventBus
 pub fn veilid_tools::EventBus::default() -> Self
@@ -1585,6 +1617,11 @@ pub fn veilid_tools::FlapDetector<T>::new_secs(f64, u64) -> Self
 pub fn veilid_tools::FlapDetector<T>::record(&mut self, u64, T) -> core::option::Option<f64>
 pub fn veilid_tools::FlapDetector<T>::record_event(&mut self, u64) -> core::option::Option<f64>
 pub fn veilid_tools::FlapDetector<T>::reset(&mut self)
+pub struct veilid_tools::ForegroundGuard
+impl veilid_tools::ForegroundGuard
+pub fn veilid_tools::ForegroundGuard::begin(&'static str) -> core::option::Option<Self>
+impl core::ops::drop::Drop for veilid_tools::ForegroundGuard
+pub fn veilid_tools::ForegroundGuard::drop(&mut self)
 pub struct veilid_tools::FutureRaceCompletionPool
 impl veilid_tools::FutureRaceCompletionPool
 pub fn veilid_tools::FutureRaceCompletionPool::channel_spawn<F, T>(&self, F) -> flume::Receiver<T> where F: core::future::future::Future<Output = T> + core::marker::Send + 'static, T: core::marker::Send + 'static
@@ -1718,7 +1755,7 @@ pub fn veilid_tools::NetworkInterfaceAddressState::is_own_address(&self, core::n
 pub struct veilid_tools::NetworkInterfaces
 impl veilid_tools::NetworkInterfaces
 pub fn veilid_tools::NetworkInterfaces::clear(&self)
-pub fn veilid_tools::NetworkInterfaces::interface_address_state(&self) -> alloc::sync::Arc<veilid_tools::NetworkInterfaceAddressState>
+pub fn veilid_tools::NetworkInterfaces::interface_address_state(&self) -> alloc::rcs::arc::Arc<veilid_tools::NetworkInterfaceAddressState>
 pub fn veilid_tools::NetworkInterfaces::is_valid(&self) -> bool
 pub fn veilid_tools::NetworkInterfaces::new() -> Self
 pub fn veilid_tools::NetworkInterfaces::raw_address_summary(&self) -> veilid_tools::RawAddressSummary

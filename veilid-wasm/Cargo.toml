@@ -40,6 +40,7 @@ unstable-blockstore = ["veilid-core/unstable-blockstore"]
 veilid-core = { version = "0.5.7", path = "../veilid-core", default-features = false, features = [
     "json-camel-case",
     "default-wasm",
+    "app-lifecycle",
 ] }
 
 tracing-subscriber = "0.3.23"

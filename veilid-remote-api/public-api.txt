@@ -300,6 +300,8 @@ pub veilid_remote_api::RequestOp::RemoveUserSecret::key: alloc::string::String
 pub veilid_remote_api::RequestOp::RenameTableDb
 pub veilid_remote_api::RequestOp::RenameTableDb::new_name: alloc::string::String
 pub veilid_remote_api::RequestOp::RenameTableDb::old_name: alloc::string::String
+pub veilid_remote_api::RequestOp::ReportAppLifecycleState
+pub veilid_remote_api::RequestOp::ReportAppLifecycleState::state: veilid_core::veilid_api::types::app_lifecycle_state::VeilidAppLifecycleState
 pub veilid_remote_api::RequestOp::RoutingContext(veilid_remote_api::RoutingContextRequest)
 pub veilid_remote_api::RequestOp::SaveUserSecret
 pub veilid_remote_api::RequestOp::SaveUserSecret::key: alloc::string::String
@@ -317,6 +319,9 @@ pub veilid_remote_api::RequestOp::VerifySignatures
 pub veilid_remote_api::RequestOp::VerifySignatures::data: alloc::vec::Vec<u8>
 pub veilid_remote_api::RequestOp::VerifySignatures::node_ids: alloc::vec::Vec<veilid_core::crypto::types::PublicKey>
 pub veilid_remote_api::RequestOp::VerifySignatures::signatures: alloc::vec::Vec<veilid_core::crypto::types::Signature>
+pub veilid_remote_api::RequestOp::WaitForAttachmentCondition
+pub veilid_remote_api::RequestOp::WaitForAttachmentCondition::condition: core::option::Option<veilid_core::veilid_api::types::veilid_state::VeilidStateAttachmentCondition>
+pub veilid_remote_api::RequestOp::WaitForAttachmentCondition::timeout_ms: core::option::Option<u64>
 pub enum veilid_remote_api::ResponseOp
 pub veilid_remote_api::ResponseOp::AppCallReply
 pub veilid_remote_api::ResponseOp::AppCallReply::result: veilid_remote_api::ApiResult<()>
@@ -378,6 +383,8 @@ pub veilid_remote_api::ResponseOp::RemoveUserSecret
 pub veilid_remote_api::ResponseOp::RemoveUserSecret::result: veilid_remote_api::ApiResult<bool>
 pub veilid_remote_api::ResponseOp::RenameTableDb
 pub veilid_remote_api::ResponseOp::RenameTableDb::result: veilid_remote_api::ApiResult<()>
+pub veilid_remote_api::ResponseOp::ReportAppLifecycleState
+pub veilid_remote_api::ResponseOp::ReportAppLifecycleState::result: veilid_remote_api::ApiResult<()>
 pub veilid_remote_api::ResponseOp::RoutingContext(alloc::boxed::Box<veilid_remote_api::RoutingContextResponse>)
 pub veilid_remote_api::ResponseOp::SaveUserSecret
 pub veilid_remote_api::ResponseOp::SaveUserSecret::result: veilid_remote_api::ApiResult<bool>
@@ -397,6 +404,8 @@ pub veilid_remote_api::ResponseOp::VeilidVersionString
 pub veilid_remote_api::ResponseOp::VeilidVersionString::value: alloc::string::String
 pub veilid_remote_api::ResponseOp::VerifySignatures
 pub veilid_remote_api::ResponseOp::VerifySignatures::result: veilid_remote_api::ApiResultWithOptVecString<core::option::Option<veilid_core::crypto::types::PublicKeyGroup>>
+pub veilid_remote_api::ResponseOp::WaitForAttachmentCondition
+pub veilid_remote_api::ResponseOp::WaitForAttachmentCondition::result: veilid_remote_api::ApiResult<alloc::boxed::Box<veilid_core::veilid_api::types::veilid_state::VeilidStateAttachment>>
 pub enum veilid_remote_api::RoutingContextRequestOp
 pub veilid_remote_api::RoutingContextRequestOp::AppCall
 pub veilid_remote_api::RoutingContextRequestOp::AppCall::message: alloc::vec::Vec<u8>
@@ -428,6 +437,7 @@ pub veilid_remote_api::RoutingContextRequestOp::InspectDhtRecord::scope: veilid_
 pub veilid_remote_api::RoutingContextRequestOp::InspectDhtRecord::subkeys: core::option::Option<veilid_core::veilid_api::types::dht::value_subkey_range_set::ValueSubkeyRangeSet>
 pub veilid_remote_api::RoutingContextRequestOp::OpenDhtRecord
 pub veilid_remote_api::RoutingContextRequestOp::OpenDhtRecord::key: veilid_core::crypto::types::RecordKey
+pub veilid_remote_api::RoutingContextRequestOp::OpenDhtRecord::options: core::option::Option<veilid_core::veilid_api::types::dht::open_dht_record_options::OpenDHTRecordOptions>
 pub veilid_remote_api::RoutingContextRequestOp::OpenDhtRecord::writer: core::option::Option<veilid_core::crypto::types::KeyPair>
 pub veilid_remote_api::RoutingContextRequestOp::Release
 pub veilid_remote_api::RoutingContextRequestOp::Safety

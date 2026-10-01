@@ -2,6 +2,7 @@ use super::*;
 
 impl StorageManager {
     /// Open an existing local record if it exists, and if it doesnt exist locally, try to pull it from the network and open it and return the opened descriptor
+    /// With `rehydrate` false, an existing local record is not queued for rehydration
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all)
@@ -11,6 +12,7 @@ impl StorageManager {
         record_key: RecordKey,
         writer: Option<KeyPair>,
         safety_selection: SafetySelection,
+        rehydrate: bool,
     ) -> VeilidAPIResult<DHTRecordDescriptor> {
         let Ok(_guard) = self.startup_lock.enter() else {
             apibail_not_initialized!();
@@ -67,7 +69,7 @@ impl StorageManager {
             // A record checked recently is not checked again on reopen: an
             // app-level open/close/reopen pattern would otherwise fan out one
             // full-record inspection per reopen
-            if !locally_created && self.rehydration_recheck_due(&opaque_record_key) {
+            if rehydrate && !locally_created && self.rehydration_recheck_due(&opaque_record_key) {
                 let set_consensus = self.config().internal().network.dht.set_value_count as usize;
 
                 self.add_rehydration_request(
@@ -102,7 +104,10 @@ impl StorageManager {
             )
             .await?;
 
-        // If we got nothing back, the key wasn't found
+        // Not found needs a node that said so; a fanout nobody answered proves nothing
+        if outbound_inspect_result.answered == 0 {
+            apibail_try_again!("no node answered the open");
+        }
         if outbound_inspect_result
             .inspect_result
             .opt_descriptor()

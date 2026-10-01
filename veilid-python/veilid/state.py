@@ -23,13 +23,13 @@ class AttachmentState(StrEnum):
     """Attachment abstraction for network 'signal strength'."""
 
     DETACHED = "Detached"
+    DETACHING = "Detaching"
     ATTACHING = "Attaching"
     ATTACHED_WEAK = "AttachedWeak"
     ATTACHED_FAIR = "AttachedFair"
     ATTACHED_GOOD = "AttachedGood"
     ATTACHED_STRONG = "AttachedStrong"
     ATTACHED_FULL = "AttachedFull"
-    DETACHING = "Detaching"
 
     def bar_count(self) -> int:
         """Signal-strength bars (0..=5)."""
@@ -43,6 +43,13 @@ class AttachmentState(StrEnum):
             AttachmentState.ATTACHED_STRONG: 4,
             AttachmentState.ATTACHED_FULL: 5,
         }[self]
+
+
+class VeilidAppLifecycleState(StrEnum):
+    """Where the host application stands in its lifecycle, as the host reports it."""
+
+    ACTIVE = "Active"
+    BACKGROUND = "Background"
 
 
 class VeilidStateAttachment:
@@ -102,6 +109,52 @@ class VeilidStateAttachment:
     def to_json(self) -> dict:
         """Serialize to a JSON-compatible dict."""
         return self.__dict__
+
+
+class VeilidStateAttachmentCondition:
+    """A condition on the attachment state, for VeilidAPI.wait_for_attachment_condition.
+
+    A field left None is not checked, so the default condition holds for every state."""
+
+    opt_min_state: Optional[AttachmentState]
+    opt_max_state: Optional[AttachmentState]
+    opt_public_internet_ready: Optional[bool]
+    opt_local_network_ready: Optional[bool]
+
+    def __init__(
+        self,
+        opt_min_state: Optional[AttachmentState] = None,
+        opt_max_state: Optional[AttachmentState] = None,
+        opt_public_internet_ready: Optional[bool] = None,
+        opt_local_network_ready: Optional[bool] = None,
+    ):
+        self.opt_min_state = opt_min_state
+        self.opt_max_state = opt_max_state
+        self.opt_public_internet_ready = opt_public_internet_ready
+        self.opt_local_network_ready = opt_local_network_ready
+
+    def __repr__(self) -> str:
+        return (
+            f"<{self.__class__.__name__}(opt_min_state={self.opt_min_state!r}, "
+            f"opt_max_state={self.opt_max_state!r}, "
+            f"opt_public_internet_ready={self.opt_public_internet_ready!r}, "
+            f"opt_local_network_ready={self.opt_local_network_ready!r})>"
+        )
+
+    @classmethod
+    def from_json(cls, j: dict) -> Self:
+        """Build from its JSON representation."""
+        return cls(
+            AttachmentState(j["opt_min_state"]) if j.get("opt_min_state") is not None else None,
+            AttachmentState(j["opt_max_state"]) if j.get("opt_max_state") is not None else None,
+            j.get("opt_public_internet_ready"),
+            j.get("opt_local_network_ready"),
+        )
+
+    def to_json(self) -> dict:
+        """Convert to its JSON representation."""
+        return self.__dict__
+
 
 class LatencyStats:
     """Communications latency to a node over all RPC questions."""

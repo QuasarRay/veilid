@@ -1,3 +1,5 @@
+#[cfg(feature = "app-lifecycle")]
+pub mod test_app_lifecycle;
 pub mod test_attachment_level_calculator;
 
 use super::*;
@@ -13,4 +15,10 @@ pub async fn test_all() {
     test_attachment_level_calculator::test_severe_latency_drops_three_bars();
     test_attachment_level_calculator::test_no_latency_samples_no_penalty();
     test_attachment_level_calculator::test_bar_count_mapping();
+    #[cfg(feature = "app-lifecycle")]
+    {
+        test_app_lifecycle::test_detection_wins_where_it_reports();
+        test_app_lifecycle::test_report_fills_a_gap();
+        test_app_lifecycle::test_report_alone_without_detection();
+    }
 }

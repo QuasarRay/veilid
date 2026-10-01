@@ -18,6 +18,7 @@ mod get_value;
 mod inspect_record;
 mod local_record_detail;
 mod local_record_store_interface;
+mod metadata_save_schedule;
 mod offline_subkey_writes;
 mod open_record;
 mod outbound_transaction_manager;
@@ -58,6 +59,7 @@ use constants::*;
 use gated_operation::*;
 use inspect_record::{InspectFanoutStop, OutboundInspectValueResult};
 use local_record_detail::*;
+use metadata_save_schedule::*;
 use offline_subkey_writes::*;
 use outbound_transaction_manager::*;
 use outbound_watch_manager::*;
@@ -128,9 +130,13 @@ struct StorageManagerInner {
     pub metadata_db: Option<TableDB>,
     /// Routing domain ready subscription (drives the DHT-online gate)
     pub routing_domain_ready_subscription: Option<EventBusSubscription>,
+    /// Online state change subscription
     pub online_state_change_subscription: Option<EventBusSubscription>,
     /// Tick subscription
     pub tick_subscription: Option<EventBusSubscription>,
+    /// App lifecycle subscription
+    #[cfg(feature = "app-lifecycle")]
+    pub app_lifecycle_subscription: Option<EventBusSubscription>,
     /// Network stats change subscription
     pub network_stats_change_subscription: Option<EventBusSubscription>,
 }
@@ -171,9 +177,16 @@ pub(crate) struct StorageManager {
     outbound_watch_manager: StatsMutex<OutboundWatchManager>,
     /// Gates operations against startup and shutdown
     startup_lock: Arc<StartupLock>,
+    /// One metadata save at a time, so an older snapshot never lands after a newer one
+    save_metadata_lock: AsyncMutex<()>,
+    /// When the metadata next goes to disk
+    metadata_save_schedule: Mutex<MetadataSaveSchedule>,
+    /// Background time held until the metadata save it is owed lands
+    #[cfg(feature = "app-lifecycle")]
+    background_save_time: Mutex<Option<BackgroundTimeGuard>>,
 
     // Background processes
-    /// Persists the manager metadata
+    /// Persists the manager metadata when its schedule says so
     save_metadata_task: TickTask<EyreReport>,
     /// Flushes the record stores
     flush_record_stores_task: TickTask<EyreReport>,
@@ -280,6 +293,8 @@ impl StorageManager {
                     routing_domain_ready_subscription: None,
                     online_state_change_subscription: None,
                     tick_subscription: None,
+                    #[cfg(feature = "app-lifecycle")]
+                    app_lifecycle_subscription: None,
                     network_stats_change_subscription: None,
                 },
                 "storage_manager_inner",
@@ -287,8 +302,15 @@ impl StorageManager {
             outbound_watch_manager: StatsMutex::new(Default::default(), "outbound_watch_manager"),
             registry: registry.clone(),
             startup_lock: Arc::new(StartupLock::new()),
+            save_metadata_lock: AsyncMutex::new(()),
+            metadata_save_schedule: Mutex::new(MetadataSaveSchedule::new(Timestamp::now())),
+            #[cfg(feature = "app-lifecycle")]
+            background_save_time: Mutex::new(None),
 
-            save_metadata_task: TickTask::new("save_metadata_task", SAVE_METADATA_INTERVAL_SECS),
+            save_metadata_task: TickTask::new(
+                "save_metadata_task",
+                SAVE_METADATA_CHECK_INTERVAL_SECS,
+            ),
             flush_record_stores_task: TickTask::new(
                 "flush_record_stores_task",
                 FLUSH_RECORD_STORES_INTERVAL_SECS,
@@ -486,6 +508,9 @@ impl StorageManager {
         let online_state_change_subscription =
             impl_subscribe_event_bus!(self, Self, online_state_change_event_handler);
         let tick_subscription = impl_subscribe_event_bus_async!(self, Self, tick_event_handler);
+        #[cfg(feature = "app-lifecycle")]
+        let app_lifecycle_subscription =
+            impl_subscribe_event_bus_async!(self, Self, app_lifecycle_event_handler);
         let network_stats_change_subscription =
             impl_subscribe_event_bus!(self, Self, network_stats_change_event_handler);
 
@@ -500,6 +525,10 @@ impl StorageManager {
         inner.routing_domain_ready_subscription = Some(routing_domain_ready_subscription);
         inner.online_state_change_subscription = Some(online_state_change_subscription);
         inner.tick_subscription = Some(tick_subscription);
+        #[cfg(feature = "app-lifecycle")]
+        {
+            inner.app_lifecycle_subscription = Some(app_lifecycle_subscription);
+        }
         inner.network_stats_change_subscription = Some(network_stats_change_subscription);
 
         Ok(())
@@ -521,6 +550,10 @@ impl StorageManager {
                 self.event_bus().unsubscribe(sub);
             }
             if let Some(sub) = inner.tick_subscription.take() {
+                self.event_bus().unsubscribe(sub);
+            }
+            #[cfg(feature = "app-lifecycle")]
+            if let Some(sub) = inner.app_lifecycle_subscription.take() {
                 self.event_bus().unsubscribe(sub);
             }
             if let Some(sub) = inner.network_stats_change_subscription.take() {
@@ -592,6 +625,8 @@ impl StorageManager {
                 routing_domain_ready_subscription: None,
                 online_state_change_subscription: None,
                 tick_subscription: None,
+                #[cfg(feature = "app-lifecycle")]
+                app_lifecycle_subscription: None,
                 network_stats_change_subscription: None,
             };
         }
@@ -602,6 +637,16 @@ impl StorageManager {
     }
 
     async fn save_metadata(&self) -> EyreResult<()> {
+        let _save_guard = self.save_metadata_lock.lock().await;
+        // Held until this save lands; a change during it claims time for the next one
+        #[cfg(feature = "app-lifecycle")]
+        let _background_time = {
+            let mut schedule = self.metadata_save_schedule.lock();
+            schedule.saving(Timestamp::now());
+            self.background_save_time.lock().take()
+        };
+        #[cfg(not(feature = "app-lifecycle"))]
+        self.metadata_save_schedule.lock().saving(Timestamp::now());
         let (
             metadata_db,
             offline_subkey_writes_json,
@@ -654,6 +699,44 @@ impl StorageManager {
         tx.commit().await.wrap_err("failed to commit")?;
 
         Ok(())
+    }
+
+    /// Save the metadata if its schedule says a save is due
+    async fn save_metadata_if_due(&self, cur_ts: Timestamp) -> EyreResult<()> {
+        let Some(reason) = self.metadata_save_schedule.lock().due(cur_ts) else {
+            return Ok(());
+        };
+        let start_ts = Timestamp::now();
+        self.save_metadata().await?;
+        if reason != MetadataSaveReason::Periodic {
+            veilid_log!(self debug "saved storage metadata ({:?}) in {:#}",
+                reason, TimestampDuration::since(start_ts));
+        }
+        Ok(())
+    }
+
+    /// The metadata changed. Called with the changed state's lock still held, so a save that
+    /// starts at the same moment either sees the change or leaves it marked for the next one.
+    fn mark_metadata_dirty(&self) {
+        let mut schedule = self.metadata_save_schedule.lock();
+        schedule.changed();
+        // The platform may suspend a backgrounded process before its save; claim time until it lands
+        #[cfg(feature = "app-lifecycle")]
+        if schedule.is_background() {
+            let mut held = self.background_save_time.lock();
+            if held.is_none() {
+                *held = BackgroundTimeGuard::begin("veilid storage metadata save");
+            }
+        }
+    }
+
+    /// The outbound watches, for a change that the next metadata save carries
+    fn outbound_watch_manager_mut(
+        &self,
+    ) -> impl core::ops::DerefMut<Target = OutboundWatchManager> + '_ {
+        let owm = self.outbound_watch_manager.lock();
+        self.mark_metadata_dirty();
+        owm
     }
 
     async fn load_metadata(&self) -> EyreResult<()> {
@@ -948,9 +1031,40 @@ impl StorageManager {
             && evt.new_state == OnlineState::Online
     }
 
+    /// Whether outbound watch network work waits: offline, nothing gets through, and one
+    /// answered ping ends it, so cancels, renewals, reconciles and change inspections hold
+    /// rather than spend themselves failing.
+    pub(super) fn holds_watch_network_work(online_state: OnlineState) -> bool {
+        online_state == OnlineState::Offline
+    }
+
     async fn tick_event_handler(&self, _evt: Arc<TickEvent>) {
         if let Err(e) = self.tick().await {
             error!("Error in storage manager tick: {}", e);
+        }
+    }
+
+    /// On the move to the background, saves at once: a kill while frozen loses what is unsaved,
+    /// and the event holds the platform's background time only until this returns
+    #[cfg(feature = "app-lifecycle")]
+    async fn app_lifecycle_event_handler(&self, evt: Arc<AppLifecycleEvent>) {
+        let background = evt.state == VeilidAppLifecycleState::Background;
+        self.metadata_save_schedule
+            .lock()
+            .set_background(background);
+        if !background {
+            // The periodic save carries whatever is pending, with no need for background time
+            *self.background_save_time.lock() = None;
+            return;
+        }
+        let Ok(_startup_guard) = self.startup_lock.enter() else {
+            return;
+        };
+        let start_ts = Timestamp::now();
+        match self.save_metadata().await {
+            Ok(()) => veilid_log!(self debug "saved storage metadata (Background) in {:#}",
+                TimestampDuration::since(start_ts)),
+            Err(e) => veilid_log!(self error "failed to save storage metadata: {}", e),
         }
     }
 

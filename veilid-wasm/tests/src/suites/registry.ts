@@ -6,6 +6,7 @@ import { protectedStoreSuite } from './protected-store.js';
 import { routingSuite } from './routing.js';
 import { dhtSuite } from './dht.js';
 import { transactionsSuite } from './transactions.js';
+import { lifecycleSuite } from './lifecycle.js';
 
 // Every suite, in the order they run when several are selected.
 export const ALL_SUITES: Suite[] = [
@@ -16,6 +17,7 @@ export const ALL_SUITES: Suite[] = [
   routingSuite,
   dhtSuite,
   transactionsSuite,
+  lifecycleSuite,
 ];
 
 export const ALL_SUITE_NAMES = ALL_SUITES.map((s) => s.name);

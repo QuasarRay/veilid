@@ -71,6 +71,27 @@ async def test_get_dht_value_nonexistent(api_connection: veilid.VeilidAPI):
 
 
 @pytest.mark.asyncio
+async def test_open_dht_record_without_rehydration(api_connection: veilid.VeilidAPI):
+    rc = await api_connection.new_routing_context()
+    async with rc:
+        for kind in await api_connection.valid_crypto_kinds():
+            rec = await rc.create_dht_record(kind, veilid.DHTSchema.dflt(1))
+            assert await rc.set_dht_value(rec.key, ValueSubkey(0), b"HELD LOCALLY") is None
+            await rc.close_dht_record(rec.key)
+
+            # A record this node holds reopens from its local copy either way
+            reopened = await rc.open_dht_record(
+                rec.key, None, veilid.OpenDHTRecordOptions(rehydrate=False))
+            assert reopened.key == rec.key
+            vd = await rc.get_dht_value(rec.key, ValueSubkey(0), False)
+            assert vd is not None
+            assert vd.data == b"HELD LOCALLY"
+
+            await rc.close_dht_record(rec.key)
+            await rc.delete_dht_record(rec.key)
+
+
+@pytest.mark.asyncio
 async def test_set_get_dht_value(api_connection: veilid.VeilidAPI):
     rc = await api_connection.new_routing_context()
     async with rc:

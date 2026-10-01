@@ -10,11 +10,6 @@ import {
   VeilidAPIErrorNotInitialized,
   RecordKey,
 } from 'veilid-wasm';
-import {
-  asyncCallWithTimeout,
-  waitForDetached,
-  waitForPublicAttachment,
-} from '../utils/wait-utils.js';
 import { textEncoder } from '../utils/marshalling-utils.js';
 import { dhtRetry } from '../utils/dht-retry.js';
 import type { Suite, TestCase } from '../harness/types.js';
@@ -37,6 +32,31 @@ export const clientSuite: Suite = {
         const features = veilidClient.features();
         expect(Array.isArray(features)).toBe(true);
         expect(features.length).toBeGreaterThan(0);
+      },
+    },
+    {
+      name: 'should throw Unimplemented for constants whose feature is compiled out',
+      run: ({ expect }) => {
+        const features = veilidClient.features();
+        const gated: [string, () => unknown][] = [
+          ['unstable-tunnels', () => veilidClient.VEILID_CAPABILITY_TUNNEL],
+          ['unstable-blockstore', () => veilidClient.VEILID_CAPABILITY_BLOCKSTORE],
+          ['enable-crypto-vld0', () => veilidCrypto.CRYPTO_KIND_VLD0],
+          ['enable-crypto-none', () => veilidCrypto.CRYPTO_KIND_NONE],
+        ];
+        for (const [feature, read] of gated) {
+          if (features.includes(feature)) {
+            expect(typeof read()).toBe('string');
+            continue;
+          }
+          let thrown: unknown;
+          try {
+            read();
+          } catch (e) {
+            thrown = e;
+          }
+          expect(thrown).toMatchObject({ kind: 'Unimplemented' });
+        }
       },
     },
     {
@@ -90,9 +110,9 @@ export const clientSuite: Suite = {
       // and hand it back attached for the cases that follow.
       run: async () => {
         await veilidClient.detach();
-        await asyncCallWithTimeout(waitForDetached(), 20_000);
+        await veilidClient.waitForAttachmentCondition({ optMaxState: 'Detached' }, 20_000);
         await veilidClient.attach();
-        await asyncCallWithTimeout(waitForPublicAttachment(), 30_000);
+        await veilidClient.waitForAttachmentCondition(undefined, 30_000);
       },
     },
     {

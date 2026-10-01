@@ -18,7 +18,7 @@ fn make_params(subkeys: ValueSubkeyRangeSet) -> OutboundWatchParameters {
     }
 }
 
-/// An unproductive inspection doubles the wait, up to the ceiling.
+/// An inspection answered with nothing newer doubles the wait, up to the ceiling.
 fn test_backoff_doubles_until_capped() {
     let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
     let per_node_states = HashMap::new();
@@ -28,9 +28,9 @@ fn test_backoff_doubles_until_capped() {
 
     // Each empty inspection doubles the interval
     let mut expected = base;
-    for _ in 0..4 {
+    for _ in 0..2 {
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
+            editor.back_off_fallback_inspect()
         });
         expected = TimestampDuration::new(expected.as_u64() * 2);
         assert_eq!(state.fallback_inspect_interval(), expected);
@@ -39,52 +39,38 @@ fn test_backoff_doubles_until_capped() {
     // And stops at the ceiling rather than growing without bound
     for _ in 0..20 {
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
-        });
-    }
-    assert_eq!(
-        state.fallback_inspect_interval(),
-        TimestampDuration::new_secs(600)
-    );
-}
-
-/// An answered inspection that found nothing newer backs off under a lower
-/// ceiling than one that reached nobody, and an answer after a run of failures
-/// brings a long interval back down: a served record's watch that was never
-/// accepted is delivered by this interval, so it must stay short.
-fn test_answered_backoff_has_lower_ceiling() {
-    let per_node_states = HashMap::new();
-    let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
-
-    for _ in 0..20 {
-        state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL);
-        });
-    }
-    assert_eq!(
-        state.fallback_inspect_interval(),
-        WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL
-    );
-
-    // Unanswered inspections climb past it
-    for _ in 0..20 {
-        state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
+            editor.back_off_fallback_inspect()
         });
     }
     assert_eq!(
         state.fallback_inspect_interval(),
         WATCH_FALLBACK_INSPECT_MAX_INTERVAL
     );
+}
 
-    // One answered inspection brings it back under the short ceiling
+/// The interval persists with the watch state, so one saved under an older, higher
+/// ceiling must read as today's ceiling rather than hold the watch to it.
+fn test_saved_interval_above_ceiling_reads_capped() {
+    let per_node_states = HashMap::new();
+    let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
     state.edit(&per_node_states, |editor| {
-        editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL);
+        editor.back_off_fallback_inspect()
+    });
+
+    let mut saved = serde_json::to_value(&state).unwrap();
+    saved["opt_fallback_inspect_interval"] = serde_json::Value::from("600000000");
+    let mut state: OutboundWatchState = serde_json::from_value(saved).unwrap();
+    assert_eq!(
+        state.fallback_inspect_interval(),
+        WATCH_FALLBACK_INSPECT_MAX_INTERVAL
+    );
+
+    state.edit(&per_node_states, |editor| {
+        editor.back_off_fallback_inspect()
     });
     assert_eq!(
         state.fallback_inspect_interval(),
-        WATCH_FALLBACK_INSPECT_ANSWERED_MAX_INTERVAL,
-        "a served record must not keep an unserved record's interval"
+        WATCH_FALLBACK_INSPECT_MAX_INTERVAL
     );
 }
 
@@ -102,8 +88,8 @@ fn test_evidence_resets_backoff() {
     ] {
         let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
-            editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
+            editor.back_off_fallback_inspect();
+            editor.back_off_fallback_inspect();
         });
         assert_ne!(
             state.fallback_inspect_interval(),
@@ -134,7 +120,7 @@ fn test_needs_fallback_inspect_honours_backoff() {
 
     // After one empty inspection the same moment is no longer due
     state.edit(&per_node_states, |editor| {
-        editor.back_off_fallback_inspect(WATCH_FALLBACK_INSPECT_MAX_INTERVAL);
+        editor.back_off_fallback_inspect()
     });
     assert!(
         !state.needs_fallback_inspect(base_due),
@@ -147,9 +133,9 @@ fn test_needs_fallback_inspect_honours_backoff() {
 
 /// A watch that is wanted but has never established has no state to keep a timer
 /// in. It still needs covering, because the app asked for it and core owns
-/// delivery - but at the slow rate, since reconcile is already retrying and a
-/// record no node serves has nothing to report.
-fn test_unestablished_watch_is_inspected_slowly() {
+/// delivery, at an established watch's longest wait since reconcile is already
+/// retrying.
+fn test_unestablished_watch_is_inspected_at_the_ceiling() {
     let record_key = RecordKey::from_opaque(
         OpaqueRecordKey::new(CRYPTO_KIND_VLD0, BareOpaqueRecordKey::new(&[0u8; 32])),
         None,
@@ -174,14 +160,14 @@ fn test_unestablished_watch_is_inspected_slowly() {
         "an unestablished watch should not inspect at the 30s cadence"
     );
     assert_eq!(
-        outbound_watch.needs_fallback_inspect(now.later(TimestampDuration::new_secs(601))),
+        outbound_watch.needs_fallback_inspect(now.later(TimestampDuration::new_secs(121))),
         Some(subkeys)
     );
 
     // A cancelled watch - no state and no desired - is inspected by nobody
     outbound_watch.set_desired(None);
     assert_eq!(
-        outbound_watch.needs_fallback_inspect(now.later(TimestampDuration::new_secs(601))),
+        outbound_watch.needs_fallback_inspect(now.later(TimestampDuration::new_secs(121))),
         None
     );
 }
@@ -235,11 +221,39 @@ fn test_recovery_from_degraded_reinspects_watches() {
     }
 }
 
+/// Offline, nothing gets through, so watch network work holds rather than spend
+/// itself failing; degraded round trips still complete, so it runs.
+fn test_watch_network_work_holds_only_while_offline() {
+    assert!(StorageManager::holds_watch_network_work(
+        OnlineState::Offline
+    ));
+    assert!(!StorageManager::holds_watch_network_work(
+        OnlineState::Degraded
+    ));
+    assert!(!StorageManager::holds_watch_network_work(
+        OnlineState::Online
+    ));
+}
+
+/// A reconcile that nodes answered only with refusals (no copy, usually nothing
+/// written yet) waits the slow interval; one nobody answered learned nothing about the
+/// record and retries, as does any reconcile still short of consensus.
+fn test_reconcile_retries_silence_not_refusals() {
+    let retry = RECONCILE_OUTBOUND_WATCHES_RETRY_INTERVAL;
+    let slow = RECONCILE_OUTBOUND_WATCHES_INTERVAL;
+    assert_eq!(StorageManager::next_reconcile_interval(true, 0, 0), retry);
+    assert_eq!(StorageManager::next_reconcile_interval(true, 0, 3), slow);
+    assert_eq!(StorageManager::next_reconcile_interval(true, 2, 1), retry);
+    assert_eq!(StorageManager::next_reconcile_interval(false, 5, 0), slow);
+}
+
 pub fn test_all() {
     test_backoff_doubles_until_capped();
     test_recovery_from_degraded_reinspects_watches();
-    test_answered_backoff_has_lower_ceiling();
+    test_saved_interval_above_ceiling_reads_capped();
     test_evidence_resets_backoff();
     test_needs_fallback_inspect_honours_backoff();
-    test_unestablished_watch_is_inspected_slowly();
+    test_unestablished_watch_is_inspected_at_the_ceiling();
+    test_watch_network_work_holds_only_while_offline();
+    test_reconcile_retries_silence_not_refusals();
 }

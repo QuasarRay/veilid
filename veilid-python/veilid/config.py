@@ -310,6 +310,19 @@ class VeilidConfigInternal(ConfigBase):
     network: VeilidConfigInternalNetwork
 
 
+# @dataclass
+# class VeilidConfigAppLifecycle(ConfigBase):
+#     prefer_foreground: bool
+#     auto_detect_state: bool
+
+
+@dataclass
+class VeilidConfigAttachment(ConfigBase):
+    """Attachment configuration, owned by the attachment manager."""
+
+#    app_lifecycle: VeilidConfigAppLifecycle
+
+
 @dataclass
 class VeilidConfig(ConfigBase):
     """Top level of the Veilid configuration tree."""
@@ -321,4 +334,5 @@ class VeilidConfig(ConfigBase):
     table_store: VeilidConfigTableStore
     block_store: VeilidConfigBlockStore
     network: VeilidConfigNetwork
+    attachment: VeilidConfigAttachment
     internal: Optional[VeilidConfigInternal] = None

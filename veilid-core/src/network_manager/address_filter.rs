@@ -42,6 +42,26 @@ pub(crate) enum TimestampError {
         adjusted_remote_timestamp: Timestamp,
         timestamp_offset: TimestampOffset,
     },
+    #[error("Sent while this node was stalled")]
+    SentWhileStalled {
+        local_timestamp: Timestamp,
+        remote_timestamp: Timestamp,
+        adjusted_remote_timestamp: Timestamp,
+        stall: StallWindow,
+    },
+}
+
+/// A stretch of time this node could not run, such as a frozen process
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StallWindow {
+    pub start: Timestamp,
+    pub end: Timestamp,
+}
+
+impl StallWindow {
+    fn contains(&self, ts: Timestamp) -> bool {
+        self.start <= ts && ts <= self.end
+    }
 }
 
 #[derive(ThisError, Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +77,7 @@ struct AddressFilterInner {
     punishments_by_ip6_prefix: BTreeMap<Ipv6Addr, Punishment>,
     punishments_by_node_id: BTreeMap<NodeId, Punishment>,
     envelope_info_by_node_id: hashlink::LruCache<NodeId, EnvelopeInfo>,
+    stall_window: Option<StallWindow>,
 }
 
 impl fmt::Debug for AddressFilterInner {
@@ -166,6 +187,7 @@ impl AddressFilter {
                 punishments_by_ip6_prefix: BTreeMap::new(),
                 punishments_by_node_id: BTreeMap::new(),
                 envelope_info_by_node_id: hashlink::LruCache::new(MAX_ENVELOPE_INFO_BY_NODE_ID),
+                stall_window: None,
             }),
             max_connections_per_ip4: config.internal().network.max_connections_per_ip4 as usize,
             max_connections_per_ip6_prefix: config.internal().network.max_connections_per_ip6_prefix
@@ -535,13 +557,45 @@ impl AddressFilter {
         Ok(())
     }
 
+    /// Checks an envelope's claimed send time against this node's clock, adjusted by the
+    /// sender's usual offset from it.
+    ///
+    /// - An envelope sent while this node was stalled is dropped before anything is learned
+    ///   from it, even from a sender seen for the first time. See [AddressFilter::record_stall].
+    /// - The first envelope from a sender is accepted and seeds its offset.
+    /// - After that only envelopes that pass move the offset, so stale or replayed ones cannot
+    ///   drag it. A sender rejected for a whole window with none passing has stepped its
+    ///   clock, and its offset starts over from its latest envelope.
     pub fn check_envelope_timestamp(
         &self,
         node_id: NodeId,
         local_timestamp: Timestamp,
         remote_timestamp: Timestamp,
     ) -> Result<(), TimestampError> {
+        // Get oldest timestamp we want to keep
+        let oldest_timestamp_duration = self
+            .opt_max_timestamp_behind
+            .unwrap_or(DEFAULT_OLDEST_TIMESTAMP_DURATION);
+        let oldest_local_timestamp = local_timestamp.earlier(oldest_timestamp_duration);
+
         let mut inner = self.inner.lock();
+
+        if let Some(stall) = self.active_stall_window(&mut inner, local_timestamp) {
+            let sent = inner
+                .envelope_info_by_node_id
+                .peek(&node_id)
+                .map(|pi| pi.timestamp_offset.adjust_remote(remote_timestamp))
+                .unwrap_or(remote_timestamp);
+            if stall.contains(sent) {
+                return Err(TimestampError::SentWhileStalled {
+                    local_timestamp,
+                    remote_timestamp,
+                    adjusted_remote_timestamp: sent,
+                    stall,
+                });
+            }
+        }
+
         let Some(pi) = inner.envelope_info_by_node_id.get_mut(&node_id) else {
             inner.envelope_info_by_node_id.insert(
                 node_id,
@@ -554,28 +608,56 @@ impl AddressFilter {
         let adjusted_remote_timestamp = pi.timestamp_offset.adjust_remote(remote_timestamp);
 
         // Drop duplicated remote timestamps
-        if let Some(last_local_timestamp) =
-            pi.envelope_timestamp_log.get(&remote_timestamp).copied()
-        {
+        if let Some(last) = pi.envelope_timestamp_log.get(&remote_timestamp).copied() {
             return Err(TimestampError::Duplicate {
                 local_timestamp,
-                last_local_timestamp,
+                last_local_timestamp: last.local,
                 remote_timestamp,
                 adjusted_remote_timestamp,
                 timestamp_offset: pi.timestamp_offset,
             });
         };
 
-        // Get oldest timestamp we want to keep
-        let oldest_timestamp_duration = self
-            .opt_max_timestamp_behind
-            .unwrap_or(DEFAULT_OLDEST_TIMESTAMP_DURATION);
-        let oldest_local_timestamp = local_timestamp.earlier(oldest_timestamp_duration);
+        let res = self.check_timestamp_range(
+            local_timestamp,
+            remote_timestamp,
+            adjusted_remote_timestamp,
+            pi.timestamp_offset,
+        );
+        if res.is_err() {
+            let heal_after = if oldest_timestamp_duration.as_u64() == 0 {
+                DEFAULT_OLDEST_TIMESTAMP_DURATION
+            } else {
+                oldest_timestamp_duration
+            };
+            if pi
+                .rejecting_since
+                .is_some_and(|since| local_timestamp.duration_since(since) >= heal_after)
+            {
+                pi.reseed(local_timestamp, remote_timestamp, oldest_local_timestamp);
+                return Ok(());
+            }
+        }
 
         // Add to the log
-        pi.add_timestamp(local_timestamp, remote_timestamp, oldest_local_timestamp);
+        pi.add_timestamp(
+            local_timestamp,
+            remote_timestamp,
+            res.is_ok(),
+            oldest_local_timestamp,
+        );
 
-        // Drop envelopes that are too old or too new
+        res
+    }
+
+    /// Drop envelopes that are too old or too new
+    fn check_timestamp_range(
+        &self,
+        local_timestamp: Timestamp,
+        remote_timestamp: Timestamp,
+        adjusted_remote_timestamp: Timestamp,
+        timestamp_offset: TimestampOffset,
+    ) -> Result<(), TimestampError> {
         if let Some(max_timestamp_behind) = self.opt_max_timestamp_behind {
             if max_timestamp_behind.as_u64() != 0
                 && (local_timestamp > adjusted_remote_timestamp
@@ -586,7 +668,7 @@ impl AddressFilter {
                     local_timestamp,
                     remote_timestamp,
                     adjusted_remote_timestamp,
-                    timestamp_offset: pi.timestamp_offset,
+                    timestamp_offset,
                 });
             }
         }
@@ -600,11 +682,61 @@ impl AddressFilter {
                     local_timestamp,
                     remote_timestamp,
                     adjusted_remote_timestamp,
-                    timestamp_offset: pi.timestamp_offset,
+                    timestamp_offset,
                 });
             }
         }
-
         Ok(())
+    }
+
+    /// Records a stretch this node could not run, such as a frozen process.
+    ///
+    /// Envelopes sent during it waited out the stall in a socket buffer: answers nobody is
+    /// waiting for, and questions whose askers have given up. They are dropped until the
+    /// stall is as old as the behind limit, after which the limit drops them anyway. A
+    /// sender first seen from one of them, before the stall was known, is forgotten so its
+    /// next envelope seeds it afresh. Stalls shorter than the behind limit are ignored: what
+    /// they buffer is within it, and some of it is answers still being waited for.
+    pub fn record_stall(&self, start: Timestamp, end: Timestamp) {
+        let Some(max_timestamp_behind) = self.enabled_max_timestamp_behind() else {
+            return;
+        };
+        if end <= start || end.duration_since(start) < max_timestamp_behind {
+            return;
+        }
+
+        let mut inner = self.inner.lock();
+        let stall = match inner.stall_window {
+            Some(w) if w.start <= end && start <= w.end => StallWindow {
+                start: w.start.min(start),
+                end: w.end.max(end),
+            },
+            _ => StallWindow { start, end },
+        };
+        inner.stall_window = Some(stall);
+        inner
+            .envelope_info_by_node_id
+            .retain(|_, pi| !(pi.seed.1 >= stall.start && stall.contains(pi.seed.0)));
+
+        veilid_log!(self debug "dropping envelopes sent while stalled: {:#} for {:#}", stall.start, stall.end.duration_since(stall.start));
+    }
+
+    /// The stall whose envelopes are still being dropped, if any
+    fn active_stall_window(
+        &self,
+        inner: &mut AddressFilterInner,
+        local_timestamp: Timestamp,
+    ) -> Option<StallWindow> {
+        let max_timestamp_behind = self.enabled_max_timestamp_behind()?;
+        let stall = inner.stall_window?;
+        if local_timestamp > stall.end.later(max_timestamp_behind) {
+            inner.stall_window = None;
+            return None;
+        }
+        Some(stall)
+    }
+
+    fn enabled_max_timestamp_behind(&self) -> Option<TimestampDuration> {
+        self.opt_max_timestamp_behind.filter(|d| d.as_u64() != 0)
     }
 }

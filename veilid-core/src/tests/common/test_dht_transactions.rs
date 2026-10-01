@@ -489,7 +489,7 @@ pub async fn test_all() {
         .expect("startup failed");
 
     let _ = api.attach().await;
-    fixture_wait_for_public_internet_ready(&api).await;
+    let _ = api.wait_for_attachment_condition(None, None).await.unwrap();
 
     info!("=== Simple transaction tests ===");
 

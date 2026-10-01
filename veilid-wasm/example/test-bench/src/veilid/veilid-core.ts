@@ -61,28 +61,11 @@ async function startVeilidInner() {
     await veilidClient.attach();
 
     // attach() only starts attaching. DHT operations are gated on the PublicInternet
-    // routing domain being ready, which arrives later as an Attachment update.
-    await waitForPublicInternetReady();
+    // routing domain being ready, which the default condition waits for.
+    await veilidClient.waitForAttachmentCondition();
     console.log('veilid network ready!');
 
     return veilidClient;
-}
-
-function waitForPublicInternetReady() {
-    return new Promise<void>((resolve) => {
-        const check = (attachment: veilid.VeilidStateAttachment) => {
-            if (attachment.publicInternetReady) {
-                veilidEventEmitter.removeListener('Attachment', check);
-                resolve();
-            }
-        };
-        veilidEventEmitter.on('Attachment', check);
-
-        veilidClient.getState().then(
-            (state) => check(state.attachment),
-            (error: unknown) => console.warn('getState failed', describeVeilidError(error)),
-        );
-    });
 }
 
 veilidEventEmitter.on('Log', (data) => {

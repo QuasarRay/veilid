@@ -47,7 +47,6 @@ rt-async-std = [
 mock-api = [
     "rt-tokio",
     "veilid-core/mock-api",
-    "veilid-core/debug-api",
     "veilid-remote-api/default-tokio",
 ]
 

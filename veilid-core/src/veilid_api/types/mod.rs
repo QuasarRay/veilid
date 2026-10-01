@@ -1,5 +1,6 @@
 #[macro_use]
 mod aligned_u64;
+mod app_lifecycle_state;
 mod app_message_call;
 mod atomic_option_timestamp;
 mod atomic_timestamp;
@@ -30,6 +31,7 @@ pub use wasm_helpers::*;
 use super::*;
 
 pub use aligned_u64::*;
+pub use app_lifecycle_state::*;
 pub use app_message_call::*;
 pub use atomic_option_timestamp::*;
 pub use atomic_timestamp::*;

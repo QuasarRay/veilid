@@ -7,8 +7,8 @@ pub(super) const COMMIT_ROUND_MIN_INTERVAL_MS: u32 = 1_000;
 
 /// Frequency to flush record stores to disk
 pub const FLUSH_RECORD_STORES_INTERVAL_SECS: u32 = 1;
-/// Frequency to save metadata to disk
-pub const SAVE_METADATA_INTERVAL_SECS: u32 = 30;
+/// Frequency to check whether a metadata save is due
+pub const SAVE_METADATA_CHECK_INTERVAL_SECS: u32 = 1;
 /// Frequency to check for offline subkeys writes to send to the network
 pub const OFFLINE_SUBKEY_WRITES_INTERVAL_SECS: u32 = 1;
 /// Total number of offline subkey write requests to process in parallel
@@ -53,12 +53,12 @@ pub const REHYDRATE_BATCH_SIZE: usize = 16;
 pub const REHYDRATE_REQUESTS_PER_TICK: usize = 4;
 /// Number of subkey sets to push in parallel during transactional rehydration
 pub const REHYDRATE_SET_CONCURRENCY: usize = 8;
-/// How often to change inspect a watch that is wanted but has never established.
-/// Deliberately slow: reconcile is already retrying establishment, and a record no
-/// node will serve has nothing to report
+/// How often to change inspect a watch that is wanted but has never established. Reconcile
+/// is already retrying establishment, and until it lands this interval is delivery latency,
+/// so it matches an established watch's longest fallback wait
 pub const UNESTABLISHED_WATCH_INSPECT_INTERVAL: TimestampDuration =
-    TimestampDuration::new_secs(600);
-/// Delay before retrying a contended change inspection
+    TimestampDuration::new_secs(120);
+/// Delay before retrying a failed change inspection
 pub const CHANGE_INSPECT_RETRY_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
 /// How long after foreground transaction activity background transactions stay deferred
 pub const BACKGROUND_TRANSACTION_QUIET_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);

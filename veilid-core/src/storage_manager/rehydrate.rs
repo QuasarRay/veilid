@@ -80,6 +80,7 @@ impl StorageManager {
                 r.consensus_count.max_assign(req.consensus_count);
             })
             .or_insert(req);
+        self.mark_metadata_dirty();
     }
 
     /// Sends the local copies of all of a record's subkeys back to the network
@@ -224,6 +225,11 @@ impl StorageManager {
                 "record was locked for inspect but is now missing: {}",
                 opaque_record_key
             );
+        }
+
+        // Absence needs a node that said so; republishing on silence would write every subkey
+        if outbound_inspect_result.answered == 0 {
+            apibail_try_again!("no node answered the rehydration inspect");
         }
 
         // If online result had no subkeys, then trigger writing the entire record in the background

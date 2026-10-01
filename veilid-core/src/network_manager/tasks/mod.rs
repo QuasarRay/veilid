@@ -56,7 +56,6 @@ impl NetworkManager {
         };
 
         let net = self.net();
-        let receipt_manager = self.receipt_manager();
 
         // Run the rolling transfers task
         self.rolling_transfers_task.tick().await?;
@@ -69,9 +68,6 @@ impl NetworkManager {
 
         // Run the low level network tick
         net.tick().await?;
-
-        // Run the receipt manager tick
-        receipt_manager.tick().await?;
 
         // Purge the client allowlist
         self.purge_client_allowlist();

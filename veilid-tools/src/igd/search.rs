@@ -7,42 +7,57 @@ const CONNECTION_SERVICES: [&str; 3] = [
 ];
 
 /// Search for a gateway on the network described by `options`.
-pub fn search_gateway(options: SearchOptions) -> Result<Gateway, IgdError> {
-    let socket =
-        UdpSocket::bind(options.bind_addr).map_err(|e| IgdError::message(e.to_string()))?;
-    socket
-        .set_read_timeout(options.timeout)
+pub async fn search_gateway(options: SearchOptions) -> Result<Gateway, IgdError> {
+    let socket = UdpSocket::bind(options.bind_addr)
+        .await
         .map_err(|e| IgdError::message(e.to_string()))?;
 
     let request = messages::SEARCH_REQUEST
         .replace("$BROADCAST_ADDRESS", &options.broadcast_address.to_string());
     socket
         .send_to(request.as_bytes(), options.broadcast_address)
+        .await
         .map_err(|e| IgdError::message(format!("ssdp send failed: {}", e)))?;
 
     loop {
         let mut buf = [0u8; 1500];
-        let (read, _) = socket
-            .recv_from(&mut buf)
-            .map_err(|e| IgdError::message(format!("no gateway found: {}", e)))?;
+        let (read, _) = recv_reply(&socket, &mut buf, options.timeout).await?;
         let Ok(text) = core::str::from_utf8(&buf[..read]) else {
             continue;
         };
         let (addr, root_path) = match parse_search_result(text) {
             Ok(v) => v,
             Err(e) => {
-                log::debug!("ssdp response skipped: {}", e);
+                debug!("ssdp response skipped: {}", e);
                 continue;
             }
         };
-        match get_gateway(addr, &root_path) {
+        match get_gateway(addr, &root_path).await {
             Ok(gateway) => return Ok(gateway),
             Err(e) => {
-                log::debug!("gateway description skipped: {}", e);
+                debug!("gateway description skipped: {}", e);
                 continue;
             }
         }
     }
+}
+
+/// The next SSDP reply, waiting at most `wait` for it
+async fn recv_reply(
+    socket: &UdpSocket,
+    buf: &mut [u8],
+    wait: Option<Duration>,
+) -> Result<(usize, SocketAddr), IgdError> {
+    let reply = match wait {
+        Some(wait) => timeout(
+            u32::try_from(wait.as_millis()).unwrap_or(u32::MAX),
+            socket.recv_from(buf),
+        )
+        .await
+        .map_err(|_| IgdError::message("no gateway found: timed out"))?,
+        None => socket.recv_from(buf).await,
+    };
+    reply.map_err(|e| IgdError::message(format!("no gateway found: {}", e)))
 }
 
 // LOCATION header value -> (gateway address, description path)
@@ -91,15 +106,15 @@ fn parse_http_url(url: &str) -> Result<(SocketAddr, String), IgdError> {
     Ok((SocketAddr::new(ip, port), path.to_owned()))
 }
 
-fn get_gateway(addr: SocketAddr, root_path: &str) -> Result<Gateway, IgdError> {
-    let description = http::http_get(addr, root_path)?;
+async fn get_gateway(addr: SocketAddr, root_path: &str) -> Result<Gateway, IgdError> {
+    let description = http::http_get(addr, root_path).await?;
     let description =
         core::str::from_utf8(&description).map_err(|_| IgdError::parse("description not utf-8"))?;
     let root = xml::parse(description)?;
     let (control_schema_url, control_url) = find_connection_service(&root)
         .ok_or_else(|| IgdError::parse("no connection service in device description"))?;
 
-    let scpd = http::http_get(addr, &control_schema_url)?;
+    let scpd = http::http_get(addr, &control_schema_url).await?;
     let scpd = core::str::from_utf8(&scpd).map_err(|_| IgdError::parse("scpd not utf-8"))?;
     let control_schema = parse_schemas(&xml::parse(scpd)?)?;
 

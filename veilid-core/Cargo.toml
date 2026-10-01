@@ -20,10 +20,10 @@ path = "src/lib.rs"
 
 [features]
 
-default = ["default-tokio", "debug-api", "backtrace"]
+default = ["default-tokio"]
 
 # Common features
-default-tokio = ["enable-crypto-vld0", "rt-tokio"]
+default-tokio = ["enable-crypto-vld0", "rt-tokio", "debug-api", "backtrace"]
 default-async-std = [
     "enable-crypto-vld0",
     "rt-async-std",
@@ -50,6 +50,9 @@ mock-api = []
 
 # Adaptive AIMD byte budgets on the DHT operation gate; off = budgets never bind
 aimd-dht = ["veilid-tools/aimd"]
+
+# Follow the host application's foreground/background lifecycle (mobile and desktop apps, not servers)
+app-lifecycle = ["veilid-tools/app-lifecycle"]
 
 # Runtimes
 rt-async-std = ["async-std", "veilid-tools/rt-async-std"]

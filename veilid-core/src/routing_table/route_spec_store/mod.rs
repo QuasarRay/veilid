@@ -65,6 +65,8 @@ pub(super) fn loopback_failure_threshold(ordering: SequenceOrdering) -> usize {
 const ROUTE_TEST_SUMMARY_INTERVAL: TimestampDuration = TimestampDuration::new_secs(60);
 /// The size of the compiled route cache
 const COMPILED_ROUTE_CACHE_SIZE: usize = 1024;
+/// Table store table holding the persisted route spec store content
+const ROUTE_SPEC_STORE_TABLE: &str = "RouteSpecStore";
 
 /// Per-key-locked cache of compiled routes (one compile per route at a time)
 pub(crate) type CompiledRouteCache = AsyncKeyedCache<CompiledRouteCacheKey, Arc<CompiledRoute>>;
@@ -77,6 +79,7 @@ pub(crate) type CompiledRouteCacheEntry =
 #[derive(Debug)]
 #[must_use]
 pub(crate) struct RouteSpecStore {
+    /// Component registry this store belongs to
     registry: VeilidComponentRegistry,
     /// Allocated route content
     content: RwLock<RouteSpecStoreContent>,
@@ -100,6 +103,8 @@ pub(crate) struct RouteSpecStore {
     route_test_summary: Mutex<RouteTestSummary>,
     /// Hops of routes that died on an ordering, kept out of that ordering's allocations for a while
     dead_route_hops: Mutex<BTreeMap<SequenceOrdering, HashMap<NodeId, Timestamp>>>,
+    /// The store's table, opened on the first save and held open after
+    table_db: Mutex<Option<TableDB>>,
 }
 
 impl_veilid_component_accessors!(RouteSpecStore);
@@ -126,6 +131,7 @@ impl RouteSpecStore {
             test_destination_rotation_counter: AtomicUsize::new(0),
             route_test_summary: Mutex::new(RouteTestSummary::default()),
             dead_route_hops: Mutex::new(BTreeMap::new()),
+            table_db: Mutex::new(None),
         }
     }
 
@@ -195,7 +201,22 @@ impl RouteSpecStore {
         let content = self.content.read().clone();
 
         // Save our content to the tablestore
-        content.save().await
+        content.save(&self.table_db().await?).await
+    }
+
+    /// Held open between saves: every open runs a full integrity check of the file
+    async fn table_db(&self) -> VeilidAPIResult<TableDB> {
+        if let Some(table_db) = self.table_db.lock().clone() {
+            return Ok(table_db);
+        }
+        let table_db = self.table_store().open(ROUTE_SPEC_STORE_TABLE, 1).await?;
+        *self.table_db.lock() = Some(table_db.clone());
+        Ok(table_db)
+    }
+
+    /// Close the table held open between saves
+    pub fn close_table(&self) {
+        self.table_db.lock().take();
     }
 
     #[cfg_attr(

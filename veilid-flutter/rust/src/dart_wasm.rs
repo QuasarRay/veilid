@@ -394,6 +394,36 @@ pub fn detach() -> Promise {
     })
 }
 
+#[wasm_bindgen()]
+pub fn report_app_lifecycle_state(state: String) -> Promise {
+    wrap_api_future_void(async move {
+        let state: veilid_core::VeilidAppLifecycleState = veilid_core::deserialize_json(&state)?;
+        let veilid_api = get_veilid_api()?;
+        veilid_api.report_app_lifecycle_state(state)
+    })
+}
+
+#[wasm_bindgen()]
+pub fn wait_for_attachment_condition(
+    condition: Option<String>,
+    timeout_ms: Option<u32>,
+) -> Promise {
+    wrap_api_future_json(async move {
+        let condition: Option<veilid_core::VeilidStateAttachmentCondition> = match condition {
+            Some(s) => Some(veilid_core::deserialize_json(&s)?),
+            None => None,
+        };
+        let veilid_api = get_veilid_api()?;
+        let attachment = veilid_api
+            .wait_for_attachment_condition(
+                condition,
+                timeout_ms.map(|ms| Duration::from_millis(ms as u64)),
+            )
+            .await?;
+        VeilidAPIResult::Ok(attachment)
+    })
+}
+
 /// Release `caller_id`'s reference on the running node, tearing it down at zero.
 #[wasm_bindgen()]
 pub fn shutdown_veilid_core(caller_id: String, generation: String) -> Promise {
@@ -599,17 +629,28 @@ pub fn routing_context_create_dht_record(
 }
 
 #[wasm_bindgen()]
-pub fn routing_context_open_dht_record(id: u32, key: String, writer: Option<String>) -> Promise {
+pub fn routing_context_open_dht_record(
+    id: u32,
+    key: String,
+    writer: Option<String>,
+    options: Option<String>,
+) -> Promise {
     wrap_api_future_json(async move {
         let key: veilid_core::RecordKey = veilid_core::deserialize_json(&key)?;
         let writer: Option<veilid_core::KeyPair> = match writer {
             Some(s) => Some(veilid_core::deserialize_json(&s)?),
             None => None,
         };
+        let options: Option<veilid_core::OpenDHTRecordOptions> = match options {
+            Some(s) => Some(veilid_core::deserialize_json(&s)?),
+            None => None,
+        };
 
         let routing_context = get_routing_context(id, "routing_context_open_dht_record")?;
 
-        let dht_record_descriptor = routing_context.open_dht_record(key, writer).await?;
+        let dht_record_descriptor = routing_context
+            .open_dht_record(key, writer, options)
+            .await?;
         VeilidAPIResult::Ok(dht_record_descriptor)
     })
 }

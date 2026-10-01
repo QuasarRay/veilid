@@ -50,7 +50,15 @@ impl PublicInternetRoutingDomainController {
         let mut bootstrap_dialinfos = Vec::<DialInfo>::new();
         let mut bootstrap_txt_names = Vec::<String>::new();
         for bootstrap in bootstraps {
-            if let Ok(bootstrap_di_vec) = dial_info_converter.try_vec_from_url(&bootstrap).await {
+            // A url's hostname resolves on the blocking pool, which a stop cannot interrupt
+            let Ok(converted) = dial_info_converter
+                .try_vec_from_url(&bootstrap)
+                .timeout_at(stop_token.clone())
+                .await
+            else {
+                return Ok(());
+            };
+            if let Ok(bootstrap_di_vec) = converted {
                 for bootstrap_di in bootstrap_di_vec {
                     bootstrap_dialinfos.push(bootstrap_di);
                 }
@@ -59,7 +67,14 @@ impl PublicInternetRoutingDomainController {
             } else {
                 // No TXT resolver here, so the bootstrap host is asked directly instead
                 for url in self.direct_bootstrap_urls(&bootstrap) {
-                    match dial_info_converter.try_vec_from_url(&url).await {
+                    let Ok(converted) = dial_info_converter
+                        .try_vec_from_url(&url)
+                        .timeout_at(stop_token.clone())
+                        .await
+                    else {
+                        return Ok(());
+                    };
+                    match converted {
                         Ok(bootstrap_di_vec) => bootstrap_dialinfos.extend(bootstrap_di_vec),
                         Err(e) => {
                             veilid_log!(self debug "Could not resolve direct bootstrap {}: {}", url, e);
@@ -235,7 +250,7 @@ impl PublicInternetRoutingDomainController {
             }
         }
         let routing_table = self.routing_table();
-        routing_table.flush().await;
+        routing_table.flush(SaveReason::Bootstrap).await;
 
         // Reset the low water mark for this routing domain
         routing_table.refresh_summaries(RoutingDomain::PublicInternet.into());

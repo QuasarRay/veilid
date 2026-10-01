@@ -15,6 +15,7 @@ mod route_spec_store;
 mod routing_domains;
 mod routing_table_inner;
 mod routing_table_snapshot;
+mod save_schedule;
 #[cfg(feature = "stats")]
 mod stats;
 mod stats_accounting;
@@ -38,6 +39,7 @@ pub(crate) use route_spec_store::*;
 pub(crate) use routing_domains::*;
 pub(crate) use routing_table_inner::*;
 pub(crate) use routing_table_snapshot::*;
+pub(crate) use save_schedule::*;
 pub(crate) use stats_accounting::*;
 pub use types::*;
 
@@ -58,9 +60,6 @@ impl_veilid_log_facility!("rtab");
 
 /// Routing table bucket count (one per bit per 32 byte node id)
 const BUCKET_COUNT: usize = HASH_COORDINATE_LENGTH * 8;
-
-/// How frequently we flush the routing table and route spec store to storage
-const ROUTING_TABLE_FLUSH_INTERVAL_SECS: u32 = 30;
 
 /// Contact-method viability recompute is event-driven (cm_viability_dirty); this
 /// only rate-limits how often the drain can fire
@@ -129,10 +128,12 @@ pub(crate) type NetworkManagerHandle = Arc<ArcSwapOption<VeilidComponentGuardArc
 
 #[must_use]
 pub(crate) struct RoutingTable {
+    /// Component registry this table belongs to
     registry: VeilidComponentRegistry,
+    /// The network manager, held from post-init until termination
     network_manager: NetworkManagerHandle,
 
-    // Startup context
+    /// Startup context
     startup_context: RoutingTableStartupContext,
 
     /// Routing table inner state
@@ -140,18 +141,18 @@ pub(crate) struct RoutingTable {
     /// Routing domains
     routing_domains: Mutex<HashMap<RoutingDomain, Arc<dyn RoutingDomainController>>>,
 
-    // Ping validation channel sender (recreated on each startup/shutdown cycle)
+    /// Ping validation channel sender (recreated on each startup/shutdown cycle)
     ping_validation_sender: Mutex<flume::Sender<PingValidationBatch>>,
-    // Ping validation channel receiver (taken during startup, recreated during shutdown)
+    /// Ping validation channel receiver (taken during startup, recreated during shutdown)
     ping_validation_receiver: Mutex<Option<flume::Receiver<PingValidationBatch>>>,
-    // Ping validation processor join handle
+    /// Ping validation processor join handle
     ping_validation_processor_jh: Mutex<Option<MustJoinHandle<()>>>,
-    // Ping validation processor stop source
+    /// Ping validation processor stop source
     ping_validation_stop_source: Mutex<Option<StopSource>>,
 
     /// Node Ids
     node_ids: RwLock<NodeIdGroup>,
-    /// Public Keysyea
+    /// Public Keys
     public_keys: RwLock<PublicKeyGroup>,
     /// Secret Keys
     secret_keys: RwLock<SecretKeyGroup>,
@@ -182,8 +183,14 @@ pub(crate) struct RoutingTable {
     routing_table_health: Mutex<Arc<RoutingTableHealth>>,
     /// Network size estimator (24h rolling history)
     network_estimator: Mutex<NetworkEstimator>,
+    /// When the table next goes to disk
+    save_schedule: Mutex<SaveSchedule>,
+    /// Serializes saves so an older snapshot never lands after a newer one
+    save_lock: AsyncMutex<()>,
+    /// The routing table's table, opened on the first save and held open after
+    table_db: Mutex<Option<TableDB>>,
 
-    /// Background process for flushing the table to disk
+    /// Background process for saving the table to disk when its schedule says
     flush_task: TickTask<EyreReport>,
     /// Background process for computing statistics
     rolling_transfers_task: TickTask<EyreReport>,
@@ -198,6 +205,12 @@ pub(crate) struct RoutingTable {
 
     /// Tick subscription
     tick_subscription: Mutex<Option<EventBusSubscription>>,
+    /// App lifecycle subscription
+    #[cfg(feature = "app-lifecycle")]
+    app_lifecycle_subscription: Mutex<Option<EventBusSubscription>>,
+    /// Background time held until the next save lands
+    #[cfg(feature = "app-lifecycle")]
+    background_save_time: Mutex<Option<Arc<BackgroundTimeGuard>>>,
 }
 
 impl fmt::Debug for RoutingTable {
@@ -253,8 +266,11 @@ impl RoutingTable {
             verified_peer_infos: Mutex::new(LruCache::new(VERIFIED_PEER_INFO_CACHE_SIZE)),
             routing_table_health: Mutex::new(Arc::new(RoutingTableHealth::default())),
             network_estimator: Mutex::new(NetworkEstimator::new()),
+            save_schedule: Mutex::new(SaveSchedule::new(Timestamp::now())),
+            save_lock: AsyncMutex::new(()),
+            table_db: Mutex::new(None),
 
-            flush_task: TickTask::new("flush_task", ROUTING_TABLE_FLUSH_INTERVAL_SECS),
+            flush_task: TickTask::new("flush_task", 1),
             rolling_transfers_task: TickTask::new(
                 "rolling_transfers_task",
                 ROLLING_TRANSFERS_INTERVAL_SECS,
@@ -274,6 +290,10 @@ impl RoutingTable {
             ),
 
             tick_subscription: Default::default(),
+            #[cfg(feature = "app-lifecycle")]
+            app_lifecycle_subscription: Default::default(),
+            #[cfg(feature = "app-lifecycle")]
+            background_save_time: Default::default(),
         };
 
         this.setup_tasks();
@@ -387,6 +407,14 @@ impl RoutingTable {
     async fn post_init_async(&self) -> EyreResult<()> {
         self.network_manager
             .store(self.registry().lookup_arc::<NetworkManager>().map(Arc::new));
+
+        // Held while detached too, so the schedule knows where the app stands on reattach
+        #[cfg(feature = "app-lifecycle")]
+        {
+            let app_lifecycle_subscription =
+                impl_subscribe_event_bus!(self, Self, app_lifecycle_event_handler);
+            *self.app_lifecycle_subscription.lock() = Some(app_lifecycle_subscription);
+        }
         Ok(())
     }
 
@@ -456,6 +484,11 @@ impl RoutingTable {
         veilid_log!(self debug "cancelling routing table tasks");
         self.cancel_tasks().await;
 
+        // Detached, the flush task no longer runs to save what changed
+        if self.save_schedule.lock().is_dirty() {
+            self.flush(SaveReason::Detach).await;
+        }
+
         // Stop ping validation processor
         veilid_log!(self debug "stopping ping validation processor");
         drop(self.ping_validation_stop_source.lock().take());
@@ -493,6 +526,11 @@ impl RoutingTable {
         );
         // Released here or the network manager outlives its own termination
         self.network_manager.store(None);
+
+        #[cfg(feature = "app-lifecycle")]
+        if let Some(sub) = self.app_lifecycle_subscription.lock().take() {
+            self.event_bus().unsubscribe(sub);
+        }
     }
 
     /// Called to shut down the routing table
@@ -500,7 +538,9 @@ impl RoutingTable {
         veilid_log!(self debug "starting routing table terminate");
 
         veilid_log!(self debug "routing table termination flush");
-        self.flush().await;
+        self.flush(SaveReason::Terminate).await;
+        self.table_db.lock().take();
+        self.route_spec_store().close_table();
 
         veilid_log!(self debug "shutting down routing table");
 
@@ -517,13 +557,60 @@ impl RoutingTable {
         veilid_log!(self debug "finished routing table terminate");
     }
 
-    pub async fn flush(&self) {
-        if let Err(e) = self.save().await {
-            error!("failed to save routing table state: {}", e);
-        }
+    /// Save the routing table and route spec store
+    pub async fn flush(&self, reason: SaveReason) {
+        let _save_guard = self.save_lock.lock().await;
+        let start_ts = Timestamp::now();
+        // Held until this save lands; a change during it claims time for the next one
+        #[cfg(feature = "app-lifecycle")]
+        let _background_time = {
+            let mut schedule = self.save_schedule.lock();
+            schedule.saving(start_ts);
+            self.background_save_time.lock().take()
+        };
+        #[cfg(not(feature = "app-lifecycle"))]
+        self.save_schedule.lock().saving(start_ts);
+
+        let saved_entries = self
+            .save()
+            .await
+            .inspect_err(|e| error!("failed to save routing table state: {}", e))
+            .ok();
 
         if let Err(e) = self.route_spec_store().save().await {
             error!("couldn't save route spec store: {}", e);
+        }
+
+        if let Some(saved_entries) = saved_entries {
+            veilid_log!(self debug "saved routing table ({:?}): {} entries in {:#}",
+                reason, saved_entries, TimestampDuration::since(start_ts));
+        }
+    }
+
+    #[cfg(feature = "app-lifecycle")]
+    fn app_lifecycle_event_handler(&self, evt: Arc<AppLifecycleEvent>) {
+        self.save_schedule.lock().set_background(
+            evt.state == VeilidAppLifecycleState::Background,
+            Timestamp::now(),
+        );
+        if let Some(background_time) = evt.background_time.clone() {
+            *self.background_save_time.lock() = Some(background_time);
+        }
+        self.hold_background_time_for_save();
+    }
+
+    /// In the background the platform may suspend the process before a save it owes; claim
+    /// time until that save lands
+    #[cfg(feature = "app-lifecycle")]
+    fn hold_background_time_for_save(&self) {
+        // Under the schedule lock, as in flush, so no save starts between the check and the claim
+        let schedule = self.save_schedule.lock();
+        if !(schedule.is_background() && schedule.is_dirty()) {
+            return;
+        }
+        let mut held = self.background_save_time.lock();
+        if held.is_none() {
+            *held = BackgroundTimeGuard::begin("veilid routing table save").map(Arc::new);
         }
     }
 
@@ -886,14 +973,14 @@ impl RoutingTable {
         (serialized_bucket_map, all_entry_bytes)
     }
 
-    /// Write the persisted routing table state to the table store.
+    /// Write the persisted routing table state to the table store, returning the entry count.
     /// Includes buckets, network estimator history, and per-routing-domain state.
-    async fn save(&self) -> EyreResult<()> {
+    async fn save(&self) -> EyreResult<usize> {
         let (serialized_bucket_map, all_entry_bytes) = self.serialized_buckets();
+        let entry_count = all_entry_bytes.len();
         let network_estimator_snapshot = self.network_estimator.lock().clone();
 
-        let table_store = self.table_store();
-        let tdb = table_store.open(ROUTING_TABLE, 1).await?;
+        let tdb = self.table_db().await?;
         let dbx = tdb.transact();
         if let Err(e) = dbx
             .store_json(0, SERIALIZED_BUCKET_MAP, &serialized_bucket_map)
@@ -923,7 +1010,17 @@ impl RoutingTable {
         }
 
         dbx.commit().await?;
-        Ok(())
+        Ok(entry_count)
+    }
+
+    /// Held open between saves: every open runs a full integrity check of the file
+    async fn table_db(&self) -> VeilidAPIResult<TableDB> {
+        if let Some(tdb) = self.table_db.lock().clone() {
+            return Ok(tdb);
+        }
+        let tdb = self.table_store().open(ROUTING_TABLE, 1).await?;
+        *self.table_db.lock() = Some(tdb.clone());
+        Ok(tdb)
     }
 
     /// Throw away the saved routing table and start the cache over from empty
@@ -1011,17 +1108,16 @@ impl RoutingTable {
         }
 
         // Reconstruct all entries
-        {
+        let loaded = {
             let inner = &mut *self.inner.write();
             Self::populate_routing_table_inner(inner, serialized_bucket_map, all_entry_bytes)?;
-        }
+            inner.bucket_entry_count()
+        };
 
         // Drop relay-only entries: low-quality hops that can't act as safety-route first hops
         // or relays. Important nodes will be re-discovered through bootstrap or peer exchange.
         let removed = self.purge_entries_without_direct_dial_info();
-        if removed > 0 {
-            veilid_log!(self debug "Purged {} relay-only entries on load", removed);
-        }
+        veilid_log!(self info "loaded routing table: {} entries, {} relay-only purged", loaded, removed);
 
         // // Make all entries live so they can be tested again
         // let cur_ts = Timestamp::now();
@@ -1653,6 +1749,20 @@ impl RoutingTable {
         self.cm_viability_dirty.swap(false, Ordering::AcqRel)
     }
 
+    /// Queue a save for once changes settle
+    pub(crate) fn mark_save_dirty(&self) {
+        self.save_schedule.lock().changed(Timestamp::now());
+        #[cfg(feature = "app-lifecycle")]
+        self.hold_background_time_for_save();
+    }
+
+    /// Count an entry changing state toward the next save
+    pub(crate) fn mark_entry_state_changed(&self) {
+        self.save_schedule.lock().state_changed(Timestamp::now());
+        #[cfg(feature = "app-lifecycle")]
+        self.hold_background_time_for_save();
+    }
+
     /// Called whenever a routing table entry is:
     /// 1. created or updated with new peer information
     /// 2. has a node id added or removed (per CryptoKind)
@@ -1685,6 +1795,7 @@ impl RoutingTable {
                 (new_pi.routing_domain(), node_ids)
             }
         };
+        self.mark_save_dirty();
 
         // If this is our relay, then redo our own peerinfo because
         // if we have relayed peerinfo, then changing the relay's peerinfo

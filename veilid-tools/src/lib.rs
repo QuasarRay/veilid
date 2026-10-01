@@ -26,6 +26,9 @@
 /// Additive-increase/multiplicative-decrease adaptive rate controller.
 #[cfg(feature = "aimd")]
 pub mod aimd;
+/// Where the host application stands in its platform's lifecycle.
+#[cfg(feature = "app-lifecycle")]
+pub mod app_lifecycle;
 /// Packet fragmentation and reassembly for the sender and receiver ends.
 pub mod assembly_buffer;
 /// Debuggable async lock primitives (mutex, rwlock).
@@ -230,6 +233,9 @@ cfg_if! {
 #[cfg(feature = "aimd")]
 #[doc(inline)]
 pub use aimd::*;
+#[cfg(feature = "app-lifecycle")]
+#[doc(inline)]
+pub use app_lifecycle::*;
 #[doc(inline)]
 pub use assembly_buffer::*;
 #[doc(inline)]

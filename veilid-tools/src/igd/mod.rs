@@ -1,7 +1,7 @@
 #![cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 
 pub(crate) mod gateway;
-mod http;
+pub(crate) mod http;
 mod messages;
 pub(crate) mod search;
 pub(crate) mod xml;
@@ -9,9 +9,10 @@ pub(crate) mod xml;
 pub use gateway::Gateway;
 pub use search::search_gateway;
 
+use super::*;
 use std::collections::HashMap;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 /// Protocol for a port mapping.
