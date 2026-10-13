@@ -3,6 +3,8 @@ use crate::core_context::*;
 use crate::veilid_api::*;
 use crate::*;
 use core::fmt::Write;
+#[cfg(feature = "backtrace")]
+use std::backtrace::Backtrace;
 use tracing_subscriber::*;
 
 struct ApiTracingLayerInner {
@@ -206,8 +208,8 @@ impl ApiTracingLayer {
 
         #[cfg(feature = "backtrace")]
         let backtrace = if log_level <= VeilidLogLevel::Error {
-            let bt = backtrace::Backtrace::new();
-            Some(format!("{:?}", bt).replace(char::REPLACEMENT_CHARACTER, ""))
+            let bt = Backtrace::force_capture();
+            Some(bt.to_string().replace(char::REPLACEMENT_CHARACTER, ""))
         } else {
             None
         };

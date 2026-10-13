@@ -58,7 +58,6 @@ veilid-core = { path = "../../veilid-core", default-features = false, features =
 tracing = { version = "0.1.41", features = ["log", "attributes"] }
 tracing-subscriber = { version = "0.3.23", features = ["time"] }
 parking_lot = "0.12.5"
-backtrace = "^0.3.76"
 serde_json = "1.0.149"
 serde = "1.0.228"
 cfg-if = "1.0.4"
@@ -85,7 +84,8 @@ lazy_static = "1.5.0"
 hostname = "0.4.2"
 ctor = { version = "1.0.6", optional = true }
 libc-print = { version = "0.3.0", optional = true }
-time = { version = "0.3.47", features = ["local-offset"] }
+# No local-offset: it pulls num_threads, which does not build for iOS on libc 0.2.190
+time = "0.3.47"
 chrono = "0.4.40"
 
 # Dependencies for Android builds only

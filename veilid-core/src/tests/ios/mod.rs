@@ -2,7 +2,7 @@ use crate::{
     tests::{native::block_on, run_all_tests},
     *,
 };
-use backtrace::Backtrace;
+use std::backtrace::Backtrace;
 use std::panic;
 use tracing_oslog::OsLogger;
 use tracing_subscriber::prelude::*;
@@ -26,7 +26,7 @@ pub fn veilid_core_setup_ios_tests() {
         .init();
 
     panic::set_hook(Box::new(|panic_info| {
-        let bt = Backtrace::new();
+        let bt = Backtrace::force_capture();
         if let Some(location) = panic_info.location() {
             error!(
                 "panic occurred in file '{}' at line {}",
@@ -45,6 +45,6 @@ pub fn veilid_core_setup_ios_tests() {
         } else {
             error!("no panic payload");
         }
-        error!("Backtrace:\n{:?}", bt);
+        error!("Backtrace:\n{}", bt);
     }));
 }

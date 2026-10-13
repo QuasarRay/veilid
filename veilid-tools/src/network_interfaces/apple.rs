@@ -2,12 +2,64 @@
 #![allow(non_camel_case_types)]
 use super::*;
 
-use libc::{
-    freeifaddrs, getifaddrs, ifaddrs, ioctl, rt_msghdr, sockaddr_in6, socket, sysctl, time_t,
-    AF_INET6, AF_LINK, CTL_NET, IFF_BROADCAST, IFF_LOOPBACK, IFF_POINTOPOINT, IFF_RUNNING,
-    IFNAMSIZ, NET_RT_FLAGS, PF_ROUTE, RTAX_DST, RTAX_GATEWAY, RTAX_MAX, RTA_DST, RTA_GATEWAY,
-    RTF_GATEWAY, SOCK_DGRAM,
+#[cfg(target_os = "ios")]
+use self::ios_route_abi::{
+    rt_msghdr, RTAX_DST, RTAX_GATEWAY, RTAX_MAX, RTA_DST, RTA_GATEWAY, RTF_GATEWAY,
 };
+use libc::{
+    freeifaddrs, getifaddrs, ifaddrs, ioctl, sockaddr_in6, socket, sysctl, time_t, AF_INET6,
+    AF_LINK, CTL_NET, IFF_BROADCAST, IFF_LOOPBACK, IFF_POINTOPOINT, IFF_RUNNING, IFNAMSIZ,
+    NET_RT_FLAGS, PF_ROUTE, SOCK_DGRAM,
+};
+#[cfg(target_os = "macos")]
+use libc::{rt_msghdr, RTAX_DST, RTAX_GATEWAY, RTAX_MAX, RTA_DST, RTA_GATEWAY, RTF_GATEWAY};
+#[cfg(target_os = "ios")]
+mod ios_route_abi {
+    use std::os::raw::{c_int, c_uchar, c_ushort};
+
+    // Field order and widths match XNU net/route.h and libc's macOS rt_msghdr.
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    pub(super) struct rt_metrics {
+        rmx_locks: u32,
+        rmx_mtu: u32,
+        rmx_hopcount: u32,
+        rmx_expire: i32,
+        rmx_recvpipe: u32,
+        rmx_sendpipe: u32,
+        rmx_ssthresh: u32,
+        rmx_rtt: u32,
+        rmx_rttvar: u32,
+        rmx_pksent: u32,
+        rmx_filler: [u32; 4],
+    }
+
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    pub(super) struct rt_msghdr {
+        pub(super) rtm_msglen: c_ushort,
+        rtm_version: c_uchar,
+        rtm_type: c_uchar,
+        pub(super) rtm_index: c_ushort,
+        rtm_flags: c_int,
+        pub(super) rtm_addrs: c_int,
+        rtm_pid: libc::pid_t,
+        rtm_seq: c_int,
+        rtm_errno: c_int,
+        rtm_use: c_int,
+        rtm_inits: u32,
+        rtm_rmx: rt_metrics,
+    }
+
+    pub(super) const RTF_GATEWAY: c_int = 0x2;
+    pub(super) const RTA_DST: c_int = 0x1;
+    pub(super) const RTA_GATEWAY: c_int = 0x2;
+    pub(super) const RTAX_DST: usize = 0;
+    pub(super) const RTAX_GATEWAY: usize = 1;
+    pub(super) const RTAX_MAX: usize = 8;
+    // The parser starts the sockaddr run immediately after this XNU header.
+    const _: [(); 92] = [(); core::mem::size_of::<rt_msghdr>()];
+}
 use sockaddr_tools::SockAddr;
 use std::ffi::CStr;
 use std::io;

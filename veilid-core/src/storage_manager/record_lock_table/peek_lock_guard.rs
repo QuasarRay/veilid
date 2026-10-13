@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "debug-locks")]
+use std::backtrace::Backtrace;
 
 /// Peek lock guard: holds Peek-mode lock (lifetime.read only). Excludes Lifetime ops; concurrent with everything else.
 #[derive(Debug)]
@@ -9,7 +11,7 @@ pub struct PeekLockGuard<R: RecordLockPurpose, S: RecordLockPurpose> {
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
-    active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
+    active_guards: Arc<Mutex<HashMap<usize, Backtrace>>>,
 }
 
 impl<R: RecordLockPurpose, S: RecordLockPurpose> PeekLockGuard<R, S> {
@@ -21,7 +23,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> PeekLockGuard<R, S> {
         let (id, active_guards) = {
             let id = GUARD_ID.fetch_add(1, Ordering::AcqRel);
             let active_guards = record_lock.get_active_guards();
-            active_guards.lock().insert(id, backtrace::Backtrace::new());
+            active_guards.lock().insert(id, Backtrace::force_capture());
             (id, active_guards)
         };
 

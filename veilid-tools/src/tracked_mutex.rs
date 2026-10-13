@@ -14,12 +14,18 @@
 //! zero overhead, identical semantics.
 
 use cfg_if::cfg_if;
+#[cfg(feature = "debug-locks")]
+use std::{
+    backtrace::Backtrace,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex as StdMutex,
+    },
+    thread::ThreadId,
+};
 
 cfg_if! {
     if #[cfg(feature = "debug-locks")] {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Mutex as StdMutex;
-        use std::thread::ThreadId;
 
         // One report is enough; the other blocked threads would print the same standoff.
         static REPORTED: AtomicBool = AtomicBool::new(false);
@@ -28,7 +34,7 @@ cfg_if! {
         struct HolderInfo {
             thread_id: ThreadId,
             thread_name: String,
-            backtrace: backtrace::Backtrace,
+            backtrace: Backtrace,
         }
 
         /// See module docs. Holder state lives in a `std` mutex so it never enters
@@ -104,7 +110,7 @@ cfg_if! {
                 *self.holder.lock().unwrap() = Some(HolderInfo {
                     thread_id: cur.id(),
                     thread_name: cur.name().unwrap_or("<unnamed>").to_string(),
-                    backtrace: backtrace::Backtrace::new_unresolved(),
+                    backtrace: Backtrace::force_capture(),
                 });
             }
 
@@ -138,12 +144,11 @@ cfg_if! {
                     cur.id(),
                     cur.name().unwrap_or("<unnamed>")
                 );
-                let mut blocked_bt = backtrace::Backtrace::new_unresolved();
-                blocked_bt.resolve();
+                let blocked_bt = Backtrace::force_capture();
                 let _ = writeln!(
                     r,
                     "blocked-acquire backtrace:\n{}",
-                    indent::indent_all_by(4, format!("{blocked_bt:?}"))
+                    indent::indent_all_by(4, blocked_bt.to_string())
                 );
                 match self.holder.lock().unwrap().as_ref() {
                     Some(h) => {
@@ -159,12 +164,10 @@ cfg_if! {
                                 ""
                             }
                         );
-                        let mut hbt = h.backtrace.clone();
-                        hbt.resolve();
                         let _ = writeln!(
                             r,
                             "holder-acquire backtrace:\n{}",
-                            indent::indent_all_by(4, format!("{hbt:?}"))
+                            indent::indent_all_by(4, h.backtrace.to_string())
                         );
                     }
                     None => {

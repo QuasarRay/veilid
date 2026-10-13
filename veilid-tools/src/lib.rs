@@ -138,9 +138,6 @@ pub mod timeout_or;
 pub mod tools;
 /// `parking_lot::Mutex` wrapper that records the holder for debugging.
 pub mod tracked_mutex;
-/// Backtrace capture that trims runtime frames and shortens paths.
-#[cfg(feature = "backtrace")]
-pub mod trim_backtrace;
 /// In-process simulated network for deterministic testing.
 #[cfg(feature = "virtual-network")]
 pub mod virtual_network;
@@ -346,9 +343,6 @@ pub use timeout_or::*;
 pub use tools::*;
 #[doc(inline)]
 pub use tracked_mutex::*;
-#[doc(inline)]
-#[cfg(feature = "backtrace")]
-pub use trim_backtrace::*;
 #[doc(inline)]
 pub use wakeup::*;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]

@@ -1,7 +1,7 @@
 use super::*;
 // std mutex keeps the active-guard map out of parking_lot's deadlock detector
 #[cfg(feature = "debug-locks")]
-use std::sync::Mutex as StdMutex;
+use std::{backtrace::Backtrace, sync::Mutex as StdMutex};
 
 /// Returned by `startup` when the lock is already in the started state.
 #[derive(ThisError, Debug, Copy, Clone, PartialEq, Eq)]
@@ -43,7 +43,7 @@ pub struct StartupLockEnterGuard<'a> {
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
-    active_guards: Arc<StdMutex<HashMap<usize, backtrace::Backtrace>>>,
+    active_guards: Arc<StdMutex<HashMap<usize, Backtrace>>>,
 }
 
 #[cfg(feature = "debug-locks")]
@@ -60,7 +60,7 @@ pub struct StartupLockEnterGuardArc {
     #[cfg(feature = "debug-locks")]
     id: usize,
     #[cfg(feature = "debug-locks")]
-    active_guards: Arc<StdMutex<HashMap<usize, backtrace::Backtrace>>>,
+    active_guards: Arc<StdMutex<HashMap<usize, Backtrace>>>,
 }
 
 #[cfg(feature = "debug-locks")]
@@ -85,7 +85,7 @@ pub struct StartupLock {
     startup_state: Arc<AsyncRwLock<bool>>,
     stop_source: Mutex<Option<StopSource>>,
     #[cfg(feature = "debug-locks")]
-    active_guards: Arc<StdMutex<HashMap<usize, backtrace::Backtrace>>>,
+    active_guards: Arc<StdMutex<HashMap<usize, Backtrace>>>,
 }
 
 impl StartupLock {
@@ -161,17 +161,12 @@ impl StartupLock {
                 let guard = match timeout(30000, self.startup_state.write()).await {
                     Ok(v) => v,
                     Err(_) => {
-                        // resolve here: captured backtraces are unresolved for speed
                         let active: Vec<_> = self
                             .active_guards
                             .lock()
                             .unwrap()
                             .values()
-                            .map(|bt| {
-                                let mut b = bt.clone();
-                                b.resolve();
-                                b
-                            })
+                            .map(ToString::to_string)
                             .collect();
                         #[allow(
                             clippy::disallowed_macros,

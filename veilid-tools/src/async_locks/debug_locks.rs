@@ -4,6 +4,7 @@
 )]
 
 use super::*;
+use std::backtrace::Backtrace;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex as StdMutex;
 
@@ -15,9 +16,9 @@ pub struct RawGuardId(usize);
 /// Per-lock debug state; active guards live in the lock so acquire/release never touches global state.
 #[derive(Debug)]
 struct LockIdContainerInner {
-    create_backtrace: backtrace::Backtrace,
+    create_backtrace: Backtrace,
     // std mutex keeps this out of parking_lot's deadlock detector
-    active_guards: StdMutex<HashMap<RawGuardId, backtrace::Backtrace>>,
+    active_guards: StdMutex<HashMap<RawGuardId, Backtrace>>,
 }
 
 #[derive(Clone, Debug)]
@@ -38,10 +39,7 @@ impl LockIdContainer {
     pub fn report_deadlock(&self, desc: &str) -> ! {
         let active_guard_backtraces: Vec<String> = {
             let active_guards = self.inner.active_guards.lock().unwrap();
-            active_guards
-                .values()
-                .map(|bt| bt.trim().to_string())
-                .collect()
+            active_guards.values().map(ToString::to_string).collect()
         };
 
         use core::fmt::Write as _;
@@ -49,14 +47,13 @@ impl LockIdContainer {
         let _ = writeln!(
             r,
             "Deadlock detected! ({})\n\nLock creation backtrace:\n{}\n\nActive guard backtraces:\n",
-            desc,
-            self.inner.create_backtrace.trim(),
+            desc, self.inner.create_backtrace,
         );
         for (n, agb) in active_guard_backtraces.iter().enumerate() {
             let _ = writeln!(r, "{}:\n{}\n", n, indent::indent_all_by(4, agb));
         }
 
-        let report_backtrace = backtrace::Backtrace::new_unresolved().trim();
+        let report_backtrace = Backtrace::force_capture();
         let _ = writeln!(r, "Panic backtrace:\n{}", report_backtrace);
 
         eprintln!("{r}");

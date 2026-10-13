@@ -80,9 +80,6 @@ opt-level = 3
 [profile.size.package.hmac]
 opt-level = 3
 
-[profile.dev.package.backtrace]
-opt-level = 3
-
 [profile.dev.package.veilid-core-optimized]
 opt-level = 3
 overflow-checks = false

@@ -33,7 +33,7 @@ default-async-std = [
 default-wasm = ["enable-crypto-vld0", "rt-wasm-bindgen"]
 
 # Capture backtraces in diagnostics (error logs, guard tracking); off for wasm product builds
-backtrace = ["dep:backtrace", "veilid-tools/backtrace"]
+backtrace = ["veilid-tools/backtrace"]
 
 # Text debug-command interface (VeilidAPI::debug); without it debug commands return ""
 debug-api = ["dep:clap", "dep:bytesize"]
@@ -105,7 +105,6 @@ veilid-tools = { version = "0.5.7", path = "../veilid-tools", features = [
     "tracing",
 ], default-features = false }
 pastey = "0.2.1"
-backtrace = { version = "^0.3.71", optional = true }
 num-traits = "0.2.19"
 cfg-if = "1.0.4"
 lazy_static = "1.5.0"

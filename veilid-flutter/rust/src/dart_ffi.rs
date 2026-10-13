@@ -15,9 +15,7 @@ cfg_if::cfg_if! {
 
 use parking_lot::Mutex;
 use serde::*;
-use std::io::Write;
-use std::os::raw::c_char;
-use std::sync::Arc;
+use std::{backtrace::Backtrace, io::Write, os::raw::c_char, sync::Arc};
 use tracing::*;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::prelude::*;
@@ -309,10 +307,7 @@ pub extern "C" fn initialize_veilid_flutter(
             } else {
                 out += "no panic payload\n";
             }
-            out += &format!(
-                "  Complete stack trace:\n{:?}\n",
-                backtrace::Backtrace::new()
-            );
+            out += &format!("  Complete stack trace:\n{}\n", Backtrace::force_capture());
 
             if let Some(mut crash_file) = crash_file {
                 let _ = write!(crash_file, "{}", out);

@@ -527,8 +527,7 @@ impl RoutingTable {
         let _tracking = {
             let mut tracking = format!("\nNodeRef Tracking:\n\n");
             for (id, bt) in &mut node_ref.entry().node_ref_tracks.lock().iter_mut() {
-                bt.resolve();
-                tracking += &format!("Id: {}\n----------------\n{:#?}", id, bt);
+                tracking += &format!("Id: {}\n----------------\n{}", id, bt);
             }
             tracking
         };

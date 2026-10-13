@@ -3,8 +3,8 @@ pub mod get_directories;
 use super::native::*;
 use crate::tests::*;
 use crate::*;
-use backtrace::Backtrace;
 use jni::{objects::JClass, objects::JObject, EnvUnowned};
+use std::backtrace::Backtrace;
 use std::panic;
 use tracing_subscriber::prelude::*;
 
@@ -26,7 +26,7 @@ pub fn veilid_core_setup_android_tests(env: EnvUnowned, ctx: JObject) {
 
     // Set up panic hook for backtraces
     panic::set_hook(Box::new(|panic_info| {
-        let bt = Backtrace::new();
+        let bt = Backtrace::force_capture();
         if let Some(location) = panic_info.location() {
             error!(
                 "panic occurred in file '{}' at line {}",
@@ -45,7 +45,7 @@ pub fn veilid_core_setup_android_tests(env: EnvUnowned, ctx: JObject) {
         } else {
             error!("no panic payload");
         }
-        error!("Backtrace:\n{:?}", bt);
+        error!("Backtrace:\n{}", bt);
     }));
 
     // Set up subscriber and layers

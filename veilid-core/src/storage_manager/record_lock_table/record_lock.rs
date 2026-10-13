@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "debug-locks")]
+use std::backtrace::Backtrace;
 
 #[cfg(feature = "debug-locks")]
 pub(super) static GUARD_ID: AtomicUsize = AtomicUsize::new(0);
@@ -24,7 +26,7 @@ pub(super) struct RecordLock<R: RecordLockPurpose, S: RecordLockPurpose> {
     watch_lock: Arc<AsyncMutex<()>>,
     inner: Mutex<RecordLockInner<R, S>>,
     #[cfg(feature = "debug-locks")]
-    active_guards: Arc<Mutex<HashMap<usize, backtrace::Backtrace>>>,
+    active_guards: Arc<Mutex<HashMap<usize, Backtrace>>>,
 }
 
 impl<R: RecordLockPurpose, S: RecordLockPurpose> VeilidComponentRegistryAccessor
@@ -104,7 +106,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLock<R, S> {
     }
 
     #[cfg(feature = "debug-locks")]
-    pub(super) fn get_active_guards(&self) -> Arc<Mutex<HashMap<usize, backtrace::Backtrace>>> {
+    pub(super) fn get_active_guards(&self) -> Arc<Mutex<HashMap<usize, Backtrace>>> {
         self.active_guards.clone()
     }
 

@@ -101,7 +101,8 @@ veilid_tools_ios_tests = [
     "test-util",
 ]
 # Capture backtraces (diagnostics, lock tracking); off for wasm product builds
-backtrace = ["dep:backtrace"]
+backtrace = []
+# parking_lot's detector uses the backtrace crate, which does not build for iOS on libc 0.2.190
 debug-locks = ["parking_lot/deadlock_detection", "backtrace"]
 log-location-quiet = []
 panic-quiet = []
@@ -128,7 +129,6 @@ event-listener = "5"
 pin-project-lite = "0.2"
 rand = "0.8.5"
 rand_core = { version = "0.10.1", default-features = false }
-backtrace = { version = "^0.3.76", optional = true }
 fn_name = "0.1.0"
 range-set-blaze = "0.6.0"
 flume = { version = "0.12.0", features = ["async"] }

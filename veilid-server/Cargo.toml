@@ -97,8 +97,7 @@ tokio = { version = "1.49.0", features = [
 ], optional = true }
 tokio-util = { version = "0.7.18", features = ["compat"], optional = true }
 console-subscriber = { version = "0.5.0", optional = true }
-color-eyre = { version = "^0.6.3", default-features = false }
-backtrace = "0.3.76"
+eyre = "0.6.12"
 clap = { version = "4.5.39", features = ["derive", "string", "wrap_help"] }
 directories = "6.0.0"
 parking_lot = "0.12.5"

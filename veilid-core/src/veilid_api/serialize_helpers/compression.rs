@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "backtrace")]
+use std::backtrace::Backtrace;
 use veilid_core_optimized::{lz4_compress_prepend_size, lz4_decompress, lz4_uncompressed_size};
 
 impl_veilid_log_facility!("compression");
@@ -35,11 +37,11 @@ pub(crate) fn decompress_size_prepended(input: &[u8], max_size: usize) -> Veilid
         Err(e) => {
             #[cfg(feature = "backtrace")]
             apibail_generic!(
-                "failed to decompress: {}:data_len={}\ndata={}\nbacktrace:\n{:#?}",
+                "failed to decompress: {}:data_len={}\ndata={}\nbacktrace:\n{}",
                 e,
                 input.len(),
                 human_byte_data(input, Some(256)),
-                backtrace::Backtrace::new()
+                Backtrace::force_capture()
             );
             #[cfg(not(feature = "backtrace"))]
             apibail_generic!(

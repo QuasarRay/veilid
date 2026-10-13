@@ -1,6 +1,6 @@
 pub use cfg_if::*;
-pub use color_eyre::eyre::{bail, eyre, Result as EyreResult, WrapErr};
 pub use core::future::Future;
+pub use eyre::{bail, eyre, Result as EyreResult, WrapErr};
 pub use parking_lot::*;
 pub use std::collections::HashMap;
 pub use std::ffi::OsString;

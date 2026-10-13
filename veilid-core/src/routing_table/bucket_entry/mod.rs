@@ -4,6 +4,8 @@ mod state_reason;
 use super::*;
 use core::sync::atomic::AtomicU32;
 use hashlink::LruCache;
+#[cfg(all(feature = "tracking", feature = "backtrace"))]
+use std::backtrace::Backtrace;
 
 pub(crate) use state::*;
 pub(crate) use state_reason::*;
@@ -1501,7 +1503,7 @@ pub(crate) struct BucketEntry {
     #[cfg(feature = "tracking")]
     next_track_id: AtomicUsize,
     #[cfg(all(feature = "tracking", feature = "backtrace"))]
-    pub(super) node_ref_tracks: Mutex<HashMap<usize, backtrace::Backtrace>>,
+    pub(super) node_ref_tracks: Mutex<HashMap<usize, Backtrace>>,
 }
 
 impl fmt::Debug for BucketEntry {
@@ -1591,7 +1593,7 @@ impl BucketEntry {
         #[cfg(feature = "backtrace")]
         self.node_ref_tracks
             .lock()
-            .insert(track_id, backtrace::Backtrace::new_unresolved());
+            .insert(track_id, Backtrace::force_capture());
         track_id
     }
 
@@ -1649,9 +1651,7 @@ impl Drop for BucketEntry {
                 let registry = &self.registry;
                 veilid_log!(registry info "NodeRef Tracking");
                 for (id, bt) in self.node_ref_tracks.lock().iter() {
-                    let mut bt = bt.clone();
-                    bt.resolve();
-                    veilid_log!(registry info "Id: {}\n----------------\n{:#?}", id, bt);
+                    veilid_log!(registry info "Id: {}\n----------------\n{}", id, bt);
                 }
             }
 

@@ -105,6 +105,7 @@
   - Fix a panic sorting allocated routes when a route's latency changed during the sort.
   - A hidden desktop app keeps saving on the foreground schedule, since saving on every change is only for platforms that freeze a background process.
   - A degraded period caused only by the node's own stalls no longer ends with a check of every watch for missed changes.
+  - The `backtrace` feature uses `std::backtrace` instead of the `backtrace` crate, which does not build for iOS on libc 0.2.190.
 
 - veilid-flutter:
   - **Breaking** `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `toString()` on `Timestamp` and `TimestampDuration` writes human-readable output instead of a raw integer.
@@ -116,6 +117,7 @@
   - `rust-android-gradle` is removed, since it no longer keeps up with AGP and Kotlin.
   - Fix multiple-attach idempotency.
   - `AttachmentState.isDetached` no longer returns true for every state.
+  - The `time` dependency drops `local-offset`, whose `num_threads` dependency does not build for iOS on libc 0.2.190.
 
 - veilid-cli:
   - The interactive console no longer exits or floods `thingbuf receiver has closed` when a log burst overruns the line editor.
@@ -125,6 +127,7 @@
 
 - veilid-server:
   - The process exits at most 500 ms after the node shuts down instead of waiting out system DNS lookups left on the blocking pool.
+  - Server errors use eyre's standard report handler instead of color-eyre's colored reports.
 
 - veilid-tools:
   - **Breaking** `hickory-resolver` is gone, 13 crates with it, and every DNS lookup goes through the platform's own resolver so the system's DNS privacy settings apply, with `Resolver::supports_txt()` reporting whether TXT lookups work and `ResolverError::Unsupported` returned when they do not.
@@ -133,9 +136,11 @@
   - **Breaking** `scaled_yielding()` drops its `yield_n` threshold, running the closure inline below `cpu_n` and on the CPU pool from there up.
   - **Breaking** The unsafe `aligned_8_u8_vec_uninit()` and `unaligned_u8_vec_uninit()` are replaced by the safe `zeroed_u8_vec()`.
   - **Breaking** `igd::search_gateway()` and the `igd::Gateway` request methods are async, so dropping one ends its router request at once, and `minreq` is gone.
+  - **Breaking** `TrimmedBacktrace` and `TrimBacktraceTrait` are gone, and backtrace captures use `std::backtrace`.
   - AIMD congestion control, behind the `aimd` feature.
   - Best-effort UDP send-with-TTL in `socket_tools`.
   - `background_may_freeze()` reports whether the platform freezes a process in the background rather than only throttling it.
+  - Apple route discovery declares the XNU route-message ABI itself on iOS, where libc 0.2.190 no longer exports it.
 
 - veilid-wasm:
   - **Breaking** The wasm file no longer loads at import time through a top-level await, so you must `await` the default export `init()` (`import init from "veilid-wasm"`) before calling any other export.

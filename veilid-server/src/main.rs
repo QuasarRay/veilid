@@ -28,6 +28,7 @@ use clap::{Args, Parser};
 use logs::*;
 use server::*;
 use settings::LogLevel;
+use std::backtrace::Backtrace;
 use tools::*;
 use veilid_core::{PublicKeyGroup, SecretKeyGroup};
 
@@ -188,7 +189,6 @@ pub struct CmdlineArgs {
 fn main() -> EyreResult<()> {
     #[cfg(windows)]
     let _ = ansi_term::enable_ansi_support();
-    color_eyre::install()?;
 
     // Get command line options
     let args = CmdlineArgs::parse();
@@ -571,11 +571,11 @@ fn main() -> EyreResult<()> {
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         orig_hook(panic_info);
-        let backtrace = backtrace::Backtrace::new();
+        let backtrace = Backtrace::force_capture();
         // Non-panicking stderr write so a broken pipe inside the hook doesn't double-panic
         use std::io::Write;
         let _ = std::io::stderr()
-            .write_all(format!("Backtrace:\n{:?}\nexiting!\n", backtrace).as_bytes());
+            .write_all(format!("Backtrace:\n{}\nexiting!\n", backtrace).as_bytes());
         std::process::exit(1);
     }));
 

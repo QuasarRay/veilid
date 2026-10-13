@@ -51,7 +51,7 @@ pub fn veilid_tools_setup_android_tests() {
 
     // Set up panic hook for backtraces
     panic::set_hook(Box::new(|panic_info| {
-        let bt = Backtrace::capture();
+        let bt = Backtrace::force_capture();
         if let Some(location) = panic_info.location() {
             error!(
                 "panic occurred in file '{}' at line {}",
@@ -70,6 +70,6 @@ pub fn veilid_tools_setup_android_tests() {
         } else {
             error!("no panic payload");
         }
-        error!("Backtrace:\n{:?}", bt);
+        error!("Backtrace:\n{}", bt);
     }));
 }
