@@ -5,12 +5,7 @@ use stop_token::future::FutureExt;
 
 impl_veilid_log_facility!("net");
 
-pub(super) const PROTECTED_CONNECTION_DROP_SPAN: TimestampDuration =
-    TimestampDuration::new_secs(10);
 const PROTECTED_CONNECTION_DROP_COUNT: usize = 3;
-/// Minimum gap between dial-info confirmations triggered by an emptied connection table.
-/// Without it a peer that churns the last connection sets the rate for real network work.
-const EMPTY_TABLE_CONFIRM_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
 const NEW_CONNECTION_RETRY_COUNT: usize = 0;
 const NEW_CONNECTION_RETRY_DELAY_MS: u32 = 500;
 
@@ -65,14 +60,14 @@ struct ProtectedAddress {
     drops: ProtectedDropTracker,
 }
 
-/// What to do about a protected connection that just dropped.
+/// What to do about a protected connection that just dropped
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProtectedDropAction {
     /// Reopen it now; a relay we lost is worth getting back quickly
     Reconnect,
-    /// Too many drops inside one span. Stay down until the span rolls.
+    /// Too many connections in a row died young; stay down until one outlives the threshold
     HoldOff {
-        /// First drop to trip the breaker in this span, so the caller reports it once
+        /// The drop that tripped the breaker, so the caller reports it once
         tripped_now: bool,
     },
 }
@@ -81,46 +76,46 @@ pub(super) enum ProtectedDropAction {
 ///
 /// Separate from the address it belongs to so the policy can be tested on its own: it is the only
 /// thing standing between a peer that accepts a handshake and then drops us, and an unbounded
-/// reconnect loop at handshake rate.
+/// re-open loop at keepalive rate.
 #[derive(Debug)]
 pub(super) struct ProtectedDropTracker {
-    span_start_ts: Timestamp,
-    drops_in_span: usize,
+    /// Lifetime under which a dropped connection counts toward the breaker
+    fast_drop: TimestampDuration,
+    /// Drops in a row of connections that died younger than `fast_drop`
+    fast_drops: usize,
 }
 
 impl ProtectedDropTracker {
-    pub(super) fn new(span_start_ts: Timestamp) -> Self {
+    pub(super) fn new(fast_drop: TimestampDuration) -> Self {
         Self {
-            span_start_ts,
-            drops_in_span: 0,
+            fast_drop,
+            fast_drops: 0,
         }
     }
 
-    pub(super) fn drops_in_span(&self) -> usize {
-        self.drops_in_span
+    pub(super) fn fast_drops(&self) -> usize {
+        self.fast_drops
     }
 
-    /// Record a drop and decide what to do about it.
+    /// Record the drop of a connection that lived `lifetime`, and decide what to do.
     ///
-    /// Once the breaker trips it stays tripped for the rest of the span. An earlier version reset
-    /// the counter and restarted the span on the spot, which re-armed it immediately and left three
-    /// of every four drops reconnecting, forever. Nothing is stranded by holding off: a send that
-    /// needs this relay opens a connection on demand, and `record_protected_connection_dead` is
-    /// what moves relay selection off a relay that keeps doing this.
-    pub(super) fn record_drop(&mut self, cur_ts: Timestamp) -> ProtectedDropAction {
-        if cur_ts.duration_since(self.span_start_ts) >= PROTECTED_CONNECTION_DROP_SPAN {
-            // First drop of a new span
-            self.drops_in_span = 1;
-            self.span_start_ts = cur_ts;
+    /// Connections that die young trip the breaker, which holds until one outlives `fast_drop`.
+    /// Traffic is not the test: a protected connection may carry nothing and still be doing its
+    /// job of holding a NAT flow open. Nothing is stranded by holding off: a send that needs this
+    /// relay opens a connection on demand, and `record_protected_connection_dead` is what moves
+    /// relay selection off a relay that keeps doing this.
+    pub(super) fn record_drop(&mut self, lifetime: TimestampDuration) -> ProtectedDropAction {
+        if lifetime >= self.fast_drop {
+            self.fast_drops = 0;
             return ProtectedDropAction::Reconnect;
         }
 
-        self.drops_in_span += 1;
-        if self.drops_in_span < PROTECTED_CONNECTION_DROP_COUNT {
+        self.fast_drops += 1;
+        if self.fast_drops < PROTECTED_CONNECTION_DROP_COUNT {
             return ProtectedDropAction::Reconnect;
         }
         ProtectedDropAction::HoldOff {
-            tripped_now: self.drops_in_span == PROTECTED_CONNECTION_DROP_COUNT,
+            tripped_now: self.fast_drops == PROTECTED_CONNECTION_DROP_COUNT,
         }
     }
 }
@@ -135,18 +130,23 @@ struct ConnectionManagerInner {
 }
 
 struct ConnectionManagerArc {
+    /// Longest wait for a new connection, including its turn at the address lock
     connection_initial_timeout_ms: u32,
+    /// Idle time after which an unprotected connection is closed
     connection_inactivity_timeout_ms: u32,
+    /// The live connections
     connection_table: ConnectionTable,
+    /// Serializes connecting to one remote address
     address_lock_table: AsyncTagLockTable<SocketAddr>,
+    /// Gates use between startup and shutdown
     startup_lock: StartupLock,
     /// Flap detector over protected (relay) connection drops, which should be rare
     connection_flap_detector: Mutex<FlapDetector<()>>,
-    /// Last dial-info confirmation asked for because the connection table emptied
-    last_empty_table_confirm_ts: AtomicTimestamp,
+    /// State that exists only while started
     inner: Mutex<Option<ConnectionManagerInner>>,
-    reconnection_processor: DeferredStreamProcessor,
+    /// Routing domain commits, which can change the protected addresses
     commit_subscription: Mutex<Option<EventBusSubscription>>,
+    /// Route allocations, which can change the protected addresses
     route_allocation_subscription: Mutex<Option<EventBusSubscription>>,
 }
 impl core::fmt::Debug for ConnectionManagerArc {
@@ -190,8 +190,6 @@ impl ConnectionManager {
             config.internal().network.connection_inactivity_timeout_ms;
 
         ConnectionManagerArc {
-            last_empty_table_confirm_ts: AtomicTimestamp::new(Timestamp::new(0)),
-            reconnection_processor: DeferredStreamProcessor::new(),
             connection_initial_timeout_ms,
             connection_inactivity_timeout_ms,
             connection_table: ConnectionTable::new(registry),
@@ -241,9 +239,6 @@ impl ConnectionManager {
             *inner = Some(Self::new_inner(stop_source, sender, async_processor));
         }
 
-        // Spawn the reconnection processor
-        self.arc.reconnection_processor.init();
-
         // Subscribe to events that may invalidate our protected-address set
         let commit_sub = impl_subscribe_event_bus_clone!(self, commit_event_handler);
         *self.arc.commit_subscription.lock() = Some(commit_sub);
@@ -283,10 +278,6 @@ impl ConnectionManager {
         if let Some(sub) = self.arc.route_allocation_subscription.lock().take() {
             self.event_bus().unsubscribe(sub);
         }
-
-        // Stop the reconnection processor
-        veilid_log!(self debug "stopping reconnection processor task");
-        self.arc.reconnection_processor.terminate().await;
 
         // Remove the inner from the lock
         let mut inner = {
@@ -363,7 +354,9 @@ impl ConnectionManager {
                         .and_modify(|pa| pa.node_ref = relay.relay_node.unfiltered())
                         .or_insert_with(|| ProtectedAddress {
                             node_ref: relay.relay_node.unfiltered(),
-                            drops: ProtectedDropTracker::new(Timestamp::now_non_decreasing()),
+                            drops: ProtectedDropTracker::new(
+                                self.network_manager().timings().protected_fast_drop,
+                            ),
                         });
                 }
             }
@@ -672,7 +665,7 @@ impl ConnectionManager {
         }
         veilid_log!(self debug "closing {} dead connections after interface change", dead_ids.len());
         for id in dead_ids {
-            self.report_connection_finished(id);
+            self.report_connection_finished(id, true);
         }
     }
 
@@ -687,7 +680,7 @@ impl ConnectionManager {
         }
         veilid_log!(self debug "closing all {} connections", dead_ids.len());
         for id in dead_ids {
-            self.report_connection_finished(id);
+            self.report_connection_finished(id, true);
         }
     }
 
@@ -794,8 +787,13 @@ impl ConnectionManager {
     }
 
     // Callback from network connection receive loop when it exits
-    // cleans up the entry in the connection table
-    pub(super) fn report_connection_finished(&self, connection_id: NetworkConnectionId) {
+    // cleans up the entry in the connection table. `closed_locally` says this node closed it
+    // (interface change, purge), which says nothing about the peer
+    pub(super) fn report_connection_finished(
+        &self,
+        connection_id: NetworkConnectionId,
+        closed_locally: bool,
+    ) {
         // Get channel sender
         let sender = {
             let mut inner = self.arc.inner.lock();
@@ -820,14 +818,14 @@ impl ConnectionManager {
             // If the connection closed while it was protected, report it on the node the connection was established on
             // In-use connections will already get reported because they will cause a 'lost_question' stat on the remote node
             if let Some(protect_nr) = conn.protected_node_ref() {
-                // Lifetime: only counts remote-closed protected connections.
-                // Our own connectivity loss must not poison peer stats
+                // A close of our own, or one while we are the problem, says nothing about the peer
                 let cur_ts = Timestamp::now_non_decreasing();
                 let lifetime = cur_ts.duration_since(conn.established_time());
-                let can_blame_peer = !self
-                    .network_manager()
-                    .online_detector()
-                    .blame_suppressed(RoutingDomain::PublicInternet);
+                let can_blame_peer = !closed_locally
+                    && !self
+                        .network_manager()
+                        .online_detector()
+                        .blame_suppressed(RoutingDomain::PublicInternet);
                 if can_blame_peer {
                     protect_nr.record_protected_connection_drop(lifetime);
                     if let Some(penalty) = self
@@ -843,8 +841,13 @@ impl ConnectionManager {
                 if let Some(inner) = self.arc.inner.lock().as_mut() {
                     for pa in inner.protected_addresses.values_mut() {
                         if pa.node_ref.same_entry(&protect_nr) {
-                            let action = pa.drops.record_drop(cur_ts);
-                            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "== Protected connection dropped (count={}, lifetime={}): {} -> {} for node {}", pa.drops.drops_in_span(), lifetime, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
+                            // Our own close is not a drop the breaker should count
+                            let action = if closed_locally {
+                                ProtectedDropAction::Reconnect
+                            } else {
+                                pa.drops.record_drop(lifetime)
+                            };
+                            veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "== Protected connection dropped (fast_drops={}, lifetime={}, local={}): {} -> {} for node {}", pa.drops.fast_drops(), lifetime, closed_locally, conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
 
                             let reconnect = match action {
                                 ProtectedDropAction::Reconnect => true,
@@ -856,18 +859,18 @@ impl ConnectionManager {
                                         );
                                     }
                                     if tripped_now {
-                                        veilid_log!(self debug "== Protected connection dropped {} times in {}, not reconnecting for the rest of the span: node {}", pa.drops.drops_in_span(), PROTECTED_CONNECTION_DROP_SPAN, protect_nr);
+                                        veilid_log!(self debug "== Protected connection died young {} times in a row, not re-opening until one lives: node {}", pa.drops.fast_drops(), protect_nr);
                                     }
                                     false
                                 }
                             };
 
-                            // Reconnect the protected connection immediately
+                            // Re-open the protected connection by sending on it
                             if reconnect {
                                 if let Some(dial_info) = conn.dial_info() {
-                                    self.spawn_reconnector(dial_info);
+                                    self.keepalive_protected(dial_info, protect_nr.clone());
                                 } else {
-                                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Can't reconnect to accepted protected connection: {} -> {} for node {}", conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
+                                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Can't re-open accepted protected connection: {} -> {} for node {}", conn.connection_id(), conn.debug_print(Timestamp::now()), protect_nr);
                                 }
                             }
 
@@ -889,40 +892,27 @@ impl ConnectionManager {
                 .online_state(RoutingDomain::PublicInternet)
                 != OnlineState::Offline
         {
-            // Rate limited because it is work, not just output: this asks other nodes to probe
-            // us, and a peer churning the last connection would otherwise set how often we do it
-            let cur_ts = Timestamp::now();
-            let last_ts = self.arc.last_empty_table_confirm_ts.get();
-            if cur_ts >= last_ts && cur_ts.duration_since(last_ts) >= EMPTY_TABLE_CONFIRM_INTERVAL {
-                self.arc.last_empty_table_confirm_ts.set(cur_ts);
-                let net = self.network_manager().net();
-                // Dead sockets alone (a thaw, peer churn) are not a moved network
-                if net.interfaces_changed_since_confirm() {
-                    veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
-                    net.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
-                } else {
-                    veilid_log!(self debug "Connection table is empty, keeping dial info: interfaces unchanged since confirmation");
-                }
+            // Asks once per network move, so a churning peer cannot set how often we are probed
+            if self
+                .network_manager()
+                .net()
+                .request_confirm_after_empty_table()
+            {
+                veilid_log!(self debug "Connection table is empty, triggering dial info confirmation");
             }
         }
     }
 
-    fn spawn_reconnector(&self, dial_info: DialInfo) {
-        let this = self.clone();
-        self.arc.reconnection_processor.add_future(
-                Box::pin(async move {
-                    match this.get_or_create_connection(dial_info.clone()).await {
-                        Ok(NetworkResult::Value(conn)) => {
-                            veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Reconnection successful to {}: {:?}", dial_info,conn);
-                        }
-                        Ok(res) => {
-                            veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Reconnection unsuccessful to {}: {:?}", dial_info, res);
-                        }
-                        Err(e) => {
-                            veilid_log!(this debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Reconnection error to {}: {}", dial_info, e);
-                        }
-                    };
-                }));
+    /// Re-open a dropped protected connection with a keepalive: the send opens the connection,
+    /// and the envelope on it is what tells the far end whose connection it is. A bare connect
+    /// would be anonymous there and closed at its initial timeout
+    fn keepalive_protected(&self, dial_info: DialInfo, protect_nr: NodeRef) {
+        self.routing_table().enqueue_ping_validations(
+            "ProtectedKeepalive".to_owned(),
+            PingValidationGroup::Keepalive,
+            0,
+            vec![Destination::dial_info(dial_info, protect_nr)],
+        );
     }
 
     #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]

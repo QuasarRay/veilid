@@ -52,33 +52,6 @@ impl StorageManager {
             check_outbound_watches_task_routine
         );
 
-        // Set check watched records tick task
-        veilid_log!(self debug "starting check inbound watches task");
-        impl_setup_task!(
-            self,
-            Self,
-            check_inbound_watches_task,
-            check_inbound_watches_task_routine
-        );
-
-        // Set check active watches tick task
-        veilid_log!(self debug "starting check outbound transactions task");
-        impl_setup_task!(
-            self,
-            Self,
-            check_outbound_transactions_task,
-            check_outbound_transactions_task_routine
-        );
-
-        // Set check watched records tick task
-        veilid_log!(self debug "starting check inbound transactions task");
-        impl_setup_task!(
-            self,
-            Self,
-            check_inbound_transactions_task,
-            check_inbound_transactions_task_routine
-        );
-
         // Set rehydrate records tick task
         veilid_log!(self debug "starting rehydrate records task");
         impl_setup_task_async!(
@@ -87,6 +60,69 @@ impl StorageManager {
             rehydrate_records_task,
             rehydrate_records_task_routine
         );
+    }
+
+    /// Start the deadline timers, once the record stores are open
+    pub(super) fn start_deadline_timers(&self) {
+        veilid_log!(self debug "starting deadline timers");
+        self.start_expiry_timer(
+            &self.check_inbound_watches_timer,
+            Self::check_inbound_watches_timer_routine,
+        );
+        self.start_expiry_timer(
+            &self.check_inbound_transactions_timer,
+            Self::check_inbound_transactions_timer_routine,
+        );
+        self.start_expiry_timer(
+            &self.check_outbound_transactions_timer,
+            Self::check_outbound_transactions_timer_routine,
+        );
+        let registry = self.registry();
+        self.background_quiet_timer
+            .start(move |cur_ts, _stop_token| {
+                let registry = registry.clone();
+                Box::pin(async move {
+                    registry
+                        .storage_manager()
+                        .background_quiet_timer_routine(Timestamp::new(cur_ts))
+                        .await
+                        .map(|ts| ts.as_u64())
+                })
+            });
+    }
+
+    /// Restart background work deferred for foreground transactions once the quiet window ends,
+    /// rather than at the next tick
+    async fn background_quiet_timer_routine(&self, cur_ts: Timestamp) -> Option<Timestamp> {
+        let quiet_until = self.background_quiet_until();
+        if cur_ts < quiet_until {
+            return Some(quiet_until);
+        }
+        // An open foreground transaction defers it further, and its end arms the timer again
+        if !self.background_transactions_allowed() || !self.dht_is_online() {
+            return None;
+        }
+        if self.has_rehydration_requests() {
+            if let Err(e) = self.rehydrate_records_task.try_tick_now().await {
+                veilid_log!(self debug "rehydrate_records_task not kicked: {}", e);
+            }
+        }
+        if let Err(e) = self.check_outbound_watches_task.try_tick_now().await {
+            veilid_log!(self debug "check_outbound_watches_task not kicked: {}", e);
+        }
+        None
+    }
+
+    fn start_expiry_timer(
+        &self,
+        timer: &DeadlineTimer,
+        routine: fn(&StorageManager, Timestamp) -> Option<Timestamp>,
+    ) {
+        let registry = self.registry();
+        timer.start(move |cur_ts, _stop_token| {
+            let opt_next = routine(&registry.storage_manager(), Timestamp::new(cur_ts));
+            Box::pin(async move { opt_next.map(|ts| ts.as_u64()) })
+        });
     }
 
     #[cfg_attr(feature = "instrument", instrument(parent = None, level = "trace", target = "stor", name = "StorageManager::tick", skip_all, err))]
@@ -101,19 +137,10 @@ impl StorageManager {
         // Run the flush stores task
         self.save_metadata_task.tick().await?;
 
-        // Check watched records
-        self.check_inbound_watches_task.tick().await?;
-
-        // Check transactions
-        self.check_inbound_transactions_task.tick().await?;
-
         // Run online-only tasks
         if self.dht_is_online() {
             // Check active watches
             self.check_outbound_watches_task.tick().await?;
-
-            // Check active transactions
-            self.check_outbound_transactions_task.tick().await?;
 
             // Run offline subkey writes task if there's work to be done
             if self.has_offline_subkey_writes() {
@@ -137,18 +164,11 @@ impl StorageManager {
         instrument(level = "trace", target = "stor", skip_all)
     )]
     pub(super) async fn cancel_tasks(&self) {
-        veilid_log!(self debug "stopping check inbound transactions task");
-        if let Err(e) = self.check_inbound_transactions_task.stop().await {
-            veilid_log!(self warn "check_inbound_transactions_task not stopped: {}", e);
-        }
-        veilid_log!(self debug "stopping check outbound transactions task");
-        if let Err(e) = self.check_outbound_transactions_task.stop().await {
-            veilid_log!(self warn "check_outbound_transactions_task not stopped: {}", e);
-        }
-        veilid_log!(self debug "stopping check inbound watches task");
-        if let Err(e) = self.check_inbound_watches_task.stop().await {
-            veilid_log!(self warn "check_inbound_watches_task not stopped: {}", e);
-        }
+        veilid_log!(self debug "stopping deadline timers");
+        self.background_quiet_timer.stop().await;
+        self.check_inbound_transactions_timer.stop().await;
+        self.check_outbound_transactions_timer.stop().await;
+        self.check_inbound_watches_timer.stop().await;
         veilid_log!(self debug "stopping check outbound watches task");
         if let Err(e) = self.check_outbound_watches_task.stop().await {
             veilid_log!(self warn "check_outbound_watches_task not stopped: {}", e);

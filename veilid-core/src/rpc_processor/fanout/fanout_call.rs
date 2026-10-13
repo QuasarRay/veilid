@@ -10,12 +10,11 @@ struct FanoutContext<'a> {
     result: FanoutResult,
     /// Termination disposition from `check_done`
     done: FanoutDoneDisposition,
-    /// Ticker stop source — drives lane wake-ups, dropped on completion
-    ticker_stop_source: Option<StopSource>,
+    /// Stops the lanes and the queue pump, dropped on completion
+    lanes_stop_source: Option<StopSource>,
     /// Timestamp consensus was first reached
     consensus_reached_ts: Option<Timestamp>,
-    /// Timestamp of the most recent accepting disposition; before consensus the deadline
-    /// tracks a full timeout past this so fanout keeps converging while making progress
+    /// Last accepting disposition; before consensus the deadline stays a full timeout past it
     last_accepted_ts: Timestamp,
 }
 
@@ -106,7 +105,8 @@ pub enum FanoutQueueMode {
 /// How long to wait, as a fraction of the RPC timeout, before treating an in-progress node as slow
 /// and dispatching another node beyond `consensus_count` to compensate. Pegged to the RPC timeout
 /// rather than the per-fanout timeout so that all fanouts (set, get, transact_begin, watch, ...)
-/// share the same throttle window regardless of their overall budget.
+/// share the same throttle window regardless of their overall budget. Also the least a straggler
+/// that can no longer complete consensus is waited for.
 const THROTTLE_DURATION_PERCENT: u64 = 33;
 
 /// The return type of the fanout call routine
@@ -122,6 +122,9 @@ pub enum FanoutCallDisposition {
     /// but we don't count the result toward our consensus
     Stale,
     /// The called node accepted the rpc request and may have returned more nodes,
+    /// but holds a result that conflicts with ours and can never count toward our consensus
+    Conflict,
+    /// The called node accepted the rpc request and may have returned more nodes,
     /// counting the result toward our consensus
     Accepted,
     /// The called node accepted the rpc request and may have returned more nodes,
@@ -131,6 +134,10 @@ pub enum FanoutCallDisposition {
     /// returning a newer value that indicates our current consensus is stale and should be ignored,
     /// and counting the result toward a new consensus
     AcceptedNewer,
+    /// The called node accepted the rpc request and may have returned more nodes,
+    /// holding a conflicting result that now leads ours: our accepters become conflicts,
+    /// earlier conflicts are asked again, and the result counts toward the new consensus
+    AcceptedSwitch,
 }
 
 /// The return type of the fanout done routine
@@ -145,11 +152,14 @@ pub enum FanoutDoneDisposition {
     NotDone,
 }
 
-/// The return type of a fanout processor lane
+/// The return type of a fanout processor lane, or of the queue pump
 enum FanoutProcessorReturn {
+    /// The fanout finished early; stop every lane now
     DoneEarly,
+    /// This lane or the pump has nothing left to do
     Done,
-    Tick,
+    /// A lane asked for work or a straggler cut is due
+    Pump,
 }
 
 /// Exit reason from the inner fanout loop
@@ -225,6 +235,8 @@ pub(crate) struct FanoutCall<'a> {
     seed_untried: bool,
     /// Ask the initial seed nodes before unproven closer ones (see `set_prefer_init_nodes`)
     prefer_init_nodes: bool,
+    /// Ask nodes unresponsive to routed questions last (see `set_demote_routed_unresponsive`)
+    demote_routed_unresponsive: bool,
 }
 
 impl VeilidComponentRegistryAccessor for FanoutCall<'_> {
@@ -276,6 +288,7 @@ impl<'a> FanoutCall<'a> {
             collection_count: params.consensus_count,
             seed_untried: false,
             prefer_init_nodes: false,
+            demote_routed_unresponsive: false,
         }
     }
 
@@ -307,6 +320,15 @@ impl<'a> FanoutCall<'a> {
     /// Set it for an operation only a node already holding the record can satisfy.
     pub fn set_prefer_init_nodes(&mut self, prefer_init_nodes: bool) {
         self.prefer_init_nodes = prefer_init_nodes;
+    }
+
+    /// Ask nodes that lost a routed question after all others.
+    ///
+    /// Set it when this run's questions travel over safety routes: a node that lost one, often
+    /// one reachable only through a relay, still answers direct questions and so stays live, but
+    /// a routed question to it is likely to wait out the RPC timeout.
+    pub fn set_demote_routed_unresponsive(&mut self, demote_routed_unresponsive: bool) {
+        self.demote_routed_unresponsive = demote_routed_unresponsive;
     }
 
     /// Narrow which peers this call will consider, for a second run over the same
@@ -395,7 +417,7 @@ impl<'a> FanoutCall<'a> {
                     FanoutNodeStage::Timeout
                     | FanoutNodeStage::Rejected
                     | FanoutNodeStage::Disqualified => {}
-                    FanoutNodeStage::Stale => {
+                    FanoutNodeStage::Stale | FanoutNodeStage::Conflict => {
                         value_nodes.push(node.work_item.node_ref.clone());
                     }
                     FanoutNodeStage::Accepted => {
@@ -428,11 +450,10 @@ impl<'a> FanoutCall<'a> {
             if ctx.consensus_reached_ts.is_none() {
                 ctx.consensus_reached_ts = Some(Timestamp::now_non_decreasing());
             }
-            // On Done a collecting run keeps the ticker so replacements still
-            // dispatch; the post-consensus window bounds how long that lasts
+            // A collecting run keeps its lanes on Done; the post-consensus window bounds how long
             if matches!(done, FanoutDoneDisposition::DoneEarly) || !self.collecting_past_consensus()
             {
-                drop(ctx.ticker_stop_source.take())
+                drop(ctx.lanes_stop_source.take())
             }
         }
         done
@@ -451,7 +472,7 @@ impl<'a> FanoutCall<'a> {
         // before this lane started has nothing left for it to do
         let Some(stop_token) = context
             .lock()
-            .ticker_stop_source
+            .lanes_stop_source
             .as_ref()
             .map(|ss| ss.token())
         else {
@@ -531,6 +552,8 @@ impl<'a> FanoutCall<'a> {
                             }
                             FanoutCallDisposition::AcceptedNewerRestart => {
                                 context_locked.fanout_queue.all_accepted_to_queued(cur_ts);
+                                context_locked.fanout_queue.all_conflict_to_queued(cur_ts);
+                                context_locked.fanout_queue.all_stale_to_queued(cur_ts);
                                 context_locked.fanout_queue.accepted(work_node, cur_ts);
                                 context_locked.last_accepted_ts = cur_ts;
                             }
@@ -539,11 +562,21 @@ impl<'a> FanoutCall<'a> {
                                 context_locked.fanout_queue.accepted(work_node, cur_ts);
                                 context_locked.last_accepted_ts = cur_ts;
                             }
+                            FanoutCallDisposition::AcceptedSwitch => {
+                                // Earlier conflicts are queued before our accepters join them
+                                context_locked.fanout_queue.all_conflict_to_queued(cur_ts);
+                                context_locked.fanout_queue.all_accepted_to_conflict(cur_ts);
+                                context_locked.fanout_queue.accepted(work_node, cur_ts);
+                                context_locked.last_accepted_ts = cur_ts;
+                            }
                             FanoutCallDisposition::Invalid => {
                                 context_locked.fanout_queue.disqualified(work_node, cur_ts);
                             }
                             FanoutCallDisposition::Stale => {
                                 context_locked.fanout_queue.stale(work_node, cur_ts);
+                            }
+                            FanoutCallDisposition::Conflict => {
+                                context_locked.fanout_queue.conflict(work_node, cur_ts);
                             }
                         }
 
@@ -661,6 +694,10 @@ impl<'a> FanoutCall<'a> {
         let node_sort = Box::new(RoutingTable::make_closest_node_id_sort(
             self.hash_coordinate.clone(),
         ));
+        let rpc_timeout_ms = self.config().internal().network.rpc.timeout_ms;
+        let slow_node_duration = TimestampDuration::new_ms(rpc_timeout_ms.into())
+            .saturating_mul(THROTTLE_DURATION_PERCENT)
+            .div(100);
         let context = Arc::new(Mutex::new(FanoutContext {
             fanout_queue: FanoutQueue::new(
                 self.name.clone(),
@@ -671,14 +708,7 @@ impl<'a> FanoutCall<'a> {
                 self.collection_count,
                 self.consensus_width,
                 match fanout_queue_mode {
-                    FanoutQueueMode::ThrottleAtConsensus => {
-                        let rpc_timeout_ms = self.config().internal().network.rpc.timeout_ms;
-                        Some(
-                            TimestampDuration::new_ms(rpc_timeout_ms.into())
-                                .saturating_mul(THROTTLE_DURATION_PERCENT)
-                                .div(100),
-                        )
-                    }
+                    FanoutQueueMode::ThrottleAtConsensus => Some(slow_node_duration),
                     FanoutQueueMode::Unthrottled => None,
                 },
             ),
@@ -688,7 +718,7 @@ impl<'a> FanoutCall<'a> {
                 value_nodes: vec![],
             },
             done: FanoutDoneDisposition::NotDone,
-            ticker_stop_source: Some(StopSource::new()),
+            lanes_stop_source: Some(StopSource::new()),
             consensus_reached_ts: None,
             last_accepted_ts: Timestamp::now_non_decreasing(),
         }));
@@ -703,6 +733,9 @@ impl<'a> FanoutCall<'a> {
                     .fanout_queue
                     .set_preferred_nodes(&init_fanout_queue);
             }
+            context_locked
+                .fanout_queue
+                .set_demote_routed_unresponsive(self.demote_routed_unresponsive);
 
             self.init_closest_nodes(context_locked, cur_ts)?;
 
@@ -720,20 +753,30 @@ impl<'a> FanoutCall<'a> {
             }
         }
 
-        // Ticker to pump the queue
-        let ticker_stop_token = context
-            .lock()
-            .ticker_stop_source
-            .as_ref()
-            .ok_or_else(|| RPCError::internal("should have stop source"))?
-            .token();
-        let make_tick_future = || {
-            let ticker_stop_token = ticker_stop_token.clone();
+        // Pump to cut stragglers and refresh the deadline as the queue changes
+        let (lanes_stop_token, pump_wake_receiver) = {
+            let context_locked = context.lock();
+            let lanes_stop_token = context_locked
+                .lanes_stop_source
+                .as_ref()
+                .ok_or_else(|| RPCError::internal("should have stop source"))?
+                .token();
+            (
+                lanes_stop_token,
+                context_locked.fanout_queue.pump_wake_receiver(),
+            )
+        };
+        let make_pump_future = |opt_straggler_cut: Option<Timestamp>| {
+            let lanes_stop_token = lanes_stop_token.clone();
+            let pump_wake_receiver = pump_wake_receiver.clone();
             pin_dyn_future!(async move {
-                if sleep(100).timeout_at(ticker_stop_token).await.is_err() {
-                    return Ok(FanoutProcessorReturn::Done);
+                match pump_wake_receiver
+                    .wait(opt_straggler_cut.map(|ts| ts.as_u64()), lanes_stop_token)
+                    .await
+                {
+                    WakeOutcome::Woken | WakeOutcome::Deadline => Ok(FanoutProcessorReturn::Pump),
+                    WakeOutcome::Stopped => Ok(FanoutProcessorReturn::Done),
                 }
-                Ok(FanoutProcessorReturn::Tick)
             })
         };
 
@@ -746,8 +789,8 @@ impl<'a> FanoutCall<'a> {
                     self.fanout_processor(format!("lane#{}", n), &context)
                 ));
             }
-            // Add the initial timer tick task
-            unord.push(make_tick_future());
+            // Lanes wake the pump as they ask for work
+            unord.push(make_pump_future(None));
         }
 
         // Effective deadline:
@@ -812,13 +855,30 @@ impl<'a> FanoutCall<'a> {
                 Some(Ok(FanoutProcessorReturn::DoneEarly)) => break FanoutLoopResult::Done,
                 // Lane finished; the deadline is recomputed at the top of the loop
                 Some(Ok(FanoutProcessorReturn::Done)) => {}
-                // Timer tick: push more work and re-arm the tick
-                Some(Ok(FanoutProcessorReturn::Tick)) => {
+                // Queue changed or a cut is due: cut stragglers, push more work, re-arm the pump
+                Some(Ok(FanoutProcessorReturn::Pump)) => {
                     let context_locked = &mut *context.lock();
                     let cur_ts = Timestamp::now_non_decreasing();
+                    let stragglers = context_locked.fanout_queue.time_out_stragglers(
+                        self.run_target_count(),
+                        slow_node_duration,
+                        cur_ts,
+                    );
+                    if stragglers > 0 {
+                        veilid_log!(self debug "{}: Timed out {} stragglers that cannot complete consensus", self.name, stragglers);
+                        if matches!(
+                            self.evaluate_done(context_locked),
+                            FanoutDoneDisposition::DoneEarly
+                        ) {
+                            break FanoutLoopResult::Done;
+                        }
+                    }
                     context_locked.fanout_queue.send_more_work(cur_ts);
                     if !unord.is_empty() {
-                        unord.push(make_tick_future());
+                        let opt_straggler_cut = context_locked
+                            .fanout_queue
+                            .next_straggler_cut(self.run_target_count(), slow_node_duration);
+                        unord.push(make_pump_future(opt_straggler_cut));
                     }
                 }
             }

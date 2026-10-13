@@ -63,13 +63,14 @@ impl InboundTransactionList {
         Ok(!self.transactions.is_empty())
     }
 
+    /// Drop the expired transactions, returning the earliest expiration left, if any
     pub(super) fn drop_expired_transactions<D: Fn(InboundTransactionId), L: Fn(VeilidAPIError)>(
         &mut self,
         now: Timestamp,
         allocator: &mut InboundTransactionIdAllocator,
         debug_logger: &D,
         error_logger: &L,
-    ) -> bool {
+    ) -> Option<Timestamp> {
         self.transactions.retain(|t| {
             let alive = t.is_alive(now);
             if !alive {
@@ -84,7 +85,7 @@ impl InboundTransactionList {
             }
             alive
         });
-        !self.transactions.is_empty()
+        self.transactions.iter().map(|t| t.expiration()).min()
     }
 
     pub fn is_locked_by(&self, transaction_id: InboundTransactionId) -> bool {

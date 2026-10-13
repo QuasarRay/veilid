@@ -20,9 +20,6 @@ impl_veilid_log_facility!("attach");
 
 const TICK_INTERVAL_MSEC: u32 = 1000;
 const ATTACHMENT_MAINTAINER_INTERVAL_MSEC: u32 = 1000;
-const BIND_WAIT_DELAY: TimestampDuration = TimestampDuration::new_ms(10000);
-/// How often shutdown re-kicks the maintainer while waiting for it to reach the detached state
-const DETACH_WAIT_INTERVAL_MSEC: u32 = 5;
 /// Tick lag past this is logged and offered to the stall handlers, which apply their own floors
 const TICK_LAG_REPORT: TimestampDuration =
     TimestampDuration::new_ms(2 * (TICK_INTERVAL_MSEC as u64));
@@ -125,6 +122,8 @@ struct AttachmentManagerInner {
     last_local_network_ready_changed_ts: Option<Timestamp>,
     /// Whether to maintain peers
     maintain_peers: bool,
+    /// Whether the network is up; Attaching starts before it is and spans any bind wait
+    network_started: bool,
     /// The timestamp when the node started
     started_ts: Timestamp,
     /// The timestamp when the node attached
@@ -178,6 +177,7 @@ impl fmt::Debug for AttachmentManagerInner {
                 &self.last_local_network_ready_changed_ts,
             )
             .field("maintain_peers", &self.maintain_peers)
+            .field("network_started", &self.network_started)
             .field("started_ts", &self.started_ts)
             .field("attach_ts", &self.attach_ts)
             .field("bind_retry_ts", &self.bind_retry_ts)
@@ -223,6 +223,7 @@ impl AttachmentManager {
             last_public_internet_ready_changed_ts: None,
             last_local_network_ready_changed_ts: None,
             maintain_peers: false,
+            network_started: false,
             started_ts: Timestamp::now(),
             attach_ts: None,
             last_tick_ts: None,
@@ -371,20 +372,25 @@ impl AttachmentManager {
 
     fn routing_domain_ready_event_handler(&self, _evt: Arc<RoutingDomainReadyEvent>) {
         let inner = self.inner.lock();
-        if !matches!(
-            inner.attachment_state,
-            AttachmentState::AttachedWeak
-                | AttachmentState::AttachedFair
-                | AttachmentState::AttachedGood
-                | AttachmentState::AttachedStrong
-                | AttachmentState::AttachedFull
-                | AttachmentState::Attaching
-        ) {
+        if !inner.network_started
+            || !matches!(
+                inner.attachment_state,
+                AttachmentState::AttachedWeak
+                    | AttachmentState::AttachedFair
+                    | AttachmentState::AttachedGood
+                    | AttachmentState::AttachedStrong
+                    | AttachmentState::AttachedFull
+                    | AttachmentState::Attaching
+            )
+        {
             return;
         }
         self.update_attached_state(inner, None);
     }
 
+    /// Close the attachment lock, then run the maintainer until it detaches. It detaches when it
+    /// finds the lock closed, and a run still winding down from before the close holds off a new
+    /// one without detaching, so each run is awaited.
     #[cfg_attr(feature = "instrument", instrument(level = "debug", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub async fn pre_terminate_async(&self) {
         // Start attachment shutdown
@@ -395,9 +401,7 @@ impl AttachmentManager {
             .await
             .expect_or_log("should be initialized");
 
-        // The maintainer task performs the detach when it finds the attachment lock closed. Kick it
-        // rather than waiting out a tick period, and keep kicking: a run still winding down from
-        // before the lock closed holds off a new one without having done the detach itself.
+        // Kick the maintainer rather than waiting out a tick
         while !matches!(
             self.inner.lock().attachment_state,
             AttachmentState::Detached
@@ -406,7 +410,10 @@ impl AttachmentManager {
                 veilid_log!(self warn "attachment_maintainer not ticked: {}", e);
                 break;
             }
-            sleep(DETACH_WAIT_INTERVAL_MSEC).await;
+            if let Err(e) = self.attachment_maintainer_task.join().await {
+                veilid_log!(self warn "attachment_maintainer run failed: {}", e);
+                break;
+            }
         }
 
         let sub = self.inner.lock().routing_domain_ready_subscription.take();
@@ -454,41 +461,59 @@ impl AttachmentManager {
         guard.success();
     }
 
+    /// Moves to Attaching, which lasts through any bind wait until the node attaches or detaches
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    #[allow(clippy::unused_async)]
-    pub async fn attach(&self) -> bool {
+    pub async fn attach(&self) -> VeilidAPIResult<()> {
         let Ok(_guard) = self.startup_context.initialize_lock.enter() else {
-            return false;
+            apibail_not_initialized!();
         };
 
-        let mut inner = self.inner.lock();
-        // If attaching is disabled (because we are terminating)
-        // then just return now
+        let changed = {
+            let mut inner = self.inner.lock();
+            // Attaching is disabled while terminating
+            if !self.startup_context.attachment_lock.is_started() {
+                apibail_not_initialized!();
+            }
+            if inner.attachment_state.is_attached() {
+                apibail_generic!("Already attached");
+            }
+            let maintain_peers_changed = !inner.maintain_peers;
+            inner.maintain_peers = true;
+            // A bind waiting on its retry period tries again now
+            let bind_retry_waiting = inner.bind_retry_ts.take().is_some();
+            if inner.attachment_state.is_detached() {
+                self.transition_to_non_attached_state(inner, AttachmentState::Attaching, None);
+            }
+            maintain_peers_changed || bind_retry_waiting
+        };
 
-        if !self.startup_context.attachment_lock.is_started() {
-            return false;
+        // Act on the request now rather than at the next tick
+        if changed {
+            if let Err(e) = self.attachment_maintainer_task.try_tick_now().await {
+                veilid_log!(self warn "attachment_maintainer not ticked: {}", e);
+            }
         }
-        let previous = inner.maintain_peers;
-        inner.maintain_peers = true;
 
-        previous != inner.maintain_peers
+        Ok(())
     }
 
+    /// Moves to Detaching until the network is down, cancelling an attach in progress
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
-    pub async fn detach(&self) -> bool {
+    pub async fn detach(&self) -> VeilidAPIResult<()> {
         let Ok(_guard) = self.startup_context.initialize_lock.enter() else {
-            return false;
+            apibail_not_initialized!();
         };
 
         {
             let mut inner = self.inner.lock();
-            let previous = inner.maintain_peers;
-            if !previous {
-                // Already detached or detaching
-                return false;
+            if inner.attachment_state.is_detached() {
+                apibail_generic!("Not attached");
             }
-            // Wants to be detached
             inner.maintain_peers = false;
+            inner.bind_retry_ts = None;
+            if inner.attachment_state != AttachmentState::Detaching {
+                self.transition_to_non_attached_state(inner, AttachmentState::Detaching, None);
+            }
         }
 
         // Act on the state change now rather than at the next tick
@@ -496,7 +521,7 @@ impl AttachmentManager {
             veilid_log!(self warn "attachment_maintainer not ticked: {}", e);
         }
 
-        true
+        Ok(())
     }
 
     /////////////////////////////////////////////////////////////////////////////
@@ -610,6 +635,8 @@ impl AttachmentManager {
             && state == VeilidAppLifecycleState::Active;
         if returned {
             inner.resend_attachment = true;
+            // Back in the foreground, a bind waiting on its retry period tries at the next pass
+            inner.bind_retry_ts = None;
         }
         drop(inner);
         if !changed && background_time.is_none() {
@@ -640,40 +667,26 @@ impl AttachmentManager {
     ) -> EyreResult<()> {
         // Enter the attachment lock and return if we are shutting down
         let Ok(_guard) = self.startup_context.attachment_lock.enter() else {
+            // Only shutdown is possible if we get here
             let do_shutdown = {
                 let inner = self.inner.lock();
-                let current_attachment_state = inner.attachment_state;
-
-                // Only shutdown is possible if we get here
-                match current_attachment_state {
-                    AttachmentState::Detached | AttachmentState::Detaching => {
-                        // no need to shut down because if we got here we're already shutting down
-                        false
-                    }
-                    AttachmentState::Attaching
-                    | AttachmentState::AttachedWeak
-                    | AttachmentState::AttachedFair
-                    | AttachmentState::AttachedGood
-                    | AttachmentState::AttachedStrong
-                    | AttachmentState::AttachedFull => {
-                        veilid_log!(self debug "terminating attachment maintainer task");
-                        self.transition_to_non_attached_state(
-                            inner,
-                            AttachmentState::Detaching,
-                            None,
-                        );
-
-                        // perform shutdown
-                        true
-                    }
+                if inner.attachment_state.is_detached() {
+                    false
+                } else if inner.network_started {
+                    veilid_log!(self debug "terminating attachment maintainer task");
+                    self.transition_to_non_attached_state(inner, AttachmentState::Detaching, None);
+                    true
+                } else {
+                    // Attaching without a network, so there is nothing to shut down
+                    self.transition_to_non_attached_state(inner, AttachmentState::Detached, None);
+                    false
                 }
             };
             if do_shutdown {
                 self.shutdown().await;
-                {
-                    let inner = self.inner.lock();
-                    self.transition_to_non_attached_state(inner, AttachmentState::Detached, None);
-                }
+                let mut inner = self.inner.lock();
+                inner.network_started = false;
+                self.transition_to_non_attached_state(inner, AttachmentState::Detached, None);
             }
 
             return Ok(());
@@ -701,7 +714,25 @@ impl AttachmentManager {
 
                 match state {
                     AttachmentState::Detached => {
-                        if maintain_peers && !bind_retry_waiting {
+                        if maintain_peers {
+                            self.transition_to_non_attached_state(
+                                inner,
+                                AttachmentState::Attaching,
+                                None,
+                            );
+                            continue_loop = true;
+                        }
+                    }
+                    // The network is not up yet: starting it, or waiting to retry a bind
+                    AttachmentState::Attaching if !inner.network_started => {
+                        if !maintain_peers {
+                            self.transition_to_non_attached_state(
+                                inner,
+                                AttachmentState::Detaching,
+                                None,
+                            );
+                            continue_loop = true;
+                        } else if !bind_retry_waiting {
                             veilid_log!(self debug "attachment starting");
                             do_startup = true;
                         }
@@ -749,25 +780,39 @@ impl AttachmentManager {
                     }
                     Ok(StartupDisposition::BindRetry) => {
                         veilid_log!(self info "waiting for network to bind...");
+                        let bind_retry =
+                            TimestampDuration::new_ms(self.config().network.bind_retry_ms.into());
                         self.inner.lock().bind_retry_ts =
-                            Some(Timestamp::now_non_decreasing().later(BIND_WAIT_DELAY));
+                            Some(Timestamp::now_non_decreasing().later(bind_retry));
                     }
                     Ok(StartupDisposition::Success) => {
                         veilid_log!(self debug "started maintaining peers");
 
-                        let inner = self.inner.lock();
-                        self.transition_to_non_attached_state(
-                            inner,
-                            AttachmentState::Attaching,
-                            None,
-                        );
+                        let now = Timestamp::now_non_decreasing();
+                        let mut inner = self.inner.lock();
+                        inner.network_started = true;
+                        // Readiness is timed from the network start, not from the attach request
+                        inner.last_public_internet_ready_changed_ts = Some(now);
+                        inner.last_local_network_ready_changed_ts = Some(now);
                     }
                 }
+                // A detach that arrived during startup is acted on now
+                continue_loop = self.inner.lock().attachment_state == AttachmentState::Detaching;
             } else if do_shutdown {
-                self.shutdown().await;
+                let network_started = self.inner.lock().network_started;
+                if network_started {
+                    self.shutdown().await;
+                }
 
-                let inner = self.inner.lock();
-                self.transition_to_non_attached_state(inner, AttachmentState::Detached, None);
+                let mut inner = self.inner.lock();
+                inner.network_started = false;
+                // Attach was asked for again while detaching, or the network is restarting
+                if inner.maintain_peers {
+                    self.transition_to_non_attached_state(inner, AttachmentState::Attaching, None);
+                    continue_loop = true;
+                } else {
+                    self.transition_to_non_attached_state(inner, AttachmentState::Detached, None);
+                }
             }
 
             // Loop again if we should process the next state immediately
@@ -886,9 +931,10 @@ impl AttachmentManager {
         let now = Timestamp::now_non_decreasing();
         match state {
             AttachmentState::Attaching => {
-                inner.attach_ts = Some(now);
-                inner.last_public_internet_ready_changed_ts = Some(now);
-                inner.last_local_network_ready_changed_ts = Some(now);
+                // Republishing the current state keeps its start
+                if inner.attachment_state != AttachmentState::Attaching {
+                    inner.attach_ts = Some(now);
+                }
             }
             AttachmentState::Detached => {
                 inner.attach_ts = None;
@@ -1005,6 +1051,14 @@ impl AttachmentManager {
         let inner = self.inner.lock();
         let current_attachment_state = inner.attachment_state;
         match current_attachment_state {
+            // Nothing to measure before the network is up
+            AttachmentState::Attaching if !inner.network_started => {
+                self.transition_to_non_attached_state(
+                    inner,
+                    AttachmentState::Attaching,
+                    Some(callback),
+                );
+            }
             AttachmentState::Attaching
             | AttachmentState::AttachedWeak
             | AttachmentState::AttachedFair

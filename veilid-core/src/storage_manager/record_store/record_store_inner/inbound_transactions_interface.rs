@@ -163,6 +163,8 @@ where
             descriptor.clone(),
             opt_snapshot,
         )?;
+        self.unlocked_inner
+            .arm_inbound_transaction_expiry(expiration);
 
         // Return the result
         Ok(InboundTransactBeginResult::Success(TransactBeginSuccess {
@@ -617,12 +619,12 @@ where
         ))
     }
 
-    /// See if any inbound transactions have expired and clear them out
+    /// Clear out the inbound transactions that have expired, returning when the next one expires
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all)
     )]
-    pub fn drop_expired_inbound_transactions(&mut self) {
+    pub fn drop_expired_inbound_transactions(&mut self) -> Option<Timestamp> {
         let now = Timestamp::now_non_decreasing();
         let registry = self.registry();
         let debug_logger = |id| {
@@ -633,6 +635,6 @@ where
         };
 
         self.inbound_transactions
-            .remove_expired_transactions(now, &debug_logger, &error_logger);
+            .remove_expired_transactions(now, &debug_logger, &error_logger)
     }
 }

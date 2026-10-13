@@ -421,12 +421,10 @@ impl StorageManager {
         };
         let check_done = make_check_done(safety_count);
 
-        // Rolling post-consensus window: POST_CONSENSUS_RTT_FACTOR * max(fastest
-        // consensus_count RTTs), capped by rpc.timeout_ms and POST_CONSENSUS_GRACE_MS.
-        // Only accepts re-arm it, so an arriving wave keeps collecting up to safety_count.
-        let rpc_timeout =
-            TimestampDuration::new_ms(config.internal().network.rpc.timeout_ms.into());
-        let post_consensus_grace = TimestampDuration::new_ms(POST_CONSENSUS_GRACE_MS);
+        // Rolling post-consensus window; only accepts re-arm it, so a late wave fills safety_count
+        let post_consensus_grace = timeout
+            .saturating_mul(POST_CONSENSUS_GRACE_PERCENT)
+            .div(100);
         let post_consensus_timeout_callback: FanoutPostConsensusTimeoutCallback = {
             let context = context.clone();
             Arc::new(move |result: &FanoutResult| -> TimestampDuration {
@@ -448,7 +446,7 @@ impl StorageManager {
                     .max()
                     .unwrap_or_else(|| TimestampDuration::new_ms(0));
                 let bound = bound_rtt.saturating_mul(POST_CONSENSUS_RTT_FACTOR);
-                bound.min(rpc_timeout).min(post_consensus_grace)
+                bound.min(post_consensus_grace)
             })
         };
 
@@ -478,6 +476,10 @@ impl StorageManager {
         // Keep dispatching reserve candidates after consensus so a thin accept set
         // converges on the full headroom instead of stalling at the minimum
         fanout_call.set_collection_count(safety_count);
+        fanout_call.set_demote_routed_unresponsive(matches!(
+            params.record_params.safety_selection,
+            SafetySelection::Safe(_)
+        ));
 
         let shutdown_stop_source = self
             .startup_lock

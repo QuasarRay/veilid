@@ -220,7 +220,9 @@ class RoutingContext(ABC):
         The writer in options, if given, overrides the default writer from open. min_seqnum, if
         given, raises the sequence number to at least that after the automatic increment;
         ValueSeqNum.MAX minus n leaves n writes after this one. Returns None on success, or the
-        network's ValueData if the value set was older than what is on the network.
+        network's ValueData if the network holds a newer value or nodes hold more than one value at
+        the sequence number written. It is then the value most of them hold, which can be the one
+        just set.
 
         Raises VeilidAPIErrorInvalidArgument if the record is not open. Raises VeilidAPIErrorGeneric
         if key is an unsupported kind, the record is not writable, the subkey has no sequence numbers
@@ -1043,6 +1045,9 @@ class VeilidAPI(ABC):
     async def attach(self):
         """Connect to the network.
 
+        The attachment moves to ATTACHING and stays there, waiting to bind if it must, until the
+        node attaches or detach() is called. Succeeds while already attaching.
+
         Raises VeilidAPIErrorGeneric if already attached, or VeilidAPIErrorNotInitialized if the
         node is shut down.
         """
@@ -1051,6 +1056,9 @@ class VeilidAPI(ABC):
     @abstractmethod
     async def detach(self):
         """Disconnect from the network.
+
+        The attachment moves to DETACHING, cancelling an attach in progress. Succeeds while already
+        detaching.
 
         Raises VeilidAPIErrorGeneric if already detached, or VeilidAPIErrorNotInitialized if the
         node is shut down.

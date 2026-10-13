@@ -6440,7 +6440,7 @@ as List<String>,
 /// @nodoc
 mixin _$VeilidConfigNetwork implements DiagnosticableTreeMixin {
 
- int get maxConnections; VeilidConfigRoutingTable get routingTable; VeilidConfigRPC get rpc; VeilidConfigDHT get dht; List<VeilidConfigAddressType> get addressTypes; bool get upnp; bool? get detectAddressChanges; VeilidConfigTLS get tls; VeilidConfigProtocol get protocol; VeilidConfigPrivacy get privacy; String? get networkKeyPassword;
+ int get maxConnections; VeilidConfigRoutingTable get routingTable; VeilidConfigRPC get rpc; VeilidConfigDHT get dht; List<VeilidConfigAddressType> get addressTypes; bool get upnp; bool? get detectAddressChanges; int get bindRetryMs; VeilidConfigTLS get tls; VeilidConfigProtocol get protocol; VeilidConfigPrivacy get privacy; String? get networkKeyPassword;
 /// Create a copy of VeilidConfigNetwork
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -6454,21 +6454,21 @@ $VeilidConfigNetworkCopyWith<VeilidConfigNetwork> get copyWith => _$VeilidConfig
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigNetwork'))
-    ..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('routingTable', routingTable))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('addressTypes', addressTypes))..add(DiagnosticsProperty('upnp', upnp))..add(DiagnosticsProperty('detectAddressChanges', detectAddressChanges))..add(DiagnosticsProperty('tls', tls))..add(DiagnosticsProperty('protocol', protocol))..add(DiagnosticsProperty('privacy', privacy))..add(DiagnosticsProperty('networkKeyPassword', networkKeyPassword));
+    ..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('routingTable', routingTable))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('addressTypes', addressTypes))..add(DiagnosticsProperty('upnp', upnp))..add(DiagnosticsProperty('detectAddressChanges', detectAddressChanges))..add(DiagnosticsProperty('bindRetryMs', bindRetryMs))..add(DiagnosticsProperty('tls', tls))..add(DiagnosticsProperty('protocol', protocol))..add(DiagnosticsProperty('privacy', privacy))..add(DiagnosticsProperty('networkKeyPassword', networkKeyPassword));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigNetwork&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.routingTable, routingTable) || other.routingTable == routingTable)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&const DeepCollectionEquality().equals(other.addressTypes, addressTypes)&&(identical(other.upnp, upnp) || other.upnp == upnp)&&(identical(other.detectAddressChanges, detectAddressChanges) || other.detectAddressChanges == detectAddressChanges)&&(identical(other.tls, tls) || other.tls == tls)&&(identical(other.protocol, protocol) || other.protocol == protocol)&&(identical(other.privacy, privacy) || other.privacy == privacy)&&(identical(other.networkKeyPassword, networkKeyPassword) || other.networkKeyPassword == networkKeyPassword));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VeilidConfigNetwork&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.routingTable, routingTable) || other.routingTable == routingTable)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&const DeepCollectionEquality().equals(other.addressTypes, addressTypes)&&(identical(other.upnp, upnp) || other.upnp == upnp)&&(identical(other.detectAddressChanges, detectAddressChanges) || other.detectAddressChanges == detectAddressChanges)&&(identical(other.bindRetryMs, bindRetryMs) || other.bindRetryMs == bindRetryMs)&&(identical(other.tls, tls) || other.tls == tls)&&(identical(other.protocol, protocol) || other.protocol == protocol)&&(identical(other.privacy, privacy) || other.privacy == privacy)&&(identical(other.networkKeyPassword, networkKeyPassword) || other.networkKeyPassword == networkKeyPassword));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,maxConnections,routingTable,rpc,dht,const DeepCollectionEquality().hash(addressTypes),upnp,detectAddressChanges,tls,protocol,privacy,networkKeyPassword);
+int get hashCode => Object.hash(runtimeType,maxConnections,routingTable,rpc,dht,const DeepCollectionEquality().hash(addressTypes),upnp,detectAddressChanges,bindRetryMs,tls,protocol,privacy,networkKeyPassword);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigNetwork(maxConnections: $maxConnections, routingTable: $routingTable, rpc: $rpc, dht: $dht, addressTypes: $addressTypes, upnp: $upnp, detectAddressChanges: $detectAddressChanges, tls: $tls, protocol: $protocol, privacy: $privacy, networkKeyPassword: $networkKeyPassword)';
+  return 'VeilidConfigNetwork(maxConnections: $maxConnections, routingTable: $routingTable, rpc: $rpc, dht: $dht, addressTypes: $addressTypes, upnp: $upnp, detectAddressChanges: $detectAddressChanges, bindRetryMs: $bindRetryMs, tls: $tls, protocol: $protocol, privacy: $privacy, networkKeyPassword: $networkKeyPassword)';
 }
 
 
@@ -6479,7 +6479,7 @@ abstract mixin class $VeilidConfigNetworkCopyWith<$Res>  {
   factory $VeilidConfigNetworkCopyWith(VeilidConfigNetwork value, $Res Function(VeilidConfigNetwork) _then) = _$VeilidConfigNetworkCopyWithImpl;
 @useResult
 $Res call({
- int maxConnections, VeilidConfigRoutingTable routingTable, VeilidConfigRPC rpc, VeilidConfigDHT dht, List<VeilidConfigAddressType> addressTypes, bool upnp, bool? detectAddressChanges, VeilidConfigTLS tls, VeilidConfigProtocol protocol, VeilidConfigPrivacy privacy, String? networkKeyPassword
+ int maxConnections, VeilidConfigRoutingTable routingTable, VeilidConfigRPC rpc, VeilidConfigDHT dht, List<VeilidConfigAddressType> addressTypes, bool upnp, bool? detectAddressChanges, int bindRetryMs, VeilidConfigTLS tls, VeilidConfigProtocol protocol, VeilidConfigPrivacy privacy, String? networkKeyPassword
 });
 
 
@@ -6496,7 +6496,7 @@ class _$VeilidConfigNetworkCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigNetwork
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? maxConnections = null,Object? routingTable = null,Object? rpc = null,Object? dht = null,Object? addressTypes = null,Object? upnp = null,Object? detectAddressChanges = freezed,Object? tls = null,Object? protocol = null,Object? privacy = null,Object? networkKeyPassword = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? maxConnections = null,Object? routingTable = null,Object? rpc = null,Object? dht = null,Object? addressTypes = null,Object? upnp = null,Object? detectAddressChanges = freezed,Object? bindRetryMs = null,Object? tls = null,Object? protocol = null,Object? privacy = null,Object? networkKeyPassword = freezed,}) {
   return _then(_self.copyWith(
 maxConnections: null == maxConnections ? _self.maxConnections : maxConnections // ignore: cast_nullable_to_non_nullable
 as int,routingTable: null == routingTable ? _self.routingTable : routingTable // ignore: cast_nullable_to_non_nullable
@@ -6505,7 +6505,8 @@ as VeilidConfigRPC,dht: null == dht ? _self.dht : dht // ignore: cast_nullable_t
 as VeilidConfigDHT,addressTypes: null == addressTypes ? _self.addressTypes : addressTypes // ignore: cast_nullable_to_non_nullable
 as List<VeilidConfigAddressType>,upnp: null == upnp ? _self.upnp : upnp // ignore: cast_nullable_to_non_nullable
 as bool,detectAddressChanges: freezed == detectAddressChanges ? _self.detectAddressChanges : detectAddressChanges // ignore: cast_nullable_to_non_nullable
-as bool?,tls: null == tls ? _self.tls : tls // ignore: cast_nullable_to_non_nullable
+as bool?,bindRetryMs: null == bindRetryMs ? _self.bindRetryMs : bindRetryMs // ignore: cast_nullable_to_non_nullable
+as int,tls: null == tls ? _self.tls : tls // ignore: cast_nullable_to_non_nullable
 as VeilidConfigTLS,protocol: null == protocol ? _self.protocol : protocol // ignore: cast_nullable_to_non_nullable
 as VeilidConfigProtocol,privacy: null == privacy ? _self.privacy : privacy // ignore: cast_nullable_to_non_nullable
 as VeilidConfigPrivacy,networkKeyPassword: freezed == networkKeyPassword ? _self.networkKeyPassword : networkKeyPassword // ignore: cast_nullable_to_non_nullable
@@ -6645,10 +6646,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  int bindRetryMs,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _VeilidConfigNetwork() when $default != null:
-return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);case _:
+return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.bindRetryMs,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);case _:
   return orElse();
 
 }
@@ -6666,10 +6667,10 @@ return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_tha
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  int bindRetryMs,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigNetwork():
-return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);}
+return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.bindRetryMs,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -6683,10 +6684,10 @@ return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_tha
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int maxConnections,  VeilidConfigRoutingTable routingTable,  VeilidConfigRPC rpc,  VeilidConfigDHT dht,  List<VeilidConfigAddressType> addressTypes,  bool upnp,  bool? detectAddressChanges,  int bindRetryMs,  VeilidConfigTLS tls,  VeilidConfigProtocol protocol,  VeilidConfigPrivacy privacy,  String? networkKeyPassword)?  $default,) {final _that = this;
 switch (_that) {
 case _VeilidConfigNetwork() when $default != null:
-return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);case _:
+return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_that.addressTypes,_that.upnp,_that.detectAddressChanges,_that.bindRetryMs,_that.tls,_that.protocol,_that.privacy,_that.networkKeyPassword);case _:
   return null;
 
 }
@@ -6698,7 +6699,7 @@ return $default(_that.maxConnections,_that.routingTable,_that.rpc,_that.dht,_tha
 @JsonSerializable()
 
 class _VeilidConfigNetwork with DiagnosticableTreeMixin implements VeilidConfigNetwork {
-  const _VeilidConfigNetwork({required this.maxConnections, required this.routingTable, required this.rpc, required this.dht, final  List<VeilidConfigAddressType> addressTypes = const <VeilidConfigAddressType>[], required this.upnp, required this.detectAddressChanges, required this.tls, required this.protocol, required this.privacy, this.networkKeyPassword}): _addressTypes = addressTypes;
+  const _VeilidConfigNetwork({required this.maxConnections, required this.routingTable, required this.rpc, required this.dht, final  List<VeilidConfigAddressType> addressTypes = const <VeilidConfigAddressType>[], required this.upnp, required this.detectAddressChanges, this.bindRetryMs = 10000, required this.tls, required this.protocol, required this.privacy, this.networkKeyPassword}): _addressTypes = addressTypes;
   factory _VeilidConfigNetwork.fromJson(Map<String, dynamic> json) => _$VeilidConfigNetworkFromJson(json);
 
 @override final  int maxConnections;
@@ -6714,6 +6715,7 @@ class _VeilidConfigNetwork with DiagnosticableTreeMixin implements VeilidConfigN
 
 @override final  bool upnp;
 @override final  bool? detectAddressChanges;
+@override@JsonKey() final  int bindRetryMs;
 @override final  VeilidConfigTLS tls;
 @override final  VeilidConfigProtocol protocol;
 @override final  VeilidConfigPrivacy privacy;
@@ -6733,21 +6735,21 @@ Map<String, dynamic> toJson() {
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'VeilidConfigNetwork'))
-    ..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('routingTable', routingTable))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('addressTypes', addressTypes))..add(DiagnosticsProperty('upnp', upnp))..add(DiagnosticsProperty('detectAddressChanges', detectAddressChanges))..add(DiagnosticsProperty('tls', tls))..add(DiagnosticsProperty('protocol', protocol))..add(DiagnosticsProperty('privacy', privacy))..add(DiagnosticsProperty('networkKeyPassword', networkKeyPassword));
+    ..add(DiagnosticsProperty('maxConnections', maxConnections))..add(DiagnosticsProperty('routingTable', routingTable))..add(DiagnosticsProperty('rpc', rpc))..add(DiagnosticsProperty('dht', dht))..add(DiagnosticsProperty('addressTypes', addressTypes))..add(DiagnosticsProperty('upnp', upnp))..add(DiagnosticsProperty('detectAddressChanges', detectAddressChanges))..add(DiagnosticsProperty('bindRetryMs', bindRetryMs))..add(DiagnosticsProperty('tls', tls))..add(DiagnosticsProperty('protocol', protocol))..add(DiagnosticsProperty('privacy', privacy))..add(DiagnosticsProperty('networkKeyPassword', networkKeyPassword));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigNetwork&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.routingTable, routingTable) || other.routingTable == routingTable)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&const DeepCollectionEquality().equals(other._addressTypes, _addressTypes)&&(identical(other.upnp, upnp) || other.upnp == upnp)&&(identical(other.detectAddressChanges, detectAddressChanges) || other.detectAddressChanges == detectAddressChanges)&&(identical(other.tls, tls) || other.tls == tls)&&(identical(other.protocol, protocol) || other.protocol == protocol)&&(identical(other.privacy, privacy) || other.privacy == privacy)&&(identical(other.networkKeyPassword, networkKeyPassword) || other.networkKeyPassword == networkKeyPassword));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VeilidConfigNetwork&&(identical(other.maxConnections, maxConnections) || other.maxConnections == maxConnections)&&(identical(other.routingTable, routingTable) || other.routingTable == routingTable)&&(identical(other.rpc, rpc) || other.rpc == rpc)&&(identical(other.dht, dht) || other.dht == dht)&&const DeepCollectionEquality().equals(other._addressTypes, _addressTypes)&&(identical(other.upnp, upnp) || other.upnp == upnp)&&(identical(other.detectAddressChanges, detectAddressChanges) || other.detectAddressChanges == detectAddressChanges)&&(identical(other.bindRetryMs, bindRetryMs) || other.bindRetryMs == bindRetryMs)&&(identical(other.tls, tls) || other.tls == tls)&&(identical(other.protocol, protocol) || other.protocol == protocol)&&(identical(other.privacy, privacy) || other.privacy == privacy)&&(identical(other.networkKeyPassword, networkKeyPassword) || other.networkKeyPassword == networkKeyPassword));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,maxConnections,routingTable,rpc,dht,const DeepCollectionEquality().hash(_addressTypes),upnp,detectAddressChanges,tls,protocol,privacy,networkKeyPassword);
+int get hashCode => Object.hash(runtimeType,maxConnections,routingTable,rpc,dht,const DeepCollectionEquality().hash(_addressTypes),upnp,detectAddressChanges,bindRetryMs,tls,protocol,privacy,networkKeyPassword);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'VeilidConfigNetwork(maxConnections: $maxConnections, routingTable: $routingTable, rpc: $rpc, dht: $dht, addressTypes: $addressTypes, upnp: $upnp, detectAddressChanges: $detectAddressChanges, tls: $tls, protocol: $protocol, privacy: $privacy, networkKeyPassword: $networkKeyPassword)';
+  return 'VeilidConfigNetwork(maxConnections: $maxConnections, routingTable: $routingTable, rpc: $rpc, dht: $dht, addressTypes: $addressTypes, upnp: $upnp, detectAddressChanges: $detectAddressChanges, bindRetryMs: $bindRetryMs, tls: $tls, protocol: $protocol, privacy: $privacy, networkKeyPassword: $networkKeyPassword)';
 }
 
 
@@ -6758,7 +6760,7 @@ abstract mixin class _$VeilidConfigNetworkCopyWith<$Res> implements $VeilidConfi
   factory _$VeilidConfigNetworkCopyWith(_VeilidConfigNetwork value, $Res Function(_VeilidConfigNetwork) _then) = __$VeilidConfigNetworkCopyWithImpl;
 @override @useResult
 $Res call({
- int maxConnections, VeilidConfigRoutingTable routingTable, VeilidConfigRPC rpc, VeilidConfigDHT dht, List<VeilidConfigAddressType> addressTypes, bool upnp, bool? detectAddressChanges, VeilidConfigTLS tls, VeilidConfigProtocol protocol, VeilidConfigPrivacy privacy, String? networkKeyPassword
+ int maxConnections, VeilidConfigRoutingTable routingTable, VeilidConfigRPC rpc, VeilidConfigDHT dht, List<VeilidConfigAddressType> addressTypes, bool upnp, bool? detectAddressChanges, int bindRetryMs, VeilidConfigTLS tls, VeilidConfigProtocol protocol, VeilidConfigPrivacy privacy, String? networkKeyPassword
 });
 
 
@@ -6775,7 +6777,7 @@ class __$VeilidConfigNetworkCopyWithImpl<$Res>
 
 /// Create a copy of VeilidConfigNetwork
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? maxConnections = null,Object? routingTable = null,Object? rpc = null,Object? dht = null,Object? addressTypes = null,Object? upnp = null,Object? detectAddressChanges = freezed,Object? tls = null,Object? protocol = null,Object? privacy = null,Object? networkKeyPassword = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? maxConnections = null,Object? routingTable = null,Object? rpc = null,Object? dht = null,Object? addressTypes = null,Object? upnp = null,Object? detectAddressChanges = freezed,Object? bindRetryMs = null,Object? tls = null,Object? protocol = null,Object? privacy = null,Object? networkKeyPassword = freezed,}) {
   return _then(_VeilidConfigNetwork(
 maxConnections: null == maxConnections ? _self.maxConnections : maxConnections // ignore: cast_nullable_to_non_nullable
 as int,routingTable: null == routingTable ? _self.routingTable : routingTable // ignore: cast_nullable_to_non_nullable
@@ -6784,7 +6786,8 @@ as VeilidConfigRPC,dht: null == dht ? _self.dht : dht // ignore: cast_nullable_t
 as VeilidConfigDHT,addressTypes: null == addressTypes ? _self._addressTypes : addressTypes // ignore: cast_nullable_to_non_nullable
 as List<VeilidConfigAddressType>,upnp: null == upnp ? _self.upnp : upnp // ignore: cast_nullable_to_non_nullable
 as bool,detectAddressChanges: freezed == detectAddressChanges ? _self.detectAddressChanges : detectAddressChanges // ignore: cast_nullable_to_non_nullable
-as bool?,tls: null == tls ? _self.tls : tls // ignore: cast_nullable_to_non_nullable
+as bool?,bindRetryMs: null == bindRetryMs ? _self.bindRetryMs : bindRetryMs // ignore: cast_nullable_to_non_nullable
+as int,tls: null == tls ? _self.tls : tls // ignore: cast_nullable_to_non_nullable
 as VeilidConfigTLS,protocol: null == protocol ? _self.protocol : protocol // ignore: cast_nullable_to_non_nullable
 as VeilidConfigProtocol,privacy: null == privacy ? _self.privacy : privacy // ignore: cast_nullable_to_non_nullable
 as VeilidConfigPrivacy,networkKeyPassword: freezed == networkKeyPassword ? _self.networkKeyPassword : networkKeyPassword // ignore: cast_nullable_to_non_nullable

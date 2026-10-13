@@ -100,42 +100,12 @@ impl Address {
         matches!(self, Address::IPV6(v6) if ipv6addr_is_unicast_link_local(v6))
     }
 
-    /// Link-local addresses
-    pub fn is_link_local(&self) -> bool {
-        match self {
-            Address::IPV4(v4) => ipv4addr_is_link_local(v4),
-            Address::IPV6(v6) => ipv6addr_is_unicast_link_local(v6),
-        }
-    }
-
     /// Loopback addresses
     pub fn is_loopback(&self) -> bool {
         match self {
             Address::IPV4(v4) => ipv4addr_is_loopback(v4),
             Address::IPV6(v6) => ipv6addr_is_loopback(v6),
         }
-    }
-
-    /// Routable addresses are anything that can be used beyond the local link
-    /// This does not include loopback or link-local addresses, but does include
-    /// 'weird' addresses like test and benchmark networks that can be routed internally
-    /// to organizations and thinks like point-to-point links and NAT, as well as
-    /// private-use addresses ranges that are not -publicly- routable, but are routable
-    /// over local networks.
-    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
-    pub fn is_routable(&self) -> bool {
-        // Loopback is not routable
-        if self.is_loopback() {
-            return false;
-        }
-
-        // Link-local is not routable
-        if self.is_link_local() {
-            return false;
-        }
-
-        // Everything else is routable in some context
-        true
     }
 
     pub fn ip_addr(&self) -> IpAddr {

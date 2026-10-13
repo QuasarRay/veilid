@@ -2,12 +2,184 @@ use super::*;
 
 impl_veilid_log_facility!("stor");
 
+/// The nodes known to hold one value at the context's sequence number
+struct ValueHolders {
+    /// The value held
+    value: Arc<SignedValueData>,
+    /// The nodes holding it
+    nodes: HashSet<NodeId>,
+    /// The holder closest to the record key
+    closest: Option<NodeId>,
+}
+
 /// The context of the outbound_set_value operation
-struct OutboundSetValueContext {
+pub(super) struct OutboundSetValueContext {
     /// The latest value of the subkey, may be the value passed in
     pub value: Arc<SignedValueData>,
     /// The number of non-sets since the last set we have received
     pub missed_since_last_set: usize,
+    /// Holders of each value seen at the latest value's sequence number
+    holders: Vec<ValueHolders>,
+    /// Orders node ids by distance to the record key, closest first
+    node_sort: FanoutQueueSort<'static>,
+}
+
+impl OutboundSetValueContext {
+    pub(super) fn new(value: Arc<SignedValueData>, hash_coordinate: HashCoordinate) -> Self {
+        Self {
+            value,
+            missed_since_last_set: 0,
+            holders: Vec::new(),
+            node_sort: Box::new(RoutingTable::make_closest_node_id_sort(hash_coordinate)),
+        }
+    }
+
+    /// Classify the answer of a node that accepted `sent_value`. A value at our sequence number
+    /// replaces ours once more nodes hold it, or as many with one closer to the record key. The
+    /// caller has already rejected a returned value that fails the schema or is older than
+    /// `sent_value`.
+    pub(super) fn classify_accepted_answer(
+        &mut self,
+        registry: &VeilidComponentRegistry,
+        node_id: &NodeId,
+        sent_value: &Arc<SignedValueData>,
+        opt_value: Option<SignedValueData>,
+    ) -> FanoutCallDisposition {
+        // See if we got a newer value back
+        let Some(value) = opt_value else {
+            // The node stored the value this lane sent, or already held it
+            if sent_value.value_data() == self.value.value_data() {
+                // No newer value was found and returned, so increase our consensus count
+                self.missed_since_last_set = 0;
+                self.add_holder(sent_value, node_id);
+
+                veilid_log!(registry debug target:"network_result", "SetValue returned no value");
+                return FanoutCallDisposition::Accepted;
+            }
+
+            // We have moved on from the value this lane sent
+            if sent_value.value_data().seq() < self.value.value_data().seq() {
+                veilid_log!(registry debug "SetValue stored a value older than our current value, marking as stale: {}", sent_value);
+                return FanoutCallDisposition::Stale;
+            }
+            return self.classify_rival(registry, node_id, sent_value.clone());
+        };
+
+        // If we got a value back it should be different than the one we sent, but because other nodes may have returned the same value
+        // we still may have that value already in our context
+        if sent_value.value_data() == value.value_data() {
+            veilid_log!(registry debug "SetValue got value back but was the same as what was, marking as invalid: {}", value);
+            return FanoutCallDisposition::Invalid;
+        }
+
+        // Check the value received against our current consensus value now
+        let rcvd_seq = value.value_data().seq();
+        let ctx_seq = self.value.value_data().seq();
+
+        if rcvd_seq < ctx_seq {
+            // Ignore if we've got something newer already
+            veilid_log!(registry debug "SetValue got value back, but it was older than our current value ({} < {}), marking as stale: {}  ", rcvd_seq, ctx_seq, value);
+            FanoutCallDisposition::Stale
+        } else if rcvd_seq > ctx_seq {
+            // A newer value replaces ours, and every node that took ours can still take it
+            veilid_log!(registry debug "SetValue got value back, (rcvd_seq={}, ctx_seq={}) restarting with newer value: {}", rcvd_seq, ctx_seq, value);
+
+            self.value = Arc::new(value);
+            self.holders.clear();
+            let value = self.value.clone();
+            self.add_holder(&value, node_id);
+            // One node has shown us this value so far
+            self.missed_since_last_set = 0;
+
+            FanoutCallDisposition::AcceptedNewerRestart
+        } else if value.value_data() == self.value.value_data() {
+            // If the sequence numbers were the same and the values were the same, then mark it as accepted
+            // since this contributes to our consensus
+            veilid_log!(registry debug "SetValue got value back, and it matched the current value received from other nodes: {}", value);
+            let value = self.value.clone();
+            self.add_holder(&value, node_id);
+            FanoutCallDisposition::Accepted
+        } else {
+            self.classify_rival(registry, node_id, Arc::new(value))
+        }
+    }
+
+    /// Count `node_id` as holding `value`, a rival to ours at the same sequence number, and switch
+    /// to it once it beats ours
+    fn classify_rival(
+        &mut self,
+        registry: &VeilidComponentRegistry,
+        node_id: &NodeId,
+        value: Arc<SignedValueData>,
+    ) -> FanoutCallDisposition {
+        let rival = self.add_holder(&value, node_id);
+        if !self.beats_current(rival) {
+            veilid_log!(registry debug "SetValue got a conflicting value at our seq, marking as conflict: {}", value);
+            return FanoutCallDisposition::Conflict;
+        }
+
+        veilid_log!(registry debug "SetValue switching to a conflicting value held by more or closer nodes: {}", value);
+        self.value = value;
+        self.missed_since_last_set = 0;
+        FanoutCallDisposition::AcceptedSwitch
+    }
+
+    /// Record that `node_id` holds `value`, returning the index of that value's holders
+    fn add_holder(&mut self, value: &Arc<SignedValueData>, node_id: &NodeId) -> usize {
+        let index = match self.holders_of(value) {
+            Some(index) => index,
+            None => {
+                self.holders.push(ValueHolders {
+                    value: value.clone(),
+                    nodes: HashSet::new(),
+                    closest: None,
+                });
+                self.holders.len() - 1
+            }
+        };
+        let holders = &mut self.holders[index];
+        if holders.nodes.insert(node_id.clone())
+            && holders
+                .closest
+                .as_ref()
+                .is_none_or(|closest| (self.node_sort)(node_id, closest) == cmp::Ordering::Less)
+        {
+            holders.closest = Some(node_id.clone());
+        }
+        index
+    }
+
+    /// Whether some node holds another value at our value's sequence number
+    pub(super) fn conflicted(&self) -> bool {
+        self.holders
+            .iter()
+            .any(|holders| holders.value.value_data() != self.value.value_data())
+    }
+
+    fn holders_of(&self, value: &SignedValueData) -> Option<usize> {
+        self.holders
+            .iter()
+            .position(|holders| holders.value.value_data() == value.value_data())
+    }
+
+    /// Whether the holders at `index` beat our current value's: more nodes, or as many with a
+    /// closer closest holder
+    fn beats_current(&self, index: usize) -> bool {
+        let rival = &self.holders[index];
+        let Some(current) = self.holders_of(&self.value).map(|i| &self.holders[i]) else {
+            return true;
+        };
+        match rival.nodes.len().cmp(&current.nodes.len()) {
+            cmp::Ordering::Greater => true,
+            cmp::Ordering::Less => false,
+            cmp::Ordering::Equal => match (&rival.closest, &current.closest) {
+                (Some(rival_closest), Some(current_closest)) => {
+                    (self.node_sort)(rival_closest, current_closest) == cmp::Ordering::Less
+                }
+                _ => false,
+            },
+        }
+    }
 }
 
 /// The result of the outbound_set_value operation
@@ -17,6 +189,8 @@ pub(super) struct OutboundSetValueResult {
     pub fanout_result: FanoutResult,
     /// The value that was set
     pub signed_value_data: Arc<SignedValueData>,
+    /// Whether some node holds another value at the set value's sequence number
+    pub conflicted: bool,
 }
 
 /// Whether a set that has run out of sequence numbers may reuse the one already stored
@@ -251,6 +425,11 @@ impl StorageManager {
                 // but it is possible the value on the network has changed,
                 // So keep the same sequence number and see if a newer value is present
                 seq = last_signed_value_data.value_data().seq();
+
+                // Resend the stored bytes, since a fresh encryption would conflict with them at this seq
+                if min_seqnum.is_none_or(|min_seqnum| min_seqnum <= seq) {
+                    return Ok((last_signed_value_data, decrypted, descriptor));
+                }
             } else {
                 // New value is different, increment sequence number
                 let last_seq = last_signed_value_data.value_data().seq();
@@ -347,10 +526,10 @@ impl StorageManager {
 
         // Make operation context
         let schema = descriptor.schema()?;
-        let context = Arc::new(Mutex::new(OutboundSetValueContext {
+        let context = Arc::new(Mutex::new(OutboundSetValueContext::new(
             value,
-            missed_since_last_set: 0,
-        }));
+            opaque_record_key.to_hash_coordinate(),
+        )));
         let descriptor_cache = self.descriptor_cache.clone();
 
         // Routine to call to generate fanout
@@ -381,7 +560,7 @@ impl StorageManager {
                             .unwrap_or_log();
                         let dc_key = DescriptorCacheKey {
                             opaque_record_key: opaque_record_key.clone(),
-                            node_id,
+                            node_id: node_id.clone(),
                         };
                         let mut descriptor_mode = SetDescriptorMode::new(
                             descriptor_cache.lock().get(&dc_key).is_none(),
@@ -466,101 +645,49 @@ impl StorageManager {
                             descriptor_cache.lock().insert(dc_key, ());
                         }
 
-                        // See if we got a newer value back
-                        let Some(value) = sva.answer.value else {
-                            // No newer value was found and returned, so increase our consensus count
-                            context.lock().missed_since_last_set = 0;
-
-                            // Return peers if we have some
-                            veilid_log!(registry debug target:"network_result", "SetValue returned no value, fanout call returned peers {}", sva.answer.peers.len());
-                            return Ok(FanoutCallOutput {
-                                peer_info_list: sva.answer.peers,
-                                disposition: FanoutCallDisposition::Accepted,
-                            });
-                        };
-
-                        // Keep the value if we got one and it is newer and it passes schema validation
-
-                        // Validate with schema
-                        if registry
-                            .storage_manager()
-                            .check_subkey_value_data(
-                                &schema,
-                                descriptor_mode.ref_descriptor().ref_owner(),
-                                subkey,
-                                value.value_data(),
-                            )
-                            .is_err()
-                        {
-                            // Validation failed, ignore this value and pretend we never saw this node
-                            veilid_log!(registry debug "SetValue got value back but validation failed, marking as invalid: {}", value);
-                            return Ok(FanoutCallOutput {
-                                peer_info_list: vec![],
-                                disposition: FanoutCallDisposition::Invalid,
-                            });
-                        }
-
-                        // If we got a value back it should be different than the one we sent, but because other nodes may have returned the same value
-                        // we still may have that value already in our context
-                        if sent_value.value_data() == value.value_data() {
-                            veilid_log!(registry debug "SetValue got value back but was the same as what was, marking as invalid: {}", value);
-                            return Ok(FanoutCallOutput {
-                                peer_info_list: sva.answer.peers,
-                                disposition: FanoutCallDisposition::Invalid,
-                            });
-                        }
-
-                        // Ensure a newer sequence number was returned than what was sent
-                        let sent_seq = sent_value.value_data().seq();
-                        let rcvd_seq = value.value_data().seq();
-                        if rcvd_seq < sent_seq {
-                            // If the sequence number is older node should have not returned a value here.
-                            // Skip this node and its closer list because it is misbehaving
-                            // Ignore this value and pretend we never saw this node
-                            veilid_log!(registry debug "SetValue got value back but was older, marking as invalid: {}", value);
-                            return Ok(FanoutCallOutput {
-                                peer_info_list: vec![],
-                                disposition: FanoutCallDisposition::Invalid,
-                            });
-                        }
-
-                        // Check the value received against our current consensus value now
-                        {
-                            let mut ctx = context.lock();
-                            let ctx_seq = ctx.value.value_data().seq();
-
-                            if rcvd_seq < ctx_seq {
-                                // Ignore if we've got something newer already
-                                veilid_log!(registry debug "SetValue got value back, but it was older than our current value ({} < {}), marking as stale: {}  ", rcvd_seq, ctx_seq, value);
-                                Ok(FanoutCallOutput {
-                                    peer_info_list: sva.answer.peers,
-                                    disposition: FanoutCallDisposition::Stale,
-                                })
-                            } else if rcvd_seq > ctx_seq
-                                || value.value_data() != ctx.value.value_data()
+                        if let Some(value) = &sva.answer.value {
+                            // Validate with schema
+                            if registry
+                                .storage_manager()
+                                .check_subkey_value_data(
+                                    &schema,
+                                    descriptor_mode.ref_descriptor().ref_owner(),
+                                    subkey,
+                                    value.value_data(),
+                                )
+                                .is_err()
                             {
-                                // If the sequence number is greater or equal than the one in our context,
-                                // keep it unless the context has the exact same value, even if the sequence number is the same, accept all conflicts in an attempt to resolve them
-                                veilid_log!(registry debug "SetValue got value back, (rcvd_seq={}, ctx_seq={}) restarting with newer or different value: {}", rcvd_seq, ctx_seq,  value);
+                                // Validation failed, ignore this value and pretend we never saw this node
+                                veilid_log!(registry debug "SetValue got value back but validation failed, marking as invalid: {}", value);
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Invalid,
+                                });
+                            }
 
-                                ctx.value = Arc::new(value);
-                                // One node has shown us this value so far
-                                ctx.missed_since_last_set = 0;
-
-                                Ok(FanoutCallOutput {
-                                    peer_info_list: sva.answer.peers,
-                                    disposition: FanoutCallDisposition::AcceptedNewerRestart,
-                                })
-                            } else {
-                                // If the sequence numbers were the same and the values were the same, then mark it as accepted
-                                // since this contributes to our consensus
-                                veilid_log!(registry debug "SetValue got value back, and it matched the current value received from other nodes: {}", value);
-                                Ok(FanoutCallOutput {
-                                    peer_info_list: sva.answer.peers,
-                                    disposition: FanoutCallDisposition::Accepted,
-                                })
+                            // Ensure a newer sequence number was returned than what was sent
+                            if value.value_data().seq() < sent_value.value_data().seq() {
+                                // If the sequence number is older node should have not returned a value here.
+                                // Skip this node and its closer list because it is misbehaving
+                                // Ignore this value and pretend we never saw this node
+                                veilid_log!(registry debug "SetValue got value back but was older, marking as invalid: {}", value);
+                                return Ok(FanoutCallOutput {
+                                    peer_info_list: vec![],
+                                    disposition: FanoutCallDisposition::Invalid,
+                                });
                             }
                         }
+
+                        let disposition = context.lock().classify_accepted_answer(
+                            &registry,
+                            &node_id,
+                            &sent_value,
+                            sva.answer.value,
+                        );
+                        Ok(FanoutCallOutput {
+                            peer_info_list: sva.answer.peers,
+                            disposition,
+                        })
                     };
                     #[cfg(feature = "instrument")]
                     let fut =
@@ -592,7 +719,7 @@ impl StorageManager {
             .ok_or_else(VeilidAPIError::not_initialized)?;
 
         let routing_table = self.routing_table();
-        let fanout_call = FanoutCall::new(
+        let mut fanout_call = FanoutCall::new(
             &routing_table,
             FanoutCallParams {
                 name: format!("outbound_set_value({})", Timestamp::now_increasing()),
@@ -607,6 +734,8 @@ impl StorageManager {
             call_routine,
             check_done,
         );
+        fanout_call
+            .set_demote_routed_unresponsive(matches!(safety_selection, SafetySelection::Safe(_)));
 
         let fanout_result = fanout_call
             .run(
@@ -625,6 +754,7 @@ impl StorageManager {
         Ok(OutboundSetValueResult {
             fanout_result,
             signed_value_data: ctx.value.clone(),
+            conflicted: ctx.conflicted(),
         })
     }
 
@@ -687,8 +817,9 @@ impl StorageManager {
             .maybe_decrypt_value_data(&record_key, result.signed_value_data.value_data())
             .await?;
 
-        // Return the new value if it differs from what was asked to set
-        if value_data != requested_value_data {
+        // Return the value the network settled on if it differs from what was asked to set, or if
+        // other nodes hold a rival at its sequence number
+        if result.conflicted || value_data != requested_value_data {
             return Ok(Some(value_data));
         }
 

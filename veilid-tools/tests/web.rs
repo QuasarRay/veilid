@@ -41,6 +41,12 @@ async fn run_test_tools_basic() {
 }
 
 #[wasm_bindgen_test]
+async fn run_test_wake_and_deadline() {
+    setup();
+    test_wake_and_deadline::test_all().await;
+}
+
+#[wasm_bindgen_test]
 async fn run_test_random() {
     setup();
     test_random::test_get_random_u64();

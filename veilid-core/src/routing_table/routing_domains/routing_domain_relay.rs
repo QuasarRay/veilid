@@ -89,11 +89,11 @@ pub struct RoutingDomainRelayState {
     pub last_keepalive: Timestamp,
     /// When we last attempted to optimize this relay
     pub last_optimized: Timestamp,
-    /// When this relay was selected. Never updated while it serves, so
-    /// `now - selected_ts` is how long it has held the job.
+    /// When this relay was selected; never updated while it serves
     pub selected_ts: Timestamp,
-    /// Best tm90 seen since this relay settled in, the baseline it is judged against.
-    /// None until the first measurement past the dwell.
+    /// The relay's latency sample count at its first check after selection, where its dwell starts
+    pub selected_latency_samples: Option<u64>,
+    /// Best tm90 since this relay settled in, its baseline; None until measured past the dwell
     pub best_tm90: Option<TimestampDuration>,
 }
 
@@ -101,10 +101,13 @@ impl fmt::Display for RoutingDomainRelayState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Keepalive:{}\nOptimized:{}\nSelected:{}\nBestTm90:{}",
+            "Keepalive:{}\nOptimized:{}\nSelected:{}\nSelectedLatencySamples:{}\nBestTm90:{}",
             f.to_string(self.last_keepalive),
             f.to_string(self.last_optimized),
             f.to_string(self.selected_ts),
+            self.selected_latency_samples
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "none".to_owned()),
             self.best_tm90
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "none".to_owned())

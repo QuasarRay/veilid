@@ -213,6 +213,19 @@ impl NetworkState {
     }
 }
 
+/// Every address on our interfaces as a connection's valid local address, less one family
+fn own_addresses_except(
+    state: &NetworkInterfaceAddressState,
+    family: Option<AddressType>,
+) -> HashSet<Address> {
+    state
+        .own_addresses
+        .iter()
+        .map(|ip| Address::from_ip_addr(*ip))
+        .filter(|a| Some(a.address_type()) != family)
+        .collect()
+}
+
 impl NativeNetwork {
     pub(super) fn last_network_state(&self) -> Option<Arc<NetworkState>> {
         self.inner.lock().network_state.clone()
@@ -235,89 +248,47 @@ impl NativeNetwork {
 
         let interface_address_state = self.interfaces.interface_address_state();
 
-        let routing_domain_detect_address_changes = if let Some(last_interface_address_state) =
-            opt_last_network_state.map(|x| x.interface_address_state.clone())
-        {
-            // Post-startup network refresh
-            veilid_log!(self debug
-                "Network interface address state changed: \nFrom:\n{}\n  To:\n{}\n",
-                indent_all_string(format!("{:?}", last_interface_address_state)),
-                indent_all_string(format!("{:?}", interface_address_state))
-            );
-
-            // Close connections whose local address departed so we don't reuse zombies. Any
-            // address still on an interface keeps its connections, published or not
-            let valid_local_addresses: HashSet<Address> = interface_address_state
-                .own_addresses
-                .iter()
-                .map(|ip| Address::from_ip_addr(*ip))
-                .collect();
-            self.network_manager()
-                .connection_manager()
-                .close_dead_connections(&valid_local_addresses);
-
-            // See if any of the addresses that have changed are routable
-            let last_routable_addresses =
-                routable_interface_addresses(&last_interface_address_state);
-            let new_routable_addresses = routable_interface_addresses(&interface_address_state);
-            let routable_addresses_changed = last_routable_addresses != new_routable_addresses;
-
-            if routable_addresses_changed {
-                // Dial info rests on these alone, so a link-local change must not re-confirm it
-                self.interface_address_generation
-                    .fetch_add(1, Ordering::Relaxed);
-
-                // Our addresses moved, so transport failures we blamed on peers may have been ours
-                self.routing_table().clear_all_transport_evidence();
-
-                let added_addresses = new_routable_addresses
-                    .difference(&last_routable_addresses)
-                    .copied()
-                    .map(|a| a.to_string())
-                    .collect::<Vec<_>>();
-                let removed_addresses = last_routable_addresses
-                    .difference(&new_routable_addresses)
-                    .copied()
-                    .map(|a| a.to_string())
-                    .collect::<Vec<_>>();
-                if !removed_addresses.is_empty() {
-                    veilid_log!(self debug "Routable addresses removed: {}", removed_addresses.join(", "));
-                }
-                if !added_addresses.is_empty() {
-                    veilid_log!(self debug "Routable addresses added: {}", added_addresses.join(", "));
-                }
-
-                // Mark PublicInternet offline; first successful RPC on the new network flips us back
-                self.network_manager()
-                    .online_detector()
-                    .network_address_change(RoutingDomain::PublicInternet);
-            }
-
-            // Cached gateway, external IP, and port mappings all reference the prior interfaces
-            if let Some(igd_manager) = &self.igd_manager {
-                igd_manager.clear_caches();
-            }
-
-            // Return the 'detect address changes' settings from when they were set up for all the other
-            // post-startup calls to this routine
-            self.routing_domains_detecting_address_changes()
-        } else {
-            // First time, pre-startup initial network refresh
-            self.interface_address_generation
-                .fetch_add(1, Ordering::Relaxed);
-            veilid_log!(self debug
-                "Network interface address state:\n{}\n",
-                indent_all_string(format!("{:?}", interface_address_state))
-            );
-
-            // The first time we get a network state, set up the 'detect address changes' settings for
-            // each routing domain based on the config and the initial network state
-            self.set_up_detect_address_changes(&interface_address_state)
-        };
-
         // Create new network state
         let address_config = self.make_address_config();
         let protocol_config = self.make_protocol_config(&address_config);
+
+        let routing_domain_detect_address_changes =
+            if let Some(last_network_state) = opt_last_network_state {
+                // Post-startup network refresh
+                veilid_log!(self debug
+                    "Network interface address state changed: \nFrom:\n{}\n  To:\n{}\n",
+                    indent_all_string(format!("{:?}", last_network_state.interface_address_state)),
+                    indent_all_string(format!("{:?}", interface_address_state))
+                );
+
+                // Close connections whose local address departed so we don't reuse zombies. Any
+                // address still on an interface keeps its connections, published or not
+                self.network_manager()
+                    .connection_manager()
+                    .close_dead_connections(&own_addresses_except(&interface_address_state, None));
+
+                self.apply_egress_change(
+                    &last_network_state,
+                    &interface_address_state,
+                    protocol_config.family_global,
+                );
+
+                // Return the 'detect address changes' settings from when they were set up for all the other
+                // post-startup calls to this routine
+                self.routing_domains_detecting_address_changes()
+            } else {
+                // First time, pre-startup initial network refresh
+                self.interface_address_generation
+                    .fetch_add(1, Ordering::Relaxed);
+                veilid_log!(self debug
+                    "Network interface address state:\n{}\n",
+                    indent_all_string(format!("{:?}", interface_address_state))
+                );
+
+                // The first time we get a network state, set up the 'detect address changes' settings for
+                // each routing domain based on the config and the initial network state
+                self.set_up_detect_address_changes(&interface_address_state)
+            };
 
         // Tell offline detection which socket classes this network uses
         self.network_manager()
@@ -352,6 +323,78 @@ impl NativeNetwork {
         }
 
         Ok(Some(new_network_state))
+    }
+
+    /// React to what an interface address change did to PublicInternet egress
+    fn apply_egress_change(
+        &self,
+        last_network_state: &NetworkState,
+        interface_address_state: &NetworkInterfaceAddressState,
+        now_in_use: AddressTypeSet,
+    ) {
+        let last_interface_address_state = &last_network_state.interface_address_state;
+        let change = egress_change(
+            last_interface_address_state,
+            interface_address_state,
+            last_network_state.protocol_config.family_global,
+            now_in_use,
+        );
+        if change.is_none() {
+            veilid_log!(self debug "PublicInternet egress unchanged");
+            return;
+        }
+        veilid_log!(self debug "PublicInternet egress {}: {}",
+            if change.is_full_move() {
+                "moved"
+            } else if change.moved.is_empty() {
+                "appeared"
+            } else {
+                "partly moved"
+            },
+            change.describe(last_interface_address_state, interface_address_state)
+        );
+
+        // Dial info rests on the egress alone, so only a change there re-confirms it
+        self.interface_address_generation
+            .fetch_add(1, Ordering::Relaxed);
+        // Relay latency measured from the old egress ranks nothing here
+        self.routing_table()
+            .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>()
+            .resettle_relays();
+
+        if !change.moved.is_empty() {
+            // Our addresses moved, so transport failures we blamed on peers may have been ours
+            self.routing_table().clear_all_transport_evidence();
+            self.network_manager()
+                .transport_stats()
+                .release_canaries(RoutingDomainSet::all(), "egress moved");
+        }
+
+        if change.is_full_move() {
+            // Cached gateway, external IP, and port mappings all reference the prior interfaces
+            if let Some(igd_manager) = &self.igd_manager {
+                igd_manager.clear_caches(None);
+            }
+            // Mark PublicInternet offline; first successful RPC on the new network flips us back
+            self.network_manager()
+                .online_detector()
+                .network_address_change(RoutingDomain::PublicInternet);
+        } else {
+            // Another family still carries traffic, so retire only what left with the moved one
+            for family in change.moved {
+                self.network_manager()
+                    .connection_manager()
+                    .close_dead_connections(&own_addresses_except(
+                        interface_address_state,
+                        Some(family),
+                    ));
+                if let Some(igd_manager) = &self.igd_manager {
+                    igd_manager.clear_caches(Some(family.into()));
+                }
+            }
+        }
+        // The purge runs while offline, when an emptied table cannot ask, so ask directly
+        self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
     }
 
     // TODO: This, along with the binding code should be part of the protocol trait
@@ -450,7 +493,10 @@ impl NativeNetwork {
             .any(|g| matches!(g, IpAddr::V4(_)));
 
         let ipv4_local = allow_v4 && Self::can_bind_v4() && raw.has_non_loopback_ipv4;
-        let ipv4_global = ipv4_local && has_v4_default_route;
+        // IPv4 from this host's own CLAT translator has no path without the IPv6 route
+        let clat_without_v6 =
+            ias.egress_v4.as_ref().is_some_and(is_clat_egress) && ias.egress_v6.is_none();
+        let ipv4_global = ipv4_local && has_v4_default_route && !clat_without_v6;
 
         let ipv6_local = allow_v6 && Self::can_bind_v6() && raw.has_non_loopback_ipv6;
         let ipv6_global = ipv6_local && raw.has_unicast_global_ipv6; // TODO: better ipv6 detection for NAT should happen

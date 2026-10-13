@@ -12,12 +12,22 @@
   - **Breaking** The WASM boundary uses tsify 0.5.7 `Ts<T>` types, so a serialization failure throws a catchable error instead of leaking or panicking, and in TypeScript the group `contains_kind` is renamed `containsKind` and typed-value constructors take the branded `CryptoKind` instead of a bare string.
   - **Breaking** `VeilidAPIError` derives from the JavaScript `Error`, closing [#441](https://gitlab.com/veilid/veilid/-/work_items/441).
   - **Breaking** `AttachmentState` variants are reordered from least to most attached, and the type is now `Ord`.
+  - **Breaking** `attach()` and `detach()` succeed when the node is already attaching or detaching, a bind wait reports `Attaching` instead of `Detached`, and `detach()` on a detached node fails with `Not attached`.
   - **Security** B01T direct-bootstrap requests are answered from the routing domain's last successful bootstrap set, persisted across restarts, without resolving DNS, so an unauthenticated packet can no longer trigger non-veilid traffic or block a worker on a slow resolver (thanks to quikchaos for reporting it).
-  - Safety routes are allocated, tested and released per sequence ordering, and a dead route's hops stay out of new allocations for ten minutes.
+  - Safety routes are allocated, tested and released per sequence ordering, and a dead route's hops stay out of that ordering's new allocations until the hop or this node publishes new peer info, or the online state changes.
   - A lost loopback no longer schedules another test of its own route, and a multi-hop loopback failure no longer blames the first hop's transport.
   - Per-ordering loopback tallies, a `route test summary` log line for each minute with a loopback failure or release, and the `route diag` and `route reallocate` debug commands.
   - `route allocate` accepts node ids to avoid as hops.
   - A refused connect no longer counts as evidence against a transport.
+  - An interface address change marks PublicInternet offline, purges connections and re-detects dial info only when the interface, source address or gateway its traffic leaves from change, so a tunnel, a secondary interface or an alias coming or going no longer drops the relay or re-maps the external port; a change to one family's egress while another still carries traffic retires that family's connections and mappings alone.
+  - The Apple route reader no longer keeps a link-local gateway's embedded interface index in its address.
+  - A dropped protected connection is re-opened by a keepalive ping instead of a bare connect, which the far end could not attribute to this node and closed at its initial timeout, and a connection this node closed itself no longer counts against the relay's protected-connection lifetime or the re-open breaker, so a move between interfaces keeps its relay. After an egress change the relay optimizer waits for latency measured from the new egress before ranking an incumbent, and a relay is judged on its protected-connection lifetimes only once three have been recorded.
+  - An IPv4 egress from this host's own CLAT translator moves with the IPv6 route it rides on, and is not a global family while that route is gone.
+  - A send that aborted before any transport was tried no longer counts a node as unreachable while this node's own PublicInternet network is down, so a two-second gap between egresses no longer kills a relay.
+  - An outbound-only node asks for dial info detection only when every recent reporter names one external address, once per address, so a symmetric NAT's stable address is detected exactly once instead of once per transport. A concluded detection tells the address check which external addresses it saw, so the address it just examined is not re-detected, the periodic outbound-only recheck is gone, and a transport the detection reached no verdict on is re-detected when enough reporters answer over it.
+  - PublicInternet offline detection counts a lost question only when it was sent after the last answer arrived, so a burst of timeouts overlapping a working path no longer flips a node offline and back within a second; the offline decision logs the failing nodes per socket class.
+  - PublicInternet leaves the offline state only on an answer to a question sent after it went offline, so an answer to an older question or unasked inbound traffic can no longer flip a node online onto a dead network, where it would fail discovery, unpublish and mark its peers dead.
+  - A send this node declined, over a suppressed transport or to a punished node, is no longer recorded as the peer being unreachable, so a relay no longer dies at its first keepalive over a transport the node has stopped using.
   - Last flows are kept per remote address, answers return over the flow their question arrived on, and a lost question over a flow we did not dial blames nobody.
   - Degraded detection counts fresh failures of Reliable peers only, excludes our own relay, and clears its evidence on recovery.
   - App call results are logged truncated.
@@ -85,6 +95,16 @@
   - `inspect_dht_record` returns TryAgain when no node answered, instead of a report whose empty network sequence numbers read as nothing newer online.
   - A failed change inspection of a watched record retries in 5s instead of backing off to 10 minutes, and a watch that never established is inspected every 2 minutes instead of 10.
   - A watch reconcile that no node answered retries in 5s instead of waiting 60s, and watch cancels, renewals, reconciles and change inspections wait while the node is offline.
+  - `set_dht_value` no longer loops forever when nodes hold different values at its sequence number: it settles on the value most of them hold and returns it, even when that is the value just set, and an identical rewrite resends the stored value rather than encrypting it again.
+  - Sets, gets and watches keep asking nodes past ones that answer with an older value or none, instead of waiting out their whole timeout, so a get no longer misses a value held by nodes it never asked.
+  - A DHT fanout that can no longer reach consensus stops waiting on a node still in flight after a third of the RPC timeout, or three times its slowest answer if longer, instead of the whole RPC timeout.
+  - A question to a node avoids a safety route that lost one to it until the node answers over that route, either side publishes new peer info, or the online state changes, and DHT operations ask a node that lost a routed question after all others until it answers one.
+  - A watch held by enough nodes for consensus checks for missed changes once per renewal after its fallback interval reaches the 2-minute ceiling, instead of every 2 minutes.
+  - Answering messages takes fewer shared locks: component and routing domain lookups take none, a known sender is registered under the routing table's read lock, and unchanged entry fields are not rewritten.
+  - A failed network result's extra log detail is built only when it is logged, instead of formatting every RPC message header.
+  - Fix a panic sorting allocated routes when a route's latency changed during the sort.
+  - A hidden desktop app keeps saving on the foreground schedule, since saving on every change is only for platforms that freeze a background process.
+  - A degraded period caused only by the node's own stalls no longer ends with a check of every watch for missed changes.
 
 - veilid-flutter:
   - **Breaking** `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `toString()` on `Timestamp` and `TimestampDuration` writes human-readable output instead of a raw integer.
@@ -115,6 +135,7 @@
   - **Breaking** `igd::search_gateway()` and the `igd::Gateway` request methods are async, so dropping one ends its router request at once, and `minreq` is gone.
   - AIMD congestion control, behind the `aimd` feature.
   - Best-effort UDP send-with-TTL in `socket_tools`.
+  - `background_may_freeze()` reports whether the platform freezes a process in the background rather than only throttling it.
 
 - veilid-wasm:
   - **Breaking** The wasm file no longer loads at import time through a top-level await, so you must `await` the default export `init()` (`import init from "veilid-wasm"`) before calling any other export.

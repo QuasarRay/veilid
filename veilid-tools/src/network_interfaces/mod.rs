@@ -615,7 +615,30 @@ impl NetworkInterface {
     }
 }
 
-/// The gateway, publication and identity addresses distilled from all interfaces.
+/// The interface a family's outbound traffic leaves from, the address it leaves from and the
+/// gateways it leaves through. A privacy address rotating or an alias coming or going changes
+/// nothing here; the source, a gateway or the interface changing does.
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+pub struct EgressIdentity {
+    /// OS interface name.
+    pub interface: String,
+    /// The address veilid sends from: the kernel's source, or the best published address of
+    /// the family when the kernel sends from a privacy address; `None` with nothing published.
+    pub source: Option<IpAddr>,
+    /// Default-route gateways of the family on this interface, sorted.
+    pub gateways: Vec<IpAddr>,
+}
+
+impl fmt::Display for EgressIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.source {
+            Some(source) => write!(f, "{} {} via {:?}", self.interface, source, self.gateways),
+            None => write!(f, "{} (no source) via {:?}", self.interface, self.gateways),
+        }
+    }
+}
+
+/// The gateway, publication, identity and egress addresses distilled from all interfaces.
 #[derive(Clone, Default, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NetworkInterfaceAddressState {
     /// Gateway addresses across all interfaces, sorted and deduplicated.
@@ -627,6 +650,11 @@ pub struct NetworkInterfaceAddressState {
     /// deduplicated. Includes privacy addresses, which a peer may report back as our
     /// external address. Not part of change detection.
     pub own_addresses: Vec<IpAddr>,
+    /// The interface the kernel sends IPv4 from, the address veilid sends from there and its
+    /// gateways; `None` without an IPv4 default route.
+    pub egress_v4: Option<EgressIdentity>,
+    /// The IPv6 egress, as `egress_v4`.
+    pub egress_v6: Option<EgressIdentity>,
 }
 
 impl NetworkInterfaceAddressState {
@@ -651,9 +679,16 @@ pub struct RawAddressSummary {
 
 /// Mutex-guarded interior state of `NetworkInterfaces`.
 pub struct NetworkInterfacesInner {
+    /// A successful `refresh` has populated the interface set.
     valid: bool,
+    /// Interfaces from the last `refresh`, globals kept only on the primary interfaces.
     interfaces: BTreeMap<String, NetworkInterface>,
+    /// Address state distilled from `interfaces` and the primaries.
     interface_address_state_cache: Arc<NetworkInterfaceAddressState>,
+    /// The kernel's IPv4 outbound source at the last `refresh`.
+    primary_v4: Option<Ipv4Addr>,
+    /// The kernel's IPv6 outbound source at the last `refresh`.
+    primary_v6: Option<Ipv6Addr>,
 }
 
 /// Cross-platform enumeration of this host's network interfaces and their addresses.
@@ -696,6 +731,8 @@ impl NetworkInterfaces {
                 valid: false,
                 interfaces: BTreeMap::new(),
                 interface_address_state_cache: Arc::new(NetworkInterfaceAddressState::default()),
+                primary_v4: None,
+                primary_v6: None,
             })),
         }
     }
@@ -712,11 +749,13 @@ impl NetworkInterfaces {
 
         inner.interfaces.clear();
         inner.interface_address_state_cache = Arc::new(NetworkInterfaceAddressState::default());
+        inner.primary_v4 = None;
+        inner.primary_v6 = None;
         inner.valid = false;
     }
-    /// Re-enumerate the platform's interfaces. Returns `true` when the publication set or the
-    /// gateways changed; identity-only churn, a privacy address rotating, refreshes the cache
-    /// without reporting a change.
+    /// Re-enumerate the platform's interfaces. Returns `true` when the publication set, the
+    /// gateways or a family's egress changed; identity-only churn, a privacy address rotating,
+    /// refreshes the cache without reporting a change.
     ///
     /// Errors with an `io::Error` if the platform's interface enumeration fails; the interface set is
     /// left unchanged in that case.
@@ -730,28 +769,37 @@ impl NetworkInterfaces {
             last_interfaces
         };
 
+        // The kernel's outbound source per family names the egress interface; one UDP connect
+        // per family, nothing is sent
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        let (primary_v4, primary_v6) = (primary_source_ipv4(), primary_source_ipv6());
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        let (primary_v4, primary_v6): (Option<Ipv4Addr>, Option<Ipv6Addr>) = (None, None);
+
         // Drop globally-routable addresses from interfaces other than the one carrying the
         // kernel's primary outbound source for that family (e.g. iOS cellular IPv6 while wifi
         // is primary). Private/local addresses are kept so the LocalNetwork routing domain
         // still works. Don't do this on wasm32-unknown-unknown because we don't have access to
         // the network stack.
         #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-        Self::filter_non_primary_global_addresses(
-            &mut last_interfaces,
-            primary_source_ipv4(),
-            primary_source_ipv6(),
-        );
+        Self::filter_non_primary_global_addresses(&mut last_interfaces, primary_v4, primary_v6);
 
         let mut inner = self.inner.lock();
         core::mem::swap(&mut inner.interfaces, &mut last_interfaces);
         inner.valid = true;
+        // A default route moving between interfaces changes the egress with every address in place
+        let primaries_changed = (inner.primary_v4, inner.primary_v6) != (primary_v4, primary_v6);
+        inner.primary_v4 = primary_v4;
+        inner.primary_v6 = primary_v6;
 
-        if last_interfaces != inner.interfaces {
+        if last_interfaces != inner.interfaces || primaries_changed {
             let old = inner.interface_address_state_cache.clone();
             Self::cache_interface_address_state(&mut inner);
             let new = &inner.interface_address_state_cache;
             if old.gateway_addresses != new.gateway_addresses
                 || old.interface_addresses != new.interface_addresses
+                || old.egress_v4 != new.egress_v4
+                || old.egress_v6 != new.egress_v6
             {
                 return Ok(true);
             }
@@ -819,14 +867,10 @@ impl NetworkInterfaces {
         primary_v4: Option<Ipv4Addr>,
         primary_v6: Option<Ipv6Addr>,
     ) {
-        let owner_of = |ip: IpAddr| {
-            interfaces
-                .iter()
-                .find(|(_, intf)| intf.addrs.iter().any(|a| a.if_addr().ip() == ip))
-                .map(|(name, _)| name.clone())
-        };
-        let primary_v4_intf = primary_v4.and_then(|p| owner_of(IpAddr::V4(p)));
-        let primary_v6_intf = primary_v6.and_then(|p| owner_of(IpAddr::V6(p)));
+        let primary_v4_intf =
+            primary_v4.and_then(|p| owner_of(interfaces, IpAddr::V4(p)).map(str::to_owned));
+        let primary_v6_intf =
+            primary_v6.and_then(|p| owner_of(interfaces, IpAddr::V6(p)).map(str::to_owned));
 
         interfaces.retain(|name, intf| {
             intf.addrs.retain(|addr| match addr.if_addr() {
@@ -843,13 +887,19 @@ impl NetworkInterfaces {
     }
 
     fn cache_interface_address_state(inner: &mut NetworkInterfacesInner) {
-        inner.interface_address_state_cache =
-            Arc::new(Self::interface_address_state_for(&inner.interfaces));
+        inner.interface_address_state_cache = Arc::new(Self::interface_address_state_for(
+            &inner.interfaces,
+            inner.primary_v4,
+            inner.primary_v6,
+        ));
     }
 
-    /// The gateway, publication and identity sets distilled from `interfaces`
+    /// The gateway, publication, identity and egress sets distilled from `interfaces`; the
+    /// primaries are the kernel's outbound sources, whose owning interfaces are the egress
     pub(crate) fn interface_address_state_for(
         interfaces: &BTreeMap<String, NetworkInterface>,
+        primary_v4: Option<Ipv4Addr>,
+        primary_v6: Option<Ipv6Addr>,
     ) -> NetworkInterfaceAddressState {
         // Reduce interfaces to their best routable ip addresses
         let mut intf_addrs = Vec::new();
@@ -862,28 +912,12 @@ impl NetworkInterfaces {
             }
 
             for addr in intf.addresses() {
-                // Identity set keeps what publication filters out below; peers report those
-                // back to us as our external address
+                // Identity set keeps what publication filters out; peers report those back
+                // to us as our external address
                 own_addresses.push(addr.if_addr().ip());
-
-                // Skip RFC 4941 privacy addresses; they rotate and churn published peer info
-                if addr.is_temporary() {
-                    continue;
+                if is_published(addr) {
+                    intf_addrs.push(addr.clone());
                 }
-                // Skip macOS/iOS CLAT46 synthesized IPv6 (local-only translator address)
-                if addr.is_clat() {
-                    continue;
-                }
-                // Skip RFC 6598 CGNAT and RFC 6333 DS-Lite IPv4; peers can't reach them
-                if addr.is_cgnat_or_ds_lite() {
-                    continue;
-                }
-                // Skip RFC 3927 IPv4 link-local (169.254.0.0/16); transient DHCP-fallback
-                // address, never reachable by peers
-                if addr.is_ipv4_link_local() {
-                    continue;
-                }
-                intf_addrs.push(addr.clone());
             }
 
             for gateway in intf.gateways() {
@@ -906,10 +940,74 @@ impl NetworkInterfaces {
         own_addresses.sort();
         own_addresses.dedup();
 
+        let egress_v4 = primary_v4.and_then(|p| egress_identity(interfaces, IpAddr::V4(p)));
+        let egress_v6 = primary_v6.and_then(|p| egress_identity(interfaces, IpAddr::V6(p)));
+
         NetworkInterfaceAddressState {
             gateway_addresses,
             interface_addresses,
             own_addresses,
+            egress_v4,
+            egress_v6,
         }
     }
+}
+
+/// The interface holding `ip`, if any
+fn owner_of(interfaces: &BTreeMap<String, NetworkInterface>, ip: IpAddr) -> Option<&str> {
+    interfaces
+        .iter()
+        .find(|(_, intf)| intf.addrs.iter().any(|a| a.if_addr().ip() == ip))
+        .map(|(name, _)| name.as_str())
+}
+
+/// Publication keeps what peers can reach: RFC 4941 privacy addresses rotate and churn peer
+/// info, CLAT46 and CGNAT/DS-Lite addresses are not reachable, IPv4 link-local is a transient
+/// DHCP fallback
+fn is_published(addr: &InterfaceAddress) -> bool {
+    !addr.is_temporary()
+        && !addr.is_clat()
+        && !addr.is_cgnat_or_ds_lite()
+        && !addr.is_ipv4_link_local()
+}
+
+/// The interface the kernel sends `primary` from, the address veilid sends from there and the
+/// family's gateways. veilid never binds a privacy address, so when the kernel picked one the
+/// source is the best published address of the family instead, stable across rotations
+fn egress_identity(
+    interfaces: &BTreeMap<String, NetworkInterface>,
+    primary: IpAddr,
+) -> Option<EgressIdentity> {
+    let name = owner_of(interfaces, primary)?;
+    let intf = &interfaces[name];
+    let same_family = |ip: IpAddr| ip.is_ipv4() == primary.is_ipv4();
+    let primary_is_temporary = intf
+        .addrs
+        .iter()
+        .any(|a| a.if_addr().ip() == primary && a.is_temporary());
+    let source = if primary_is_temporary {
+        intf.addrs
+            .iter()
+            .filter(|a| {
+                let ip = a.if_addr().ip();
+                is_published(a)
+                    && same_family(ip)
+                    && !matches!(a.if_addr(), IfAddr::V6(v6) if ipv6addr_is_unicast_link_local(&v6.ip))
+            })
+            .max()
+            .map(|a| a.if_addr().ip())
+    } else {
+        Some(primary)
+    };
+    let gateways = intf
+        .gateways()
+        .iter()
+        .copied()
+        .filter(|g| same_family(*g))
+        .collect();
+    Some(EgressIdentity {
+        interface: name.to_owned(),
+        source,
+        gateways,
+    })
 }

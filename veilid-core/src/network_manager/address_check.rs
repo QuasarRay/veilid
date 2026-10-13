@@ -50,8 +50,11 @@ pub struct AddressCheck {
     // Used by OutboundOnly to determine if we should re-do our network class
     address_consistency_table:
         BTreeMap<AddressCheckCacheKey, hashlink::LruCache<IpAddr, SocketAddress>>,
-    // Last address that triggered an OutboundOnly re-confirm; used to suppress duplicate re-fires
-    last_outbound_triggered_address: BTreeMap<AddressCheckCacheKey, Address>,
+    // External addresses the last detection saw per family, plus the one a pending OutboundOnly
+    // trigger asked about; a report naming one of them re-fires nothing
+    detected_external_addresses: BTreeMap<(RoutingDomain, AddressType), BTreeSet<Address>>,
+    // Transports the last detection reached no verdict on; unanimous reports over one re-fire
+    unexamined_transports: BTreeMap<RoutingDomain, BTreeSet<TransportType>>,
 }
 
 impl fmt::Debug for AddressCheck {
@@ -72,9 +75,10 @@ impl fmt::Debug for AddressCheck {
             )
             .field("address_consistency_table", &self.address_consistency_table)
             .field(
-                "last_outbound_triggered_address",
-                &self.last_outbound_triggered_address,
+                "detected_external_addresses",
+                &self.detected_external_addresses,
             )
+            .field("unexamined_transports", &self.unexamined_transports)
             .field(
                 "last_inbound_triggered_address",
                 &self.last_inbound_triggered_address,
@@ -111,8 +115,32 @@ impl AddressCheck {
             address_inconsistency_table: BTreeMap::new(),
             last_inbound_triggered_address: BTreeMap::new(),
             address_consistency_table: BTreeMap::new(),
-            last_outbound_triggered_address: BTreeMap::new(),
+            detected_external_addresses: BTreeMap::new(),
+            unexamined_transports: BTreeMap::new(),
         }
+    }
+
+    /// Record what a concluded dial info detection saw, so the OutboundOnly trigger re-fires
+    /// only for an address it did not see, or over a transport it could not conclude
+    pub fn report_dial_info_detection(
+        &mut self,
+        routing_domain: RoutingDomain,
+        external_addresses: BTreeSet<Address>,
+        unexamined_transports: BTreeSet<TransportType>,
+    ) {
+        for address_type in AddressTypeSet::all() {
+            let seen: BTreeSet<Address> = external_addresses
+                .iter()
+                .filter(|a| a.address_type() == address_type)
+                .copied()
+                .collect();
+            if !seen.is_empty() {
+                self.detected_external_addresses
+                    .insert((routing_domain, address_type), seen);
+            }
+        }
+        self.unexamined_transports
+            .insert(routing_domain, unexamined_transports);
     }
 
     /// Accept a report of any peerinfo that has been -published-
@@ -136,8 +164,8 @@ impl AddressCheck {
                 self.address_inconsistency_table.remove(&acck);
                 self.address_consistency_table.remove(&acck);
 
-                // Leave the last-triggered dedups alone: re-arming detection on every
-                // publish loops forever on a symmetric NAT's stable address
+                // Leave the detected addresses and trigger dedups alone: re-arming detection
+                // on every publish loops forever on a symmetric NAT's stable address
             }
         }
 
@@ -399,10 +427,10 @@ impl AddressCheck {
         false
     }
 
-    // If we are currently outbound only, we don't have any public dial info
-    // but if we are starting to see consistent socket address from multiple reporting peers
-    // then we may be become inbound capable, so zap the network class so we can re-detect it and any public dial info
-    // lru the addresses we're seeing and if they all match (same ip only?) then trigger
+    // Outbound only, so no public dial info. Only when every recent reporter, from enough
+    // distinct networks, names one external address has the translator settled enough that a
+    // detection could find us inbound capable; a NAT that varies the address with the source
+    // port never gets there, and a stable one is detected once
     fn detect_for_outbound_only(
         &mut self,
         routing_domain: RoutingDomain, // the routing domain used by this flow
@@ -427,30 +455,36 @@ impl AddressCheck {
                 lruc
             });
 
-        // If we have at least N consistencies then trigger a detect
-        let mut consistencies = HashMap::<Address, usize>::new();
-        for (_k, v) in cache.iter() {
-            // Strip port because if we are outbound only we won't go inbound-capable
-            // unless the addresses are stable, and checking the port would unnecessarily
-            // prevert the detection of stable addresses
-            let address = v.address();
-
-            let count = *consistencies
-                .entry(address)
-                .and_modify(|e| *e += 1)
-                .or_insert(1);
-            if count >= ADDRESS_CONSISTENCY_DETECTION_COUNT {
-                // Fire once per distinct address: a symmetric NAT reports the same
-                // stable address forever, and detection must conclude exactly once
-                if self.last_outbound_triggered_address.get(&acckey) == Some(&address) {
-                    return false;
-                }
-                self.last_outbound_triggered_address.insert(acckey, address);
-                veilid_log!(registry debug "Address consistency detected for {:?}: {}", acckey, address);
-                return true;
-            }
+        if cache.len() < ADDRESS_CONSISTENCY_DETECTION_COUNT {
+            return false;
         }
-
-        false
+        // Ports are the translator's to vary; the address is what must hold still
+        let mut addresses = cache.iter().map(|(_, sa)| sa.address());
+        let Some(address) = addresses.next() else {
+            return false;
+        };
+        if !addresses.all(|a| a == address) {
+            return false;
+        }
+        // One detection covers every transport, so an address it saw re-fires only over a
+        // transport it reached no verdict on
+        let family_key = (routing_domain, address.address_type());
+        let seen = self
+            .detected_external_addresses
+            .get(&family_key)
+            .is_some_and(|addresses| addresses.contains(&address));
+        let unexamined = self
+            .unexamined_transports
+            .get_mut(&routing_domain)
+            .is_some_and(|transports| transports.remove(&flow.transport_type()));
+        if seen && !unexamined {
+            return false;
+        }
+        self.detected_external_addresses
+            .entry(family_key)
+            .or_default()
+            .insert(address);
+        veilid_log!(registry debug "Address consistency detected for {:?}: {}", acckey, address);
+        true
     }
 }

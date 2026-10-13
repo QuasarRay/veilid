@@ -24,3 +24,19 @@ pub fn test_internal_footgun_gate() {
         assert_eq!(*cfg.internal(), VeilidConfigInternal::default());
     }
 }
+
+// A config saved before `network.bind_retry_ms` existed still deserializes, with the default
+pub fn test_bind_retry_ms_defaults_when_absent() {
+    let mut json = serde_json::to_value(fake_veilid_config()).expect("serialize");
+    let network = json
+        .get_mut("network")
+        .and_then(|n| n.as_object_mut())
+        .expect("network object");
+    let removed = network
+        .remove("bind_retry_ms")
+        .or_else(|| network.remove("bindRetryMs"));
+    assert!(removed.is_some(), "the field is serialized");
+
+    let cfg: VeilidConfig = serde_json::from_value(json).expect("deserialize");
+    assert_eq!(cfg.network.bind_retry_ms, 10_000);
+}

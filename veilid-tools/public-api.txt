@@ -69,6 +69,7 @@ impl veilid_tools::ForegroundGuard
 pub fn veilid_tools::ForegroundGuard::begin(&'static str) -> core::option::Option<Self>
 impl core::ops::drop::Drop for veilid_tools::ForegroundGuard
 pub fn veilid_tools::ForegroundGuard::drop(&mut self)
+pub const fn veilid_tools::app_lifecycle::background_may_freeze() -> bool
 pub mod veilid_tools::assembly_buffer
 pub struct veilid_tools::assembly_buffer::AssemblyBuffer
 impl veilid_tools::AssemblyBuffer
@@ -255,6 +256,19 @@ pub fn veilid_tools::CloneStream<T>::poll_write(core::pin::Pin<&mut Self>, &mut 
 pub mod veilid_tools::cpu_pool
 pub fn veilid_tools::cpu_pool::cpu_pool_queue_depth() -> usize
 pub fn veilid_tools::cpu_pool::cpu_pool_spawn_fifo(alloc::boxed::Box<(dyn core::ops::function::FnOnce() + core::marker::Send)>)
+pub mod veilid_tools::deadline_timer
+pub struct veilid_tools::deadline_timer::DeadlineArmer
+impl veilid_tools::DeadlineArmer
+pub fn veilid_tools::DeadlineArmer::arm(&self, u64)
+pub struct veilid_tools::deadline_timer::DeadlineTimer
+impl veilid_tools::DeadlineTimer
+pub fn veilid_tools::DeadlineTimer::arm(&self, u64)
+pub fn veilid_tools::DeadlineTimer::armer(&self) -> veilid_tools::DeadlineArmer
+pub fn veilid_tools::DeadlineTimer::new(&str) -> Self
+pub fn veilid_tools::DeadlineTimer::start(&self, impl core::ops::function::Fn(u64, veilid_tools::stop_token::StopToken) -> veilid_tools::PinBoxFutureStatic<core::option::Option<u64>> + core::marker::Send + core::marker::Sync + 'static)
+pub async fn veilid_tools::DeadlineTimer::stop(&self)
+impl core::fmt::Debug for veilid_tools::DeadlineTimer
+pub fn veilid_tools::DeadlineTimer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub mod veilid_tools::debugging
 pub enum veilid_tools::debugging::DebuggerState
 pub veilid_tools::debugging::DebuggerState::Attached
@@ -707,6 +721,12 @@ pub veilid_tools::network_interfaces::AddressFlags::is_clat: bool
 pub veilid_tools::network_interfaces::AddressFlags::is_dynamic: bool
 pub veilid_tools::network_interfaces::AddressFlags::is_preferred: bool
 pub veilid_tools::network_interfaces::AddressFlags::is_temporary: bool
+pub struct veilid_tools::network_interfaces::EgressIdentity
+pub veilid_tools::network_interfaces::EgressIdentity::gateways: alloc::vec::Vec<core::net::ip_addr::IpAddr>
+pub veilid_tools::network_interfaces::EgressIdentity::interface: alloc::string::String
+pub veilid_tools::network_interfaces::EgressIdentity::source: core::option::Option<core::net::ip_addr::IpAddr>
+impl core::fmt::Display for veilid_tools::EgressIdentity
+pub fn veilid_tools::EgressIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct veilid_tools::network_interfaces::Ifv4Addr
 pub veilid_tools::network_interfaces::Ifv4Addr::broadcast: core::option::Option<core::net::ip_addr::Ipv4Addr>
 pub veilid_tools::network_interfaces::Ifv4Addr::ip: core::net::ip_addr::Ipv4Addr
@@ -769,6 +789,8 @@ pub fn veilid_tools::NetworkInterface::primary_ipv6(&self) -> core::option::Opti
 impl core::fmt::Debug for veilid_tools::NetworkInterface
 pub fn veilid_tools::NetworkInterface::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct veilid_tools::network_interfaces::NetworkInterfaceAddressState
+pub veilid_tools::network_interfaces::NetworkInterfaceAddressState::egress_v4: core::option::Option<veilid_tools::EgressIdentity>
+pub veilid_tools::network_interfaces::NetworkInterfaceAddressState::egress_v6: core::option::Option<veilid_tools::EgressIdentity>
 pub veilid_tools::network_interfaces::NetworkInterfaceAddressState::gateway_addresses: alloc::vec::Vec<core::net::ip_addr::IpAddr>
 pub veilid_tools::network_interfaces::NetworkInterfaceAddressState::interface_addresses: alloc::vec::Vec<veilid_tools::IfAddr>
 pub veilid_tools::network_interfaces::NetworkInterfaceAddressState::own_addresses: alloc::vec::Vec<core::net::ip_addr::IpAddr>
@@ -1072,6 +1094,7 @@ pub mod veilid_tools::tick_task
 pub struct veilid_tools::tick_task::TickTask<E: core::marker::Send + 'static>
 impl<E: core::marker::Send + core::fmt::Debug + 'static> veilid_tools::TickTask<E>
 pub fn veilid_tools::TickTask<E>::is_running(&self) -> bool
+pub async fn veilid_tools::TickTask<E>::join(&self) -> core::result::Result<(), E>
 pub fn veilid_tools::TickTask<E>::last_timestamp_us(&self) -> core::option::Option<u64>
 pub fn veilid_tools::TickTask<E>::new(&str, u32) -> Self
 pub fn veilid_tools::TickTask<E>::new_ms(&str, u32) -> Self
@@ -1164,6 +1187,18 @@ pub fn veilid_tools::tools::zeroed_u8_vec(usize) -> alloc::vec::Vec<u8>
 pub mod veilid_tools::tracked_mutex
 pub type veilid_tools::tracked_mutex::TrackedMutex<T> = parking_lot::mutex::Mutex<T>
 pub type veilid_tools::tracked_mutex::TrackedMutexGuard<'a, T> = parking_lot::mutex::MutexGuard<'a, T>
+pub mod veilid_tools::wakeup
+pub enum veilid_tools::wakeup::WakeOutcome
+pub veilid_tools::wakeup::WakeOutcome::Deadline
+pub veilid_tools::wakeup::WakeOutcome::Stopped
+pub veilid_tools::wakeup::WakeOutcome::Woken
+pub struct veilid_tools::wakeup::WakeReceiver
+impl veilid_tools::WakeReceiver
+pub async fn veilid_tools::WakeReceiver::wait(&self, core::option::Option<u64>, veilid_tools::stop_token::StopToken) -> veilid_tools::WakeOutcome
+pub struct veilid_tools::wakeup::WakeSender
+impl veilid_tools::WakeSender
+pub fn veilid_tools::WakeSender::wake(&self)
+pub fn veilid_tools::wakeup::wakeup() -> (veilid_tools::WakeSender, veilid_tools::WakeReceiver)
 pub mod veilid_tools::yield_timing
 pub struct veilid_tools::yield_timing::YieldTiming
 pub veilid_tools::yield_timing::YieldTiming::enqueued_us: u64
@@ -1298,6 +1333,10 @@ impl<T: core::fmt::Display> core::fmt::Display for veilid_tools::TimeoutOr<T>
 pub fn veilid_tools::TimeoutOr<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<T> core::convert::From<veilid_tools::TimeoutOr<T>> for core::option::Option<T>
 pub fn core::option::Option<T>::from(veilid_tools::TimeoutOr<T>) -> Self
+pub enum veilid_tools::WakeOutcome
+pub veilid_tools::WakeOutcome::Deadline
+pub veilid_tools::WakeOutcome::Stopped
+pub veilid_tools::WakeOutcome::Woken
 pub struct veilid_tools::AddressFlags
 pub veilid_tools::AddressFlags::expiration_secs: core::option::Option<u64>
 pub veilid_tools::AddressFlags::is_clat: bool
@@ -1488,6 +1527,18 @@ impl<T> futures_io::if_std::AsyncWrite for veilid_tools::CloneStream<T> where T:
 pub fn veilid_tools::CloneStream<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::io::error::Result<()>>
 pub fn veilid_tools::CloneStream<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::io::error::Result<()>>
 pub fn veilid_tools::CloneStream<T>::poll_write(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>, &[u8]) -> core::task::poll::Poll<core::io::error::Result<usize>>
+pub struct veilid_tools::DeadlineArmer
+impl veilid_tools::DeadlineArmer
+pub fn veilid_tools::DeadlineArmer::arm(&self, u64)
+pub struct veilid_tools::DeadlineTimer
+impl veilid_tools::DeadlineTimer
+pub fn veilid_tools::DeadlineTimer::arm(&self, u64)
+pub fn veilid_tools::DeadlineTimer::armer(&self) -> veilid_tools::DeadlineArmer
+pub fn veilid_tools::DeadlineTimer::new(&str) -> Self
+pub fn veilid_tools::DeadlineTimer::start(&self, impl core::ops::function::Fn(u64, veilid_tools::stop_token::StopToken) -> veilid_tools::PinBoxFutureStatic<core::option::Option<u64>> + core::marker::Send + core::marker::Sync + 'static)
+pub async fn veilid_tools::DeadlineTimer::stop(&self)
+impl core::fmt::Debug for veilid_tools::DeadlineTimer
+pub fn veilid_tools::DeadlineTimer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct veilid_tools::DebugGuard
 impl veilid_tools::DebugGuard
 pub fn veilid_tools::DebugGuard::new(&'static str, &'static core::sync::atomic::AtomicUsize) -> Self
@@ -1510,6 +1561,12 @@ pub fn veilid_tools::DeferredStreamProcessor::new() -> Self
 pub async fn veilid_tools::DeferredStreamProcessor::terminate(&self)
 impl core::default::Default for veilid_tools::DeferredStreamProcessor
 pub fn veilid_tools::DeferredStreamProcessor::default() -> Self
+pub struct veilid_tools::EgressIdentity
+pub veilid_tools::EgressIdentity::gateways: alloc::vec::Vec<core::net::ip_addr::IpAddr>
+pub veilid_tools::EgressIdentity::interface: alloc::string::String
+pub veilid_tools::EgressIdentity::source: core::option::Option<core::net::ip_addr::IpAddr>
+impl core::fmt::Display for veilid_tools::EgressIdentity
+pub fn veilid_tools::EgressIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct veilid_tools::EventBus
 impl veilid_tools::EventBus
 pub fn veilid_tools::EventBus::is_empty(&self) -> bool
@@ -1747,6 +1804,8 @@ pub fn veilid_tools::NetworkInterface::primary_ipv6(&self) -> core::option::Opti
 impl core::fmt::Debug for veilid_tools::NetworkInterface
 pub fn veilid_tools::NetworkInterface::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct veilid_tools::NetworkInterfaceAddressState
+pub veilid_tools::NetworkInterfaceAddressState::egress_v4: core::option::Option<veilid_tools::EgressIdentity>
+pub veilid_tools::NetworkInterfaceAddressState::egress_v6: core::option::Option<veilid_tools::EgressIdentity>
 pub veilid_tools::NetworkInterfaceAddressState::gateway_addresses: alloc::vec::Vec<core::net::ip_addr::IpAddr>
 pub veilid_tools::NetworkInterfaceAddressState::interface_addresses: alloc::vec::Vec<veilid_tools::IfAddr>
 pub veilid_tools::NetworkInterfaceAddressState::own_addresses: alloc::vec::Vec<core::net::ip_addr::IpAddr>
@@ -1879,6 +1938,7 @@ pub fn veilid_tools::TagLockTable<T>::fmt(&self, &mut core::fmt::Formatter<'_>) 
 pub struct veilid_tools::TickTask<E: core::marker::Send + 'static>
 impl<E: core::marker::Send + core::fmt::Debug + 'static> veilid_tools::TickTask<E>
 pub fn veilid_tools::TickTask<E>::is_running(&self) -> bool
+pub async fn veilid_tools::TickTask<E>::join(&self) -> core::result::Result<(), E>
 pub fn veilid_tools::TickTask<E>::last_timestamp_us(&self) -> core::option::Option<u64>
 pub fn veilid_tools::TickTask<E>::new(&str, u32) -> Self
 pub fn veilid_tools::TickTask<E>::new_ms(&str, u32) -> Self
@@ -1909,6 +1969,12 @@ pub type veilid_tools::VeilidRng::Error = never
 pub fn veilid_tools::VeilidRng::try_fill_bytes(&mut self, &mut [u8]) -> core::result::Result<(), Self::Error>
 pub fn veilid_tools::VeilidRng::try_next_u32(&mut self) -> core::result::Result<u32, Self::Error>
 pub fn veilid_tools::VeilidRng::try_next_u64(&mut self) -> core::result::Result<u64, Self::Error>
+pub struct veilid_tools::WakeReceiver
+impl veilid_tools::WakeReceiver
+pub async fn veilid_tools::WakeReceiver::wait(&self, core::option::Option<u64>, veilid_tools::stop_token::StopToken) -> veilid_tools::WakeOutcome
+pub struct veilid_tools::WakeSender
+impl veilid_tools::WakeSender
+pub fn veilid_tools::WakeSender::wake(&self)
 pub struct veilid_tools::YieldTiming
 pub veilid_tools::YieldTiming::enqueued_us: u64
 pub veilid_tools::YieldTiming::finished_us: u64
@@ -2063,6 +2129,7 @@ pub fn alloc::vec::Vec<T>::to_table_string_custom(&self, usize, usize, bool, boo
 pub fn veilid_tools::async_tcp_listener_incoming(tokio::net::tcp::listener::TcpListener) -> core::pin::Pin<alloc::boxed::Box<impl futures_core::stream::Stream<Item = core::io::error::Result<tokio::net::tcp::stream::TcpStream>> + core::marker::Send>>
 pub async fn veilid_tools::async_try_at_most_n_things<T, I, C, R, F>(usize, I, C) -> core::option::Option<R> where I: core::iter::traits::collect::IntoIterator<Item = T>, C: core::ops::function::Fn(T) -> F, F: core::future::future::Future<Output = core::option::Option<R>>
 pub fn veilid_tools::available_unspecified_addresses() -> alloc::vec::Vec<core::net::ip_addr::IpAddr>
+pub const fn veilid_tools::background_may_freeze() -> bool
 pub fn veilid_tools::bind_async_tcp_listener(core::net::socket_addr::SocketAddr) -> core::io::error::Result<core::option::Option<tokio::net::tcp::listener::TcpListener>>
 pub fn veilid_tools::bind_async_udp_socket(core::net::socket_addr::SocketAddr) -> core::io::error::Result<core::option::Option<tokio::net::udp::UdpSocket>>
 pub fn veilid_tools::bind_async_udp_socket_probed(core::net::socket_addr::SocketAddr) -> core::io::error::Result<core::option::Option<tokio::net::udp::UdpSocket>>
@@ -2162,6 +2229,7 @@ pub fn veilid_tools::try_at_most_n_things<T, I, C, R>(usize, I, C) -> core::opti
 pub fn veilid_tools::type_name_of_val<T: ?core::marker::Sized>(&T) -> &'static str
 pub fn veilid_tools::us_to_ms(u64) -> core::result::Result<u32, alloc::string::String>
 pub fn veilid_tools::wait_until_debugger_attached<T: core::convert::Into<core::option::Option<core::time::Duration>>>(T) -> core::result::Result<(), &'static str>
+pub fn veilid_tools::wakeup() -> (veilid_tools::WakeSender, veilid_tools::WakeReceiver)
 pub async fn veilid_tools::yielding<R, T: core::ops::function::FnOnce() -> R>(T) -> R
 pub fn veilid_tools::zeroed_u8_vec(usize) -> alloc::vec::Vec<u8>
 pub type veilid_tools::PinBox<T> = core::pin::Pin<alloc::boxed::Box<T>>

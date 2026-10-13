@@ -37,12 +37,30 @@ use std::path::{Path, PathBuf};
 impl_veilid_log_facility!("net");
 
 pub const MAX_DIAL_INFO_CONFIRM_FAILURE_COUNT: usize = 3;
-pub const UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS: u32 = 10;
-pub const UPDATE_OUTBOUND_ONLY_DIAL_INFO_MAX_PERIOD_SECS: u32 = 300;
 pub const UPDATE_DIAL_INFO_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const NETWORK_INTERFACES_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const UPNP_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const HOLE_PUNCH_TTL: u32 = 3;
+
+/// Native network durations derived from config
+#[derive(Clone, Copy, Debug)]
+pub(super) struct NativeNetworkTimings {
+    /// Time to deliver a dial info validation request before the receipt wait: 75% of a send
+    pub validate_dial_info_send_budget: TimestampDuration,
+    /// Backstop on a detection pass, whose steps carry their own timeouts: twelve RPC timeouts
+    pub dial_info_detection_timeout: TimestampDuration,
+}
+
+impl NativeNetworkTimings {
+    pub fn new(config: &VeilidConfig) -> Self {
+        let single_send_timeout =
+            TimestampDuration::new_ms(config.internal().network.single_send_timeout_ms.into());
+        Self {
+            validate_dial_info_send_budget: single_send_timeout.saturating_mul(75).div(100),
+            dial_info_detection_timeout: config.rpc_timeout().saturating_mul(12),
+        }
+    }
+}
 pub const PEEK_DETECT_LEN: usize = 64;
 
 /////////////////////////////////////////////////////////////////
@@ -59,11 +77,6 @@ struct NetworkInner {
     confirmed_validator_count: Option<usize>,
     /// result of resolving 'auto'/None detect_address_changes mode
     routing_domain_detect_address_changes: BTreeSet<RoutingDomain>,
-    /// the next time we are allowed to check for better dialinfo when we are OutboundOnly
-    next_outbound_only_dial_info_check: Timestamp,
-    /// current outbound-only recheck period; doubles when a confirmation finds no dial info,
-    /// resets when one does or when a reconfirmation is requested
-    outbound_only_dial_info_check_period_secs: u32,
     /// join handles for all the low level network background tasks
     join_handles: Vec<MustJoinHandle<()>>,
     /// stop source for shutting down the low level network background tasks
@@ -94,6 +107,8 @@ pub(super) struct NetworkUnlockedInner {
     interface_address_generation: AtomicU64,
     // Generation the public internet dial info was last confirmed on; 0 = never
     confirmed_interface_address_generation: AtomicU64,
+    // Generation an emptied connection table last asked to confirm
+    empty_table_requested_generation: AtomicU64,
 
     // Background processes
     confirm_dial_info_tasks: BTreeMap<RoutingDomain, TickTask<EyreReport>>,
@@ -104,6 +119,9 @@ pub(super) struct NetworkUnlockedInner {
     // Managers
     // None unless UPnP is enabled, so we never create the manager or emit SSDP when disabled
     igd_manager: Option<igd_manager::IGDManager>,
+
+    // Durations derived from config
+    timings: NativeNetworkTimings,
 }
 
 #[derive(Clone)]
@@ -795,41 +813,40 @@ impl PlatformNetwork for NativeNetwork {
         if !rdc.read_dyn().confirmed() {
             return false;
         }
-        // Real evidence of change makes the outbound-only recheck eager again
-        self.inner.lock().outbound_only_dial_info_check_period_secs =
-            UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS;
         let mut editor = rdc.edit_dyn();
         editor.set_confirmed(false);
         editor.commit();
         true
     }
 
-    fn interfaces_changed_since_confirm(&self) -> bool {
-        self.confirmed_interface_address_generation
-            .load(Ordering::Relaxed)
-            != self.interface_address_generation.load(Ordering::Relaxed)
+    fn request_confirm_after_empty_table(&self) -> bool {
+        let generation = self.interface_address_generation.load(Ordering::Relaxed);
+        if generation
+            == self
+                .confirmed_interface_address_generation
+                .load(Ordering::Relaxed)
+        {
+            return false;
+        }
+        // A failed detection keeps the generation unconfirmed, so remember the one asked for
+        if self
+            .empty_table_requested_generation
+            .swap(generation, Ordering::Relaxed)
+            == generation
+        {
+            return false;
+        }
+        self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
     }
 }
 
 impl NativeNetwork {
-    /// Upper bound on one send; a stalled connection parks channel sends forever otherwise
-    fn single_send_timeout_ms(&self) -> u32 {
-        let config = self.config();
-        let net_config = &config.internal().network;
-        net_config
-            .rpc
-            .timeout_ms
-            .min(net_config.single_send_timeout_ms)
-    }
-
     fn new_inner() -> NetworkInner {
         NetworkInner {
             network_needs_restart: false,
             dial_info_confirm_failure_count: BTreeMap::new(),
             confirmed_validator_count: None,
             routing_domain_detect_address_changes: BTreeSet::new(),
-            next_outbound_only_dial_info_check: Timestamp::default(),
-            outbound_only_dial_info_check_period_secs: UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS,
             join_handles: Vec::new(),
             stop_source: None,
             bound_address_per_protocol: BTreeMap::new(),
@@ -866,6 +883,7 @@ impl NativeNetwork {
             interfaces: NetworkInterfaces::new(),
             interface_address_generation: AtomicU64::new(0),
             confirmed_interface_address_generation: AtomicU64::new(0),
+            empty_table_requested_generation: AtomicU64::new(0),
             confirm_dial_info_tasks,
             network_interfaces_task: TickTask::new(
                 "network_interfaces_task",
@@ -874,6 +892,7 @@ impl NativeNetwork {
             upnp_task: TickTask::new("upnp_task", UPNP_TASK_TICK_PERIOD_SECS),
             network_task_lock: AsyncRwLock::new(()),
             igd_manager,
+            timings: NativeNetworkTimings::new(&config),
         }
     }
 
@@ -887,6 +906,21 @@ impl NativeNetwork {
         this.setup_tasks();
 
         this
+    }
+
+    /// Durations derived from config
+    pub(super) fn timings(&self) -> &NativeNetworkTimings {
+        &self.unlocked_inner.timings
+    }
+
+    /// Upper bound on one send; a stalled connection parks channel sends forever otherwise
+    fn single_send_timeout_ms(&self) -> u32 {
+        let config = self.config();
+        let net_config = &config.internal().network;
+        net_config
+            .rpc
+            .timeout_ms
+            .min(net_config.single_send_timeout_ms)
     }
 
     fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {

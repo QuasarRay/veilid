@@ -2,7 +2,7 @@ use futures_util::future::MaybeDone;
 
 use super::*;
 
-/// Durability signal for the outbound transaction check task.
+/// Durability signal for the outbound transaction expiry check
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(in crate::storage_manager) enum DurabilityExpiration {
     /// Durability already broken; drop now.
@@ -56,6 +56,12 @@ pub(in crate::storage_manager) struct OutboundTransactionState {
     /// Commit rounds recorded so far
     #[serde(default)]
     commit_rounds: u32,
+    /// Wakes an End waiting for its outstanding Sets to settle
+    #[serde(skip)]
+    opt_settle_wakeup: Option<WakeSender>,
+    /// The expiry check is waiting for the records lock to drop this transaction
+    #[serde(skip)]
+    expiry_drop_pending: bool,
 }
 
 impl fmt::Display for OutboundTransactionState {
@@ -121,6 +127,8 @@ impl OutboundTransactionState {
             background_tokens: vec![],
             route_refs: Vec::new(),
             commit_rounds: 0,
+            opt_settle_wakeup: None,
+            expiry_drop_pending: false,
         }
     }
 
@@ -128,8 +136,38 @@ impl OutboundTransactionState {
         self.kind
     }
 
+    /// Wake whoever waits for this transaction's outstanding Sets to settle
+    pub fn set_settle_wakeup(&mut self, settle_wakeup: WakeSender) {
+        self.opt_settle_wakeup = Some(settle_wakeup);
+    }
+
+    /// An outstanding Set settled
+    pub fn wake_settle(&self) {
+        if let Some(settle_wakeup) = &self.opt_settle_wakeup {
+            settle_wakeup.wake();
+        }
+    }
+
     pub fn commit_rounds(&self) -> u32 {
         self.commit_rounds
+    }
+
+    pub fn expiry_drop_pending(&self) -> bool {
+        self.expiry_drop_pending
+    }
+
+    pub fn set_expiry_drop_pending(&mut self, expiry_drop_pending: bool) {
+        self.expiry_drop_pending = expiry_drop_pending;
+    }
+
+    /// When the expiry check drops this transaction: at once when durability is lost, never while
+    /// no node needs keepalives
+    pub fn expiry(&self) -> Option<Timestamp> {
+        match self.durability_expiration() {
+            DurabilityExpiration::Lost => Some(Timestamp::new(0)),
+            DurabilityExpiration::AliveUntil(t) => Some(t),
+            DurabilityExpiration::NotApplicable => None,
+        }
     }
 
     pub(super) fn note_commit_round(&mut self) {

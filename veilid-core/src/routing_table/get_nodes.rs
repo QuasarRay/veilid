@@ -50,7 +50,7 @@ impl RoutingTable {
         // If any sequence ordering this node supports needs a timing-based ping
         // (or has never been pinged yet), schedule per-sequence-ordering pings.
         let sequence_orderings: SequenceOrderingSet =
-            snap.needs_proof_of_life_ping(routing_domain, outbound_dif);
+            snap.needs_proof_of_life_ping(routing_domain, outbound_dif, self.timings());
         if !sequence_orderings.is_empty() {
             veilid_log!(self debug target: "rtab::state::node", "Ping reason: reachability (rd={:?} ids={:?} sequence_orderings={:?})",
                 routing_domain, snap.node_ids, sequence_orderings);

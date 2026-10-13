@@ -30,7 +30,7 @@ impl RoutingTable {
         routing_domain_set: RoutingDomainSet,
     ) -> Vec<RoutingDomainControllerGuard<'_>> {
         self.routing_domains
-            .lock()
+            .load()
             .iter()
             .filter_map(|(k, v)| {
                 routing_domain_set
@@ -45,7 +45,7 @@ impl RoutingTable {
         routing_domain: RoutingDomain,
     ) -> RoutingDomainControllerGuard<'_> {
         self.routing_domains
-            .lock()
+            .load()
             .get(&routing_domain)
             .map(|v| RoutingDomainControllerGuard::new(v.clone()))
             .expect_or_log(&format!("routing domain not found: {}", routing_domain))
@@ -55,7 +55,7 @@ impl RoutingTable {
         &self,
     ) -> SpecificRoutingDomainControllerGuard<'_, C> {
         self.routing_domains
-            .lock()
+            .load()
             .get(&C::ROUTING_DOMAIN)
             .map(|v| {
                 SpecificRoutingDomainControllerGuard::new(
@@ -70,7 +70,7 @@ impl RoutingTable {
 
     pub fn routing_domain_for_address(&self, address: Address) -> Option<RoutingDomain> {
         self.routing_domains
-            .lock()
+            .load()
             .iter()
             .find_map(|(k, v)| v.read_dyn().can_contain_address(address).then_some(*k))
     }

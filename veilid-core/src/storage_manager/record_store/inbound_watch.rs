@@ -108,13 +108,13 @@ where
         }
     }
 
-    /// See if any watched records have expired and clear them out
+    /// Clear out the inbound watches that have expired, returning when the next one is due
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all)
     )]
-    pub fn drop_expired_inbound_watches(&self) {
-        self.inner.lock().drop_expired_inbound_watches();
+    pub fn drop_expired_inbound_watches(&self) -> Option<Timestamp> {
+        self.inner.lock().drop_expired_inbound_watches()
     }
 
     #[cfg_attr(

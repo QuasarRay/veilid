@@ -76,6 +76,9 @@ impl RPCProcessor {
             match request.kind {
                 // Process RPC Message
                 RPCWorkerRequestKind::Message { message_encoded } => {
+                    // Cloned, not formatted: formatting locks the sender's entry
+                    let opt_header = debug_target_enabled!("network_result")
+                        .then(|| message_encoded.header.clone());
                     network_result_value_or_log!(self target:"network_result", match self
                         .process_rpc_message(message_encoded).instrument(rpc_request_span)
                         .await
@@ -96,7 +99,7 @@ impl RPCProcessor {
                         Ok(v) => {
                             v
                         }
-                    } => [ format!(": msg.header={:?}", message_encoded.header) ] {});
+                    } => [ opt_header.map(|header| format!(": msg.header={:?}", header)).unwrap_or_default() ] {});
                 }
             }
 

@@ -353,6 +353,7 @@ impl RoutingDomainDetailCommon {
                             last_keepalive: cur_ts,
                             last_optimized: cur_ts,
                             selected_ts: cur_ts,
+                            selected_latency_samples: None,
                             best_tm90: None,
                         });
                 }

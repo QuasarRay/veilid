@@ -17,9 +17,11 @@ use super::*;
 
 pub async fn test_all() {
     test_route_stats::test_all();
+    test_route_stats::test_dead_route_hops_hold_in_their_epoch().await;
     test_serialize_routing_table::test_kick_preserves_best_node_id().await;
     test_serialize_routing_table::test_load_rejects_entries_without_node_ids().await;
     test_serialize_routing_table::test_replace_node_ids_rejects_without_valid_id().await;
+    test_serialize_routing_table::test_register_known_node_keeps_entry().await;
     test_serialize_routing_table::test_routingtable_buckets_round_trip().await;
     test_serialize_routing_table::test_round_trip_peerinfo().await;
     test_signed_node_info::test_signed_node_info().await;
@@ -37,6 +39,7 @@ pub async fn test_all() {
     test_network_estimator::test_network_estimator_entered_slot_zeros_old_data();
     test_network_estimator::test_network_estimator_combined_single_kind();
     test_network_estimator::test_network_estimator_clock_backward_ignored();
+    test_nodes_needed::test_routing_table_timings_at_default_rpc_timeout();
     test_nodes_needed::test_nodes_needed_empty_table_bootstraps();
     test_nodes_needed::test_nodes_needed_stale_table_inflation_capped();
     test_nodes_needed::test_nodes_needed_fresh_small_table_uses_fraction();

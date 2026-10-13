@@ -194,6 +194,7 @@ impl<R: RecordLockPurpose, S: RecordLockPurpose> RecordLockTable<R, S> {
             .await
     }
 
+    #[expect(dead_code)]
     pub fn try_lock_records(
         &self,
         mut records: Vec<OpaqueRecordKey>,

@@ -168,9 +168,32 @@ impl fmt::Debug for StorageManagerInner {
     }
 }
 
+/// Storage manager durations derived from config
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StorageManagerTimings {
+    /// How long before expiration to renew per-node watches
+    pub renew_outbound_watches: TimestampDuration,
+    /// Background transactions wait this long after foreground activity: one RPC timeout
+    pub background_quiet: TimestampDuration,
+}
+
+impl StorageManagerTimings {
+    pub fn new(config: &VeilidConfig) -> Self {
+        let get_value_timeout =
+            TimestampDuration::new_ms(config.internal().network.dht.get_value_timeout_ms.into());
+        Self {
+            renew_outbound_watches: get_value_timeout
+                .saturating_mul(RENEW_OUTBOUND_WATCHES_GET_TIMEOUT_MULTIPLIER),
+            background_quiet: config.rpc_timeout(),
+        }
+    }
+}
+
 pub(crate) struct StorageManager {
     /// Component registry this manager belongs to
     registry: VeilidComponentRegistry,
+    /// Durations derived from config
+    timings: StorageManagerTimings,
     /// Record and transaction state, behind the manager's main lock
     inner: StatsMutex<StorageManagerInner>,
     /// Outbound watch state on its own lock; lock order is record lock, then `inner`, then this
@@ -196,12 +219,14 @@ pub(crate) struct StorageManager {
     send_value_changes_task: TickTask<EyreReport>,
     /// Sweeps outbound watches
     check_outbound_watches_task: TickTask<EyreReport>,
-    /// Sweeps inbound watches
-    check_inbound_watches_task: TickTask<EyreReport>,
-    /// Sweeps outbound transactions
-    check_outbound_transactions_task: TickTask<EyreReport>,
-    /// Sweeps inbound transactions
-    check_inbound_transactions_task: TickTask<EyreReport>,
+    /// Drops inbound watches as they expire
+    check_inbound_watches_timer: DeadlineTimer,
+    /// Drops outbound transactions as they expire
+    check_outbound_transactions_timer: DeadlineTimer,
+    /// Drops inbound transactions as they expire
+    check_inbound_transactions_timer: DeadlineTimer,
+    /// Restarts background work deferred for foreground transactions when the quiet window ends
+    background_quiet_timer: DeadlineTimer,
     /// Pushes records the network is missing back out
     rehydrate_records_task: TickTask<EyreReport>,
 
@@ -277,8 +302,10 @@ impl StorageManager {
         let outbound_transaction_manager = OutboundTransactionManager::new(registry.clone());
         #[cfg(feature = "stats")]
         let transaction_quality = outbound_transaction_manager.transaction_quality().clone();
+        let timings = StorageManagerTimings::new(&registry.config());
 
         let this = StorageManager {
+            timings,
             inner: StatsMutex::new(
                 StorageManagerInner {
                     opened_records: Default::default(),
@@ -327,18 +354,14 @@ impl StorageManager {
                 "check_outbound_watches_task",
                 CHECK_OUTBOUND_WATCHES_INTERVAL_SECS,
             ),
-            check_inbound_watches_task: TickTask::new(
-                "check_inbound_watches_task",
-                CHECK_INBOUND_WATCHES_INTERVAL_SECS,
+            check_inbound_watches_timer: DeadlineTimer::new("check_inbound_watches_timer"),
+            check_outbound_transactions_timer: DeadlineTimer::new(
+                "check_outbound_transactions_timer",
             ),
-            check_outbound_transactions_task: TickTask::new(
-                "check_outbound_transactions_task",
-                CHECK_OUTBOUND_TRANSACTIONS_INTERVAL_SECS,
+            check_inbound_transactions_timer: DeadlineTimer::new(
+                "check_inbound_transactions_timer",
             ),
-            check_inbound_transactions_task: TickTask::new(
-                "check_inbound_transactions_task",
-                CHECK_INBOUND_TRANSACTIONS_INTERVAL_SECS,
-            ),
+            background_quiet_timer: DeadlineTimer::new("background_quiet_timer"),
             rehydrate_records_task: TickTask::new(
                 "rehydrate_records_task",
                 REHYDRATE_RECORDS_INTERVAL_SECS,
@@ -371,6 +394,11 @@ impl StorageManager {
     #[cfg(feature = "stats")]
     fn transaction_quality(&self) -> &Arc<Mutex<TransactionQualityAccounting>> {
         &self.transaction_quality
+    }
+
+    /// Durations derived from config
+    pub(crate) fn timings(&self) -> &StorageManagerTimings {
+        &self.timings
     }
 
     pub(crate) fn local_limits_from_config(c: Arc<VeilidConfig>) -> RecordStoreLimits {
@@ -459,9 +487,18 @@ impl StorageManager {
         let local_limits = Self::local_limits_from_config(config.clone());
         let remote_limits = Self::remote_limits_from_config(config.clone());
 
-        let local_record_store = RecordStore::try_new(&table_store, "local", local_limits).await?;
-        let remote_record_store =
-            RecordStore::try_new(&table_store, "remote", remote_limits).await?;
+        let local_record_store =
+            RecordStore::try_new(&table_store, "local", local_limits, None).await?;
+        let remote_record_store = RecordStore::try_new(
+            &table_store,
+            "remote",
+            remote_limits,
+            Some(InboundExpiryArmers {
+                watches: self.check_inbound_watches_timer.armer(),
+                transactions: self.check_inbound_transactions_timer.armer(),
+            }),
+        )
+        .await?;
 
         {
             let mut inner = self.inner.lock();
@@ -471,6 +508,9 @@ impl StorageManager {
 
             // Start up outbound transaction manager
             inner.outbound_transaction_manager.init();
+            inner
+                .outbound_transaction_manager
+                .set_expiry_armer(self.check_outbound_transactions_timer.armer());
 
             // Terminal delivery only queues: drop_transaction spawns it while holding
             // the inner lock
@@ -490,6 +530,8 @@ impl StorageManager {
 
         // Start deferred results processors
         self.background_operation_processor.init();
+
+        self.start_deadline_timers();
 
         guard.success();
 
@@ -573,7 +615,7 @@ impl StorageManager {
             .await
             .expect_or_log("should be started up");
 
-        // Cancel all tasks associated with the tick future
+        // Stop the tick tasks and the expiry timers
         self.cancel_tasks().await;
 
         // Shutdown keepalive processor
@@ -817,18 +859,24 @@ impl StorageManager {
     }
 
     /// Mark foreground transaction activity, deferring background transactions
-    /// for the quiet interval
+    /// for the quiet window
     fn touch_foreground_transaction_activity(&self) {
+        let cur_ts = Timestamp::now_non_decreasing();
         self.last_foreground_transaction_ts
-            .store(Timestamp::now_non_decreasing().as_u64(), Ordering::Release);
+            .store(cur_ts.as_u64(), Ordering::Release);
+        self.background_quiet_timer
+            .arm(cur_ts.later(self.timings.background_quiet).as_u64());
+    }
+
+    /// When the quiet window after the last foreground transaction activity ends
+    fn background_quiet_until(&self) -> Timestamp {
+        Timestamp::new(self.last_foreground_transaction_ts.load(Ordering::Acquire))
+            .later(self.timings.background_quiet)
     }
 
     /// Background transactions run only when no foreground transaction is active or recent
     fn background_transactions_allowed(&self) -> bool {
-        let last_fg_ts =
-            Timestamp::new(self.last_foreground_transaction_ts.load(Ordering::Acquire));
-        if Timestamp::now_non_decreasing() < last_fg_ts.later(BACKGROUND_TRANSACTION_QUIET_INTERVAL)
-        {
+        if Timestamp::now_non_decreasing() < self.background_quiet_until() {
             return false;
         }
         !self
@@ -1006,6 +1054,8 @@ impl StorageManager {
         let now_online = evt.is_ready_inbound && evt.is_ready_outbound;
         let was_online = self.is_online.swap(now_online, Ordering::AcqRel);
         if now_online && !was_online {
+            // Expired transactions are dropped only while online
+            self.check_outbound_transactions_timer.arm(0);
             // A new network invalidates learned budgets
             self.reset_gated_operation_budgets();
             veilid_log!(self debug "network came back online, change inspecting all watches");
@@ -1025,10 +1075,14 @@ impl StorageManager {
     /// node; a watch established or renewed then may never have been accepted, and
     /// a change it should have delivered is not coming. Same answer as coming back
     /// online: now, rather than at each watch's backed-off interval.
+    ///
+    /// A period held only by this node's own stalls is left to those intervals: a throttled
+    /// process stalls every minute or so, and a sweep after each would be most of its traffic.
     pub(super) fn online_state_change_reinspects_watches(evt: &OnlineStateChangeEvent) -> bool {
         evt.routing_domain == RoutingDomain::PublicInternet
             && evt.old_state == OnlineState::Degraded
             && evt.new_state == OnlineState::Online
+            && !evt.local_stall_only
     }
 
     /// Whether outbound watch network work waits: offline, nothing gets through, and one
@@ -1044,11 +1098,14 @@ impl StorageManager {
         }
     }
 
-    /// On the move to the background, saves at once: a kill while frozen loses what is unsaved,
-    /// and the event holds the platform's background time only until this returns
+    /// On the move to the background, saves at once where the platform freezes it there: a kill
+    /// while frozen loses what is unsaved, and the event holds the platform's background time
+    /// only until this returns
     #[cfg(feature = "app-lifecycle")]
     async fn app_lifecycle_event_handler(&self, evt: Arc<AppLifecycleEvent>) {
-        let background = evt.state == VeilidAppLifecycleState::Background;
+        // A hidden desktop app keeps running, so its saves keep the foreground schedule
+        let background =
+            evt.state == VeilidAppLifecycleState::Background && background_may_freeze();
         self.metadata_save_schedule
             .lock()
             .set_background(background);

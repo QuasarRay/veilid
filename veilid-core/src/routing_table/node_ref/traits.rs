@@ -57,12 +57,14 @@ pub(crate) trait NodeRefCommonTrait:
         });
     }
     fn best_routing_domain(&self) -> Option<RoutingDomain> {
-        self.operate(|e| {
-            let routing_table = self.routing_table();
-            e.best_routing_domain(&routing_table, self.routing_domain_set())
-        })
+        let routing_table = self.routing_table();
+        self.operate(|e| e.best_routing_domain(&routing_table, self.routing_domain_set()))
     }
     fn add_envelope_version(&self, envelope_version: EnvelopeVersion) {
+        // Every envelope carries a version the sender is already known to support
+        if self.operate(|e| e.supports_envelope_version(envelope_version)) {
+            return;
+        }
         self.operate_mut(|e| e.add_envelope_version(envelope_version))
     }
     fn best_envelope_version(&self) -> Option<EnvelopeVersion> {
@@ -105,22 +107,24 @@ pub(crate) trait NodeRefCommonTrait:
         })
     }
     fn has_seen_our_node_info_ts(&self, routing_domain: RoutingDomain) -> bool {
-        self.operate(|e| {
-            let routing_table = self.routing_table();
-            let Some(our_node_info_ts) = routing_table
-                .get_published_peer_info(routing_domain)
-                .map(|pi| pi.node_info().timestamp())
-            else {
-                return false;
-            };
-            e.has_seen_our_node_info_ts(routing_domain, our_node_info_ts)
-        })
+        let Some(our_node_info_ts) = self
+            .routing_table()
+            .get_published_peer_info(routing_domain)
+            .map(|pi| pi.node_info().timestamp())
+        else {
+            return false;
+        };
+        self.operate(|e| e.has_seen_our_node_info_ts(routing_domain, our_node_info_ts))
     }
     fn set_seen_our_node_info_ts(
         &self,
         routing_domain: RoutingDomain,
         seen_ts: Timestamp,
     ) -> Option<Timestamp> {
+        // Nearly every message repeats the timestamp the entry already holds
+        if self.operate(|e| e.has_seen_our_node_info_ts(routing_domain, seen_ts)) {
+            return None;
+        }
         self.operate_mut(|e| e.set_seen_our_node_info_ts(routing_domain, seen_ts))
     }
     // DialInfo
@@ -180,9 +184,9 @@ pub(crate) trait NodeRefCommonTrait:
     /// Get the most recent 'last connection' to this node matching the node ref filter
     /// Filtered first and then sorted by ordering preference and then by most recent
     fn last_flow(&self) -> Option<Flow> {
+        let routing_table = self.routing_table();
         self.operate(|e| {
             // apply sequencing to filter and get sort
-            let routing_table = self.routing_table();
             let sequencing = self.sequencing();
             let filter = self.filter();
             let (ordering, filter) = filter.apply_sequencing(sequencing);
@@ -201,8 +205,8 @@ pub(crate) trait NodeRefCommonTrait:
     /// Filtered first and then sorted by ordering preference and then by most recent
     #[expect(dead_code)]
     fn last_flows(&self) -> Vec<Flow> {
+        let routing_table = self.routing_table();
         self.operate(|e| {
-            let routing_table = self.routing_table();
             // apply sequencing to filter and get sort
             let sequencing = self.sequencing();
             let filter = self.filter();
@@ -222,8 +226,8 @@ pub(crate) trait NodeRefCommonTrait:
     /// their outbound source port, so one connection exists between two nodes and its remote
     /// is the dial info; a flow relayed in from elsewhere has a different remote and never matches.
     fn last_flow_to(&self, remote: SocketAddress) -> Option<Flow> {
+        let routing_table = self.routing_table();
         self.operate(|e| {
-            let routing_table = self.routing_table();
             let sequencing = self.sequencing();
             let filter = self.filter();
             let (_ordering, filter) = filter.apply_sequencing(sequencing);
@@ -255,17 +259,15 @@ pub(crate) trait NodeRefCommonTrait:
     }
 
     fn is_relaying(&self, routing_domain: RoutingDomain) -> bool {
-        self.operate(|e| {
-            let routing_table = self.routing_table();
-            let Some(relay_ids) = e
-                .node_info(routing_domain)
+        let Some(relay_ids) = self.operate(|e| {
+            e.node_info(routing_domain)
                 .map(|node_info| node_info.relay_ids())
-            else {
-                return false;
-            };
-            let our_node_ids = routing_table.node_ids();
-            our_node_ids.contains_any_from_iter(relay_ids.iter())
-        })
+        }) else {
+            return false;
+        };
+        self.routing_table()
+            .node_ids()
+            .contains_any_from_iter(relay_ids.iter())
     }
 
     fn has_any_dial_info(&self) -> bool {
@@ -296,6 +298,10 @@ pub(crate) trait NodeRefCommonTrait:
     }
 
     fn report_contact_method_result(&self, cm: &ContactMethod, success: bool) {
+        // A success clears a recorded failure, and most successes have none to clear
+        if success && self.operate(|e| e.get_contact_method_failure_ts(cm).is_none()) {
+            return;
+        }
         self.operate_mut(|e| {
             e.report_contact_method_result(cm, success);
         })
@@ -366,6 +372,12 @@ pub(crate) trait NodeRefCommonTrait:
         bytes: ByteCount,
     ) {
         self.operate_mut(|e| e.record_routed_round_trip(key, send_ts, recv_ts, bytes))
+    }
+    fn stats_routed_lost_question(&self, epoch: LossEpoch) {
+        self.operate_mut(|e| e.record_routed_lost_question(epoch))
+    }
+    fn stats_routed_answer(&self) {
+        self.operate_mut(|e| e.record_routed_answer())
     }
     fn stats_failed_to_send(
         &self,

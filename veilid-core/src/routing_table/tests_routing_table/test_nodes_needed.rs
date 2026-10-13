@@ -6,7 +6,42 @@ fn needed(
     counts: KindNodeCounts,
     no_responsive_elapsed: Option<TimestampDuration>,
 ) -> KindNodesNeeded {
-    nodes_needed_for_counts(counts, MIN_PEER_COUNT, no_responsive_elapsed)
+    let rpc_timeout =
+        TimestampDuration::new_ms(VeilidConfigInternalRPC::default().timeout_ms.into());
+    nodes_needed_for_counts(
+        counts,
+        MIN_PEER_COUNT,
+        no_responsive_elapsed,
+        RoutingTableTimings::new(rpc_timeout).no_responsive_bootstrap_delay,
+    )
+}
+
+/// At the default RPC timeout the derived routing table durations keep their tuned values
+pub fn test_routing_table_timings_at_default_rpc_timeout() {
+    info!("--- test_routing_table_timings_at_default_rpc_timeout ---");
+    let rpc_timeout =
+        TimestampDuration::new_ms(VeilidConfigInternalRPC::default().timeout_ms.into());
+    let timings = RoutingTableTimings::new(rpc_timeout);
+    assert_eq!(
+        timings.unreliable_ping_interval,
+        TimestampDuration::new_secs(5)
+    );
+    assert_eq!(
+        timings.bootstrap_txt_timeout,
+        TimestampDuration::new_secs(10)
+    );
+    assert_eq!(
+        timings.no_responsive_bootstrap_delay,
+        TimestampDuration::new_secs(10)
+    );
+    assert_eq!(
+        timings.liveness.unreliable_answer,
+        TimestampDuration::new_secs(60)
+    );
+    assert_eq!(
+        timings.liveness.dead_lost_question,
+        TimestampDuration::new_secs(60)
+    );
 }
 
 pub fn test_nodes_needed_empty_table_bootstraps() {

@@ -195,7 +195,7 @@ fn core_log_tail(lines: usize) -> String {
 /// later, and below every platform's ephemeral range (Linux 32768+, macOS and Windows 49152+):
 /// an ephemeral pick can be handed to any process's next outbound connection between this probe
 /// and the node's bind and then stays taken on TCP for that connection's life, while a node that
-/// loses its bind retries only every BIND_WAIT_DELAY, which outlives this test's own timeout.
+/// loses its bind retries only every `network.bind_retry_ms`, longer than this test's timeout.
 fn free_port() -> u16 {
     let micros = Timestamp::now().as_u64();
     let base = 10_000 + ((u64::from(std::process::id()) ^ micros) % 22_000) as u16;
@@ -535,7 +535,7 @@ pub fn test_txt_records_survive_restart() {
 }
 
 /// The failure `free_port` exists to prevent, on demand. A node that loses either bind retries
-/// only every BIND_WAIT_DELAY (10 s in veilid-core), so a port held for the length of a test run
+/// only every `network.bind_retry_ms` (10 s by default), so a port held for a whole test run
 /// shows up as `network never started` and nothing else. Holding UDP and holding TCP are separate
 /// cases because an ephemeral port the OS hands out for one says nothing about the other, which
 /// is how this reached the gate in the first place.

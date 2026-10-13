@@ -121,20 +121,27 @@ impl InboundWatches {
         Ok(true)
     }
 
+    /// Drop the expired watches, returning when the next one left is due
     pub fn remove_expired_watches<D: Fn(InboundWatchId), L: Fn(VeilidAPIError)>(
         &mut self,
         now: Timestamp,
         debug_logger: &D,
         error_logger: &L,
-    ) {
+    ) -> Option<Timestamp> {
+        let mut opt_next_due: Option<Timestamp> = None;
         self.record_watches.retain(|_, inbound_watch_list| {
-            inbound_watch_list.drop_expired_watches(
+            let Some(next_due) = inbound_watch_list.drop_expired_watches(
                 now,
                 &mut self.watch_id_allocator,
                 debug_logger,
                 error_logger,
-            )
+            ) else {
+                return false;
+            };
+            opt_next_due = Some(opt_next_due.map_or(next_due, |due| due.min(next_due)));
+            true
         });
+        opt_next_due
     }
 
     pub fn debug(&self) -> String {

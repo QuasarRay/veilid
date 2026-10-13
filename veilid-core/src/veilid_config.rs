@@ -515,6 +515,10 @@ pub struct VeilidConfigNetwork {
     pub upnp: bool,
     /// Watch for and react to local address changes (`None` = auto-detect).
     pub detect_address_changes: Option<bool>,
+    /// Wait before retrying a listen address that failed to bind, in milliseconds.
+    #[serde(default = "default_bind_retry_ms")]
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), tsify(optional))]
+    pub bind_retry_ms: u32,
     /// TLS configuration for inbound secure protocols.
     pub tls: VeilidConfigTLS,
     /// Per-protocol (UDP/TCP/WS/WSS) configuration.
@@ -537,6 +541,7 @@ impl Default for VeilidConfigNetwork {
             dht: VeilidConfigDHT::default(),
             upnp: true,
             detect_address_changes: Some(true),
+            bind_retry_ms: default_bind_retry_ms(),
             tls: VeilidConfigTLS::default(),
             protocol: VeilidConfigProtocol::default(),
             privacy: VeilidConfigPrivacy::default(),
@@ -544,6 +549,11 @@ impl Default for VeilidConfigNetwork {
             virtual_network: VeilidConfigVirtualNetwork::default(),
         }
     }
+}
+
+/// Default for bind_retry_ms (single source for serde + Default).
+fn default_bind_retry_ms() -> u32 {
+    10_000
 }
 
 /// Table store configuration: the encrypted key-value database backing node state.
@@ -1128,6 +1138,7 @@ impl VeilidConfig {
             default()
         }
     }
+
     /// Create a new 'VeilidConfig' for use with `setup_from_config`
     /// Should match the application bundle name if used elsewhere in the format:
     /// `qualifier.organization.program_name` - for example `org.veilid.veilidchat`
@@ -1212,6 +1223,11 @@ impl VeilidConfig {
         safe_cfg.protected_store.new_device_encryption_key_password = None;
 
         Arc::new(safe_cfg)
+    }
+
+    /// The RPC reply timeout, the base most other durations derive from
+    pub(crate) fn rpc_timeout(&self) -> TimestampDuration {
+        TimestampDuration::new_ms(self.internal().network.rpc.timeout_ms.into())
     }
 
     /// Serialize the config, or the subtree at a dot-separated `key` path, to JSON. Empty `key` returns the whole config.

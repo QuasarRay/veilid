@@ -68,7 +68,7 @@ impl RPCProcessor {
         // This can only be sent directly, as relays can not validate dial info
         network_result_value_or_log!(self self.statement(Destination::direct(
             peer.custom_filtered(node_ref_filter).with_sequencing(Sequencing::PreferOrdered),
-            None), statement, None, None)
+            None), statement.clone(), None, None)
             .await? => [ format!(": peer={} statement={:?}", peer, statement) ] {
                 return Ok(DialInfoValidationOutcome::Inconclusive);
             }
@@ -207,7 +207,7 @@ impl RPCProcessor {
 
                 // Send the validate_dial_info request
                 // This can only be sent directly, as relays can not validate dial info
-                network_result_value_or_log!(self pin_future_closure!(self.statement(Destination::direct(peer.sequencing_filtered(Sequencing::PreferUnordered), None), statement, None, None))
+                network_result_value_or_log!(self pin_future_closure!(self.statement(Destination::direct(peer.sequencing_filtered(Sequencing::PreferUnordered), None), statement.clone(), None, None))
                     .await? => [ format!(": peer={} statement={:?}", peer, statement) ] {
                         continue;
                     }

@@ -384,7 +384,7 @@ pub fn attach() -> Promise {
 pub fn detach() -> Promise {
     wrap_api_future_void(async move {
         let veilid_api = get_veilid_api()?;
-        // symmetric with attach: "already detached" is another caller's doing, not an error
+        // symmetric with attach: "not attached" is another caller's doing, not an error
         if let Err(e) = veilid_api.detach().await {
             if !matches!(e, veilid_core::VeilidAPIError::Generic { .. }) {
                 return Err(e);

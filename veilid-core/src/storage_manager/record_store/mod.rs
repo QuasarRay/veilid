@@ -49,14 +49,42 @@ pub(super) enum CommitActionFlushMode {
 }
 
 pub(super) struct RecordStoreUnlockedInner {
+    /// Component registry this store belongs to
     registry: VeilidComponentRegistry,
+    /// Store name, the prefix of its table names
     name: String,
+    /// Size, count and expiration limits from config
     limits: RecordStoreLimits,
 
     /// The tabledb used for record data
     record_table: TableDB,
     /// The tabledb used for subkey data
     subkey_table: TableDB,
+    /// Arms the expiry checks of the store that holds inbound watches and transactions
+    opt_inbound_expiry: Option<InboundExpiryArmers>,
+}
+
+impl RecordStoreUnlockedInner {
+    fn arm_inbound_watch_expiry(&self, drop_due: Timestamp) {
+        if let Some(inbound_expiry) = &self.opt_inbound_expiry {
+            inbound_expiry.watches.arm(drop_due.as_u64());
+        }
+    }
+
+    fn arm_inbound_transaction_expiry(&self, expiration: Timestamp) {
+        if let Some(inbound_expiry) = &self.opt_inbound_expiry {
+            inbound_expiry.transactions.arm(expiration.as_u64());
+        }
+    }
+}
+
+/// Arms the checks that drop expired inbound watches and transactions
+#[derive(Clone, Debug)]
+pub(super) struct InboundExpiryArmers {
+    /// Armed with each new or changed watch's drop time
+    pub watches: DeadlineArmer,
+    /// Armed with each new transaction's expiration
+    pub transactions: DeadlineArmer,
 }
 
 /// Record detail trait
@@ -125,6 +153,7 @@ where
         table_store: &TableStore,
         name: &str,
         limits: RecordStoreLimits,
+        opt_inbound_expiry: Option<InboundExpiryArmers>,
     ) -> EyreResult<Self> {
         let record_table = table_store.open(&format!("{}_records", name), 1).await?;
         let subkey_table = table_store
@@ -139,6 +168,7 @@ where
             limits,
             record_table,
             subkey_table,
+            opt_inbound_expiry,
         });
 
         let inner = RecordStoreInner::<D>::try_new(unlocked_inner.clone()).await?;
@@ -825,13 +855,13 @@ where
             .inbound_transaction_set(opaque_record_key, transaction_id, subkey, value)
     }
 
-    /// See if any inbound transactions have expired and clear them out
+    /// Clear out the inbound transactions that have expired, returning when the next one expires
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all)
     )]
-    pub fn drop_expired_inbound_transactions(&self) {
-        self.inner.lock().drop_expired_inbound_transactions();
+    pub fn drop_expired_inbound_transactions(&self) -> Option<Timestamp> {
+        self.inner.lock().drop_expired_inbound_transactions()
     }
 
     pub fn total_storage_space(&self) -> u64 {

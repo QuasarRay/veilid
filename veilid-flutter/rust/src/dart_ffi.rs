@@ -718,7 +718,7 @@ pub extern "C" fn detach(port: i64) {
     DartIsolateWrapper::new(port).spawn_result(
         async move {
             let veilid_api = get_veilid_api().await?;
-            // symmetric with attach: "already detached" is another caller's doing, not an error
+            // symmetric with attach: "not attached" is another caller's doing, not an error
             if let Err(e) = veilid_api.detach().await {
                 if !matches!(e, VeilidAPIError::Generic { .. }) {
                     return VeilidAPIResult::Err(e);

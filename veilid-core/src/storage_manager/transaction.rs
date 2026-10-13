@@ -45,6 +45,27 @@ impl StorageManager {
         .await
     }
 
+    /// The slowest reply timeout among these records' safety selections; the base RPC timeout for
+    /// a record that is not open
+    fn records_reply_timeout(&self, opaque_record_keys: &[OpaqueRecordKey]) -> TimestampDuration {
+        let rpc_processor = self.rpc_processor();
+        let base_timeout = self.config().rpc_timeout();
+        let inner = self.inner.lock();
+        opaque_record_keys
+            .iter()
+            .map(|key| {
+                inner
+                    .opened_records
+                    .get(key)
+                    .map_or(base_timeout, |opened_record| {
+                        rpc_processor
+                            .get_safety_selection_timeout(&opened_record.safety_selection())
+                    })
+            })
+            .max()
+            .unwrap_or(base_timeout)
+    }
+
     /// Shared core of begin_transaction used by both the public API and background transactions.
     /// `signer_source` controls how each record's transaction signing keypair is resolved, and for
     /// background transactions carries the Peek locks (released here once the TransactBegin lock is
@@ -101,13 +122,17 @@ impl StorageManager {
                 // - lock_records sorts, so queueing here is deadlock-safe
                 // - the timeout breaks any residual cycle and keeps the TryAgain
                 //   contract for genuinely stuck holders
+                let lock_timeout = self
+                    .records_reply_timeout(&opaque_record_keys)
+                    .saturating_mul(BACKGROUND_BEGIN_LOCK_TIMEOUT_PERCENT)
+                    .div(100);
                 match self
                     .record_lock_table
                     .lock_records(
                         opaque_record_keys.clone(),
                         StorageManagerRecordLockPurpose::TransactBegin,
                     )
-                    .timeout_duration(TimestampDuration::new_ms(BACKGROUND_BEGIN_LOCK_TIMEOUT_MS))
+                    .timeout_duration(lock_timeout)
                     .await
                 {
                     Ok(records_lock) => records_lock,
@@ -898,17 +923,24 @@ impl StorageManager {
 
                 // Vote only where nothing can land after End; see the doc comment
                 let wait_deadline = Timestamp::now().later(rpc_timeout);
+                let stop_token = self
+                    .startup_lock
+                    .stop_token()
+                    .ok_or_else(VeilidAPIError::not_initialized)?;
+                let (settle_sender, settle_receiver) = wakeup();
                 #[cfg(feature = "stats")]
                 let mut opt_wait_start: Option<Timestamp> = None;
                 let (command_params_list, non_voters) = loop {
-                    let plan = self
-                        .inner
-                        .lock()
-                        .outbound_transaction_manager
-                        .plan_transact_end(transaction_handle)
-                        .inspect_err(|e| {
+                    let plan = {
+                        let mut inner = self.inner.lock();
+                        let otm = &mut inner.outbound_transaction_manager;
+                        let plan = otm.plan_transact_end(transaction_handle).inspect_err(|e| {
                             veilid_log!(self debug "error in plan_transact_end: {}", e);
                         })?;
+                        // Under the plan's lock, so a Set settling after the plan wakes the wait
+                        otm.set_settle_wakeup(transaction_handle, settle_sender.clone())?;
+                        plan
+                    };
                     if !plan.short {
                         veilid_stats!(if let Some(wait_start) = opt_wait_start {
                             self.transaction_quality()
@@ -943,8 +975,13 @@ impl StorageManager {
                         {
                             opt_wait_start.get_or_insert_with(Timestamp::now);
                         }
-                        sleep(END_QUIESCENCE_POLL_MS).await;
-                        continue;
+                        if settle_receiver
+                            .wait(Some(wait_deadline.as_u64()), stop_token.clone())
+                            .await
+                            != WakeOutcome::Stopped
+                        {
+                            continue;
+                        }
                     }
                     tx_try_again!(
                         self,

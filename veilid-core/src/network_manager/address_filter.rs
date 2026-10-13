@@ -6,7 +6,6 @@ impl_veilid_log_facility!("net");
 const PUNISHMENT_DURATION_MIN: usize = 60;
 const MAX_PUNISHMENTS_BY_NODE_ID: usize = 65536;
 const MAX_ENVELOPE_INFO_BY_NODE_ID: usize = 16384;
-const DEFAULT_OLDEST_TIMESTAMP_DURATION: TimestampDuration = TimestampDuration::new_secs(10);
 
 #[derive(ThisError, Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AddConnectionError {
@@ -128,6 +127,7 @@ pub(crate) struct AddressFilter {
     punishment_duration_min: usize,
     opt_max_timestamp_ahead: Option<TimestampDuration>,
     opt_max_timestamp_behind: Option<TimestampDuration>,
+    oldest_timestamp_fallback: TimestampDuration,
 }
 
 impl fmt::Debug for AddressFilter {
@@ -151,6 +151,7 @@ impl fmt::Debug for AddressFilter {
             .field("punishment_duration_min", &self.punishment_duration_min)
             .field("opt_max_timestamp_ahead", &self.opt_max_timestamp_ahead)
             .field("opt_max_timestamp_behind", &self.opt_max_timestamp_behind)
+            .field("oldest_timestamp_fallback", &self.oldest_timestamp_fallback)
             .finish()
     }
 }
@@ -205,6 +206,8 @@ impl AddressFilter {
             punishment_duration_min: PUNISHMENT_DURATION_MIN,
             opt_max_timestamp_ahead,
             opt_max_timestamp_behind,
+            // Two RPC timeouts when the configured window is off
+            oldest_timestamp_fallback: config.rpc_timeout().saturating_mul(2),
         }
     }
 
@@ -575,7 +578,7 @@ impl AddressFilter {
         // Get oldest timestamp we want to keep
         let oldest_timestamp_duration = self
             .opt_max_timestamp_behind
-            .unwrap_or(DEFAULT_OLDEST_TIMESTAMP_DURATION);
+            .unwrap_or(self.oldest_timestamp_fallback);
         let oldest_local_timestamp = local_timestamp.earlier(oldest_timestamp_duration);
 
         let mut inner = self.inner.lock();
@@ -626,7 +629,7 @@ impl AddressFilter {
         );
         if res.is_err() {
             let heal_after = if oldest_timestamp_duration.as_u64() == 0 {
-                DEFAULT_OLDEST_TIMESTAMP_DURATION
+                self.oldest_timestamp_fallback
             } else {
                 oldest_timestamp_duration
             };

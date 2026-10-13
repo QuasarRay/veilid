@@ -152,9 +152,10 @@ where
     }
 }
 
+type ComponentTypeMap = HashMap<core::any::TypeId, Arc<dyn VeilidComponent + Send + Sync>>;
+
 #[derive(Debug)]
 struct VeilidComponentRegistryInner {
-    type_map: HashMap<core::any::TypeId, Arc<dyn VeilidComponent + Send + Sync>>,
     init_order: Vec<core::any::TypeId>,
     #[cfg(any(test, feature = "test-util"))]
     mock: bool,
@@ -162,12 +163,21 @@ struct VeilidComponentRegistryInner {
 
 #[derive(Debug)]
 struct VeilidComponentRegistryUnlockedInner {
+    /// Registration order, behind the lock that serializes registrations
     inner: Mutex<VeilidComponentRegistryInner>,
+    /// Registered components, replaced whole on each registration so a lookup takes no lock
+    type_map: ArcSwap<ComponentTypeMap>,
+    /// Startup options the components are built from
     startup_options: VeilidStartupOptions,
+    /// Namespace from the config
     namespace: &'static str,
+    /// Program name from the config
     program_name: &'static str,
+    /// Log key for this registry's components
     log_key: &'static str,
+    /// Event bus shared by the components
     event_bus: EventBus,
+    /// Serializes init and termination, and records whether init completed
     init_lock: AsyncMutex<bool>,
 }
 
@@ -186,11 +196,11 @@ impl VeilidComponentRegistry {
         Self {
             unlocked_inner: Arc::new(VeilidComponentRegistryUnlockedInner {
                 inner: Mutex::new(VeilidComponentRegistryInner {
-                    type_map: HashMap::new(),
                     init_order: Vec::new(),
                     #[cfg(any(test, feature = "test-util"))]
                     mock: false,
                 }),
+                type_map: ArcSwap::from_pointee(HashMap::new()),
                 startup_options,
                 namespace,
                 program_name,
@@ -238,19 +248,7 @@ impl VeilidComponentRegistry {
         component_constructor: F,
     ) {
         let component = Arc::new(component_constructor(self.clone()));
-        let component_type_id = core::any::TypeId::of::<T>();
-
-        // Add to type map and initialization order
-        let mut inner = self.unlocked_inner.inner.lock();
-        if inner
-            .type_map
-            .insert(component_type_id, component)
-            .is_some()
-        {
-            veilid_log!(self error "should not register same component twice");
-            return;
-        }
-        inner.init_order.push(component_type_id);
+        self.add_component(core::any::TypeId::of::<T>(), component);
     }
 
     pub fn register_with_context<
@@ -263,15 +261,20 @@ impl VeilidComponentRegistry {
         context: C,
     ) {
         let component = Arc::new(component_constructor(self.clone(), context));
-        let component_type_id = core::any::TypeId::of::<T>();
+        self.add_component(core::any::TypeId::of::<T>(), component);
+    }
 
-        // Add to type map and initialization order
+    // Add to type map and initialization order
+    fn add_component(
+        &self,
+        component_type_id: core::any::TypeId,
+        component: Arc<dyn VeilidComponent + Send + Sync>,
+    ) {
         let mut inner = self.unlocked_inner.inner.lock();
-        if inner
-            .type_map
-            .insert(component_type_id, component)
-            .is_some()
-        {
+        let mut type_map = ComponentTypeMap::clone(&self.unlocked_inner.type_map.load());
+        let replaced = type_map.insert(component_type_id, component).is_some();
+        self.unlocked_inner.type_map.store(Arc::new(type_map));
+        if replaced {
             veilid_log!(self error "should not register same component twice");
             return;
         }
@@ -422,10 +425,11 @@ impl VeilidComponentRegistry {
 
     fn get_init_order(&self) -> Vec<Arc<dyn VeilidComponent + Send + Sync>> {
         let inner = self.unlocked_inner.inner.lock();
+        let type_map = self.unlocked_inner.type_map.load();
         inner
             .init_order
             .iter()
-            .map(|id| inner.type_map.get(id).unwrap_or_log().clone())
+            .map(|id| type_map.get(id).unwrap_or_log().clone())
             .collect::<Vec<_>>()
     }
 
@@ -454,9 +458,13 @@ impl VeilidComponentRegistry {
     pub fn lookup<'a, T: VeilidComponent + Send + Sync + 'static>(
         &self,
     ) -> Option<VeilidComponentGuard<'a, T>> {
-        let inner = self.unlocked_inner.inner.lock();
         let component_type_id = core::any::TypeId::of::<T>();
-        let component_dyn = inner.type_map.get(&component_type_id)?.clone();
+        let component_dyn = self
+            .unlocked_inner
+            .type_map
+            .load()
+            .get(&component_type_id)?
+            .clone();
         let component = component_dyn
             .as_any_arc_send_sync()
             .downcast::<T>()
@@ -470,9 +478,13 @@ impl VeilidComponentRegistry {
     pub fn lookup_arc<T: VeilidComponent + Send + Sync + 'static>(
         &self,
     ) -> Option<VeilidComponentGuardArc<T>> {
-        let inner = self.unlocked_inner.inner.lock();
         let component_type_id = core::any::TypeId::of::<T>();
-        let component_dyn = inner.type_map.get(&component_type_id)?.clone();
+        let component_dyn = self
+            .unlocked_inner
+            .type_map
+            .load()
+            .get(&component_type_id)?
+            .clone();
         let component = component_dyn
             .as_any_arc_send_sync()
             .downcast::<T>()

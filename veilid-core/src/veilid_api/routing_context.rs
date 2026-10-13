@@ -734,7 +734,8 @@ impl RoutingContext {
     /// The writer, if specified, will override the 'default_writer' specified when the record is opened.
     ///
     /// Returns `None` if the value was successfully set.
-    /// Returns `Some(data)` if the value set was older than the one available on the network.
+    /// Returns `Some(data)` if the network holds a newer value, or if nodes hold more than one value at
+    /// the sequence number written. `data` is the value most of them hold, which can be the one just set.
     ///
     /// Blocks on a network fanout to push the value; when offline or the fanout fails, queues the write for later flush (if `allow_offline`) and returns `Ok(None)`.
     ///

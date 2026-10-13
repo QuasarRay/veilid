@@ -51,8 +51,8 @@ const ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD: usize = 1;
 const ROUTE_LOOPBACK_FAILURES_INVALIDATE_THRESHOLD_ORDERED: usize = 3;
 const ROUTE_LOOPBACK_FAILURES_INVALIDATE_THRESHOLD_UNORDERED: usize = 5;
 
-/// How long the hops of a route that died on an ordering stay out of new routes for that ordering
-const ROUTE_DEAD_HOP_AVOID_SECS: u32 = 600;
+/// Number of automatic safety routes of each safe/unsafe default length to maintain
+pub(crate) const DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT: usize = 4;
 
 /// Loopback failure threshold for one ordering
 pub(super) fn loopback_failure_threshold(ordering: SequenceOrdering) -> usize {
@@ -101,8 +101,8 @@ pub(crate) struct RouteSpecStore {
     test_destination_rotation_counter: AtomicUsize,
     /// Per-ordering loopback tallies for the periodic summary line
     route_test_summary: Mutex<RouteTestSummary>,
-    /// Hops of routes that died on an ordering, kept out of that ordering's allocations for a while
-    dead_route_hops: Mutex<BTreeMap<SequenceOrdering, HashMap<NodeId, Timestamp>>>,
+    /// Hops of routes that died on an ordering, kept out of its allocations while their epoch holds
+    dead_route_hops: Mutex<BTreeMap<SequenceOrdering, LruCache<NodeId, LossEpoch>>>,
     /// The store's table, opened on the first save and held open after
     table_db: Mutex<Option<TableDB>>,
 }
@@ -284,23 +284,16 @@ impl RouteSpecStore {
     {
         let cache = self.cache.read();
         let mut out = Vec::with_capacity(cache.get_allocated_route_count());
-        let mut entries = cache.iter_allocated_routes().collect::<Vec<_>>();
-        entries.sort_unstable_by(|a, b| {
-            let cmp_hop_count = a.1.hop_count().cmp(&b.1.hop_count());
-            if cmp_hop_count != cmp::Ordering::Equal {
-                return cmp_hop_count;
-            }
-            let avg_a = a.1.with_stats(|sa| sa.latency.average);
-            let avg_b = b.1.with_stats(|sb| sb.latency.average);
-            let cmp_avg_latency = avg_a.cmp(&avg_b);
-            if cmp_avg_latency != cmp::Ordering::Equal {
-                return cmp_avg_latency;
-            }
-            a.0.cmp(b.0)
-        });
+        // Keys read once: a route's latency can change mid-sort, and an order that shifts during
+        // a sort panics
+        let mut entries = cache
+            .iter_allocated_routes()
+            .map(|(k, v)| ((v.hop_count(), v.with_stats(|s| s.latency.average)), k, v))
+            .collect::<Vec<_>>();
+        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
 
-        for detail in entries {
-            if let Some(x) = filter(detail.0, detail.1) {
+        for (_, k, v) in entries {
+            if let Some(x) = filter(k, v) {
                 out.push(x);
             }
         }

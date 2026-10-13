@@ -75,6 +75,30 @@ pub const HOLE_PUNCH_DELAY_MS: u32 = 100;
 /// Number of rpc relay operations that can be handles simultaneously
 pub const RELAY_WORKERS_PER_CORE: u32 = 16;
 
+/// Network manager durations derived from the RPC timeout
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NetworkManagerTimings {
+    /// Envelope encryption this slow is reported as a local stall: 10% of the RPC timeout
+    pub envelope_encrypt_slow: TimestampDuration,
+    /// Envelope building this slow is reported as a local stall: 20% of the RPC timeout
+    pub envelope_build_slow: TimestampDuration,
+    /// Protected connections that die younger than this count toward a hold-off: one RPC timeout
+    pub protected_fast_drop: TimestampDuration,
+    /// A suppressed transport's canary period while nothing on our side changes: six RPC timeouts
+    pub transport_canary: TimestampDuration,
+}
+
+impl NetworkManagerTimings {
+    pub fn new(rpc_timeout: TimestampDuration) -> Self {
+        Self {
+            envelope_encrypt_slow: rpc_timeout.saturating_mul(10).div(100),
+            envelope_build_slow: rpc_timeout.saturating_mul(20).div(100),
+            protected_fast_drop: rpc_timeout,
+            transport_canary: rpc_timeout.saturating_mul(6),
+        }
+    }
+}
+
 /// Things we get when we start up and go away when we shut down
 /// Routing table is not in here because we want it to survive a network shutdown/startup restart
 #[derive(Clone)]
@@ -146,6 +170,9 @@ pub(crate) struct NetworkManager {
 
     // Our own outbound send health, per routing domain and transport
     transport_stats: TransportStats,
+
+    // Durations derived from the RPC timeout
+    timings: NetworkManagerTimings,
 
     // Accessors
     components: RwLock<Option<NetworkComponents>>,
@@ -257,7 +284,8 @@ impl NetworkManager {
         let inner = Self::new_inner();
         let address_filter = AddressFilter::new(registry.clone());
         let online_detector = OnlineDetector::new(registry.clone());
-        let transport_stats = TransportStats::new(registry.clone());
+        let timings = NetworkManagerTimings::new(registry.config().rpc_timeout());
+        let transport_stats = TransportStats::new(registry.clone(), timings.transport_canary);
 
         let this = Self {
             registry,
@@ -266,6 +294,7 @@ impl NetworkManager {
             address_filter,
             online_detector,
             transport_stats,
+            timings,
             components: RwLock::new(None),
             rolling_transfers_task: TickTask::new(
                 "rolling_transfers_task",
@@ -300,6 +329,11 @@ impl NetworkManager {
 
     pub fn transport_stats(&self) -> &TransportStats {
         &self.transport_stats
+    }
+
+    /// Durations derived from the RPC timeout
+    pub(crate) fn timings(&self) -> &NetworkManagerTimings {
+        &self.timings
     }
 
     fn net(&self) -> Network {
@@ -983,7 +1017,7 @@ impl NetworkManager {
 
         envelope
             .to_encrypted_data(&crypto, body, &secret_key, &network_key)
-            .measure_limit(TimestampDuration::new_ms(500), |duration| {
+            .measure_limit(self.timings.envelope_encrypt_slow, |duration| {
                 veilid_log!(self debug "NetworkManager::build_envelope to_encrypted_data slow: {:#} (nonce {:#})", duration, nonce_us);
                 // Encryption this slow ate the timeout budget of everything in flight
                 self.online_detector().record_local_stall(duration);
@@ -1044,7 +1078,7 @@ impl NetworkManager {
         let timestamp = Timestamp::now_increasing();
         let out = match self
             .build_envelope(timestamp, best_node_id, envelope_version, body)
-            .measure_limit(TimestampDuration::new_ms(1000), |duration| {
+            .measure_limit(self.timings.envelope_build_slow, |duration| {
                 veilid_log!(self debug "NetworkManager::build_envelope slow: {:#}", duration);
                 self.online_detector().record_local_stall(duration);
             })
@@ -1183,7 +1217,8 @@ impl NetworkManager {
 
         // Is this an out-of-band receipt instead of an envelope?
         if VALID_RECEIPT_VERSIONS.contains(&ReceiptVersion::from(magic)) {
-            network_result_value_or_log!(self pin_future!(self.handle_out_of_band_receipt(data)).await => [ format!(": data.len={}", data.len()) ] {});
+            let data_len = data.len();
+            network_result_value_or_log!(self pin_future!(self.handle_out_of_band_receipt(data)).await => [ format!(": data.len={}", data_len) ] {});
             return Ok(true);
         }
 
@@ -1445,12 +1480,10 @@ impl NetworkManager {
         };
 
         // Inform the connection table about the flow's priority
-        let is_relaying_flow = node_ref.is_relaying(routing_domain);
-        if is_relaying_flow
-            && matches!(
-                flow.protocol_type().sequence_ordering(),
-                SequenceOrdering::Ordered
-            )
+        if matches!(
+            flow.protocol_type().sequence_ordering(),
+            SequenceOrdering::Ordered
+        ) && node_ref.is_relaying(routing_domain)
         {
             self.connection_manager().add_relaying_flow(flow);
         }
@@ -1459,6 +1492,24 @@ impl NetworkManager {
     #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn restart_network(&self) {
         self.net().restart_network();
+    }
+
+    /// Hand a concluded dial info detection's view to the address check
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
+    pub(crate) fn report_dial_info_detection(
+        &self,
+        routing_domain: RoutingDomain,
+        external_addresses: BTreeSet<Address>,
+        unexamined_transports: BTreeSet<TransportType>,
+    ) {
+        let mut inner = self.inner.lock();
+        if let Some(address_check) = inner.address_check.as_mut() {
+            address_check.report_dial_info_detection(
+                routing_domain,
+                external_addresses,
+                unexamined_transports,
+            );
+        }
     }
 
     // Report peer info changes

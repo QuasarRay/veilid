@@ -12,6 +12,12 @@ fn secs_ago(secs: u64) -> Timestamp {
 fn span_secs(d: TimestampDuration) -> u64 {
     d.as_u64() / 1_000_000u64
 }
+// The liveness spans at the default RPC timeout.
+fn spans() -> LivenessSpans {
+    LivenessSpans::new(TimestampDuration::new_ms(
+        VeilidConfigInternalRPC::default().timeout_ms.into(),
+    ))
+}
 fn compute(
     punishment: Option<PunishmentReason>,
     rpc_stats: &RPCStats,
@@ -21,6 +27,7 @@ fn compute(
 ) -> BucketEntryStateReason {
     BucketEntryInner::compute_state_reason_from_stats(
         now(),
+        &spans(),
         punishment,
         rpc_stats,
         per_so,
@@ -40,6 +47,7 @@ fn compute_with_offline(
 ) -> BucketEntryStateReason {
     BucketEntryInner::compute_state_reason_from_stats(
         now(),
+        &spans(),
         punishment,
         rpc_stats,
         per_so,
@@ -272,8 +280,8 @@ pub fn test_state_dead_steady_lost_questions() {
 
     // [D4] heard from before, node-level steadily losing questions past the span, is dead
     let rpc = RPCStats {
-        last_seen_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 2)),
-        first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 1)),
+        last_seen_ts: Some(secs_ago(span_secs(spans().dead_lost_question) + 2)),
+        first_steady_lost_question_ts: Some(secs_ago(span_secs(spans().dead_lost_question) + 1)),
         ..Default::default()
     };
     assert_eq!(
@@ -283,8 +291,8 @@ pub fn test_state_dead_steady_lost_questions() {
 
     // boundary: a steady lost question newer than the span is not yet dead
     let rpc = RPCStats {
-        last_seen_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 2)),
-        first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) - 1)),
+        last_seen_ts: Some(secs_ago(span_secs(spans().dead_lost_question) + 2)),
+        first_steady_lost_question_ts: Some(secs_ago(span_secs(spans().dead_lost_question) - 1)),
         ..Default::default()
     };
     assert_ne!(
@@ -418,7 +426,7 @@ pub fn test_state_unreliable() {
     let per_so = so_map(&[(
         SequenceOrdering::Unordered,
         RPCStats {
-            first_steady_answer_ts: Some(secs_ago(span_secs(UNRELIABLE_ANSWER_SPAN) - 1)),
+            first_steady_answer_ts: Some(secs_ago(span_secs(spans().unreliable_answer) - 1)),
             ..Default::default()
         },
     )]);
@@ -441,7 +449,7 @@ pub fn test_state_reliable() {
     let per_so = so_map(&[(
         SequenceOrdering::Unordered,
         RPCStats {
-            first_steady_answer_ts: Some(secs_ago(span_secs(UNRELIABLE_ANSWER_SPAN) + 1)),
+            first_steady_answer_ts: Some(secs_ago(span_secs(spans().unreliable_answer) + 1)),
             ..Default::default()
         },
     )]);
@@ -509,8 +517,8 @@ pub fn test_state_offline_credit_steady_lost_questions() {
 
     // [D4] a node losing questions past the dead span is Dead by raw time.
     let rpc = RPCStats {
-        last_seen_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 20)),
-        first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 10)),
+        last_seen_ts: Some(secs_ago(span_secs(spans().dead_lost_question) + 20)),
+        first_steady_lost_question_ts: Some(secs_ago(span_secs(spans().dead_lost_question) + 10)),
         recent_lost_questions: MISSING_LOST_QUESTIONS,
         ..Default::default()
     };
@@ -525,8 +533,8 @@ pub fn test_state_offline_credit_steady_lost_questions() {
     );
     // A genuinely long lost span stays Dead despite the same offline credit.
     let long_lost = RPCStats {
-        last_seen_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 220)),
-        first_steady_lost_question_ts: Some(secs_ago(span_secs(DEAD_LOST_QUESTION_SPAN) + 200)),
+        last_seen_ts: Some(secs_ago(span_secs(spans().dead_lost_question) + 220)),
+        first_steady_lost_question_ts: Some(secs_ago(span_secs(spans().dead_lost_question) + 200)),
         recent_lost_questions: MISSING_LOST_QUESTIONS,
         ..Default::default()
     };
@@ -550,7 +558,7 @@ pub fn test_state_offline_credit_unreliable_answer() {
     let per_so = so_map(&[(
         SequenceOrdering::Ordered,
         RPCStats {
-            first_steady_answer_ts: Some(secs_ago(span_secs(UNRELIABLE_ANSWER_SPAN) + 10)),
+            first_steady_answer_ts: Some(secs_ago(span_secs(spans().unreliable_answer) + 10)),
             ..Default::default()
         },
     )]);

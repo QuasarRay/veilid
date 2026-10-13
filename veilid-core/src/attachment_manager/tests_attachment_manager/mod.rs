@@ -1,11 +1,17 @@
 #[cfg(feature = "app-lifecycle")]
 pub mod test_app_lifecycle;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub mod test_attach_detach;
 pub mod test_attachment_level_calculator;
 
 use super::*;
 
-#[expect(clippy::unused_async)]
+#[cfg_attr(
+    all(target_arch = "wasm32", target_os = "unknown"),
+    expect(clippy::unused_async)
+)]
 pub async fn test_all() {
+    test_attachment_level_calculator::test_latency_thresholds_at_default_rpc_timeout();
     test_attachment_level_calculator::test_attaching_when_no_live_peers();
     test_attachment_level_calculator::test_weak_floor_when_live_but_untested();
     test_attachment_level_calculator::test_well_attached_server();
@@ -21,4 +27,6 @@ pub async fn test_all() {
         test_app_lifecycle::test_report_fills_a_gap();
         test_app_lifecycle::test_report_alone_without_detection();
     }
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_attach_detach::test_bind_wait_is_attaching().await;
 }

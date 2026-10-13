@@ -944,6 +944,8 @@ pub struct Network {
     /// React to local address changes: `'auto'`, `'true'`, or `'false'`.
     #[serde(with = "auto_bool")]
     pub detect_address_changes: Option<bool>,
+    /// Wait before retrying a listen address that failed to bind, in milliseconds.
+    pub bind_retry_ms: u32,
     /// TLS configuration for inbound secure protocols.
     pub tls: Tls,
     /// Per-protocol configuration.
@@ -966,6 +968,7 @@ impl Default for Network {
             address_types: Vec::new(),
             upnp: false,
             detect_address_changes: None,
+            bind_retry_ms: 10_000,
             tls: Tls::default(),
             protocol: Protocol::default(),
             privacy: Privacy::default(),
@@ -1635,6 +1638,7 @@ impl Settings {
             value,
             auto_bool::from_str
         );
+        set_config_value!(inner.core.network.bind_retry_ms, value);
         set_config_value!(inner.core.network.tls.certificate_path, value);
         set_config_value!(inner.core.network.tls.private_key_path, value);
         set_config_value!(inner.core.network.tls.connection_initial_timeout_ms, value);
@@ -1875,6 +1879,7 @@ impl Settings {
                 },
                 upnp: inner.core.network.upnp,
                 detect_address_changes: inner.core.network.detect_address_changes,
+                bind_retry_ms: inner.core.network.bind_retry_ms,
                 tls: VeilidConfigTLS {
                     certificate_path: inner.core.network.tls.certificate_path.clone(),
                     private_key_path: inner.core.network.tls.private_key_path.clone(),

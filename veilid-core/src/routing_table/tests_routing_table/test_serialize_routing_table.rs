@@ -235,6 +235,52 @@ pub async fn test_replace_node_ids_rejects_without_valid_id() {
     mock_registry::terminate(registry).await;
 }
 
+// A node already in the table registers again under the read lock: the same entry with the
+// same node ids, while a peer info update still lands on it.
+pub async fn test_register_known_node_keeps_entry() {
+    let registry = mock_registry::init("a").await;
+    {
+        let rt = registry.routing_table();
+        let nr = seed_nodes(&rt, 1).remove(0);
+        let node_ids = nr.node_ids();
+        let entry_count = rt.inner.read().bucket_entry_count();
+        let pi = nr
+            .get_peer_info(RoutingDomain::PublicInternet)
+            .expect("should have peer info");
+
+        let fnr = rt
+            .register_node_with_peer_info(Arc::new(UnverifiedPeerInfo::from_verified(&pi)), false)
+            .expect("should register");
+        assert!(
+            fnr.same_entry(&nr),
+            "a known node must resolve to its entry"
+        );
+        assert_eq!(
+            nr.get_peer_info(RoutingDomain::PublicInternet),
+            Some(pi.clone())
+        );
+
+        // A sender seen by a single id, which is all of its ids with one crypto kind
+        if node_ids.len() == 1 {
+            let fnr = rt
+                .register_node_without_peer_info(RoutingDomain::PublicInternet, node_ids[0].clone())
+                .expect("should register");
+            assert!(
+                fnr.same_entry(&nr),
+                "a known sender must resolve to its entry"
+            );
+        }
+
+        assert_eq!(nr.node_ids(), node_ids, "node ids must be unchanged");
+        assert_eq!(
+            rt.inner.read().bucket_entry_count(),
+            entry_count,
+            "no entry may be added"
+        );
+    }
+    mock_registry::terminate(registry).await;
+}
+
 pub async fn test_round_trip_peerinfo() {
     let registry = mock_registry::init("a").await;
     let routing_table = registry.routing_table();

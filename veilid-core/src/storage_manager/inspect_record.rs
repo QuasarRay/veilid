@@ -720,7 +720,7 @@ impl StorageManager {
         // Call the fanout
         let routing_table = self.routing_table();
         let hash_coordinate = opaque_record_key.to_hash_coordinate();
-        let fanout_call = FanoutCall::new(
+        let mut fanout_call = FanoutCall::new(
             &routing_table,
             FanoutCallParams {
                 name: format!("outbound_inspect_value({})", Timestamp::now_increasing()),
@@ -735,6 +735,8 @@ impl StorageManager {
             call_routine,
             check_done,
         );
+        fanout_call
+            .set_demote_routed_unresponsive(matches!(safety_selection, SafetySelection::Safe(_)));
 
         let shutdown_stop_source = self
             .startup_lock

@@ -18,6 +18,45 @@ fn make_params(subkeys: ValueSubkeyRangeSet) -> OutboundWatchParameters {
     }
 }
 
+/// The default `get_value_count`
+const CONSENSUS_COUNT: usize = 3;
+/// The renew window `StorageManagerTimings` derives from the default get timeout
+const RENEW_WINDOW: TimestampDuration = TimestampDuration::new_secs(30);
+
+fn make_record_key() -> RecordKey {
+    RecordKey::from_opaque(
+        OpaqueRecordKey::new(CRYPTO_KIND_VLD0, BareOpaqueRecordKey::new(&[0u8; 32])),
+        None,
+    )
+}
+
+/// Per-node watches on `count` distinct nodes, all accepted until `expiration`
+fn make_per_node_states(
+    record_key: &RecordKey,
+    count: u8,
+    expiration: Timestamp,
+) -> HashMap<PerNodeKey, OutboundWatchPerNodeState> {
+    (1..=count)
+        .map(|n| {
+            (
+                PerNodeKey {
+                    record_key: record_key.clone(),
+                    node_id: NodeId::new(CRYPTO_KIND_VLD0, BareNodeId::new(&[n; 32])),
+                },
+                OutboundWatchPerNodeState {
+                    watch_id: n.into(),
+                    safety_selection: SafetySelection::Unsafe(Sequencing::PreferOrdered),
+                    opt_watcher: None,
+                    expiration,
+                    count: u32::MAX,
+                    watch_node_ref: None,
+                    opt_value_changed_route: None,
+                },
+            )
+        })
+        .collect()
+}
+
 /// An inspection answered with nothing newer doubles the wait, up to the ceiling.
 fn test_backoff_doubles_until_capped() {
     let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
@@ -131,22 +170,89 @@ fn test_needs_fallback_inspect_honours_backoff() {
     ));
 }
 
+/// A watch at consensus is being served: once its interval reaches the ceiling, silence until
+/// its renewal window is expected, so it inspects once per renewal. Short of consensus the
+/// ceiling stays, since there the fallback is how changes arrive at all.
+fn test_served_watch_inspects_once_per_renewal() {
+    let record_key = make_record_key();
+    let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
+    let now = Timestamp::now_non_decreasing();
+    let expiration = now.later(TimestampDuration::new_secs(600));
+    let per_node_states = make_per_node_states(&record_key, 3, expiration);
+    state.edit(&per_node_states, |editor| {
+        editor.add_nodes(per_node_states.keys().cloned());
+        for _ in 0..4 {
+            editor.back_off_fallback_inspect();
+        }
+    });
+    assert_eq!(
+        state.fallback_inspect_interval(),
+        WATCH_FALLBACK_INSPECT_MAX_INTERVAL
+    );
+
+    // Past the ceiling the interval alone says due, but a served watch waits for renewal
+    let past_ceiling = now
+        .later(WATCH_FALLBACK_INSPECT_MAX_INTERVAL.saturating_add(TimestampDuration::new_secs(1)));
+    assert!(state.needs_fallback_inspect(past_ceiling));
+    assert!(!state.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW));
+
+    // Its renewal window opens the inspection
+    let in_renew_window = expiration.earlier(RENEW_WINDOW);
+    assert!(state.fallback_inspect_due(in_renew_window, CONSENSUS_COUNT, RENEW_WINDOW));
+    assert!(!state.fallback_inspect_due(
+        in_renew_window.earlier(TimestampDuration::new_secs(1)),
+        CONSENSUS_COUNT,
+        RENEW_WINDOW
+    ));
+
+    // Short of consensus the ceiling applies
+    let mut short = state.clone();
+    let mut kept = 0;
+    short.edit(&per_node_states, |editor| {
+        editor.retain_nodes(|_| {
+            kept += 1;
+            kept < CONSENSUS_COUNT
+        })
+    });
+    assert_eq!(short.nodes().len(), CONSENSUS_COUNT - 1);
+    assert!(short.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW));
+
+    // While still backing off, the interval decides even at consensus
+    let mut fresh = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
+    fresh.edit(&per_node_states, |editor| {
+        editor.add_nodes(per_node_states.keys().cloned())
+    });
+    assert!(fresh.fallback_inspect_due(
+        Timestamp::now_non_decreasing().later(TimestampDuration::new_secs(31)),
+        CONSENSUS_COUNT,
+        RENEW_WINDOW
+    ));
+
+    // A watch whose per-node watches are past expiration is no longer known to be served
+    let lapsed_per_node_states = make_per_node_states(&record_key, 3, now);
+    let mut lapsed = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
+    lapsed.edit(&lapsed_per_node_states, |editor| {
+        editor.add_nodes(lapsed_per_node_states.keys().cloned());
+        for _ in 0..4 {
+            editor.back_off_fallback_inspect();
+        }
+    });
+    assert!(lapsed.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW));
+}
+
 /// A watch that is wanted but has never established has no state to keep a timer
 /// in. It still needs covering, because the app asked for it and core owns
-/// delivery, at an established watch's longest wait since reconcile is already
-/// retrying.
+/// delivery, at the ceiling of an established watch short of consensus since
+/// reconcile is already retrying.
 fn test_unestablished_watch_is_inspected_at_the_ceiling() {
-    let record_key = RecordKey::from_opaque(
-        OpaqueRecordKey::new(CRYPTO_KIND_VLD0, BareOpaqueRecordKey::new(&[0u8; 32])),
-        None,
-    );
+    let record_key = make_record_key();
     let subkeys = ValueSubkeyRangeSet::single(7);
     let mut outbound_watch = OutboundWatch::new(record_key, make_params(subkeys.clone()));
     let per_node_states = HashMap::new();
 
     // Never inspected, so it is due at once, over the DESIRED subkeys
     assert_eq!(
-        outbound_watch.needs_fallback_inspect(Timestamp::new(0)),
+        outbound_watch.needs_fallback_inspect(Timestamp::new(0), CONSENSUS_COUNT, RENEW_WINDOW),
         Some(subkeys.clone())
     );
 
@@ -155,30 +261,44 @@ fn test_unestablished_watch_is_inspected_at_the_ceiling() {
 
     // Not due again at the established-watch cadence
     assert_eq!(
-        outbound_watch.needs_fallback_inspect(now.later(TimestampDuration::new_secs(60))),
+        outbound_watch.needs_fallback_inspect(
+            now.later(TimestampDuration::new_secs(60)),
+            CONSENSUS_COUNT,
+            RENEW_WINDOW
+        ),
         None,
         "an unestablished watch should not inspect at the 30s cadence"
     );
     assert_eq!(
-        outbound_watch.needs_fallback_inspect(now.later(TimestampDuration::new_secs(121))),
+        outbound_watch.needs_fallback_inspect(
+            now.later(TimestampDuration::new_secs(121)),
+            CONSENSUS_COUNT,
+            RENEW_WINDOW
+        ),
         Some(subkeys)
     );
 
     // A cancelled watch - no state and no desired - is inspected by nobody
     outbound_watch.set_desired(None);
     assert_eq!(
-        outbound_watch.needs_fallback_inspect(now.later(TimestampDuration::new_secs(121))),
+        outbound_watch.needs_fallback_inspect(
+            now.later(TimestampDuration::new_secs(121)),
+            CONSENSUS_COUNT,
+            RENEW_WINDOW
+        ),
         None
     );
 }
 
 /// Leaving Degraded re-inspects every watch, the way coming back online does; no
-/// other transition, and no other routing domain, may.
+/// other transition, no other routing domain, and no period held only by our own
+/// stalls may.
 fn test_recovery_from_degraded_reinspects_watches() {
     let evt = |routing_domain, old_state, new_state| OnlineStateChangeEvent {
         routing_domain,
         old_state,
         new_state,
+        local_stall_only: false,
     };
     assert!(StorageManager::online_state_change_reinspects_watches(
         &evt(
@@ -186,6 +306,16 @@ fn test_recovery_from_degraded_reinspects_watches() {
             OnlineState::Degraded,
             OnlineState::Online
         )
+    ));
+    assert!(!StorageManager::online_state_change_reinspects_watches(
+        &OnlineStateChangeEvent {
+            local_stall_only: true,
+            ..evt(
+                RoutingDomain::PublicInternet,
+                OnlineState::Degraded,
+                OnlineState::Online
+            )
+        }
     ));
     for (domain, old_state, new_state) in [
         (
@@ -253,6 +383,7 @@ pub fn test_all() {
     test_saved_interval_above_ceiling_reads_capped();
     test_evidence_resets_backoff();
     test_needs_fallback_inspect_honours_backoff();
+    test_served_watch_inspects_once_per_renewal();
     test_unestablished_watch_is_inspected_at_the_ceiling();
     test_watch_network_work_holds_only_while_offline();
     test_reconcile_retries_silence_not_refusals();

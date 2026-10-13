@@ -142,8 +142,8 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
     /// `false` if it was already unconfirmed (so the caller can suppress redundant work).
     fn routing_domain_request_confirm_dial_info(&self, routing_domain: RoutingDomain) -> bool;
 
-    /// Whether the interface addresses have changed since PublicInternet dial info was
-    /// last confirmed. Dead sockets alone (a thaw, peer churn) say nothing about the
-    /// dial info; platforms without interface visibility answer `true`.
-    fn interfaces_changed_since_confirm(&self) -> bool;
+    /// Request PublicInternet dial info confirmation because the connection table emptied,
+    /// once per network move: dead sockets alone (a thaw, peer churn) say nothing about the
+    /// dial info. Returns whether a request was made.
+    fn request_confirm_after_empty_table(&self) -> bool;
 }

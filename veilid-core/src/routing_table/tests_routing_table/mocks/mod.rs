@@ -144,3 +144,50 @@ pub fn fix_unsigned_peer_info(
 
     PeerInfo::new_from_unsigned(routing_table, RoutingDomain::PublicInternet, node_info)
 }
+
+fn make_distinct_peer_info(routing_table: &RoutingTable) -> PeerInfo {
+    let mut crypto_info_list: Vec<CryptoInfo> = vec![];
+    let mut secret_keys = SecretKeyGroup::new();
+    for ck in VALID_CRYPTO_KINDS {
+        let (public_key, secret) = Crypto::generate_keypair(ck)
+            .expect("should generate keypair")
+            .value()
+            .into_split();
+        let ci = match ck {
+            #[cfg(feature = "enable-crypto-none")]
+            CRYPTO_KIND_NONE => CryptoInfo::NONE { public_key },
+            #[cfg(feature = "enable-crypto-vld0")]
+            CRYPTO_KIND_VLD0 => CryptoInfo::VLD0 { public_key },
+            _ => {
+                unreachable!("missing match arm");
+            }
+        };
+        crypto_info_list.push(ci);
+        secret_keys.add(SecretKey::new(ck, secret));
+    }
+    fix_peer_info(routing_table, crypto_info_list, secret_keys).expect("should be valid")
+}
+
+pub fn seed_nodes(routing_table: &RoutingTable, count: usize) -> Vec<NodeRef> {
+    (0..count)
+        .map(|_| {
+            let pi = make_distinct_peer_info(routing_table);
+            routing_table
+                .register_node_with_peer_info(
+                    Arc::new(UnverifiedPeerInfo::from_verified(&pi)),
+                    false,
+                )
+                .expect("should register")
+                .unfiltered()
+        })
+        .collect()
+}
+
+pub fn rank_map(node_refs: &[NodeRef], target: &HashCoordinate) -> HashMap<NodeId, usize> {
+    let mut ids: Vec<NodeId> = node_refs
+        .iter()
+        .map(|nr| nr.node_ids().get(CRYPTO_KIND_VLD0).unwrap_or_log())
+        .collect();
+    ids.sort_unstable_by(RoutingTable::make_closest_node_id_sort(target.clone()));
+    ids.into_iter().enumerate().map(|(n, id)| (id, n)).collect()
+}

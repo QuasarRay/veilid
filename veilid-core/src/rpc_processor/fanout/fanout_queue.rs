@@ -8,6 +8,10 @@ use super::*;
 impl_veilid_log_facility!("fanout");
 impl_veilid_component_accessors!(FanoutQueue<'_>);
 
+/// Multiple of the slowest answer that a straggler unable to complete consensus is waited for,
+/// when that is longer than the slow-node threshold
+const STRAGGLER_RTT_FACTOR: u64 = 3;
+
 /// The stage of a particular node we fanned out to
 #[derive(Debug, Copy, Clone)]
 pub enum FanoutNodeStage {
@@ -23,6 +27,8 @@ pub enum FanoutNodeStage {
     Accepted,
     /// Node that accepted the query but had an older result
     Stale,
+    /// Node that accepted the query but holds a result that conflicts with ours
+    Conflict,
     /// Node that has been disqualified for being too far away from the key or are acting badly
     Disqualified,
 }
@@ -49,7 +55,8 @@ impl FanoutNodeStatus {
             | FanoutNodeStage::Rejected
             | FanoutNodeStage::Disqualified
             | FanoutNodeStage::Accepted
-            | FanoutNodeStage::Stale => true,
+            | FanoutNodeStage::Stale
+            | FanoutNodeStage::Conflict => true,
         }
     }
 
@@ -72,6 +79,22 @@ impl FanoutNodeStatus {
         self.touch_ts = timestamp;
     }
 
+    /// How long the node took to answer, if its current stage is an answer to its last request
+    pub fn answer_duration(&self) -> Option<TimestampDuration> {
+        if !matches!(
+            self.stage,
+            FanoutNodeStage::Accepted
+                | FanoutNodeStage::Stale
+                | FanoutNodeStage::Conflict
+                | FanoutNodeStage::Rejected
+        ) {
+            return None;
+        }
+        let prev_status = self.prev_status.as_ref()?;
+        matches!(prev_status.stage, FanoutNodeStage::InProgress)
+            .then(|| self.transition_ts.duration_since(prev_status.transition_ts))
+    }
+
     pub fn touch(&mut self, timestamp: Timestamp) {
         match self.stage {
             FanoutNodeStage::Queued | FanoutNodeStage::InProgress => {
@@ -81,6 +104,7 @@ impl FanoutNodeStatus {
             | FanoutNodeStage::Rejected
             | FanoutNodeStage::Accepted
             | FanoutNodeStage::Stale
+            | FanoutNodeStage::Conflict
             | FanoutNodeStage::Disqualified => {
                 // Don't touch these because they are not considered 'active'
             }
@@ -113,6 +137,7 @@ pub struct FanoutNode {
     pub work_item: FanoutWorkItem,
     pub lane_stop_source: Option<StopSource>,
     pub status: FanoutNodeStatus,
+    pub demoted: bool,
 }
 
 impl fmt::Display for FanoutNode {
@@ -194,17 +219,23 @@ pub struct FanoutQueue<'a> {
     node_sort: FanoutQueueSort<'a>,
     /// Nodes to ask ahead of the sort, if any (see `FanoutCall::set_prefer_init_nodes`)
     preferred_nodes: HashSet<NodeId>,
-    /// The channel to receive work requests to process
+    /// Ask nodes unresponsive to routed questions last (see `FanoutCall::set_demote_routed_unresponsive`)
+    demote_routed_unresponsive: bool,
+    /// Lanes' requests for work, queued by `request_work`
     work_request_sender: flume::Sender<FanoutWorkRequest>,
+    /// Requests waiting for a node, served by `send_more_work`
     work_request_receiver: flume::Receiver<FanoutWorkRequest>,
+    /// Wakes the run loop's pump whenever a lane asks for work, which follows each of its results
+    pump_wake_sender: WakeSender,
+    /// What the run loop's pump waits on
+    pump_wake_receiver: WakeReceiver,
     /// Consensus count to use
     consensus_count: usize,
     /// Accepts to keep dispatching toward once consensus is met (>= consensus_count)
     collection_count: usize,
     /// Number of nodes away from the key that can be considered for fanout operations
     consensus_width: usize,
-    /// Whether or not to stop handing out work when queue consensus is met
-    /// Duration at which to start a new node when throttled
+    /// How long a node may be in flight before a throttled queue counts it as slow
     opt_throttle_duration: Option<TimestampDuration>,
 }
 
@@ -253,6 +284,7 @@ impl<'a> FanoutQueue<'a> {
         opt_throttle_duration: Option<TimestampDuration>,
     ) -> Self {
         let (sender, receiver) = flume::unbounded();
+        let (pump_wake_sender, pump_wake_receiver) = wakeup();
         Self {
             name,
             registry,
@@ -261,8 +293,11 @@ impl<'a> FanoutQueue<'a> {
             sorted_nodes: Vec::new(),
             node_sort,
             preferred_nodes: HashSet::new(),
+            demote_routed_unresponsive: false,
             work_request_sender: sender,
             work_request_receiver: receiver,
+            pump_wake_sender,
+            pump_wake_receiver,
             consensus_count,
             collection_count: collection_count.max(consensus_count),
             consensus_width,
@@ -285,8 +320,14 @@ impl<'a> FanoutQueue<'a> {
 
         // Send whatever work is available immediately
         self.send_more_work(request_ts);
+        self.pump_wake_sender.wake();
 
         Ok(work_receiver)
+    }
+
+    /// What the run loop's pump waits on, besides the next straggler cut
+    pub fn pump_wake_receiver(&self) -> WakeReceiver {
+        self.pump_wake_receiver.clone()
     }
 
     /// Ask these nodes ahead of the sort order, for an operation that only a node
@@ -298,9 +339,20 @@ impl<'a> FanoutQueue<'a> {
             .collect();
     }
 
+    /// Ask nodes that lost a routed question after all others, for a fanout whose questions
+    /// travel over safety routes
+    pub fn set_demote_routed_unresponsive(&mut self, demote_routed_unresponsive: bool) {
+        self.demote_routed_unresponsive = demote_routed_unresponsive;
+    }
+
     /// Update the queue with changes, adding new nodes to a filtered and sorted
     /// list of fanout candidates and disqualifying nodes no longer needed
     pub fn update(&mut self, new_nodes: &[NodeRef], cur_ts: Timestamp) {
+        // The network side of the state losses are judged in, read once
+        let opt_epoch = self
+            .demote_routed_unresponsive
+            .then(|| self.registry().routing_table().loss_epoch(None));
+
         for node_ref in new_nodes {
             // Ensure the node has a comparable key with our current crypto kind
             let Some(key) = node_ref.node_ids().get(self.crypto_kind) else {
@@ -316,6 +368,15 @@ impl<'a> FanoutQueue<'a> {
             let lane_stop_source = StopSource::new();
             let work_item_stop_token = lane_stop_source.token();
 
+            // Judged once, so the order stays put for the rest of the run
+            let demoted = opt_epoch.is_some_and(|epoch| {
+                let epoch = LossEpoch {
+                    destination: Some(node_ref.node_info_ts(RoutingDomain::PublicInternet)),
+                    ..epoch
+                };
+                node_ref.operate(|e| e.is_routed_unresponsive(&epoch))
+            });
+
             // Add the new node
             self.nodes.insert(
                 key.clone(),
@@ -326,6 +387,7 @@ impl<'a> FanoutQueue<'a> {
                     },
                     lane_stop_source: Some(lane_stop_source),
                     status: FanoutNodeStatus::queued(cur_ts),
+                    demoted,
                 },
             );
             self.sorted_nodes.push(key);
@@ -339,6 +401,11 @@ impl<'a> FanoutQueue<'a> {
             let preferred_nodes = &self.preferred_nodes;
             self.sorted_nodes
                 .sort_by_key(|node_id| !preferred_nodes.contains(node_id));
+        }
+        if self.nodes.values().any(|node| node.demoted) {
+            let nodes = &self.nodes;
+            self.sorted_nodes
+                .sort_by_key(|node_id| nodes.get(node_id).is_some_and(|node| node.demoted));
         }
 
         // Disqualify any nodes that can be
@@ -436,8 +503,8 @@ impl<'a> FanoutQueue<'a> {
                         working_toward_consensus += 1;
                     }
                 }
-                FanoutNodeStage::Accepted | FanoutNodeStage::Stale => {
-                    // Always consider these nodes as working toward consensus because they're done
+                FanoutNodeStage::Accepted => {
+                    // Accepted nodes are done and count toward the collection target
                     if counting_consensus {
                         working_toward_consensus += 1;
                     }
@@ -447,6 +514,8 @@ impl<'a> FanoutQueue<'a> {
                 }
                 FanoutNodeStage::Timeout
                 | FanoutNodeStage::Rejected
+                | FanoutNodeStage::Stale
+                | FanoutNodeStage::Conflict
                 | FanoutNodeStage::Disqualified => {
                     // Does not count toward consensus or stop counting it
 
@@ -502,6 +571,17 @@ impl<'a> FanoutQueue<'a> {
         node.status.transition(FanoutNodeStage::Stale, cur_ts);
     }
 
+    /// Transition node InProgress -> Conflict
+    pub fn conflict(&mut self, node_ref: NodeRef, cur_ts: Timestamp) {
+        let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
+        let node = self.nodes.get_mut(&key).unwrap_or_log();
+        if !matches!(node.status.stage, FanoutNodeStage::InProgress) {
+            veilid_log!(self error "conflict: node should be in progress");
+            return;
+        }
+        node.status.transition(FanoutNodeStage::Conflict, cur_ts);
+    }
+
     /// Transition node InProgress -> Disqualified
     pub fn disqualified(&mut self, node_ref: NodeRef, cur_ts: Timestamp) {
         let key = node_ref.node_ids().get(self.crypto_kind).unwrap_or_log();
@@ -523,6 +603,33 @@ impl<'a> FanoutQueue<'a> {
         }
     }
 
+    /// Transition all Accepted -> Conflict, in the event a conflicting result overtakes ours
+    pub fn all_accepted_to_conflict(&mut self, cur_ts: Timestamp) {
+        for node in &mut self.nodes {
+            if matches!(node.1.status.stage, FanoutNodeStage::Accepted) {
+                node.1.status.transition(FanoutNodeStage::Conflict, cur_ts);
+            }
+        }
+    }
+
+    /// Transition all Stale -> Queued, so they are asked again with a newer result
+    pub fn all_stale_to_queued(&mut self, cur_ts: Timestamp) {
+        for node in &mut self.nodes {
+            if matches!(node.1.status.stage, FanoutNodeStage::Stale) {
+                node.1.status.transition(FanoutNodeStage::Queued, cur_ts);
+            }
+        }
+    }
+
+    /// Transition all Conflict -> Queued, so they are asked again with our current result
+    pub fn all_conflict_to_queued(&mut self, cur_ts: Timestamp) {
+        for node in &mut self.nodes {
+            if matches!(node.1.status.stage, FanoutNodeStage::Conflict) {
+                node.1.status.transition(FanoutNodeStage::Queued, cur_ts);
+            }
+        }
+    }
+
     /// Transition all Accepted -> Stale, in the event a newer value for consensus is found but we don't want to try again
     pub fn all_accepted_to_stale(&mut self, cur_ts: Timestamp) {
         for node in &mut self.nodes {
@@ -530,6 +637,90 @@ impl<'a> FanoutQueue<'a> {
                 node.1.status.transition(FanoutNodeStage::Stale, cur_ts);
             }
         }
+    }
+
+    /// The window's in-flight nodes and how long each is waited for, when they could not bring
+    /// the window to `target` accepts even if they all accepted and nothing in the window is left
+    /// to ask: past `floor` and `STRAGGLER_RTT_FACTOR` times the slowest answer
+    fn straggler_scan(
+        &self,
+        target: usize,
+        floor: TimestampDuration,
+    ) -> Option<(Vec<NodeId>, TimestampDuration)> {
+        if target == 0 || self.consensus_width == 0 {
+            return None;
+        }
+
+        let mut accepted = 0usize;
+        let mut in_flight = Vec::<NodeId>::new();
+        let mut window_slots = 0usize;
+        for node_id in &self.sorted_nodes {
+            let node = self.nodes.get(node_id).unwrap_or_log();
+            match node.status.stage {
+                FanoutNodeStage::Timeout | FanoutNodeStage::Disqualified => continue,
+                FanoutNodeStage::Queued => return None,
+                FanoutNodeStage::InProgress => in_flight.push(node_id.clone()),
+                FanoutNodeStage::Accepted => accepted += 1,
+                FanoutNodeStage::Rejected | FanoutNodeStage::Stale | FanoutNodeStage::Conflict => {}
+            }
+            window_slots += 1;
+            if window_slots == self.consensus_width {
+                break;
+            }
+        }
+        if in_flight.is_empty() || accepted + in_flight.len() >= target {
+            return None;
+        }
+
+        // With no answer yet there is nothing to call a node slow against
+        let slowest_answer = self
+            .nodes
+            .values()
+            .filter_map(|node| node.status.answer_duration())
+            .max()?;
+        let grace = floor.max(slowest_answer.saturating_mul(STRAGGLER_RTT_FACTOR));
+        Some((in_flight, grace))
+    }
+
+    /// When `time_out_stragglers` next has a node to cut
+    pub fn next_straggler_cut(&self, target: usize, floor: TimestampDuration) -> Option<Timestamp> {
+        let (in_flight, grace) = self.straggler_scan(target, floor)?;
+        in_flight
+            .iter()
+            .map(|node_id| {
+                self.nodes
+                    .get(node_id)
+                    .unwrap_or_log()
+                    .status
+                    .transition_ts
+                    .later(grace)
+            })
+            .min()
+    }
+
+    /// Time out the stragglers `straggler_scan` finds past their grace, returning how many
+    pub fn time_out_stragglers(
+        &mut self,
+        target: usize,
+        floor: TimestampDuration,
+        cur_ts: Timestamp,
+    ) -> usize {
+        let Some((in_flight, grace)) = self.straggler_scan(target, floor) else {
+            return 0;
+        };
+
+        let mut timed_out = 0usize;
+        for node_id in in_flight {
+            let node = self.nodes.get_mut(&node_id).unwrap_or_log();
+            if cur_ts.duration_since(node.status.transition_ts) < grace {
+                continue;
+            }
+            node.status.transition(FanoutNodeStage::Timeout, cur_ts);
+            // Drop the stop source to force the lane to stop processing this node
+            drop(node.lane_stop_source.take());
+            timed_out += 1;
+        }
+        timed_out
     }
 
     /// Transition all Queued | InProgress -> Timeout, in the event that the fanout is being cut short by a timeout
@@ -546,7 +737,7 @@ impl<'a> FanoutQueue<'a> {
 
     /// Transition InProgress | Queued -> Disqualified once they can no longer matter to the outcome
     ///
-    /// Width counts only terminal answers that hold a slot (Accepted, Stale, Rejected):
+    /// Width counts only terminal answers that hold a slot (Accepted, Stale, Conflict, Rejected):
     /// a candidate is culled only when `consensus_width` closer nodes have answered for
     /// good, or rejections reach consensus. Unanswered nodes hold no slot, so a slow or
     /// unreachable closest node never culls the reserve that could replace it.

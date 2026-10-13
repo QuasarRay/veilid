@@ -188,6 +188,9 @@ pub(crate) struct BucketEntryInner {
     /// our inbound reply-PR for inbound answers). Only populated for routed exchanges.
     #[serde(skip, default = "default_per_route_stats")]
     per_route_stats: LruCache<PublicKey, PerRouteStats>,
+    /// The state a routed question to this node was lost in, while it has answered none since
+    #[serde(skip)]
+    routed_question_loss: Option<LossEpoch>,
     /// Stats for connection-oriented protocols
     #[serde(skip)]
     connection_stats: ConnectionStats,
@@ -398,6 +401,7 @@ impl<'de> serde::de::Visitor<'de> for BucketEntryInnerVisitor {
             per_transport_stats: BTreeMap::new(),
             cm_viability: None,
             per_route_stats: default_per_route_stats(),
+            routed_question_loss: None,
             connection_stats: ConnectionStats::default(),
             punishment: None,
             contact_method_failures: HashMap::new(),
@@ -588,6 +592,11 @@ impl BucketEntryInner {
     /// Get all node ids
     pub fn node_ids(&self) -> NodeIdGroup {
         self.node_ids.clone()
+    }
+
+    /// Whether this entry's node ids are exactly `node_ids`, without cloning them
+    pub fn node_ids_equal(&self, node_ids: &NodeIdGroup) -> bool {
+        self.node_ids == *node_ids
     }
 
     /// Get public keys
@@ -916,7 +925,11 @@ impl BucketEntryInner {
         only_live: bool,
         filter: NodeRefFilter,
     ) -> Vec<(Flow, Timestamp)> {
-        let opt_connection_manager = routing_table.network_manager().opt_connection_manager();
+        let opt_connection_manager = self
+            .network_manager
+            .load()
+            .as_ref()
+            .and_then(|nm| nm.opt_connection_manager());
 
         let mut out: Vec<(Flow, Timestamp)> = self
             .last_flows
@@ -993,6 +1006,10 @@ impl BucketEntryInner {
         self.envelope_support = envelope_support;
     }
 
+    pub fn supports_envelope_version(&self, envelope_version: EnvelopeVersion) -> bool {
+        self.envelope_support.contains(&envelope_version)
+    }
+
     pub fn best_envelope_version(&self) -> Option<EnvelopeVersion> {
         self.envelope_support
             .iter()
@@ -1058,6 +1075,15 @@ impl BucketEntryInner {
 
     pub fn peer_stats(&self) -> &PeerStats {
         &self.peer_stats
+    }
+
+    pub fn latency_samples_recorded(&self) -> u64 {
+        self.latency_stats_accounting.recorded()
+    }
+
+    /// Whether a full latency window of samples arrived after the first `recorded`
+    pub fn latency_window_newer_than(&self, recorded: u64) -> bool {
+        self.latency_stats_accounting.window_newer_than(recorded)
     }
 
     pub fn rpc_stats(&self) -> &RPCStats {
@@ -1167,6 +1193,22 @@ impl BucketEntryInner {
         entry.add_down(bytes);
     }
 
+    /// Record a routed question to this node lost in the state `epoch` describes
+    pub(super) fn record_routed_lost_question(&mut self, epoch: LossEpoch) {
+        self.routed_question_loss = Some(epoch);
+    }
+
+    /// Record a routed answer from this node, which shows our routes reach it
+    pub(super) fn record_routed_answer(&mut self) {
+        self.routed_question_loss = None;
+    }
+
+    /// Whether a routed question to this node was lost in the state `epoch` describes, with no
+    /// routed answer since
+    pub fn is_routed_unresponsive(&self, epoch: &LossEpoch) -> bool {
+        self.routed_question_loss.as_ref() == Some(epoch)
+    }
+
     #[expect(
         dead_code,
         reason = "expose via routing_table debug command when needed"
@@ -1181,14 +1223,19 @@ impl BucketEntryInner {
         self.protected_drop_span_accounting.record_latency(duration);
     }
 
+    /// Protected-connection lifetimes a relay is judged on; one eviction is not a pattern
+    const PROTECTED_DROP_SPAN_MIN_SAMPLES: u64 = 3;
+
     // Called every UPDATE_STATE_STATS_INTERVAL_SECS seconds; recomputes only
     // from accountings that saw new samples since the last pass
     pub(super) fn update_latency_stats(&mut self) {
         if let Some(l) = self.latency_stats_accounting.take_latency_stats() {
             self.peer_stats.latency = Some(l);
         }
-        if let Some(l) = self.protected_drop_span_accounting.take_latency_stats() {
-            self.connection_stats.protected_drop_span = Some(l);
+        if self.protected_drop_span_accounting.recorded() >= Self::PROTECTED_DROP_SPAN_MIN_SAMPLES {
+            if let Some(l) = self.protected_drop_span_accounting.take_latency_stats() {
+                self.connection_stats.protected_drop_span = Some(l);
+            }
         }
         for (_key, prs) in self.per_route_stats.iter_mut() {
             prs.update_latency_stats();
@@ -1401,6 +1448,7 @@ impl BucketEntryInner {
         self.per_transport_stats.clear();
         self.contact_method_failures.clear();
         self.cm_viability = None;
+        self.routed_question_loss = None;
     }
 
     /// Peerinfo changed on either side: keep evidence only for contact methods
@@ -1509,6 +1557,7 @@ impl BucketEntry {
             per_transport_stats: BTreeMap::new(),
             cm_viability: None,
             per_route_stats: LruCache::new(PER_ROUTE_STATS_LRU_SIZE),
+            routed_question_loss: None,
             punishment: None,
             contact_method_failures: HashMap::new(),
             latency_stats_accounting: LatencyStatsAccounting::new(),

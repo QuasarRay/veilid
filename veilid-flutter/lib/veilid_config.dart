@@ -453,6 +453,7 @@ sealed class VeilidConfigNetwork with _$VeilidConfigNetwork {
     List<VeilidConfigAddressType> addressTypes,
     required bool upnp,
     required bool? detectAddressChanges,
+    @Default(10000) int bindRetryMs,
     required VeilidConfigTLS tls,
     required VeilidConfigProtocol protocol,
     required VeilidConfigPrivacy privacy,

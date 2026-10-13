@@ -242,6 +242,18 @@ impl Destination {
         })
     }
 
+    /// Node info timestamp of a node destination, the part of its state a lost question to it is
+    /// judged in
+    pub fn node_info_ts(&self) -> Option<Timestamp> {
+        match self {
+            Destination::Direct {
+                node,
+                safety_selection: _,
+            } => Some(node.node_info_ts(RoutingDomain::PublicInternet)),
+            Destination::DialInfo { .. } | Destination::PrivateRoute { .. } => None,
+        }
+    }
+
     pub fn destination_key(&self) -> Result<PublicKey, RPCError> {
         match self {
             Destination::Direct {
@@ -402,6 +414,9 @@ impl RPCProcessor {
                             directions: Direction::In.into(),
                             avoid_nodes: target.node_ids().to_vec(),
                             is_destination_safe: false,
+                            opt_destination: dest.destination_key().ok().map(|dest_key| {
+                                (dest_key, routing_table.loss_epoch(dest.node_info_ts()))
+                            }),
                         })
                         .await
                         .to_rpc_network_result()?);
@@ -493,6 +508,10 @@ impl RPCProcessor {
                                     directions: Direction::In.into(),
                                     avoid_nodes: vec![avoid_node_id],
                                     is_destination_safe: true,
+                                    opt_destination: Some((
+                                        private_route.public_key.clone(),
+                                        routing_table.loss_epoch(None),
+                                    )),
                                 })
                                 .await
                                 .to_rpc_network_result()?)

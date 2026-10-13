@@ -569,7 +569,7 @@ impl NetworkConnection {
 
             // Let the connection manager know the receive loop exited
             connection_manager
-                .report_connection_finished(connection_id);
+                .report_connection_finished(connection_id, false);
 
             // Close the low level socket
             // Both the error and the network result: a close that timed out arrives as the

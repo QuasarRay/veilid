@@ -7,12 +7,15 @@ impl_veilid_log_facility!("net");
 
 type InboundProtocolMap = HashMap<(AddressType, LowLevelProtocolType, u16), Vec<ProtocolType>>;
 
-/// Cap on one whole dial-info detection pass across all discovery contexts
-const DIAL_INFO_DETECTION_TIMEOUT_MS: u32 = 60_000;
-
 struct DialInfoConfirmationResult {
+    /// address families the validators saw us from
     external_address_types: AddressTypeSet,
+    /// dial info the detection confirmed
     dial_info_details: Vec<DialInfoDetail>,
+    /// external addresses the validators reported, over every transport
+    external_addresses: BTreeSet<Address>,
+    /// transports the detection reached no verdict on
+    unexamined_transports: BTreeSet<TransportType>,
 }
 
 enum DialInfoDetectionOutcome {
@@ -118,11 +121,7 @@ impl NativeNetwork {
             }
         };
 
-        if needs_confirm_dial_info
-            || (state_is_publishable
-                && !current_peer_info.node_info().has_dial_info()
-                && self.inner.lock().next_outbound_only_dial_info_check <= Timestamp::now())
-        {
+        if needs_confirm_dial_info {
             // Bootstrap needs to have gotten us enough connectivity nodes. The discovery
             // quorum scales down to the validator pool, so gate on its minimum, not the
             // full quorum, or a small network never attempts confirmation at all
@@ -356,6 +355,22 @@ impl NativeNetwork {
             return Ok(DialInfoDetectionOutcome::Failed);
         }
 
+        let external_addresses: BTreeSet<Address> = discovery_contexts
+            .iter()
+            .flat_map(|dc| dc.external_addresses())
+            .collect();
+        let mut unexamined_transports = BTreeSet::new();
+        for dcc in &context_configs {
+            let key = (
+                dcc.address_type,
+                dcc.protocol_type.low_level_protocol_type(),
+                dcc.port,
+            );
+            for pt in inbound_protocol_map.get(&key).into_iter().flatten() {
+                unexamined_transports.insert(TransportType::new(*pt, dcc.address_type));
+            }
+        }
+
         // All done
         veilid_log!(self debug "DialInfo discovery finished in {:#} with address_types {:?}", done_duration, external_address_types);
 
@@ -363,6 +378,8 @@ impl NativeNetwork {
             DialInfoConfirmationResult {
                 external_address_types,
                 dial_info_details,
+                external_addresses,
+                unexamined_transports,
             },
         ))
     }
@@ -467,15 +484,16 @@ impl NativeNetwork {
 
         // Bound the detection so a hung discovery fails instead of wedging this
         // single-flight task forever
+        let detection_timeout = self.timings().dial_info_detection_timeout;
         let detection_outcome = match timeout(
-            DIAL_INFO_DETECTION_TIMEOUT_MS,
+            detection_timeout.millis_u32().unwrap_or(u32::MAX),
             self.do_public_internet_dial_info_detection(stop_token, cur_ts, &inbound_protocol_map),
         )
         .await
         {
             Ok(res) => res?,
             Err(_) => {
-                veilid_log!(self debug "DialInfo detection timed out after {}ms", DIAL_INFO_DETECTION_TIMEOUT_MS);
+                veilid_log!(self debug "DialInfo detection timed out after {}", detection_timeout);
                 DialInfoDetectionOutcome::Failed
             }
         };
@@ -530,6 +548,14 @@ impl NativeNetwork {
             .dial_info_confirm_failure_count
             .remove(&RoutingDomain::PublicInternet);
 
+        // The address check re-detects only for an address this detection did not see, or
+        // on reports over a transport it reached no verdict on
+        self.network_manager().report_dial_info_detection(
+            RoutingDomain::PublicInternet,
+            confirmation_result.external_addresses.clone(),
+            confirmation_result.unexamined_transports.clone(),
+        );
+
         // An upgrade re-test that reproduces the published state records the larger
         // quorum and leaves the routing domain alone
         if is_quorum_upgrade {
@@ -559,8 +585,6 @@ impl NativeNetwork {
             confirmation_result.external_address_types,
             protocol_config.public_internet_capabilities,
         ));
-        let has_dial_info = !static_dial_info_details.is_empty()
-            || !confirmation_result.dial_info_details.is_empty();
         editor.clear_dial_info_details(None, None);
         for did in static_dial_info_details {
             editor.add_dial_info_detail(did);
@@ -575,23 +599,6 @@ impl NativeNetwork {
 
         // Publish the peer info (idempotent if it hasn't changed)
         rdc.publish_peer_info();
-
-        // A stable symmetric NAT needs no re-proving, so back off while there is no dial info
-        {
-            let mut inner = self.inner.lock();
-            let period_secs = if has_dial_info {
-                inner.outbound_only_dial_info_check_period_secs =
-                    UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS;
-                UPDATE_OUTBOUND_ONLY_DIAL_INFO_PERIOD_SECS
-            } else {
-                let period = inner.outbound_only_dial_info_check_period_secs;
-                inner.outbound_only_dial_info_check_period_secs =
-                    (period * 2).min(UPDATE_OUTBOUND_ONLY_DIAL_INFO_MAX_PERIOD_SECS);
-                period
-            };
-            inner.next_outbound_only_dial_info_check =
-                Timestamp::now().later(TimestampDuration::new_secs(period_secs));
-        }
 
         Ok(true)
     }

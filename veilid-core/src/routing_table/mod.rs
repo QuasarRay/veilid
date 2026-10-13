@@ -53,6 +53,7 @@ use bucket::*;
 use hashlink::LruCache;
 use network_estimator::*;
 use tasks::ping_validator::PingValidationBatch;
+pub(crate) use tasks::ping_validator::PingValidationGroup;
 
 impl_veilid_log_facility!("rtab");
 
@@ -64,6 +65,30 @@ const BUCKET_COUNT: usize = HASH_COORDINATE_LENGTH * 8;
 /// Contact-method viability recompute is event-driven (cm_viability_dirty); this
 /// only rate-limits how often the drain can fire
 const UPDATE_CM_VIABILITY_INTERVAL_SECS: u32 = 1;
+
+/// Routing table durations derived from the RPC timeout
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RoutingTableTimings {
+    /// Ping period until a node answers steadily, and base of the ping falloffs: one RPC timeout
+    pub unreliable_ping_interval: TimestampDuration,
+    /// TXT lookup time for a bootstrap name before direct bootstrap: two RPC timeouts
+    pub bootstrap_txt_timeout: TimestampDuration,
+    /// Zero responsive nodes this long falls back to bootstrap: one ping round and its answer
+    pub no_responsive_bootstrap_delay: TimestampDuration,
+    /// How long nodes must answer or lose questions steadily to become reliable or dead
+    pub liveness: LivenessSpans,
+}
+
+impl RoutingTableTimings {
+    pub fn new(rpc_timeout: TimestampDuration) -> Self {
+        Self {
+            unreliable_ping_interval: rpc_timeout,
+            bootstrap_txt_timeout: rpc_timeout.saturating_mul(2),
+            no_responsive_bootstrap_delay: rpc_timeout.saturating_mul(2),
+            liveness: LivenessSpans::new(rpc_timeout),
+        }
+    }
+}
 
 // Table store keys
 const ALL_ENTRY_BYTES: &[u8] = b"all_entry_bytes";
@@ -89,6 +114,7 @@ pub type CreateNodeRefUpdateFunc<'t> = Box<dyn FnOnce(&mut BucketEntryInner) + '
 
 type SerializedBuckets = Vec<Vec<u8>>;
 type SerializedBucketMap = BTreeMap<CryptoKind, SerializedBuckets>;
+type RoutingDomainControllerMap = HashMap<RoutingDomain, Arc<dyn RoutingDomainController>>;
 
 pub type BucketIndex = (CryptoKind, usize);
 
@@ -138,8 +164,8 @@ pub(crate) struct RoutingTable {
 
     /// Routing table inner state
     inner: RwLock<RoutingTableInner>,
-    /// Routing domains
-    routing_domains: Mutex<HashMap<RoutingDomain, Arc<dyn RoutingDomainController>>>,
+    /// Routing domains, replaced whole at init and terminate so readers take no lock
+    routing_domains: ArcSwap<RoutingDomainControllerMap>,
 
     /// Ping validation channel sender (recreated on each startup/shutdown cycle)
     ping_validation_sender: Mutex<flume::Sender<PingValidationBatch>>,
@@ -158,15 +184,15 @@ pub(crate) struct RoutingTable {
     secret_keys: RwLock<SecretKeyGroup>,
     /// Route spec store
     route_spec_store: RouteSpecStore,
+    /// Durations derived from the RPC timeout
+    timings: RoutingTableTimings,
     /// Buckets to kick on our next kick task
     kick_queue: Mutex<BTreeSet<BucketIndex>>,
     /// Set when peerinfo changed on either side; the cm viability task fires only when set
     cm_viability_dirty: AtomicBool,
-    /// Last route-test enqueue time per route, so a struggling route is not
-    /// re-tested continuously on lossy networks
+    /// Last route-test enqueue time per route, so a lossy network cannot retest it continuously
     route_test_cooldown: Mutex<BTreeMap<RouteId, Timestamp>>,
-    /// Routes whose test failures were deferred while blame was suppressed;
-    /// retested with cooldown bypassed once blame lifts
+    /// Routes whose test failures waited out blame suppression, retested past the cooldown after
     deferred_route_tests: Mutex<BTreeSet<RouteId>>,
     /// Ping outcome and queue accounting surfaced through stats
     #[cfg(feature = "stats")]
@@ -235,6 +261,7 @@ impl RoutingTable {
             network_manager.clone(),
         ));
         let route_spec_store = RouteSpecStore::new(registry.clone());
+        let timings = RoutingTableTimings::new(registry.config().rpc_timeout());
 
         // Create ping validation channel
         let (ping_validation_sender, ping_validation_receiver) = flume::unbounded();
@@ -245,6 +272,7 @@ impl RoutingTable {
             inner,
             startup_context,
             route_spec_store,
+            timings,
 
             routing_domains: Default::default(),
             node_ids: Default::default(),
@@ -360,7 +388,8 @@ impl RoutingTable {
 
         // Set up routing domains (eventually make this pluggable or use features)
         {
-            let mut routing_domains = self.routing_domains.lock();
+            let mut routing_domains =
+                RoutingDomainControllerMap::clone(&self.routing_domains.load());
             routing_domains.insert(
                 RoutingDomain::PublicInternet,
                 Arc::new(PublicInternetRoutingDomainController::new(self.registry())),
@@ -369,6 +398,7 @@ impl RoutingTable {
                 RoutingDomain::LocalNetwork,
                 Arc::new(LocalNetworkRoutingDomainController::new(self.registry())),
             );
+            self.routing_domains.store(Arc::new(routing_domains));
         }
 
         // Set up initial keys and node ids
@@ -552,7 +582,7 @@ impl RoutingTable {
 
         self.node_ids.write().clear();
 
-        self.routing_domains.lock().clear();
+        self.routing_domains.store(Default::default());
 
         veilid_log!(self debug "finished routing table terminate");
     }
@@ -589,8 +619,9 @@ impl RoutingTable {
 
     #[cfg(feature = "app-lifecycle")]
     fn app_lifecycle_event_handler(&self, evt: Arc<AppLifecycleEvent>) {
+        // A hidden desktop app keeps running, so its saves keep the foreground schedule
         self.save_schedule.lock().set_background(
-            evt.state == VeilidAppLifecycleState::Background,
+            evt.state == VeilidAppLifecycleState::Background && background_may_freeze(),
             Timestamp::now(),
         );
         if let Some(background_time) = evt.background_time.clone() {
@@ -1207,6 +1238,11 @@ impl RoutingTable {
         &self.route_spec_store
     }
 
+    /// Durations derived from the RPC timeout
+    pub fn timings(&self) -> &RoutingTableTimings {
+        &self.timings
+    }
+
     /// Record bytes sent/received from this node
     pub fn record_sent_bytes(&self, bytes: ByteCount) {
         self.self_transfer_stats_accounting.lock().0.add_up(bytes);
@@ -1456,6 +1492,14 @@ impl RoutingTable {
             bail!("can't register own node");
         }
 
+        // A known node whose ids are unchanged needs no table edit, only the read lock
+        if let Some(nr) = self.existing_node_ref_with_node_ids(node_ids)? {
+            if let Some(update_func) = opt_update_func {
+                nr.operate_mut(|e| update_func(e));
+            }
+            return Ok(nr);
+        }
+
         // Look up all bucket entries and make sure we only have zero or one
         // If we have more than one, pick the one with the best cryptokind to add node ids to
 
@@ -1536,6 +1580,27 @@ impl RoutingTable {
         }
 
         Ok(nr)
+    }
+
+    /// The entry create_node_ref would pick for `node_ids`, if its node ids are exactly those
+    fn existing_node_ref_with_node_ids(
+        &self,
+        node_ids: &NodeIdGroup,
+    ) -> EyreResult<Option<NodeRef>> {
+        let inner = self.inner.read();
+        for node_id in node_ids.iter() {
+            if !VALID_CRYPTO_KINDS.contains(&node_id.kind()) {
+                continue;
+            }
+            let bucket_index = self.calculate_bucket_index(node_id)?;
+            if let Some(entry) = inner.get_bucket(bucket_index).entry(node_id.ref_value()) {
+                // Ref bumped under the table lock, as in lookup_node_id
+                return Ok(entry
+                    .with(|e| e.node_ids_equal(node_ids))
+                    .then(|| NodeRef::new(self.registry(), entry)));
+            }
+        }
+        Ok(None)
     }
 
     /// Resolve an existing routing table entry using any crypto kind and return a reference to it

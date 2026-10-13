@@ -9,6 +9,7 @@ impl StorageManager {
         registry: VeilidComponentRegistry,
         owm: &mut OutboundWatchManager,
         cur_ts: Timestamp,
+        renew_window: TimestampDuration,
     ) {
         // A stalled or unreachable node cannot complete these, and either answer the
         // detector gives means wait
@@ -21,10 +22,16 @@ impl StorageManager {
         }
 
         // Collect watches needing fallback inspection
+        let consensus_count = registry.config().internal().network.dht.get_value_count as usize;
         let inspections: Vec<_> = owm
             .outbound_watches
             .values()
-            .filter_map(|ow| Some((ow.record_key(), ow.needs_fallback_inspect(cur_ts)?)))
+            .filter_map(|ow| {
+                Some((
+                    ow.record_key(),
+                    ow.needs_fallback_inspect(cur_ts, consensus_count, renew_window)?,
+                ))
+            })
             .collect();
 
         if inspections.is_empty() {
@@ -65,7 +72,12 @@ impl StorageManager {
         owm.update_per_node_states(cur_ts);
 
         // Check for watches that need fallback inspection
-        Self::check_fallback_inspections_inner(self.registry(), owm, cur_ts);
+        Self::check_fallback_inspections_inner(
+            self.registry(),
+            owm,
+            cur_ts,
+            self.timings().renew_outbound_watches,
+        );
 
         // Send any repeat hints owed from reads that raced suppressed reports
         if !owm.pending_rehints.is_empty() {

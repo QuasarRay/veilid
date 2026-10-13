@@ -42,6 +42,8 @@ pub mod clone_stream;
 /// Dedicated FIFO thread pool for heavy CPU work.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub mod cpu_pool;
+/// Runs a routine when the earliest armed deadline passes.
+pub mod deadline_timer;
 /// parking_lot deadlock-detector watchdog (enabled by the `debug-locks` feature).
 #[cfg(feature = "debug-locks")]
 pub mod deadlock_detector;
@@ -142,6 +144,8 @@ pub mod trim_backtrace;
 /// In-process simulated network for deterministic testing.
 #[cfg(feature = "virtual-network")]
 pub mod virtual_network;
+/// Wakeup signal for one waiter that keeps a wake sent before the wait.
+pub mod wakeup;
 /// Browser/WASM environment and address-family detection.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub mod wasm_tools;
@@ -249,6 +253,8 @@ pub use clone_stream::*;
 #[doc(inline)]
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub use cpu_pool::*;
+#[doc(inline)]
+pub use deadline_timer::*;
 #[cfg(feature = "debug-locks")]
 #[doc(inline)]
 pub use deadlock_detector::*;
@@ -343,6 +349,8 @@ pub use tracked_mutex::*;
 #[doc(inline)]
 #[cfg(feature = "backtrace")]
 pub use trim_backtrace::*;
+#[doc(inline)]
+pub use wakeup::*;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub use wasm_tools::*;
 #[doc(inline)]

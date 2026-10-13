@@ -1,7 +1,5 @@
 use super::*;
 
-/// How often End re-checks for in-flight Sets to settle
-pub(super) const END_QUIESCENCE_POLL_MS: u32 = 50;
 /// Least time between commit round starts, so a round that fails fast does not spin
 pub(super) const COMMIT_ROUND_MIN_INTERVAL_MS: u32 = 1_000;
 
@@ -24,27 +22,19 @@ pub const RECONCILE_OUTBOUND_WATCHES_INTERVAL: TimestampDuration = TimestampDura
 /// Frequency to retry reconciliation of watches that are not at consensus
 pub const RECONCILE_OUTBOUND_WATCHES_RETRY_INTERVAL: TimestampDuration =
     TimestampDuration::new_secs(5);
-/// How long before expiration to try to renew per-node watches
-pub const RENEW_OUTBOUND_WATCHES_DURATION: TimestampDuration = TimestampDuration::new_secs(30);
-/// Frequency to check for expired server-side watched records
-pub const CHECK_INBOUND_WATCHES_INTERVAL_SECS: u32 = 1;
-/// Frequency to check for expired client-side transactions
-pub const CHECK_OUTBOUND_TRANSACTIONS_INTERVAL_SECS: u32 = 1;
+/// Renew per-node watches this many get-value timeouts before expiry, room for the renewal fanout
+pub const RENEW_OUTBOUND_WATCHES_GET_TIMEOUT_MULTIPLIER: u64 = 3;
 /// Multiplier applied to rpc_timeout_ms to derive the server-side transaction TTL
 pub const TRANSACTION_TIMEOUT_RPC_MULTIPLIER: u64 = 2;
 /// Multiplier applied to a node's RTT to derive a post-consensus deadline (capped at `rpc.timeout_ms`)
 pub const POST_CONSENSUS_RTT_FACTOR: u64 = 3;
-/// Hard cap on the post-consensus collection window, which is for the answer wave trailing
-/// consensus; under congested RTTs the RTT factor alone degenerates toward the rpc timeout
-/// and waits on dead stragglers
-pub const POST_CONSENSUS_GRACE_MS: u64 = 500;
-/// How long a Background transaction begin queues on the record lock before
-/// yielding TryAgain to the caller's retry loop
-pub const BACKGROUND_BEGIN_LOCK_TIMEOUT_MS: u64 = 2000;
+/// Cap on the post-consensus window as a percent of the reply timeout; under congested RTTs the
+/// RTT factor alone nears the reply timeout and waits on dead stragglers
+pub const POST_CONSENSUS_GRACE_PERCENT: u64 = 10;
+/// Background begin's record lock wait before TryAgain, % of its records' slowest reply timeout
+pub const BACKGROUND_BEGIN_LOCK_TIMEOUT_PERCENT: u64 = 40;
 /// Headroom beyond `consensus_count` (= `set_value_count`) that Begin aims for, as a percentage rounded up
 pub const CONSENSUS_TRIM_PERCENT: usize = 50;
-/// Frequency to check for expired server-side transactions
-pub const CHECK_INBOUND_TRANSACTIONS_INTERVAL_SECS: u32 = 1;
 /// Frequency to process record rehydration requests
 pub const REHYDRATE_RECORDS_INTERVAL_SECS: u32 = 1;
 /// Number of rehydration requests to process in parallel
@@ -55,13 +45,11 @@ pub const REHYDRATE_REQUESTS_PER_TICK: usize = 4;
 pub const REHYDRATE_SET_CONCURRENCY: usize = 8;
 /// How often to change inspect a watch that is wanted but has never established. Reconcile
 /// is already retrying establishment, and until it lands this interval is delivery latency,
-/// so it matches an established watch's longest fallback wait
+/// so it matches the fallback ceiling of an established watch short of consensus
 pub const UNESTABLISHED_WATCH_INSPECT_INTERVAL: TimestampDuration =
     TimestampDuration::new_secs(120);
 /// Delay before retrying a failed change inspection
 pub const CHANGE_INSPECT_RETRY_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
-/// How long after foreground transaction activity background transactions stay deferred
-pub const BACKGROUND_TRANSACTION_QUIET_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
 /// Length of descriptor cache (512 records and 5 nodes per record, roughly 184320 bytes)
 pub const DESCRIPTOR_CACHE_SIZE: usize = 2560;
 /// How long a completed rehydration check answers for a record, so a reopen

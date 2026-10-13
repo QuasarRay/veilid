@@ -84,6 +84,7 @@ pub async fn test_record_index() {
                         limits,
                         record_table,
                         subkey_table,
+                        opt_inbound_expiry: None,
                     };
                     let record_index = TestRecordIndex::try_new(Arc::new(unlocked_inner))
                         .await
@@ -127,6 +128,7 @@ pub async fn test_record_index() {
                 limits: local_config,
                 record_table,
                 subkey_table,
+                opt_inbound_expiry: None,
             });
 
             info!("{}: {}", context_name, test_name);

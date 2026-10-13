@@ -114,21 +114,30 @@ impl InboundTransactions {
         Ok(())
     }
 
+    /// Drop the expired transactions, returning when the next one left expires
     pub fn remove_expired_transactions<D: Fn(InboundTransactionId), L: Fn(VeilidAPIError)>(
         &mut self,
         now: Timestamp,
         debug_logger: &D,
         error_logger: &L,
-    ) {
+    ) -> Option<Timestamp> {
+        let mut opt_next_expiration: Option<Timestamp> = None;
         self.record_transactions
             .retain(|_, inbound_transaction_list| {
-                inbound_transaction_list.drop_expired_transactions(
+                let Some(next_expiration) = inbound_transaction_list.drop_expired_transactions(
                     now,
                     &mut self.transaction_id_allocator,
                     debug_logger,
                     error_logger,
-                )
+                ) else {
+                    return false;
+                };
+                opt_next_expiration = Some(
+                    opt_next_expiration.map_or(next_expiration, |exp| exp.min(next_expiration)),
+                );
+                true
             });
+        opt_next_expiration
     }
 
     pub fn debug(&self) -> String {

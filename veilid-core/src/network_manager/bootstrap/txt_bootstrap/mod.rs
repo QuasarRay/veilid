@@ -133,6 +133,22 @@ impl NetworkManager {
         })
     }
 
+    /// When the earliest cached TXT answer for these names expires, or None if one has no answer
+    /// cached
+    pub fn txt_answers_expiration(&self, hostnames: &[String]) -> Option<Timestamp> {
+        let cur_ts = Timestamp::now();
+        let inner = self.inner.lock();
+        let mut opt_expiration: Option<Timestamp> = None;
+        for hostname in hostnames {
+            let (exp_ts, _) = inner.txt_lookup_cache.peek(hostname)?;
+            if *exp_ts <= cur_ts {
+                return None;
+            }
+            opt_expiration = Some(opt_expiration.map_or(*exp_ts, |exp| exp.min(*exp_ts)));
+        }
+        opt_expiration
+    }
+
     /// Bootstrap resolution from TXT into strings
     /// This is cached as to minimize the number of outbound network requests on bootstrap servers
     #[cfg_attr(

@@ -96,6 +96,8 @@ pub async fn run_all_tests() {
     test_tracked_mutex::test_all();
     info!("TEST: exec_test_yield_timing");
     test_yield_timing::test_all().await;
+    info!("TEST: exec_test_wake_and_deadline");
+    test_wake_and_deadline::test_all().await;
 
     info!("Finished unit tests");
 }
@@ -193,6 +195,14 @@ cfg_if! {
             setup();
             block_on(async {
                 test_must_join::test_must_join_single_future().await;
+            });
+        }
+
+        #[test]
+        fn run_test_wake_and_deadline() {
+            setup();
+            block_on(async {
+                test_wake_and_deadline::test_all().await;
             });
         }
 

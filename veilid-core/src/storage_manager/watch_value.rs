@@ -37,7 +37,7 @@ pub(super) struct OutboundWatchValueResult {
 /// Watch parameters used to configure a watch
 #[derive(Debug, Clone)]
 pub(crate) struct InboundWatchParameters {
-    /// The range of subkeys being watched, empty meaning full
+    /// The range of subkeys being watched; empty only to cancel, so it never fires
     pub subkeys: ValueSubkeyRangeSet,
     /// When this watch will expire
     pub expiration: Timestamp,
@@ -47,6 +47,17 @@ pub(crate) struct InboundWatchParameters {
     pub watcher_member_id: MemberId,
     /// The place where updates are sent
     pub target: Target,
+}
+
+impl InboundWatchParameters {
+    /// When an inbound watch with these parameters is dropped; one that can never fire goes at once
+    pub fn drop_due(&self) -> Timestamp {
+        if self.count == 0 || self.subkeys.is_empty() {
+            Timestamp::new(0)
+        } else {
+            self.expiration
+        }
+    }
 }
 
 /// Watch result to return with answer
@@ -679,6 +690,10 @@ impl StorageManager {
 
         // A node with no copy refuses the watch, and only the seeds have answered before
         fanout_call.set_prefer_init_nodes(true);
+        fanout_call.set_demote_routed_unresponsive(matches!(
+            params.safety_selection,
+            SafetySelection::Safe(_)
+        ));
 
         let shutdown_stop_source = self
             .startup_lock
@@ -2169,21 +2184,28 @@ impl StorageManager {
         });
     }
 
-    /// Requeue a change inspection that failed.
+    /// Requeue a change inspection that failed or was deferred for foreground activity.
     ///
     /// A failure learned nothing about the record: its nodes did not answer, or we
-    /// could not reach them. It retries soon, and while we are offline the queue holds
-    /// it rather than spending it.
+    /// could not reach them. It retries soon, or when a running quiet window ends if that
+    /// is sooner, and while we are offline the queue holds it rather than spending it.
     pub(super) fn requeue_failed_change_inspect(
         &self,
         record_key: RecordKey,
         subkeys: ValueSubkeyRangeSet,
     ) {
+        let cur_ts = Timestamp::now_non_decreasing();
+        let retry_ts = cur_ts.later(CHANGE_INSPECT_RETRY_INTERVAL);
+        let quiet_until = self.background_quiet_until();
+        let not_before = if quiet_until > cur_ts {
+            quiet_until.min(retry_ts)
+        } else {
+            retry_ts
+        };
         let owm = &mut *self.outbound_watch_manager_mut();
         if !owm.outbound_watches.contains_key(&record_key.opaque()) {
             return;
         }
-        let not_before = Timestamp::now_non_decreasing().later(CHANGE_INSPECT_RETRY_INTERVAL);
         owm.enqueue_change_inspect_after(record_key, subkeys, not_before);
     }
 

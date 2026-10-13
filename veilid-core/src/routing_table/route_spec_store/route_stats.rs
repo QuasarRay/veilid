@@ -56,6 +56,8 @@ pub struct RouteOrderingStats {
     pub max_consecutive_loopback_failures: usize,
     /// Per-destination lost question tracking: destination pubkey -> lost count
     pub lost_question_destinations: HashMap<PublicKey, usize>,
+    /// Destinations a question was lost to, until each answers here: pubkey -> state it was lost in
+    pub lost_destination_marks: HashMap<PublicKey, LossEpoch>,
     /// When this ordering was last known valid (loopback pass / rcvd traffic)
     pub last_known_valid_ts: Option<Timestamp>,
     /// When this ordering was last sent to
@@ -360,31 +362,55 @@ impl RouteStats {
         self.ordering_mut(ordering).failed_to_send += 1;
     }
 
-    /// Mark a route as having lost an answer for a destination at the given ordering
-    pub fn record_lost_question(&mut self, ordering: SequenceOrdering, destination: &Destination) {
+    /// Mark a route as having lost an answer for a destination at the given ordering; a loss
+    /// with no epoch, judged while blame is suppressed, marks nothing
+    pub fn record_lost_question(
+        &mut self,
+        ordering: SequenceOrdering,
+        destination: &Destination,
+        opt_epoch: Option<LossEpoch>,
+    ) {
         let Ok(dest_key) = destination.destination_key() else {
             self.ordering_mut(ordering)
                 .answer_stats_accounting
                 .record_lost_question(Timestamp::now());
             return;
         };
-        self.record_lost_question_to(ordering, dest_key);
+        self.record_lost_question_to(ordering, dest_key, opt_epoch);
     }
 
     /// Mark a route as having lost an answer for a destination key at the given ordering
-    pub fn record_lost_question_to(&mut self, ordering: SequenceOrdering, dest_key: PublicKey) {
-        let cur_ts = Timestamp::now();
+    pub fn record_lost_question_to(
+        &mut self,
+        ordering: SequenceOrdering,
+        dest_key: PublicKey,
+        opt_epoch: Option<LossEpoch>,
+    ) {
         let os = self.ordering_mut(ordering);
-        os.answer_stats_accounting.record_lost_question(cur_ts);
-        *os.lost_question_destinations.entry(dest_key).or_insert(0) += 1;
+        os.answer_stats_accounting
+            .record_lost_question(Timestamp::now());
+        *os.lost_question_destinations
+            .entry(dest_key.clone())
+            .or_insert(0) += 1;
+        if let Some(epoch) = opt_epoch {
+            os.lost_destination_marks
+                .retain(|_, mark| mark.same_network(&epoch));
+            os.lost_destination_marks.insert(dest_key, epoch);
+        }
     }
 
-    /// Whether a question to [dest_key] was lost at this ordering since it last answered or
-    /// passed a loopback
-    pub fn lost_question_to(&self, ordering: SequenceOrdering, dest_key: &PublicKey) -> bool {
+    /// Whether a question to [dest_key] was lost at this ordering in the state `epoch` describes,
+    /// with no answer from it over this route since
+    pub fn lost_question_to(
+        &self,
+        ordering: SequenceOrdering,
+        dest_key: &PublicKey,
+        epoch: &LossEpoch,
+    ) -> bool {
         self.per_ordering
             .get(&ordering)
-            .is_some_and(|os| os.lost_question_destinations.contains_key(dest_key))
+            .and_then(|os| os.lost_destination_marks.get(dest_key))
+            .is_some_and(|mark| mark == epoch)
     }
 
     /// Mark a route as having received a question or statement at the given ordering
@@ -407,7 +433,7 @@ impl RouteStats {
         ordering: SequenceOrdering,
         cur_ts: Timestamp,
         bytes: ByteCount,
-        _destination: &Destination,
+        destination: &Destination,
     ) {
         let os = self.ordering_mut(ordering);
         os.last_rcvd_answer_ts = Some(cur_ts);
@@ -415,6 +441,10 @@ impl RouteStats {
         os.answer_stats_accounting.record_answer(cur_ts);
         // Receiving any answer at this ordering means the ordering is functional.
         os.lost_question_destinations.clear();
+        // but only this destination's answer shows the route reaches it
+        if let Ok(dest_key) = destination.destination_key() {
+            os.lost_destination_marks.remove(&dest_key);
+        }
         self.transfer_stats_accounting.add_down(bytes);
     }
 
@@ -592,7 +622,7 @@ impl RouteSpecStore {
     /// After a route-test failure, mark the route for release if it's now dead for all its
     /// orderings. Sticky, so a later send resetting failed_to_send can't un-mark it.
     pub fn mark_allocated_route_for_release_if_dead(&self, key: &PublicKey) {
-        let opt_release_rid = {
+        let (opt_release_rid, opt_dead_hops) = {
             let cache = self.cache.read();
             let Some(rid) = cache.get_allocated_route_id_by_key(key) else {
                 return;
@@ -605,48 +635,78 @@ impl RouteSpecStore {
                 let why = arce.with_stats(|st| st.death_reason(arce.orderings()));
                 veilid_log!(self debug "Marking dead route for release: {} ({})", key, why);
                 arce.mark_for_release();
-                if arce.with_stats(|s| s.death_blames_hops_for(arce.orderings())) {
-                    self.avoid_dead_route_hops(arce.orderings(), &arce.hop_node_refs());
-                }
+                let opt_dead_hops = arce
+                    .with_stats(|s| s.death_blames_hops_for(arce.orderings()))
+                    .then(|| (arce.orderings(), arce.hop_node_refs()));
                 // Nothing holds it right now -> release immediately
-                (!arce.is_locked()).then_some(rid)
+                ((!arce.is_locked()).then_some(rid), opt_dead_hops)
             } else {
-                None
+                (None, None)
             }
         };
+        if let Some((orderings, hops)) = opt_dead_hops {
+            let routing_table = self.routing_table();
+            let hop_epochs = hops
+                .iter()
+                .map(|hop| {
+                    let destination_ts = hop.node_info_ts(RoutingDomain::PublicInternet);
+                    (
+                        hop.best_node_id(),
+                        routing_table.loss_epoch(Some(destination_ts)),
+                    )
+                })
+                .collect::<Vec<_>>();
+            self.avoid_dead_route_hops(orderings, &hop_epochs);
+        }
         if let Some(rid) = opt_release_rid {
             self.release_allocated_route(rid);
         }
     }
 
-    /// Keep a dead route's hops out of its orderings' allocations for a while, otherwise the
-    /// pool refills with the same dead hop pair
-    fn avoid_dead_route_hops(&self, orderings: SequenceOrderingSet, hops: &[NodeRef]) {
-        let cur_ts = Timestamp::now();
+    /// Keep a dead route's hops out of its orderings' allocations while the state each was lost
+    /// in holds, otherwise the pool refills with the same dead hop pair. Keeps the hops of the
+    /// latest deaths, a background pool's worth of routes at the longest hop count.
+    pub(crate) fn avoid_dead_route_hops(
+        &self,
+        orderings: SequenceOrderingSet,
+        hop_epochs: &[(NodeId, LossEpoch)],
+    ) {
+        let Some((_, network)) = hop_epochs.first() else {
+            return;
+        };
+        let capacity = DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT
+            * usize::from(self.config().internal().network.rpc.max_route_hop_count);
         let mut dead_route_hops = self.dead_route_hops.lock();
         for ordering in orderings {
-            let avoided = dead_route_hops.entry(ordering).or_default();
-            for hop in hops {
-                avoided.insert(hop.best_node_id(), cur_ts);
+            let avoided = dead_route_hops
+                .entry(ordering)
+                .or_insert_with(|| LruCache::new(capacity));
+            avoided.retain(|_, lost| lost.same_network(network));
+            for (node_id, lost) in hop_epochs {
+                avoided.insert(node_id.clone(), *lost);
             }
         }
     }
 
-    /// Hops to avoid when allocating a route for this ordering; expired entries are dropped
-    pub(super) fn dead_route_hops_to_avoid(&self, ordering: SequenceOrdering) -> Vec<NodeId> {
-        let cur_ts = Timestamp::now();
-        let avoid_for = TimestampDuration::new_secs(ROUTE_DEAD_HOP_AVOID_SECS);
-        let mut dead_route_hops = self.dead_route_hops.lock();
-        let Some(avoided) = dead_route_hops.get_mut(&ordering) else {
-            return Vec::new();
+    /// Dead hops to avoid when allocating a route for this ordering: those whose current epoch,
+    /// from `current_epoch`, is still the one they were lost in
+    pub(crate) fn dead_route_hops_to_avoid(
+        &self,
+        ordering: SequenceOrdering,
+        current_epoch: impl Fn(&NodeId) -> Option<LossEpoch>,
+    ) -> Vec<NodeId> {
+        let recorded = match self.dead_route_hops.lock().get(&ordering) {
+            Some(avoided) => avoided
+                .iter()
+                .map(|(node_id, lost)| (node_id.clone(), *lost))
+                .collect::<Vec<_>>(),
+            None => return Vec::new(),
         };
-        avoided.retain(|_, ts| cur_ts.duration_since(*ts) < avoid_for);
-        avoided.keys().cloned().collect()
-    }
-
-    /// Forget dead hops; routes that died during our own outage say nothing about their hops
-    pub(crate) fn clear_dead_route_hops(&self) {
-        self.dead_route_hops.lock().clear();
+        recorded
+            .into_iter()
+            .filter(|(node_id, lost)| current_epoch(node_id).as_ref() == Some(lost))
+            .map(|(node_id, _)| node_id)
+            .collect()
     }
 
     /// Tally a loopback outcome for the periodic summary

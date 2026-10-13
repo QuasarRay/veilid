@@ -410,7 +410,7 @@ impl StorageManager {
                                         // Value data mismatch means skip this node
                                         // This is okay because even the conflicting value is signed,
                                         // so the application just needs to push a newer value
-                                        FanoutCallDisposition::Stale
+                                        FanoutCallDisposition::Conflict
                                     } else {
                                         // Increase the consensus count for the existing value
                                         FanoutCallDisposition::Accepted
@@ -484,7 +484,7 @@ impl StorageManager {
             .ok_or_else(VeilidAPIError::not_initialized)?;
 
         let routing_table = self.routing_table();
-        let fanout_call = FanoutCall::new(
+        let mut fanout_call = FanoutCall::new(
             &routing_table,
             FanoutCallParams {
                 name: format!("outbound_get_value({})", Timestamp::now_increasing()),
@@ -499,6 +499,8 @@ impl StorageManager {
             call_routine,
             check_done,
         );
+        fanout_call
+            .set_demote_routed_unresponsive(matches!(safety_selection, SafetySelection::Safe(_)));
 
         let fanout_result = fanout_call
             .run(

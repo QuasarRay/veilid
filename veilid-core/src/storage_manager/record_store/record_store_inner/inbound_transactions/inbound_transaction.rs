@@ -40,7 +40,6 @@ impl InboundTransaction {
     pub fn id(&self) -> InboundTransactionId {
         self.id
     }
-    #[expect(dead_code)]
     pub fn expiration(&self) -> Timestamp {
         self.expiration
     }

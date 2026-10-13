@@ -11,6 +11,7 @@ mod tasks;
 
 use super::*;
 
+use bootstrap::BootstrapStandoff;
 pub use state::*;
 
 impl_veilid_log_facility!("rtab");
@@ -48,7 +49,9 @@ pub(crate) fn persisted_requires_reset(
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub struct PublicInternetRoutingDomainControllerUnlockedInner {
+    /// Component registry this controller belongs to
     registry: VeilidComponentRegistry,
+    /// The routing domain's editable state
     detail: Box<RwLock<PublicInternetRoutingDomainDetail>>,
     /// Published peer info for this routing domain
     published_peer_info: Mutex<Option<Arc<PeerInfo>>>,
@@ -83,9 +86,8 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
 
     /// Bootstrap wait detector (to prevent spamming logs)
     bootstrap_wait_detector: AtomicOptionTimestamp,
-    /// Set when a round found only this node: rounds are skipped until this time, and silence
-    /// cannot send the node back to bootstrap while it is set
-    bootstrap_standoff_until: AtomicOptionTimestamp,
+    /// Set by a round that found only this node; holds off rounds and silence-driven rebootstrap
+    bootstrap_standoff: Mutex<Option<BootstrapStandoff>>,
     /// Per crypto kind, when we first observed zero responsive connectivity nodes
     no_responsive_since: Mutex<BTreeMap<CryptoKind, Timestamp>>,
 }
@@ -173,7 +175,7 @@ impl PublicInternetRoutingDomainController {
             commit_subscription: Default::default(),
             peer_info_subscription: Default::default(),
             bootstrap_wait_detector: AtomicOptionTimestamp::new(None),
-            bootstrap_standoff_until: AtomicOptionTimestamp::new(None),
+            bootstrap_standoff: Mutex::new(None),
             no_responsive_since: Default::default(),
         };
         let this = Self {
@@ -224,7 +226,7 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
 
             // Don't let detached time count toward the fallback-bootstrap delay
             self.no_responsive_since.lock().clear();
-            self.bootstrap_standoff_until.set(None);
+            *self.bootstrap_standoff.lock() = None;
 
             // Serve the configured bootstrap records, whether or not we ever bootstrap
             let config_cache = self.network_manager().config_bootstrap_cache().await;

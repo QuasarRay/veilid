@@ -79,16 +79,29 @@ pub(crate) const RELIABLE_PING_INTERVAL_MULTIPLIER: f64 = 2.0;
 //////////////////////////////////////////////////////////////////////////////////////////
 // Unreliable state thresholds
 
-/// Unreliable pings are done for a fixed amount of time while the
-/// node is given a chance to come back online before it is made dead
-/// If a node misses a single ping, it is marked missing and must
-/// return reliable pings for the duration of the span before being
-/// marked reliable again
+/// How long a node must answer, or lose questions, steadily before its state changes; twelve RPC
+/// timeouts each, so twelve rounds of `RoutingTableTimings::unreliable_ping_interval`.
 ///
-/// - Span is the number of seconds of consecutive successful answers before a node is considered reliable
-pub(crate) const UNRELIABLE_ANSWER_SPAN: TimestampDuration = TimestampDuration::new_secs(60);
-/// - Interval is the number of seconds between each ping
-pub(crate) const UNRELIABLE_PING_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
+/// Unreliable pings are done for a span while the node is given a chance to come back online
+/// before it is made dead. If a node misses a single ping, it is marked missing and must return
+/// reliable pings for the span before being marked reliable again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LivenessSpans {
+    /// Consecutive answering before a node is reliable
+    pub unreliable_answer: TimestampDuration,
+    /// Consecutive lost questions before a node heard from before is dead
+    pub dead_lost_question: TimestampDuration,
+}
+
+impl LivenessSpans {
+    pub fn new(rpc_timeout: TimestampDuration) -> Self {
+        let span = rpc_timeout.saturating_mul(12);
+        Self {
+            unreliable_answer: span,
+            dead_lost_question: span,
+        }
+    }
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // Missing state thresholds
@@ -100,8 +113,6 @@ pub(crate) const MISSING_LOST_QUESTIONS: u32 = 3;
 //////////////////////////////////////////////////////////////////////////////////////////
 // Dead state thresholds
 
-/// - Span is the number of seconds of consecutive lost questions before a node is considered dead
-pub(crate) const DEAD_LOST_QUESTION_SPAN: TimestampDuration = TimestampDuration::new_secs(60);
 /// Failed node-level unreachable attempts (no usable transport) before we call it dead
 pub(crate) const DEAD_UNREACHABLE_COUNT: u32 = 1;
 /// Node-level lost questions before we call a node dead if we have never seen any traffic from it
@@ -193,7 +204,7 @@ impl BucketEntryInner {
     ///   - [D3] if the node has never been heard from (last_seen_ts is None), and
     ///     node-level recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
     ///   - [D4] if the node has been heard from, and node-level
-    ///     time_since(first_steady_lost_question_ts) >= DEAD_LOST_QUESTION_SPAN
+    ///     time_since(first_steady_lost_question_ts) >= the dead lost question span
     ///     (any answer on any transport resets it)
     /// * Missing (any of the following are true):
     ///   - [M1] the node has per-entry unreachable > 0 (only possible if DEAD_UNREACHABLE_COUNT > 1)
@@ -205,7 +216,7 @@ impl BucketEntryInner {
     ///     - first_steady_answer_ts is None (cold start)
     /// * Unreliable (any of the following are true):
     ///   - [U1] for any sequence-ordering:
-    ///     - time_since(first_steady_answer_ts) < UNRELIABLE_ANSWER_SPAN
+    ///     - time_since(first_steady_answer_ts) < the unreliable answer span
     /// * Reliable:
     ///   - [R1] Any other condition is reliable
     pub(super) fn compute_state_reason(&self, cur_ts: Timestamp) -> BucketEntryStateReason {
@@ -229,6 +240,7 @@ impl BucketEntryInner {
         };
         Self::compute_state_reason_from_stats(
             cur_ts,
+            &LivenessSpans::new(self.config().rpc_timeout()),
             self.punishment,
             &self.rpc_stats,
             &self.per_sequence_ordering_stats,
@@ -240,8 +252,10 @@ impl BucketEntryInner {
 
     /// Pure node-level state calculation over the stats it depends on. The wrapper
     /// `compute_state_reason` carries the full condition reference; tags below match it.
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn compute_state_reason_from_stats(
         cur_ts: Timestamp,
+        spans: &LivenessSpans,
         punishment: Option<PunishmentReason>,
         rpc_stats: &RPCStats,
         per_sequence_ordering_stats: &BTreeMap<SequenceOrdering, RPCStats>,
@@ -288,7 +302,7 @@ impl BucketEntryInner {
         }
 
         // [D4] heard from the node before, and node-level steady lost questions (reset by
-        // any answer on any transport) span at least DEAD_LOST_QUESTION_SPAN, minus unjudgeable time
+        // any answer on any transport) span at least the dead span, minus unjudgeable time
         if rpc_stats.last_seen_ts.is_some()
             && rpc_stats
                 .first_steady_lost_question_ts
@@ -296,9 +310,9 @@ impl BucketEntryInner {
                     // Credit only shrinks the span, so consult the detector
                     // only once the raw span could cross the threshold
                     let raw = cur_ts.duration_since(ts);
-                    raw >= DEAD_LOST_QUESTION_SPAN
+                    raw >= spans.dead_lost_question
                         && raw.saturating_sub(credit_since(ts, TimeCredit::Unblamed))
-                            >= DEAD_LOST_QUESTION_SPAN
+                            >= spans.dead_lost_question
                 })
                 .unwrap_or(false)
         {
@@ -340,15 +354,15 @@ impl BucketEntryInner {
         // ---===/ Unreliable /===---
 
         // [U1] for any sequence-ordering:
-        //   - time_since(first_steady_answer_ts), minus offline time, < UNRELIABLE_ANSWER_SPAN
+        //   - time_since(first_steady_answer_ts), minus offline time, < the unreliable span
         if per_sequence_ordering_stats.values().any(|stats| {
             if let Some(ts) = stats.first_steady_answer_ts {
                 let raw = cur_ts.duration_since(ts);
                 // Within span by wall-clock → unreliable regardless; otherwise
                 // subtract offline time so we don't grant untested reliability.
-                raw < UNRELIABLE_ANSWER_SPAN
+                raw < spans.unreliable_answer
                     || raw.saturating_sub(credit_since(ts, TimeCredit::Untestable))
-                        < UNRELIABLE_ANSWER_SPAN
+                        < spans.unreliable_answer
             } else {
                 false
             }

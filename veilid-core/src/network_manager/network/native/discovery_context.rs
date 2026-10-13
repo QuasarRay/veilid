@@ -11,8 +11,6 @@ const EXTERNAL_INFO_CONCURRENCY: usize = 20;
 pub(super) const EXTERNAL_INFO_VALIDATIONS: usize = 5;
 // NAT classification compares answers from two validators, so fewer than this is starvation
 pub(super) const MIN_EXTERNAL_INFO_VALIDATIONS: usize = 2;
-// Time allowed to get a validation request to its validator, before the receipt wait begins
-const VALIDATE_DIAL_INFO_SEND_BUDGET_MS: u32 = 1_500;
 
 /// Entry filters a dial info validator must pass, independent of protocol and address type
 pub(super) fn make_validator_entry_filters(
@@ -223,6 +221,16 @@ impl DiscoveryContext {
     /// True when the last discovery had fewer validator candidates than the full quorum
     pub fn validator_pool_starved(&self) -> bool {
         self.inner.lock().validator_pool_starved
+    }
+
+    /// External addresses the validators reported for this context, without ports
+    pub fn external_addresses(&self) -> BTreeSet<Address> {
+        self.inner
+            .lock()
+            .external_infos
+            .iter()
+            .map(|ei| ei.address.address())
+            .collect()
     }
 
     ///////
@@ -462,13 +470,19 @@ impl DiscoveryContext {
         redirect: bool,
     ) -> DialInfoValidationOutcome {
         // An unreachable validator ends inconclusive, so don't wait out its connect timeout
+        let send_budget_ms = self
+            .network
+            .timings()
+            .validate_dial_info_send_budget
+            .millis_u32()
+            .unwrap_or(u32::MAX);
         let deadline_ms = self
             .config()
             .internal()
             .network
             .dht
             .validate_dial_info_receipt_time_ms
-            .saturating_add(VALIDATE_DIAL_INFO_SEND_BUDGET_MS);
+            .saturating_add(send_budget_ms);
 
         // ask the node to send us a dial info validation receipt
         // no need to clear_last_flows here, because the dial_info is always returned via the

@@ -41,13 +41,14 @@ impl InboundWatchList {
         Ok(!self.watches.is_empty())
     }
 
+    /// Drop the expired watches, returning the earliest drop time left, if any
     pub(super) fn drop_expired_watches<D: Fn(InboundWatchId), L: Fn(VeilidAPIError)>(
         &mut self,
         now: Timestamp,
         allocator: &mut InboundWatchIdAllocator,
         debug_logger: &D,
         error_logger: &L,
-    ) -> bool {
+    ) -> Option<Timestamp> {
         self.watches.retain(|w| {
             let alive = w.is_alive(now);
             if !alive {
@@ -59,6 +60,6 @@ impl InboundWatchList {
             }
             alive
         });
-        !self.watches.is_empty()
+        self.watches.iter().map(|w| w.params().drop_due()).min()
     }
 }

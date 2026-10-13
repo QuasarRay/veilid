@@ -236,11 +236,18 @@ impl AllocatedRouteCacheEntry {
         })
     }
 
-    /// Whether a question to [dest_key] was lost on any ordering [sequencing] may send on
-    pub fn lost_question_to(&self, sequencing: Sequencing, dest_key: &PublicKey) -> bool {
+    /// Whether a question to [dest_key] was lost in the state `epoch` describes on any ordering
+    /// [sequencing] may send on
+    pub fn lost_question_to(
+        &self,
+        sequencing: Sequencing,
+        dest_key: &PublicKey,
+        epoch: &LossEpoch,
+    ) -> bool {
         self.with_stats(|stats| {
             self.orderings.iter().any(|ordering| {
-                sequencing.matches_ordering(ordering) && stats.lost_question_to(ordering, dest_key)
+                sequencing.matches_ordering(ordering)
+                    && stats.lost_question_to(ordering, dest_key, epoch)
             })
         })
     }

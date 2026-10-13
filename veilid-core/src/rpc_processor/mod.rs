@@ -97,6 +97,22 @@ impl_veilid_log_facility!("rpc");
 
 const RPC_WORKERS_PER_CORE: u32 = 16;
 
+/// Percent of the RPC timeout allowed per route hop past those the base timeout covers
+const ROUTE_HOP_ALLOWANCE_PERCENT: u64 = 10;
+/// Route hops the base RPC timeout already covers
+const ROUTE_HOPS_IN_BASE_TIMEOUT: usize = 4;
+
+/// The timeout added for each route hop past those the base RPC timeout covers
+fn route_hop_allowance(timeout: TimestampDuration) -> TimestampDuration {
+    timeout.saturating_mul(ROUTE_HOP_ALLOWANCE_PERCENT).div(100)
+}
+
+/// The reply timeout for a question whose round trip crosses `effective_hops` route hops
+fn routed_timeout(timeout: TimestampDuration, effective_hops: usize) -> TimestampDuration {
+    let excess_hops = effective_hops.saturating_sub(ROUTE_HOPS_IN_BASE_TIMEOUT);
+    timeout.saturating_add(route_hop_allowance(timeout).saturating_mul(excess_hops as u64))
+}
+
 /////////////////////////////////////////////////////////////////////
 
 #[derive(Copy, Clone, Debug)]
@@ -216,10 +232,7 @@ impl RPCProcessor {
         };
 
         // Worst-case waiter: get_safety_selection_timeout at the maximum hop count
-        let worker_shed_timeout = timeout_us.saturating_add(
-            TimestampDuration::new_ms(500)
-                .saturating_mul(((max_route_hop_count as u64) * 2).saturating_sub(4)),
-        );
+        let worker_shed_timeout = routed_timeout(timeout_us, (max_route_hop_count as usize) * 2);
 
         Self {
             waiting_rpc_table: OperationWaiter::new(registry.clone()),
@@ -1212,8 +1225,26 @@ impl RPCProcessor {
     fn record_unreachable(&self, node_ref: NodeRef) {
         // No transport was attempted (no routing domain, no peer info, no contact method).
         // Record at the node level and clear last flows so a fresh attempt rebuilds state.
-        node_ref.stats_unreachable();
+        if self.pre_send_abort_blames_peer() {
+            node_ref.stats_unreachable();
+        }
         node_ref.clear_last_flows();
+    }
+
+    /// A send aborted before any transport was tried says something about the peer only while
+    /// this node has a PublicInternet network of its own; with the domain Invalid, between an
+    /// egress going and the next one appearing, every abort is ours, whatever the detector has
+    /// had time to notice
+    fn pre_send_abort_blames_peer(&self) -> bool {
+        let state = self
+            .routing_table()
+            .get_routing_domain_controller(RoutingDomain::PublicInternet)
+            .state();
+        !matches!(state.outbound_stage, RoutingDomainOutboundStage::Invalid)
+            && !self
+                .network_manager()
+                .online_detector()
+                .blame_suppressed(RoutingDomain::PublicInternet)
     }
 
     /// Whether our own spread verdict condemns this transport, voiding any blame
@@ -1249,11 +1280,20 @@ impl RPCProcessor {
         rpc_kind: RPCKind,
         send_ts: Timestamp,
         node_ref: FilteredNodeRef,
+        opt_contact: Option<&NodeContactMethodResult>,
         opt_transport: Option<TransportType>,
         dialed: bool,
         safety_route: Option<AllocatedRouteRef>,
         remote_private_route: Option<RemoteRouteRef>,
     ) {
+        // A send this node declined, over a suppressed transport or to a punished node, says
+        // nothing about the peer and nothing about the network
+        if matches!(
+            opt_contact,
+            Some(NodeContactMethodResult::TransportSuppressed | NodeContactMethodResult::Punished)
+        ) {
+            return;
+        }
         veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, target: "network_result", "send failure: rpc_kind={:?} send_ts={}, node_ref={}, opt_transport={:?}, safety_route={:?}, remote_private_route={:?}",
             rpc_kind, send_ts, node_ref, opt_transport, safety_route, remote_private_route
         );
@@ -1296,7 +1336,7 @@ impl RPCProcessor {
                         // A specific transport failed to send, record it on the transport
                         node_ref.stats_failed_to_send(send_ts, wants_answer, transport, dialed);
                     }
-                } else {
+                } else if self.pre_send_abort_blames_peer() {
                     // Pre-send abort with no transport attempted:
                     // * NoRoutingDomain / NoPeerInfo / NoContactMethod / Punished
                     // * Or a ContactMethod::Existing that didn't exist
@@ -1417,10 +1457,25 @@ impl RPCProcessor {
             .filter(|transport| !transport_suppressed(*transport))
             .map(|transport| transport.sequence_ordering());
 
+        // The state the loss is judged in; while blame is suppressed the loss is about us
+        let opt_epoch = (!suppress_degradation).then(|| {
+            self.routing_table()
+                .loss_epoch(context.destination.node_info_ts())
+        });
+
         // If safety route was used, record question lost there
         if let Some(sr) = &context.opt_safety_route_ref {
             if let Some(ordering) = opt_ordering {
-                sr.with_stats_mut(|s| s.record_lost_question(ordering, &context.destination));
+                sr.with_stats_mut(|s| {
+                    s.record_lost_question(ordering, &context.destination, opt_epoch)
+                });
+
+                // Fanouts ask the node last until it answers a routed question
+                if let (Destination::Direct { node, .. }, Some(epoch)) =
+                    (&context.destination, opt_epoch)
+                {
+                    node.stats_routed_lost_question(epoch);
+                }
             }
 
             // Trigger an out-of-band route test so silently-degraded routes
@@ -1444,7 +1499,9 @@ impl RPCProcessor {
         // If remote private route was used, record question lost there
         if let Some(pr) = &context.opt_remote_private_route_ref {
             if let Some(ordering) = opt_ordering {
-                pr.with_stats_mut(|s| s.record_lost_question(ordering, &context.destination));
+                pr.with_stats_mut(|s| {
+                    s.record_lost_question(ordering, &context.destination, opt_epoch)
+                });
             }
         }
         // If reply private route was used, record question lost there
@@ -1453,7 +1510,9 @@ impl RPCProcessor {
             if context.opt_safety_route_ref.as_ref().map(|r| r.route_key()) != Some(rpr.route_key())
             {
                 if let Some(ordering) = opt_ordering {
-                    rpr.with_stats_mut(|s| s.record_lost_question(ordering, &context.destination));
+                    rpr.with_stats_mut(|s| {
+                        s.record_lost_question(ordering, &context.destination, opt_epoch)
+                    });
                 }
             }
         }
@@ -1535,7 +1594,9 @@ impl RPCProcessor {
             context.node_ref.best_routing_domain()
         };
         if let Some(rd) = opt_rd {
-            self.network_manager().online_detector().record_success(rd);
+            self.network_manager()
+                .online_detector()
+                .record_success(rd, Some(context.send_ts));
         }
 
         // Record stats for remote node if this was direct
@@ -1555,6 +1616,11 @@ impl RPCProcessor {
             return;
         }
         let routing_table = self.routing_table();
+
+        // A routed answer shows our routes reach the node
+        if let Destination::Direct { node, .. } = &context.destination {
+            node.stats_routed_answer();
+        }
 
         // Ordering the send/answer went out/came in on; marks that ordering valid on the route.
         let opt_ordering = context.send_data_result.sequence_ordering();
@@ -1677,7 +1743,7 @@ impl RPCProcessor {
         // Inbound traffic is proof we're online.
         self.network_manager()
             .online_detector()
-            .record_success(msg.header.routing_domain());
+            .record_success(msg.header.routing_domain(), None);
 
         // Ordering this message arrived on (marks that ordering valid on the receiving route).
         let ordering = msg
@@ -1742,7 +1808,7 @@ impl RPCProcessor {
         // Inbound traffic is proof we're online.
         self.network_manager()
             .online_detector()
-            .record_success(msg.header.routing_domain());
+            .record_success(msg.header.routing_domain(), None);
 
         // Ordering this message arrived on (marks that ordering valid on the receiving route).
         let ordering = msg
@@ -1790,15 +1856,8 @@ impl RPCProcessor {
         // For both safety routes to direct destinations, and to private routes, the effective hop count is
         // twice that of the safety selection's choice, either because the private route doubles the hop count (probably)
         // or because we manually double it when contacting non-private destinations
-        let effective_hops = safety_selection.get_hop_count() * 2;
-
-        // Timeout is the default timeout plus 500ms (max single hop latency) times the excess hop count
-        // Excess hops count is what could possibly fix in the 3sec -> 5sec padding range. Better calculations
-        // using actual routing table statistics should be able to optimize this with a more accurate estimate.
-        let excess_hops = effective_hops.saturating_sub(4); // 500ms * 4 = 2000ms,
-        self.timeout
-            .saturating_add(TimestampDuration::new_ms(500).saturating_mul(excess_hops as u64))
-        // Effectively for all routed communications under 4 hops total, the timeout will be the default timeout for now
+        // XXX: route statistics could give a measured per-hop latency instead of the allowance
+        routed_timeout(self.timeout, safety_selection.get_hop_count() * 2)
     }
 
     /// Get the default timeout for RPCs sent to a specific destination
@@ -1908,6 +1967,7 @@ impl RPCProcessor {
                     send_ts,
                     node_ref.clone(),
                     None,
+                    None,
                     false,
                     opt_safety_route_ref.clone(),
                     opt_remote_private_route_ref.clone(),
@@ -1925,6 +1985,7 @@ impl RPCProcessor {
                 RPCKind::Question,
                 send_ts,
                 node_ref.clone(),
+                Some(send_data_result.node_contact_method_result()),
                 send_data_result.opt_transport_type(),
                 send_data_result.dialed_evidence(),
                 opt_safety_route_ref,
@@ -2062,6 +2123,7 @@ impl RPCProcessor {
                     send_ts,
                     node_ref.clone(),
                     None,
+                    None,
                     false,
                     safety_route.clone(),
                     remote_private_route.clone(),
@@ -2079,6 +2141,7 @@ impl RPCProcessor {
                 RPCKind::Statement,
                 send_ts,
                 node_ref.clone(),
+                Some(send_data_result.node_contact_method_result()),
                 send_data_result.opt_transport_type(),
                 send_data_result.dialed_evidence(),
                 safety_route.clone(),
@@ -2194,6 +2257,7 @@ impl RPCProcessor {
                     send_ts,
                     node_ref.clone(),
                     None,
+                    None,
                     false,
                     safety_route.clone(),
                     remote_private_route.clone(),
@@ -2211,6 +2275,7 @@ impl RPCProcessor {
                 RPCKind::Answer,
                 send_ts,
                 node_ref.clone(),
+                Some(send_data_result.node_contact_method_result()),
                 send_data_result.opt_transport_type(),
                 send_data_result.dialed_evidence(),
                 safety_route.clone(),
@@ -2516,7 +2581,7 @@ impl RPCProcessor {
             RPCOperationKind::Statement(s) => match s.detail() {
                 RPCStatementDetail::Route(_) => Some(
                     self.worker_shed_timeout
-                        .saturating_sub(TimestampDuration::new_ms(500)),
+                        .saturating_sub(route_hop_allowance(self.timeout)),
                 ),
                 _ => None,
             },

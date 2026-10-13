@@ -54,10 +54,15 @@ impl OutboundWatch {
     /// Whether this watch is due a fallback change inspection, and over which subkeys.
     /// A wanted but never-established watch has no state to keep a timer in, so it is
     /// covered here at [UNESTABLISHED_WATCH_INSPECT_INTERVAL].
-    pub fn needs_fallback_inspect(&self, cur_ts: Timestamp) -> Option<ValueSubkeyRangeSet> {
+    pub fn needs_fallback_inspect(
+        &self,
+        cur_ts: Timestamp,
+        consensus_count: usize,
+        renew_window: TimestampDuration,
+    ) -> Option<ValueSubkeyRangeSet> {
         if let Some(state) = self.state.as_ref() {
             return state
-                .needs_fallback_inspect(cur_ts)
+                .fallback_inspect_due(cur_ts, consensus_count, renew_window)
                 .then(|| state.params().subkeys.clone());
         }
         let desired = self.desired.as_ref()?;
@@ -288,10 +293,8 @@ impl OutboundWatch {
         state: &OutboundWatchState,
         cur_ts: Timestamp,
     ) -> bool {
-        // If the watch has per node watches that have expired, but we can extend our watch then renew.
-        // Do this only within RENEW_OUTBOUND_WATCHES_DURATION_SECS of the actual expiration.
-        // If we're looking at this after the actual expiration, don't try because the watch id will have died.
-        let renew_ts = cur_ts.later(RENEW_OUTBOUND_WATCHES_DURATION);
+        // Renew in the window before the first per-node expiration; after it the ids are gone
+        let renew_ts = cur_ts.later(registry.storage_manager().timings().renew_outbound_watches);
         if renew_ts >= state.min_expiration()
             && cur_ts < state.min_expiration()
             && (state.params().expiration.as_u64() == 0 || renew_ts < state.params().expiration)

@@ -19,6 +19,9 @@ pub struct RouteSelectParams {
     pub avoid_nodes: Vec<NodeId>,
     /// Destination is a private route; an unsafe one doubles a short hop count
     pub is_destination_safe: bool,
+    /// Destination key and the state its losses are judged in; routes that lost a question to it
+    /// in that state rank last
+    pub opt_destination: Option<(PublicKey, LossEpoch)>,
 }
 
 /// Match for one allocated route in the pool
@@ -40,6 +43,9 @@ struct FirstAvailableRouteParams {
     pub directions: DirectionSet,
     /// Nodes that must not appear as hops
     pub avoid_nodes: Vec<NodeId>,
+    /// Destination key and the state its losses are judged in; routes that lost a question to it
+    /// in that state rank last
+    pub opt_destination: Option<(PublicKey, LossEpoch)>,
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +121,7 @@ impl RouteSpecStore {
             ordering: params.sequencing.preferred_ordering(),
             directions: params.directions,
             avoid_nodes: params.avoid_nodes,
+            opt_destination: params.opt_destination,
         };
 
         let opt_allocate_route_lock_guard = {
@@ -303,8 +310,15 @@ impl RouteSpecStore {
             {
                 // snapshot stats (interior mutability) to avoid race conditions and sort instability
                 let stats = arce.with_stats(|stats| stats.clone());
+                let lost_destination =
+                    params
+                        .opt_destination
+                        .as_ref()
+                        .is_some_and(|(dest_key, epoch)| {
+                            stats.lost_question_to(params.ordering, dest_key, epoch)
+                        });
 
-                routes.push((id, arce, stats));
+                routes.push((id, arce, stats, lost_destination));
             }
         }
 
@@ -316,6 +330,10 @@ impl RouteSpecStore {
             // carry traffic and prefers idle/untested ones. Validated 2026-07:
             // both gating and sort-preference on disposition break routed
             // answers on the public network. Disposition drives testing only.
+            // A lost destination ranks a route last for that destination alone.
+            if a.3 != b.3 {
+                return a.3.cmp(&b.3);
+            }
 
             // Prefer routes that don't need testing
             let a_needs_testing = a.2.needs_testing(a.1.orderings(), cur_ts);
@@ -344,21 +362,27 @@ impl RouteSpecStore {
             a_latency.cmp(&b_latency)
         });
 
-        // Count top-tier routes (don't need testing and meet stability requirement)
+        // Count top-tier routes (reach the destination, don't need testing and meet stability requirement)
         let good_count = routes
             .iter()
-            .take_while(|(_, rssd, stats)| {
+            .take_while(|(_, rssd, stats, lost_destination)| {
                 let needs_testing = stats.needs_testing(rssd.orderings(), cur_ts);
                 let meets_stability = rssd.stability() >= params.stability;
-                !needs_testing && meets_stability
+                !lost_destination && !needs_testing && meets_stability
             })
             .count();
 
         // Round-robin among top-tier routes to distribute load; with no top tier,
-        // over all candidates so the same possibly-broken lowest-latency route
-        // is not re-picked every time
+        // over all candidates that reach the destination so the same possibly-broken
+        // lowest-latency route is not re-picked every time
+        let reaching_count = routes
+            .iter()
+            .take_while(|(_, _, _, lost_destination)| !lost_destination)
+            .count();
         let pool = if good_count >= 1 {
             good_count
+        } else if reaching_count >= 1 {
+            reaching_count
         } else {
             routes.len()
         };

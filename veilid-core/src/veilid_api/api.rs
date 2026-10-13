@@ -396,8 +396,9 @@ impl VeilidAPI {
 
     /// Connect to the network.
     ///
-    /// Sets the attachment to maintain peers; the network connect proceeds in the background tick loop.
-    /// Returns an error if already attached.
+    /// Moves the attachment to [AttachmentState::Attaching], where it stays, waiting to bind if it must,
+    /// until the node attaches or [VeilidAPI::detach] is called; the network connect proceeds in the
+    /// background tick loop. Succeeds while already attaching.
     ///
     /// Errors with [VeilidAPIError::Generic] if already attached, or [VeilidAPIError::NotInitialized]
     /// if the API has been shut down.
@@ -425,12 +426,7 @@ impl VeilidAPI {
                         veilid_log!(self debug "{}[start={:#}]()", name, start);
                     });
                     recorder.record_fut(
-                        async {
-                            if !Box::pin(attachment_manager.attach()).await {
-                                apibail_generic!("Already attached");
-                            }
-                            VeilidAPIResult::Ok(())
-                        },
+                        Box::pin(attachment_manager.attach()),
                         |name, start, dur, ret| {
                             veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
                             ret
@@ -445,8 +441,8 @@ impl VeilidAPI {
 
     /// Disconnect from the network.
     ///
-    /// Clears the attachment's maintain-peers flag; the network teardown proceeds in the background tick loop.
-    /// Returns an error if already detached.
+    /// Moves the attachment to [AttachmentState::Detaching], cancelling an attach in progress; the
+    /// network teardown proceeds in the background tick loop. Succeeds while already detaching.
     ///
     /// Errors with [VeilidAPIError::Generic] if already detached, or [VeilidAPIError::NotInitialized]
     /// if the API has been shut down.
@@ -461,7 +457,7 @@ impl VeilidAPI {
                         (node.attachment.detach(), node.attachment.to_state())
                     })?;
                     if !changed {
-                        apibail_generic!("Already detached");
+                        apibail_generic!("Not attached");
                     }
                     MockNetwork::send_update(&key, VeilidUpdate::Attachment(Box::new(state)))?;
                     VeilidAPIResult::Ok(())
@@ -471,12 +467,7 @@ impl VeilidAPI {
                         veilid_log!(self debug "{}[start={:#}]()", name, start);
                     });
                     recorder.record_fut(
-                        async {
-                            if !Box::pin(attachment_manager.detach()).await {
-                                apibail_generic!("Already detached");
-                            }
-                            VeilidAPIResult::Ok(())
-                        },
+                        Box::pin(attachment_manager.detach()),
                         |name, start, dur, ret| {
                             veilid_log!(self debug "{}[start={:#} dur={:#}](ret: {:?})", name, start, dur, ret);
                             ret

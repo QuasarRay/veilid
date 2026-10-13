@@ -4,8 +4,6 @@ impl_veilid_log_facility!("rtab");
 
 /// Minimum number of nodes we need, per crypto kind or we trigger a bootstrap
 const MIN_BOOTSTRAP_CONNECTIVITY_PEERS: usize = 4;
-/// How long we tolerate zero responsive nodes before falling back to bootstrap
-const NO_RESPONSIVE_NODES_BOOTSTRAP_DELAY: TimestampDuration = TimestampDuration::new_secs(10);
 /// Fraction of the connectivity nodes we need to have tested to allocate routes
 const ALLOCATION_CONNECTIVITY_NODES_TESTED_FACTOR: f32 = 0.25;
 /// Fraction of the low water mark nodes we need to have tested to allocate routes
@@ -37,15 +35,17 @@ pub struct KindNodesNeeded {
     pub needs_more_tested_nodes: bool,
 }
 
-/// Decide what one crypto kind needs from its entry counts
+/// Decide what one crypto kind needs from its entry counts; zero responsive nodes for
+/// `no_responsive_bootstrap_delay` falls back to bootstrap
 pub fn nodes_needed_for_counts(
     counts: KindNodeCounts,
     min_peer_count: usize,
     no_responsive_elapsed: Option<TimestampDuration>,
+    no_responsive_bootstrap_delay: TimestampDuration,
 ) -> KindNodesNeeded {
     // Bootstrap when almost nothing is known, or when nothing has responded for too long
     let needs_bootstrap = counts.maybe_live < MIN_BOOTSTRAP_CONNECTIVITY_PEERS
-        || no_responsive_elapsed.is_some_and(|d| d >= NO_RESPONSIVE_NODES_BOOTSTRAP_DELAY);
+        || no_responsive_elapsed.is_some_and(|d| d >= no_responsive_bootstrap_delay);
     // Require a fraction of known nodes tested, capped so stale entries can't raise the bar
     let required_tested_connectivity_nodes = usize::max(
         (counts.live_external as f32 * ALLOCATION_CONNECTIVITY_NODES_TESTED_FACTOR) as usize,
@@ -182,8 +182,10 @@ impl PublicInternetRoutingDomainController {
         let mut needs_more_tested_nodes = Vec::new();
 
         let min_peer_count = self.config().internal().network.dht.min_peer_count as usize;
+        let no_responsive_bootstrap_delay =
+            self.routing_table().timings().no_responsive_bootstrap_delay;
         // Silence sends a node back to bootstrap only if it has a bootstrap other than itself
-        let can_bootstrap_again = self.bootstrap_standoff_until.get().is_none();
+        let can_bootstrap_again = self.bootstrap_standoff.lock().is_none();
         let cur_ts = Timestamp::now();
         let mut no_responsive_since = self.no_responsive_since.lock();
         for ck in VALID_CRYPTO_KINDS {
@@ -216,7 +218,12 @@ impl PublicInternetRoutingDomainController {
                 None
             };
 
-            let needed = nodes_needed_for_counts(counts, min_peer_count, no_responsive_elapsed);
+            let needed = nodes_needed_for_counts(
+                counts,
+                min_peer_count,
+                no_responsive_elapsed,
+                no_responsive_bootstrap_delay,
+            );
             if needed.needs_bootstrap {
                 needs_bootstrap.push(ck);
             }

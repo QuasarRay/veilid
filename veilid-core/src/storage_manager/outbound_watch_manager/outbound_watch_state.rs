@@ -6,8 +6,9 @@ use super::*;
 /// to WATCH_FALLBACK_INSPECT_MAX_INTERVAL while inspections keep finding nothing.
 const WATCH_FALLBACK_INSPECT_INTERVAL: TimestampDuration = TimestampDuration::new_secs(30);
 
-/// Ceiling for the backed-off interval: an inspection costs one round trip, and the watch
-/// may simply never have been accepted, in which case this interval IS delivery latency.
+/// Ceiling for the backed-off interval: an inspection costs one round trip, and a watch short
+/// of consensus may get its changes only this way, so for it this interval IS delivery latency.
+/// A watch at consensus also waits for its renewal window, see `fallback_inspect_due`.
 pub(in crate::storage_manager) const WATCH_FALLBACK_INSPECT_MAX_INTERVAL: TimestampDuration =
     TimestampDuration::new_secs(120);
 
@@ -303,6 +304,27 @@ impl OutboundWatchState {
         }
 
         cur_ts >= reference_ts.later(self.fallback_inspect_interval())
+    }
+
+    /// Whether the fallback change inspection is due. Once the interval reaches its ceiling, a
+    /// watch at consensus also waits for its renewal window: every node accepted it within one
+    /// per-node lifetime, so one inspection per renewal covers it. A watch short of consensus
+    /// keeps the ceiling, which is its delivery latency.
+    pub fn fallback_inspect_due(
+        &self,
+        cur_ts: Timestamp,
+        consensus_count: usize,
+        renew_window: TimestampDuration,
+    ) -> bool {
+        if !self.needs_fallback_inspect(cur_ts) {
+            return false;
+        }
+        if self.nodes.len() < consensus_count
+            || self.fallback_inspect_interval() < WATCH_FALLBACK_INSPECT_MAX_INTERVAL
+        {
+            return true;
+        }
+        cur_ts.later(renew_window) >= self.min_expiration
     }
 
     /// The interval currently in force for this watch's fallback inspection

@@ -2,8 +2,21 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
-/// How long a node stands off from bootstrapping after finding itself to be its only bootstrap
-const BOOTSTRAP_STANDOFF: TimestampDuration = TimestampDuration::new_secs(60);
+/// What a round that found this node to be its only bootstrap was judged on. Config records do
+/// not change, so only a new TXT answer or a change in our network can give another verdict.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BootstrapStandoff {
+    /// Our published peer info and online state when the round started
+    epoch: LossEpoch,
+    /// When the earliest TXT answer the round used leaves the lookup cache
+    opt_txt_expiration: Option<Timestamp>,
+}
+
+impl BootstrapStandoff {
+    fn holds(&self, epoch: &LossEpoch, now: Timestamp) -> bool {
+        self.epoch.same_network(epoch) && self.opt_txt_expiration.is_none_or(|exp| now < exp)
+    }
+}
 
 impl PublicInternetRoutingDomainController {
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
@@ -32,10 +45,11 @@ impl PublicInternetRoutingDomainController {
         }
 
         // Stand off while this node is the only bootstrap it knows of
+        let epoch = routing_table.loss_epoch(None);
         if self
-            .bootstrap_standoff_until
-            .get()
-            .is_some_and(|until| Timestamp::now() < until)
+            .bootstrap_standoff
+            .lock()
+            .is_some_and(|standoff| standoff.holds(&epoch, Timestamp::now()))
         {
             return Ok(());
         }
@@ -86,6 +100,7 @@ impl PublicInternetRoutingDomainController {
 
         // Process bootstraps into peers lists
         let network_manager = self.network_manager();
+        let txt_names = bootstrap_txt_names.clone();
         let mut unord = FuturesUnordered::<PinBoxFuture<EyreResult<BootstrapPeers>>>::new();
 
         // Records supplied by config need no lookup of any kind
@@ -111,7 +126,7 @@ impl PublicInternetRoutingDomainController {
             unord.push(pin_dyn_future!(async {
                 let bstn = bstn;
                 veilid_log!(self debug "TXT bootstrap with: {}", bstn);
-                let txt_timeout = TimestampDuration::new_ms(BOOTSTRAP_TXT_TIMEOUT_MS.into());
+                let txt_timeout = self.routing_table().timings().bootstrap_txt_timeout;
                 match pin_future!(network_manager.txt_bootstrap(bstn.clone()))
                     .timeout_duration(txt_timeout)
                     .await
@@ -188,13 +203,22 @@ impl PublicInternetRoutingDomainController {
         // Only this node among the bootstraps: nothing to bootstrap from until other nodes connect
         if own_node_seen && bootstrapped_peers.is_empty() {
             self.record_bootstrap_cache(bootstrap_cache);
-            let until = Timestamp::now().later(BOOTSTRAP_STANDOFF);
-            if self.bootstrap_standoff_until.swap(Some(until)).is_none() {
+            // An unanswered TXT name leaves the verdict open, so the next round asks again
+            let opt_txt_expiration = (!txt_names.is_empty()).then(|| {
+                network_manager
+                    .txt_answers_expiration(&txt_names)
+                    .unwrap_or_else(Timestamp::now)
+            });
+            let standoff = BootstrapStandoff {
+                epoch,
+                opt_txt_expiration,
+            };
+            if self.bootstrap_standoff.lock().replace(standoff).is_none() {
                 veilid_log!(self info "This node is its only bootstrap, waiting for other nodes to connect");
             }
             return Ok(());
         }
-        self.bootstrap_standoff_until.set(None);
+        *self.bootstrap_standoff.lock() = None;
 
         if self
             .unlocked_inner

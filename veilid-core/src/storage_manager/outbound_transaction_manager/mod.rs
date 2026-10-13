@@ -87,8 +87,7 @@ pub(in crate::storage_manager) struct OutboundTransactionManager {
     transactions: HashMap<OutboundTransactionHandle, OutboundTransactionState>,
     /// Next transaction id to assign
     next_txid: u64,
-    /// Local node transaction ids to transaction mapping.
-    /// Invariant: an entry exists iff the corresponding node_transaction exists.
+    /// Transaction of each local node transaction id; an entry exists iff its node transaction does
     local_node_transaction_mappings: HashMap<LocalNodeTransactionId, LocalNodeTransactionMapping>,
     /// Next local node transaction id to assign
     next_lnxid: u64,
@@ -97,6 +96,8 @@ pub(in crate::storage_manager) struct OutboundTransactionManager {
     opt_keepalive_processor: Option<Arc<OutboundTransactionKeepaliveProcessor>>,
     /// Runs a `TerminalDelivery` in the background
     opt_terminal_delivery_spawner: Option<Box<dyn Fn(terminal_delivery::TerminalDelivery) + Send>>,
+    /// Arms the check that drops expired transactions
+    opt_expiry_armer: Option<DeadlineArmer>,
     /// Transaction quality counters, a leaf lock shared with the storage manager
     #[cfg(feature = "stats")]
     quality: Arc<Mutex<TransactionQualityAccounting>>,
@@ -155,6 +156,7 @@ impl OutboundTransactionManager {
             next_lnxid: 1_000_000_000u64,
             opt_keepalive_processor: None,
             opt_terminal_delivery_spawner: None,
+            opt_expiry_armer: None,
             #[cfg(feature = "stats")]
             quality: Arc::new(Mutex::new(TransactionQualityAccounting::default())),
         }
@@ -189,6 +191,66 @@ impl OutboundTransactionManager {
         spawner: Box<dyn Fn(terminal_delivery::TerminalDelivery) + Send>,
     ) {
         self.opt_terminal_delivery_spawner = Some(spawner);
+    }
+
+    /// Install the armer of the check that drops expired transactions
+    pub fn set_expiry_armer(&mut self, expiry_armer: DeadlineArmer) {
+        self.opt_expiry_armer = Some(expiry_armer);
+    }
+
+    /// Run the expiry check once `deadline` passes
+    fn arm_expiry_check(&self, deadline: Timestamp) {
+        if let Some(expiry_armer) = &self.opt_expiry_armer {
+            expiry_armer.arm(deadline.as_u64());
+        }
+    }
+
+    /// Mark newly expired transactions to drop, returning them with their records and next expiry
+    pub fn mark_expired_transactions(
+        &mut self,
+        cur_ts: Timestamp,
+    ) -> (
+        Vec<(OutboundTransactionHandle, Vec<OpaqueRecordKey>)>,
+        Option<Timestamp>,
+    ) {
+        let mut expired = vec![];
+        let mut opt_next_expiry: Option<Timestamp> = None;
+        for (transaction_handle, state) in &mut self.transactions {
+            if state.expiry_drop_pending() {
+                continue;
+            }
+            let Some(expiry) = state.expiry() else {
+                continue;
+            };
+            if expiry <= cur_ts {
+                state.set_expiry_drop_pending(true);
+                expired.push((*transaction_handle, state.keys()));
+            } else {
+                opt_next_expiry = Some(opt_next_expiry.map_or(expiry, |next| next.min(expiry)));
+            }
+        }
+        (expired, opt_next_expiry)
+    }
+
+    /// Drop a transaction marked by `mark_expired_transactions` if it is still expired, otherwise
+    /// unmark it; a Begin that held the records reports Lost until enough nodes join
+    #[must_use]
+    pub fn drop_if_expired(
+        &mut self,
+        transaction_handle: OutboundTransactionHandle,
+        cur_ts: Timestamp,
+    ) -> Option<OutboundTransactionState> {
+        let state = self.transactions.get_mut(&transaction_handle)?;
+        match state.expiry() {
+            Some(expiry) if expiry <= cur_ts => self.drop_transaction(transaction_handle),
+            opt_expiry => {
+                state.set_expiry_drop_pending(false);
+                if let Some(expiry) = opt_expiry {
+                    self.arm_expiry_check(expiry);
+                }
+                None
+            }
+        }
     }
 
     pub fn terminate(&mut self) -> OutboundTransactionManagerTerminate {
@@ -340,12 +402,15 @@ impl OutboundTransactionManager {
         Ok(())
     }
 
+    /// Modify a record state, rechecking expiry once the caller releases its lock
     fn get_transaction_record_state_mut_by_lnxid(
         &mut self,
         transaction_handle: OutboundTransactionHandle,
         lnxid: LocalNodeTransactionId,
     ) -> Option<&mut OutboundTransactionRecordState> {
         let registry = self.registry();
+
+        self.arm_expiry_check(Timestamp::new(0));
 
         let Some(mapping) = self.local_node_transaction_mappings.get(&lnxid) else {
             veilid_log!(registry debug "Missing local node transaction mapping {} for transaction {} in background drop", lnxid, transaction_handle);
@@ -721,21 +786,27 @@ impl OutboundTransactionManager {
             .ok_or_else(|| VeilidAPIError::transaction_not_found("missing transaction"))
     }
 
-    /// Modify a transaction state
+    /// Wake `settle_wakeup` whenever one of this transaction's outstanding Sets settles
+    pub fn set_settle_wakeup(
+        &mut self,
+        transaction_handle: OutboundTransactionHandle,
+        settle_wakeup: WakeSender,
+    ) -> VeilidAPIResult<()> {
+        self.get_transaction_state_mut(transaction_handle)?
+            .set_settle_wakeup(settle_wakeup);
+        Ok(())
+    }
+
+    /// Modify a transaction state, rechecking expiry once the caller releases its lock
     fn get_transaction_state_mut(
         &mut self,
         transaction_handle: OutboundTransactionHandle,
     ) -> VeilidAPIResult<&mut OutboundTransactionState> {
+        self.arm_expiry_check(Timestamp::new(0));
+
         self.transactions
             .get_mut(&transaction_handle)
             .ok_or_else(|| VeilidAPIError::transaction_not_found("missing transaction"))
-    }
-
-    /// Iterate transaction handles and states
-    pub fn transactions(
-        &self,
-    ) -> impl Iterator<Item = (&OutboundTransactionHandle, &OutboundTransactionState)> {
-        self.transactions.iter()
     }
 
     /// Prepare to begin a transaction
@@ -1261,15 +1332,37 @@ impl OutboundTransactionManager {
             return;
         };
         nt.finish_outstanding_set();
-        let Some(pnr) = opt_pnr else {
-            return;
-        };
+        if let Some(pnr) = opt_pnr {
+            Self::record_late_set_answer(
+                #[cfg(feature = "stats")]
+                &quality,
+                &opt_keepalive_processor,
+                nt,
+                subkey,
+                value,
+                pnr,
+            );
+        }
+        if let Ok(state) = self.get_transaction_state(mapping.transaction_handle) {
+            state.wake_settle();
+        }
+    }
+
+    /// Apply a late Set answer to its node transaction
+    fn record_late_set_answer(
+        #[cfg(feature = "stats")] quality: &Arc<Mutex<TransactionQualityAccounting>>,
+        opt_keepalive_processor: &Option<Arc<OutboundTransactionKeepaliveProcessor>>,
+        nt: &mut NodeTransaction,
+        subkey: ValueSubkey,
+        value: &Arc<SignedValueData>,
+        pnr: OutboundTransactCommandPerNodeResult,
+    ) {
         match pnr.disposition {
             TransactCommandDisposition::Valid => {
                 veilid_stats!(quality
                     .lock()
                     .record_collected(TransactionCommandKind::Set, LateAnswer::Valid));
-                Self::refresh_keepalive(&opt_keepalive_processor, &pnr);
+                Self::refresh_keepalive(opt_keepalive_processor, &pnr);
                 nt.record_set_answer(subkey, value, pnr);
             }
             TransactCommandDisposition::Invalid => {

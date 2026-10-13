@@ -112,6 +112,15 @@ impl<E: Send + fmt::Debug + 'static> TickTask<E> {
         }
     }
 
+    /// Wait for the in-flight run, if any, to finish without stopping the task, propagating its
+    /// error. Returns at once when nothing runs or another caller is already waiting on it.
+    pub async fn join(&self) -> Result<(), E> {
+        match pin_future!(self.single_future.join()).await {
+            Ok(Some(Err(err))) => Err(err),
+            _ => Ok(()),
+        }
+    }
+
     /// Run the routine if at least the tick period has elapsed since the last run, otherwise do nothing.
     /// Returns immediately before the period elapses; if a prior run is still in flight, leaves it
     /// running and starts no second run (does not wait for it).

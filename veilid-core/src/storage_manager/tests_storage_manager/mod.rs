@@ -10,6 +10,7 @@ mod test_metadata_save_schedule;
 mod test_min_seqnum;
 mod test_record_report_seqs;
 mod test_rehydration_failure_runs;
+mod test_set_value_split;
 mod test_transaction_quality;
 mod test_transaction_stage_consensus;
 mod test_unanswered_inspect;
@@ -35,4 +36,5 @@ pub async fn test_all() {
     test_watch_route_pinning::test_all().await;
     test_watch_subkey_filter::test_all().await;
     record_store::tests::test_record_store().await;
+    test_set_value_split::test_all().await;
 }

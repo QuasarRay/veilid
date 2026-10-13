@@ -542,9 +542,10 @@ async def test_watch_dht_values():
                 # Server 1: Open the subkey
                 rec1 = await rc1.open_dht_record(rec0.key, rec0.owner_key_pair())
 
-                # Server 1: Now set the subkey and trigger an update
+                # Server 1: Now set the subkey to the same data
                 vd = await rc1.set_dht_value(rec1.key, ValueSubkey(3), b"BLAH")
-                assert vd is None
+                # Server 1 has no local copy, so it encrypts afresh at server 0's seq and the set may report the contest
+                assert vd is None or (vd.seq == 0 and vd.data == b"BLAH")
                 await sync(rc1, [rec1])
 
                 # Server 0: Now we should NOT get an update because the update is the same as our local copy

@@ -95,6 +95,24 @@ pub enum IGDAddressType {
     IPV4,
 }
 
+impl From<AddressType> for IGDAddressType {
+    fn from(address_type: AddressType) -> Self {
+        match address_type {
+            AddressType::IPV4 => IGDAddressType::IPV4,
+            AddressType::IPV6 => IGDAddressType::IPV6,
+        }
+    }
+}
+
+impl From<IpAddr> for IGDAddressType {
+    fn from(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(_) => IGDAddressType::IPV4,
+            IpAddr::V6(_) => IGDAddressType::IPV6,
+        }
+    }
+}
+
 impl fmt::Display for IGDAddressType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -332,14 +350,29 @@ impl IGDManager {
         }
     }
 
-    /// Drop cached probe results and active port mappings; used on interface change
-    pub fn clear_caches(&self) {
+    /// Forget probed gateways, external IPs and mappings, for one address type or all of them
+    pub fn clear_caches(&self, address_type: Option<IGDAddressType>) {
         let mut inner = self.inner.lock();
-        inner.local_ip_addrs.clear();
-        inner.gateways.clear();
-        inner.external_ips.clear();
-        inner.port_maps.clear();
-        inner.deferred_maps.clear();
+        match address_type {
+            None => {
+                inner.local_ip_addrs.clear();
+                inner.gateways.clear();
+                inner.external_ips.clear();
+                inner.port_maps.clear();
+                inner.deferred_maps.clear();
+            }
+            Some(at) => {
+                inner.local_ip_addrs.remove(&at);
+                inner
+                    .gateways
+                    .retain(|ip, _| IGDAddressType::from(*ip) != at);
+                inner
+                    .external_ips
+                    .retain(|ip, _| IGDAddressType::from(*ip) != at);
+                inner.port_maps.retain(|k, _| k.address_type != at);
+                inner.deferred_maps.remove(&at);
+            }
+        }
         inner.cache_generation += 1;
     }
 

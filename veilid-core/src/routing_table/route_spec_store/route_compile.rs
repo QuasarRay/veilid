@@ -71,6 +71,19 @@ struct RouteCompileContext {
 }
 
 impl RouteSpecStore {
+    /// The state a lost question to this private route is judged in; a stub's one hop is the
+    /// destination node
+    fn private_route_loss_epoch(&self, private_route: &PrivateRoute) -> LossEpoch {
+        let routing_table = self.routing_table();
+        let destination_ts = private_route
+            .is_stub()
+            .then(|| private_route.first_hop_node_id())
+            .flatten()
+            .and_then(|node_id| routing_table.lookup_node_id(node_id).ok().flatten())
+            .map(|node_ref| node_ref.node_info_ts(RoutingDomain::PublicInternet));
+        routing_table.loss_epoch(destination_ts)
+    }
+
     /// Extracts the compile context from route spec details for a resolved safety route.
     fn get_route_compile_context(
         &self,
@@ -449,6 +462,10 @@ impl RouteSpecStore {
                     directions: Direction::Out.into(),
                     avoid_nodes: vec![avoid_node_id],
                     is_destination_safe: !params.private_route.is_stub(),
+                    opt_destination: Some((
+                        pr_pubkey.clone(),
+                        self.private_route_loss_epoch(&params.private_route),
+                    )),
                 };
 
                 let RouteIdAndKeys {
@@ -516,7 +533,7 @@ impl RouteSpecStore {
         // 2. If the private route being compiled with is allocated it must still exist
         // 3. Check the safety route and private route for validity and optimizability:
         //    a. If the route has a bad stats disposition, it should be invalidated so we have a chance at a different route selection
-        //    b. If the safety route lost a question to this destination, it is invalidated for this destination only, so the retry compiles onto another route
+        //    b. If a selected safety route lost a question to this destination, it is invalidated for this destination only, so the retry compiles onto another route
         //    c. If the route is optimizable, and the cache is optimized it is valid
         //    d. If the route is not optimizable, and the cache is unoptimized it is valid
         //    e. If there is no optimizability match, then we either need to compile, or optimize
@@ -529,6 +546,12 @@ impl RouteSpecStore {
         // The reply private route, if specified is only used to choose a symmetric safety route
         // and is not part of the compile route itself. We do not need to check it explicitly here
         // because checking 'compiled_route.safety_route' already does this for us.
+
+        // Read before the cache lock, since it reads the routing table
+        let opt_loss_epoch = key
+            .opt_reply_pr_pubkey
+            .is_none()
+            .then(|| self.private_route_loss_epoch(&params.private_route));
 
         let cache = self.cache.read();
 
@@ -567,8 +590,12 @@ impl RouteSpecStore {
                 return RouteCompileCacheDisposition::Compile(entry);
             }
             // Check #3b: a question lost to this destination over this route sends the next one
-            // over another; the route keeps serving other destinations until it is tested
-            if arce.lost_question_to(sequencing, &key.pr_pubkey) {
+            // over another; the route keeps serving other destinations. A reply route fixes the
+            // safety route, and its selection already ranks this route last for the destination.
+            if opt_loss_epoch
+                .as_ref()
+                .is_some_and(|epoch| arce.lost_question_to(sequencing, &key.pr_pubkey, epoch))
+            {
                 veilid_log!(self debug "Safety route {} lost a question to {}, compiling another for it", safety_route_id, key.pr_pubkey);
                 drop(cache);
                 entry.remove();

@@ -1,4 +1,7 @@
+use super::mocks::fix_typed_node_id;
 use crate::routing_table::*;
+use crate::rpc_processor::Destination;
+use crate::tests::mock_registry;
 
 fn now() -> Timestamp {
     Timestamp::new(1_000_000_000u64)
@@ -6,6 +9,21 @@ fn now() -> Timestamp {
 
 fn only(ordering: SequenceOrdering) -> SequenceOrderingSet {
     SequenceOrderingSet::only(ordering)
+}
+
+fn dest_key(n: u8) -> PublicKey {
+    PublicKey::new(CRYPTO_KIND_VLD0, BarePublicKey::new(&[n; 32]))
+}
+
+/// A destination whose key is `key`, as an answer or a loss names it
+fn destination(key: &PublicKey) -> Destination {
+    Destination::private_route(
+        Arc::new(PrivateRoute::new_stub(
+            key.clone(),
+            RouteNode::NodeId(fix_typed_node_id(CRYPTO_KIND_VLD0, 1)),
+        )),
+        SafetySelection::Unsafe(Sequencing::PreferOrdered),
+    )
 }
 
 pub fn test_loopback_failure_run_kills_ordering() {
@@ -133,28 +151,156 @@ pub fn test_sequencing_narrows_to_route_orderings() {
     );
 }
 
-/// A lost question is remembered per destination and ordering, short of killing the
-/// route, until the ordering answers or passes a loopback again
-pub fn test_lost_question_marks_destination_until_answer() {
-    info!("--- test_lost_question_marks_destination_until_answer ---");
+fn epoch(destination: u64, own: u64, online: u64) -> LossEpoch {
+    LossEpoch {
+        destination: Some(Timestamp::new(destination)),
+        own: Some(Timestamp::new(own)),
+        online,
+    }
+}
+
+/// A lost question is remembered per destination and ordering, short of killing the route, while
+/// the state it was lost in holds: a peer info change on either side or an online state change
+/// leaves the mark behind
+pub fn test_lost_question_mark_holds_in_its_epoch() {
+    info!("--- test_lost_question_mark_holds_in_its_epoch ---");
+    let ordering = SequenceOrdering::Unordered;
     let mut stats = RouteStats::new(now());
-    let dest = PublicKey::new(CRYPTO_KIND_VLD0, BarePublicKey::new(&[7u8; 32]));
-    let other = PublicKey::new(CRYPTO_KIND_VLD0, BarePublicKey::new(&[8u8; 32]));
-    assert!(!stats.lost_question_to(SequenceOrdering::Unordered, &dest));
+    let dest = dest_key(7);
+    let other = dest_key(8);
+    let lost_in = epoch(1, 1, 0);
+    assert!(!stats.lost_question_to(ordering, &dest, &lost_in));
 
-    stats.record_lost_question_to(SequenceOrdering::Unordered, dest.clone());
-    assert!(stats.lost_question_to(SequenceOrdering::Unordered, &dest));
-    assert!(!stats.lost_question_to(SequenceOrdering::Unordered, &other));
-    assert!(!stats.lost_question_to(SequenceOrdering::Ordered, &dest));
-    assert!(!stats.is_dead_for_ordering(SequenceOrdering::Unordered));
-    assert!(stats.needs_testing(only(SequenceOrdering::Unordered), now()));
+    stats.record_lost_question_to(ordering, dest.clone(), Some(lost_in));
+    assert!(stats.lost_question_to(ordering, &dest, &lost_in));
+    assert!(!stats.lost_question_to(ordering, &other, &lost_in));
+    assert!(!stats.lost_question_to(SequenceOrdering::Ordered, &dest, &lost_in));
+    assert!(!stats.is_dead_for_ordering(ordering));
+    assert!(stats.needs_testing(only(ordering), now()));
 
-    stats.record_loopback_result(SequenceOrdering::Unordered, true, now());
-    assert!(!stats.lost_question_to(SequenceOrdering::Unordered, &dest));
+    assert!(
+        !stats.lost_question_to(ordering, &dest, &epoch(2, 1, 0)),
+        "the destination republished its peer info"
+    );
+    assert!(
+        !stats.lost_question_to(ordering, &dest, &epoch(1, 2, 0)),
+        "we republished our peer info"
+    );
+    assert!(
+        !stats.lost_question_to(ordering, &dest, &epoch(1, 1, 1)),
+        "the online state moved"
+    );
+
+    // A loss judged while blame is suppressed marks nothing
+    stats.record_lost_question_to(ordering, other.clone(), None);
+    assert!(!stats.lost_question_to(ordering, &other, &lost_in));
+}
+
+/// Answers from other destinations and loopback passes say nothing about the hop's path to a
+/// destination that lost a question, so only its own answer clears the mark; the route-death
+/// tally still forgets on any answer
+pub fn test_lost_destination_mark_outlives_other_answers() {
+    info!("--- test_lost_destination_mark_outlives_other_answers ---");
+    let ordering = SequenceOrdering::Unordered;
+    let mut stats = RouteStats::new(now());
+    let dest = dest_key(7);
+    let other = dest_key(8);
+
+    let lost_in = epoch(1, 1, 0);
+    stats.record_lost_question_to(ordering, dest.clone(), Some(lost_in));
+    stats.record_answer_received(ordering, now(), ByteCount::new(100), &destination(&other));
+    assert!(!stats.needs_testing(only(ordering), now()));
+    assert!(
+        stats.lost_question_to(ordering, &dest, &lost_in),
+        "another destination's answer cleared the mark"
+    );
+
+    stats.record_loopback_result(ordering, true, now());
+    assert!(
+        stats.lost_question_to(ordering, &dest, &lost_in),
+        "a loopback pass cleared the mark"
+    );
+
+    stats.record_answer_received(ordering, now(), ByteCount::new(100), &destination(&dest));
+    assert!(!stats.lost_question_to(ordering, &dest, &lost_in));
+}
+
+/// A dead route's hops stay out of its orderings' allocations while the state each was lost in
+/// holds; a death on a changed network forgets the older hops, and only the latest deaths are kept
+pub async fn test_dead_route_hops_hold_in_their_epoch() {
+    info!("--- test_dead_route_hops_hold_in_their_epoch ---");
+    let registry = mock_registry::init("dead_route_hops").await;
+    let routing_table = registry.routing_table();
+    let rss = routing_table.route_spec_store();
+    let ordered = SequenceOrdering::Ordered;
+    let current = |hops: Vec<(NodeId, LossEpoch)>| {
+        move |node_id: &NodeId| {
+            hops.iter()
+                .find(|(id, _)| id == node_id)
+                .map(|(_, lost)| *lost)
+        }
+    };
+
+    let a = (fix_typed_node_id(CRYPTO_KIND_VLD0, 1), epoch(1, 1, 0));
+    let b = (fix_typed_node_id(CRYPTO_KIND_VLD0, 2), epoch(2, 1, 0));
+    rss.avoid_dead_route_hops(only(ordered), &[a.clone(), b.clone()]);
+
+    let mut avoided = rss.dead_route_hops_to_avoid(ordered, current(vec![a.clone(), b.clone()]));
+    avoided.sort();
+    assert_eq!(avoided, vec![a.0.clone(), b.0.clone()]);
+    assert!(rss
+        .dead_route_hops_to_avoid(
+            SequenceOrdering::Unordered,
+            current(vec![a.clone(), b.clone()])
+        )
+        .is_empty());
+
+    // b republished its peer info, and a left the table
+    let b_republished = (b.0.clone(), epoch(3, 1, 0));
+    assert!(rss
+        .dead_route_hops_to_avoid(ordered, current(vec![b_republished]))
+        .is_empty());
+
+    // A death on a changed network forgets the hops lost on the old one
+    let c = (fix_typed_node_id(CRYPTO_KIND_VLD0, 3), epoch(5, 2, 0));
+    rss.avoid_dead_route_hops(only(ordered), std::slice::from_ref(&c));
+    assert_eq!(
+        rss.dead_route_hops_to_avoid(ordered, current(vec![a.clone(), b.clone(), c.clone()])),
+        vec![c.0.clone()]
+    );
+
+    // A background pool's worth of hops at the longest hop count, latest first
+    let capacity = DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT
+        * usize::from(registry.config().internal().network.rpc.max_route_hop_count);
+    let many = (0..=capacity)
+        .map(|n| {
+            let n = u8::try_from(n + 10).expect("small");
+            (
+                fix_typed_node_id(CRYPTO_KIND_VLD0, n),
+                epoch(u64::from(n), 2, 0),
+            )
+        })
+        .collect::<Vec<_>>();
+    for hop in &many {
+        rss.avoid_dead_route_hops(only(ordered), std::slice::from_ref(hop));
+    }
+    let mut everything = many.clone();
+    everything.push(c.clone());
+    let avoided = rss.dead_route_hops_to_avoid(ordered, current(everything));
+    assert_eq!(avoided.len(), capacity);
+    assert!(
+        !avoided.contains(&c.0),
+        "the oldest death is forgotten first"
+    );
+    assert!(!avoided.contains(&many[0].0));
+    assert!(avoided.contains(&many[capacity].0));
+
+    mock_registry::terminate(registry).await;
 }
 
 pub fn test_all() {
-    test_lost_question_marks_destination_until_answer();
+    test_lost_question_mark_holds_in_its_epoch();
+    test_lost_destination_mark_outlives_other_answers();
     test_send_failure_does_not_kill_the_route();
     test_loopback_failure_run_kills_ordering();
     test_loopback_pass_resets_run();

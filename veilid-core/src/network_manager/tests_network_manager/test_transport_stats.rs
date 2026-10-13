@@ -9,6 +9,9 @@ fn secs_ago(secs: u64) -> Timestamp {
     Timestamp::new(now().as_u64() - secs * 1_000_000u64)
 }
 
+/// The canary period at the default RPC timeout
+const CANARY: TimestampDuration = TimestampDuration::new_secs(30);
+
 fn peer(n: u8) -> TransportPeerKey {
     let mut b = [0u8; 32];
     b[0] = n;
@@ -33,7 +36,7 @@ pub fn test_verdict_needs_min_samples() {
         .map(|_| (now(), TransportSendOutcome::Timeout))
         .collect();
     let w = window_with(&outcomes);
-    assert_eq!(w.verdict(now()), TransportVerdict::Unknown);
+    assert_eq!(w.verdict(now(), CANARY), TransportVerdict::Unknown);
 
     // One more timeout crosses the threshold with no successes: suppressed
     let outcomes: Vec<_> = (0..TRANSPORT_STATS_MIN_SAMPLES)
@@ -41,7 +44,7 @@ pub fn test_verdict_needs_min_samples() {
         .collect();
     let w = window_with(&outcomes);
     assert_eq!(
-        w.verdict(now()),
+        w.verdict(now(), CANARY),
         TransportVerdict::Suppressed {
             due_for_canary: false
         }
@@ -58,7 +61,7 @@ pub fn test_verdict_any_success_is_healthy() {
         .collect();
     outcomes.push((now(), TransportSendOutcome::Sent));
     let w = window_with(&outcomes);
-    assert_eq!(w.verdict(now()), TransportVerdict::Healthy);
+    assert_eq!(w.verdict(now(), CANARY), TransportVerdict::Healthy);
 }
 
 pub fn test_window_keeps_min_samples_when_quiet() {
@@ -73,7 +76,7 @@ pub fn test_window_keeps_min_samples_when_quiet() {
     w.evict_aged(now());
     assert_eq!(w.sample_count(), TRANSPORT_STATS_MIN_SAMPLES);
     assert!(matches!(
-        w.verdict(now()),
+        w.verdict(now(), CANARY),
         TransportVerdict::Suppressed { .. }
     ));
 }
@@ -86,7 +89,7 @@ pub fn test_canary_becomes_due() {
         .map(|_| (now(), TransportSendOutcome::Timeout))
         .collect();
     let w = window_with(&outcomes);
-    assert!(w.verdict(now()).is_deprioritized());
+    assert!(w.verdict(now(), CANARY).is_deprioritized());
 
     // Nothing attempted for longer than the canary interval: let one send through,
     // otherwise suppression would starve its own window and never recover
@@ -95,12 +98,12 @@ pub fn test_canary_becomes_due() {
         .collect();
     let w = window_with(&stale);
     assert_eq!(
-        w.verdict(now()),
+        w.verdict(now(), CANARY),
         TransportVerdict::Suppressed {
             due_for_canary: true
         }
     );
-    assert!(!w.verdict(now()).is_deprioritized());
+    assert!(!w.verdict(now(), CANARY).is_deprioritized());
 }
 
 pub fn test_concentrated_failures_are_not_a_dead_path() {
@@ -112,7 +115,7 @@ pub fn test_concentrated_failures_are_not_a_dead_path() {
     for _ in 0..TRANSPORT_STATS_MIN_SAMPLES * 2 {
         w.record(now(), TransportSendOutcome::Timeout, peer(1));
     }
-    assert_eq!(w.verdict(now()), TransportVerdict::Unknown);
+    assert_eq!(w.verdict(now(), CANARY), TransportVerdict::Unknown);
 
     // The same failures spread across enough distinct peers do implicate the path
     let mut w = TransportWindow::default();
@@ -120,9 +123,32 @@ pub fn test_concentrated_failures_are_not_a_dead_path() {
         w.record(now(), TransportSendOutcome::Timeout, peer(i as u8));
     }
     assert!(matches!(
-        w.verdict(now()),
+        w.verdict(now(), CANARY),
         TransportVerdict::Suppressed { .. }
     ));
+}
+
+/// A change on our side lets one canary through at once, whatever the period says; a transport
+/// that is not suppressed has nothing to release
+pub fn test_release_lets_a_canary_through() {
+    info!("--- test_release_lets_a_canary_through ---");
+
+    let outcomes: Vec<_> = (0..TRANSPORT_STATS_MIN_SAMPLES)
+        .map(|_| (now(), TransportSendOutcome::Timeout))
+        .collect();
+    let mut w = window_with(&outcomes);
+    assert!(w.verdict(now(), CANARY).is_deprioritized());
+    assert!(w.release_canary());
+    assert_eq!(
+        w.verdict(now(), CANARY),
+        TransportVerdict::Suppressed {
+            due_for_canary: true
+        }
+    );
+    assert!(!w.release_canary(), "already released");
+
+    let mut healthy = window_with(&[(now(), TransportSendOutcome::Sent)]);
+    assert!(!healthy.release_canary());
 }
 
 pub fn test_skipping_does_not_defer_the_canary() {
@@ -136,7 +162,7 @@ pub fn test_skipping_does_not_defer_the_canary() {
     let w = window_with(&outcomes);
     let before = w.sample_count();
     assert_eq!(
-        w.verdict(now()),
+        w.verdict(now(), CANARY),
         TransportVerdict::Suppressed {
             due_for_canary: true
         }
@@ -154,7 +180,7 @@ pub fn test_suppression_survives_losing_peer_diversity() {
         w.record(secs_ago(60), TransportSendOutcome::Timeout, peer(i as u8));
     }
     assert!(matches!(
-        w.verdict(secs_ago(60)),
+        w.verdict(secs_ago(60), CANARY),
         TransportVerdict::Suppressed { .. }
     ));
 
@@ -166,13 +192,13 @@ pub fn test_suppression_survives_losing_peer_diversity() {
     w.evict_aged(now());
     assert!(w.distinct_peers() < TRANSPORT_STATS_MIN_DISTINCT_PEERS);
     assert!(matches!(
-        w.verdict(now()),
+        w.verdict(now(), CANARY),
         TransportVerdict::Suppressed { .. }
     ));
 
     // Only a send that works releases it
     w.record(now(), TransportSendOutcome::Sent, peer(1));
-    assert_eq!(w.verdict(now()), TransportVerdict::Healthy);
+    assert_eq!(w.verdict(now(), CANARY), TransportVerdict::Healthy);
 }
 
 pub fn test_unbound_sends_count_toward_diversity() {
@@ -192,7 +218,7 @@ pub fn test_unbound_sends_count_toward_diversity() {
         w.record(now(), TransportSendOutcome::Timeout, addr(i as u8));
     }
     assert!(matches!(
-        w.verdict(now()),
+        w.verdict(now(), CANARY),
         TransportVerdict::Suppressed { .. }
     ));
 
@@ -201,7 +227,7 @@ pub fn test_unbound_sends_count_toward_diversity() {
     for _ in 0..TRANSPORT_STATS_MIN_SAMPLES * 2 {
         w.record(now(), TransportSendOutcome::Timeout, addr(1));
     }
-    assert_eq!(w.verdict(now()), TransportVerdict::Unknown);
+    assert_eq!(w.verdict(now(), CANARY), TransportVerdict::Unknown);
 }
 
 pub fn test_refused_connect_is_not_evidence() {
@@ -245,6 +271,7 @@ pub fn test_all() {
     test_verdict_any_success_is_healthy();
     test_window_keeps_min_samples_when_quiet();
     test_canary_becomes_due();
+    test_release_lets_a_canary_through();
     test_concentrated_failures_are_not_a_dead_path();
     test_skipping_does_not_defer_the_canary();
     test_suppression_survives_losing_peer_diversity();

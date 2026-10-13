@@ -82,7 +82,7 @@ impl StorageManager {
             .map_err(VeilidAPIError::from)?;
 
         network_result_value_or_log!(self rpc_processor
-            .rpc_call_value_changed(dest, vc.record_key.clone(), vc.subkeys.clone(), vc.count, vc.watch_id.into(), vc.value.map(|v| (*v).clone()) )
+            .rpc_call_value_changed(dest.clone(), vc.record_key.clone(), vc.subkeys.clone(), vc.count, vc.watch_id.into(), vc.value.as_ref().map(|v| (**v).clone()) )
             .await
             .map_err(VeilidAPIError::from)? => [format!(": dest={:?} vc={:?}", dest, vc)] {});
 

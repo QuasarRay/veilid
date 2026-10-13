@@ -4,9 +4,24 @@ use super::*;
 
 const SATURATION_TARGET_RELIABLE_NODES: u64 = 32;
 
-const LATENCY_PENALTY_THRESHOLD_1: TimestampDuration = TimestampDuration::new_ms(100);
-const LATENCY_PENALTY_THRESHOLD_2: TimestampDuration = TimestampDuration::new_ms(250);
-const LATENCY_PENALTY_THRESHOLD_3: TimestampDuration = TimestampDuration::new_ms(500);
+/// Percents of the RPC timeout at which median peer latency takes off one more bar
+const LATENCY_PENALTY_PERCENTS: [u64; 3] = [2, 5, 10];
+
+/// Attachment level durations derived from the RPC timeout
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::attachment_manager) struct AttachmentLevelTimings {
+    /// Median peer latency at or past each takes off one more bar
+    pub latency_penalty_thresholds: [TimestampDuration; 3],
+}
+
+impl AttachmentLevelTimings {
+    pub fn new(rpc_timeout: TimestampDuration) -> Self {
+        Self {
+            latency_penalty_thresholds: LATENCY_PENALTY_PERCENTS
+                .map(|percent| rpc_timeout.saturating_mul(percent).div(100)),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub(in crate::attachment_manager) struct AttachmentLevelInputs {
@@ -26,6 +41,7 @@ pub(in crate::attachment_manager) struct AttachmentLevelInputs {
 
 pub(in crate::attachment_manager) fn compute_attachment_state(
     inputs: &AttachmentLevelInputs,
+    timings: &AttachmentLevelTimings,
 ) -> AttachmentState {
     // No live nodes at all: still attaching.
     if inputs.live_count == 0 {
@@ -44,13 +60,13 @@ pub(in crate::attachment_manager) fn compute_attachment_state(
         .saturating_div(target)
         .min(5) as u8;
 
-    let latency_penalty = match inputs.median_latency {
-        None => 0,
-        Some(lat) if lat < LATENCY_PENALTY_THRESHOLD_1 => 0,
-        Some(lat) if lat < LATENCY_PENALTY_THRESHOLD_2 => 1,
-        Some(lat) if lat < LATENCY_PENALTY_THRESHOLD_3 => 2,
-        Some(_) => 3,
-    };
+    let latency_penalty = inputs.median_latency.map_or(0, |latency| {
+        timings
+            .latency_penalty_thresholds
+            .iter()
+            .filter(|threshold| latency >= **threshold)
+            .count() as u8
+    });
 
     let bars = raw_bars.saturating_sub(latency_penalty);
 
@@ -67,6 +83,7 @@ pub(in crate::attachment_manager) fn compute_attachment_state(
 #[derive(Clone)]
 pub(in crate::attachment_manager) struct AttachmentLevelCalculator {
     registry: VeilidComponentRegistry,
+    timings: AttachmentLevelTimings,
     inner: Arc<Mutex<AttachmentLevelCalculatorInner>>,
 }
 
@@ -86,8 +103,10 @@ struct AttachmentLevelCalculatorInner {
 
 impl AttachmentLevelCalculator {
     pub fn new(registry: VeilidComponentRegistry) -> Self {
+        let timings = AttachmentLevelTimings::new(registry.config().rpc_timeout());
         Self {
             registry,
+            timings,
             inner: Arc::new(Mutex::new(AttachmentLevelCalculatorInner {
                 last_state: AttachmentState::Detached,
                 last_inputs: AttachmentLevelInputs::default(),
@@ -107,7 +126,7 @@ impl AttachmentLevelCalculator {
             median_latency: median_p75_latency(&routing_table),
             excess_kickable: routing_table.excess_kickable_count(),
         };
-        let state = compute_attachment_state(&inputs);
+        let state = compute_attachment_state(&inputs, &self.timings);
 
         let mut inner = self.inner.lock();
         inner.last_state = state;

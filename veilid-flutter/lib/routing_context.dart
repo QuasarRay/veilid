@@ -182,8 +182,10 @@ abstract class VeilidRoutingContext {
 
   /// Push a changed [subkey] value to the network.
   ///
-  /// Returns `null` on success, or the newer network [ValueData] if the set was
-  /// older than what is already on the network.
+  /// Returns `null` on success, or the network [ValueData] if the network holds
+  /// a newer value or nodes hold more than one value at the sequence number
+  /// written. It is then the value most of them hold, which can be the one just
+  /// set.
   ///
   /// Blocks on a network fanout to push the value; when offline or the fanout
   /// fails, queues the write for a later flush (if offline writes are allowed)

@@ -2969,6 +2969,7 @@ pub struct veilid_core::VeilidConfigInternalUDP
 pub veilid_core::VeilidConfigInternalUDP::socket_pool_size: u32
 pub struct veilid_core::VeilidConfigNetwork
 pub veilid_core::VeilidConfigNetwork::address_types: alloc::vec::Vec<veilid_core::VeilidConfigAddressType>
+pub veilid_core::VeilidConfigNetwork::bind_retry_ms: u32
 pub veilid_core::VeilidConfigNetwork::detect_address_changes: core::option::Option<bool>
 pub veilid_core::VeilidConfigNetwork::dht: veilid_core::VeilidConfigDHT
 pub veilid_core::VeilidConfigNetwork::max_connections: u32

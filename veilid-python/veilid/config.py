@@ -220,6 +220,7 @@ class VeilidConfigNetwork(ConfigBase):
     address_types: list[VeilidConfigAddressType]
     upnp: bool
     detect_address_changes: Optional[bool]
+    bind_retry_ms: int
     tls: VeilidConfigTLS
     protocol: VeilidConfigProtocol
     privacy: VeilidConfigPrivacy

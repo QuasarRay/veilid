@@ -28,6 +28,7 @@ struct WasmNetworkInner {
     protocol_config: ProtocolConfig,
     last_confirm_request_ts: BTreeMap<RoutingDomain, Timestamp>,
     // Address-family confirmation worker lifecycle (cancelled+joined in cancel_tasks)
+    address_family_wakeup: Option<WakeSender>,
     address_family_stop_source: Option<StopSource>,
     address_family_worker_jh: Option<MustJoinHandle<()>>,
     online_event_listener_jh: Option<MustJoinHandle<()>>,
@@ -129,7 +130,10 @@ impl PlatformNetwork for WasmNetwork {
                 return Ok(());
             };
 
-            // No per-tick tasks for WASM; the address-family confirmation worker self-drives
+            // A deferred confirmation retries as nodes are seen live over more families
+            if !self.unconfirmed_address_family_domains().is_empty() {
+                self.wake_address_family_confirm_worker();
+            }
 
             Ok(())
         })
@@ -145,6 +149,7 @@ impl PlatformNetwork for WasmNetwork {
             ) = {
                 let mut inner = self.inner.lock();
 
+                inner.address_family_wakeup = None;
                 drop(inner.address_family_stop_source.take());
                 (
                     inner.address_family_worker_jh.take(),
@@ -552,8 +557,14 @@ impl PlatformNetwork for WasmNetwork {
         self.reset_address_family_confirm_state(routing_domain)
     }
 
-    fn interfaces_changed_since_confirm(&self) -> bool {
-        true
+    fn request_confirm_after_empty_table(&self) -> bool {
+        // No interface visibility, so ask only while confirmed and never restart a running one
+        let confirmed = self
+            .routing_table()
+            .get_routing_domain_controller(RoutingDomain::PublicInternet)
+            .read_dyn()
+            .confirmed();
+        confirmed && self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
     }
 }
 
@@ -565,6 +576,7 @@ impl WasmNetwork {
             network_needs_restart: false,
             protocol_config: Default::default(),
             last_confirm_request_ts: BTreeMap::new(),
+            address_family_wakeup: None,
             address_family_stop_source: None,
             address_family_worker_jh: None,
             online_event_listener_jh: None,

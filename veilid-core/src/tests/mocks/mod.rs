@@ -60,6 +60,7 @@ pub fn fake_veilid_config() -> VeilidConfig {
             address_types: Vec::new(),
             upnp: true,
             detect_address_changes: Some(false),
+            bind_retry_ms: 10_000,
             tls: VeilidConfigTLS {
                 certificate_path: "/etc/ssl/certs/cert.pem".to_string(),
                 private_key_path: "/etc/ssl/keys/key.pem".to_string(),

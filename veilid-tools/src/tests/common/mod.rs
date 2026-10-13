@@ -15,3 +15,4 @@ pub mod test_tag_lock;
 pub mod test_timestamp;
 pub mod test_tools_basic;
 pub mod test_tracked_mutex;
+pub mod test_wake_and_deadline;

@@ -4,7 +4,6 @@ use crate::settings::*;
 use crate::*;
 use std::ffi::OsString;
 use std::time::Duration;
-use tracing::*;
 use windows_service::service::{
     ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
 };

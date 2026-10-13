@@ -351,7 +351,7 @@ impl VeilidClient {
 
     /// Connect to the network.
     ///
-    /// Sets the maintain-peers flag and returns; the network connect proceeds in the background tick loop. Errors if already attached.
+    /// Moves the attachment to `Attaching` and returns; it stays there, waiting to bind if it must, until the node attaches or `detach` is called. Succeeds while already attaching.
     ///
     /// Throws the same error its core twin `VeilidAPI::attach` returns: `Generic` if already attached, and `NotInitialized` if the node is not started.
     pub async fn attach() -> VeilidAPIResult<()> {
@@ -361,7 +361,7 @@ impl VeilidClient {
 
     /// Disconnect from the network.
     ///
-    /// Clears the maintain-peers flag and returns; the network teardown proceeds in the background tick loop. Errors if already detached.
+    /// Moves the attachment to `Detaching` and returns, cancelling an attach in progress; the network teardown proceeds in the background tick loop. Succeeds while already detaching.
     ///
     /// Throws the same error its core twin `VeilidAPI::detach` returns: `Generic` if already detached, and `NotInitialized` if the node is not started.
     pub async fn detach() -> VeilidAPIResult<()> {

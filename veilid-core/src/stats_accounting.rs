@@ -93,8 +93,12 @@ impl TransferStatsAccounting {
 /// [Self::latency_stats].
 #[derive(Debug, Clone, Default)]
 pub struct LatencyStatsAccounting {
+    /// The latest samples, oldest first
     rolling_latencies: VecDeque<TimestampDuration>,
+    /// A sample arrived since the last take
     dirty: bool,
+    /// Samples recorded so far
+    recorded: u64,
 }
 
 impl LatencyStatsAccounting {
@@ -127,6 +131,16 @@ impl LatencyStatsAccounting {
         }
         self.rolling_latencies.push_back(latency);
         self.dirty = true;
+        self.recorded += 1;
+    }
+
+    pub fn recorded(&self) -> u64 {
+        self.recorded
+    }
+
+    /// Whether a full window of samples arrived after the first `recorded`
+    pub fn window_newer_than(&self, recorded: u64) -> bool {
+        self.recorded >= recorded.saturating_add(ROLLING_LATENCIES_SIZE as u64)
     }
 
     /// Stats over the sample window, or None if nothing has been recorded
@@ -275,5 +289,25 @@ mod tests {
         // Non-taking reads never consume the dirty flag
         assert!(lsa.latency_stats().is_some());
         assert!(lsa.take_latency_stats().is_none());
+    }
+
+    #[test]
+    fn window_turns_over_after_a_full_window_of_samples() {
+        let mut lsa = LatencyStatsAccounting::new();
+        for _ in 0..7 {
+            lsa.record_latency(TimestampDuration::new(1));
+        }
+        let marked = lsa.recorded();
+        assert_eq!(marked, 7);
+
+        for _ in 1..ROLLING_LATENCIES_SIZE {
+            lsa.record_latency(TimestampDuration::new(1));
+        }
+        assert!(
+            !lsa.window_newer_than(marked),
+            "one sample from before the mark remains"
+        );
+        lsa.record_latency(TimestampDuration::new(1));
+        assert!(lsa.window_newer_than(marked));
     }
 }

@@ -274,7 +274,8 @@ impl VeilidRoutingContext {
     /// The writer, if specified, will override the 'default_writer' specified when the record is opened.
     ///
     /// Returns `undefined` if the value was successfully put.
-    /// Returns a Uint8Array of `data` if the value put was older than the one available on the network.
+    /// Returns a Uint8Array of `data` if the network holds a newer value, or if nodes hold more than one value
+    /// at the sequence number written. `data` is the value most of them hold, which can be the one just put.
     ///
     /// Blocks on a network set fanout; when offline or the fanout fails, queues the write for later flush (if offline writes are allowed) and returns `undefined`.
     ///

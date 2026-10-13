@@ -196,6 +196,7 @@ network:
     address_types: []
     upnp: true
     detect_address_changes: true
+    bind_retry_ms: 10000
     enable_local_peer_scope: false
     restricted_nat_retries: 0
 ```

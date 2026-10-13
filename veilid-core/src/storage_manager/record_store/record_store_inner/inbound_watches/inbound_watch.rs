@@ -54,7 +54,7 @@ impl InboundWatch {
     }
 
     pub fn is_alive(&self, now: Timestamp) -> bool {
-        self.params.count != 0 && self.params.expiration > now && !self.params.subkeys.is_empty()
+        self.params.drop_due() > now
     }
 }
 

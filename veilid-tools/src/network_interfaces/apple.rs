@@ -531,8 +531,21 @@ fn parse_default_gateways(table: &[u8], gateways: &mut BTreeMap<u32, BTreeSet<Ip
             gateways
                 .entry(u32::from(hdr.rtm_index))
                 .or_default()
-                .insert(gateway);
+                .insert(strip_embedded_scope(gateway));
         }
+    }
+}
+
+/// The routing socket returns link-local gateways KAME-style, with the interface index in the
+/// second segment (`fe80:13::` for `fe80::%utun0`); the index is already the message's rtm_index
+fn strip_embedded_scope(addr: IpAddr) -> IpAddr {
+    match addr {
+        IpAddr::V6(v6) if ipv6addr_is_unicast_link_local(&v6) && v6.segments()[1] != 0 => {
+            let mut segments = v6.segments();
+            segments[1] = 0;
+            IpAddr::V6(Ipv6Addr::from(segments))
+        }
+        _ => addr,
     }
 }
 
@@ -674,6 +687,31 @@ mod tests {
             BTreeSet::from([IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))])
         );
         assert!(gateways[&9].iter().all(|g| g.is_ipv6()));
+    }
+
+    #[test]
+    fn link_local_gateway_drops_its_embedded_scope() {
+        let table = route_msg(
+            19,
+            DST_GW,
+            &[
+                &sa_v6([0; 16]),
+                &sa_v6({
+                    let mut g = [0u8; 16];
+                    g[0] = 0xfe;
+                    g[1] = 0x80;
+                    g[3] = 0x13;
+                    g
+                }),
+            ],
+            None,
+        );
+        let mut gateways = BTreeMap::new();
+        parse_default_gateways(&table, &mut gateways);
+        assert_eq!(
+            gateways[&19],
+            BTreeSet::from(["fe80::".parse::<IpAddr>().unwrap()])
+        );
     }
 
     #[test]

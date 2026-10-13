@@ -1733,26 +1733,12 @@ impl VeilidAPI {
     }
 
     async fn debug_attach(&self) -> VeilidAPIResult<String> {
-        if !matches!(
-            self.get_state().await?.attachment.state,
-            AttachmentState::Detached
-        ) {
-            apibail_internal!("Not detached");
-        }
-
         self.attach().await?;
 
         Ok("Attached".to_owned())
     }
 
     async fn debug_detach(&self) -> VeilidAPIResult<String> {
-        if matches!(
-            self.get_state().await?.attachment.state,
-            AttachmentState::Detached | AttachmentState::Detaching
-        ) {
-            apibail_internal!("Not attached");
-        };
-
         self.detach().await?;
 
         Ok("Detached".to_owned())

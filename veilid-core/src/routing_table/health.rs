@@ -12,30 +12,44 @@ impl RoutingTable {
 
     #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub fn get_recent_peers(&self) -> Vec<(NodeId, RecentPeersEntry)> {
-        let mut recent_peers_locked = self.recent_peers.lock();
+        // Checked with the lock released: every send and receive touches it
+        let recent_peers = self
+            .recent_peers
+            .lock()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.last_connection))
+            .collect::<Vec<_>>();
 
-        // collect all recent peers
         let mut dead_peers = Vec::new();
         let mut out = Vec::new();
 
         // look up each node and make sure the connection is still live
         // (uses same logic as send_data, ensuring last_connection works for UDP)
-        for node_id in recent_peers_locked.iter().map(|(k, _v)| k.clone()) {
-            let mut dead = true;
-            if let Ok(Some(nr)) = self.lookup_node_id(node_id.clone()) {
-                if let Some(last_connection) = nr.last_flow() {
-                    out.push((node_id.clone(), RecentPeersEntry { last_connection }));
-                    dead = false;
+        for (node_id, checked_connection) in recent_peers {
+            match self
+                .lookup_node_id(node_id.clone())
+                .ok()
+                .flatten()
+                .and_then(|nr| nr.last_flow())
+            {
+                Some(last_connection) => {
+                    out.push((node_id, RecentPeersEntry { last_connection }));
                 }
-            }
-            if dead {
-                dead_peers.push(node_id);
+                None => dead_peers.push((node_id, checked_connection)),
             }
         }
 
-        // purge dead recent peers
-        for d in dead_peers {
-            recent_peers_locked.remove(&d);
+        // purge dead recent peers, keeping any touched with a new flow while being checked
+        if !dead_peers.is_empty() {
+            let mut recent_peers_locked = self.recent_peers.lock();
+            for (node_id, checked_connection) in dead_peers {
+                if recent_peers_locked
+                    .peek(&node_id)
+                    .is_some_and(|e| e.last_connection == checked_connection)
+                {
+                    recent_peers_locked.remove(&node_id);
+                }
+            }
         }
 
         out

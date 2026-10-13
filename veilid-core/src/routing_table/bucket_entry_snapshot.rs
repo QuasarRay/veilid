@@ -225,7 +225,9 @@ impl BucketEntrySnapshot {
         &self,
         routing_domain: RoutingDomain,
         outbound_dif: &DialInfoFilter,
+        timings: &RoutingTableTimings,
     ) -> SequenceOrderingSet {
+        let unreliable_ping_interval = timings.unreliable_ping_interval;
         let mut out = SequenceOrderingSet::empty();
         for so in self.supported_sequence_orderings(routing_domain, outbound_dif) {
             let Some(stats) = self.per_sequence_ordering.get(&so) else {
@@ -248,7 +250,7 @@ impl BucketEntrySnapshot {
                             .duration_since(first_steady_lost_ts)
                             .as_u64(),
                         self.cur_ts.duration_since(first_steady_lost_ts).as_u64(),
-                        UNRELIABLE_PING_INTERVAL.as_u64(),
+                        unreliable_ping_interval.as_u64(),
                         RELIABLE_PING_INTERVAL_MAX.as_u64(),
                         RELIABLE_PING_INTERVAL_MULTIPLIER,
                     ) {
@@ -265,7 +267,7 @@ impl BucketEntrySnapshot {
                 | BucketEntryState::Unreliable => match stats.last_question_ts {
                     None => true,
                     Some(last_question_ts) => {
-                        self.cur_ts.duration_since(last_question_ts) >= UNRELIABLE_PING_INTERVAL
+                        self.cur_ts.duration_since(last_question_ts) >= unreliable_ping_interval
                     }
                 },
                 BucketEntryState::Reliable => {
@@ -274,12 +276,15 @@ impl BucketEntrySnapshot {
                         (None, _) => true,
                         // Asked but not yet established with this sequence ordering: probe at the unreliable interval.
                         (Some(last_question_ts), None) => {
-                            self.cur_ts.duration_since(last_question_ts) >= UNRELIABLE_PING_INTERVAL
+                            self.cur_ts.duration_since(last_question_ts) >= unreliable_ping_interval
                         }
                         // Established reliable with this sequence ordering: use the reliable backoff.
                         (Some(last_question_ts), Some(first_steady_answer_ts)) => {
                             let start_of_reliable_time = first_steady_answer_ts.later(
-                                UNRELIABLE_ANSWER_SPAN.saturating_sub(UNRELIABLE_PING_INTERVAL),
+                                timings
+                                    .liveness
+                                    .unreliable_answer
+                                    .saturating_sub(unreliable_ping_interval),
                             );
                             let reliable_cur = self.cur_ts.duration_since(start_of_reliable_time);
                             let reliable_last =

@@ -2,8 +2,6 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
-/// Number of automatic safety routes of each safe/unsafe default length to maintain
-const DESIRED_BACKGROUND_SAFETY_ROUTE_COUNT: usize = 4;
 /// Number of automatic safety routes of each safe/unsafe default length required for operation
 const MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT: usize = 2;
 /// Interval between loopback keepalive ticks on allocated routes; suppressed when real traffic

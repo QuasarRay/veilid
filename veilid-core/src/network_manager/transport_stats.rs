@@ -6,9 +6,9 @@
 //!   so a few peers with stale dial info never indict the path
 //! - Suppression is sticky: entered on the evidence bar, released only by a send
 //!   that works, so window decay cannot un-suppress on thin evidence
-//! - While suppressed, one canary send per CANARY_INTERVAL_SECS probes for
-//!   recovery; it is spent at decision time so concurrent selections cannot all
-//!   escape with it
+//! - While suppressed, one canary send probes for recovery when our side changes
+//!   (back online, new interface addresses) and otherwise once per canary period;
+//!   it is spent at decision time so concurrent selections cannot all escape with it
 //! - Enforcement (skipping sends, rationing the canary) runs only while the
 //!   domain's outbound stage is ReadyToOperate. Until then every send is a
 //!   canary: with too few live peers the evidence is stale by construction (a
@@ -31,8 +31,6 @@ pub(crate) const TRANSPORT_STATS_MIN_SAMPLES: usize = 8;
 pub(crate) const TRANSPORT_STATS_MIN_DISTINCT_PEERS: usize = 4;
 /// Hard bound on retained outcomes per transport
 const MAX_SAMPLES: usize = 64;
-/// How long a suppressed transport goes unattempted before one send is let through
-const CANARY_INTERVAL_SECS: u32 = 30;
 /// How often the per-transport health summary is logged
 pub const TRANSPORT_STATS_LOG_INTERVAL_SECS: u32 = 10;
 
@@ -124,7 +122,9 @@ impl TransportVerdict {
 /// Rolling send outcomes for one transport, plus its suppression latch
 #[derive(Debug, Default)]
 pub(crate) struct TransportWindow {
+    /// Recent send outcomes with their time and peer, oldest first
     outcomes: VecDeque<(Timestamp, TransportSendOutcome, TransportPeerKey)>,
+    /// Last send attempt, a spent canary included; None lets the next canary through
     last_attempt_ts: Option<Timestamp>,
     /// Sends skipped while suppressed since the last health log
     skipped: usize,
@@ -203,8 +203,18 @@ impl TransportWindow {
         (sent, failed, timeout)
     }
 
-    /// Verdict from the outcomes currently retained
-    pub(crate) fn verdict(&self, cur_ts: Timestamp) -> TransportVerdict {
+    /// Let the next send through as a canary if suppressed; returns whether one was held back
+    pub(crate) fn release_canary(&mut self) -> bool {
+        self.suppressed && self.last_attempt_ts.take().is_some()
+    }
+
+    /// Verdict from the outcomes currently retained; a suppressed transport is due a canary once
+    /// nothing was attempted for `canary_interval`
+    pub(crate) fn verdict(
+        &self,
+        cur_ts: Timestamp,
+        canary_interval: TimestampDuration,
+    ) -> TransportVerdict {
         if !self.suppressed {
             if self.outcomes.len() < TRANSPORT_STATS_MIN_SAMPLES {
                 return TransportVerdict::Unknown;
@@ -218,7 +228,7 @@ impl TransportWindow {
         }
         let due_for_canary = self
             .last_attempt_ts
-            .map(|ts| cur_ts.duration_since(ts) > TimestampDuration::new_secs(CANARY_INTERVAL_SECS))
+            .map(|ts| cur_ts.duration_since(ts) > canary_interval)
             .unwrap_or(true);
         TransportVerdict::Suppressed { due_for_canary }
     }
@@ -232,11 +242,11 @@ pub(crate) struct TransportStats {
     registry: VeilidComponentRegistry,
     /// One send-outcome window per routing domain and transport
     windows: Mutex<BTreeMap<(RoutingDomain, LowLevelTransportType), TransportWindow>>,
-    /// Domains where enforcement is armed (outbound stage ReadyToOperate); absent
-    /// means suppression is advisory only and every send doubles as a canary
+    /// How long a suppressed transport goes unattempted before a canary while nothing changes
+    canary_interval: TimestampDuration,
+    /// Domains with enforcement armed (outbound ReadyToOperate); elsewhere every send is a canary
     enforcing: Mutex<BTreeSet<RoutingDomain>>,
-    /// Debug availability overrides; value is the change generation so a timed
-    /// toggle only reverts state nothing else has touched since
+    /// Debug availability overrides by change generation, so a timed revert skips later toggles
     disabled: Mutex<BTreeMap<LowLevelTransportType, u64>>,
     /// Bumped by every availability change
     #[cfg(feature = "debug-api")]
@@ -247,10 +257,11 @@ impl_veilid_component_accessors!(TransportStats);
 
 impl TransportStats {
     /// Create an empty send-health tracker
-    pub fn new(registry: VeilidComponentRegistry) -> Self {
+    pub fn new(registry: VeilidComponentRegistry, canary_interval: TimestampDuration) -> Self {
         Self {
             registry,
             windows: Mutex::new(BTreeMap::new()),
+            canary_interval,
             enforcing: Mutex::new(BTreeSet::new()),
             disabled: Mutex::new(BTreeMap::new()),
             #[cfg(feature = "debug-api")]
@@ -450,7 +461,7 @@ impl TransportStats {
             return false;
         };
         window.evict_aged(cur_ts);
-        match window.verdict(cur_ts) {
+        match window.verdict(cur_ts, self.canary_interval) {
             TransportVerdict::Suppressed {
                 due_for_canary: false,
             } => true,
@@ -485,7 +496,21 @@ impl TransportStats {
             return TransportVerdict::Unknown;
         };
         window.evict_aged(cur_ts);
-        window.verdict(cur_ts)
+        window.verdict(cur_ts, self.canary_interval)
+    }
+
+    /// Let one canary through on every suppressed transport of these domains, because our side
+    /// of the path changed and old failures may no longer apply
+    pub fn release_canaries(&self, routing_domains: RoutingDomainSet, reason: &str) {
+        let mut released = 0usize;
+        for ((rd, _), window) in self.windows.lock().iter_mut() {
+            if routing_domains.contains(*rd) && window.release_canary() {
+                released += 1;
+            }
+        }
+        if released > 0 {
+            veilid_log!(self debug "released {} transport canaries: {}", released, reason);
+        }
     }
 
     /// Drop all evidence for a routing domain. Our network position changed, so
@@ -513,7 +538,7 @@ impl TransportStats {
                 window.evict_aged(cur_ts);
                 let (sent, failed, timeout) = window.counts();
                 let peers = window.distinct_peers();
-                let verdict = match window.verdict(cur_ts) {
+                let verdict = match window.verdict(cur_ts, self.canary_interval) {
                     TransportVerdict::Unknown => "unknown".to_owned(),
                     TransportVerdict::Healthy => "healthy".to_owned(),
                     TransportVerdict::Suppressed { due_for_canary } => {

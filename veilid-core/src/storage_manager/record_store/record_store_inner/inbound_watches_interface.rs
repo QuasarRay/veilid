@@ -132,7 +132,9 @@ where
 
         // Allocate watch
         let expiration = params.expiration;
+        let drop_due = params.drop_due();
         let id = self.inbound_watches.allocate(opaque_record_key, params)?;
+        self.unlocked_inner.arm_inbound_watch_expiry(drop_due);
 
         Ok(InboundWatchValueResult::Created { id, expiration })
     }
@@ -169,9 +171,10 @@ where
             if w.params().watcher_member_id == params.watcher_member_id {
                 // Updating an existing watch
                 w.update_params(params);
-                return Ok(InboundWatchValueResult::Changed {
-                    expiration: w.params().expiration,
-                });
+                let expiration = w.params().expiration;
+                let drop_due = w.params().drop_due();
+                self.unlocked_inner.arm_inbound_watch_expiry(drop_due);
+                return Ok(InboundWatchValueResult::Changed { expiration });
             }
         }
 
@@ -202,12 +205,12 @@ where
         Ok(true)
     }
 
-    /// See if any watched records have expired and clear them out
+    /// Clear out the inbound watches that have expired, returning when the next one is due
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all)
     )]
-    pub fn drop_expired_inbound_watches(&mut self) {
+    pub fn drop_expired_inbound_watches(&mut self) -> Option<Timestamp> {
         let now = Timestamp::now_non_decreasing();
         let registry = self.registry();
         let debug_logger = |id| {
@@ -218,7 +221,7 @@ where
         };
 
         self.inbound_watches
-            .remove_expired_watches(now, &debug_logger, &error_logger);
+            .remove_expired_watches(now, &debug_logger, &error_logger)
     }
 
     #[cfg_attr(

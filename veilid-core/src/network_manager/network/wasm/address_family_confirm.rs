@@ -4,8 +4,6 @@
 
 use super::*;
 
-/// Interval between polling for address family confirmation
-const ADDR_FAMILY_POLL_INTERVAL_MS: u32 = 1000;
 /// Maximum number of probes per family
 const ADDR_FAMILY_MAX_PROBES: usize = 8;
 /// Maximum number of failures to tolerate before declaring an address family unsupported
@@ -35,9 +33,31 @@ impl WasmNetwork {
 
             editor.commit();
         }
+        self.wake_address_family_confirm_worker();
 
         veilid_log!(self info "{:#} address families reset: {:?}", routing_domain, configured_address_types);
         true
+    }
+
+    /// Run a confirmation pass over the unconfirmed routing domains
+    pub(super) fn wake_address_family_confirm_worker(&self) {
+        if let Some(wakeup) = &self.inner.lock().address_family_wakeup {
+            wakeup.wake();
+        }
+    }
+
+    /// The routing domains whose address families still await a verdict
+    pub(super) fn unconfirmed_address_family_domains(&self) -> Vec<RoutingDomain> {
+        let routing_table = self.routing_table();
+        self.routing_domains_detecting_address_changes()
+            .into_iter()
+            .filter(|routing_domain| {
+                !routing_table
+                    .get_routing_domain_controller(*routing_domain)
+                    .read_dyn()
+                    .confirmed()
+            })
+            .collect()
     }
 
     // Apply address family verdict for routing domain
@@ -65,9 +85,13 @@ impl WasmNetwork {
     pub(super) fn start_address_family_confirm_worker(&self) {
         let stop_source = StopSource::new();
         let stop_token = stop_source.token();
+        let (wake_sender, wake_receiver) = wakeup();
+        // The first pass needs no request
+        wake_sender.wake();
         let this = self.clone();
         let jh = spawn("address family confirm", async move {
-            this.address_family_confirm_worker(stop_token).await;
+            this.address_family_confirm_worker(wake_receiver, stop_token)
+                .await;
         });
 
         let opt_online_event_listener_jh = if let Some(online_event_listener) =
@@ -117,6 +141,11 @@ impl WasmNetwork {
                         .connection_manager()
                         .close_all_connections();
 
+                    // Relay latency measured before the network went away ranks nothing after it
+                    this.routing_table()
+                        .get_specific_routing_domain_controller::<PublicInternetRoutingDomainController>()
+                        .resettle_relays();
+
                     // Request address family reconfirmation
                     this.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet);
                 }
@@ -127,36 +156,16 @@ impl WasmNetwork {
         };
 
         let mut inner = self.inner.lock();
+        inner.address_family_wakeup = Some(wake_sender);
         inner.address_family_stop_source = Some(stop_source);
         inner.address_family_worker_jh = Some(jh);
         inner.online_event_listener_jh = opt_online_event_listener_jh;
         inner.offline_event_listener_jh = opt_offline_event_listener_jh;
     }
 
-    async fn address_family_confirm_worker(&self, stop_token: StopToken) {
-        loop {
-            if sleep(ADDR_FAMILY_POLL_INTERVAL_MS)
-                .timeout_at(stop_token.clone())
-                .await
-                .is_err()
-            {
-                return;
-            }
-
-            // Operate on routing domains that are detecting address changes
-            let routing_table = self.routing_table();
-            for routing_domain in self.routing_domains_detecting_address_changes() {
-                // Skip routing domains that are already confirmed
-                let confirmed = {
-                    let rdc = routing_table.get_routing_domain_controller(routing_domain);
-                    let confirmed = rdc.read_dyn().confirmed();
-                    confirmed
-                };
-
-                if confirmed {
-                    continue;
-                }
-
+    async fn address_family_confirm_worker(&self, wakeup: WakeReceiver, stop_token: StopToken) {
+        while wakeup.wait(None, stop_token.clone()).await == WakeOutcome::Woken {
+            for routing_domain in self.unconfirmed_address_family_domains() {
                 if let Err(e) = self
                     .perform_address_family_confirmation_pass(routing_domain, &stop_token)
                     .await

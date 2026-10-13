@@ -40,6 +40,16 @@ pub enum AppLifecycleState {
     Background,
 }
 
+/// Whether the platform freezes a process in the background; a desktop platform only throttles it
+#[must_use]
+pub const fn background_may_freeze() -> bool {
+    cfg!(any(
+        target_os = "android",
+        target_os = "ios",
+        all(target_arch = "wasm32", target_os = "unknown")
+    ))
+}
+
 type ChangeCallback = Arc<dyn Fn() + Send + Sync>;
 
 /// Every live monitor's change callback, by monitor id

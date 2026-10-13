@@ -41,6 +41,19 @@ async fn local_seq(
     report.local_seqs()[0]
 }
 
+async fn stored_value(
+    storage_manager: &StorageManager,
+    record_key: &RecordKey,
+    subkey: ValueSubkey,
+) -> Arc<SignedValueData> {
+    storage_manager
+        .handle_get_single_local_value(&record_key.opaque(), subkey, false)
+        .await
+        .expect("local get should succeed")
+        .opt_value
+        .expect("subkey should be stored")
+}
+
 pub async fn test_min_seqnum() {
     let (update_callback, config) = fixture_veilid_core();
     let api = api_startup(update_callback, config)
@@ -129,6 +142,49 @@ pub async fn test_min_seqnum() {
     api.shutdown().await;
 }
 
+/// An identical rewrite resends the stored signed value, since encrypting it again would put a
+/// second value at the same seq
+pub async fn test_identical_rewrite_resends_stored_value() {
+    let (update_callback, config) = fixture_veilid_core();
+    let api = api_startup(update_callback, config)
+        .await
+        .expect("startup failed");
+    let rc = api.routing_context().unwrap();
+    let registry = api.core_context().unwrap().registry();
+
+    let rec = rc
+        .create_dht_record(CRYPTO_KIND_VLD0, DHTSchema::dflt(1).unwrap(), None)
+        .await
+        .unwrap();
+    let key = rec.key().clone();
+
+    {
+        let storage_manager = registry.storage_manager();
+
+        set_value(&rc, &key, 0, b"a", None).await.unwrap();
+        let first = stored_value(&storage_manager, &key, 0).await;
+
+        set_value(&rc, &key, 0, b"a", None).await.unwrap();
+        let resent = stored_value(&storage_manager, &key, 0).await;
+        assert_eq!(resent.value_data(), first.value_data());
+        assert_eq!(resent.signature(), first.signature());
+
+        // A raised minimum needs a new seq, so the value is encrypted and signed again
+        set_value(&rc, &key, 0, b"a", Some(ValueSeqNum::from(5)))
+            .await
+            .unwrap();
+        let raised = stored_value(&storage_manager, &key, 0).await;
+        assert_eq!(raised.value_data().seq(), ValueSeqNum::from(5));
+        assert_ne!(raised.value_data(), first.value_data());
+    }
+
+    rc.close_dht_record(key.clone()).await.unwrap();
+    rc.delete_dht_record(key).await.unwrap();
+
+    api.shutdown().await;
+}
+
 pub async fn test_all() {
     test_min_seqnum().await;
+    test_identical_rewrite_resends_stored_value().await;
 }

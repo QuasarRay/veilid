@@ -7,6 +7,7 @@ mod events;
 #[cfg(feature = "geolocation")]
 mod geolocation_info;
 mod hash_coordinate;
+mod loss_epoch;
 mod low_level_port_info;
 mod node_info;
 mod node_status;
@@ -29,6 +30,7 @@ pub use events::*;
 #[cfg(feature = "geolocation")]
 pub use geolocation_info::*;
 pub(crate) use hash_coordinate::*;
+pub(crate) use loss_epoch::*;
 pub use low_level_port_info::*;
 pub use node_info::*;
 pub use node_status::*;

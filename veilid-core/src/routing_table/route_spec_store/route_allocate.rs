@@ -105,14 +105,23 @@ impl RouteSpecStore {
             .await
     }
 
-    /// Allocate, preferring hops that have not recently killed a route on this ordering. After
-    /// an outage every hop is on that list, so when avoidance leaves no route it is dropped.
+    /// Allocate, preferring hops that have not killed a route on this ordering in the current
+    /// epoch; when avoidance leaves no route it is dropped.
     pub async fn allocate_route_inner(
         &self,
         lock: &AsyncMutexGuard<'_, ()>,
         params: AllocateRouteParams,
     ) -> VeilidAPIResult<RouteIdAndKeys> {
-        let dead_hops = self.dead_route_hops_to_avoid(params.sequencing.preferred_ordering());
+        let routing_table = self.routing_table();
+        let dead_hops =
+            self.dead_route_hops_to_avoid(params.sequencing.preferred_ordering(), |node_id| {
+                let node_ref = routing_table
+                    .lookup_node_id(node_id.clone())
+                    .ok()
+                    .flatten()?;
+                let destination_ts = node_ref.node_info_ts(RoutingDomain::PublicInternet);
+                Some(routing_table.loss_epoch(Some(destination_ts)))
+            });
         if !dead_hops.is_empty() {
             let mut avoiding = params.clone();
             avoiding.avoid_nodes.extend(dead_hops);

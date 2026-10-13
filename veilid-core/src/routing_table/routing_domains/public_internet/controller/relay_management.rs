@@ -20,14 +20,52 @@ const RELAY_DEGRADATION_MARGIN: u64 = 2;
 /// Also the anti-herding knob: selection picks at random from this tier, so a wider tier
 /// spreads load across more nodes.
 const RELAY_SELECTION_PERCENTILE: f32 = 75.0;
-/// How long a newly selected relay is left alone before it can be optimized away.
-/// Optimization only: a disqualified, dead, punished or erroring relay is dropped
-/// immediately however long it has served. Latency right after selection is the least
-/// trustworthy: the flow has not settled and our own traffic load inflates the
-/// incumbent's measurements relative to resting candidates.
-const RELAY_MIN_DWELL_BEFORE_OPTIMIZATION: TimestampDuration = TimestampDuration::new_secs(300);
 
 impl PublicInternetRoutingDomainController {
+    /// Our egress moved, so every incumbent's latency so far was measured from somewhere else:
+    /// optimization waits for a window of samples from here, and the baseline starts over
+    pub fn resettle_relays(&self) {
+        let mut state_updates = Vec::new();
+        for relay in self.read_dyn().relays() {
+            let Some(mut state) = self.read_dyn().relay_state(relay.relay_id.clone()) else {
+                continue;
+            };
+            state.selected_latency_samples = None;
+            state.best_tm90 = None;
+            state_updates.push((relay.relay_id, state));
+        }
+        if state_updates.is_empty() {
+            return;
+        }
+        let mut editor = self.edit();
+        for (relay_id, state) in state_updates {
+            editor.set_relay_state(relay_id, state);
+        }
+        editor.commit();
+    }
+
+    /// Whether a newly selected relay may be optimized away: only once its latency window holds
+    /// nothing from before selection. Optimization only; a disqualified, dead, punished or
+    /// erroring relay is dropped at once. Latency right after selection is the least trustworthy:
+    /// the flow has not settled and our own traffic load inflates the incumbent's measurements
+    /// relative to resting candidates.
+    fn relay_latency_settled(
+        relay_node: &FilteredNodeRef,
+        relay_state: &mut RoutingDomainRelayState,
+    ) -> bool {
+        let recorded = relay_node.operate(|e| e.latency_samples_recorded());
+        match relay_state.selected_latency_samples {
+            // A re-created bucket entry starts counting again
+            Some(selected) if selected <= recorded => {
+                relay_node.operate(|e| e.latency_window_newer_than(selected))
+            }
+            _ => {
+                relay_state.selected_latency_samples = Some(recorded);
+                false
+            }
+        }
+    }
+
     /// Check if a relay is still valid in this routing domain
     /// Does not require access to the routing domain controller itself
     ///
@@ -112,10 +150,11 @@ impl PublicInternetRoutingDomainController {
         // against its own settled baseline before we drop it.
         let last_optimized_duration = cur_ts.duration_since(relay_state.last_optimized);
         let dwell_duration = cur_ts.duration_since(relay_state.selected_ts);
+        let latency_settled = Self::relay_latency_settled(&relay_node, &mut relay_state);
         if relay_filter_passes
             && !blame_suppressed
             && last_optimized_duration > RELAY_OPTIMIZATION_INTERVAL
-            && dwell_duration >= RELAY_MIN_DWELL_BEFORE_OPTIMIZATION
+            && latency_settled
         {
             // See what our relay's current percentile is
             if let Some(relay_relative_performance) = routing_table.get_node_relative_performance(

@@ -7,44 +7,6 @@ const COLLECTION_COUNT: usize = 8;
 pub const CONSENSUS_WIDTH: usize = 10;
 pub const SEED_COUNT: usize = 20;
 
-fn make_distinct_peer_info(routing_table: &RoutingTable) -> PeerInfo {
-    let mut crypto_info_list: Vec<CryptoInfo> = vec![];
-    let mut secret_keys = SecretKeyGroup::new();
-    for ck in VALID_CRYPTO_KINDS {
-        let (public_key, secret) = Crypto::generate_keypair(ck)
-            .expect("should generate keypair")
-            .value()
-            .into_split();
-        let ci = match ck {
-            #[cfg(feature = "enable-crypto-none")]
-            CRYPTO_KIND_NONE => CryptoInfo::NONE { public_key },
-            #[cfg(feature = "enable-crypto-vld0")]
-            CRYPTO_KIND_VLD0 => CryptoInfo::VLD0 { public_key },
-            _ => {
-                unreachable!("missing match arm");
-            }
-        };
-        crypto_info_list.push(ci);
-        secret_keys.add(SecretKey::new(ck, secret));
-    }
-    fix_peer_info(routing_table, crypto_info_list, secret_keys).expect("should be valid")
-}
-
-pub fn seed_nodes(routing_table: &RoutingTable, count: usize) -> Vec<NodeRef> {
-    (0..count)
-        .map(|_| {
-            let pi = make_distinct_peer_info(routing_table);
-            routing_table
-                .register_node_with_peer_info(
-                    Arc::new(UnverifiedPeerInfo::from_verified(&pi)),
-                    false,
-                )
-                .expect("should register")
-                .unfiltered()
-        })
-        .collect()
-}
-
 fn make_queue<'a>(
     registry: &VeilidComponentRegistry,
     collection_count: usize,
@@ -314,6 +276,94 @@ pub async fn test_no_preference_leaves_order_untouched() {
             plain.with_nodes(|_, s| s.to_vec()),
             empty_pref.with_nodes(|_, s| s.to_vec())
         );
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// A node that lost a routed question is asked after every other node by a fanout that demotes,
+/// until it answers a routed question or the state the loss was judged in moves on
+pub async fn test_routed_unresponsive_nodes_trail_the_sort() {
+    let registry = mock_registry::init("fanout_queue").await;
+    {
+        let routing_table = registry.routing_table();
+        let node_refs = seed_nodes(&routing_table, SEED_COUNT);
+        let sorted = |demote: bool| {
+            let mut queue = make_queue(&registry, CONSENSUS_COUNT, None);
+            queue.set_demote_routed_unresponsive(demote);
+            queue.update(&node_refs, Timestamp::now_non_decreasing());
+            queue.with_nodes(|_, sorted_nodes| sorted_nodes.to_vec())
+        };
+
+        let distance_order = sorted(true);
+        let closest_id = distance_order.first().cloned().unwrap_or_log();
+        let closest = node_refs
+            .iter()
+            .find(|nr| nr.node_ids().get(CRYPTO_KIND_VLD0) == Some(closest_id.clone()))
+            .unwrap_or_log();
+        let lost_in =
+            routing_table.loss_epoch(Some(closest.node_info_ts(RoutingDomain::PublicInternet)));
+
+        closest.stats_routed_lost_question(lost_in);
+        let demoted_order = sorted(true);
+        assert_eq!(demoted_order.last(), Some(&closest_id));
+        assert_eq!(demoted_order[..SEED_COUNT - 1], distance_order[1..]);
+        assert_eq!(sorted(false), distance_order);
+
+        closest.stats_routed_answer();
+        assert_eq!(sorted(true), distance_order);
+
+        // A loss judged in another online state counts only there
+        let moved = LossEpoch {
+            online: lost_in.online + 1,
+            ..lost_in
+        };
+        closest.stats_routed_lost_question(moved);
+        assert!(closest.operate(|e| e.is_routed_unresponsive(&moved)));
+        assert_eq!(sorted(true), distance_order);
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// The pump's straggler deadline is the first moment the cut has a node to take, and there is
+/// none while the nodes in flight could still bring consensus
+pub async fn test_next_straggler_cut_matches_the_cut() {
+    let registry = mock_registry::init("fanout_queue").await;
+    {
+        let routing_table = registry.routing_table();
+        let node_refs = seed_nodes(&routing_table, SEED_COUNT);
+        let floor = TimestampDuration::new_secs(1);
+
+        let mut queue = make_queue(&registry, CONSENSUS_COUNT, None);
+        queue.update(&node_refs, Timestamp::now_non_decreasing());
+
+        // The closest two stay in flight, the rest of the window answers stale
+        let before_dispatch = Timestamp::now_non_decreasing();
+        let work_items = (0..CONSENSUS_WIDTH)
+            .map(|_| take_work(&mut queue))
+            .collect::<Vec<_>>();
+        let after_dispatch = Timestamp::now_non_decreasing();
+        for work_item in &work_items[2..] {
+            queue.stale(work_item.node_ref.clone(), Timestamp::now_non_decreasing());
+        }
+
+        assert_eq!(queue.next_straggler_cut(2, floor), None);
+
+        let cut = queue
+            .next_straggler_cut(CONSENSUS_COUNT, floor)
+            .expect("the stragglers are due a cut");
+        assert!(
+            cut >= before_dispatch.later(floor) && cut <= after_dispatch.later(floor),
+            "cut {} outside the dispatch window",
+            cut
+        );
+        assert_eq!(
+            queue.time_out_stragglers(CONSENSUS_COUNT, floor, Timestamp::new(cut.as_u64() - 1)),
+            0
+        );
+        assert!(queue.time_out_stragglers(CONSENSUS_COUNT, floor, cut) >= 1);
+
+        // The cut lets a queued reserve node into the window, which is asked before another cut
+        assert_eq!(queue.next_straggler_cut(CONSENSUS_COUNT, floor), None);
     }
     mock_registry::terminate(registry).await;
 }

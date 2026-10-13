@@ -307,8 +307,16 @@ pub(crate) const PROTOCOL_LOG_THROTTLE_MS: u64 = 1000;
 /// * If it is a Value, return it.
 /// * If it is any other enum variant, log it and return an alternative value in the `=>` block
 ///
-/// If a `[ ]` block is also provided, an extra logging string provided in the block will be added to the log message
+/// If a `[ ]` block is also provided, an extra logging string provided in the block will be added to the log message.
+/// The block is only evaluated for a result that gets logged, so it must not borrow anything `$r` moves.
 macro_rules! network_result_value_or_log {
+    (@extra $d:expr) => {
+        if debug_target_enabled!("network_result") {
+            $d.to_string()
+        } else {
+            String::new()
+        }
+    };
     ($self:ident $r:expr => $f:expr) => {
         network_result_value_or_log!($self target: self::__VEILID_LOG_FACILITY, $r => [ "" ] $f )
     };
@@ -319,11 +327,6 @@ macro_rules! network_result_value_or_log {
         network_result_value_or_log!($self target: $target, $r => [ "" ] $f )
     };
     ($self:ident target: $target:expr, $r:expr => [ $d:expr ] $f:expr) => { {
-        let __extra_message = if debug_target_enabled!("network_result") {
-            $d.to_string()
-        } else {
-            String::new()
-        };
         match $r {
             NetworkResult::Timeout => {
                 veilid_log!($self debug throttle: $crate::logging::PROTOCOL_LOG_THROTTLE_MS, target: $target,
@@ -333,7 +336,7 @@ macro_rules! network_result_value_or_log {
                     line!(),
                     column!(),
                     fn_name::uninstantiated!(),
-                    __extra_message
+                    network_result_value_or_log!(@extra $d)
                 );
                 $f
             }
@@ -346,7 +349,7 @@ macro_rules! network_result_value_or_log {
                     line!(),
                     column!(),
                     fn_name::uninstantiated!(),
-                    __extra_message
+                    network_result_value_or_log!(@extra $d)
                 );
                 $f
             }
@@ -359,7 +362,7 @@ macro_rules! network_result_value_or_log {
                     line!(),
                     column!(),
                     fn_name::uninstantiated!(),
-                    __extra_message
+                    network_result_value_or_log!(@extra $d)
                 );
                 $f
             }
@@ -372,7 +375,7 @@ macro_rules! network_result_value_or_log {
                     line!(),
                     column!(),
                     fn_name::uninstantiated!(),
-                    __extra_message
+                    network_result_value_or_log!(@extra $d)
                 );
                 $f
             }
@@ -385,7 +388,7 @@ macro_rules! network_result_value_or_log {
                     line!(),
                     column!(),
                     fn_name::uninstantiated!(),
-                    __extra_message
+                    network_result_value_or_log!(@extra $d)
                 );
                 $f
             }
