@@ -139,6 +139,7 @@
   - **Breaking** `TrimmedBacktrace` and `TrimBacktraceTrait` are gone, and backtrace captures use `std::backtrace`.
   - AIMD congestion control, behind the `aimd` feature.
   - Best-effort UDP send-with-TTL in `socket_tools`.
+  - `tokio` 1.53.3 is the minimum: the platform resolver registers its file descriptor through the I/O-safe `AsyncFd` constructor.
   - `background_may_freeze()` reports whether the platform freezes a process in the background rather than only throttling it.
   - Apple route discovery declares the XNU route-message ABI itself on iOS, where libc 0.2.190 no longer exports it.
 

@@ -25,10 +25,15 @@ impl AsFd for FdHandle {
 pub(crate) async fn wait_readable(fd: RawFd) -> Result<(), DnsError> {
     cfg_if! {
         if #[cfg(feature="rt-tokio")] {
-            let async_fd = tokio::io::unix::AsyncFd::with_interest(
-                FdHandle(fd),
-                tokio::io::Interest::READABLE,
-            )?;
+            // SAFETY: the resolver keeps `fd` open and unchanged until this returns, and the
+            // registration is dropped with `async_fd` before then
+            let async_fd = unsafe {
+                tokio::io::unix::AsyncFd::register_with_interest(
+                    FdHandle(fd),
+                    tokio::io::Interest::READABLE,
+                )
+            }
+            .map_err(std::io::Error::from)?;
             let _guard = async_fd.readable().await?;
             Ok(())
         } else if #[cfg(feature="rt-async-std")] {
