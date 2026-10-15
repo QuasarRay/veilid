@@ -1470,7 +1470,7 @@ impl RPCProcessor {
                     s.record_lost_question(ordering, &context.destination, opt_epoch)
                 });
 
-                // Fanouts ask the node last until it answers a routed question
+                // Fanouts ask the node after the rest of its window until it answers a routed question
                 if let (Destination::Direct { node, .. }, Some(epoch)) =
                     (&context.destination, opt_epoch)
                 {

@@ -37,6 +37,14 @@ fn count_stage(queue: &FanoutQueue, stage: FanoutNodeStage) -> usize {
     })
 }
 
+fn node_id(work_item: &FanoutWorkItem) -> NodeId {
+    work_item
+        .node_ref
+        .node_ids()
+        .get(CRYPTO_KIND_VLD0)
+        .unwrap_or_log()
+}
+
 fn take_work(queue: &mut FanoutQueue) -> FanoutWorkItem {
     try_take_work(queue).expect("should have work")
 }
@@ -280,21 +288,23 @@ pub async fn test_no_preference_leaves_order_untouched() {
     mock_registry::terminate(registry).await;
 }
 
-/// A node that lost a routed question is asked after every other node by a fanout that demotes,
-/// until it answers a routed question or the state the loss was judged in moves on
-pub async fn test_routed_unresponsive_nodes_trail_the_sort() {
+/// A node that lost a routed question keeps its window slot, so it is still asked and its answer
+/// still counts, but a demoting fanout asks it after the window's other candidates; the mark lifts
+/// when it answers a routed question or the state the loss was judged in moves on
+pub async fn test_routed_unresponsive_nodes_dispatch_after_their_window() {
     let registry = mock_registry::init("fanout_queue").await;
     {
         let routing_table = registry.routing_table();
         let node_refs = seed_nodes(&routing_table, SEED_COUNT);
-        let sorted = |demote: bool| {
+        let make = |demote: bool| {
             let mut queue = make_queue(&registry, CONSENSUS_COUNT, None);
             queue.set_demote_routed_unresponsive(demote);
             queue.update(&node_refs, Timestamp::now_non_decreasing());
-            queue.with_nodes(|_, sorted_nodes| sorted_nodes.to_vec())
+            queue
         };
+        let first_dispatched = |demote: bool| node_id(&take_work(&mut make(demote)));
 
-        let distance_order = sorted(true);
+        let distance_order = make(true).with_nodes(|_, sorted_nodes| sorted_nodes.to_vec());
         let closest_id = distance_order.first().cloned().unwrap_or_log();
         let closest = node_refs
             .iter()
@@ -304,13 +314,35 @@ pub async fn test_routed_unresponsive_nodes_trail_the_sort() {
             routing_table.loss_epoch(Some(closest.node_info_ts(RoutingDomain::PublicInternet)));
 
         closest.stats_routed_lost_question(lost_in);
-        let demoted_order = sorted(true);
-        assert_eq!(demoted_order.last(), Some(&closest_id));
-        assert_eq!(demoted_order[..SEED_COUNT - 1], distance_order[1..]);
-        assert_eq!(sorted(false), distance_order);
+        let mut queue = make(true);
+        assert_eq!(
+            queue.with_nodes(|_, sorted_nodes| sorted_nodes.to_vec()),
+            distance_order,
+            "the window keeps distance order"
+        );
+        // The window's other members are asked first and answer
+        for expected in &distance_order[1..CONSENSUS_WIDTH] {
+            let work_item = take_work(&mut queue);
+            assert_eq!(node_id(&work_item), *expected);
+            queue.accepted(work_item.node_ref, Timestamp::now_non_decreasing());
+        }
+        // Then the demoted node, still holding its slot, before any reserve node
+        let work_item = take_work(&mut queue);
+        assert_eq!(node_id(&work_item), closest_id);
+        queue.accepted(work_item.node_ref, Timestamp::now_non_decreasing());
+        queue.update(&[], Timestamp::now_non_decreasing());
+        assert_eq!(
+            count_stage(&queue, FanoutNodeStage::Accepted),
+            CONSENSUS_WIDTH
+        );
+        assert_eq!(
+            count_stage(&queue, FanoutNodeStage::Disqualified),
+            SEED_COUNT - CONSENSUS_WIDTH
+        );
+        assert_eq!(first_dispatched(false), closest_id);
 
         closest.stats_routed_answer();
-        assert_eq!(sorted(true), distance_order);
+        assert_eq!(first_dispatched(true), closest_id);
 
         // A loss judged in another online state counts only there
         let moved = LossEpoch {
@@ -319,7 +351,65 @@ pub async fn test_routed_unresponsive_nodes_trail_the_sort() {
         };
         closest.stats_routed_lost_question(moved);
         assert!(closest.operate(|e| e.is_routed_unresponsive(&moved)));
-        assert_eq!(sorted(true), distance_order);
+        assert_eq!(first_dispatched(true), closest_id);
+    }
+    mock_registry::terminate(registry).await;
+}
+
+/// A demoted node in flight is not counted on: with the rest of the window answered short of the
+/// target, the straggler cut is due even though its accept alone would reach the target
+pub async fn test_demoted_straggler_does_not_hold_the_cut() {
+    let registry = mock_registry::init("fanout_queue").await;
+    {
+        let routing_table = registry.routing_table();
+        let node_refs = seed_nodes(&routing_table, SEED_COUNT);
+        let floor = TimestampDuration::new_secs(1);
+
+        let mut plain = make_queue(&registry, CONSENSUS_COUNT, None);
+        plain.update(&node_refs, Timestamp::now_non_decreasing());
+        let closest_id = plain.with_nodes(|_, sorted_nodes| sorted_nodes[0].clone());
+        let closest = node_refs
+            .iter()
+            .find(|nr| nr.node_ids().get(CRYPTO_KIND_VLD0) == Some(closest_id.clone()))
+            .unwrap_or_log();
+        let lost_in =
+            routing_table.loss_epoch(Some(closest.node_info_ts(RoutingDomain::PublicInternet)));
+
+        // The closest stays in flight; four others accept, the rest answer stale
+        let next_cut = |demote_closest: bool| {
+            if demote_closest {
+                closest.stats_routed_lost_question(lost_in);
+            } else {
+                closest.stats_routed_answer();
+            }
+            let mut queue = make_queue(&registry, CONSENSUS_COUNT, None);
+            queue.set_demote_routed_unresponsive(true);
+            queue.update(&node_refs, Timestamp::now_non_decreasing());
+            let work_items = (0..CONSENSUS_WIDTH)
+                .map(|_| take_work(&mut queue))
+                .collect::<Vec<_>>();
+            let mut accepted = 0usize;
+            for work_item in work_items {
+                if node_id(&work_item) == closest_id {
+                    continue;
+                }
+                if accepted < CONSENSUS_COUNT - 1 {
+                    queue.accepted(work_item.node_ref, Timestamp::now_non_decreasing());
+                    accepted += 1;
+                } else {
+                    queue.stale(work_item.node_ref, Timestamp::now_non_decreasing());
+                }
+            }
+            queue.next_straggler_cut(CONSENSUS_COUNT, floor)
+        };
+        assert!(
+            next_cut(false).is_none(),
+            "a node in flight that could complete consensus is waited for"
+        );
+        assert!(
+            next_cut(true).is_some(),
+            "a demoted node in flight does not hold the cut"
+        );
     }
     mock_registry::terminate(registry).await;
 }

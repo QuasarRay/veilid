@@ -125,18 +125,30 @@ const GET_FANOUT_TASKS: usize = 5;
 /// A run that ends this fast never waited out its 1s timeout
 const QUICK: TimestampDuration = TimestampDuration::new_ms(500);
 
-/// A get-shaped fanout where each rank answers `script(rank)`, a delay in ms and a disposition;
-/// returns (result kind, consensus node count, fanout run time)
-async fn run_get_fanout(
+/// A fanout over the mock table where each rank answers `script(rank)`, a delay in ms and a
+/// disposition, and the ranks `demote` picks have lost a routed question; returns (result kind,
+/// consensus node count, fanout run time)
+async fn run_scripted(
+    consensus_count: usize,
+    fanout_tasks: usize,
     timeout: TimestampDuration,
+    demote: impl Fn(usize) -> bool,
     script: impl Fn(usize) -> (u32, FanoutCallDisposition) + Send + Sync + 'static,
 ) -> (FanoutResultKind, usize, TimestampDuration) {
-    let registry = mock_registry::init("fanout_get").await;
+    let registry = mock_registry::init("fanout_scripted").await;
     let out = {
         let routing_table = registry.routing_table();
         let node_refs = seed_nodes(&routing_table, SEED_COUNT);
         let target = fix_typed_node_id(CRYPTO_KIND_VLD0, 0).to_hash_coordinate();
         let ranks = rank_map(&node_refs, &target);
+        for node_ref in &node_refs {
+            let rank = ranks[&node_ref.node_ids().get(CRYPTO_KIND_VLD0).unwrap_or_log()];
+            if demote(rank) {
+                let lost_in = routing_table
+                    .loss_epoch(Some(node_ref.node_info_ts(RoutingDomain::PublicInternet)));
+                node_ref.stats_routed_lost_question(lost_in);
+            }
+        }
         let script = Arc::new(script);
         let call_routine: FanoutCallRoutine = Arc::new(move |node_ref: NodeRef| {
             let rank = node_ref
@@ -160,14 +172,14 @@ async fn run_get_fanout(
                 | FanoutResultKind::Exhausted
                 | FanoutResultKind::Consensus => FanoutDoneDisposition::DoneEarly,
             });
-        let fanout_call = FanoutCall::new(
+        let mut fanout_call = FanoutCall::new(
             &routing_table,
             FanoutCallParams {
-                name: "test_fanout_get".to_string(),
+                name: "test_fanout_scripted".to_string(),
                 hash_coordinate: target,
                 node_count: SEED_COUNT,
-                fanout_tasks: GET_FANOUT_TASKS,
-                consensus_count: GET_CONSENSUS_COUNT,
+                fanout_tasks,
+                consensus_count,
                 consensus_width: CONSENSUS_WIDTH,
                 timeout,
             },
@@ -175,6 +187,7 @@ async fn run_get_fanout(
             call_routine,
             check_done,
         );
+        fanout_call.set_demote_routed_unresponsive(true);
 
         let stop_source = StopSource::new();
         let start_ts = Timestamp::now_non_decreasing();
@@ -191,6 +204,21 @@ async fn run_get_fanout(
     };
     mock_registry::terminate(registry).await;
     out
+}
+
+/// A get-shaped fanout where each rank answers `script(rank)`
+async fn run_get_fanout(
+    timeout: TimestampDuration,
+    script: impl Fn(usize) -> (u32, FanoutCallDisposition) + Send + Sync + 'static,
+) -> (FanoutResultKind, usize, TimestampDuration) {
+    run_scripted(
+        GET_CONSENSUS_COUNT,
+        GET_FANOUT_TASKS,
+        timeout,
+        |_| false,
+        script,
+    )
+    .await
 }
 
 /// A get-shaped fanout with a 1s timeout where the ranks `stale` picks answer Stale and the rest
@@ -287,6 +315,53 @@ pub async fn test_straggler_waited_for_while_consensus_reachable() {
     assert_eq!(consensus_len, GET_CONSENSUS_COUNT);
     assert!(
         elapsed >= TimestampDuration::new_ms(STRAGGLER_MS.into()),
+        "took {:#}",
+        elapsed
+    );
+}
+
+/// Begin-shaped: consensus CONSENSUS_COUNT over six lanes
+const BEGIN_FANOUT_TASKS: usize = 6;
+
+/// A demoted closest node keeps its window slot: asked after the window's other candidates, its
+/// accept completes a consensus that the farther nodes refuse
+pub async fn test_demoted_closest_node_still_counts() {
+    let (kind, consensus_len, _) = run_scripted(
+        CONSENSUS_COUNT,
+        BEGIN_FANOUT_TASKS,
+        STRAGGLER_FANOUT_TIMEOUT,
+        |rank| rank == 0,
+        |rank| match rank {
+            0 => (300, FanoutCallDisposition::Accepted),
+            1..=4 => (10, FanoutCallDisposition::Accepted),
+            _ => (10, FanoutCallDisposition::Rejected),
+        },
+    )
+    .await;
+    assert!(matches!(kind, FanoutResultKind::Consensus), "{:?}", kind);
+    assert_eq!(consensus_len, CONSENSUS_COUNT);
+}
+
+/// A demoted node in flight keeps nobody waiting: once the rest of the window has answered short
+/// of consensus it is cut at the grace and the reserve node that slides in completes the count
+pub async fn test_demoted_straggler_is_cut_at_the_grace() {
+    let (kind, consensus_len, elapsed) = run_scripted(
+        CONSENSUS_COUNT,
+        BEGIN_FANOUT_TASKS,
+        STRAGGLER_FANOUT_TIMEOUT,
+        |rank| rank == 4,
+        |rank| match rank {
+            0..=3 => (10, FanoutCallDisposition::Accepted),
+            4 => (STRAGGLER_MS, FanoutCallDisposition::Timeout),
+            5..=9 => (10, FanoutCallDisposition::Stale),
+            _ => (10, FanoutCallDisposition::Accepted),
+        },
+    )
+    .await;
+    assert!(matches!(kind, FanoutResultKind::Consensus), "{:?}", kind);
+    assert_eq!(consensus_len, CONSENSUS_COUNT);
+    assert!(
+        elapsed < TimestampDuration::new_ms(2000),
         "took {:#}",
         elapsed
     );

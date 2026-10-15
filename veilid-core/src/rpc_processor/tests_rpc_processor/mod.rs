@@ -21,7 +21,10 @@ pub async fn test_all() {
     test_fanout_queue::test_rejection_consensus_culls_everything().await;
     test_fanout_queue::test_preferred_nodes_lead_the_sort().await;
     test_fanout_queue::test_no_preference_leaves_order_untouched().await;
-    test_fanout_queue::test_routed_unresponsive_nodes_trail_the_sort().await;
+    test_fanout_queue::test_routed_unresponsive_nodes_dispatch_after_their_window().await;
+    test_fanout_queue::test_demoted_straggler_does_not_hold_the_cut().await;
+    test_fanout_call::test_demoted_closest_node_still_counts().await;
+    test_fanout_call::test_demoted_straggler_is_cut_at_the_grace().await;
     test_fanout_queue::test_next_straggler_cut_matches_the_cut().await;
     test_signed_value_data::test_encode_and_decode_signed_value_data();
     test_dial_info::test_encode_and_decode_dial_info_udp();

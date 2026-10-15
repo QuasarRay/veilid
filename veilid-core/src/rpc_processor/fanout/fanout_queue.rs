@@ -219,7 +219,7 @@ pub struct FanoutQueue<'a> {
     node_sort: FanoutQueueSort<'a>,
     /// Nodes to ask ahead of the sort, if any (see `FanoutCall::set_prefer_init_nodes`)
     preferred_nodes: HashSet<NodeId>,
-    /// Ask nodes unresponsive to routed questions last (see `FanoutCall::set_demote_routed_unresponsive`)
+    /// Ask nodes unresponsive to routed questions after their window (see `FanoutCall::set_demote_routed_unresponsive`)
     demote_routed_unresponsive: bool,
     /// Lanes' requests for work, queued by `request_work`
     work_request_sender: flume::Sender<FanoutWorkRequest>,
@@ -263,7 +263,20 @@ impl fmt::Display for FanoutQueue<'_> {
             "nodes:\n{}",
             self.sorted_nodes
                 .iter()
-                .map(|x| format!("    {}: {}", x, self.nodes.get(x).unwrap_or_log().status))
+                .map(|x| {
+                    let node = self.nodes.get(x).unwrap_or_log();
+                    format!(
+                        "    {}:{}{} {}",
+                        x,
+                        if self.preferred_nodes.contains(x) {
+                            " [preferred]"
+                        } else {
+                            ""
+                        },
+                        if node.demoted { " [demoted]" } else { "" },
+                        node.status
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         )
@@ -339,8 +352,8 @@ impl<'a> FanoutQueue<'a> {
             .collect();
     }
 
-    /// Ask nodes that lost a routed question after all others, for a fanout whose questions
-    /// travel over safety routes
+    /// Ask nodes that lost a routed question after the rest of their window or reserve, for a
+    /// fanout whose questions travel over safety routes; they keep their place in the window
     pub fn set_demote_routed_unresponsive(&mut self, demote_routed_unresponsive: bool) {
         self.demote_routed_unresponsive = demote_routed_unresponsive;
     }
@@ -368,7 +381,7 @@ impl<'a> FanoutQueue<'a> {
             let lane_stop_source = StopSource::new();
             let work_item_stop_token = lane_stop_source.token();
 
-            // Judged once, so the order stays put for the rest of the run
+            // Judged once, so the dispatch order stays put for the rest of the run
             let demoted = opt_epoch.is_some_and(|epoch| {
                 let epoch = LossEpoch {
                     destination: Some(node_ref.node_info_ts(RoutingDomain::PublicInternet)),
@@ -402,12 +415,6 @@ impl<'a> FanoutQueue<'a> {
             self.sorted_nodes
                 .sort_by_key(|node_id| !preferred_nodes.contains(node_id));
         }
-        if self.nodes.values().any(|node| node.demoted) {
-            let nodes = &self.nodes;
-            self.sorted_nodes
-                .sort_by_key(|node_id| nodes.get(node_id).is_some_and(|node| node.demoted));
-        }
-
         // Disqualify any nodes that can be
         self.disqualify(cur_ts);
 
@@ -435,6 +442,27 @@ impl<'a> FanoutQueue<'a> {
         );
     }
 
+    /// The window order with each demoted node still to be asked moved behind the other
+    /// candidates of its group, window or reserve: asked last there, never skipped
+    fn dispatch_order(&self) -> Vec<NodeId> {
+        let mut window_slots = 0usize;
+        let mut keyed: Vec<((bool, bool), NodeId)> = Vec::with_capacity(self.sorted_nodes.len());
+        for node_id in &self.sorted_nodes {
+            let node = self.nodes.get(node_id).unwrap_or_log();
+            if !matches!(
+                node.status.stage,
+                FanoutNodeStage::Timeout | FanoutNodeStage::Disqualified
+            ) {
+                window_slots += 1;
+            }
+            let reserve = self.consensus_width > 0 && window_slots > self.consensus_width;
+            let deferred = node.demoted && matches!(node.status.stage, FanoutNodeStage::Queued);
+            keyed.push(((reserve, deferred), node_id.clone()));
+        }
+        keyed.sort_by_key(|(key, _)| *key);
+        keyed.into_iter().map(|(_, node_id)| node_id).collect()
+    }
+
     /// Send next fanout candidates if available to whatever workers are ready
     pub fn send_more_work(&mut self, cur_ts: Timestamp) {
         // Get the next work and send it along
@@ -444,7 +472,7 @@ impl<'a> FanoutQueue<'a> {
 
         let mut slow_nodes = Vec::<NodeRef>::new();
 
-        for x in &mut self.sorted_nodes {
+        for x in &self.dispatch_order() {
             // If there are no work receivers left then we should stop trying to send
             if self.work_request_receiver.is_empty() {
                 break;
@@ -639,9 +667,10 @@ impl<'a> FanoutQueue<'a> {
         }
     }
 
-    /// The window's in-flight nodes and how long each is waited for, when they could not bring
-    /// the window to `target` accepts even if they all accepted and nothing in the window is left
-    /// to ask: past `floor` and `STRAGGLER_RTT_FACTOR` times the slowest answer
+    /// The window's in-flight nodes and how long each is waited for, when the ones still counted
+    /// on could not bring the window to `target` accepts even if they all accepted and nothing in
+    /// the window is left to ask: past `floor` and `STRAGGLER_RTT_FACTOR` times the slowest
+    /// answer. A demoted node in flight is not counted on
     fn straggler_scan(
         &self,
         target: usize,
@@ -653,13 +682,19 @@ impl<'a> FanoutQueue<'a> {
 
         let mut accepted = 0usize;
         let mut in_flight = Vec::<NodeId>::new();
+        let mut counted_on = 0usize;
         let mut window_slots = 0usize;
         for node_id in &self.sorted_nodes {
             let node = self.nodes.get(node_id).unwrap_or_log();
             match node.status.stage {
                 FanoutNodeStage::Timeout | FanoutNodeStage::Disqualified => continue,
                 FanoutNodeStage::Queued => return None,
-                FanoutNodeStage::InProgress => in_flight.push(node_id.clone()),
+                FanoutNodeStage::InProgress => {
+                    in_flight.push(node_id.clone());
+                    if !node.demoted {
+                        counted_on += 1;
+                    }
+                }
                 FanoutNodeStage::Accepted => accepted += 1,
                 FanoutNodeStage::Rejected | FanoutNodeStage::Stale | FanoutNodeStage::Conflict => {}
             }
@@ -668,7 +703,7 @@ impl<'a> FanoutQueue<'a> {
                 break;
             }
         }
-        if in_flight.is_empty() || accepted + in_flight.len() >= target {
+        if in_flight.is_empty() || accepted + counted_on >= target {
             return None;
         }
 

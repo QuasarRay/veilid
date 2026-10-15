@@ -235,7 +235,7 @@ pub(crate) struct FanoutCall<'a> {
     seed_untried: bool,
     /// Ask the initial seed nodes before unproven closer ones (see `set_prefer_init_nodes`)
     prefer_init_nodes: bool,
-    /// Ask nodes unresponsive to routed questions last (see `set_demote_routed_unresponsive`)
+    /// Ask nodes unresponsive to routed questions after their window (see `set_demote_routed_unresponsive`)
     demote_routed_unresponsive: bool,
 }
 
@@ -322,11 +322,13 @@ impl<'a> FanoutCall<'a> {
         self.prefer_init_nodes = prefer_init_nodes;
     }
 
-    /// Ask nodes that lost a routed question after all others.
+    /// Ask nodes that lost a routed question after the rest of their window, and do not wait on
+    /// them past the straggler grace.
     ///
     /// Set it when this run's questions travel over safety routes: a node that lost one, often
     /// one reachable only through a relay, still answers direct questions and so stays live, but
-    /// a routed question to it is likely to wait out the RPC timeout.
+    /// a routed question to it is likely to wait out the RPC timeout. It keeps its place in the
+    /// window: the closest nodes own the record, and only an answer from it can clear its mark.
     pub fn set_demote_routed_unresponsive(&mut self, demote_routed_unresponsive: bool) {
         self.demote_routed_unresponsive = demote_routed_unresponsive;
     }
