@@ -181,8 +181,11 @@ impl serde::Serialize for EncryptedValueData {
     where
         S: Serializer,
     {
-        let encoded = BASE64URL_NOPAD.encode(&self.blob);
-        serializer.serialize_str(&encoded)
+        if serializer.is_human_readable() {
+            serializer.serialize_str(&BASE64URL_NOPAD.encode(&self.blob))
+        } else {
+            serializer.serialize_bytes(&self.blob)
+        }
     }
 }
 
@@ -191,52 +194,68 @@ impl<'de> serde::Deserialize<'de> for EncryptedValueData {
     where
         D: Deserializer<'de>,
     {
+        /// The field form of rows written before the capnp blob
         #[derive(Deserialize)]
         struct LegacyValueData {
-            /// An increasing sequence number to time-order the DHT record changes
             seq: ValueSeqNum,
-
-            /// The contents of a DHT Record
             #[cfg_attr(
                 not(all(target_arch = "wasm32", target_os = "unknown")),
                 serde(with = "as_human_base64")
             )]
             data: Vec<u8>,
-
-            /// The public identity key of the writer of the data
             #[serde(with = "public_key_try_untyped_vld0")]
             writer: PublicKey,
         }
 
-        #[derive(serde::Deserialize)]
-        #[serde(untagged)]
-        enum Helper {
-            Base64Str(String),
-            Legacy(LegacyValueData),
-        }
+        /// Bytes, base64 text or the field form, in any format: rows written before the bytes
+        /// form hold text, and serde's buffered replay claims every format is human-readable
+        struct BlobVisitor;
 
-        match Helper::deserialize(deserializer)? {
-            Helper::Base64Str(value) => {
-                let blob = BASE64URL_NOPAD.decode(value.as_bytes()).map_err(|e| {
-                    <D::Error as serde::de::Error>::custom(format!(
-                        "Failed to decode base64: {}",
-                        e
-                    ))
-                })?;
-
+        impl BlobVisitor {
+            fn from_blob<E: serde::de::Error>(blob: Vec<u8>) -> Result<EncryptedValueData, E> {
                 validate_value_data_blob(&blob).map_err(|e| {
-                    <D::Error as serde::de::Error>::custom(format!(
-                        "Decoded blob is not a valid ValueData capnp struct: {}",
-                        e
+                    E::custom(format!(
+                        "Decoded blob is not a valid ValueData capnp struct: {e}"
                     ))
                 })?;
-
                 Ok(EncryptedValueData { blob: blob.into() })
             }
-            Helper::Legacy(legacy) => {
+        }
+
+        impl<'de> serde::de::Visitor<'de> for BlobVisitor {
+            type Value = EncryptedValueData;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a ValueData blob as bytes, base64 text or fields")
+            }
+
+            fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                Self::from_blob(v.to_vec())
+            }
+
+            fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                Self::from_blob(v)
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                let blob = BASE64URL_NOPAD
+                    .decode(v.as_bytes())
+                    .map_err(|e| E::custom(format!("Failed to decode base64: {e}")))?;
+                Self::from_blob(blob)
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let legacy = LegacyValueData::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(map),
+                )?;
                 EncryptedValueData::new(legacy.seq, legacy.data.into(), legacy.writer, None)
                     .map_err(serde::de::Error::custom)
             }
         }
+
+        deserializer.deserialize_any(BlobVisitor)
     }
 }

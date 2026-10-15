@@ -424,8 +424,7 @@ class TableDb(ABC):
         """Get the list of keys in a column.
 
         Raises VeilidAPIErrorGeneric if col is at or above the opened column count, the
-        backing-store read fails, or a stored key fails to decrypt or decompress (wrong device
-        encryption key or corrupt data).
+        backing-store read fails, or a stored key is too short to decrypt (corrupt data).
         """
         pass
 
@@ -452,8 +451,7 @@ class TableDb(ABC):
         """Read a key from a column. Returns None if the key is absent.
 
         Raises VeilidAPIErrorGeneric if col is at or above the opened column count, the
-        backing-store read fails, or the stored value fails to decrypt or decompress (wrong device
-        encryption key or corrupt data).
+        backing-store read fails, or the stored value is too short to decrypt (corrupt data).
         """
         pass
 
@@ -462,8 +460,7 @@ class TableDb(ABC):
         """Delete a key from a column, returning its old value or None if absent.
 
         Raises VeilidAPIErrorGeneric if col is at or above the opened column count, the
-        backing-store delete fails, or the prior value fails to decrypt or decompress (wrong device
-        encryption key or corrupt data).
+        backing-store delete fails, or the prior value is too short to decrypt (corrupt data).
         """
         pass
 

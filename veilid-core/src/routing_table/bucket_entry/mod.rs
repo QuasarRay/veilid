@@ -238,11 +238,19 @@ pub(crate) struct BucketEntryInner {
     geolocation_info: GeolocationInfo,
 }
 
-/// Deserialization context for `BucketEntryInner`: carries the registry to attach to the
-/// deserialized entry, replacing the old `prepare` step.
-pub(crate) struct BucketEntryInnerDeserializeSeed {
-    pub registry: VeilidComponentRegistry,
-    pub network_manager: NetworkManagerHandle,
+/// Only the fields that are actually persisted to disk.
+#[derive(Debug, Deserialize)]
+struct BucketEntryInnerPersisted {
+    node_ids: NodeIdGroup,
+    time_added: Timestamp,
+    envelope_support: Vec<EnvelopeVersion>,
+    updated_since_last_network_change: bool,
+    public_internet: BucketEntryPublicInternet,
+    local_network: BucketEntryLocalNetwork,
+    #[serde(default)]
+    peer_stats: PeerStats,
+    #[serde(default)]
+    rpc_stats: RPCStats,
 }
 
 impl BucketEntryInner {
@@ -251,154 +259,32 @@ impl BucketEntryInner {
     pub fn deserialize_from_persisted(
         registry: VeilidComponentRegistry,
         network_manager: NetworkManagerHandle,
-        bytes: &[u8],
+        serialized: TableDBSerializedData,
     ) -> EyreResult<BucketEntryInner> {
-        use serde::de::DeserializeSeed;
-        let seed = BucketEntryInnerDeserializeSeed {
-            registry,
-            network_manager,
-        };
-        let mut de = serde_json::Deserializer::from_slice(bytes);
-        seed.deserialize(&mut de).map_err(|e| eyre!("{}", e))
-    }
-}
+        let table_store = registry.table_store();
+        let p: BucketEntryInnerPersisted = table_store.try_deserialize(&serialized)?;
 
-impl<'de> serde::de::DeserializeSeed<'de> for BucketEntryInnerDeserializeSeed {
-    type Value = BucketEntryInner;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<BucketEntryInner, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(BucketEntryInnerVisitor {
-            registry: self.registry,
-            network_manager: self.network_manager,
-        })
-    }
-}
-
-struct BucketEntryInnerVisitor {
-    registry: VeilidComponentRegistry,
-    network_manager: NetworkManagerHandle,
-}
-
-impl<'de> serde::de::Visitor<'de> for BucketEntryInnerVisitor {
-    type Value = BucketEntryInner;
-
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a BucketEntryInner map")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<BucketEntryInner, A::Error>
-    where
-        A: serde::de::MapAccess<'de>,
-    {
-        use serde::de::Error as _;
-
-        let mut node_ids: Option<NodeIdGroup> = None;
-        let mut time_added: Option<Timestamp> = None;
-        let mut envelope_support: Option<Vec<EnvelopeVersion>> = None;
-        let mut updated_since_last_network_change: Option<bool> = None;
-        let mut public_internet: Option<BucketEntryPublicInternet> = None;
-        let mut local_network: Option<BucketEntryLocalNetwork> = None;
-        let mut peer_stats: Option<PeerStats> = None;
-        let mut rpc_stats: Option<RPCStats> = None;
-
-        // Only the persisted (non-skip) fields are recognized; unknown keys are ignored,
-        // matching the previous derive.
-        while let Some(key) = map.next_key::<String>()? {
-            match key.as_str() {
-                "node_ids" => {
-                    if node_ids.is_some() {
-                        return Err(A::Error::duplicate_field("node_ids"));
-                    }
-                    node_ids = Some(map.next_value()?);
-                }
-                "time_added" => {
-                    if time_added.is_some() {
-                        return Err(A::Error::duplicate_field("time_added"));
-                    }
-                    time_added = Some(map.next_value()?);
-                }
-                "envelope_support" => {
-                    if envelope_support.is_some() {
-                        return Err(A::Error::duplicate_field("envelope_support"));
-                    }
-                    envelope_support = Some(map.next_value()?);
-                }
-                "updated_since_last_network_change" => {
-                    if updated_since_last_network_change.is_some() {
-                        return Err(A::Error::duplicate_field(
-                            "updated_since_last_network_change",
-                        ));
-                    }
-                    updated_since_last_network_change = Some(map.next_value()?);
-                }
-                "public_internet" => {
-                    if public_internet.is_some() {
-                        return Err(A::Error::duplicate_field("public_internet"));
-                    }
-                    public_internet = Some(map.next_value()?);
-                }
-                "local_network" => {
-                    if local_network.is_some() {
-                        return Err(A::Error::duplicate_field("local_network"));
-                    }
-                    local_network = Some(map.next_value()?);
-                }
-                "peer_stats" => {
-                    if peer_stats.is_some() {
-                        return Err(A::Error::duplicate_field("peer_stats"));
-                    }
-                    peer_stats = Some(map.next_value()?);
-                }
-                "rpc_stats" => {
-                    if rpc_stats.is_some() {
-                        return Err(A::Error::duplicate_field("rpc_stats"));
-                    }
-                    rpc_stats = Some(map.next_value()?);
-                }
-                _ => {
-                    let _ = map.next_value::<serde::de::IgnoredAny>()?;
-                }
-            }
-        }
-
-        let node_ids = node_ids.ok_or_else(|| A::Error::missing_field("node_ids"))?;
-        let time_added = time_added.ok_or_else(|| A::Error::missing_field("time_added"))?;
-        let envelope_support =
-            envelope_support.ok_or_else(|| A::Error::missing_field("envelope_support"))?;
-        let updated_since_last_network_change = updated_since_last_network_change
-            .ok_or_else(|| A::Error::missing_field("updated_since_last_network_change"))?;
-        let public_internet =
-            public_internet.ok_or_else(|| A::Error::missing_field("public_internet"))?;
-        let local_network =
-            local_network.ok_or_else(|| A::Error::missing_field("local_network"))?;
-        // peer_stats and rpc_stats default when absent (matching their #[serde(default)]).
-        let peer_stats = peer_stats.unwrap_or_default();
-        let rpc_stats = rpc_stats.unwrap_or_default();
-
-        // Reconstruct the best node id (most-preferred valid kind); fail if there is none.
-        let best_node_id = node_ids
+        let best_node_id = p
+            .node_ids
             .iter()
             .find(|nid| VALID_CRYPTO_KINDS.contains(&nid.kind()))
             .cloned()
-            .ok_or_else(|| A::Error::custom("bucket entry has no valid node id"))?;
+            .ok_or_else(|| eyre!("bucket entry has no valid node id"))?;
 
         Ok(BucketEntryInner {
-            registry: self.registry,
-            network_manager: self.network_manager,
+            registry,
+            network_manager,
             best_node_id,
-            node_ids,
-            time_added,
-            envelope_support,
-            updated_since_last_network_change,
+            node_ids: p.node_ids,
+            time_added: p.time_added,
+            envelope_support: p.envelope_support,
+            updated_since_last_network_change: p.updated_since_last_network_change,
             last_flows: BTreeMap::new(),
             last_sender_info: HashMap::new(),
-            public_internet,
-            local_network,
-            peer_stats,
-            rpc_stats,
+            public_internet: p.public_internet,
+            local_network: p.local_network,
+            peer_stats: p.peer_stats,
+            rpc_stats: p.rpc_stats,
             per_sequence_ordering_stats: BTreeMap::new(),
             per_transport_stats: BTreeMap::new(),
             cm_viability: None,

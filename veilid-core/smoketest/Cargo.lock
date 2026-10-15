@@ -9,7 +9,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1973cfbc1a2daf9cf550e74e1f088c28e7f7d8c1e1418fb6c9dc5184b7e84c99"
 dependencies = [
  "crypto-common 0.2.2",
- "inout 0.2.2",
+ "inout 0.2.3",
 ]
 
 [[package]]
@@ -611,7 +611,7 @@ checksum = "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
 dependencies = [
  "block-buffer 0.12.1",
  "crypto-common 0.2.2",
- "inout 0.2.2",
+ "inout 0.2.3",
 ]
 
 [[package]]
@@ -1537,9 +1537,9 @@ dependencies = [
 
 [[package]]
 name = "inout"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
+checksum = "d8c0d789294fb457b791f7797a04478704788f30b407e5d0b01deaa846572d9f"
 dependencies = [
  "hybrid-array",
 ]
@@ -1649,15 +1649,15 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb64e62d343e5cb85c7e36e60403bcea00fe71ecd6702ebfa03258db92e91d5c"
+checksum = "fe6d4f7c813a6072025fc34565fdcc829cd0f6cf424af1a4a972abefc976e806"
 
 [[package]]
 name = "keyvaluedb-memorydb"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb0e3245548c2bdb465d818385e890ea9d96621bf47e89db753b0b2b67d2107b"
+checksum = "2feecd3d8cd06c46717a4556be64aca270fd1d5b39bec841bb54e482d0e6a7de"
 dependencies = [
  "keyvaluedb",
  "parking_lot",
@@ -1665,9 +1665,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-sqlite"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a01d1eaa184986516afd219f763c75de2de7666ff935a41857d34d8068483ce"
+checksum = "5e71790cac48d1ffddb922f9c2a5421ac6a9d25866721a0213d750b1dd7ab810"
 dependencies = [
  "async-sqlite",
  "keyvaluedb",
@@ -1676,9 +1676,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-web"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "506a1ffded07bb3a8ee285e8f62d2dc29a8c876b8b088faff95400a34ba92da6"
+checksum = "a36642addc71d64cf4314044745763b3694abf98a556660440d862e8e9d7080c"
 dependencies = [
  "flume",
  "futures",
@@ -2480,9 +2480,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "log",
  "once_cell",
@@ -3126,6 +3126,7 @@ dependencies = [
  "capnp",
  "capnpc",
  "cfg-if",
+ "ciborium",
  "clap",
  "data-encoding",
  "directories",

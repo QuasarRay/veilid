@@ -1,4 +1,5 @@
 use super::*;
+use veilid_core::bytes::Bytes;
 
 /// Convert a `VeilidAPIResult` into its JSON `ApiResult` ok/err form.
 pub fn to_json_api_result<T: Clone + fmt::Debug + JsonSchema>(
@@ -463,28 +464,37 @@ impl JsonRequestProcessor {
                 result: to_json_api_result(table_db.get_column_count()),
             },
             TableDbRequestOp::GetKeys { col } => TableDbResponseOp::GetKeys {
-                result: to_json_api_result_with_vec_vec_u8(table_db.get_keys(col).await),
+                result: to_json_api_result_with_vec_vec_u8(
+                    table_db
+                        .get_keys(col)
+                        .await
+                        .map(|keys| keys.into_iter().map(|key| key.to_vec()).collect()),
+                ),
             },
             TableDbRequestOp::Transact => TableDbResponseOp::Transact {
                 value: self.add_table_db_transaction(table_db.transact()),
             },
             TableDbRequestOp::Store { col, key, value } => TableDbResponseOp::Store {
-                result: to_json_api_result(table_db.store(col, &key, &value).await),
+                result: to_json_api_result(
+                    table_db
+                        .store(col, Bytes::from(key), Bytes::from(value))
+                        .await,
+                ),
             },
             TableDbRequestOp::Load { col, key } => TableDbResponseOp::Load {
                 result: to_json_api_result(
                     table_db
-                        .load(col, &key)
+                        .load(col, Bytes::from(key))
                         .await
-                        .map(|vopt| vopt.map(|v| VecU8 { value: v })),
+                        .map(|vopt| vopt.map(|v| VecU8 { value: v.to_vec() })),
                 ),
             },
             TableDbRequestOp::Delete { col, key } => TableDbResponseOp::Delete {
                 result: to_json_api_result(
                     table_db
-                        .delete(col, &key)
+                        .delete(col, Bytes::from(key))
                         .await
-                        .map(|vopt| vopt.map(|v| VecU8 { value: v })),
+                        .map(|vopt| vopt.map(|v| VecU8 { value: v.to_vec() })),
                 ),
             },
         };
@@ -523,13 +533,19 @@ impl JsonRequestProcessor {
             }
             TableDbTransactionRequestOp::Store { col, key, value } => {
                 TableDbTransactionResponseOp::Store {
-                    result: to_json_api_result(table_db_transaction.store(col, &key, &value).await),
+                    result: to_json_api_result(
+                        table_db_transaction
+                            .store(col, Bytes::from(key), Bytes::from(value))
+                            .await,
+                    ),
                 }
             }
 
             TableDbTransactionRequestOp::Delete { col, key } => {
                 TableDbTransactionResponseOp::Delete {
-                    result: to_json_api_result(table_db_transaction.delete(col, &key).await),
+                    result: to_json_api_result(
+                        table_db_transaction.delete(col, Bytes::from(key)).await,
+                    ),
                 }
             }
         };

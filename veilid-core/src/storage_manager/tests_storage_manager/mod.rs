@@ -6,6 +6,7 @@ mod test_encrypted_value_data;
 mod test_gated_operation;
 mod test_inbound_set_value_signature;
 mod test_inspect_fanout_done;
+mod test_metadata_round_trip;
 mod test_metadata_save_schedule;
 mod test_min_seqnum;
 mod test_record_report_seqs;
@@ -25,6 +26,7 @@ pub async fn test_all() {
     test_gated_operation::test_all();
     test_inbound_set_value_signature::test_all().await;
     test_inspect_fanout_done::test_all();
+    test_metadata_round_trip::test_metadata_round_trip().await;
     test_metadata_save_schedule::test_all().await;
     test_min_seqnum::test_all().await;
     test_record_report_seqs::test_all();

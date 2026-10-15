@@ -91,8 +91,8 @@ abstract class VeilidTableDB {
   /// The list of keys in column [col].
   ///
   /// Throws VeilidAPIExceptionGeneric if [col] is at or above the opened column
-  /// count, if the backing-store read fails, or if a stored key fails to decrypt
-  /// or decompress (wrong device encryption key or corrupt data).
+  /// count, if the backing-store read fails, or if a stored key is too short to
+  /// decrypt (corrupt data).
   Future<List<Uint8List>> getKeys(int col);
 
   /// Start a write transaction. The caller must [VeilidTableDBTransaction.commit]
@@ -108,15 +108,15 @@ abstract class VeilidTableDB {
   /// Read [key] from column [col], or null if absent.
   ///
   /// Throws VeilidAPIExceptionGeneric if [col] is at or above the opened column
-  /// count, if the backing-store read fails, or if the stored value fails to
-  /// decrypt or decompress (wrong device encryption key or corrupt data).
+  /// count, if the backing-store read fails, or if the stored value is too short
+  /// to decrypt (corrupt data).
   Future<Uint8List?> load(int col, Uint8List key);
 
   /// Delete [key] from column [col], returning its prior value if any.
   ///
   /// Throws VeilidAPIExceptionGeneric if [col] is at or above the opened column
-  /// count, if the backing-store delete fails, or if the prior value fails to
-  /// decrypt or decompress (wrong device encryption key or corrupt data).
+  /// count, if the backing-store delete fails, or if the prior value is too short
+  /// to decrypt (corrupt data).
   Future<Uint8List?> delete(int col, Uint8List key);
 
   /// Store [object] as JSON under [key] in column [col]. Committed immediately.

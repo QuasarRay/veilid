@@ -58,7 +58,7 @@ pub async fn test_routingtable_buckets_round_trip() {
             serialized_bucket_map,
             all_entry_bytes,
         )
-        .unwrap();
+        .unwrap(); // FIXME
 
         let original_inner = &*original.inner.read();
         let copy_inner = &*copy.inner.read();
@@ -111,13 +111,20 @@ pub async fn test_load_rejects_entries_without_node_ids() {
             "should have at least one entry"
         );
 
+        let table_store = copy_registry.table_store();
         // Simulate corrupt/legacy data: blank out node_ids on every persisted entry.
-        let tampered: Vec<Vec<u8>> = all_entry_bytes
+        let tampered: Vec<TableDBSerializedData> = all_entry_bytes
             .iter()
             .map(|eb| {
-                let mut v: serde_json::Value = deserialize_json_bytes(eb).unwrap();
-                v["node_ids"] = serde_json::json!([]);
-                serialize_json_bytes(v)
+                let mut v: ciborium::Value = table_store.try_deserialize(eb).unwrap();
+                if let ciborium::Value::Map(ref mut m) = v {
+                    for (k, v) in m.iter_mut() {
+                        if *k == ciborium::Value::Text("node_ids".into()) {
+                            *v = ciborium::Value::Array(vec![]);
+                        }
+                    }
+                };
+                serialize_table_value(&v)
             })
             .collect();
 

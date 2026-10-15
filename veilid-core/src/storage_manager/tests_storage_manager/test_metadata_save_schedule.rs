@@ -65,14 +65,19 @@ async fn test_background_offline_write_reaches_disk() {
         .metadata_db
         .clone()
         .expect("metadata db should exist");
+    let table_store = registry.table_store();
     let saved_writes = || async {
         metadata_db
-            .load_json::<LinkedHashMap<OpaqueRecordKey, OfflineSubkeyWrite>>(
-                0,
-                OFFLINE_SUBKEY_WRITES,
-            )
+            .load_serialized(0, OFFLINE_SUBKEY_WRITES)
             .await
             .expect("load failed")
+            .map(|serialized| {
+                table_store
+                    .try_deserialize::<LinkedHashMap<OpaqueRecordKey, OfflineSubkeyWrite>>(
+                        &serialized,
+                    )
+                    .expect("deserialize failed")
+            })
             .unwrap_or_default()
     };
 

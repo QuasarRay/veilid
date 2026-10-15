@@ -3,6 +3,8 @@ use super::*;
 #[derive(Debug)]
 #[must_use]
 pub struct LoadAction {
+    registry: VeilidComponentRegistry,
+
     subkey_table: TableDB,
     subkey_table_key: SubkeyTableKey,
     opt_cached_record_data: Option<RecordData>,
@@ -12,12 +14,14 @@ pub struct LoadAction {
 
 impl LoadAction {
     pub(super) fn new(
+        registry: VeilidComponentRegistry,
         subkey_table: TableDB,
         subkey_table_key: SubkeyTableKey,
         opt_cached_record_data: Option<RecordData>,
         peek: bool,
     ) -> Self {
         Self {
+            registry,
             subkey_table,
             subkey_table_key,
             opt_cached_record_data,
@@ -31,10 +35,15 @@ impl LoadAction {
             return Ok(Some(cached_record_data.clone()));
         }
 
-        let opt_data = self
+        let serialized = self
             .subkey_table
-            .load_json(0, &self.subkey_table_key.bytes())
+            .load_serialized(0, Bytes::from(self.subkey_table_key.bytes()))
             .await?;
+
+        let table_store = self.registry.table_store();
+        let opt_data = serialized
+            .map(|v| table_store.try_deserialize(&v))
+            .transpose()?;
 
         self.opt_cached_record_data = opt_data.clone();
 

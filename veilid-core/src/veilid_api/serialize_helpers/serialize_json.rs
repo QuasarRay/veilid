@@ -196,7 +196,7 @@ pub mod as_human_base64 {
             let base64 = BASE64URL_NOPAD.encode(v.as_ref());
             String::serialize(&base64, s)
         } else {
-            <[u8]>::serialize(v.as_ref(), s)
+            s.serialize_bytes(v.as_ref())
         }
     }
 
@@ -215,7 +215,7 @@ pub mod as_human_base64 {
                 .map_err(serde::de::Error::custom)
                 .map(B::from)
         } else {
-            Vec::<u8>::deserialize(d).map(B::from)
+            serde_bytes::deserialize(d).map(B::from)
         }
     }
 }
@@ -361,5 +361,32 @@ pub mod as_human_opt_string {
         } else {
             Option::<T>::deserialize(d)
         }
+    }
+}
+
+/// serde `with`-module that uses a value's `Display`/`FromStr` in every format.
+///
+/// For a field whose own serde impl depends on `is_human_readable`: inside an internally tagged
+/// or untagged enum, serde buffers the content and replays it as human readable, so a binary
+/// format's encoding of such a field cannot be read back.
+pub(crate) mod as_string {
+    use std::fmt::Display;
+    use std::str::FromStr;
+
+    use serde::{de, Deserialize, Deserializer, Serializer};
+
+    /// Serializes via `Display`.
+    pub fn serialize<T: Display, S: Serializer>(value: &T, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(value)
+    }
+
+    /// Parses via `FromStr`; yields a serde decode error (`D::Error`) if `T::from_str` rejects the string.
+    pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
+    where
+        T: FromStr,
+        T::Err: Display,
+        D: Deserializer<'de>,
+    {
+        String::deserialize(d)?.parse().map_err(de::Error::custom)
     }
 }

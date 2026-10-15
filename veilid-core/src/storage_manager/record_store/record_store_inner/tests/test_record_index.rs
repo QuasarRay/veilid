@@ -844,7 +844,7 @@ pub async fn test_subkey_seq_heal(
     ));
     unlocked_inner
         .subkey_table
-        .store_json(0, &stk.bytes(), &newer)
+        .store_serialized(0, Bytes::from(stk.bytes()), serialize_table_value(&newer))
         .await
         .expect("should forge newer row");
 
@@ -892,7 +892,7 @@ pub async fn test_subkey_seq_heal(
     ));
     unlocked_inner
         .subkey_table
-        .store_json(0, &stk.bytes(), &stale)
+        .store_serialized(0, Bytes::from(stk.bytes()), serialize_table_value(&stale))
         .await
         .expect("should forge stale row");
     {

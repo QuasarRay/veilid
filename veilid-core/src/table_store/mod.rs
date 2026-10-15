@@ -18,8 +18,10 @@ pub mod tests_table_store;
 mod wasm;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm::*;
+mod migration;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod native;
+
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use native::*;
 
@@ -97,7 +99,7 @@ pub struct TableInfo {
 struct TableStoreInner {
     opened: WeakValueHashMap<String, Weak<TableDBUnlockedInner>>,
     encryption_key: Option<SharedSecret>,
-    all_table_names: HashMap<String, String>,
+    all_table_names: BTreeMap<String, String>,
     // Skips the periodic flush when the name map is unchanged; the flush task
     // otherwise rewrites the whole map every interval and bloats the WAL
     all_table_names_dirty: bool,
@@ -153,7 +155,7 @@ impl TableStore {
         TableStoreInner {
             opened: WeakValueHashMap::new(),
             encryption_key: None,
-            all_table_names: HashMap::new(),
+            all_table_names: BTreeMap::new(),
             all_table_names_dirty: false,
             all_tables_db: None,
             namespace_lock: None,
@@ -195,7 +197,9 @@ impl TableStore {
                 inner.all_tables_db.clone().unwrap_or_log(),
             )
         };
-        let mut dbt = DBTransaction::new();
+        let mut dbt = DBTransaction::with_capacity(2);
+
+        dbt.put(0, VERSION_KEY, CURRENT_SCHEMA_VERSION);
         dbt.put(0, ALL_TABLE_NAMES, &all_table_names_value);
         if let Err(e) = all_tables_db.write(dbt).await {
             veilid_log!(self error "failed to write all tables db: {}", e);
@@ -632,6 +636,15 @@ impl TableStore {
                     .await?;
             }
 
+            match migration::migrate(self, &device_encryption_key).await {
+                Ok(()) => {}
+                Err(migration::MigrationError::InvalidEncryptionKey { table, reason }) => {
+                    self.wipe_or_refuse_invalid_encryption_key(&table, &reason)
+                        .await?;
+                }
+                Err(migration::MigrationError::Other(e)) => return Err(e.into()),
+            }
+
             // Deserialize all table names
             let all_tables_db = match self
                 .table_store_driver
@@ -645,7 +658,7 @@ impl TableStore {
                 }
             };
             match all_tables_db.get(0, ALL_TABLE_NAMES).await {
-                Ok(Some(v)) => match deserialize_json_bytes::<HashMap<String, String>>(&v) {
+                Ok(Some(v)) => match deserialize_json_bytes::<BTreeMap<String, String>>(&v) {
                     Ok(all_table_names) => {
                         let mut inner = self.inner.lock();
                         inner.all_table_names = all_table_names;
@@ -833,6 +846,21 @@ impl TableStore {
             }
         };
 
+        let crypto = self.crypto();
+        let ek = {
+            let inner = self.inner.lock();
+            inner.encryption_key.clone()
+        };
+
+        // Ensure table contains schema version
+        if db.get(0, VERSION_KEY).await?.is_none() {
+            let mut tx = DBTransaction::with_capacity(1);
+            tx.put(0, VERSION_KEY, CURRENT_SCHEMA_VERSION);
+            db.write(tx)
+                .await
+                .map_err(|e| VeilidAPIError::from(e.error))?;
+        }
+
         // Flush table names to disk
         self.flush().await;
 
@@ -854,6 +882,58 @@ impl TableStore {
             };
         }
 
+        // The stored key hash is the only wrong-key check: values are not authenticated
+        let computed_key_hash = match &ek {
+            Some(ek) => Some(hash_table_encryption_key(&crypto, ek).await),
+            None => None,
+        };
+        let stored_key_hash = db
+            .get(0, ENCRYPTION_KEY_HASH_KEY)
+            .await?
+            .map(|val| val.to_vec());
+        #[cfg(feature = "verbose-tracing")]
+        veilid_log!(self debug "open_pooled name={name:?} computed_hash={computed_key_hash:02x?} stored_hash={stored_key_hash:02x?}");
+
+        let mut first_failure: Option<(u32, String)> = None;
+        match (computed_key_hash, stored_key_hash) {
+            (Some(a), Some(b)) if a == b => {}
+            (Some(_), Some(_)) => {
+                first_failure = Some((
+                    0,
+                    format!("attempted to open table '{name}' with a wrong encryption key"),
+                ));
+            }
+            (Some(a), None) => {
+                // No hash yet: a new table, or one written without encryption
+                let mut key_count = 0usize;
+                for col in 0..existing_col_count {
+                    let (n, _) = db
+                        .iter_keys(col, None, 0_usize, |ctr, k| {
+                            if check_plaintext_internal_key(k).is_ok() {
+                                *ctr += 1;
+                            }
+                            Ok(Option::<()>::None)
+                        })
+                        .await
+                        .map_err(VeilidAPIError::from)?;
+                    key_count += n;
+                }
+                if key_count > 0 {
+                    first_failure = Some((0, format!("attempted to open table '{name}' with an encryption key but it was not encrypted before")));
+                } else {
+                    let mut tx = DBTransaction::with_capacity(1);
+                    tx.put(0, ENCRYPTION_KEY_HASH_KEY, a);
+                    db.write(tx)
+                        .await
+                        .map_err(|e| VeilidAPIError::from(e.error))?;
+                }
+            }
+            (None, Some(_)) => {
+                first_failure = Some((0, format!("attempted to open table '{name}' without an encryption key when it was expected")));
+            }
+            (None, None) => {}
+        }
+
         // Wrap low-level Database in TableDB object
         let encryption_key = self.inner.lock().encryption_key.clone();
         let table_db = TableDB::new(
@@ -865,19 +945,21 @@ impl TableStore {
             column_count,
         );
 
-        // Validate keys are readable if they exist, otherwise wipe this database
-        // because there is an invalid encryption key and no way to read the data
-        let mut first_failure: Option<(u32, String)> = None;
-        for col in 0..existing_col_count {
-            match table_db.get_keys(col).await {
-                Ok(_keys) => {
-                    #[cfg(feature = "verbose-tracing")]
-                    veilid_log!(self debug "table {}({}) col {}: {} keys read ok", name, table_name, col, _keys.len());
-                }
-                Err(e) => {
-                    veilid_log!(self warn "table {}({}) col {}: get_keys failed: {}", name, table_name, col, e);
-                    if first_failure.is_none() {
-                        first_failure = Some((col, e.to_string()));
+        if first_failure.is_none() {
+            // Validate keys are readable if they exist, otherwise wipe this database
+            // because there is an invalid encryption key and no way to read the data
+            let mut first_failure: Option<(u32, String)> = None;
+            for col in 0..existing_col_count {
+                match table_db.get_keys(col).await {
+                    Ok(_keys) => {
+                        #[cfg(feature = "verbose-tracing")]
+                        veilid_log!(self debug "table {}({}) col {}: {} keys read ok", name, table_name, col, _keys.len());
+                    }
+                    Err(e) => {
+                        veilid_log!(self warn "table {}({}) col {}: get_keys failed: {}", name, table_name, col, e);
+                        if first_failure.is_none() {
+                            first_failure = Some((col, e.to_string()));
+                        }
                     }
                 }
             }
@@ -959,6 +1041,34 @@ impl TableStore {
             .insert(table_name.clone(), table_db.unlocked_inner());
 
         Ok(table_db)
+    }
+
+    /// Apply the wipe policy to a store the device encryption key cannot read, before any
+    /// table is opened: wipe the namespace, or refuse to start
+    async fn wipe_or_refuse_invalid_encryption_key(
+        &self,
+        table: &str,
+        reason: &str,
+    ) -> VeilidAPIResult<()> {
+        let namespace = self.config().namespace.clone();
+        if !self
+            .config()
+            .table_store
+            .wipe_on_invalid_device_encryption_key
+        {
+            veilid_log!(self error
+                "table {} has invalid encryption key ({}); wipe_on_invalid_device_encryption_key=false, refusing to wipe namespace '{}'",
+                table, reason, namespace
+            );
+            apibail_not_initialized!();
+        }
+        veilid_log!(self warn
+            "table {} has invalid encryption key ({}); wiping all tables in namespace '{}' and starting fresh",
+            table, reason, namespace
+        );
+        let deleted = self.table_store_driver.delete_all_in_namespace().await?;
+        veilid_log!(self warn "wiped {} table file(s) from namespace '{}'", deleted, namespace);
+        Ok(())
     }
 
     /// Delete a TableDB table by name
@@ -1133,4 +1243,117 @@ impl TableStore {
             error!("Error in table store tick: {}", e);
         }
     }
+
+    /// Deserialize a value `serialize_table_value` wrote, or the bare JSON a v0 store wrote
+    pub(crate) fn try_deserialize<T: for<'a> Deserialize<'a>>(
+        &self,
+        serialized: &TableDBSerializedData,
+    ) -> VeilidAPIResult<T> {
+        let max_value_size = self.config().table_store.max_value_size_mb as usize * 1024 * 1024;
+        deserialize_table_value(serialized, max_value_size)
+    }
+}
+
+/// Encrypt `data` under `secret_key` with the nonce prepended; without a key `data` comes back as is.
+/// Keyed nonces are unique because keys must be unique.
+/// Normally they must be sequential or random, but the critical.
+/// requirement is that they are different for each encryption
+/// but if the contents are guaranteed to be unique, then a nonce
+/// can be generated from the hash of the contents and the encryption key itself.
+#[cfg_attr(
+    feature = "instrument",
+    instrument(level = "trace", target = "tstore", skip_all)
+)]
+async fn maybe_encrypt(
+    crypto: &VeilidComponentGuard<'_, Crypto>,
+    secret_key: &Option<SharedSecret>,
+    data: Bytes,
+    keyed_nonce: bool,
+) -> Bytes {
+    // NOTE: This function is used in migrations. If it's ever changed,
+    //       an older version must be usable by existing migrations.
+
+    let Some(ref sk) = secret_key else {
+        return data;
+    };
+
+    let vcrypto = crypto.get_async(sk.kind()).unwrap_or_log();
+    let mut out = BytesMut::zeroed(vcrypto.nonce_length() + data.len());
+
+    if keyed_nonce {
+        // Key content nonce
+        let mut noncedata = BytesMut::with_capacity(data.len() + sk.ref_value().len());
+        noncedata.extend_from_slice(&data);
+        noncedata.extend_from_slice(sk.ref_value());
+        let noncehash = vcrypto.generate_hash(noncedata.freeze()).await.value();
+        // Key content nonce is first 'nonce_length' bytes of generated hash
+        out.as_mut()[0..vcrypto.nonce_length()]
+            .copy_from_slice(&noncehash.as_ref()[0..vcrypto.nonce_length()]);
+    } else {
+        // Random nonce
+        random_bytes(&mut out[0..vcrypto.nonce_length()]);
+    }
+    let nonce = Nonce::new(&out[0..vcrypto.nonce_length()]);
+
+    let out = vcrypto
+        .crypt_b2b_no_auth(data, out, vcrypto.nonce_length(), &nonce, sk)
+        .await
+        .unwrap_or_log();
+
+    out.freeze()
+}
+
+/// Decrypt `data`, nonce first, under `secret_key`; without a key `data` comes back as is.
+#[cfg_attr(
+    feature = "instrument",
+    instrument(level = "trace", target = "tstore", skip_all)
+)]
+async fn maybe_decrypt(
+    crypto: &VeilidComponentGuard<'_, Crypto>,
+    secret_key: &Option<SharedSecret>,
+    mut data: Bytes,
+) -> VeilidAPIResult<Bytes> {
+    // NOTE: This function is used in migrations. If it's ever changed,
+    //       an older version must be usable by existing migrations.
+
+    let Some(ref sk) = secret_key else {
+        return Ok(data);
+    };
+
+    let vcrypto = crypto.get_async(sk.kind()).unwrap_or_log();
+    if data.len() < vcrypto.nonce_length() {
+        return Err(VeilidAPIError::generic("encrypted data is too short"));
+    }
+    if data.len() == vcrypto.nonce_length() {
+        return Ok(Bytes::new());
+    }
+
+    let out = BytesMut::zeroed(data.len() - vcrypto.nonce_length());
+    let data_start = data.split_to(vcrypto.nonce_length());
+
+    let out = vcrypto
+        .crypt_b2b_no_auth(data, out, 0, &Nonce::new(data_start.as_ref()), sk)
+        .await
+        .unwrap_or_log();
+
+    Ok(out.freeze())
+}
+
+async fn hash_table_encryption_key(
+    crypto: &VeilidComponentGuard<'_, Crypto>,
+    encryption_key: &SharedSecret,
+) -> Vec<u8> {
+    // NOTE: This function is used in migrations. If it's ever changed,
+    //       an older version must be usable by existing migrations.
+
+    const SALT: &[u8] = b"__veilid_table_store_encryption_key_hash__";
+
+    let vcrypto = crypto.get_async(encryption_key.kind()).unwrap_or_log();
+
+    let mut data_to_hash = BytesMut::with_capacity(encryption_key.ref_value().len() + SALT.len());
+    data_to_hash.extend_from_slice(encryption_key.ref_value().as_ref());
+    data_to_hash.extend_from_slice(SALT);
+
+    let encryption_key_hash = vcrypto.generate_hash(data_to_hash.freeze()).await;
+    encryption_key_hash.value().to_vec()
 }

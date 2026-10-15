@@ -62,13 +62,13 @@ pub const REHYDRATION_FAILURE_WARN_THRESHOLD: u32 = 3;
 /// Table store table for storage manager metadata
 pub const STORAGE_MANAGER_METADATA: &str = "storage_manager_metadata";
 /// Storage manager metadata key name for offline subkey write persistence
-pub const OFFLINE_SUBKEY_WRITES: &[u8] = b"offline_subkey_writes";
+pub const OFFLINE_SUBKEY_WRITES: Bytes = Bytes::from_static(b"offline_subkey_writes");
 /// Outbound watch manager metadata key name for watch persistence
-pub const OUTBOUND_WATCH_MANAGER: &[u8] = b"outbound_watch_manager";
+pub const OUTBOUND_WATCH_MANAGER: Bytes = Bytes::from_static(b"outbound_watch_manager");
 /// Rehydration requests metadata key name for rehydration persistence
-pub const REHYDRATION_REQUESTS: &[u8] = b"rehydration_requests";
+pub const REHYDRATION_REQUESTS: Bytes = Bytes::from_static(b"rehydration_requests");
 /// Descriptor cache metadata key name for persistence
-pub const DESCRIPTOR_CACHE: &[u8] = b"descriptor_cache";
+pub const DESCRIPTOR_CACHE: Bytes = Bytes::from_static(b"descriptor_cache");
 /// Remote store connection pool divisor
 pub const REMOTE_POOL_CONCURRENCY_DIVISOR: usize = 4;
 

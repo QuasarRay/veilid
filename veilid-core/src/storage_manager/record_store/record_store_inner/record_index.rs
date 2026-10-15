@@ -51,9 +51,11 @@ where
     }
 
     pub fn estimate(&self, rtk: &RecordTableKey, record: &Record<D>) -> VeilidAPIResult<u64> {
-        let record_size = self
-            .record_table
-            .estimate_storage_size_json(0, &rtk.bytes(), record)?;
+        let record_size = self.record_table.estimate_storage_size(
+            0,
+            &rtk.bytes(),
+            &serialize_table_value(record).0,
+        )?;
 
         let subkey_size = record
             .subkey_sizes()
@@ -457,6 +459,7 @@ where
         Ok(LoadActionResult::Subkey {
             descriptor: record.descriptor(),
             load_action: LoadAction::new(
+                self.registry(),
                 self.unlocked_inner.subkey_table.clone(),
                 stk,
                 opt_cached_record_data,
@@ -1102,15 +1105,15 @@ where
         let mut last_check_ts = Timestamp::now();
         let mut repaired_count = AtomicUsize::new(0);
         for (n, k) in record_table_keys.into_iter().enumerate() {
-            let Ok(rtk) = RecordTableKey::try_from(k.as_slice()) else {
-                rt_xact.delete(0, &k).await?;
+            let Ok(rtk) = RecordTableKey::try_from(k.as_ref()) else {
+                rt_xact.delete(0, k.clone()).await?;
                 continue;
             };
             let Ok(record) = self
                 .load_record_from_db(&rtk, &rt_xact, &mut repaired_count)
                 .await
             else {
-                rt_xact.delete(0, &k).await?;
+                rt_xact.delete(0, k.clone()).await?;
                 continue;
             };
 
@@ -1450,14 +1453,17 @@ where
         rt_xact: &TableDBTransaction,
         repaired_count: &mut AtomicUsize,
     ) -> VeilidAPIResult<Record<D>> {
-        let Some(mut record) = self
+        let Some(serialized) = self
             .unlocked_inner
             .record_table
-            .load_json::<Record<D>>(0, &rtk.bytes())
+            .load_serialized(0, Bytes::from(rtk.bytes()))
             .await?
         else {
             apibail_internal!("missing record: {}", rtk);
         };
+
+        let table_store = self.registry().table_store();
+        let mut record: Record<D> = table_store.try_deserialize(&serialized)?;
 
         record.post_deserialize();
 
@@ -1492,9 +1498,9 @@ where
                 apibail_internal!("should have removed subkey from cache already: {}", stk);
             }
 
-            st_xact.delete(0, &stk.bytes()).await?;
+            st_xact.delete(0, Bytes::from(stk.bytes())).await?;
         }
-        rt_xact.delete(0, &rtk.bytes()).await?;
+        rt_xact.delete(0, Bytes::from(rtk.bytes())).await?;
 
         Ok(())
     }
@@ -1524,8 +1530,9 @@ where
         }
         record.repair(subkey_info);
 
+        let serialized = serialize_table_value(record);
         rt_xact
-            .store_json::<Record<D>>(0, &rtk.bytes(), record)
+            .store_serialized(0, Bytes::from(rtk.bytes()), serialized)
             .await?;
         Ok(())
     }
@@ -1536,10 +1543,16 @@ where
         &self,
         stk: &SubkeyTableKey,
     ) -> VeilidAPIResult<Option<RecordData>> {
-        self.unlocked_inner
+        let serialized = self
+            .unlocked_inner
             .subkey_table
-            .load_json::<RecordData>(0, &stk.bytes())
-            .await
+            .load_serialized(0, Bytes::from(stk.bytes()))
+            .await?;
+
+        let table_store = self.registry().table_store();
+        serialized
+            .map(|v| table_store.try_deserialize(&v))
+            .transpose()
     }
 
     /// Adds subkey data to the cache, performing all of the accounting around the operation

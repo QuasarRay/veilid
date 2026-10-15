@@ -2,11 +2,10 @@ mod test_types;
 mod test_types_dht;
 mod test_types_dht_schema;
 
+use super::*;
 use test_types::*;
 use test_types_dht::*;
 use test_types_dht_schema::*;
-
-use super::*;
 
 pub fn test_serialize_json() {
     // test_types

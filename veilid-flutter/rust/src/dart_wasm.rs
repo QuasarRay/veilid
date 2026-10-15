@@ -2,6 +2,7 @@
 /// The Flutter/Dart bindings are in this lib.rs directly
 use super::*;
 use tracing::warn;
+use veilid_core::bytes::Bytes;
 
 #[wasm_bindgen]
 extern "C" {
@@ -1218,7 +1219,8 @@ pub fn table_db_transaction_store(id: u32, col: u32, key: String, value: String)
 
         let tdbt = get_table_db_transaction(id, "table_db_transaction_store")?;
 
-        tdbt.store(col, &key, &value).await?;
+        tdbt.store(col, Bytes::from(key), Bytes::from(value))
+            .await?;
         VeilidAPIResult::Ok(())
     })
 }
@@ -1232,7 +1234,7 @@ pub fn table_db_transaction_delete(id: u32, col: u32, key: String) -> Promise {
 
         let tdbt = get_table_db_transaction(id, "table_db_transaction_delete")?;
 
-        tdbt.delete(col, &key).await?;
+        tdbt.delete(col, Bytes::from(key)).await?;
         VeilidAPIResult::Ok(())
     })
 }
@@ -1248,7 +1250,9 @@ pub fn table_db_store(id: u32, col: u32, key: String, value: String) -> Promise 
             .map_err(|e| VeilidAPIError::parse_error("failed to decode value", e.to_string()))?;
         let table_db = get_table_db(id, "table_db_store")?;
 
-        table_db.store(col, &key, &value).await?;
+        table_db
+            .store(col, Bytes::from(key), Bytes::from(value))
+            .await?;
         VeilidAPIResult::Ok(())
     })
 }
@@ -1261,7 +1265,7 @@ pub fn table_db_load(id: u32, col: u32, key: String) -> Promise {
             .map_err(|e| VeilidAPIError::parse_error("failed to decode key", e.to_string()))?;
         let table_db = get_table_db(id, "table_db_load")?;
 
-        let out = table_db.load(col, &key).await?;
+        let out = table_db.load(col, Bytes::from(key)).await?;
         let out = out.map(|x| data_encoding::BASE64URL_NOPAD.encode(&x));
         VeilidAPIResult::Ok(out)
     })
@@ -1275,7 +1279,7 @@ pub fn table_db_delete(id: u32, col: u32, key: String) -> Promise {
             .map_err(|e| VeilidAPIError::parse_error("failed to decode key", e.to_string()))?;
         let table_db = get_table_db(id, "table_db_delete")?;
 
-        let out = table_db.delete(col, &key).await?;
+        let out = table_db.delete(col, Bytes::from(key)).await?;
         let out = out.map(|x| data_encoding::BASE64URL_NOPAD.encode(&x));
         VeilidAPIResult::Ok(out)
     })

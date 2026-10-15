@@ -19,6 +19,7 @@ use std::{backtrace::Backtrace, io::Write, os::raw::c_char, sync::Arc};
 use tracing::*;
 use tracing_flame::FlameLayer;
 use tracing_subscriber::prelude::*;
+use veilid_core::bytes::Bytes;
 use veilid_core::tools::*;
 use veilid_core::*;
 
@@ -1737,7 +1738,8 @@ pub extern "C" fn table_db_transaction_store(
             let value = base64_decode_opt(value)?;
             let tdbt = get_table_db_transaction(id, "table_db_transaction_store")?;
 
-            tdbt.store(col, &key, &value).await?;
+            tdbt.store(col, Bytes::from(key), Bytes::from(value))
+                .await?;
             VeilidAPIResult::Ok(())
         }
         .in_current_span(),
@@ -1753,7 +1755,7 @@ pub extern "C" fn table_db_transaction_delete(port: i64, id: u32, col: u32, key:
             let key = base64_decode_opt(key)?;
             let tdbt = get_table_db_transaction(id, "table_db_transaction_delete")?;
 
-            tdbt.delete(col, &key).await?;
+            tdbt.delete(col, Bytes::from(key)).await?;
             VeilidAPIResult::Ok(())
         }
         .in_current_span(),
@@ -1771,7 +1773,9 @@ pub extern "C" fn table_db_store(port: i64, id: u32, col: u32, key: FfiStr, valu
             let value = base64_decode_opt(value)?;
             let table_db = get_table_db(id, "table_db_store")?;
 
-            table_db.store(col, &key, &value).await?;
+            table_db
+                .store(col, Bytes::from(key), Bytes::from(value))
+                .await?;
             VeilidAPIResult::Ok(())
         }
         .in_current_span(),
@@ -1787,7 +1791,7 @@ pub extern "C" fn table_db_load(port: i64, id: u32, col: u32, key: FfiStr) {
             let key = base64_decode_opt(key)?;
             let table_db = get_table_db(id, "table_db_load")?;
 
-            let out = table_db.load(col, &key).await?;
+            let out = table_db.load(col, Bytes::from(key)).await?;
             let out = out.map(|x| data_encoding::BASE64URL_NOPAD.encode(&x));
             VeilidAPIResult::Ok(out)
         }
@@ -1804,7 +1808,7 @@ pub extern "C" fn table_db_delete(port: i64, id: u32, col: u32, key: FfiStr) {
             let key = base64_decode_opt(key)?;
             let table_db = get_table_db(id, "table_db_delete")?;
 
-            let out = table_db.delete(col, &key).await?;
+            let out = table_db.delete(col, Bytes::from(key)).await?;
             let out = out.map(|x| data_encoding::BASE64URL_NOPAD.encode(&x));
             VeilidAPIResult::Ok(out)
         }

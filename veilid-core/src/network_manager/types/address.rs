@@ -1,10 +1,11 @@
 use super::*;
 
 // Ordering here matters, IPV6 is preferred to IPV4 in dial info sorts
+// Text in every format: std's format-dependent encoding does not survive the tagged DialInfo
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Address {
-    IPV6(Ipv6Addr),
-    IPV4(Ipv4Addr),
+    IPV6(#[serde(with = "as_string")] Ipv6Addr),
+    IPV4(#[serde(with = "as_string")] Ipv4Addr),
 }
 
 impl Default for Address {

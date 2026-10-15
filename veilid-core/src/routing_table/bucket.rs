@@ -48,10 +48,11 @@ impl Bucket {
 
     pub(super) fn load_bucket(
         &mut self,
-        data: Vec<u8>,
+        serialized_object: &TableDBSerializedData,
         all_entries: &[Option<Arc<BucketEntry>>],
     ) -> EyreResult<()> {
-        let bucket_data: SerializedBucketData = deserialize_json_bytes(&data)?;
+        let table_store = self.registry().table_store();
+        let bucket_data: SerializedBucketData = table_store.try_deserialize(serialized_object)?;
 
         for e in bucket_data.entries {
             // Skip dangling indices and entries that were dropped on load (e.g. no valid
@@ -83,7 +84,7 @@ impl Bucket {
         &self,
         all_entries: &mut Vec<Arc<BucketEntry>>,
         entry_map: &mut HashMap<*const BucketEntry, u32>,
-    ) -> Vec<u8> {
+    ) -> TableDBSerializedData {
         let mut entries = Vec::new();
         for (k, v) in &self.entries {
             let entry_index = entry_map.entry(Arc::as_ptr(v)).or_insert_with(|| {
@@ -98,7 +99,7 @@ impl Bucket {
         }
         let bucket_data = SerializedBucketData { entries };
 
-        serialize_json_bytes(bucket_data)
+        serialize_table_value(&bucket_data)
     }
 
     /// Create a new entry with a node_id of this crypto kind and return it

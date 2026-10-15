@@ -12,8 +12,30 @@ cfg_if! {
 
 impl_veilid_log_facility!("tstore");
 
+pub(super) const VERSION_KEY: &[u8] = b"__veilid_schema_version";
+pub(super) const CURRENT_SCHEMA_VERSION: &[u8] = &[1];
+
+pub(super) const ENCRYPTION_KEY_HASH_KEY: &[u8] = b"__veilid_encryption_key_hash";
+pub(super) const MIGRATION_PROGRESS_KEY: &[u8] = b"__veilid_schema_migration_progress";
+/// Keys the table store keeps in column 0 of every table, unencrypted
+pub(super) const PLAINTEXT_INTERNAL_KEYS: &[&[u8]] =
+    &[VERSION_KEY, ENCRYPTION_KEY_HASH_KEY, MIGRATION_PROGRESS_KEY];
+
+/// Reject a stored key that would collide with one the table store keeps in plaintext.
+///
+/// Takes the key as stored, after encryption, since that is what sits next to the internal keys.
+pub(crate) fn check_plaintext_internal_key(key: &[u8]) -> VeilidAPIResult<()> {
+    for k in PLAINTEXT_INTERNAL_KEYS {
+        if key == *k {
+            return Err(VeilidAPIError::internal("internal TableDB key"));
+        }
+    }
+
+    Ok(())
+}
+
 #[must_use]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct CryptInfo {
     secret: SharedSecret,
 }
@@ -154,7 +176,6 @@ impl TableDB {
     }
 
     /// Estimate the storage size for a table entry
-    /// Overestimates size on disk because records are compressed in the tabledb
     /// Rough guess for sqlite based on their file format. Other databases may vary.
     ///
     /// Infallible on all supported targets (the `usize`→`u64` conversion only widens).
@@ -164,6 +185,7 @@ impl TableDB {
         key: &[u8],
         value: &[u8],
     ) -> VeilidAPIResult<u64> {
+        // TODO
         let size =
             // Count of fields byte
             1 +
@@ -180,122 +202,20 @@ impl TableDB {
             // Extra padding for max length and whatever else
             // XXX: at some point we should measure this on disk to figure out a better estimate :P
             4;
+        // TODO
         size.try_into().map_err(VeilidAPIError::internal)
-    }
-
-    /// Estimate the storage size for a table entry if it is json encoded
-    ///
-    /// Errors with `VeilidAPIError::Internal` if `value` fails to JSON-serialize.
-    pub fn estimate_storage_size_json<T>(
-        &self,
-        col: u32,
-        key: &[u8],
-        value: &T,
-    ) -> VeilidAPIResult<u64>
-    where
-        T: serde::Serialize,
-    {
-        let value_json = serde_json::to_vec(value).map_err(VeilidAPIError::internal)?;
-        self.estimate_storage_size(col, key, &value_json)
-    }
-
-    /// Encrypt buffer using encrypt key and prepend nonce to output.
-    /// Keyed nonces are unique because keys must be unique.
-    /// Normally they must be sequential or random, but the critical.
-    /// requirement is that they are different for each encryption
-    /// but if the contents are guaranteed to be unique, then a nonce
-    /// can be generated from the hash of the contents and the encryption key itself.
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "tstore", skip_all)
-    )]
-    pub(in crate::table_store) async fn maybe_encrypt(
-        &self,
-        data: &[u8],
-        keyed_nonce: bool,
-    ) -> Bytes {
-        let Some(ei) = &self.unlocked_inner.encrypt_info else {
-            return Bytes::copy_from_slice(data);
-        };
-
-        let crypto = self.crypto();
-        let vcrypto = crypto.get_async(ei.secret.kind()).unwrap_or_log();
-        let mut out = BytesMut::zeroed(vcrypto.nonce_length() + data.len());
-
-        if keyed_nonce {
-            // Key content nonce
-            let mut noncedata = BytesMut::with_capacity(data.len() + ei.secret.ref_value().len());
-            noncedata.extend_from_slice(data);
-            noncedata.extend_from_slice(ei.secret.ref_value());
-            let noncehash = vcrypto.generate_hash(noncedata.freeze()).await.value();
-            // Key content nonce is first 'nonce_length' bytes of generated hash
-            out.as_mut()[0..vcrypto.nonce_length()]
-                .copy_from_slice(&noncehash.as_ref()[0..vcrypto.nonce_length()]);
-        } else {
-            // Random nonce
-            random_bytes(&mut out[0..vcrypto.nonce_length()]);
-        }
-        let nonce = Nonce::new(&out[0..vcrypto.nonce_length()]);
-
-        let out = vcrypto
-            .crypt_b2b_no_auth(
-                Bytes::copy_from_slice(data),
-                out,
-                vcrypto.nonce_length(),
-                &nonce,
-                &ei.secret,
-            )
-            .await
-            .unwrap_or_log();
-
-        out.freeze()
-    }
-
-    /// Decrypt buffer using decrypt key with nonce prepended to input
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "tstore", skip_all)
-    )]
-    pub(in crate::table_store) async fn maybe_decrypt(
-        &self,
-        data: &[u8],
-    ) -> std::io::Result<Bytes> {
-        let Some(di) = &self.unlocked_inner.decrypt_info else {
-            return Ok(Bytes::copy_from_slice(data));
-        };
-
-        let crypto = self.crypto();
-        let vcrypto = crypto.get_async(di.secret.kind()).unwrap_or_log();
-        if data.len() < vcrypto.nonce_length() {
-            veilid_log!(self error "maybe_decrypt: data too short for nonce: {} < {}", data.len(), vcrypto.nonce_length());
-            return Err(std::io::Error::other("data too short for nonce"));
-        }
-        if data.len() == vcrypto.nonce_length() {
-            return Ok(Bytes::new());
-        }
-
-        let out = BytesMut::zeroed(data.len() - vcrypto.nonce_length());
-        let mut data = Bytes::copy_from_slice(data);
-        let data_start = data.split_to(vcrypto.nonce_length());
-
-        let out = vcrypto
-            .crypt_b2b_no_auth(data, out, 0, &Nonce::new(data_start.as_ref()), &di.secret)
-            .await
-            .unwrap_or_log();
-
-        Ok(out.freeze())
     }
 
     /// Get the list of keys in a column of the TableDB
     ///
     /// Blocks on on-disk reads.
     ///
-    /// Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store read fails, or if a stored key fails to decompress (wrong device encryption key or corrupt data).
+    /// Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store read fails, or if a stored key is too short to decrypt (corrupt data).
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    pub async fn get_keys(&self, col: u32) -> VeilidAPIResult<Vec<Vec<u8>>> {
+    pub async fn get_keys(&self, col: u32) -> VeilidAPIResult<Vec<Bytes>> {
         if col >= self.opened_column_count {
             apibail_generic!(
                 "Column exceeds opened column count {} >= {}",
@@ -305,10 +225,9 @@ impl TableDB {
         }
         let db = self.unlocked_inner.database.clone();
         let out = Vec::new();
-        let (mut out, _) = db
+        let (out, _) = db
             .iter_keys(col, None, out, |out, ekey| {
-                //let key = self.maybe_decrypt(k).await?;
-                out.push(ekey.clone());
+                out.push(Bytes::copy_from_slice(ekey));
                 Ok(Option::<()>::None)
             })
             .await
@@ -317,23 +236,17 @@ impl TableDB {
         #[cfg(feature = "verbose-tracing")]
         veilid_log!(self debug "TableDB::get_keys({}) col={}: read {} raw keys", self.unlocked_inner.table, col, out.len());
 
-        let max_value_size = self.config().table_store.max_value_size_mb as usize * 1024 * 1024;
-        for (idx, k) in out.iter_mut().enumerate() {
-            let raw_len = k.len();
-            let decrypted = self.maybe_decrypt(k).await.map_err(|e| {
-                let msg = format!("idx={} maybe_decrypt failed (raw_len={}): {}", idx, raw_len, e);
-                veilid_log!(self warn "TableDB::get_keys({}) col={} {}", self.unlocked_inner.table, col, msg);
-                VeilidAPIError::generic(msg)
-            })?;
-            let decompressed = decompress_size_prepended(&decrypted, max_value_size).map_err(|e| {
-                let preview: Vec<u8> = decrypted.as_ref()[..decrypted.len().min(16)].to_vec();
-                let msg = format!("idx={} decompress failed (raw_len={} decrypted_len={} first_bytes={:02x?}): {}", idx, raw_len, decrypted.len(), preview, e);
-                veilid_log!(self warn "TableDB::get_keys({}) col={} {}", self.unlocked_inner.table, col, msg);
-                std::io::Error::other(msg)
-            })?;
-            *k = decompressed;
+        let crypto = self.crypto();
+        let dk = &self.unlocked_inner.decrypt_info.clone().map(|ei| ei.secret);
+
+        let mut keys = Vec::with_capacity(out.len());
+        for k in out {
+            if check_plaintext_internal_key(&k).is_ok() {
+                keys.push(table_store::maybe_decrypt(&crypto, dk, k).await?);
+            }
         }
-        Ok(out)
+
+        Ok(keys)
     }
 
     /// Get the number of keys in a column of the TableDB
@@ -354,7 +267,18 @@ impl TableDB {
             );
         }
         let db = self.unlocked_inner.database.clone();
-        let key_count = db.num_keys(col).await.map_err(VeilidAPIError::from)?;
+        let mut key_count = db.num_keys(col).await.map_err(VeilidAPIError::from)?;
+        if col == 0 {
+            for internal_key in PLAINTEXT_INTERNAL_KEYS {
+                if db
+                    .has_key(0, internal_key)
+                    .await
+                    .map_err(VeilidAPIError::from)?
+                {
+                    key_count = key_count.saturating_sub(1);
+                }
+            }
+        }
         Ok(key_count)
     }
 
@@ -380,7 +304,7 @@ impl TableDB {
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    pub async fn store(&self, col: u32, key: &[u8], value: &[u8]) -> VeilidAPIResult<()> {
+    pub async fn store(&self, col: u32, key: Bytes, value: Bytes) -> VeilidAPIResult<()> {
         if col >= self.opened_column_count {
             apibail_generic!(
                 "Column exceeds opened column count {} >= {}",
@@ -388,46 +312,46 @@ impl TableDB {
                 self.opened_column_count
             );
         }
+
+        let crypto = self.crypto();
+        let ek = &self.unlocked_inner.encrypt_info.clone().map(|ei| ei.secret);
+        let encrypted_key = table_store::maybe_encrypt(&crypto, ek, key, true).await;
+        check_plaintext_internal_key(&encrypted_key)?;
+        let encrypted_value = table_store::maybe_encrypt(&crypto, ek, value, false).await;
+
         let db = self.unlocked_inner.database.clone();
         let mut dbt = db.transaction();
-        dbt.put(
-            col,
-            self.maybe_encrypt(&compress_prepend_size(key), true).await,
-            self.maybe_encrypt(&compress_prepend_size(value), false)
-                .await,
-        );
+        dbt.put_owned(col, Vec::from(encrypted_key), Vec::from(encrypted_value));
         db.write(dbt)
             .await
             .map_err(|e| VeilidAPIError::generic(format!("failed to store: {}", e)))
     }
 
-    /// Store a key in json format with a value in a column in the TableDB. Performs a single transaction immediately.
+    /// Store a key in serialized format with a value in a column in the TableDB. Performs a single transaction immediately.
     ///
     /// Blocks on the on-disk write.
     ///
-    /// Errors with `VeilidAPIError::Internal` if `value` fails to JSON-serialize, otherwise the same errors as `store`.
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "tstore", skip_all)
-    )]
-    pub async fn store_json<T>(&self, col: u32, key: &[u8], value: &T) -> VeilidAPIResult<()>
-    where
-        T: serde::Serialize,
-    {
-        let value = serde_json::to_vec(value).map_err(VeilidAPIError::internal)?;
-        self.store(col, key, &value).await
+    /// Returns same errors as `store`.
+    #[instrument(level = "trace", target = "tstore", skip_all)]
+    pub(crate) async fn store_serialized(
+        &self,
+        col: u32,
+        key: Bytes,
+        value: TableDBSerializedData,
+    ) -> VeilidAPIResult<()> {
+        self.store(col, key, value.0).await
     }
 
     /// Read a key from a column in the TableDB immediately.
     ///
     /// Blocks on the on-disk read.
     ///
-    /// Returns `Ok(None)` if the key is absent. Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store read fails, or if the stored value fails to decompress (wrong device encryption key or corrupt data).
+    /// Returns `Ok(None)` if the key is absent. Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store read fails, or if the stored value is too short to decrypt (corrupt data).
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    pub async fn load(&self, col: u32, key: &[u8]) -> VeilidAPIResult<Option<Vec<u8>>> {
+    pub async fn load(&self, col: u32, key: Bytes) -> VeilidAPIResult<Option<Bytes>> {
         if col >= self.opened_column_count {
             apibail_generic!(
                 "Column exceeds opened column count {} >= {}",
@@ -435,51 +359,52 @@ impl TableDB {
                 self.opened_column_count
             );
         }
+
+        let crypto = self.crypto();
+        let ek = &self.unlocked_inner.encrypt_info.clone().map(|ei| ei.secret);
+        let dk = &self.unlocked_inner.decrypt_info.clone().map(|di| di.secret);
+        let encrypted_key = table_store::maybe_encrypt(&crypto, ek, key, true).await;
+        check_plaintext_internal_key(&encrypted_key)?;
+
         let db = self.unlocked_inner.database.clone();
-        let key = self.maybe_encrypt(&compress_prepend_size(key), true).await;
-        let max_value_size = self.config().table_store.max_value_size_mb as usize * 1024 * 1024;
-        match db.get(col, &key).await.map_err(VeilidAPIError::from)? {
+        match db
+            .get(col, &encrypted_key)
+            .await
+            .map_err(VeilidAPIError::from)?
+        {
             Some(v) => Ok(Some(
-                decompress_size_prepended(
-                    &self.maybe_decrypt(&v).await.map_err(VeilidAPIError::from)?,
-                    max_value_size,
-                )
-                .map_err(|e| std::io::Error::other(e.to_string()))?,
+                table_store::maybe_decrypt(&crypto, dk, Bytes::from(v)).await?,
             )),
             None => Ok(None),
         }
     }
 
-    /// Read an serde-json key from a column in the TableDB immediately
+    /// Read an serialized value from a column in the TableDB immediately
     ///
     /// Blocks on the on-disk read.
     ///
-    /// Errors with `VeilidAPIError::Internal` if the stored value fails to JSON-deserialize into `T`, otherwise the same errors as `load`.
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "tstore", skip_all)
-    )]
-    pub async fn load_json<T>(&self, col: u32, key: &[u8]) -> VeilidAPIResult<Option<T>>
-    where
-        T: for<'de> serde::Deserialize<'de>,
-    {
-        let out = match self.load(col, key).await? {
-            Some(v) => Some(serde_json::from_slice(&v).map_err(VeilidAPIError::internal)?),
-            None => None,
-        };
-        Ok(out)
+    /// Returns same errors as `load`.
+    #[instrument(level = "trace", target = "tstore", skip_all)]
+    pub(crate) async fn load_serialized(
+        &self,
+        col: u32,
+        key: Bytes,
+    ) -> VeilidAPIResult<Option<TableDBSerializedData>> {
+        self.load(col, key)
+            .await
+            .map(|opt_value| opt_value.map(TableDBSerializedData))
     }
 
     /// Delete key with from a column in the TableDB
     ///
     /// Blocks on the on-disk write.
     ///
-    /// Returns `Ok(None)` if the key was absent. Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store delete fails, or if the prior value fails to decompress (wrong device encryption key or corrupt data).
+    /// Returns `Ok(None)` if the key was absent. Errors with `VeilidAPIError::Generic` if `col` is at or above the opened column count, if the backing-store delete fails, or if the prior value is too short to decrypt (corrupt data).
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    pub async fn delete(&self, col: u32, key: &[u8]) -> VeilidAPIResult<Option<Vec<u8>>> {
+    pub async fn delete(&self, col: u32, key: Bytes) -> VeilidAPIResult<Option<Bytes>> {
         if col >= self.opened_column_count {
             apibail_generic!(
                 "Column exceeds opened column count {} >= {}",
@@ -487,41 +412,25 @@ impl TableDB {
                 self.opened_column_count
             );
         }
-        let key = self.maybe_encrypt(&compress_prepend_size(key), true).await;
+
+        let crypto = self.crypto();
+        let ek = &self.unlocked_inner.encrypt_info.clone().map(|ei| ei.secret);
+        let dk = &self.unlocked_inner.decrypt_info.clone().map(|di| di.secret);
+        let encrypted_key = table_store::maybe_encrypt(&crypto, ek, key, true).await;
+        check_plaintext_internal_key(&encrypted_key)?;
 
         let db = self.unlocked_inner.database.clone();
 
-        let max_value_size = self.config().table_store.max_value_size_mb as usize * 1024 * 1024;
-        match db.delete(col, &key).await.map_err(VeilidAPIError::from)? {
+        match db
+            .delete(col, &encrypted_key)
+            .await
+            .map_err(VeilidAPIError::from)?
+        {
             Some(v) => Ok(Some(
-                decompress_size_prepended(
-                    &self.maybe_decrypt(&v).await.map_err(VeilidAPIError::from)?,
-                    max_value_size,
-                )
-                .map_err(|e| std::io::Error::other(e.to_string()))?,
+                table_store::maybe_decrypt(&crypto, dk, Bytes::from(v)).await?,
             )),
             None => Ok(None),
         }
-    }
-
-    /// Delete serde-json key with from a column in the TableDB
-    ///
-    /// Blocks on the on-disk write.
-    ///
-    /// Errors with `VeilidAPIError::Internal` if the prior value fails to JSON-deserialize into `T`, otherwise the same errors as `delete`.
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "tstore", skip_all)
-    )]
-    pub async fn delete_json<T>(&self, col: u32, key: &[u8]) -> VeilidAPIResult<Option<T>>
-    where
-        T: for<'de> serde::Deserialize<'de>,
-    {
-        let old_value = match self.delete(col, key).await? {
-            Some(v) => Some(serde_json::from_slice(&v).map_err(VeilidAPIError::internal)?),
-            None => None,
-        };
-        Ok(old_value)
     }
 }
 
@@ -645,7 +554,7 @@ impl TableDBTransaction {
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    pub async fn store(&self, col: u32, key: &[u8], value: &[u8]) -> VeilidAPIResult<()> {
+    pub async fn store(&self, col: u32, key: Bytes, value: Bytes) -> VeilidAPIResult<()> {
         if col >= self.db.opened_column_count {
             apibail_generic!(
                 "Column exceeds opened column count {} >= {}",
@@ -654,38 +563,41 @@ impl TableDBTransaction {
             );
         }
 
-        let key = self
+        let crypto = self.db.crypto();
+        let ek = &self
             .db
-            .maybe_encrypt(&compress_prepend_size(key), true)
-            .await;
-        let value = self
-            .db
-            .maybe_encrypt(&compress_prepend_size(value), false)
-            .await;
+            .unlocked_inner
+            .encrypt_info
+            .clone()
+            .map(|ei| ei.secret);
+        let key = table_store::maybe_encrypt(&crypto, ek, key, true).await;
+        check_plaintext_internal_key(&key)?;
+        let value = table_store::maybe_encrypt(&crypto, ek, value, false).await;
         let mut inner = self.inner.lock();
         inner
             .dbt
             .as_mut()
             .ok_or_else(|| VeilidAPIError::generic("store failed, transaction already completed"))?
-            .put_owned(col, key.to_vec(), value.to_vec());
+            .put_owned(col, Vec::from(key), Vec::from(value));
         Ok(())
     }
 
-    /// Store a key in json format with a value in a column in the TableDB
+    /// Store a key in serialized format with a value in a column in the TableDB
     ///
     /// Buffers the write into the transaction without touching disk; errors if the transaction is already committed or rolled back.
     ///
-    /// Errors with `VeilidAPIError::Internal` if `value` fails to JSON-serialize, otherwise the same errors as `store`.
+    /// Returns same errors as `store`.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    pub async fn store_json<T>(&self, col: u32, key: &[u8], value: &T) -> VeilidAPIResult<()>
-    where
-        T: serde::Serialize,
-    {
-        let value = serde_json::to_vec(value).map_err(VeilidAPIError::internal)?;
-        self.store(col, key, &value).await
+    pub(crate) async fn store_serialized(
+        &self,
+        col: u32,
+        key: Bytes,
+        value: TableDBSerializedData,
+    ) -> VeilidAPIResult<()> {
+        self.store(col, key, value.0).await
     }
 
     /// Delete key with from a column in the TableDB
@@ -697,7 +609,7 @@ impl TableDBTransaction {
         feature = "instrument",
         instrument(level = "trace", target = "tstore", skip_all)
     )]
-    pub async fn delete(&self, col: u32, key: &[u8]) -> VeilidAPIResult<()> {
+    pub async fn delete(&self, col: u32, key: Bytes) -> VeilidAPIResult<()> {
         if col >= self.db.opened_column_count {
             apibail_generic!(
                 "Column exceeds opened column count {} >= {}",
@@ -706,16 +618,21 @@ impl TableDBTransaction {
             );
         }
 
-        let key = self
+        let crypto = self.db.crypto();
+        let ek = &self
             .db
-            .maybe_encrypt(&compress_prepend_size(key), true)
-            .await;
+            .unlocked_inner
+            .encrypt_info
+            .clone()
+            .map(|ei| ei.secret);
+        let key = table_store::maybe_encrypt(&crypto, ek, key, true).await;
+        check_plaintext_internal_key(&key)?;
         let mut inner = self.inner.lock();
         inner
             .dbt
             .as_mut()
             .ok_or_else(|| VeilidAPIError::generic("delete failed, transaction already completed"))?
-            .delete_owned(col, key.to_vec());
+            .delete_owned(col, Vec::from(key));
         Ok(())
     }
 }

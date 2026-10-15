@@ -23,7 +23,8 @@ pub const RELAY_MANAGEMENT_INTERVAL_SECS: u32 = 1;
 pub const PRIVATE_ROUTE_MANAGEMENT_INTERVAL_SECS: u32 = 1;
 
 /// Table store key for the PublicInternet routing domain persisted state
-const PUBLIC_INTERNET_PERSISTED_STATE_KEY: &[u8] = b"public_internet_persisted_state";
+const PUBLIC_INTERNET_PERSISTED_STATE_KEY: Bytes =
+    Bytes::from_static(b"public_internet_persisted_state");
 
 /// PublicInternet routing domain state that survives across restarts
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -263,11 +264,15 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
 
     fn load<'a>(&'a self, db: &'a TableDB) -> PinBoxFuture<'a, EyreResult<()>> {
         Box::pin(async move {
-            let Some(persisted): Option<PublicInternetPersistedState> =
-                db.load_json(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY).await?
+            let Some(serialized) = db
+                .load_serialized(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY)
+                .await?
             else {
                 return Ok(());
             };
+            let table_store = self.registry().table_store();
+            let persisted: PublicInternetPersistedState =
+                table_store.try_deserialize(&serialized)?;
             let lwm = Arc::new(persisted.low_water_mark);
             let detail = self.read_dyn();
             detail.reset_low_water_mark();
@@ -290,18 +295,28 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
                 low_water_mark,
                 bootstrap,
             };
-            dbx.store_json(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY, &persisted)
+            let serialized = serialize_table_value(&persisted);
+            dbx.store_serialized(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY, serialized)
                 .await?;
             Ok(())
         })
     }
 
     fn persisted_state_requires_reset<'a>(&'a self, db: &'a TableDB) -> PinBoxFuture<'a, bool> {
+        let table_store = self.registry().table_store();
+
         Box::pin(async move {
-            let persisted: Option<PublicInternetPersistedState> = db
-                .load_json(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY)
-                .await
-                .unwrap_or_default();
+            let serialized = db
+                .load_serialized(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY)
+                .await;
+
+            let persisted: Option<PublicInternetPersistedState> = match serialized {
+                Ok(None) | Err(_) => Default::default(),
+                Ok(Some(serialized)) => {
+                    table_store.try_deserialize(&serialized).unwrap_or_default()
+                }
+            };
+
             persisted_requires_reset(persisted.as_ref(), &self.config().network.routing_table)
         })
     }

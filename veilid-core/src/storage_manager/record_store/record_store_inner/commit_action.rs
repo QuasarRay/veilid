@@ -115,7 +115,10 @@ where
                         new_record: record,
                         new_record_size: _,
                     } => {
-                        rt_xact.store_json(0, &rtk.bytes(), &record).await?;
+                        let serialized = serialize_table_value(&record);
+                        rt_xact
+                            .store_serialized(0, Bytes::from(rtk.bytes()), serialized)
+                            .await?;
                     }
                     UncommittedRecordChange::Update {
                         new_record,
@@ -123,30 +126,39 @@ where
                         old_record: _,
                         old_record_size: _,
                     } => {
-                        rt_xact.store_json(0, &rtk.bytes(), &new_record).await?;
+                        let serialized = serialize_table_value(&new_record);
+                        rt_xact
+                            .store_serialized(0, Bytes::from(rtk.bytes()), serialized)
+                            .await?;
                     }
                     UncommittedRecordChange::Delete {
                         old_record: _,
                         old_record_size: _,
                         is_lru: _,
-                    } => rt_xact.delete(0, &rtk.bytes()).await?,
+                    } => rt_xact.delete(0, Bytes::from(rtk.bytes())).await?,
                 }
             }
             for (stk, usc) in self.uncommitted_subkey_changes.iter() {
                 match usc {
                     UncommittedSubkeyChange::Create { new_data: data } => {
-                        st_xact.store_json(0, &stk.bytes(), &data).await?;
+                        let serialized = serialize_table_value(&data);
+                        st_xact
+                            .store_serialized(0, Bytes::from(stk.bytes()), serialized)
+                            .await?;
                     }
                     UncommittedSubkeyChange::Update {
                         new_data,
                         opt_old_data: _,
                     } => {
-                        st_xact.store_json(0, &stk.bytes(), &new_data).await?;
+                        let serialized = serialize_table_value(&new_data);
+                        st_xact
+                            .store_serialized(0, Bytes::from(stk.bytes()), serialized)
+                            .await?;
                     }
                     UncommittedSubkeyChange::Delete {
                         opt_old_data: _,
                         is_lru: _,
-                    } => st_xact.delete(0, &stk.bytes()).await?,
+                    } => st_xact.delete(0, Bytes::from(stk.bytes())).await?,
                 }
             }
             Ok(())

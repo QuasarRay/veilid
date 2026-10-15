@@ -691,10 +691,10 @@ impl StorageManager {
         self.metadata_save_schedule.lock().saving(Timestamp::now());
         let (
             metadata_db,
-            offline_subkey_writes_json,
-            outbound_watch_manager_json,
-            rehydration_requests_json,
-            descriptor_cache_json,
+            offline_subkey_writes,
+            outbound_watch_manager,
+            rehydration_requests,
+            descriptor_cache,
         ) = {
             let descriptor_cache = self
                 .descriptor_cache
@@ -708,34 +708,30 @@ impl StorageManager {
                 return Ok(());
             };
 
-            let offline_subkey_writes_json = serde_json::to_vec(&inner.offline_subkey_writes)
-                .map_err(VeilidAPIError::internal)?;
-            let outbound_watch_manager_json =
-                serde_json::to_vec(&*self.outbound_watch_manager.lock())
-                    .map_err(VeilidAPIError::internal)?;
-            let rehydration_requests_json = serde_json::to_vec(&inner.rehydration_requests)
-                .map_err(VeilidAPIError::internal)?;
-            let descriptor_cache_json =
-                serde_json::to_vec(&descriptor_cache).map_err(VeilidAPIError::internal)?;
+            let offline_subkey_writes = serialize_table_value(&inner.offline_subkey_writes);
+            let outbound_watch_manager =
+                serialize_table_value(&*self.outbound_watch_manager.lock());
+            let rehydration_requests = serialize_table_value(&inner.rehydration_requests);
+            let descriptor_cache = serialize_table_value(&descriptor_cache);
 
             (
                 metadata_db,
-                offline_subkey_writes_json,
-                outbound_watch_manager_json,
-                rehydration_requests_json,
-                descriptor_cache_json,
+                offline_subkey_writes,
+                outbound_watch_manager,
+                rehydration_requests,
+                descriptor_cache,
             )
         };
 
         let tx = metadata_db.transact();
 
-        tx.store(0, OFFLINE_SUBKEY_WRITES, &offline_subkey_writes_json)
+        tx.store_serialized(0, OFFLINE_SUBKEY_WRITES, offline_subkey_writes)
             .await?;
-        tx.store(0, OUTBOUND_WATCH_MANAGER, &outbound_watch_manager_json)
+        tx.store_serialized(0, OUTBOUND_WATCH_MANAGER, outbound_watch_manager)
             .await?;
-        tx.store(0, REHYDRATION_REQUESTS, &rehydration_requests_json)
+        tx.store_serialized(0, REHYDRATION_REQUESTS, rehydration_requests)
             .await?;
-        tx.store(0, DESCRIPTOR_CACHE, &descriptor_cache_json)
+        tx.store_serialized(0, DESCRIPTOR_CACHE, descriptor_cache)
             .await?;
 
         tx.commit().await.wrap_err("failed to commit")?;
@@ -786,45 +782,71 @@ impl StorageManager {
             bail!("metadata db should exist");
         };
 
-        let offline_subkey_writes = match metadata_db.load_json(0, OFFLINE_SUBKEY_WRITES).await {
-            Ok(v) => v.unwrap_or_default(),
-            Err(_) => {
+        let table_store = self.registry().table_store();
+        let offline_subkey_writes = match metadata_db
+            .load_serialized(0, OFFLINE_SUBKEY_WRITES)
+            .await
+            .map(|ok| ok.map(|v| table_store.try_deserialize(&v)))
+        {
+            // Value not found
+            Ok(None) => Default::default(),
+            // Value found, parsed
+            Ok(Some(Ok(v))) => v,
+            // Value found, parse error
+            Ok(Some(Err(_))) => {
                 if let Err(e) = metadata_db.delete(0, OFFLINE_SUBKEY_WRITES).await {
                     veilid_log!(self debug "offline_subkey_writes format changed, clearing: {}", e);
                 }
                 Default::default()
             }
+            // TableDB error
+            Err(_) => Default::default(),
         };
-        let outbound_watch_manager = match metadata_db.load_json(0, OUTBOUND_WATCH_MANAGER).await {
-            Ok(v) => v.unwrap_or_default(),
-            Err(_) => {
+        let outbound_watch_manager = match metadata_db
+            .load_serialized(0, OUTBOUND_WATCH_MANAGER)
+            .await
+            .map(|ok| ok.map(|v| table_store.try_deserialize(&v)))
+        {
+            Ok(None) => Default::default(),
+            Ok(Some(Ok(v))) => v,
+            Ok(Some(Err(_))) => {
                 if let Err(e) = metadata_db.delete(0, OUTBOUND_WATCH_MANAGER).await {
                     veilid_log!(self debug "outbound_watch_manager format changed, clearing: {}", e);
                 }
                 Default::default()
             }
+            Err(_) => Default::default(),
         };
 
-        let rehydration_requests = match metadata_db.load_json(0, REHYDRATION_REQUESTS).await {
-            Ok(v) => v.unwrap_or_default(),
-            Err(_) => {
+        let rehydration_requests = match metadata_db
+            .load_serialized(0, REHYDRATION_REQUESTS)
+            .await
+            .map(|ok| ok.map(|v| table_store.try_deserialize(&v)))
+        {
+            Ok(None) => Default::default(),
+            Ok(Some(Ok(v))) => v,
+            Ok(Some(Err(_))) => {
                 if let Err(e) = metadata_db.delete(0, REHYDRATION_REQUESTS).await {
                     veilid_log!(self debug "rehydration_requests format changed, clearing: {}", e);
                 }
                 Default::default()
             }
+            Err(_) => Default::default(),
         };
-        let descriptor_cache_keys = match metadata_db
-            .load_json::<Vec<DescriptorCacheKey>>(0, DESCRIPTOR_CACHE)
+        let descriptor_cache_keys: Vec<DescriptorCacheKey> = match metadata_db
+            .load_serialized(0, DESCRIPTOR_CACHE)
             .await
+            .map(|ok| ok.map(|v| table_store.try_deserialize(&v)))
         {
-            Ok(v) => v.unwrap_or_default(),
-            Err(_) => {
+            Ok(None) => Default::default(),
+            Ok(Some(Ok(v))) => v,
+            Ok(Some(Err(_))) => {
                 if let Err(e) = metadata_db.delete(0, DESCRIPTOR_CACHE).await {
                     veilid_log!(self debug "descriptor_cache format changed, clearing: {}", e);
                 }
                 Default::default()
             }
+            Err(_) => Default::default(),
         };
 
         {

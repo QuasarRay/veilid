@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 use super::*;
+use veilid_core::bytes::Bytes;
 
 /// A handle to an opened encrypted key-value table.
 #[wasm_bindgen()]
@@ -85,7 +86,7 @@ impl VeilidTableDB {
     ///
     /// Opens the table if needed, then awaits a disk read.
     ///
-    /// Returns `undefined` if the key is absent. Throws the same error its core twin `TableDB::load` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store read fails, or the stored value fails to decrypt or decompress. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
+    /// Returns `undefined` if the key is absent. Throws the same error its core twin `TableDB::load` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store read fails, or the stored value is too short to decrypt. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
     pub async fn load(
         &mut self,
         columnId: u32,
@@ -94,8 +95,8 @@ impl VeilidTableDB {
         self.ensureOpen().await;
         let table_db = self.getTableDB()?;
 
-        let out = table_db.load(columnId, &key).await?;
-        let out = out.map(|out| Uint8Array::from(out.as_slice()));
+        let out = table_db.load(columnId, Bytes::from(key)).await?;
+        let out = out.map(|out| Uint8Array::from(out.as_ref()));
         Ok(out)
     }
 
@@ -114,14 +115,16 @@ impl VeilidTableDB {
         self.ensureOpen().await;
         let table_db = self.getTableDB()?;
 
-        table_db.store(columnId, &key, &value).await
+        table_db
+            .store(columnId, Bytes::from(key), Bytes::from(value))
+            .await
     }
 
     /// Delete key with from a column in the TableDB.
     ///
     /// Opens the table if needed, then awaits a disk write.
     ///
-    /// Returns `undefined` if the key was absent. Throws the same error its core twin `TableDB::delete` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store delete fails, or the prior value fails to decrypt or decompress. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
+    /// Returns `undefined` if the key was absent. Throws the same error its core twin `TableDB::delete` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store delete fails, or the prior value is too short to decrypt. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
     pub async fn delete(
         &mut self,
         columnId: u32,
@@ -130,8 +133,8 @@ impl VeilidTableDB {
         self.ensureOpen().await;
         let table_db = self.getTableDB()?;
 
-        let out = table_db.delete(columnId, &key).await?;
-        let out = out.map(|out| Uint8Array::from(out.as_slice()));
+        let out = table_db.delete(columnId, Bytes::from(key)).await?;
+        let out = out.map(|out| Uint8Array::from(out.as_ref()));
         Ok(out)
     }
 
@@ -141,7 +144,7 @@ impl VeilidTableDB {
     ///
     /// Opens the table if needed, then awaits a disk read.
     ///
-    /// Throws the same error its core twin `TableDB::get_keys` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store read fails, or a stored key fails to decrypt or decompress. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
+    /// Throws the same error its core twin `TableDB::get_keys` returns: `Generic` if `columnId` is at or above the opened column count, the backing-store read fails, or a stored key is too short to decrypt. Throws `Generic` if the table could not be opened, and `NotInitialized` if the node is not started.
     pub async fn getKeys(&mut self, columnId: u32) -> VeilidAPIResult<Uint8ArrayArray> {
         self.ensureOpen().await;
         let table_db = self.getTableDB()?;
@@ -149,7 +152,7 @@ impl VeilidTableDB {
         let keys = table_db.clone().get_keys(columnId).await?;
         let out: Vec<Uint8Array> = keys
             .into_iter()
-            .map(|k| Uint8Array::from(k.as_slice()))
+            .map(|k| Uint8Array::from(k.as_ref()))
             .collect();
 
         let out = into_unchecked_uint8array_array(out);
@@ -217,7 +220,9 @@ impl VeilidTableDBTransaction {
     /// Throws the same error its core twin `TableDBTransaction::store` returns: `Generic` if `col` is at or above the opened column count, or if this transaction was already committed or rolled back.
     pub async fn store(&self, col: u32, key: Box<[u8]>, value: Box<[u8]>) -> VeilidAPIResult<()> {
         let transaction = self.getTransaction()?;
-        transaction.store(col, &key, &value).await
+        transaction
+            .store(col, Bytes::from(key), Bytes::from(value))
+            .await
     }
 
     /// Delete key with from a column in the TableDB
@@ -226,6 +231,6 @@ impl VeilidTableDBTransaction {
     /// Throws the same error its core twin `TableDBTransaction::delete` returns: `Generic` if `col` is at or above the opened column count, or if this transaction was already committed or rolled back.
     pub async fn deleteKey(&self, col: u32, key: Box<[u8]>) -> VeilidAPIResult<()> {
         let transaction = self.getTransaction()?;
-        transaction.delete(col, &key).await
+        transaction.delete(col, Bytes::from(key)).await
     }
 }

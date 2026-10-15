@@ -3,7 +3,7 @@ use super::*;
 /// A table's columns, shared by every handle opened on the same name.
 #[derive(Debug, Default)]
 struct MockTableInner {
-    columns: Vec<HashMap<Vec<u8>, Vec<u8>>>,
+    columns: Vec<HashMap<Bytes, Bytes>>,
 }
 
 impl MockTableInner {
@@ -14,13 +14,13 @@ impl MockTableInner {
         }
     }
 
-    fn column(&self, col: u32) -> VeilidAPIResult<&HashMap<Vec<u8>, Vec<u8>>> {
+    fn column(&self, col: u32) -> VeilidAPIResult<&HashMap<Bytes, Bytes>> {
         self.columns
             .get(col as usize)
             .ok_or_else(|| VeilidAPIError::generic("invalid column"))
     }
 
-    fn column_mut(&mut self, col: u32) -> VeilidAPIResult<&mut HashMap<Vec<u8>, Vec<u8>>> {
+    fn column_mut(&mut self, col: u32) -> VeilidAPIResult<&mut HashMap<Bytes, Bytes>> {
         self.columns
             .get_mut(col as usize)
             .ok_or_else(|| VeilidAPIError::generic("invalid column"))
@@ -71,23 +71,9 @@ impl TableDB {
         size.try_into().map_err(VeilidAPIError::internal)
     }
 
-    /// Estimate the storage size for a table entry if it is json encoded.
-    pub fn estimate_storage_size_json<T>(
-        &self,
-        col: u32,
-        key: &[u8],
-        value: &T,
-    ) -> VeilidAPIResult<u64>
-    where
-        T: serde::Serialize,
-    {
-        let value_json = serde_json::to_vec(value).map_err(VeilidAPIError::internal)?;
-        self.estimate_storage_size(col, key, &value_json)
-    }
-
     /// Get the list of keys in a column.
     #[expect(clippy::unused_async)]
-    pub async fn get_keys(&self, col: u32) -> VeilidAPIResult<Vec<Vec<u8>>> {
+    pub async fn get_keys(&self, col: u32) -> VeilidAPIResult<Vec<Bytes>> {
         self.check_col(col)?;
         let inner = self.inner.lock();
         Ok(inner.column(col)?.keys().cloned().collect())
@@ -109,68 +95,33 @@ impl TableDB {
 
     /// Store a key with a value in a column.
     #[expect(clippy::unused_async)]
-    pub async fn store(&self, col: u32, key: &[u8], value: &[u8]) -> VeilidAPIResult<()> {
+    pub async fn store(&self, col: u32, key: Bytes, value: Bytes) -> VeilidAPIResult<()> {
         self.check_col(col)?;
         let mut inner = self.inner.lock();
-        inner.column_mut(col)?.insert(key.to_vec(), value.to_vec());
+        inner.column_mut(col)?.insert(key, value);
         Ok(())
-    }
-
-    /// Store a key with a JSON-encoded value in a column.
-    pub async fn store_json<T>(&self, col: u32, key: &[u8], value: &T) -> VeilidAPIResult<()>
-    where
-        T: serde::Serialize,
-    {
-        let value = serde_json::to_vec(value).map_err(VeilidAPIError::internal)?;
-        self.store(col, key, &value).await
     }
 
     /// Read a key from a column, or `None` if it is absent.
     #[expect(clippy::unused_async)]
-    pub async fn load(&self, col: u32, key: &[u8]) -> VeilidAPIResult<Option<Vec<u8>>> {
+    pub async fn load(&self, col: u32, key: Bytes) -> VeilidAPIResult<Option<Bytes>> {
         self.check_col(col)?;
         let inner = self.inner.lock();
-        Ok(inner.column(col)?.get(key).cloned())
-    }
-
-    /// Read a JSON-decoded key from a column, or `None` if it is absent.
-    pub async fn load_json<T>(&self, col: u32, key: &[u8]) -> VeilidAPIResult<Option<T>>
-    where
-        T: for<'de> serde::Deserialize<'de>,
-    {
-        let Some(bytes) = self.load(col, key).await? else {
-            return Ok(None);
-        };
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(VeilidAPIError::internal)
+        Ok(inner.column(col)?.get(&key).cloned())
     }
 
     /// Delete a key from a column, returning the value that was there.
     #[expect(clippy::unused_async)]
-    pub async fn delete(&self, col: u32, key: &[u8]) -> VeilidAPIResult<Option<Vec<u8>>> {
+    pub async fn delete(&self, col: u32, key: Bytes) -> VeilidAPIResult<Option<Bytes>> {
         self.check_col(col)?;
         let mut inner = self.inner.lock();
-        Ok(inner.column_mut(col)?.remove(key))
-    }
-
-    /// Delete a key from a column, returning the JSON-decoded value that was there.
-    pub async fn delete_json<T>(&self, col: u32, key: &[u8]) -> VeilidAPIResult<Option<T>>
-    where
-        T: for<'de> serde::Deserialize<'de>,
-    {
-        let Some(bytes) = self.delete(col, key).await? else {
-            return Ok(None);
-        };
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(VeilidAPIError::internal)
+        Ok(inner.column_mut(col)?.remove(&key))
     }
 }
 
 enum MockTableOp {
-    Store(u32, Vec<u8>, Vec<u8>),
-    Delete(u32, Vec<u8>),
+    Store(u32, Bytes, Bytes),
+    Delete(u32, Bytes),
 }
 
 /// A batch of writes applied atomically on commit.
@@ -233,25 +184,16 @@ impl TableDBTransaction {
 
     /// Queue a key-value store.
     #[expect(clippy::unused_async)]
-    pub async fn store(&self, col: u32, key: &[u8], value: &[u8]) -> VeilidAPIResult<()> {
+    pub async fn store(&self, col: u32, key: Bytes, value: Bytes) -> VeilidAPIResult<()> {
         self.db.check_col(col)?;
-        self.with_ops(|ops| ops.push(MockTableOp::Store(col, key.to_vec(), value.to_vec())))
-    }
-
-    /// Queue a JSON-encoded key-value store.
-    pub async fn store_json<T>(&self, col: u32, key: &[u8], value: &T) -> VeilidAPIResult<()>
-    where
-        T: serde::Serialize,
-    {
-        let value = serde_json::to_vec(value).map_err(VeilidAPIError::internal)?;
-        self.store(col, key, &value).await
+        self.with_ops(|ops| ops.push(MockTableOp::Store(col, key, value)))
     }
 
     /// Queue a key delete.
     #[expect(clippy::unused_async)]
-    pub async fn delete(&self, col: u32, key: &[u8]) -> VeilidAPIResult<()> {
+    pub async fn delete(&self, col: u32, key: Bytes) -> VeilidAPIResult<()> {
         self.db.check_col(col)?;
-        self.with_ops(|ops| ops.push(MockTableOp::Delete(col, key.to_vec())))
+        self.with_ops(|ops| ops.push(MockTableOp::Delete(col, key)))
     }
 }
 

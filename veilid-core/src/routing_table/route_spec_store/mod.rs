@@ -17,6 +17,8 @@ mod route_spec_store_content;
 mod route_stats;
 mod route_test;
 mod route_validate;
+#[cfg(any(test, feature = "test-util"))]
+pub(crate) mod tests_route_spec_store;
 
 use allocated_route_cache_entry::*;
 use remote_route_cache_entry::*;

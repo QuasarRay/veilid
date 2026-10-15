@@ -1191,7 +1191,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -2612,27 +2612,22 @@ pub fn veilid_core::SignatureGroup::from_str(&str) -> core::result::Result<Self,
 pub struct veilid_core::TableDB
 impl veilid_core::TableDB
 pub async fn veilid_core::TableDB::cleanup(&self) -> veilid_core::VeilidAPIResult<()>
-pub async fn veilid_core::TableDB::delete(&self, u32, &[u8]) -> veilid_core::VeilidAPIResult<core::option::Option<alloc::vec::Vec<u8>>>
-pub async fn veilid_core::TableDB::delete_json<T>(&self, u32, &[u8]) -> veilid_core::VeilidAPIResult<core::option::Option<T>> where T: for<'de> serde_core::de::Deserialize<'de>
+pub async fn veilid_core::TableDB::delete(&self, u32, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<core::option::Option<bytes::bytes::Bytes>>
 pub fn veilid_core::TableDB::estimate_storage_size(&self, u32, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<u64>
-pub fn veilid_core::TableDB::estimate_storage_size_json<T>(&self, u32, &[u8], &T) -> veilid_core::VeilidAPIResult<u64> where T: serde_core::ser::Serialize
 pub fn veilid_core::TableDB::get_column_count(&self) -> veilid_core::VeilidAPIResult<u32>
 pub async fn veilid_core::TableDB::get_key_count(&self, u32) -> veilid_core::VeilidAPIResult<u64>
-pub async fn veilid_core::TableDB::get_keys(&self, u32) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<alloc::vec::Vec<u8>>>
+pub async fn veilid_core::TableDB::get_keys(&self, u32) -> veilid_core::VeilidAPIResult<alloc::vec::Vec<bytes::bytes::Bytes>>
 pub fn veilid_core::TableDB::io_stats(&self, keyvaluedb::io_stats::Kind) -> keyvaluedb::io_stats::IoStats
-pub async fn veilid_core::TableDB::load(&self, u32, &[u8]) -> veilid_core::VeilidAPIResult<core::option::Option<alloc::vec::Vec<u8>>>
-pub async fn veilid_core::TableDB::load_json<T>(&self, u32, &[u8]) -> veilid_core::VeilidAPIResult<core::option::Option<T>> where T: for<'de> serde_core::de::Deserialize<'de>
-pub async fn veilid_core::TableDB::store(&self, u32, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<()>
-pub async fn veilid_core::TableDB::store_json<T>(&self, u32, &[u8], &T) -> veilid_core::VeilidAPIResult<()> where T: serde_core::ser::Serialize
+pub async fn veilid_core::TableDB::load(&self, u32, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<core::option::Option<bytes::bytes::Bytes>>
+pub async fn veilid_core::TableDB::store(&self, u32, bytes::bytes::Bytes, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::TableDB::table_name(&self) -> alloc::string::String
 pub fn veilid_core::TableDB::transact(&self) -> veilid_core::TableDBTransaction
 pub struct veilid_core::TableDBTransaction
 impl veilid_core::TableDBTransaction
 pub async fn veilid_core::TableDBTransaction::commit(self) -> veilid_core::VeilidAPIResult<()>
-pub async fn veilid_core::TableDBTransaction::delete(&self, u32, &[u8]) -> veilid_core::VeilidAPIResult<()>
+pub async fn veilid_core::TableDBTransaction::delete(&self, u32, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::TableDBTransaction::rollback(self)
-pub async fn veilid_core::TableDBTransaction::store(&self, u32, &[u8], &[u8]) -> veilid_core::VeilidAPIResult<()>
-pub async fn veilid_core::TableDBTransaction::store_json<T>(&self, u32, &[u8], &T) -> veilid_core::VeilidAPIResult<()> where T: serde_core::ser::Serialize
+pub async fn veilid_core::TableDBTransaction::store(&self, u32, bytes::bytes::Bytes, bytes::bytes::Bytes) -> veilid_core::VeilidAPIResult<()>
 #[repr(C, align(8))] pub struct veilid_core::Timestamp(_)
 impl veilid_core::Timestamp
 pub const fn veilid_core::Timestamp::as_u64(self) -> u64

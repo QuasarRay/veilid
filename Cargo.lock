@@ -2932,15 +2932,15 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb64e62d343e5cb85c7e36e60403bcea00fe71ecd6702ebfa03258db92e91d5c"
+checksum = "fe6d4f7c813a6072025fc34565fdcc829cd0f6cf424af1a4a972abefc976e806"
 
 [[package]]
 name = "keyvaluedb-memorydb"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb0e3245548c2bdb465d818385e890ea9d96621bf47e89db753b0b2b67d2107b"
+checksum = "2feecd3d8cd06c46717a4556be64aca270fd1d5b39bec841bb54e482d0e6a7de"
 dependencies = [
  "keyvaluedb",
  "parking_lot",
@@ -2948,9 +2948,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-sqlite"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a01d1eaa184986516afd219f763c75de2de7666ff935a41857d34d8068483ce"
+checksum = "5e71790cac48d1ffddb922f9c2a5421ac6a9d25866721a0213d750b1dd7ab810"
 dependencies = [
  "async-sqlite",
  "keyvaluedb",
@@ -2959,9 +2959,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-web"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "506a1ffded07bb3a8ee285e8f62d2dc29a8c876b8b088faff95400a34ba92da6"
+checksum = "a36642addc71d64cf4314044745763b3694abf98a556660440d862e8e9d7080c"
 dependencies = [
  "flume",
  "futures",
@@ -5583,6 +5583,7 @@ dependencies = [
  "capnp",
  "capnpc",
  "cfg-if",
+ "ciborium",
  "clap",
  "console_error_panic_hook",
  "data-encoding",

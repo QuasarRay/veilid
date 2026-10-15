@@ -91,11 +91,11 @@ impl RoutingTableTimings {
 }
 
 // Table store keys
-const ALL_ENTRY_BYTES: &[u8] = b"all_entry_bytes";
+const ALL_ENTRY_BYTES: Bytes = Bytes::from_static(b"all_entry_bytes");
 const ROUTING_TABLE: &str = "routing_table";
-const SERIALIZED_BUCKET_MAP: &[u8] = b"serialized_bucket_map";
-const CACHE_VALIDITY_KEY: &[u8] = b"cache_validity_key";
-const NETWORK_ESTIMATOR_HISTORY: &[u8] = b"network_estimator_history";
+const SERIALIZED_BUCKET_MAP: Bytes = Bytes::from_static(b"serialized_bucket_map");
+const CACHE_VALIDITY_KEY: Bytes = Bytes::from_static(b"cache_validity_key");
+const NETWORK_ESTIMATOR_HISTORY: Bytes = Bytes::from_static(b"network_estimator_history");
 
 pub type RoutingTableEntryFilter<'t> =
     Box<dyn FnMut(&Option<BucketEntrySnapshot>, Timestamp) -> bool + Send + 't>;
@@ -112,7 +112,7 @@ pub type RoutingTableEntrySort<'t> = Box<
 >;
 pub type CreateNodeRefUpdateFunc<'t> = Box<dyn FnOnce(&mut BucketEntryInner) + 't>;
 
-type SerializedBuckets = Vec<Vec<u8>>;
+type SerializedBuckets = Vec<TableDBSerializedData>;
 type SerializedBucketMap = BTreeMap<CryptoKind, SerializedBuckets>;
 type RoutingDomainControllerMap = HashMap<RoutingDomain, Arc<dyn RoutingDomainController>>;
 
@@ -791,9 +791,11 @@ impl RoutingTable {
         if public_key.is_none() {
             veilid_log!(self debug "pulling {} from storage", table_key_public_key);
             if let Ok(Some(stored_public_key)) = config_table
-                .load_json::<PublicKey>(0, table_key_public_key.as_bytes())
+                .load_serialized(0, Bytes::from(table_key_public_key.clone()))
                 .await
             {
+                let stored_public_key: PublicKey =
+                    table_store.try_deserialize(&stored_public_key)?;
                 veilid_log!(self debug "{} found in storage", table_key_public_key);
                 public_key = Some(stored_public_key);
             } else {
@@ -803,9 +805,11 @@ impl RoutingTable {
         if public_key.is_none() {
             veilid_log!(self debug "pulling {} from deprecated storage", table_key_node_id);
             if let Ok(Some(stored_public_key)) = config_table
-                .load_json::<PublicKey>(0, table_key_node_id.as_bytes())
+                .load_serialized(0, Bytes::from(table_key_node_id.clone()))
                 .await
             {
+                let stored_public_key: PublicKey =
+                    table_store.try_deserialize(&stored_public_key)?;
                 veilid_log!(self debug "{} found in deprecated storage", table_key_node_id);
                 public_key = Some(stored_public_key);
             } else {
@@ -817,9 +821,11 @@ impl RoutingTable {
         if secret_key.is_none() {
             veilid_log!(self debug "pulling {} from storage", table_key_secret_key);
             if let Ok(Some(stored_secret_key)) = config_table
-                .load_json::<SecretKey>(0, table_key_secret_key.as_bytes())
+                .load_serialized(0, Bytes::from(table_key_secret_key.clone()))
                 .await
             {
+                let stored_secret_key: SecretKey =
+                    table_store.try_deserialize(&stored_secret_key)?;
                 veilid_log!(self debug "{} found in storage", table_key_secret_key);
                 secret_key = Some(stored_secret_key);
             } else {
@@ -829,9 +835,11 @@ impl RoutingTable {
         if secret_key.is_none() {
             veilid_log!(self debug "pulling {} from deprecated storage", table_key_node_id_secret);
             if let Ok(Some(stored_secret_key)) = config_table
-                .load_json::<SecretKey>(0, table_key_node_id_secret.as_bytes())
+                .load_serialized(0, Bytes::from(table_key_node_id_secret.clone()))
                 .await
             {
+                let stored_secret_key: SecretKey =
+                    table_store.try_deserialize(&stored_secret_key)?;
                 veilid_log!(self debug "{} found in deprecated storage", table_key_node_id_secret);
                 secret_key = Some(stored_secret_key);
             } else {
@@ -858,11 +866,21 @@ impl RoutingTable {
             };
 
         // Save the public key + secret in storage
+        let public_key_serialized = serialize_table_value(&public_key);
         config_table
-            .store_json(0, table_key_public_key.as_bytes(), &public_key)
+            .store_serialized(
+                0,
+                Bytes::from(table_key_public_key.clone()),
+                public_key_serialized,
+            )
             .await?;
+        let secret_key_serialized = serialize_table_value(&secret_key);
         config_table
-            .store_json(0, table_key_secret_key.as_bytes(), &secret_key)
+            .store_serialized(
+                0,
+                Bytes::from(table_key_secret_key.clone()),
+                secret_key_serialized,
+            )
             .await?;
 
         Ok((public_key, secret_key))
@@ -997,7 +1015,7 @@ impl RoutingTable {
         let mut all_entry_bytes = Vec::with_capacity(all_entries.len());
         for entry in all_entries {
             // Serialize entry
-            let entry_bytes = entry.with(|e| serialize_json_bytes(e));
+            let entry_bytes = entry.with(serialize_table_value);
             all_entry_bytes.push(entry_bytes);
         }
 
@@ -1013,19 +1031,22 @@ impl RoutingTable {
 
         let tdb = self.table_db().await?;
         let dbx = tdb.transact();
+        let serialized = serialize_table_value(&serialized_bucket_map);
         if let Err(e) = dbx
-            .store_json(0, SERIALIZED_BUCKET_MAP, &serialized_bucket_map)
+            .store_serialized(0, SERIALIZED_BUCKET_MAP, serialized)
             .await
         {
             dbx.rollback();
             return Err(e.into());
         }
-        if let Err(e) = dbx.store_json(0, ALL_ENTRY_BYTES, &all_entry_bytes).await {
+        let serialized = serialize_table_value(&all_entry_bytes);
+        if let Err(e) = dbx.store_serialized(0, ALL_ENTRY_BYTES, serialized).await {
             dbx.rollback();
             return Err(e.into());
         }
+        let serialized = serialize_table_value(&network_estimator_snapshot);
         if let Err(e) = dbx
-            .store_json(0, NETWORK_ESTIMATOR_HISTORY, &network_estimator_snapshot)
+            .store_serialized(0, NETWORK_ESTIMATOR_HISTORY, serialized)
             .await
         {
             dbx.rollback();
@@ -1059,7 +1080,12 @@ impl RoutingTable {
         let table_store = self.table_store();
         table_store.delete(ROUTING_TABLE).await?;
         let db = table_store.open(ROUTING_TABLE, 1).await?;
-        db.store(0, CACHE_VALIDITY_KEY, cache_validity_key).await?;
+        db.store(
+            0,
+            CACHE_VALIDITY_KEY,
+            Bytes::copy_from_slice(cache_validity_key),
+        )
+        .await?;
         Ok(())
     }
 
@@ -1105,18 +1131,19 @@ impl RoutingTable {
         }
 
         // Caches valid, load saved routing table
-        let Some(serialized_bucket_map): Option<SerializedBucketMap> =
-            db.load_json(0, SERIALIZED_BUCKET_MAP).await?
+        let Some(serialized_bucket_map) = db.load_serialized(0, SERIALIZED_BUCKET_MAP).await?
         else {
             veilid_log!(self debug "no bucket map in saved routing table");
             return Ok(());
         };
-        let Some(all_entry_bytes): Option<SerializedBuckets> =
-            db.load_json(0, ALL_ENTRY_BYTES).await?
-        else {
+        let serialized_bucket_map: SerializedBucketMap =
+            table_store.try_deserialize(&serialized_bucket_map)?;
+
+        let Some(all_entry_bytes) = db.load_serialized(0, ALL_ENTRY_BYTES).await? else {
             veilid_log!(self debug "no all_entry_bytes in saved routing table");
             return Ok(());
         };
+        let all_entry_bytes: SerializedBuckets = table_store.try_deserialize(&all_entry_bytes)?;
 
         // A routing domain can reject the saved table outright, in which case none of it is
         // applied and the node bootstraps from nothing. This is how a table saved without a
@@ -1131,10 +1158,8 @@ impl RoutingTable {
         }
 
         // Restore the network estimator histogram if present.
-        if let Ok(Some(estimator)) = db
-            .load_json::<NetworkEstimator>(0, NETWORK_ESTIMATOR_HISTORY)
-            .await
-        {
+        if let Ok(Some(serialized)) = db.load_serialized(0, NETWORK_ESTIMATOR_HISTORY).await {
+            let estimator: NetworkEstimator = table_store.try_deserialize(&serialized)?;
             *self.network_estimator.lock() = estimator;
         }
 
@@ -1173,18 +1198,18 @@ impl RoutingTable {
     pub fn populate_routing_table_inner(
         inner: &mut RoutingTableInner,
         serialized_bucket_map: SerializedBucketMap,
-        all_entry_bytes: SerializedBuckets,
+        all_entry_objects: SerializedBuckets,
     ) -> EyreResult<()> {
         let mut all_entries: Vec<Option<Arc<BucketEntry>>> =
-            Vec::with_capacity(all_entry_bytes.len());
-        for entry_bytes in all_entry_bytes {
+            Vec::with_capacity(all_entry_objects.len());
+        for entry_object in all_entry_objects {
             // Deserialize with the registry attached and the best node id reconstructed.
             // Entries that fail to deserialize or have no valid node id are skipped; a None
             // slot keeps the bucket map's entry indices aligned.
             let entryinner = match BucketEntryInner::deserialize_from_persisted(
                 inner.registry(),
                 inner.network_manager.clone(),
-                &entry_bytes,
+                entry_object,
             ) {
                 Ok(e) => e,
                 Err(e) => {
@@ -1227,7 +1252,7 @@ impl RoutingTable {
             let buckets = inner.buckets.get_mut(&k).unwrap_or_log();
 
             for n in 0..v.len() {
-                buckets[n].load_bucket(v[n].clone(), &all_entries)?;
+                buckets[n].load_bucket(&v[n], &all_entries)?;
             }
         }
 

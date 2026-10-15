@@ -12,6 +12,8 @@
   - **Breaking** The WASM boundary uses tsify 0.5.7 `Ts<T>` types, so a serialization failure throws a catchable error instead of leaking or panicking, and in TypeScript the group `contains_kind` is renamed `containsKind` and typed-value constructors take the branded `CryptoKind` instead of a bare string.
   - **Breaking** `VeilidAPIError` derives from the JavaScript `Error`, closing [#441](https://gitlab.com/veilid/veilid/-/work_items/441).
   - **Breaking** `AttachmentState` variants are reordered from least to most attached, and the type is now `Ord`.
+  - **Breaking** `TableDB::store_json`, `load_json` and `delete_json` and `TableDBTransaction::store_json` are gone; the table store serializes its own state as CBOR and apps store raw bytes.
+  - **Breaking** `TableDB` and `TableDBTransaction` take keys and values as `Bytes`, `load`, `delete` and `get_keys` return `Bytes`, and `estimate_storage_size_json` is gone.
   - **Breaking** `attach()` and `detach()` succeed when the node is already attaching or detaching, a bind wait reports `Attaching` instead of `Detached`, and `detach()` on a detached node fails with `Not attached`.
   - **Security** B01T direct-bootstrap requests are answered from the routing domain's last successful bootstrap set, persisted across restarts, without resolving DNS, so an unauthenticated packet can no longer trigger non-veilid traffic or block a worker on a slow resolver (thanks to quikchaos for reporting it).
   - Safety routes are allocated, tested and released per sequence ordering, and a dead route's hops stay out of that ordering's new allocations until the hop or this node publishes new peer info, or the online state changes.
@@ -106,6 +108,10 @@
   - A hidden desktop app keeps saving on the foreground schedule, since saving on every change is only for platforms that freeze a background process.
   - A degraded period caused only by the node's own stalls no longer ends with a check of every watch for missed changes.
   - The `backtrace` feature uses `std::backtrace` instead of the `backtrace` crate, which does not build for iOS on libc 0.2.190.
+  - The table store keeps rows as written, encrypted without compression, and a one-time migration at startup converts an existing store; an older version cannot open a store this version has touched.
+  - The migration drops the routing table, whose entry format changed, so a node bootstraps once after upgrading.
+  - IP addresses in dial info serialize as text in every format.
+  - The record store writes a value's data as bytes instead of base64 text, a quarter smaller per subkey, and values written as text still read.
 
 - veilid-flutter:
   - **Breaking** `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `toString()` on `Timestamp` and `TimestampDuration` writes human-readable output instead of a raw integer.

@@ -3,6 +3,7 @@ pub mod test_bucket_entry_state;
 pub mod test_network_estimator;
 pub mod test_nodes_needed;
 pub mod test_own_dial_info;
+pub mod test_persisted_cbor;
 pub mod test_persisted_reset;
 pub mod test_relay_info;
 pub mod test_route_stats;
@@ -24,6 +25,10 @@ pub async fn test_all() {
     test_serialize_routing_table::test_register_known_node_keeps_entry().await;
     test_serialize_routing_table::test_routingtable_buckets_round_trip().await;
     test_serialize_routing_table::test_round_trip_peerinfo().await;
+    test_persisted_cbor::test_persisted_dial_info().await;
+    test_persisted_cbor::test_persisted_public_internet_state().await;
+    test_persisted_cbor::test_persisted_network_estimator().await;
+    route_spec_store::tests_route_spec_store::test_persisted_route_spec_store_content().await;
     test_signed_node_info::test_signed_node_info().await;
     test_relay_info::test_relay_info_equivalent();
     test_routing_metrics::test_bucket_depth();
