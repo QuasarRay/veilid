@@ -317,8 +317,14 @@ impl PublicInternetRoutingDomainController {
 
         // Ordered cells first (they gate readiness), safe and unsafe lengths interleaved so the
         // first batch of parallel tests covers both lengths
+        let network_manager = routing_table.network_manager();
+        let transport_stats = network_manager.transport_stats();
         let mut newly_allocated_routes = Vec::new();
         for ordering in [SequenceOrdering::Ordered, SequenceOrdering::Unordered] {
+            // No outbound protocol carries it; PreferUnordered traffic rides the ordered routes
+            if !transport_stats.ordering_is_available(RoutingDomain::PublicInternet, ordering) {
+                continue;
+            }
             let mut newly_safe_routes = Vec::new();
             let mut newly_unsafe_routes = Vec::new();
             for (hop_count, is_safe) in [

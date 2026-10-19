@@ -306,7 +306,7 @@ impl RPCProcessor {
         }
 
         // Make SetValue answer
-        let set_value_a = RPCOperationSetValueA::new(
+        let set_value_a = RPCOperationSetValueA::try_new(
             accepted,
             need_descriptor,
             return_value.map(|x| (*x).clone()),

@@ -46,7 +46,7 @@ pub async fn test_signed_node_info() {
         );
 
         // Make peerinfo from nodeinfo
-        let pi = PeerInfo::new_from_node_info(
+        let pi = PeerInfo::try_new_from_node_info(
             &routing_table,
             RoutingDomain::PublicInternet,
             &secret_key_group,
@@ -55,7 +55,7 @@ pub async fn test_signed_node_info() {
         .unwrap();
 
         // Test correct validation and decoding
-        let opt_pi2 = UnverifiedPeerInfo::new_from_wire(
+        let opt_pi2 = UnverifiedPeerInfo::try_new_from_wire(
             &routing_table,
             RoutingDomain::PublicInternet,
             pi.node_info_message(),
@@ -77,7 +77,7 @@ pub async fn test_signed_node_info() {
         let invalid_signatures =
             SignatureGroup::from(Signature::new(CRYPTO_KIND_VLD0, BareSignature::default()));
 
-        let _ = UnverifiedPeerInfo::new_from_wire(
+        let _ = UnverifiedPeerInfo::try_new_from_wire(
             &routing_table,
             RoutingDomain::PublicInternet,
             pi.node_info_message(),
@@ -93,7 +93,7 @@ pub async fn test_signed_node_info() {
             BareSignature::default(),
         ));
 
-        let opt_pi_invalid_crypto_kind = UnverifiedPeerInfo::new_from_wire(
+        let opt_pi_invalid_crypto_kind = UnverifiedPeerInfo::try_new_from_wire(
             &routing_table,
             RoutingDomain::PublicInternet,
             pi.node_info_message(),

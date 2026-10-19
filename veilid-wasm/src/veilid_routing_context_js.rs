@@ -19,7 +19,7 @@ impl VeilidRoutingContext {
     ///
     /// Throws `NotInitialized` if the node is not started.
     #[wasm_bindgen(constructor)]
-    pub fn new() -> VeilidAPIResult<VeilidRoutingContext> {
+    pub fn try_new() -> VeilidAPIResult<VeilidRoutingContext> {
         let veilid_api = get_veilid_api()?;
         VeilidAPIResult::Ok(VeilidRoutingContext {
             inner_routing_context: veilid_api.routing_context()?,
@@ -28,7 +28,7 @@ impl VeilidRoutingContext {
 
     /// Same as `new VeilidRoutingContext()` except easier to chain.
     pub fn create() -> VeilidAPIResult<VeilidRoutingContext> {
-        VeilidRoutingContext::new()
+        VeilidRoutingContext::try_new()
     }
 
     // --------------------------------

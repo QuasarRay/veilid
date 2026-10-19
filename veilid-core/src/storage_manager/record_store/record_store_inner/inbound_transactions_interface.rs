@@ -386,8 +386,9 @@ where
         if !self.contains_record(opaque_record_key) {
             // record didn't exist, make it
             let cur_ts = Timestamp::now();
-            let record = Record::<D>::new(cur_ts, transaction.descriptor(), make_record_detail())?;
-            self.new_record(opaque_record_key.clone(), record)?;
+            let record =
+                Record::<D>::try_new(cur_ts, transaction.descriptor(), make_record_detail())?;
+            self.try_new_record(opaque_record_key.clone(), record)?;
         };
 
         // Apply all changes

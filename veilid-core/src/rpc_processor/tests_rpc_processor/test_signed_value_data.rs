@@ -11,7 +11,7 @@ pub fn test_encode_and_decode_signed_value_data() {
     let mut builder = message_builder.init_root::<veilid_capnp::signed_value_data::Builder>();
 
     let signed_value_data = SignedValueData::new(
-        EncryptedValueData::new(
+        EncryptedValueData::try_new(
             10.into(),
             Bytes::from(vec![1, 2, 3, 4, 5, 6]),
             keypair.key(),

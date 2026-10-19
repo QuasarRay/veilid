@@ -39,119 +39,259 @@ fn add_mock_data(routing_table: &RoutingTable) {
         .expect("should succeed with allow_invalid");
 }
 
-pub async fn test_routingtable_buckets_round_trip() {
-    let original_registry = mock_registry::init("a").await;
-    let copy_registry = mock_registry::init("b").await;
-
-    // Wrap to close lifetime of 'inner' which is borrowed here so terminate() can succeed
-    // (it also .write() locks routing table inner)
-    {
-        let original = original_registry.routing_table();
-        let copy = copy_registry.routing_table();
-
-        add_mock_data(&original);
-
-        let (serialized_bucket_map, all_entry_bytes) = original.serialized_buckets();
-
-        RoutingTable::populate_routing_table_inner(
-            &mut copy.inner.write(),
-            serialized_bucket_map,
-            all_entry_bytes,
-        )
-        .unwrap(); // FIXME
-
-        let original_inner = &*original.inner.read();
-        let copy_inner = &*copy.inner.read();
-
-        let original_crypto_kinds: Vec<_> = original_inner.buckets.keys().clone().collect();
-        let copy_crypto_kinds: Vec<_> = copy_inner.buckets.keys().clone().collect();
-
-        assert_eq!(original_crypto_kinds.len(), copy_crypto_kinds.len());
-
-        for crypto in original_crypto_kinds {
-            // The same keys are present in the original and copy RoutingTables.
-            let original_buckets = original_inner.buckets.get(crypto).unwrap();
-            let copy_buckets = copy_inner.buckets.get(crypto).unwrap();
-
-            // Recurse into RoutingTable.inner.buckets
-            for (left_bucket, right_bucket) in original_buckets.iter().zip(copy_buckets.iter()) {
-                // Recurse into RoutingTable.inner.buckets.entries
-                for ((left_node_id, left_entry), (right_node_id, right_entry)) in
-                    left_bucket.entries().zip(right_bucket.entries())
-                {
-                    assert_eq!(left_node_id, right_node_id);
-
-                    let s = left_entry.with(|e| serialize_json(e));
-                    let s2 = right_entry.with(|e| serialize_json(e));
-
-                    assert_eq!(s, s2);
-                }
+/// Every bucketed entry as persisted, by crypto kind, bucket and node id
+fn saved_contents(routing_table: &RoutingTable) -> Vec<(CryptoKind, usize, BareNodeId, Bytes)> {
+    let inner = routing_table.inner.read();
+    let mut out = Vec::new();
+    for (ck, buckets) in inner.buckets.iter() {
+        for (n, bucket) in buckets.iter().enumerate() {
+            for (node_id, entry) in bucket.entries() {
+                out.push((
+                    *ck,
+                    n,
+                    node_id.clone(),
+                    // An entry computes its state rather than holding one
+                    entry.with(|e| {
+                        serialize_table_value(&e.to_persisted(BucketEntryState::Initial)).0
+                    }),
+                ));
             }
         }
     }
-
-    // Even if these are mocks, we should still practice good hygiene.
-    mock_registry::terminate(original_registry).await;
-    mock_registry::terminate(copy_registry).await;
+    out
 }
 
-// REPRO: a routing table persisted with an entry that has no node ids (corrupt/legacy
-// on-disk data) must not load that entry into a bucket. Pre-fix, the empty entry is
-// bucketed and the first `best_node_id()` caller panics at startup.
+fn mock_config(config: &mut VeilidConfig, identity: &(PublicKeyGroup, SecretKeyGroup)) {
+    config.network.routing_table.bootstrap = vec![];
+    set_identity(&mut config.network.routing_table, identity);
+}
+
+pub async fn test_persisted_entries_round_trip() {
+    let identity = fix_identity();
+    let (registry, storage) =
+        mock_registry::init_with_storage("rt_persisted_round_trip", |config| {
+            mock_config(config, &identity)
+        })
+        .await;
+    let saved = {
+        let routing_table = registry.routing_table();
+        add_mock_data(&routing_table);
+        let nodes = seed_nodes(&routing_table, 4);
+
+        // Transport evidence is persisted too
+        nodes[0].operate_mut(|e| {
+            e.lost_question(
+                TransportType::new(ProtocolType::TCP, AddressType::IPV4),
+                true,
+            );
+            e.report_contact_method_result(
+                &ContactMethod::Direct {
+                    target_di: fix_dial_info_detail().dial_info,
+                },
+                false,
+            );
+        });
+        drop(nodes);
+
+        // An unsigned peer info, as a bootstrap entry has
+        let (crypto_info_list, _) = fix_node_keys();
+        let unsigned =
+            fix_unsigned_peer_info(&routing_table, crypto_info_list).expect("should be valid");
+        routing_table
+            .register_node_with_peer_info(
+                Arc::new(UnverifiedPeerInfo::from_verified(&unsigned)),
+                true,
+            )
+            .expect("should register with allow_invalid");
+
+        saved_contents(&routing_table)
+    };
+    assert_eq!(saved.len(), 6, "should have entries to save");
+    mock_registry::terminate(registry).await;
+
+    let registry = mock_registry::reopen("rt_persisted_round_trip", storage, |config| {
+        mock_config(config, &identity)
+    })
+    .await;
+    let loaded = saved_contents(&registry.routing_table());
+    mock_registry::terminate(registry).await;
+
+    assert_eq!(
+        loaded, saved,
+        "a reload should restore every entry as saved"
+    );
+}
+
+/// A saved entry with no node ids stays out of the buckets, where the first `best_node_id()` panics
 pub async fn test_load_rejects_entries_without_node_ids() {
-    let original_registry = mock_registry::init("a").await;
-    let copy_registry = mock_registry::init("b").await;
-    {
-        let original = original_registry.routing_table();
-        add_mock_data(&original);
+    let identity = fix_identity();
+    let (registry, storage) =
+        mock_registry::init_with_storage("rt_persisted_no_node_ids", |config| {
+            mock_config(config, &identity)
+        })
+        .await;
+    let tampered_key = {
+        let routing_table = registry.routing_table();
+        seed_nodes(&routing_table, 2);
+        routing_table.save().await.expect("should save");
 
-        let (serialized_bucket_map, all_entry_bytes) = original.serialized_buckets();
-        assert!(
-            !all_entry_bytes.is_empty(),
-            "should have at least one entry"
-        );
-
-        let table_store = copy_registry.table_store();
-        // Simulate corrupt/legacy data: blank out node_ids on every persisted entry.
-        let tampered: Vec<TableDBSerializedData> = all_entry_bytes
-            .iter()
-            .map(|eb| {
-                let mut v: ciborium::Value = table_store.try_deserialize(eb).unwrap();
-                if let ciborium::Value::Map(ref mut m) = v {
-                    for (k, v) in m.iter_mut() {
-                        if *k == ciborium::Value::Text("node_ids".into()) {
-                            *v = ciborium::Value::Array(vec![]);
-                        }
-                    }
-                };
-                serialize_table_value(&v)
-            })
-            .collect();
-
-        let copy = copy_registry.routing_table();
-        RoutingTable::populate_routing_table_inner(
-            &mut copy.inner.write(),
-            serialized_bucket_map,
-            tampered,
-        )
-        .unwrap();
-
-        // INVARIANT: no entry may be in a bucket without a best node id. Calling
-        // best_node_id() on every bucketed entry — exactly what startup code does —
-        // must not hit the `expect_or_log("all entries must have one valid node id")`
-        // at bucket_entry/mod.rs:370. Pre-fix, the blanked entries are bucketed and
-        // this panics there.
-        let copy_inner = &*copy.inner.read();
-        for buckets in copy_inner.buckets.values() {
-            for bucket in buckets {
-                for (_k, entry) in bucket.entries() {
-                    let _ = entry.with(|e| e.best_node_id());
+        // Blank out node_ids on one persisted entry
+        let tdb = routing_table.table_db().await.expect("should open");
+        let key = tdb
+            .get_keys(PERSISTED_ENTRIES_COLUMN)
+            .await
+            .expect("should list entries")
+            .remove(0);
+        let persisted = tdb
+            .load_serialized(PERSISTED_ENTRIES_COLUMN, key.clone())
+            .await
+            .expect("should read entry")
+            .expect("entry should exist");
+        let mut v: ciborium::Value = registry.table_store().try_deserialize(&persisted).unwrap();
+        if let ciborium::Value::Map(ref mut m) = v {
+            for (k, v) in m.iter_mut() {
+                if *k == ciborium::Value::Text("node_ids".into()) {
+                    *v = ciborium::Value::Array(vec![]);
                 }
             }
+        };
+        tdb.store_serialized(
+            PERSISTED_ENTRIES_COLUMN,
+            key.clone(),
+            serialize_table_value(&v),
+        )
+        .await
+        .expect("should write entry");
+        key
+    };
+    // The terminate save leaves unchanged entries alone, so the blanked one stays
+    mock_registry::terminate(registry).await;
+
+    let registry = mock_registry::reopen("rt_persisted_no_node_ids", storage, |config| {
+        mock_config(config, &identity)
+    })
+    .await;
+    {
+        let routing_table = registry.routing_table();
+
+        // Startup calls best_node_id() on every bucketed entry
+        {
+            let inner = &*routing_table.inner.read();
+            for buckets in inner.buckets.values() {
+                for bucket in buckets {
+                    for (_k, entry) in bucket.entries() {
+                        let _ = entry.with(|e| e.best_node_id());
+                    }
+                }
+            }
+            assert_eq!(
+                inner.bucket_entry_count(),
+                1,
+                "the blanked entry must not load"
+            );
         }
+
+        // The entry that did not load is deleted by the next save
+        let saved = routing_table.save().await.expect("should save");
+        assert_eq!((saved.entries, saved.written, saved.deleted), (1, 0, 1));
+        let keys = routing_table
+            .table_db()
+            .await
+            .expect("should open")
+            .get_keys(PERSISTED_ENTRIES_COLUMN)
+            .await
+            .expect("should list entries");
+        assert!(
+            !keys.contains(&tampered_key),
+            "the blanked entry should be gone"
+        );
     }
-    mock_registry::terminate(original_registry).await;
-    mock_registry::terminate(copy_registry).await;
+    mock_registry::terminate(registry).await;
+}
+
+/// A save writes the entries that changed and deletes the entries that left
+pub async fn test_persisted_entries_write_only_changes() {
+    let registry = mock_registry::init("rt_persisted_changes").await;
+    {
+        let routing_table = registry.routing_table();
+        let (crypto_info_list, secret_keys) = fix_node_keys();
+        let first_peer_info = fix_peer_info_at(
+            &routing_table,
+            crypto_info_list.clone(),
+            secret_keys.clone(),
+            Timestamp::new(1),
+        )
+        .expect("should be valid");
+        routing_table
+            .register_node_with_peer_info(
+                Arc::new(UnverifiedPeerInfo::from_verified(&first_peer_info)),
+                false,
+            )
+            .expect("should register");
+        let nodes = seed_nodes(&routing_table, 2);
+
+        let first = routing_table.save().await.expect("should save");
+        assert_eq!((first.entries, first.written, first.deleted), (3, 3, 0));
+
+        let unchanged = routing_table.save().await.expect("should save");
+        assert_eq!(
+            (unchanged.written, unchanged.deleted),
+            (0, 0),
+            "an unchanged table writes nothing"
+        );
+
+        // A newer peer info rewrites that entry
+        let newer_peer_info = fix_peer_info_at(
+            &routing_table,
+            crypto_info_list,
+            secret_keys,
+            Timestamp::new(2),
+        )
+        .expect("should be valid");
+        routing_table
+            .register_node_with_peer_info(
+                Arc::new(UnverifiedPeerInfo::from_verified(&newer_peer_info)),
+                false,
+            )
+            .expect("should register");
+        let peer_info_changed = routing_table.save().await.expect("should save");
+        assert_eq!(
+            (peer_info_changed.written, peer_info_changed.deleted),
+            (1, 0),
+            "a newer peer info rewrites one entry"
+        );
+
+        // A state change rewrites that entry
+        nodes[0].operate_mut(|e| e.unreachable());
+        let state_changed = routing_table.save().await.expect("should save");
+        assert_eq!(
+            (state_changed.written, state_changed.deleted),
+            (1, 0),
+            "a state change rewrites one entry"
+        );
+
+        // An entry that leaves the buckets is deleted
+        let dropped = nodes[1].node_ids();
+        drop(nodes);
+        {
+            let inner = &mut *routing_table.inner.write();
+            for node_id in dropped.iter() {
+                let bucket_index = routing_table
+                    .calculate_bucket_index(node_id)
+                    .expect("should have a bucket");
+                inner
+                    .get_bucket_mut(bucket_index)
+                    .remove_entry(node_id.ref_value());
+            }
+        }
+        let removed = routing_table.save().await.expect("should save");
+        assert_eq!(
+            (removed.entries, removed.written, removed.deleted),
+            (2, 0, 1),
+            "a dropped entry is deleted"
+        );
+    }
+    mock_registry::terminate(registry).await;
 }
 
 // REPRO: the lookup/kick race. `lookup_node_id` clones an entry's Arc under the inner

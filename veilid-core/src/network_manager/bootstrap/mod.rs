@@ -125,7 +125,7 @@ impl NetworkManager {
                     vec![],                             // No relays for bootstrap nodes
                 );
 
-                match PeerInfo::new_from_unsigned(
+                match PeerInfo::try_new_from_unsigned(
                     &routing_table,
                     RoutingDomain::PublicInternet,
                     ni,
@@ -221,9 +221,10 @@ impl NetworkManager {
             }
 
             let result = if version == BOOTSTRAP_TXT_VERSION_0 {
-                BootstrapRecord::new_from_v0_str(self, opt_dial_info_converter, record_string).await
+                BootstrapRecord::try_new_from_v0_str(self, opt_dial_info_converter, record_string)
+                    .await
             } else {
-                BootstrapRecord::new_from_v1_str(
+                BootstrapRecord::try_new_from_v1_str(
                     self,
                     opt_dial_info_converter,
                     record_string,

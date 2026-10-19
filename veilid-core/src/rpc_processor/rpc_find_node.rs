@@ -36,7 +36,7 @@ impl RPCProcessor {
         }
 
         let find_node_q_detail = RPCQuestionDetail::FindNodeQ(Box::new(
-            RPCOperationFindNodeQ::new(hash_coordinate.clone(), capabilities.clone())?,
+            RPCOperationFindNodeQ::try_new(hash_coordinate.clone(), capabilities.clone())?,
         ));
         let find_node_q = RPCQuestion::new(
             network_result_try!(self.get_destination_respond_to(&dest).await?),
@@ -116,7 +116,7 @@ impl RPCProcessor {
 
         // Make FindNode answer
         let find_node_a =
-            RPCOperationFindNodeA::new(UnverifiedPeerInfo::from_verified_list(closest_nodes))?;
+            RPCOperationFindNodeA::try_new(UnverifiedPeerInfo::from_verified_list(closest_nodes))?;
 
         // Send FindNode answer
         self.answer(

@@ -375,7 +375,7 @@ impl NativeNetwork {
             if already {
                 continue;
             }
-            match RawUdpProtocolHandler::new_specific_bound_handler(self.registry(), addr) {
+            match RawUdpProtocolHandler::try_new_specific_bound_handler(self.registry(), addr) {
                 Ok(ph) => {
                     let mut inner = self.inner.lock();
                     inner.udp_protocol_handlers.insert(addr, ph.clone());

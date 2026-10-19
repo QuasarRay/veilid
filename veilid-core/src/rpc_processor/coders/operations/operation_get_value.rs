@@ -18,7 +18,7 @@ pub(in crate::rpc_processor) struct RPCOperationGetValueQ {
 }
 
 impl RPCOperationGetValueQ {
-    pub fn new(
+    pub fn try_new(
         key: OpaqueRecordKey,
         subkey: ValueSubkey,
         want_descriptor: bool,
@@ -79,7 +79,7 @@ pub(in crate::rpc_processor) struct RPCOperationGetValueA {
 }
 
 impl RPCOperationGetValueA {
-    pub fn new(
+    pub fn try_new(
         accepted: bool,
         value: Option<SignedValueData>,
         peers: Vec<Arc<UnverifiedPeerInfo>>,
@@ -203,7 +203,7 @@ impl RPCOperationGetValueA {
             None
         };
 
-        Self::new(accepted, value, peers, descriptor)
+        Self::try_new(accepted, value, peers, descriptor)
     }
     pub fn encode(
         &self,

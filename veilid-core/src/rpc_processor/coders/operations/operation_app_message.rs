@@ -17,7 +17,7 @@ impl fmt::Debug for RPCOperationAppMessage {
 }
 
 impl RPCOperationAppMessage {
-    pub fn new(message: Bytes) -> Result<Self, RPCError> {
+    pub fn try_new(message: Bytes) -> Result<Self, RPCError> {
         if message.len() > MAX_APP_MESSAGE_MESSAGE_LEN {
             return Err(RPCError::internal("AppMessage message too long to set"));
         }
@@ -42,7 +42,7 @@ impl RPCOperationAppMessage {
         rpc_ignore_missing_property!(reader, message);
         let mr = reader.get_message()?;
         rpc_ignore_max_len!(mr, MAX_APP_MESSAGE_MESSAGE_LEN);
-        Self::new(Bytes::copy_from_slice(mr))
+        Self::try_new(Bytes::copy_from_slice(mr))
     }
     pub fn encode(
         &self,

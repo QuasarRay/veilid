@@ -70,7 +70,7 @@ pub async fn test_bootstrap_v0() {
         .await
         .expect("should make string");
     let bsrec2 =
-        BootstrapRecord::new_from_v0_str(&network_manager, Some(&dial_info_converter), &v0str)
+        BootstrapRecord::try_new_from_v0_str(&network_manager, Some(&dial_info_converter), &v0str)
             .await
             .expect("should parse string")
             .expect("should be valid record");
@@ -99,7 +99,7 @@ pub async fn test_bootstrap_v1() {
         )
         .await
         .expect("should make string");
-    let bsrec2 = BootstrapRecord::new_from_v1_str(
+    let bsrec2 = BootstrapRecord::try_new_from_v1_str(
         &network_manager,
         Some(&dial_info_converter),
         &v1str,
@@ -141,7 +141,7 @@ pub async fn test_boot_v1_response() {
         )
         .await
         .expect("should make string");
-    let bsrec = BootstrapRecord::new_from_v1_str(
+    let bsrec = BootstrapRecord::try_new_from_v1_str(
         &network_manager,
         Some(&dial_info_converter),
         &v1str,
@@ -196,7 +196,7 @@ pub async fn test_bootstrap_record_unresolved() {
 
     // Parsing for serving consults no converter at all
     let unresolved =
-        BootstrapRecord::new_from_v1_str(&network_manager, None, &v1str, &signing_keys)
+        BootstrapRecord::try_new_from_v1_str(&network_manager, None, &v1str, &signing_keys)
             .await
             .expect("should parse string")
             .expect("should be valid record");
@@ -204,7 +204,7 @@ pub async fn test_bootstrap_record_unresolved() {
     assert_eq!(dial_info_converter.resolve_count(), baseline);
 
     // Same record, resolved, differs only in its dial info
-    let resolved = BootstrapRecord::new_from_v1_str(
+    let resolved = BootstrapRecord::try_new_from_v1_str(
         &network_manager,
         Some(&dial_info_converter),
         &v1str,
@@ -221,7 +221,7 @@ pub async fn test_bootstrap_record_unresolved() {
     // the record exactly as written
     let padded = format!("  {}\n", v1str);
     assert!(
-        BootstrapRecord::new_from_v1_str(&network_manager, None, &padded, &signing_keys)
+        BootstrapRecord::try_new_from_v1_str(&network_manager, None, &padded, &signing_keys)
             .await
             .expect("should parse string")
             .is_some()
@@ -231,7 +231,7 @@ pub async fn test_bootstrap_record_unresolved() {
     let mut tampered = v1str.clone();
     tampered.insert(tampered.rfind('|').expect("has a signature") + 1, 'A');
     assert!(
-        BootstrapRecord::new_from_v1_str(&network_manager, None, &tampered, &signing_keys)
+        BootstrapRecord::try_new_from_v1_str(&network_manager, None, &tampered, &signing_keys)
             .await
             .is_err()
     );

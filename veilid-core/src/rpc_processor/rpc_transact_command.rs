@@ -76,7 +76,7 @@ impl RPCProcessor {
         );
 
         // Send the TransactCommand question
-        let transact_value_q = RPCOperationTransactCommandQ::new(
+        let transact_value_q = RPCOperationTransactCommandQ::try_new(
             opaque_record_key.clone(),
             transaction_id,
             command,
@@ -327,7 +327,7 @@ impl RPCProcessor {
         }
 
         // Make TransactCommand answer
-        let transact_command_a = RPCOperationTransactCommandA::new(
+        let transact_command_a = RPCOperationTransactCommandA::try_new(
             transaction_valid,
             duration,
             opt_seqs,

@@ -1,6 +1,5 @@
 mod bucket;
 mod bucket_entry;
-mod bucket_entry_snapshot;
 #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
 mod debug;
 mod find_nodes;
@@ -32,7 +31,6 @@ mod types;
 pub mod tests_routing_table;
 
 pub(crate) use bucket_entry::*;
-pub(crate) use bucket_entry_snapshot::*;
 pub(crate) use node_ref::*;
 pub(crate) use privacy::*;
 pub(crate) use route_spec_store::*;
@@ -91,11 +89,32 @@ impl RoutingTableTimings {
 }
 
 // Table store keys
-const ALL_ENTRY_BYTES: Bytes = Bytes::from_static(b"all_entry_bytes");
 const ROUTING_TABLE: &str = "routing_table";
-const SERIALIZED_BUCKET_MAP: Bytes = Bytes::from_static(b"serialized_bucket_map");
+/// Column 0 holds the table's own state, column 1 the persisted entries
+pub(crate) const ROUTING_TABLE_COLUMN_COUNT: u32 = 2;
+/// Column holding the persisted entries, one per key
+const PERSISTED_ENTRIES_COLUMN: u32 = 1;
 const CACHE_VALIDITY_KEY: Bytes = Bytes::from_static(b"cache_validity_key");
 const NETWORK_ESTIMATOR_HISTORY: Bytes = Bytes::from_static(b"network_estimator_history");
+/// Layout of the saved routing table
+const ROUTING_TABLE_FORMAT_VERSION: u32 = 1;
+
+/// What a saved routing table was built under; a table saved under anything else is emptied at load
+#[derive(Serialize)]
+struct RoutingTableCacheValidity<'a> {
+    /// Layout of the saved table
+    format_version: u32,
+    /// This node's ids
+    node_ids: &'a NodeIdGroup,
+    /// Configured bootstrap hosts
+    bootstrap: &'a [String],
+    /// Keys trusted to sign bootstrap records
+    bootstrap_keys: &'a [PublicKey],
+    /// Configured bootstrap records
+    bootstrap_records: &'a [String],
+    /// Key separating this network from others
+    network_key_password: Option<&'a str>,
+}
 
 pub type RoutingTableEntryFilter<'t> =
     Box<dyn FnMut(&Option<BucketEntrySnapshot>, Timestamp) -> bool + Send + 't>;
@@ -112,8 +131,6 @@ pub type RoutingTableEntrySort<'t> = Box<
 >;
 pub type CreateNodeRefUpdateFunc<'t> = Box<dyn FnOnce(&mut BucketEntryInner) + 't>;
 
-type SerializedBuckets = Vec<TableDBSerializedData>;
-type SerializedBucketMap = BTreeMap<CryptoKind, SerializedBuckets>;
 type RoutingDomainControllerMap = HashMap<RoutingDomain, Arc<dyn RoutingDomainController>>;
 
 pub type BucketIndex = (CryptoKind, usize);
@@ -213,6 +230,12 @@ pub(crate) struct RoutingTable {
     save_schedule: Mutex<SaveSchedule>,
     /// Serializes saves so an older snapshot never lands after a newer one
     save_lock: AsyncMutex<()>,
+    /// The entries the last committed save left in the table store
+    persisted_entries: Mutex<PersistedEntries>,
+    /// The network estimator history as the table store holds it
+    saved_network_estimator: Mutex<Option<NetworkEstimator>>,
+    /// Each routing domain's states as the table store holds them, by key
+    saved_routing_domain_states: Mutex<HashMap<Bytes, Bytes>>,
     /// The routing table's table, opened on the first save and held open after
     table_db: Mutex<Option<TableDB>>,
 
@@ -296,6 +319,9 @@ impl RoutingTable {
             network_estimator: Mutex::new(NetworkEstimator::new()),
             save_schedule: Mutex::new(SaveSchedule::new(Timestamp::now())),
             save_lock: AsyncMutex::new(()),
+            persisted_entries: Default::default(),
+            saved_network_estimator: Default::default(),
+            saved_routing_domain_states: Default::default(),
             table_db: Mutex::new(None),
 
             flush_task: TickTask::new("flush_task", 1),
@@ -514,10 +540,8 @@ impl RoutingTable {
         veilid_log!(self debug "cancelling routing table tasks");
         self.cancel_tasks().await;
 
-        // Detached, the flush task no longer runs to save what changed
-        if self.save_schedule.lock().is_dirty() {
-            self.flush(SaveReason::Detach).await;
-        }
+        // Before the routing domains unpublish; terminate saves only what changes after
+        self.flush(SaveReason::Detach).await;
 
         // Stop ping validation processor
         veilid_log!(self debug "stopping ping validation processor");
@@ -567,8 +591,11 @@ impl RoutingTable {
     async fn terminate_async(&self) {
         veilid_log!(self debug "starting routing table terminate");
 
-        veilid_log!(self debug "routing table termination flush");
-        self.flush(SaveReason::Terminate).await;
+        // A detach saved everything before it
+        if self.save_schedule.lock().is_dirty() {
+            veilid_log!(self debug "routing table termination flush");
+            self.flush(SaveReason::Terminate).await;
+        }
         self.table_db.lock().take();
         self.route_spec_store().close_table();
 
@@ -601,7 +628,7 @@ impl RoutingTable {
         #[cfg(not(feature = "app-lifecycle"))]
         self.save_schedule.lock().saving(start_ts);
 
-        let saved_entries = self
+        let saved = self
             .save()
             .await
             .inspect_err(|e| error!("failed to save routing table state: {}", e))
@@ -611,9 +638,9 @@ impl RoutingTable {
             error!("couldn't save route spec store: {}", e);
         }
 
-        if let Some(saved_entries) = saved_entries {
-            veilid_log!(self debug "saved routing table ({:?}): {} entries in {:#}",
-                reason, saved_entries, TimestampDuration::since(start_ts));
+        if let Some(saved) = saved {
+            veilid_log!(self debug "saved routing table ({:?}): {} entries, {} written, {} deleted, {} routing domain states written in {:#}",
+                reason, saved.entries, saved.written, saved.deleted, saved.routing_domain_states, TimestampDuration::since(start_ts));
         }
     }
 
@@ -899,8 +926,18 @@ impl RoutingTable {
                 .get_async(ck)
                 .expect_or_log("Valid crypto kind is not actually valid.");
 
+            // Configured keys let a reopened test core keep its identity
             #[cfg(test)]
-            let (public_key, secret_key) = vcrypto.generate_keypair().await.into_split();
+            let (public_key, secret_key) = {
+                let config = self.config();
+                match (
+                    config.network.routing_table.public_keys.get(ck),
+                    config.network.routing_table.secret_keys.get(ck),
+                ) {
+                    (Some(public_key), Some(secret_key)) => (public_key, secret_key),
+                    _ => vcrypto.generate_keypair().await.into_split(),
+                }
+            };
             #[cfg(not(test))]
             let (public_key, secret_key) = self.setup_public_key(vcrypto).await?;
 
@@ -990,79 +1027,107 @@ impl RoutingTable {
         ))
     }
 
-    /// Serialize the routing table.
-    fn serialized_buckets(&self) -> (SerializedBucketMap, SerializedBuckets) {
-        // Since entries are shared by multiple buckets per cryptokind
-        // we need to get the list of all unique entries when serializing
-        let mut all_entries: Vec<Arc<BucketEntry>> = Vec::new();
-
-        // Serialize all buckets and get map of entries
-        let mut serialized_bucket_map: SerializedBucketMap = BTreeMap::new();
-        {
-            let mut entry_map: HashMap<*const BucketEntry, u32> = HashMap::new();
-            let inner = &*self.inner.read();
-            for ck in VALID_CRYPTO_KINDS {
-                let buckets = inner.buckets.get(&ck).unwrap_or_log();
-                let mut serialized_buckets = Vec::new();
-                for bucket in buckets.iter() {
-                    serialized_buckets.push(bucket.save_bucket(&mut all_entries, &mut entry_map))
+    /// Every entry in a bucket, once each
+    fn bucketed_entries(&self) -> Vec<Arc<BucketEntry>> {
+        let inner = self.inner.read();
+        let mut seen: HashSet<*const BucketEntry> = HashSet::new();
+        let mut entries = Vec::new();
+        for buckets in inner.buckets.values() {
+            for bucket in buckets {
+                for (_, entry) in bucket.entries() {
+                    if seen.insert(Arc::as_ptr(entry)) {
+                        entries.push(entry.clone());
+                    }
                 }
-                serialized_bucket_map.insert(ck, serialized_buckets);
             }
         }
-
-        // Serialize all the entries
-        let mut all_entry_bytes = Vec::with_capacity(all_entries.len());
-        for entry in all_entries {
-            // Serialize entry
-            let entry_bytes = entry.with(serialize_table_value);
-            all_entry_bytes.push(entry_bytes);
-        }
-
-        (serialized_bucket_map, all_entry_bytes)
+        entries
     }
 
-    /// Write the persisted routing table state to the table store, returning the entry count.
-    /// Includes buckets, network estimator history, and per-routing-domain state.
-    async fn save(&self) -> EyreResult<usize> {
-        let (serialized_bucket_map, all_entry_bytes) = self.serialized_buckets();
-        let entry_count = all_entry_bytes.len();
-        let network_estimator_snapshot = self.network_estimator.lock().clone();
+    /// Write what changed since the last save: bucket entries, network estimator history and
+    /// per-routing-domain state
+    async fn save(&self) -> EyreResult<SaveCounts> {
+        let entries = self.bucketed_entries();
+        let changes = self
+            .persisted_entries
+            .lock()
+            .changes(&entries, Timestamp::now());
+        let network_estimator = self.network_estimator.lock().clone();
+        let network_estimator_changed =
+            self.saved_network_estimator.lock().as_ref() != Some(&network_estimator);
+        let routing_domain_states: Vec<(Bytes, TableDBSerializedData)> = self
+            .get_routing_domain_controllers(RoutingDomainSet::all())
+            .iter()
+            .flat_map(|rdc| {
+                let restore_point = (
+                    restore_point_key(rdc.routing_domain()),
+                    serialize_table_value(&rdc.read_dyn().get_restore_point().as_deref()),
+                );
+                rdc.persisted_state().into_iter().chain([restore_point])
+            })
+            .collect();
+        let routing_domain_states: Vec<(Bytes, TableDBSerializedData)> = {
+            let saved = self.saved_routing_domain_states.lock();
+            routing_domain_states
+                .into_iter()
+                .filter(|(key, value)| saved.get(key) != Some(&value.0))
+                .collect()
+        };
 
         let tdb = self.table_db().await?;
         let dbx = tdb.transact();
-        let serialized = serialize_table_value(&serialized_bucket_map);
-        if let Err(e) = dbx
-            .store_serialized(0, SERIALIZED_BUCKET_MAP, serialized)
-            .await
-        {
-            dbx.rollback();
-            return Err(e.into());
-        }
-        let serialized = serialize_table_value(&all_entry_bytes);
-        if let Err(e) = dbx.store_serialized(0, ALL_ENTRY_BYTES, serialized).await {
-            dbx.rollback();
-            return Err(e.into());
-        }
-        let serialized = serialize_table_value(&network_estimator_snapshot);
-        if let Err(e) = dbx
-            .store_serialized(0, NETWORK_ESTIMATOR_HISTORY, serialized)
-            .await
-        {
-            dbx.rollback();
-            return Err(e.into());
-        }
-
-        // Per-routing-domain state goes in the same transaction
-        for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
-            if let Err(e) = rdc.save(&dbx).await {
-                dbx.rollback();
-                return Err(e);
+        let staged: EyreResult<()> = async {
+            // Deletes first: an entry that did not load may share its key with one written now
+            for key in &changes.deleted {
+                dbx.delete(PERSISTED_ENTRIES_COLUMN, key.clone()).await?;
             }
+            for node_id in &changes.written {
+                if let Some(persisted) = changes.entries.get(node_id) {
+                    dbx.store_serialized(
+                        PERSISTED_ENTRIES_COLUMN,
+                        persisted_entry_key(node_id),
+                        serialize_table_value(&**persisted),
+                    )
+                    .await?;
+                }
+            }
+            if network_estimator_changed {
+                dbx.store_serialized(
+                    0,
+                    NETWORK_ESTIMATOR_HISTORY,
+                    serialize_table_value(&network_estimator),
+                )
+                .await?;
+            }
+            for (key, value) in &routing_domain_states {
+                dbx.store_serialized(0, key.clone(), TableDBSerializedData(value.0.clone()))
+                    .await?;
+            }
+            Ok(())
         }
-
+        .await;
+        if let Err(e) = staged {
+            dbx.rollback();
+            return Err(e);
+        }
         dbx.commit().await?;
-        Ok(entry_count)
+
+        let counts = SaveCounts {
+            entries: changes.entries.entry_count(),
+            written: changes.written.len(),
+            deleted: changes.deleted.len(),
+            routing_domain_states: routing_domain_states.len(),
+        };
+        *self.persisted_entries.lock() = changes.entries;
+        if network_estimator_changed {
+            *self.saved_network_estimator.lock() = Some(network_estimator);
+        }
+        self.saved_routing_domain_states.lock().extend(
+            routing_domain_states
+                .into_iter()
+                .map(|(key, value)| (key, value.0)),
+        );
+        Ok(counts)
     }
 
     /// Held open between saves: every open runs a full integrity check of the file
@@ -1070,53 +1135,53 @@ impl RoutingTable {
         if let Some(tdb) = self.table_db.lock().clone() {
             return Ok(tdb);
         }
-        let tdb = self.table_store().open(ROUTING_TABLE, 1).await?;
+        let tdb = self
+            .table_store()
+            .open(ROUTING_TABLE, ROUTING_TABLE_COLUMN_COUNT)
+            .await?;
         *self.table_db.lock() = Some(tdb.clone());
         Ok(tdb)
     }
 
     /// Throw away the saved routing table and start the cache over from empty
-    async fn reset_saved_routing_table(&self, cache_validity_key: &[u8]) -> EyreResult<()> {
+    async fn reset_saved_routing_table(&self, cache_validity_key: Bytes) -> EyreResult<()> {
         let table_store = self.table_store();
         table_store.delete(ROUTING_TABLE).await?;
-        let db = table_store.open(ROUTING_TABLE, 1).await?;
-        db.store(
-            0,
-            CACHE_VALIDITY_KEY,
-            Bytes::copy_from_slice(cache_validity_key),
-        )
-        .await?;
+        let db = table_store
+            .open(ROUTING_TABLE, ROUTING_TABLE_COLUMN_COUNT)
+            .await?;
+        db.store(0, CACHE_VALIDITY_KEY, cache_validity_key).await?;
+        *self.persisted_entries.lock() = PersistedEntries::default();
+        *self.saved_network_estimator.lock() = None;
+        self.saved_routing_domain_states.lock().clear();
         Ok(())
     }
 
-    /// Deserialize routing table state from the table store.
-    /// Includes buckets, network estimator history, and per-routing-domain state.
-    async fn load(&self) -> EyreResult<()> {
-        // Make a cache validity key of all our node ids and our bootstrap choice
-        let mut cache_validity_key: Vec<u8> = Vec::new();
-        {
-            let config = self.config();
-            for ck in VALID_CRYPTO_KINDS {
-                if let Some(nid) = config.network.routing_table.public_keys.get(ck) {
-                    cache_validity_key.extend_from_slice(nid.ref_value());
-                }
-            }
-            for b in &config.network.routing_table.bootstrap {
-                cache_validity_key.extend_from_slice(b.as_bytes());
-            }
-            cache_validity_key.extend_from_slice(
-                config
-                    .network
-                    .network_key_password
-                    .clone()
-                    .unwrap_or_default()
-                    .as_bytes(),
-            );
-        };
+    /// The validity a saved table must carry to load into this node
+    fn cache_validity_key(&self) -> Bytes {
+        let config = self.config();
+        let routing_table_config = &config.network.routing_table;
+        let node_ids = self.node_ids();
+        serialize_table_value(&RoutingTableCacheValidity {
+            format_version: ROUTING_TABLE_FORMAT_VERSION,
+            node_ids: &node_ids,
+            bootstrap: &routing_table_config.bootstrap,
+            bootstrap_keys: &routing_table_config.bootstrap_keys,
+            bootstrap_records: &routing_table_config.bootstrap_records,
+            network_key_password: config.network.network_key_password.as_deref(),
+        })
+        .0
+    }
 
-        // Deserialize bucket map and all entries from the table store
+    /// Load the saved routing table: bucket entries, network estimator history and
+    /// per-routing-domain state
+    async fn load(&self) -> EyreResult<()> {
+        let cache_validity_key = self.cache_validity_key();
+
         let table_store = self.table_store();
-        let db = table_store.open(ROUTING_TABLE, 1).await?;
+        let db = table_store
+            .open(ROUTING_TABLE, ROUTING_TABLE_COLUMN_COUNT)
+            .await?;
 
         let caches_valid = match db.load(0, CACHE_VALIDITY_KEY).await? {
             Some(v) => v == cache_validity_key,
@@ -1126,24 +1191,9 @@ impl RoutingTable {
             // Caches not valid, start over
             veilid_log!(self debug "cache validity key changed, emptying routing table");
             drop(db);
-            self.reset_saved_routing_table(&cache_validity_key).await?;
+            self.reset_saved_routing_table(cache_validity_key).await?;
             return Ok(());
         }
-
-        // Caches valid, load saved routing table
-        let Some(serialized_bucket_map) = db.load_serialized(0, SERIALIZED_BUCKET_MAP).await?
-        else {
-            veilid_log!(self debug "no bucket map in saved routing table");
-            return Ok(());
-        };
-        let serialized_bucket_map: SerializedBucketMap =
-            table_store.try_deserialize(&serialized_bucket_map)?;
-
-        let Some(all_entry_bytes) = db.load_serialized(0, ALL_ENTRY_BYTES).await? else {
-            veilid_log!(self debug "no all_entry_bytes in saved routing table");
-            return Ok(());
-        };
-        let all_entry_bytes: SerializedBuckets = table_store.try_deserialize(&all_entry_bytes)?;
 
         // A routing domain can reject the saved table outright, in which case none of it is
         // applied and the node bootstraps from nothing. This is how a table saved without a
@@ -1152,7 +1202,7 @@ impl RoutingTable {
             if rdc.persisted_state_requires_reset(&db).await {
                 veilid_log!(self info "{} has no recorded bootstrap, emptying routing table to bootstrap again", rdc.routing_domain());
                 drop(db);
-                self.reset_saved_routing_table(&cache_validity_key).await?;
+                self.reset_saved_routing_table(cache_validity_key).await?;
                 return Ok(());
             }
         }
@@ -1160,15 +1210,60 @@ impl RoutingTable {
         // Restore the network estimator histogram if present.
         if let Ok(Some(serialized)) = db.load_serialized(0, NETWORK_ESTIMATOR_HISTORY).await {
             let estimator: NetworkEstimator = table_store.try_deserialize(&serialized)?;
-            *self.network_estimator.lock() = estimator;
+            *self.network_estimator.lock() = estimator.clone();
+            *self.saved_network_estimator.lock() = Some(estimator);
         }
 
-        // Reconstruct all entries
+        // An entry that does not load stays recorded, so the next save deletes it
+        let registry = self.registry();
+        let mut persisted_entries = PersistedEntries::default();
+        let mut loaded_entries = Vec::new();
+        for key in db.get_keys(PERSISTED_ENTRIES_COLUMN).await? {
+            let Some(serialized) = db
+                .load_serialized(PERSISTED_ENTRIES_COLUMN, key.clone())
+                .await?
+            else {
+                continue;
+            };
+            let loaded = table_store
+                .try_deserialize::<BucketEntryPersisted>(&serialized)
+                .map_err(EyreReport::from)
+                .and_then(|persisted| {
+                    BucketEntryInner::from_persisted(
+                        registry.clone(),
+                        self.network_manager.clone(),
+                        &persisted,
+                    )
+                    .map(|entry_inner| (persisted, entry_inner))
+                });
+            match loaded {
+                Ok((persisted, entry_inner)) => loaded_entries.push((key, persisted, entry_inner)),
+                Err(e) => {
+                    veilid_log!(self debug "skipping saved routing table entry: {}", e);
+                    persisted_entries.insert_unloaded(key);
+                }
+            }
+        }
         let loaded = {
             let inner = &mut *self.inner.write();
-            Self::populate_routing_table_inner(inner, serialized_bucket_map, all_entry_bytes)?;
+            for (key, persisted, entry_inner) in loaded_entries {
+                #[cfg(feature = "geolocation")]
+                let entry_inner = {
+                    let mut entry_inner = entry_inner;
+                    entry_inner.update_geolocation_info();
+                    entry_inner
+                };
+                let entry = Arc::new(BucketEntry::new_with_inner(entry_inner));
+                if self.insert_loaded_entry(inner, entry) {
+                    persisted_entries.insert(key, persisted);
+                } else {
+                    veilid_log!(self debug "skipping saved routing table entry whose node ids are taken: {}", persisted.node_ids);
+                    persisted_entries.insert_unloaded(key);
+                }
+            }
             inner.bucket_entry_count()
         };
+        *self.persisted_entries.lock() = persisted_entries;
 
         // Drop relay-only entries: low-quality hops that can't act as safety-route first hops
         // or relays. Important nodes will be re-discovered through bootstrap or peer exchange.
@@ -1185,76 +1280,36 @@ impl RoutingTable {
         // });
 
         // Per-routing-domain state; failures are non-fatal
+        let mut saved_routing_domain_states = HashMap::new();
         for rdc in self.get_routing_domain_controllers(RoutingDomainSet::all()) {
             if let Err(e) = rdc.load(&db).await {
                 veilid_log!(self warn "failed to load persisted state for {}: {}", rdc.routing_domain(), e);
             }
-        }
-
-        Ok(())
-    }
-
-    /// Write the deserialized table store data to the routing table.
-    pub fn populate_routing_table_inner(
-        inner: &mut RoutingTableInner,
-        serialized_bucket_map: SerializedBucketMap,
-        all_entry_objects: SerializedBuckets,
-    ) -> EyreResult<()> {
-        let mut all_entries: Vec<Option<Arc<BucketEntry>>> =
-            Vec::with_capacity(all_entry_objects.len());
-        for entry_object in all_entry_objects {
-            // Deserialize with the registry attached and the best node id reconstructed.
-            // Entries that fail to deserialize or have no valid node id are skipped; a None
-            // slot keeps the bucket map's entry indices aligned.
-            let entryinner = match BucketEntryInner::deserialize_from_persisted(
-                inner.registry(),
-                inner.network_manager.clone(),
-                entry_object,
-            ) {
-                Ok(e) => e,
-                Err(e) => {
-                    veilid_log!(inner debug "skipping bucket entry on load: {}", e);
-                    all_entries.push(None);
-                    continue;
+            // Recorded as read, so the next save skips the states that did not change
+            if let Some((key, _)) = rdc.persisted_state() {
+                if let Ok(Some(serialized)) = db.load_serialized(0, key.clone()).await {
+                    saved_routing_domain_states.insert(key, serialized.0);
                 }
-            };
-
-            #[cfg(feature = "geolocation")]
-            let entryinner = {
-                let mut entryinner = entryinner;
-                entryinner.update_geolocation_info();
-                entryinner
-            };
-
-            let entry = Arc::new(BucketEntry::new_with_inner(entryinner));
-
-            // Keep strong reference in table
-            all_entries.push(Some(entry.clone()));
-
-            // Keep all entries in weak table too
-            inner.all_entries.insert(entry);
-        }
-
-        // Validate serialized bucket map
-        for (k, v) in &serialized_bucket_map {
-            if !VALID_CRYPTO_KINDS.contains(k) {
-                veilid_log!(inner warn "crypto kind is not valid, not loading routing table");
-                return Ok(());
             }
-            if v.len() != BUCKET_COUNT {
-                veilid_log!(inner warn "bucket count is different, not loading routing table");
-                return Ok(());
+            // A restore point that does not load costs a detection, nothing more
+            let key = restore_point_key(rdc.routing_domain());
+            if let Ok(Some(serialized)) = db.load_serialized(0, key.clone()).await {
+                match table_store.try_deserialize::<Option<RoutingDomainRestorePoint>>(&serialized)
+                {
+                    Ok(restore_point) => {
+                        rdc.read_dyn()
+                            .replace_restore_point(restore_point.map(Arc::new));
+                    }
+                    Err(e) => {
+                        veilid_log!(self debug "[{}] skipping saved restore point: {}", rdc.routing_domain(), e);
+                    }
+                }
+                saved_routing_domain_states.insert(key, serialized.0);
             }
         }
-
-        // Recreate buckets
-        for (k, v) in serialized_bucket_map {
-            let buckets = inner.buckets.get_mut(&k).unwrap_or_log();
-
-            for n in 0..v.len() {
-                buckets[n].load_bucket(&v[n], &all_entries)?;
-            }
-        }
+        self.saved_routing_domain_states
+            .lock()
+            .extend(saved_routing_domain_states);
 
         Ok(())
     }
@@ -1303,6 +1358,7 @@ impl RoutingTable {
             }
             let mut edit = rdc.edit_dyn();
             edit.reset();
+            rdc.discard_restore_point();
         }
 
         // Purge buckets
@@ -1607,6 +1663,41 @@ impl RoutingTable {
         Ok(nr)
     }
 
+    /// Bucket a reloaded entry under each of its valid node ids; false when one of them is ours
+    /// or already belongs to another entry
+    fn insert_loaded_entry(&self, inner: &mut RoutingTableInner, entry: Arc<BucketEntry>) -> bool {
+        let node_ids = entry.with(|e| e.node_ids());
+        if self.matches_own_node_id(&node_ids) {
+            return false;
+        }
+        let mut placements = Vec::new();
+        for node_id in node_ids
+            .iter()
+            .filter(|nid| VALID_CRYPTO_KINDS.contains(&nid.kind()))
+        {
+            let Ok(bucket_index) = self.calculate_bucket_index(node_id) else {
+                return false;
+            };
+            if inner
+                .get_bucket(bucket_index)
+                .entry(node_id.ref_value())
+                .is_some()
+            {
+                return false;
+            }
+            placements.push((bucket_index, node_id.value()));
+        }
+        let mut kick_queue = self.kick_queue.lock();
+        for (bucket_index, bare_node_id) in placements {
+            inner
+                .get_bucket_mut(bucket_index)
+                .add_existing_entry(bare_node_id, entry.clone());
+            kick_queue.insert(bucket_index);
+        }
+        inner.all_entries.insert(entry);
+        true
+    }
+
     /// The entry create_node_ref would pick for `node_ids`, if its node ids are exactly those
     fn existing_node_ref_with_node_ids(
         &self,
@@ -1846,6 +1937,14 @@ impl RoutingTable {
         self.hold_background_time_for_save();
     }
 
+    /// Queue a save that waits only for the least interval between saves, for state a restart
+    /// restores at once
+    pub(crate) fn mark_save_urgent(&self) {
+        self.save_schedule.lock().urgent_change(Timestamp::now());
+        #[cfg(feature = "app-lifecycle")]
+        self.hold_background_time_for_save();
+    }
+
     /// Count an entry changing state toward the next save
     pub(crate) fn mark_entry_state_changed(&self) {
         self.save_schedule.lock().state_changed(Timestamp::now());
@@ -1899,6 +1998,8 @@ impl RoutingTable {
             .collect::<Vec<_>>();
         if node_ids.contains_any_from_iter(our_relay_node_ids.iter()) {
             rdd.invalidate();
+            // Publishing reads the detail again; a held read lock can deadlock a waiting writer
+            drop(rdd);
             rdc.publish_peer_info();
         }
 

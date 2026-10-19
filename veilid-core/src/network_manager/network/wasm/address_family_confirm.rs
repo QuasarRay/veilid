@@ -33,6 +33,7 @@ impl WasmNetwork {
 
             editor.commit();
         }
+        rdc.discard_restore_point();
         self.wake_address_family_confirm_worker();
 
         veilid_log!(self info "{:#} address families reset: {:?}", routing_domain, configured_address_types);
@@ -46,16 +47,19 @@ impl WasmNetwork {
         }
     }
 
-    /// The routing domains whose address families still await a verdict
-    pub(super) fn unconfirmed_address_family_domains(&self) -> Vec<RoutingDomain> {
+    /// The routing domains whose address families still await a verdict: unconfirmed ones, and
+    /// restored ones not yet probed on this network
+    pub(super) fn address_family_domains_to_confirm(&self) -> Vec<RoutingDomain> {
         let routing_table = self.routing_table();
+        let verifying = self.inner.lock().verifying_address_families.clone();
         self.routing_domains_detecting_address_changes()
             .into_iter()
             .filter(|routing_domain| {
-                !routing_table
-                    .get_routing_domain_controller(*routing_domain)
-                    .read_dyn()
-                    .confirmed()
+                verifying.contains(routing_domain)
+                    || !routing_table
+                        .get_routing_domain_controller(*routing_domain)
+                        .read_dyn()
+                        .confirmed()
             })
             .collect()
     }
@@ -165,7 +169,7 @@ impl WasmNetwork {
 
     async fn address_family_confirm_worker(&self, wakeup: WakeReceiver, stop_token: StopToken) {
         while wakeup.wait(None, stop_token.clone()).await == WakeOutcome::Woken {
-            for routing_domain in self.unconfirmed_address_family_domains() {
+            for routing_domain in self.address_family_domains_to_confirm() {
                 if let Err(e) = self
                     .perform_address_family_confirmation_pass(routing_domain, &stop_token)
                     .await
@@ -227,6 +231,10 @@ impl WasmNetwork {
         };
 
         if let ConfirmationPassOutcome::Confirm(confirmed_address_types) = outcome {
+            self.inner
+                .lock()
+                .verifying_address_families
+                .remove(&routing_domain);
             self.confirm_address_families(routing_domain, confirmed_address_types);
         }
 
@@ -279,7 +287,7 @@ impl WasmNetwork {
 
             // Families we've received answers over since the last confirm request
             let mut snap_live_families = AddressTypeSet::empty();
-            for (tt, st) in snap.per_transport.iter() {
+            for (tt, st) in snap.per_transport_stats.iter() {
                 // Skip any address types that are not configured for this routing domain
                 if !configured_address_types.contains(tt.address_type()) {
                     continue;

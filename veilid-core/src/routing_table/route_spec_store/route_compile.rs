@@ -92,6 +92,7 @@ impl RouteSpecStore {
         safety_spec: &SafetySpec,
         optimize: bool,
         pr_allocated: bool,
+        loopback: bool,
     ) -> VeilidAPIResult<RouteCompileContext> {
         let cache = self.cache.read();
 
@@ -111,6 +112,15 @@ impl RouteSpecStore {
         // Enforce the routing domain
         first_hop
             .merge_filter(NodeRefFilter::new().with_routing_domain(RoutingDomain::PublicInternet));
+
+        // A datagram route's loopback must leave on datagrams, not on another route's connection
+        if loopback
+            && safety_arce.orderings() == SequenceOrderingSet::only(SequenceOrdering::Unordered)
+        {
+            first_hop.merge_filter(NodeRefFilter::new().with_dial_info_filter(
+                DialInfoFilter::ensure_ordering(SequenceOrdering::Unordered),
+            ));
+        }
 
         let secret = safety_arce.route_set_secret_for_key(&sr_pubkey)?;
 
@@ -476,12 +486,14 @@ impl RouteSpecStore {
             };
 
         // Get the compile context (shared state for both optimized and unoptimized paths)
+        let loopback = sr_pubkey == pr_pubkey;
         let ctx = self.get_route_compile_context(
             &safety_route_id,
             sr_pubkey,
             safety_spec,
             optimize,
             opt_private_route_id.is_some(),
+            loopback,
         )?;
 
         #[cfg(feature = "verbose-tracing")]
@@ -547,10 +559,10 @@ impl RouteSpecStore {
         // and is not part of the compile route itself. We do not need to check it explicitly here
         // because checking 'compiled_route.safety_route' already does this for us.
 
+        // A loopback's safety route is the route under test: a lost question has nowhere to move
+        let loopback = compiled_route.compiled_safety_route.public_key == key.pr_pubkey;
         // Read before the cache lock, since it reads the routing table
-        let opt_loss_epoch = key
-            .opt_reply_pr_pubkey
-            .is_none()
+        let opt_loss_epoch = (key.opt_reply_pr_pubkey.is_none() && !loopback)
             .then(|| self.private_route_loss_epoch(&params.private_route));
 
         let cache = self.cache.read();

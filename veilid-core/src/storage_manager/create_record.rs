@@ -115,12 +115,15 @@ impl StorageManager {
         // Add new local value record
         let cur_ts = Timestamp::now();
         let local_record_detail = LocalRecordDetail::new(safety_selection);
-        let record =
-            Record::<LocalRecordDetail>::new(cur_ts, signed_value_descriptor, local_record_detail)?;
+        let record = Record::<LocalRecordDetail>::try_new(
+            cur_ts,
+            signed_value_descriptor,
+            local_record_detail,
+        )?;
 
         let opaque_record_key = record_key.opaque();
         local_record_store
-            .new_record(opaque_record_key, record)
+            .try_new_record(opaque_record_key, record)
             .await?;
 
         Ok((record_key, owner))

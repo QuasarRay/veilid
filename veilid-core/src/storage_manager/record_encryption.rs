@@ -50,14 +50,14 @@ impl StorageManager {
                 .crypt_b2b_no_auth(in_data, out_data, 0, &nonce, &encryption_key)
                 .await?;
 
-            Ok(EncryptedValueData::new(
+            Ok(EncryptedValueData::try_new(
                 value_data.seq(),
                 out_data.freeze(),
                 value_data.writer(),
                 Some(nonce),
             )?)
         } else {
-            Ok(EncryptedValueData::new(
+            Ok(EncryptedValueData::try_new(
                 value_data.seq(),
                 value_data.data_bytes(),
                 value_data.writer(),
@@ -93,13 +93,13 @@ impl StorageManager {
                 let out_data = vcrypto
                     .crypt_b2b_no_auth(in_data, out_data, 0, &nonce, &encryption_key)
                     .await?;
-                Ok(ValueData::new_with_seq(
+                Ok(ValueData::try_new_with_seq(
                     encrypted_value_data.seq(),
                     out_data.freeze(),
                     encrypted_value_data.writer(),
                 )?)
             }
-            (None, None) => Ok(ValueData::new_with_seq(
+            (None, None) => Ok(ValueData::try_new_with_seq(
                 encrypted_value_data.seq(),
                 encrypted_value_data.data(),
                 encrypted_value_data.writer(),

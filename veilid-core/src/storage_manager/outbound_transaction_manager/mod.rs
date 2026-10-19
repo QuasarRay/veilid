@@ -309,7 +309,7 @@ impl OutboundTransactionManager {
     }
 
     /// Create a new transaction over a set of records
-    pub fn new_transaction(
+    pub fn try_new_transaction(
         &mut self,
         record_params: Vec<OutboundTransactionRecordParams>,
         kind: OutboundTransactionKind,
@@ -333,7 +333,7 @@ impl OutboundTransactionManager {
 
         // Add all records
         for rp in record_params {
-            outbound_transaction_state.new_record_state(rp)?;
+            outbound_transaction_state.try_new_record_state(rp)?;
         }
 
         // Add to transaction list
@@ -360,7 +360,7 @@ impl OutboundTransactionManager {
         let record_state = outbound_transaction_state
             .get_record_state_mut(&params.opaque_record_key)
             .ok_or_else(|| VeilidAPIError::internal("missing record state"))?;
-        let nt = record_state.new_node_transaction(
+        let nt = record_state.try_new_node_transaction(
             lnxid,
             NodeTransactionParams {
                 kind: params.opaque_record_key.kind(),
@@ -2217,7 +2217,7 @@ impl OutboundTransactionManager {
             }
         }
 
-        DHTRecordReport::new(
+        DHTRecordReport::try_new(
             subkeys,
             // Transactions never have offline subkeys
             ValueSubkeyRangeSet::new(),

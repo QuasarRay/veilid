@@ -64,7 +64,7 @@ impl RPCProcessor {
         );
 
         // Send the inspectvalue question
-        let inspect_value_q = RPCOperationInspectValueQ::new(
+        let inspect_value_q = RPCOperationInspectValueQ::try_new(
             opaque_record_key.clone(),
             subkeys.clone(),
             matches!(descriptor_mode, GetDescriptorMode::WantDescriptor),
@@ -265,7 +265,7 @@ impl RPCProcessor {
         }
 
         // Make InspectValue answer
-        let inspect_value_a = RPCOperationInspectValueA::new(
+        let inspect_value_a = RPCOperationInspectValueA::try_new(
             accepted,
             inspect_result_seqs,
             UnverifiedPeerInfo::from_verified_list(closer_to_key_peers),

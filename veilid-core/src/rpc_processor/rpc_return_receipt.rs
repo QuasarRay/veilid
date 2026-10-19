@@ -17,7 +17,7 @@ impl RPCProcessor {
             .enter()
             .map_err(RPCError::map_try_again("not started up"))?;
 
-        let return_receipt = RPCOperationReturnReceipt::new(receipt)?;
+        let return_receipt = RPCOperationReturnReceipt::try_new(receipt)?;
         let statement =
             RPCStatement::new(RPCStatementDetail::ReturnReceipt(Box::new(return_receipt)));
 
@@ -45,7 +45,7 @@ impl RPCProcessor {
         let res = match msg.header.detail {
             RPCMessageHeaderDetail::Direct(detail) => {
                 network_manager
-                    .handle_in_band_receipt(receipt, detail.sender_noderef)
+                    .handle_in_band_receipt(receipt, detail.sender_noderef, detail.flow)
                     .await
             }
             RPCMessageHeaderDetail::SafetyRouted(_) => {

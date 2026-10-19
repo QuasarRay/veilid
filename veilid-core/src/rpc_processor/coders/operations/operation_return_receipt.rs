@@ -6,7 +6,7 @@ pub(in crate::rpc_processor) struct RPCOperationReturnReceipt {
 }
 
 impl RPCOperationReturnReceipt {
-    pub fn new(receipt: Bytes) -> Result<Self, RPCError> {
+    pub fn try_new(receipt: Bytes) -> Result<Self, RPCError> {
         if receipt.len() < RCP0_MIN_RECEIPT_SIZE {
             return Err(RPCError::protocol("ReturnReceipt receipt too short to set"));
         }
@@ -36,7 +36,7 @@ impl RPCOperationReturnReceipt {
         let rr = reader.get_receipt()?;
         rpc_ignore_min_max_len!(rr, RCP0_MIN_RECEIPT_SIZE, RCP0_MAX_RECEIPT_SIZE);
 
-        Self::new(Bytes::copy_from_slice(rr))
+        Self::try_new(Bytes::copy_from_slice(rr))
     }
     pub fn encode(
         &self,

@@ -36,7 +36,10 @@ impl fmt::Debug for DHTTransaction {
 impl DHTTransaction {
     ////////////////////////////////////////////////////////////////
 
-    pub(super) fn new(api: VeilidAPI, handle: OutboundTransactionHandle) -> VeilidAPIResult<Self> {
+    pub(super) fn try_new(
+        api: VeilidAPI,
+        handle: OutboundTransactionHandle,
+    ) -> VeilidAPIResult<Self> {
         let registry = api.core_context()?.registry();
         Ok(Self {
             api,

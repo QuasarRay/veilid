@@ -108,8 +108,23 @@ pub fn fix_peer_info(
     crypto_info_list: Vec<CryptoInfo>,
     secret_keys: SecretKeyGroup,
 ) -> VeilidAPIResult<PeerInfo> {
-    let node_info = NodeInfo::new(
+    fix_peer_info_at(
+        routing_table,
+        crypto_info_list,
+        secret_keys,
         Timestamp::new(0),
+    )
+}
+
+/// A signed peer info whose node info carries `timestamp`
+pub fn fix_peer_info_at(
+    routing_table: &RoutingTable,
+    crypto_info_list: Vec<CryptoInfo>,
+    secret_keys: SecretKeyGroup,
+    timestamp: Timestamp,
+) -> VeilidAPIResult<PeerInfo> {
+    let node_info = NodeInfo::new(
+        timestamp,
         vec![ENVELOPE_VERSION_ENV0],
         crypto_info_list,
         PUBLIC_INTERNET_CAPABILITIES.to_vec(),
@@ -119,7 +134,7 @@ pub fn fix_peer_info(
         vec![],
     );
 
-    PeerInfo::new_from_node_info(
+    PeerInfo::try_new_from_node_info(
         routing_table,
         RoutingDomain::PublicInternet,
         &secret_keys,
@@ -142,10 +157,11 @@ pub fn fix_unsigned_peer_info(
         vec![],
     );
 
-    PeerInfo::new_from_unsigned(routing_table, RoutingDomain::PublicInternet, node_info)
+    PeerInfo::try_new_from_unsigned(routing_table, RoutingDomain::PublicInternet, node_info)
 }
 
-fn make_distinct_peer_info(routing_table: &RoutingTable) -> PeerInfo {
+/// Crypto info and secret keys of a node no other call returns
+pub fn fix_node_keys() -> (Vec<CryptoInfo>, SecretKeyGroup) {
     let mut crypto_info_list: Vec<CryptoInfo> = vec![];
     let mut secret_keys = SecretKeyGroup::new();
     for ck in VALID_CRYPTO_KINDS {
@@ -165,6 +181,35 @@ fn make_distinct_peer_info(routing_table: &RoutingTable) -> PeerInfo {
         crypto_info_list.push(ci);
         secret_keys.add(SecretKey::new(ck, secret));
     }
+    (crypto_info_list, secret_keys)
+}
+
+/// An identity for a mock core to configure, so a reopened core keeps it
+pub fn fix_identity() -> (PublicKeyGroup, SecretKeyGroup) {
+    let mut public_keys = PublicKeyGroup::new();
+    let mut secret_keys = SecretKeyGroup::new();
+    for ck in VALID_CRYPTO_KINDS {
+        let (public_key, secret_key) = Crypto::generate_keypair(ck)
+            .expect("should generate keypair")
+            .value()
+            .into_split();
+        public_keys.add(PublicKey::new(ck, public_key));
+        secret_keys.add(SecretKey::new(ck, secret_key));
+    }
+    (public_keys, secret_keys)
+}
+
+/// Configure `identity` as the core's own
+pub fn set_identity(
+    rt: &mut VeilidConfigRoutingTable,
+    identity: &(PublicKeyGroup, SecretKeyGroup),
+) {
+    rt.public_keys = identity.0.clone();
+    rt.secret_keys = identity.1.clone();
+}
+
+fn make_distinct_peer_info(routing_table: &RoutingTable) -> PeerInfo {
+    let (crypto_info_list, secret_keys) = fix_node_keys();
     fix_peer_info(routing_table, crypto_info_list, secret_keys).expect("should be valid")
 }
 

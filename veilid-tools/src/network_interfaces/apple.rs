@@ -253,7 +253,7 @@ pub struct IfAddrs {
 }
 
 impl IfAddrs {
-    pub fn new() -> io::Result<Self> {
+    pub fn try_new() -> io::Result<Self> {
         let mut ifaddrs = std::ptr::null_mut();
         // SAFETY: getifaddrs writes a list head (or leaves null) into the out-pointer
         if -1 == unsafe { getifaddrs(&mut ifaddrs) } {
@@ -385,7 +385,7 @@ impl PlatformSupportApple {
         interfaces: &mut BTreeMap<String, NetworkInterface>,
     ) -> io::Result<()> {
         self.refresh_default_route_interfaces();
-        let ifaddrs = IfAddrs::new()?;
+        let ifaddrs = IfAddrs::try_new()?;
         self.collect_interfaces(ifaddrs.iter(), interfaces, Self::get_address_flags);
         Ok(())
     }
@@ -1099,7 +1099,7 @@ mod tests {
         let table = read_route_table().expect("route table");
         let mut gateways = BTreeMap::new();
         parse_default_gateways(&table, &mut gateways);
-        let ifaddrs = IfAddrs::new().expect("getifaddrs");
+        let ifaddrs = IfAddrs::try_new().expect("getifaddrs");
         let names: Vec<String> = ifaddrs.iter().map(interface_name).collect();
         assert!(!names.is_empty());
         assert!(names.iter().all(|n| !n.is_empty()));

@@ -47,7 +47,7 @@ impl VeilidCoreContext {
             fields(__VEILID_LOG_KEY)
         )
     )]
-    async fn new_with_config(
+    async fn try_new_with_config(
         update_callback: UpdateCallback,
         config: VeilidConfig,
     ) -> VeilidAPIResult<VeilidCoreContext> {
@@ -60,7 +60,7 @@ impl VeilidCoreContext {
         // Set up config from json
         let config = VeilidStartupOptions::try_new(config, update_callback)?;
 
-        Self::new_common(config).await
+        Self::try_new_common(config).await
     }
 
     #[cfg_attr(
@@ -73,7 +73,7 @@ impl VeilidCoreContext {
             fields(__VEILID_LOG_KEY)
         )
     )]
-    async fn new_common(
+    async fn try_new_common(
         startup_options: VeilidStartupOptions,
     ) -> VeilidAPIResult<VeilidCoreContext> {
         cfg_if! {
@@ -417,7 +417,7 @@ pub async fn api_startup(
     }
 
     // Create core context
-    let context = VeilidCoreContext::new_with_config(update_callback, config).await?;
+    let context = VeilidCoreContext::try_new_with_config(update_callback, config).await?;
 
     // Return an API object around our context
     let veilid_api = VeilidAPI::new(context);

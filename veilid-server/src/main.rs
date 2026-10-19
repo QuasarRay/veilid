@@ -207,7 +207,8 @@ fn main() -> EyreResult<()> {
         .config_file
         .filter(|config_file| Path::new(&config_file).exists());
 
-    let settings = Settings::new(settings_path.as_deref()).wrap_err("configuration is invalid")?;
+    let settings =
+        Settings::try_new(settings_path.as_deref()).wrap_err("configuration is invalid")?;
 
     // write lock the settings
     let mut settingsrw = settings.write();

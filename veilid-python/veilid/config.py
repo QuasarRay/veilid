@@ -297,6 +297,8 @@ class VeilidConfigInternalNetwork(ConfigBase):
     client_allowlist_timeout_ms: int
     reverse_connection_receipt_time_ms: int
     hole_punch_receipt_time_ms: int
+    default_hole_punch_ttl: int
+    cgnat_hole_punch_ttl: int
     restricted_nat_retries: int
     rpc: VeilidConfigInternalRPC
     dht: VeilidConfigInternalDHT

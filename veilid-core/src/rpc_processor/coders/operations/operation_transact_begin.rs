@@ -18,7 +18,7 @@ pub(in crate::rpc_processor) struct RPCOperationTransactBeginQ {
 }
 
 impl RPCOperationTransactBeginQ {
-    pub fn new(
+    pub fn try_new(
         key: OpaqueRecordKey,
         descriptor: Option<SignedValueDescriptor>,
         want_descriptor: bool,
@@ -120,7 +120,7 @@ pub(in crate::rpc_processor) struct RPCOperationTransactBeginA {
 }
 
 impl RPCOperationTransactBeginA {
-    pub fn new(
+    pub fn try_new(
         accepted: bool,
         need_descriptor: bool,
         descriptor: Option<SignedValueDescriptor>,
@@ -301,7 +301,7 @@ impl RPCOperationTransactBeginA {
             return Err(RPCError::protocol("invalid transaction id"));
         }
 
-        Self::new(
+        Self::try_new(
             accepted,
             need_descriptor,
             descriptor,

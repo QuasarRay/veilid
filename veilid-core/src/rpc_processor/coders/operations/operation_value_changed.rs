@@ -13,7 +13,7 @@ pub(in crate::rpc_processor) struct RPCOperationValueChanged {
 }
 
 impl RPCOperationValueChanged {
-    pub fn new(
+    pub fn try_new(
         key: OpaqueRecordKey,
         subkeys: ValueSubkeyRangeSet,
         count: u32,
@@ -136,7 +136,7 @@ impl RPCOperationValueChanged {
             None
         };
 
-        Self::new(key, subkeys, count, watch_id, value)
+        Self::try_new(key, subkeys, count, watch_id, value)
     }
     pub fn encode(
         &self,

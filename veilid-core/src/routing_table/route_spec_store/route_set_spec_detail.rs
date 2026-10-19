@@ -20,9 +20,9 @@ pub struct RouteSetSpecDetailStats {
     pub transfer: TransferStatsDownUp,
     /// Latency stats
     pub latency: LatencyStats,
-    /// Answer stats per SequenceOrdering (serde-default: old aggregate field is dropped)
+    /// Test state and answer stats per SequenceOrdering
     #[serde(default)]
-    pub answer_by_ordering: Vec<(SequenceOrdering, AnswerStats)>,
+    pub per_ordering: Vec<(SequenceOrdering, RouteOrderingStats)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -84,7 +84,7 @@ impl fmt::Display for RouteSetSpecDetail {
 }
 
 impl RouteSetSpecDetail {
-    pub fn new(
+    pub fn try_new(
         route_set: BTreeMap<PublicKey, RouteSpecDetail>,
         directions: DirectionSet,
         stability: Stability,
@@ -182,8 +182,8 @@ impl RouteSetSpecDetail {
         stats.transfer = route_stats.transfer.clone();
     }
 
-    pub fn update_answers(&self, route_stats: &RouteStats) {
+    pub fn update_per_ordering(&self, route_stats: &RouteStats) {
         let mut stats = self.stats.write();
-        stats.answer_by_ordering = route_stats.answer_by_ordering();
+        stats.per_ordering = route_stats.per_ordering_snapshot();
     }
 }

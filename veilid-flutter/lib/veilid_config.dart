@@ -677,6 +677,8 @@ sealed class VeilidConfigInternalNetwork with _$VeilidConfigInternalNetwork {
     required int clientAllowlistTimeoutMs,
     required int reverseConnectionReceiptTimeMs,
     required int holePunchReceiptTimeMs,
+    required int defaultHolePunchTtl,
+    required int cgnatHolePunchTtl,
     required int restrictedNatRetries,
     required VeilidConfigInternalRPC rpc,
     required VeilidConfigInternalDHT dht,

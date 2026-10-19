@@ -20,7 +20,7 @@ pub struct DHTRecordReport {
 }
 
 impl DHTRecordReport {
-    pub(crate) fn new(
+    pub(crate) fn try_new(
         subkeys: ValueSubkeyRangeSet,
         offline_subkeys: ValueSubkeyRangeSet,
         local_seqs: Vec<ValueSeqNum>,

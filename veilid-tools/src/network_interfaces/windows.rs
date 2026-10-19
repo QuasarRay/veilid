@@ -85,7 +85,7 @@ impl PlatformSupportWindows {
         interfaces: &mut BTreeMap<String, NetworkInterface>,
     ) -> io::Result<()> {
         // Iterate all the interfaces
-        let windows_interfaces = WindowsInterfaces::new()?;
+        let windows_interfaces = WindowsInterfaces::try_new()?;
         for windows_interface in windows_interfaces.iter() {
             // Get name
             let intf_name = windows_interface.name();
@@ -210,7 +210,7 @@ struct WindowsInterfaces {
 }
 
 impl WindowsInterfaces {
-    pub fn new() -> io::Result<Self> {
+    pub fn try_new() -> io::Result<Self> {
         let mut buffersize: c_ulong = ADAPTER_TABLE_INITIAL_LEN;
         for _ in 0..ADAPTER_TABLE_READ_ATTEMPTS {
             // SAFETY: the buffer is buffersize bytes and freed on every path but success, where

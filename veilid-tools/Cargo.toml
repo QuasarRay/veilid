@@ -219,6 +219,7 @@ winapi = { version = "0.3.9", features = [
     "errhandlingapi",
     "iphlpapi",
     "iptypes",
+    "mswsock",
     "sysinfoapi",
     "winerror",
     "winsock2",

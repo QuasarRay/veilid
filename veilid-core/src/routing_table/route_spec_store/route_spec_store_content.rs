@@ -113,10 +113,10 @@ impl RouteSpecStoreContent {
         }
     }
 
-    pub fn update_answers(&self, cache: &RouteSpecStoreCache) {
+    pub fn update_per_ordering(&self, cache: &RouteSpecStoreCache) {
         for (id, rssd) in self.data.details.iter() {
             if let Some(arce) = cache.get_allocated_route_by_id(id) {
-                arce.with_stats(|s| rssd.update_answers(s));
+                arce.with_stats(|s| rssd.update_per_ordering(s));
             }
         }
     }

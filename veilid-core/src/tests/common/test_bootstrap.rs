@@ -178,7 +178,10 @@ async fn persisted_state_requires_reset(api: &VeilidAPI) -> bool {
     let registry = registry(api);
     let table_store = registry.table_store();
     let db = table_store
-        .open("routing_table", 1)
+        .open(
+            "routing_table",
+            crate::routing_table::ROUTING_TABLE_COLUMN_COUNT,
+        )
         .await
         .expect("should open routing table db");
     let routing_table = registry.routing_table();

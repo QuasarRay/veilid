@@ -18,7 +18,7 @@ impl fmt::Debug for RPCOperationAppCallQ {
 }
 
 impl RPCOperationAppCallQ {
-    pub fn new(message: Bytes) -> Result<Self, RPCError> {
+    pub fn try_new(message: Bytes) -> Result<Self, RPCError> {
         if message.len() > MAX_APP_CALL_Q_MESSAGE_LEN {
             return Err(RPCError::internal("AppCallQ message too long to set"));
         }
@@ -43,7 +43,7 @@ impl RPCOperationAppCallQ {
         let mr = reader.get_message()?;
         rpc_ignore_max_len!(mr, MAX_APP_CALL_Q_MESSAGE_LEN);
 
-        RPCOperationAppCallQ::new(Bytes::copy_from_slice(mr))
+        RPCOperationAppCallQ::try_new(Bytes::copy_from_slice(mr))
     }
     pub fn encode(
         &self,
@@ -71,7 +71,7 @@ impl fmt::Debug for RPCOperationAppCallA {
 }
 
 impl RPCOperationAppCallA {
-    pub fn new(message: Bytes) -> Result<Self, RPCError> {
+    pub fn try_new(message: Bytes) -> Result<Self, RPCError> {
         if message.len() > MAX_APP_CALL_A_MESSAGE_LEN {
             return Err(RPCError::ignore("AppCallA message too long to set"));
         }
@@ -96,7 +96,7 @@ impl RPCOperationAppCallA {
         rpc_ignore_missing_property!(reader, message);
         let mr = reader.get_message()?;
         rpc_ignore_max_len!(mr, MAX_APP_CALL_A_MESSAGE_LEN);
-        Self::new(Bytes::copy_from_slice(mr))
+        Self::try_new(Bytes::copy_from_slice(mr))
     }
     pub fn encode(
         &self,

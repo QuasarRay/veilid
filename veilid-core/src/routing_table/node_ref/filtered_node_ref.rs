@@ -7,7 +7,7 @@ pub(crate) struct FilteredNodeRef {
     entry: Arc<BucketEntry>,
     filter: NodeRefFilter,
     sequencing: Sequencing,
-    /// The inbound flow an answer must go back over, when this ref addresses a questioner
+    /// The flow a reply must go out on, ahead of contact method selection
     reply_flow: Option<Flow>,
     #[cfg(feature = "tracking")]
     track_id: usize,
@@ -42,7 +42,7 @@ impl FilteredNodeRef {
         NodeRef::new(self.registry(), self.entry.clone())
     }
 
-    /// Pin the flow an answer goes back over
+    /// Pin the flow a reply goes out on
     pub fn with_reply_flow(&self, flow: Flow) -> FilteredNodeRef {
         let mut out = self.clone();
         out.reply_flow = Some(flow);

@@ -1,3 +1,7 @@
+mod persisted;
+mod persisted_entries;
+mod routing_domain;
+mod snapshot;
 mod state;
 mod state_reason;
 
@@ -7,6 +11,10 @@ use hashlink::LruCache;
 #[cfg(all(feature = "tracking", feature = "backtrace"))]
 use std::backtrace::Backtrace;
 
+pub(crate) use persisted::*;
+pub(crate) use persisted_entries::*;
+pub(crate) use routing_domain::*;
+pub(crate) use snapshot::*;
 pub(crate) use state::*;
 pub(crate) use state_reason::*;
 
@@ -21,6 +29,7 @@ pub(crate) const CONNECTIONLESS_TIMEOUT: TimestampDuration = TimestampDuration::
 
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) struct LastFlowKey {
+    /// Transport the flow runs over
     pub transport: TransportType,
     /// A node can be reached over several remotes per transport (its own address, its relay,
     /// our relay); keying on the remote keeps a relayed flow from overwriting a direct one
@@ -70,79 +79,15 @@ impl fmt::Display for LastFlowEntry {
     }
 }
 
-/// Bucket entry information specific to the LocalNetwork RoutingDomain
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct BucketEntryPublicInternet {
-    /// The PublicInternet node info
-    peer_info: Option<Arc<PeerInfo>>,
-    /// The last node info timestamp of ours that this entry has seen
-    last_seen_our_node_info_ts: Timestamp,
-    /// Last known node status
-    node_status: Option<NodeStatus>,
-}
-
-impl fmt::Display for BucketEntryPublicInternet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(pi) = &self.peer_info {
-            writeln!(f, "peer_info:")?;
-            writeln!(f, "    {}", indent_string(f.to_string(&**pi)))?;
-        } else {
-            writeln!(f, "peer_info: None")?;
-        }
-        writeln!(
-            f,
-            "last_seen_our_node_info_ts: {}",
-            f.to_string(self.last_seen_our_node_info_ts)
-        )?;
-        writeln!(f, "node_status: {:?}", self.node_status)?;
-        Ok(())
-    }
-}
-
-/// Bucket entry information specific to the LocalNetwork RoutingDomain
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct BucketEntryLocalNetwork {
-    /// The LocalNetwork peerinfo
-    peer_info: Option<Arc<PeerInfo>>,
-    /// The last node info timestamp of ours that this entry has seen
-    last_seen_our_node_info_ts: Timestamp,
-    /// Last known node status
-    node_status: Option<NodeStatus>,
-}
-
-impl fmt::Display for BucketEntryLocalNetwork {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(pi) = &self.peer_info {
-            writeln!(f, "peer_info:")?;
-            writeln!(f, "    {}", indent_string(f.to_string(&**pi)))?;
-        } else {
-            writeln!(f, "peer_info: None")?;
-        }
-        writeln!(
-            f,
-            "last_seen_our_node_info_ts: {}",
-            f.to_string(self.last_seen_our_node_info_ts)
-        )?;
-        writeln!(f, "node_status: {:?}", self.node_status)?;
-        Ok(())
-    }
-}
-
-/// The data associated with each bucket entry
-///
-/// Deserialized via a manual `DeserializeSeed` (see below) rather than `derive(Deserialize)`,
-/// so the registry can be attached and `best_node_id` reconstructed (and validated) on load.
-#[derive(Debug, Serialize)]
+/// The data associated with each bucket entry; persisted as a [`BucketEntryPersisted`]
+#[derive(Debug)]
 pub(crate) struct BucketEntryInner {
     /// Registry for logging
-    #[serde(skip)]
     registry: VeilidComponentRegistry,
     /// Online detector access for state computation, without a registry lookup
-    #[serde(skip)]
     network_manager: NetworkManagerHandle,
     /// The best (most-preferred valid) node id. Always present and kept in sync with
     /// `node_ids`, so `best_node_id()` is infallible. Reconstructed on load, not persisted.
-    #[serde(skip)]
     best_node_id: NodeId,
     /// The node ids matching this bucket entry
     node_ids: NodeIdGroup,
@@ -158,75 +103,56 @@ pub(crate) struct BucketEntryInner {
     /// be reachable with the same SignedNodeInfo/DialInfo
     updated_since_last_network_change: bool,
     /// The last flows used to contact this node, per protocol type
-    #[serde(skip)]
     pub(super) last_flows: BTreeMap<LastFlowKey, LastFlowEntry>,
     /// Last seen senderinfo per protocol/address type
-    #[serde(skip)]
     last_sender_info: HashMap<LastSenderInfoKey, SenderInfo>,
-    /// The node info for this entry on the publicinternet routing domain
-    public_internet: BucketEntryPublicInternet,
-    /// The node info for this entry on the localnetwork routing domain
-    local_network: BucketEntryLocalNetwork,
+    /// The entry in the PublicInternet routing domain
+    public_internet: BucketEntryRoutingDomain,
+    /// The entry in the LocalNetwork routing domain
+    local_network: BucketEntryRoutingDomain,
     /// API-visible statistics gathered for the peer
-    #[serde(default)]
     peer_stats: PeerStats,
 
     ////////////////////////////////////////////////////////////////////////
     // State Calculation Statistics
     ////////////////////////////////////////////////////////////////////////
     /// Node-level information about RPCs used to calculate state
-    #[serde(default)]
     rpc_stats: RPCStats,
     /// Statistics gathered per SequenceOrdering used to calculate state
-    #[serde(skip)]
     per_sequence_ordering_stats: BTreeMap<SequenceOrdering, RPCStats>,
     /// Per-transport reliability stats used to calculate state
-    #[serde(skip)]
     per_transport_stats: BTreeMap<TransportType, RPCStats>,
     /// Cached per-ordering contact-method viability, recomputed by the update_cm_viability task
-    #[serde(skip)]
     cm_viability: Option<CMViability>,
     /// Per-local-route stats keyed by local-route pubkey (our outbound SR for outbound,
     /// our inbound reply-PR for inbound answers). Only populated for routed exchanges.
-    #[serde(skip, default = "default_per_route_stats")]
     per_route_stats: LruCache<PublicKey, PerRouteStats>,
     /// The state a routed question to this node was lost in, while it has answered none since
-    #[serde(skip)]
     routed_question_loss: Option<LossEpoch>,
     /// Stats for connection-oriented protocols
-    #[serde(skip)]
     connection_stats: ConnectionStats,
     /// If the entry is being punished and should be considered dead
-    #[serde(skip)]
     punishment: Option<PunishmentReason>,
     /// Contact method failures cache for assisting with contact method selection
-    #[serde(skip)]
     contact_method_failures: HashMap<ContactMethod, Timestamp>,
 
     /// Verbose stats: Recorded states for this peer over time for debugging purposes
-    #[serde(skip)]
     state_stats: StateStats,
     /// Verbose stats: Answer stats for this node over time for debugging purposes
-    #[serde(skip)]
     answer_stats: AnswerStats,
 
     ////////////////////////////////////////////////////////////////////////
     // Stats Accounting
     ////////////////////////////////////////////////////////////////////////
     /// The accounting for the latency statistics
-    #[serde(skip)]
     latency_stats_accounting: LatencyStatsAccounting,
     /// The accounting for protected-connection drop durations
-    #[serde(skip)]
     protected_drop_span_accounting: LatencyStatsAccounting,
     /// The accounting for the transfer statistics
-    #[serde(skip)]
     transfer_stats_accounting: TransferStatsAccounting,
     /// The account for the state and reason statistics
-    #[serde(skip)]
     state_stats_accounting: Mutex<StateStatsAccounting>,
     /// The accounting for the answer statistics
-    #[serde(skip)]
     answer_stats_accounting: AnswerStatsAccounting,
 
     ////////////////////////////////////////////////////////////////////////
@@ -234,75 +160,50 @@ pub(crate) struct BucketEntryInner {
     ////////////////////////////////////////////////////////////////////////
     /// Node location
     #[cfg(feature = "geolocation")]
-    #[serde(skip)]
     geolocation_info: GeolocationInfo,
 }
 
-/// Only the fields that are actually persisted to disk.
-#[derive(Debug, Deserialize)]
-struct BucketEntryInnerPersisted {
-    node_ids: NodeIdGroup,
-    time_added: Timestamp,
-    envelope_support: Vec<EnvelopeVersion>,
-    updated_since_last_network_change: bool,
-    public_internet: BucketEntryPublicInternet,
-    local_network: BucketEntryLocalNetwork,
-    #[serde(default)]
-    peer_stats: PeerStats,
-    #[serde(default)]
-    rpc_stats: RPCStats,
-}
-
 impl BucketEntryInner {
-    /// Deserialize a persisted entry, attaching `registry` and reconstructing the best node
-    /// id. Errors if the entry has no valid node id.
-    pub fn deserialize_from_persisted(
+    fn new(
         registry: VeilidComponentRegistry,
         network_manager: NetworkManagerHandle,
-        serialized: TableDBSerializedData,
-    ) -> EyreResult<BucketEntryInner> {
-        let table_store = registry.table_store();
-        let p: BucketEntryInnerPersisted = table_store.try_deserialize(&serialized)?;
-
-        let best_node_id = p
-            .node_ids
-            .iter()
-            .find(|nid| VALID_CRYPTO_KINDS.contains(&nid.kind()))
-            .cloned()
-            .ok_or_else(|| eyre!("bucket entry has no valid node id"))?;
-
-        Ok(BucketEntryInner {
+        best_node_id: NodeId,
+    ) -> Self {
+        Self {
             registry,
             network_manager,
+            node_ids: NodeIdGroup::from(best_node_id.clone()),
             best_node_id,
-            node_ids: p.node_ids,
-            time_added: p.time_added,
-            envelope_support: p.envelope_support,
-            updated_since_last_network_change: p.updated_since_last_network_change,
+            time_added: Timestamp::now(),
+            envelope_support: Vec::new(),
+            updated_since_last_network_change: false,
             last_flows: BTreeMap::new(),
             last_sender_info: HashMap::new(),
-            public_internet: p.public_internet,
-            local_network: p.local_network,
-            peer_stats: p.peer_stats,
-            rpc_stats: p.rpc_stats,
+            local_network: BucketEntryRoutingDomain::default(),
+            public_internet: BucketEntryRoutingDomain::default(),
+            #[cfg(feature = "geolocation")]
+            geolocation_info: Default::default(),
+            peer_stats: PeerStats {
+                latency: None,
+                transfer: TransferStatsDownUp::default(),
+            },
+            rpc_stats: RPCStats::default(),
+            state_stats: StateStats::default(),
+            answer_stats: AnswerStats::default(),
+            connection_stats: ConnectionStats::default(),
             per_sequence_ordering_stats: BTreeMap::new(),
             per_transport_stats: BTreeMap::new(),
             cm_viability: None,
-            per_route_stats: default_per_route_stats(),
+            per_route_stats: LruCache::new(PER_ROUTE_STATS_LRU_SIZE),
             routed_question_loss: None,
-            connection_stats: ConnectionStats::default(),
             punishment: None,
             contact_method_failures: HashMap::new(),
-            state_stats: StateStats::default(),
-            answer_stats: AnswerStats::default(),
             latency_stats_accounting: LatencyStatsAccounting::new(),
             protected_drop_span_accounting: LatencyStatsAccounting::new(),
             transfer_stats_accounting: TransferStatsAccounting::new(),
             state_stats_accounting: Mutex::new(StateStatsAccounting::new()),
             answer_stats_accounting: AnswerStatsAccounting::default(),
-            #[cfg(feature = "geolocation")]
-            geolocation_info: Default::default(),
-        })
+        }
     }
 }
 
@@ -452,10 +353,6 @@ impl VeilidComponentRegistryAccessor for BucketEntryInner {
     fn registry(&self) -> VeilidComponentRegistry {
         self.registry.clone()
     }
-}
-
-fn default_per_route_stats() -> LruCache<PublicKey, PerRouteStats> {
-    LruCache::new(PER_ROUTE_STATS_LRU_SIZE)
 }
 
 /// The valid node ids added to and removed from a bucket entry by `replace_node_ids`.
@@ -913,42 +810,11 @@ impl BucketEntryInner {
         cur_ts: Timestamp,
         state: BucketEntryState,
     ) -> BucketEntrySnapshot {
-        let mut per_routing_domain = BTreeMap::new();
-        if let Some(peer_info) = self.public_internet.peer_info.clone() {
-            per_routing_domain.insert(
-                RoutingDomain::PublicInternet,
-                PerRoutingDomainSnapshot {
-                    peer_info,
-                    node_status: self.public_internet.node_status.clone(),
-                    last_seen_our_node_info_ts: self.public_internet.last_seen_our_node_info_ts,
-                },
-            );
-        }
-        if let Some(peer_info) = self.local_network.peer_info.clone() {
-            per_routing_domain.insert(
-                RoutingDomain::LocalNetwork,
-                PerRoutingDomainSnapshot {
-                    peer_info,
-                    node_status: self.local_network.node_status.clone(),
-                    last_seen_our_node_info_ts: self.local_network.last_seen_our_node_info_ts,
-                },
-            );
-        }
-        let per_sequence_ordering = self.per_sequence_ordering_stats.clone();
-        let per_transport = self.per_transport_stats.clone();
-
         let inner = BucketEntrySnapshotInner {
             cur_ts,
             node_ref: NodeRef::new(registry, entry),
-            time_added: self.time_added,
-            peer_stats: self.peer_stats.clone(),
-            rpc_stats: self.rpc_stats.clone(),
             connection_stats: self.connection_stats.clone(),
-            state,
-            node_ids: self.node_ids.clone(),
-            per_routing_domain,
-            per_sequence_ordering,
-            per_transport,
+            persisted: self.to_persisted(state),
         };
 
         BucketEntrySnapshot::new(inner)
@@ -1410,52 +1276,11 @@ impl BucketEntry {
         // First node id should always be one we support since TypedKeySets are sorted and we must have at least one supported key
         debug_assert!(VALID_CRYPTO_KINDS.contains(&first_node_id.kind()));
 
-        let now = Timestamp::now();
-        let inner = BucketEntryInner {
+        Self::new_with_inner(BucketEntryInner::new(
             registry,
             network_manager,
-            best_node_id: first_node_id.clone(),
-            node_ids: NodeIdGroup::from(first_node_id),
-            time_added: now,
-            envelope_support: Vec::new(),
-            updated_since_last_network_change: false,
-            last_flows: BTreeMap::new(),
-            last_sender_info: HashMap::new(),
-            local_network: BucketEntryLocalNetwork {
-                last_seen_our_node_info_ts: Timestamp::new(0u64),
-                peer_info: None,
-                node_status: None,
-            },
-            public_internet: BucketEntryPublicInternet {
-                last_seen_our_node_info_ts: Timestamp::new(0u64),
-                peer_info: None,
-                node_status: None,
-            },
-            #[cfg(feature = "geolocation")]
-            geolocation_info: Default::default(),
-            peer_stats: PeerStats {
-                latency: None,
-                transfer: TransferStatsDownUp::default(),
-            },
-            rpc_stats: RPCStats::default(),
-            state_stats: StateStats::default(),
-            answer_stats: AnswerStats::default(),
-            connection_stats: ConnectionStats::default(),
-            per_sequence_ordering_stats: BTreeMap::new(),
-            per_transport_stats: BTreeMap::new(),
-            cm_viability: None,
-            per_route_stats: LruCache::new(PER_ROUTE_STATS_LRU_SIZE),
-            routed_question_loss: None,
-            punishment: None,
-            contact_method_failures: HashMap::new(),
-            latency_stats_accounting: LatencyStatsAccounting::new(),
-            protected_drop_span_accounting: LatencyStatsAccounting::new(),
-            transfer_stats_accounting: TransferStatsAccounting::new(),
-            state_stats_accounting: Mutex::new(StateStatsAccounting::new()),
-            answer_stats_accounting: AnswerStatsAccounting::default(),
-        };
-
-        Self::new_with_inner(inner)
+            first_node_id,
+        ))
     }
 
     pub(super) fn new_with_inner(inner: BucketEntryInner) -> Self {

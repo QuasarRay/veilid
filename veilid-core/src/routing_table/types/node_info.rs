@@ -69,6 +69,23 @@ impl NodeInfo {
         }
     }
 
+    /// Decode a node info from its packed capnp message
+    pub(crate) fn try_new_from_wire(node_info_message: &[u8]) -> VeilidAPIResult<Self> {
+        let node_info_message_reader = ::capnp::serialize_packed::read_message(
+            node_info_message,
+            capnp::message::ReaderOptions::new(),
+        )
+        .map_err(|e| VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message)))?;
+
+        let node_info_reader = node_info_message_reader
+            .get_root::<veilid_capnp::node_info::Reader>()
+            .map_err(|e| {
+                VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message))
+            })?;
+
+        Ok(decode_node_info(&node_info_reader)?)
+    }
+
     pub fn timestamp(&self) -> Timestamp {
         self.timestamp
     }

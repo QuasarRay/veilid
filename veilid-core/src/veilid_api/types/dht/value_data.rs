@@ -36,7 +36,8 @@ impl ValueData {
     /// Make a new value with sequence number [ValueSeqNum::ZERO]. Fails if `data` exceeds [ValueData::MAX_LEN].
     ///
     /// Errors with `VeilidAPIError::Generic` if `data` exceeds [ValueData::MAX_LEN].
-    pub fn new<B: Into<Bytes>>(data: B, writer: PublicKey) -> VeilidAPIResult<Self> {
+    #[cfg(any(test, feature = "test-util"))]
+    pub(crate) fn try_new<B: Into<Bytes>>(data: B, writer: PublicKey) -> VeilidAPIResult<Self> {
         let data = data.into();
         if data.len() > Self::MAX_LEN {
             apibail_generic!("invalid size");
@@ -50,7 +51,7 @@ impl ValueData {
     /// Make a new value with an explicit sequence number. Fails if `seq` is [ValueSeqNum::NONE] or `data` exceeds [ValueData::MAX_LEN].
     ///
     /// Errors with `VeilidAPIError::Generic` if `seq` is [ValueSeqNum::NONE] or `data` exceeds [ValueData::MAX_LEN].
-    pub fn new_with_seq<B: Into<Bytes>>(
+    pub(crate) fn try_new_with_seq<B: Into<Bytes>>(
         seq: ValueSeqNum,
         data: B,
         writer: PublicKey,

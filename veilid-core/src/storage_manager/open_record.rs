@@ -269,14 +269,14 @@ impl StorageManager {
         let schema = signed_value_descriptor.schema()?;
 
         // Make and store a new record for this descriptor
-        let record = Record::<LocalRecordDetail>::new(
+        let record = Record::<LocalRecordDetail>::try_new(
             Timestamp::now(),
             signed_value_descriptor,
             LocalRecordDetail::new(safety_selection.clone()),
         )?;
 
         local_record_store
-            .new_record(opaque_record_key.clone(), record)
+            .try_new_record(opaque_record_key.clone(), record)
             .await?;
 
         let encryption_key = record_key.ref_value().encryption_key();

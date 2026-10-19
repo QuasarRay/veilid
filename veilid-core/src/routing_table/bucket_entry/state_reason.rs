@@ -398,6 +398,11 @@ impl BucketEntryInner {
         self.state_reason(cur_ts).into()
     }
 
+    /// The node-level state, without recording it in the state statistics
+    pub(super) fn computed_state(&self, cur_ts: Timestamp) -> BucketEntryState {
+        self.compute_state_reason(cur_ts).into()
+    }
+
     /// Utility function to compute and log a state reason change
     fn compute_and_log_state_reason_inner(
         &self,

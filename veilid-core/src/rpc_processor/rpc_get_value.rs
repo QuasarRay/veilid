@@ -60,7 +60,7 @@ impl RPCProcessor {
         );
 
         // Send the getvalue question
-        let get_value_q = RPCOperationGetValueQ::new(
+        let get_value_q = RPCOperationGetValueQ::try_new(
             opaque_record_key.clone(),
             subkey,
             matches!(descriptor_mode, GetDescriptorMode::WantDescriptor),
@@ -278,7 +278,7 @@ impl RPCProcessor {
         }
 
         // Make GetValue answer
-        let get_value_a = RPCOperationGetValueA::new(
+        let get_value_a = RPCOperationGetValueA::try_new(
             accepted,
             get_result_value.map(|x| (*x).clone()),
             UnverifiedPeerInfo::from_verified_list(closer_to_key_peers),

@@ -72,7 +72,7 @@ impl RPCProcessor {
         };
 
         // Send the transact begin question
-        let transact_value_q = RPCOperationTransactBeginQ::new(
+        let transact_value_q = RPCOperationTransactBeginQ::try_new(
             opaque_record_key.clone(),
             if send_descriptor {
                 last_descriptor.as_ref().map(|x| x.as_ref().clone())
@@ -386,7 +386,7 @@ impl RPCProcessor {
         }
 
         // Make TransactBegin answer
-        let transact_begin_a = RPCOperationTransactBeginA::new(
+        let transact_begin_a = RPCOperationTransactBeginA::try_new(
             accepted,
             need_descriptor,
             opt_descriptor.clone(),

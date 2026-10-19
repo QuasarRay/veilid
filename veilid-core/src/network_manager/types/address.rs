@@ -60,11 +60,8 @@ impl Address {
             }
         }
     }
-    /// Indicates the address is on a network where the local host is behind a carrier-grade NAT
-    /// or DS-Lite tunnel — RFC 6598 shared address space (100.64.0.0/10) or RFC 6333 IETF
-    /// protocol assignments (192.0.0.0/24). When seen on a local interface, inbound from the
-    /// public internet to this host is not reachable, even if peers report a globally routable
-    /// external address (because the carrier owns the public range and uses it for CGNAT).
+    /// The address sits behind a carrier NAT: RFC 6598 shared address space (100.64.0.0/10), or
+    /// the RFC 6890 IETF protocol assignments (192.0.0.0/24) that DS-Lite and CLAT46 sources use.
     #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     pub fn is_cgnat_indicator(&self) -> bool {
         match self {

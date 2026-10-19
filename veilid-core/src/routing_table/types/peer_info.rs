@@ -9,7 +9,7 @@ pub struct PeerInfo {
     routing_domain: RoutingDomain,
     /// The calculated node ids for each crypto type in the node info
     node_ids: NodeIdGroup,
-    /// The node info, as parsed. May not include everthing that is in the node info message if it is not understandable by this node
+    /// The node info as parsed; may omit parts of the message this node does not understand
     node_info: NodeInfo,
     /// The node info message bytes, as serialized from a capnp message
     node_info_message: Bytes,
@@ -42,7 +42,7 @@ impl fmt::Debug for PeerInfo {
 
 impl PeerInfo {
     // Create a peer info from node info and secret
-    pub fn new_from_node_info(
+    pub fn try_new_from_node_info(
         routing_table: &RoutingTable,
         routing_domain: RoutingDomain,
         secret_keys: &SecretKeyGroup,
@@ -112,7 +112,7 @@ impl PeerInfo {
     }
 
     // Create an unsigned peer info
-    pub fn new_from_unsigned(
+    pub fn try_new_from_unsigned(
         routing_table: &RoutingTable,
         routing_domain: RoutingDomain,
         node_info: NodeInfo,
@@ -163,6 +163,23 @@ impl PeerInfo {
         })
     }
 
+    /// Rebuild a peer info from its stored signed message, without checking its signatures
+    pub(crate) fn try_new_from_parts(
+        routing_domain: RoutingDomain,
+        node_ids: NodeIdGroup,
+        node_info_message: Bytes,
+        signatures: SignatureGroup,
+    ) -> VeilidAPIResult<Self> {
+        let node_info = NodeInfo::try_new_from_wire(&node_info_message)?;
+        Ok(Self {
+            routing_domain,
+            node_ids,
+            node_info,
+            node_info_message,
+            signatures,
+        })
+    }
+
     pub fn routing_domain(&self) -> RoutingDomain {
         self.routing_domain
     }
@@ -175,8 +192,7 @@ impl PeerInfo {
     pub fn signatures(&self) -> &SignatureGroup {
         &self.signatures
     }
-    #[cfg(any(test, feature = "test-util"))]
-    pub fn node_info_message(&self) -> &[u8] {
+    pub fn node_info_message(&self) -> &Bytes {
         &self.node_info_message
     }
 
@@ -224,26 +240,13 @@ impl UnverifiedPeerInfo {
     ///
     /// Returns `Ok(None)` when no signature matches a supported crypto kind or the node
     /// info is not acceptable from `origin_routing_domain`.
-    pub fn new_from_wire(
+    pub fn try_new_from_wire(
         routing_table: &RoutingTable,
         origin_routing_domain: RoutingDomain,
         node_info_message: &[u8],
         signatures: SignatureGroup,
     ) -> VeilidAPIResult<Option<Self>> {
-        // Read node info message
-        let node_info_message_reader = ::capnp::serialize_packed::read_message(
-            node_info_message,
-            capnp::message::ReaderOptions::new(),
-        )
-        .map_err(|e| VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message)))?;
-
-        let node_info_reader = node_info_message_reader
-            .get_root::<veilid_capnp::node_info::Reader>()
-            .map_err(|e| {
-                VeilidAPIError::parse_error(e.to_string(), hex::encode(node_info_message))
-            })?;
-
-        let node_info = decode_node_info(&node_info_reader)?;
+        let node_info = NodeInfo::try_new_from_wire(node_info_message)?;
 
         // Get signing public keys from node info
         let public_keys = node_info.public_keys();
@@ -355,5 +358,63 @@ impl UnverifiedPeerInfo {
     }
     pub fn signatures(&self) -> &SignatureGroup {
         &self.0.signatures
+    }
+}
+
+/// A peer info stored as its signed message, decoded again when loaded
+pub(crate) mod signed_peer_info {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    type SignedParts = (RoutingDomain, NodeIdGroup, Bytes, SignatureGroup);
+
+    fn to_parts(peer_info: &PeerInfo) -> (RoutingDomain, &NodeIdGroup, &Bytes, &SignatureGroup) {
+        (
+            peer_info.routing_domain(),
+            peer_info.node_ids(),
+            peer_info.node_info_message(),
+            peer_info.signatures(),
+        )
+    }
+
+    fn from_parts<E: serde::de::Error>(
+        (routing_domain, node_ids, node_info_message, signatures): SignedParts,
+    ) -> Result<Arc<PeerInfo>, E> {
+        PeerInfo::try_new_from_parts(routing_domain, node_ids, node_info_message, signatures)
+            .map(Arc::new)
+            .map_err(E::custom)
+    }
+
+    pub fn serialize<S: Serializer>(
+        peer_info: &Arc<PeerInfo>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        to_parts(peer_info).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Arc<PeerInfo>, D::Error> {
+        from_parts(SignedParts::deserialize(deserializer)?)
+    }
+
+    /// The same for an optional peer info
+    pub mod option {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(
+            peer_info: &Option<Arc<PeerInfo>>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            peer_info.as_deref().map(to_parts).serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<Arc<PeerInfo>>, D::Error> {
+            Option::<SignedParts>::deserialize(deserializer)?
+                .map(from_parts)
+                .transpose()
+        }
     }
 }

@@ -7,9 +7,10 @@
 //! the one exception: its entry format changed with the schema, so its rows are dropped and the
 //! node bootstraps once after the upgrade.
 //!
-//! Each table checkpoints its remaining rows in a progress key, so an interrupted run resumes
-//! where it stopped, and the all-tables version key is written last so a crash anywhere re-runs
-//! the tables that are still at v0.
+//! Each table records its v0 rows in a progress key before it starts. A batch moves its rows in
+//! one transaction, so an interrupted run resumes by skipping the recorded rows that are gone,
+//! and the all-tables version key is written last so a crash anywhere re-runs the tables that
+//! are still at v0.
 
 use super::*;
 use crate::table_store::table_db::{ENCRYPTION_KEY_HASH_KEY, MIGRATION_PROGRESS_KEY, VERSION_KEY};
@@ -95,10 +96,10 @@ impl Migration for V1 {
     }
 }
 
-/// Rows of one table still at v0, written with every batch so a crash resumes here
+/// The v0 rows of one table, recorded once before its first batch
 #[derive(Debug, Serialize, Deserialize)]
 struct MigrationV1Progress {
-    /// (column, stored key) of each row still in the v0 encoding
+    /// (column, stored key) of each row in the v0 encoding when the table's migration began
     remaining: Vec<(u32, Vec<u8>)>,
 }
 
@@ -139,26 +140,36 @@ async fn migrate_table(
     max_value_size: usize,
 ) -> Result<usize, MigrationError> {
     let crypto = ts.crypto();
+    // Rewriting the record with every batch would cost time quadratic in the table's rows
     let mut progress = match db.get(0, MIGRATION_PROGRESS_KEY).await? {
         Some(value) => serde_json::from_slice::<MigrationV1Progress>(&value)
             .map_err(VeilidAPIError::internal)?,
-        None => MigrationV1Progress {
-            remaining: collect_rows(db).await?,
-        },
+        None => {
+            let progress = MigrationV1Progress {
+                remaining: collect_rows(db).await?,
+            };
+            let progress_json = serde_json::to_vec(&progress).map_err(VeilidAPIError::internal)?;
+            let mut tx = DBTransaction::with_capacity(1);
+            tx.put(0, MIGRATION_PROGRESS_KEY, &progress_json);
+            db.write(tx)
+                .await
+                .map_err(|e| VeilidAPIError::from(e.error))?;
+            progress
+        }
     };
-    let total = progress.remaining.len();
 
+    let mut migrated = 0usize;
     while !progress.remaining.is_empty() {
         let mut keys_processed = 0usize;
         let mut bytes_processed = 0usize;
-        let mut tx = DBTransaction::with_capacity(MAX_KEYS_IN_BATCH * 2 + 1);
+        let mut tx = DBTransaction::with_capacity(MAX_KEYS_IN_BATCH * 2);
 
         while keys_processed < MAX_KEYS_IN_BATCH && bytes_processed < MAX_BYTES_IN_BATCH {
             let Some((col, key)) = progress.remaining.pop() else {
                 break;
             };
             let key = Bytes::from(key);
-            // The table is closed to everyone else until every migration is done
+            // Gone only if an interrupted run moved it: nothing else opens the table until done
             let Some(value) = db.get(col, &key).await? else {
                 continue;
             };
@@ -193,8 +204,7 @@ async fn migrate_table(
             tx.put_owned(col, Vec::from(new_key), Vec::from(new_value));
         }
 
-        let progress_json = serde_json::to_vec(&progress).map_err(VeilidAPIError::internal)?;
-        tx.put(0, MIGRATION_PROGRESS_KEY, &progress_json);
+        migrated += keys_processed;
         db.write(tx)
             .await
             .map_err(|e| VeilidAPIError::from(e.error))?;
@@ -214,7 +224,7 @@ async fn migrate_table(
         .await
         .map_err(|e| VeilidAPIError::from(e.error))?;
 
-    Ok(total)
+    Ok(migrated)
 }
 
 /// Every (column, stored key) of the table

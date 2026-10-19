@@ -104,7 +104,7 @@ impl VeilidAPI {
         value: &ValueData,
     ) -> VeilidAPIResult<ValueData> {
         let data = self.mock_crypt_value(record_key, subkey, value.data())?;
-        ValueData::new_with_seq(value.seq(), data, value.ref_writer().clone())
+        ValueData::try_new_with_seq(value.seq(), data, value.ref_writer().clone())
     }
 }
 
@@ -523,7 +523,7 @@ impl VeilidAPI {
             seq = min_seqnum;
         }
 
-        let incoming = ValueData::new_with_seq(seq, data, writer.key())?;
+        let incoming = ValueData::try_new_with_seq(seq, data, writer.key())?;
 
         // Detached, the write goes no further than the local store and the offline queue
         if !self.mock_is_attached()? {
@@ -638,7 +638,7 @@ impl VeilidAPI {
 
         // A local-scope report never consults the network, but still reports a slot per subkey
         if matches!(scope, DHTReportScope::Local) {
-            return DHTRecordReport::new(
+            return DHTRecordReport::try_new(
                 subkeys,
                 offline_subkeys,
                 local_seqs.clone(),
@@ -684,7 +684,7 @@ impl VeilidAPI {
                 .collect(),
         };
 
-        DHTRecordReport::new(subkeys, offline_subkeys, local_seqs, network_seqs)
+        DHTRecordReport::try_new(subkeys, offline_subkeys, local_seqs, network_seqs)
     }
 }
 

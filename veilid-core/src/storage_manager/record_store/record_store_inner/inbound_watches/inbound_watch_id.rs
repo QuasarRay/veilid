@@ -6,7 +6,7 @@ use super::*;
 pub(crate) struct InboundWatchId(u64);
 
 impl InboundWatchId {
-    pub(super) fn new(raw_id: u64) -> VeilidAPIResult<Self> {
+    pub(super) fn try_new(raw_id: u64) -> VeilidAPIResult<Self> {
         if raw_id == 0 {
             apibail_internal!("invalid watch id");
         }

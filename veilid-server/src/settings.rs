@@ -1221,7 +1221,7 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn new(config_file: Option<&OsStr>) -> EyreResult<Self> {
+    pub fn try_new(config_file: Option<&OsStr>) -> EyreResult<Self> {
         // Load the default config
         let mut cfg = load_default_config()?;
 
@@ -1686,6 +1686,8 @@ impl Settings {
             inner.core.internal.network.hole_punch_receipt_time_ms,
             value
         );
+        set_config_value!(inner.core.internal.network.default_hole_punch_ttl, value);
+        set_config_value!(inner.core.internal.network.cgnat_hole_punch_ttl, value);
         set_config_value!(inner.core.internal.network.restricted_nat_retries, value);
         set_config_value!(inner.core.internal.network.rpc.concurrency, value);
         set_config_value!(inner.core.internal.network.rpc.queue_size, value);
@@ -2042,7 +2044,7 @@ mod tests {
 
     #[test]
     fn test_default_config_settings() {
-        let settings = Settings::new(None).unwrap_or_log();
+        let settings = Settings::try_new(None).unwrap_or_log();
 
         // The default config must map exactly onto the struct for the active features
         // (no stray keys), or every startup would warn.
@@ -2181,6 +2183,8 @@ mod tests {
             5_000u32
         );
         assert_eq!(s.core.internal.network.hole_punch_receipt_time_ms, 5_000u32);
+        assert_eq!(s.core.internal.network.default_hole_punch_ttl, 3u32);
+        assert_eq!(s.core.internal.network.cgnat_hole_punch_ttl, 8u32);
         assert_eq!(s.core.network.max_connections, 256);
         assert_eq!(s.core.network.network_key_password, None);
         assert_eq!(s.core.network.routing_table.public_keys, None);

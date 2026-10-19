@@ -34,3 +34,4 @@
 2 unsafe-safety-sites veilid-tools/src/resolver/native/ptr_unix.rs
 6 unsafe-safety-sites veilid-tools/src/resolver/native/resolv.rs
 2 unsafe-safety-sites veilid-tools/src/resolver/native/windows.rs
+1 unsafe-safety-sites veilid-tools/src/socket_tools.rs

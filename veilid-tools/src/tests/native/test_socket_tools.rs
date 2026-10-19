@@ -35,6 +35,26 @@ pub async fn test_borrowed_socket_operations() {
     assert!(client.peer_addr().is_ok());
 }
 
+/// A port unreachable for one of our sends stays out of the next receive, as on other platforms
+#[cfg(windows)]
+pub async fn test_udp_icmp_errors_stay_out_of_recv() {
+    info!("-- test_udp_icmp_errors_stay_out_of_recv");
+    let socket = bind_async_udp_socket(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)))
+        .expect("bind should not error")
+        .expect("bind should succeed");
+    // A loopback port nobody listens on
+    let closed = std::net::UdpSocket::bind("127.0.0.1:0")
+        .expect("probe bind")
+        .local_addr()
+        .expect("probe addr");
+    socket.send_to(b"x", closed).await.expect("send");
+    let mut buf = [0u8; 16];
+    let res = timeout(500, socket.recv_from(&mut buf)).await;
+    assert!(res.is_err(), "receive should wait, not fail: {:?}", res);
+}
+
 pub async fn test_all() {
     test_borrowed_socket_operations().await;
+    #[cfg(windows)]
+    test_udp_icmp_errors_stay_out_of_recv().await;
 }

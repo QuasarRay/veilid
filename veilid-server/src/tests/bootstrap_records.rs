@@ -87,7 +87,7 @@ core:
 }
 
 fn settings_for(path: &Path) -> Settings {
-    Settings::new(Some(&OsString::from(path))).expect("should load settings")
+    Settings::try_new(Some(&OsString::from(path))).expect("should load settings")
 }
 
 async fn start(path: &Path) -> VeilidAPI {

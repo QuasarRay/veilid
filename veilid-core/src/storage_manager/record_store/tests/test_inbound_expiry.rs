@@ -117,16 +117,16 @@ pub async fn test_inbound_watch_expiry_timer() {
     let store = storage_manager
         .get_remote_record_store()
         .expect("remote record store");
-    let record = Record::<RemoteRecordDetail>::new(
+    let record = Record::<RemoteRecordDetail>::try_new(
         Timestamp::now(),
         Arc::new(descriptor),
         RemoteRecordDetail {},
     )
     .expect("record");
     store
-        .new_record(opaque_record_key.clone(), record)
+        .try_new_record(opaque_record_key.clone(), record)
         .await
-        .expect("new_record");
+        .expect("try_new_record");
 
     // Straight to the inner store: watch_record refuses lifetimes under the rpc timeout
     let watch = |tag: u8, expiration: Timestamp| {

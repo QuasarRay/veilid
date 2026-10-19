@@ -216,13 +216,25 @@ impl RouteSpecStore {
             }
         };
 
+        // A preference for datagrams with no datagram protocol to send on can only build ordered
+        let sequencing = if params.sequencing == Sequencing::PreferUnordered
+            && !self
+                .network_manager()
+                .transport_stats()
+                .ordering_is_available(RoutingDomain::PublicInternet, SequenceOrdering::Unordered)
+        {
+            Sequencing::PreferOrdered
+        } else {
+            params.sequencing
+        };
+
         // Note: `crypto_kind` and `directions` from params is only for selection, not for allocation.
         // Automatic routes should always use all crypto kinds and be bidirectional.
         let params = AllocateRouteParams {
             crypto_kinds: VALID_CRYPTO_KINDS.to_vec(),
             hop_count: params.hop_count,
             stability: params.stability,
-            sequencing: params.sequencing,
+            sequencing,
             directions: DirectionSet::all(),
             avoid_nodes: first_available_route_params.avoid_nodes,
             automatic: true,

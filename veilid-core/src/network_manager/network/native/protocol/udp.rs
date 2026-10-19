@@ -21,6 +21,8 @@ const UDP_RECV_ERROR_BACKOFF_MS: u32 = 100;
 pub struct RawUdpProtocolHandler {
     /// Component registry for logging and access to other subsystems
     registry: VeilidComponentRegistry,
+    /// Low-TTL sends for `socket`, declared before it so its twin closes first
+    ttl_sender: Arc<UdpTtlSender>,
     /// Async UDP socket this handler reads from and writes to
     socket: Arc<UdpSocket>,
     /// Reassembly buffer for fragmented UDP messages
@@ -40,6 +42,7 @@ impl RawUdpProtocolHandler {
 
         Self {
             registry,
+            ttl_sender: Arc::new(UdpTtlSender::new()),
             socket,
             assembly_buffer: AssemblyBuffer::new(),
             stop_source: Arc::new(Mutex::new(Some(stop_source))),
@@ -251,7 +254,10 @@ impl RawUdpProtocolHandler {
         }
 
         // Zero length packet with a best-effort per-packet TTL
-        let res = match send_udp_datagram_with_ttl(self.socket.as_ref(), &[], remote_addr, ttl) {
+        let res = match self
+            .ttl_sender
+            .send_to(self.socket.as_ref(), &[], remote_addr, ttl)
+        {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS, "UDP hole punch send would block: remote_addr={:?}", remote_addr);
                 return Ok(NetworkResult::timeout());
@@ -288,7 +294,7 @@ impl RawUdpProtocolHandler {
         feature = "instrument",
         instrument(level = "trace", target = "protocol", skip(registry), err, fields(__VEILID_LOG_KEY = registry.log_key()))
     )]
-    pub fn new_unspecified_bound_handler(
+    pub fn try_new_unspecified_bound_handler(
         registry: VeilidComponentRegistry,
         socket_addr: &SocketAddr,
     ) -> io::Result<RawUdpProtocolHandler> {
@@ -304,7 +310,7 @@ impl RawUdpProtocolHandler {
         feature = "instrument",
         instrument(level = "trace", target = "protocol", skip(registry), err, fields(__VEILID_LOG_KEY = registry.log_key()))
     )]
-    pub fn new_specific_bound_handler(
+    pub fn try_new_specific_bound_handler(
         registry: VeilidComponentRegistry,
         local_socket_addr: SocketAddr,
     ) -> io::Result<RawUdpProtocolHandler> {

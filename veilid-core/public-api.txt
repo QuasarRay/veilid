@@ -1191,7 +1191,7 @@ pub struct veilid_core::CryptoSystemGuard<'a>
 impl<'a> veilid_core::CryptoSystemGuard<'a>
 pub fn veilid_core::CryptoSystemGuard<'a>::as_async(self) -> veilid_core::AsyncCryptoSystemGuard<'a>
 impl core::ops::deref::Deref for veilid_core::CryptoSystemGuard<'_>
-pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Sync + core::marker::Send)
+pub type veilid_core::CryptoSystemGuard<'_>::Target = (dyn veilid_core::CryptoSystem + core::marker::Send + core::marker::Sync)
 pub fn veilid_core::CryptoSystemGuard<'_>::deref(&self) -> &Self::Target
 pub struct veilid_core::DHTRecordDescriptor
 impl veilid_core::DHTRecordDescriptor
@@ -2720,8 +2720,6 @@ pub const veilid_core::ValueData::MAX_LEN: usize
 pub fn veilid_core::ValueData::data(&self) -> &[u8]
 pub fn veilid_core::ValueData::data_bytes(&self) -> bytes::bytes::Bytes
 pub fn veilid_core::ValueData::data_size(&self) -> usize
-pub fn veilid_core::ValueData::new<B: core::convert::Into<bytes::bytes::Bytes>>(B, veilid_core::PublicKey) -> veilid_core::VeilidAPIResult<Self>
-pub fn veilid_core::ValueData::new_with_seq<B: core::convert::Into<bytes::bytes::Bytes>>(veilid_core::ValueSeqNum, B, veilid_core::PublicKey) -> veilid_core::VeilidAPIResult<Self>
 pub fn veilid_core::ValueData::ref_writer(&self) -> &veilid_core::PublicKey
 pub fn veilid_core::ValueData::seq(&self) -> veilid_core::ValueSeqNum
 pub fn veilid_core::ValueData::total_size(&self) -> usize
@@ -2933,9 +2931,11 @@ pub veilid_core::VeilidConfigInternalDHT::validate_dial_info_receipt_time_ms: u3
 impl core::default::Default for veilid_core::VeilidConfigInternalDHT
 pub fn veilid_core::VeilidConfigInternalDHT::default() -> Self
 pub struct veilid_core::VeilidConfigInternalNetwork
+pub veilid_core::VeilidConfigInternalNetwork::cgnat_hole_punch_ttl: u32
 pub veilid_core::VeilidConfigInternalNetwork::client_allowlist_timeout_ms: u32
 pub veilid_core::VeilidConfigInternalNetwork::connection_inactivity_timeout_ms: u32
 pub veilid_core::VeilidConfigInternalNetwork::connection_initial_timeout_ms: u32
+pub veilid_core::VeilidConfigInternalNetwork::default_hole_punch_ttl: u32
 pub veilid_core::VeilidConfigInternalNetwork::dht: veilid_core::VeilidConfigInternalDHT
 pub veilid_core::VeilidConfigInternalNetwork::hole_punch_receipt_time_ms: u32
 pub veilid_core::VeilidConfigInternalNetwork::max_connection_frequency_per_min: u32

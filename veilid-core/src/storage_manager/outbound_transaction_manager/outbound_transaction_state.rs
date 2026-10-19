@@ -313,7 +313,7 @@ impl OutboundTransactionState {
             .unwrap_or(self.created_ts)
     }
 
-    pub(super) fn new_record_state(
+    pub(super) fn try_new_record_state(
         &mut self,
         params: OutboundTransactionRecordParams,
     ) -> VeilidAPIResult<()> {

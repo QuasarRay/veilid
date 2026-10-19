@@ -62,7 +62,7 @@ pub(in crate::rpc_processor) struct RPCOperationFindBlockA {
 }
 
 impl RPCOperationFindBlockA {
-    pub fn new(
+    pub fn try_new(
         data: Vec<u8>,
         suppliers: Vec<PeerInfo>,
         peers: Vec<PeerInfo>,

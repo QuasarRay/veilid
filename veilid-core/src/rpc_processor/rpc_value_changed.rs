@@ -28,7 +28,7 @@ impl RPCProcessor {
             ));
         }
         let value_changed =
-            RPCOperationValueChanged::new(record_key, subkeys, count, watch_id, value)?;
+            RPCOperationValueChanged::try_new(record_key, subkeys, count, watch_id, value)?;
         let statement =
             RPCStatement::new(RPCStatementDetail::ValueChanged(Box::new(value_changed)));
 

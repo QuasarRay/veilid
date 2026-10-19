@@ -40,5 +40,16 @@ if [ -z "$have" ] || ! ver_ge "$have" "$FLUTTER_MIN_VERSION"; then
 fi
 echo "Using Flutter $have."
 
+# The native build hook has rustup sync veilid-flutter/rust's toolchain file (the channel and every
+# listed target) without retrying a failed download; sync it first, retried. Three attempts: each
+# can wait out rustup's 3 minute download timeout
+i=1
+until (cd "$VEILIDDIR/veilid-flutter/rust" && rustup show active-toolchain); do
+    if [ "$i" -ge 3 ]; then echo "giving up syncing the Rust toolchain after $i attempts" >&2; exit 1; fi
+    echo "retry #$i: rustup show active-toolchain" >&2
+    i=$((i+1))
+    sleep 10
+done
+
 exec "$VEILIDDIR/veilid-flutter/run_integration_tests.sh" --headless \
     ${ARGS[@]+"${ARGS[@]}"}

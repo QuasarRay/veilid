@@ -38,6 +38,10 @@ pub struct RoutingDomainDetailCommon {
     config_bootstrap_cache: Mutex<BootstrapCache>,
     /// The last calculated summary of the routing table entries in this domain
     entry_summary: Mutex<Arc<EntrySummary>>,
+    /// The last published state and what it rests on, for the next attach to publish again
+    restore_point: Mutex<Option<Arc<RoutingDomainRestorePoint>>>,
+    /// Peer infos we sign are stamped no earlier than this: peers take only newer ones
+    peer_info_ts_floor: AtomicU64,
 }
 
 impl fmt::Debug for RoutingDomainDetailCommon {
@@ -54,6 +58,8 @@ impl fmt::Debug for RoutingDomainDetailCommon {
             .field("bootstrap_peers", &self.bootstrap_peers)
             .field("bootstrap_cache", &self.bootstrap_cache)
             .field("entry_summary", &self.entry_summary)
+            .field("restore_point", &self.restore_point)
+            .field("peer_info_ts_floor", &self.peer_info_ts_floor)
             .finish()
     }
 }
@@ -98,6 +104,8 @@ impl RoutingDomainDetailCommon {
             bootstrap_cache: Mutex::new(Default::default()),
             config_bootstrap_cache: Mutex::new(Default::default()),
             entry_summary: Mutex::new(Default::default()),
+            restore_point: Mutex::new(None),
+            peer_info_ts_floor: AtomicU64::new(0),
         }
     }
 
@@ -249,6 +257,32 @@ impl RoutingDomainDetailCommon {
         *self.entry_summary.lock() = entry_summary;
     }
 
+    pub fn get_restore_point(&self) -> Option<Arc<RoutingDomainRestorePoint>> {
+        self.restore_point.lock().clone()
+    }
+
+    pub fn replace_restore_point(
+        &self,
+        restore_point: Option<Arc<RoutingDomainRestorePoint>>,
+    ) -> Option<Arc<RoutingDomainRestorePoint>> {
+        core::mem::replace(&mut *self.restore_point.lock(), restore_point)
+    }
+
+    /// Make `peer_info` the current peer info when a fresh one would say the same; peer infos
+    /// signed after it are newer either way
+    pub fn restore_current_peer_info(&self, peer_info: Arc<PeerInfo>) -> bool {
+        self.peer_info_ts_floor.fetch_max(
+            peer_info.node_info().timestamp().as_u64().saturating_add(1),
+            Ordering::AcqRel,
+        );
+        self.clear_current_peer_info_cache();
+        if !self.get_current_peer_info().equivalent(&peer_info) {
+            return false;
+        }
+        *self.current_peer_info_cache.lock() = Some(peer_info);
+        true
+    }
+
     ///////////////////////////////////////////////////////////////////////
     // Mutators
 
@@ -391,7 +425,9 @@ impl RoutingDomainDetailCommon {
 
     fn make_current_peer_info(&self) -> PeerInfo {
         let routing_table = self.routing_table();
-        let cur_ts = Timestamp::now_non_decreasing();
+        let cur_ts = Timestamp::now_non_decreasing().max(Timestamp::new(
+            self.peer_info_ts_floor.load(Ordering::Acquire),
+        ));
         let mut relay_info_list = vec![];
         for relay in self.relays() {
             let relay_node_ids = relay.relay_node.node_ids();
@@ -437,7 +473,12 @@ impl RoutingDomainDetailCommon {
             relay_info_list,
         );
 
-        PeerInfo::new_from_node_info(&routing_table, self.routing_domain, &secret_keys, node_info)
-            .expect_or_log("our own peerinfo should never fail")
+        PeerInfo::try_new_from_node_info(
+            &routing_table,
+            self.routing_domain,
+            &secret_keys,
+            node_info,
+        )
+        .expect_or_log("our own peerinfo should never fail")
     }
 }

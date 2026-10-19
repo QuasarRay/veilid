@@ -856,7 +856,10 @@ async fn test_migration_v1() {
         assert_eq!(value, ["one", "two"]);
 
         let rt_db = ts
-            .open("routing_table", 1)
+            .open(
+                "routing_table",
+                crate::routing_table::ROUTING_TABLE_COLUMN_COUNT,
+            )
             .await
             .expect("open routing table");
         assert_eq!(
@@ -891,8 +894,9 @@ async fn test_migration_v1() {
     api3.shutdown().await;
 }
 
-/// An interrupted migration picks up each table where its checkpoint left it, and a table
-/// already at v1 is not touched
+/// An interrupted migration finishes each table from its progress record, whether the record
+/// names only the rows left or every row the table began with, and a table already at v1 is not
+/// touched
 async fn test_migration_v1_resumes() {
     info!("test_migration_v1_resumes");
 
@@ -933,6 +937,29 @@ async fn test_migration_v1_resumes() {
         )
         .await;
 
+        // The same, with a record that still names k1 and k2, whose v0 rows are gone
+        let named_db = open_raw_table(&ts, "migrate_resume_named", 1).await;
+        let mut began_with = Vec::new();
+        for (i, (key, value)) in rows.iter().enumerate() {
+            let row = v0_row(&ts, key, value).await;
+            began_with.push((0u32, row.0.to_vec()));
+            if i < 2 {
+                put_row(&named_db, 0, v1_row(&ts, key, value).await).await;
+            } else {
+                put_row(&named_db, 0, row).await;
+            }
+        }
+        let progress = serde_json::to_vec(&serde_json::json!({ "remaining": began_with })).unwrap();
+        put_row(
+            &named_db,
+            0,
+            (
+                Bytes::from_static(MIGRATION_PROGRESS_KEY),
+                Bytes::from(progress),
+            ),
+        )
+        .await;
+
         // Finished: carries the version, so a value that would decompress stays as it is
         let done_db = open_raw_table(&ts, "migrate_done", 1).await;
         put_row(&done_db, 0, v1_row(&ts, b"k", &looks_compressed).await).await;
@@ -957,19 +984,22 @@ async fn test_migration_v1_resumes() {
         .expect("startup 2 failed");
     {
         let ts = api2.table_store().unwrap();
-        let db = ts.open("migrate_resume", 1).await.expect("open resume");
-        for (key, value) in rows {
-            assert_eq!(
-                db.load(0, Bytes::copy_from_slice(key))
-                    .await
-                    .unwrap()
-                    .as_deref(),
-                Some(*value),
-                "{}",
-                String::from_utf8_lossy(key)
-            );
+        for table in ["migrate_resume", "migrate_resume_named"] {
+            let db = ts.open(table, 1).await.expect("open resume");
+            for (key, value) in rows {
+                assert_eq!(
+                    db.load(0, Bytes::copy_from_slice(key))
+                        .await
+                        .unwrap()
+                        .as_deref(),
+                    Some(*value),
+                    "{} {}",
+                    table,
+                    String::from_utf8_lossy(key)
+                );
+            }
+            assert_eq!(db.get_key_count(0).await.unwrap(), rows.len() as u64);
         }
-        assert_eq!(db.get_key_count(0).await.unwrap(), rows.len() as u64);
 
         let done_db = ts.open("migrate_done", 1).await.expect("open done");
         assert_eq!(

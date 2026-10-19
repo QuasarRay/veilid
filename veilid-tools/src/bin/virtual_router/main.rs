@@ -171,7 +171,7 @@ fn real_main() -> Result<(), String> {
 
         setup_tracing(&args.logging)?;
 
-        let initial_config = config::Config::new(&args.config_file, args.no_predefined_config)
+        let initial_config = config::Config::try_new(&args.config_file, args.no_predefined_config)
             .map_err(|e| format!("Error loading config: {}", e))?;
 
         if args.dump_config {

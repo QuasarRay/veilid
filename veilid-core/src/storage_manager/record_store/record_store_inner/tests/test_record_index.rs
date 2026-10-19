@@ -176,7 +176,7 @@ fn random_signed_value_data(
     );
     let data = vcrypto.random_bytes(size);
     Arc::new(SignedValueData::new(
-        EncryptedValueData::new(seq, data.into(), random_keypair.key(), Some(random_nonce))
+        EncryptedValueData::try_new(seq, data.into(), random_keypair.key(), Some(random_nonce))
             .expect("should validate"),
         random_signature,
     ))
@@ -307,7 +307,7 @@ pub async fn test_subkey_access_range(
         record_index
             .create_record(
                 key.clone(),
-                Record::<LocalRecordDetail>::new(
+                Record::<LocalRecordDetail>::try_new(
                     Timestamp::now(),
                     desc.clone(),
                     LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferUnordered)),
@@ -584,7 +584,7 @@ pub async fn test_create_read_write_delete_loop(
         record_index
             .create_record(
                 key.clone(),
-                Record::<LocalRecordDetail>::new(
+                Record::<LocalRecordDetail>::try_new(
                     Timestamp::now(),
                     descriptor.clone(),
                     detail.clone(),
@@ -758,7 +758,7 @@ pub async fn test_reopen_persistence(
         record_index
             .create_record(
                 key.clone(),
-                Record::<LocalRecordDetail>::new(
+                Record::<LocalRecordDetail>::try_new(
                     Timestamp::now(),
                     desc.clone(),
                     LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferUnordered)),
@@ -818,7 +818,7 @@ pub async fn test_subkey_seq_heal(
         record_index
             .create_record(
                 key.clone(),
-                Record::<LocalRecordDetail>::new(
+                Record::<LocalRecordDetail>::try_new(
                     Timestamp::now(),
                     desc.clone(),
                     LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferUnordered)),

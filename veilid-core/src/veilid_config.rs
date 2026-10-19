@@ -1037,6 +1037,10 @@ pub struct VeilidConfigInternalNetwork {
     pub reverse_connection_receipt_time_ms: u32,
     /// Time allowed to receive a hole-punch receipt, in milliseconds.
     pub hole_punch_receipt_time_ms: u32,
+    /// TTL (hop limit) of a hole punch, enough to pass this node's NAT but not reach the peer's.
+    pub default_hole_punch_ttl: u32,
+    /// Hole punch TTL behind a carrier-grade NAT, which sits more hops out than a home router.
+    pub cgnat_hole_punch_ttl: u32,
     /// NAT-detection retries during dial-info confirmation for port/address-restricted NAT
     /// (some NATs open to full-cone after a few attempts; off by default).
     pub restricted_nat_retries: u32,
@@ -1060,6 +1064,8 @@ impl Default for VeilidConfigInternalNetwork {
             client_allowlist_timeout_ms: 300000,
             reverse_connection_receipt_time_ms: 5000,
             hole_punch_receipt_time_ms: 5000,
+            default_hole_punch_ttl: 3,
+            cgnat_hole_punch_ttl: 8,
             restricted_nat_retries: 0,
             rpc: VeilidConfigInternalRPC::default(),
             dht: VeilidConfigInternalDHT::default(),
@@ -1375,6 +1381,20 @@ impl VeilidConfig {
             apibail_generic!(
                 "default route hop count must be <= max route hop count in 'network.rpc.default_route_hop_count <= network.rpc.max_route_hop_count'"
             );
+        }
+        for (ttl, key) in [
+            (
+                self.internal().network.default_hole_punch_ttl,
+                "network.default_hole_punch_ttl",
+            ),
+            (
+                self.internal().network.cgnat_hole_punch_ttl,
+                "network.cgnat_hole_punch_ttl",
+            ),
+        ] {
+            if !(1..=255).contains(&ttl) {
+                apibail_generic!("hole punch ttl must be from 1 to 255 in '{}'", key);
+            }
         }
         if self.internal().network.rpc.queue_size < 256 {
             apibail_generic!("rpc queue size must be >= 256 in 'network.rpc.queue_size'");

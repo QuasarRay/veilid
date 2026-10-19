@@ -1,25 +1,23 @@
 use super::*;
 
-#[derive(Debug)]
-pub(crate) struct PerRoutingDomainSnapshot {
-    pub peer_info: Arc<PeerInfo>,
-    pub node_status: Option<NodeStatus>,
-    pub last_seen_our_node_info_ts: Timestamp,
-}
-
+/// An entry as of `cur_ts`: its persisted parts and the live state they leave out
 #[derive(Debug)]
 pub(crate) struct BucketEntrySnapshotInner {
+    /// When the snapshot was taken
     pub cur_ts: Timestamp,
+    /// The entry
     pub node_ref: NodeRef,
-    pub time_added: Timestamp,
-    pub peer_stats: PeerStats,
-    pub rpc_stats: RPCStats,
+    /// Stats for connection-oriented protocols
     pub connection_stats: ConnectionStats,
-    pub state: BucketEntryState,
-    pub node_ids: NodeIdGroup,
-    pub per_routing_domain: BTreeMap<RoutingDomain, PerRoutingDomainSnapshot>,
-    pub per_sequence_ordering: BTreeMap<SequenceOrdering, RPCStats>,
-    pub per_transport: BTreeMap<TransportType, RPCStats>,
+    /// The entry's persisted parts
+    pub persisted: BucketEntryPersisted,
+}
+
+impl core::ops::Deref for BucketEntrySnapshotInner {
+    type Target = BucketEntryPersisted;
+    fn deref(&self) -> &Self::Target {
+        &self.persisted
+    }
 }
 
 /// A point-in-time snapshot of mutable BucketEntry fields used for sorting and filtering.
@@ -53,7 +51,10 @@ impl BucketEntrySnapshot {
     }
 
     pub fn routing_domain_set(&self) -> RoutingDomainSet {
-        self.per_routing_domain.keys().cloned().collect()
+        RoutingDomainSet::all()
+            .iter()
+            .filter(|rd| self.routing_domain(*rd).peer_info.is_some())
+            .collect()
     }
 
     pub fn is_reliable(&self) -> bool {
@@ -61,7 +62,7 @@ impl BucketEntrySnapshot {
     }
 
     // pub fn is_reliable_for(&self, transport: LowLevelTransportType) -> bool {
-    //     self.per_transport
+    //     self.per_transport_stats
     //         .get(&transport)
     //         .map(|t| t.state == LowLevelState::Reliable)
     //         .unwrap_or(false)
@@ -108,7 +109,7 @@ impl BucketEntrySnapshot {
     pub fn has_node_info(&self, routing_domain_set: RoutingDomainSet) -> bool {
         routing_domain_set
             .iter()
-            .any(|routing_domain| self.per_routing_domain.contains_key(&routing_domain))
+            .any(|routing_domain| self.routing_domain(routing_domain).peer_info.is_some())
     }
 
     pub fn best_node_id(&self) -> Option<NodeId> {
@@ -116,15 +117,13 @@ impl BucketEntrySnapshot {
     }
 
     pub fn get_peer_info(&self, routing_domain: RoutingDomain) -> Option<Arc<PeerInfo>> {
-        self.per_routing_domain
-            .get(&routing_domain)
-            .map(|x| x.peer_info.clone())
+        self.routing_domain(routing_domain).peer_info.clone()
     }
 
     pub fn node_status(&self, routing_domain: RoutingDomain) -> Option<NodeStatus> {
-        self.per_routing_domain
-            .get(&routing_domain)
-            .and_then(|x| x.node_status.clone())
+        let entry = self.routing_domain(routing_domain);
+        entry.peer_info.as_ref()?;
+        entry.node_status.clone()
     }
 
     pub fn has_all_capabilities(
@@ -157,7 +156,7 @@ impl BucketEntrySnapshot {
         }
     }
 
-    // Less is more reliable then faster
+    // Less is more reliable, then faster
     pub fn cmp_fastest_reliable(
         a: &Self,
         b: &Self,
@@ -173,7 +172,7 @@ impl BucketEntrySnapshot {
         Self::cmp_fastest(a, b, metric)
     }
 
-    // Less is more reliable then older
+    // Less is more reliable, then older
     pub fn cmp_oldest_reliable(a: &Self, b: &Self) -> std::cmp::Ordering {
         // Reverse compare so most reliable is at front
         let ret = b.state.cmp(&a.state);
@@ -202,20 +201,17 @@ impl BucketEntrySnapshot {
         routing_domain: RoutingDomain,
         our_node_info_ts: Timestamp,
     ) -> bool {
-        let Some(rds) = self.per_routing_domain.get(&routing_domain) else {
-            return false;
-        };
-        our_node_info_ts == rds.last_seen_our_node_info_ts
+        let entry = self.routing_domain(routing_domain);
+        entry.peer_info.is_some() && our_node_info_ts == entry.last_seen_our_node_info_ts
     }
 
-    /// Per-sequence-ordering ping decision. Returns false if the sequence ordering has no stats yet
-    /// (no DialInfo for it, or never used) - callers should check `supported_sequence_orderings`
-    /// against the peer info for cold-start pings.
+    /// Sequence orderings due a proof-of-life ping. A supported ordering with no stats yet (no
+    /// dial info for it, or never used) gets a cold-start ping.
     ///
-    /// The cadence is driven by the node's overall (min-across-transports) state, not this
-    /// transport's own state: when the node is unreliable, every transport is pinged at the fast
-    /// unreliable interval so a stale 'reliable' transport gets re-probed and can degrade,
-    /// instead of riding the slow reliable backoff.
+    /// The cadence is driven by the node's overall state, not this ordering's own state: when the
+    /// node is unreliable, every ordering is pinged at the fast unreliable interval so a stale
+    /// 'reliable' ordering gets re-probed and can degrade, instead of riding the slow reliable
+    /// backoff.
     ///
     /// EXCEPT an ordering with consecutive lost questions at the Failing threshold, which
     /// probes on a falloff from its steady-loss start: it is either down (the [D3]/[D4]
@@ -230,7 +226,7 @@ impl BucketEntrySnapshot {
         let unreliable_ping_interval = timings.unreliable_ping_interval;
         let mut out = SequenceOrderingSet::empty();
         for so in self.supported_sequence_orderings(routing_domain, outbound_dif) {
-            let Some(stats) = self.per_sequence_ordering.get(&so) else {
+            let Some(stats) = self.per_sequence_ordering_stats.get(&so) else {
                 // Supported sequence ordering but no stats yet, cold start ping required
                 out |= so;
                 continue;
@@ -272,13 +268,13 @@ impl BucketEntrySnapshot {
                 },
                 BucketEntryState::Reliable => {
                     match (stats.last_question_ts, stats.first_steady_answer_ts) {
-                        // Never asked: ping it.
+                        // Never asked: ping it
                         (None, _) => true,
-                        // Asked but not yet established with this sequence ordering: probe at the unreliable interval.
+                        // Asked but not yet established with this sequence ordering: probe at the unreliable interval
                         (Some(last_question_ts), None) => {
                             self.cur_ts.duration_since(last_question_ts) >= unreliable_ping_interval
                         }
-                        // Established reliable with this sequence ordering: use the reliable backoff.
+                        // Established reliable with this sequence ordering: use the reliable backoff
                         (Some(last_question_ts), Some(first_steady_answer_ts)) => {
                             let start_of_reliable_time = first_steady_answer_ts.later(
                                 timings

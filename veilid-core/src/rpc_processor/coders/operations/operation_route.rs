@@ -22,7 +22,7 @@ impl fmt::Debug for RoutedOperation {
 }
 
 impl RoutedOperation {
-    pub fn new(
+    pub fn try_new(
         routing_domain: RoutingDomain,
         sequencing: Sequencing,
         signatures: Vec<Signature>,
@@ -103,7 +103,7 @@ impl RoutedOperation {
         rpc_ignore_missing_property!(reader, data);
         let data = Bytes::copy_from_slice(reader.get_data()?);
 
-        Self::new(
+        Self::try_new(
             decode_context.origin_routing_domain,
             sequencing,
             signatures,

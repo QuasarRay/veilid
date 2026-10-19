@@ -36,13 +36,13 @@ pub async fn test_inbound_set_value_rejects_forged_signature() {
     let opaque_record_key =
         make_opaque_record_key(&avcrypto, attacker_owner_pk.ref_value(), &schema_data).await;
 
-    let value_data = EncryptedValueData::new(
+    let value_data = EncryptedValueData::try_new(
         ValueSeqNum::from(1),
         Bytes::from_static(b"poisoned-payload-from-unauthenticated-attacker"),
         attacker_owner_pk.clone(),
         Some(nonce),
     )
-    .expect("EncryptedValueData::new should succeed");
+    .expect("EncryptedValueData::try_new should succeed");
     let fake_signed_value = SignedValueData::new(value_data, garbage_sig.clone());
 
     let attacker_target = Target::NodeId(NodeId::new(ck, BareNodeId::new(&[0u8; 32])));

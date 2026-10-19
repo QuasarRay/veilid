@@ -5,7 +5,9 @@ use super::*;
 impl_veilid_log_facility!("rtab");
 
 pub struct LocalNetworkRoutingDomainControllerUnlockedInner {
+    /// Component registry this controller belongs to
     registry: VeilidComponentRegistry,
+    /// The routing domain's editable state
     detail: Box<RwLock<LocalNetworkRoutingDomainDetail>>,
     /// Published peer info for this routing domain
     published_peer_info: Mutex<Option<Arc<PeerInfo>>>,
@@ -280,6 +282,11 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
                 if new_peer_info.equivalent(old_peer_info) {
                     #[cfg(feature = "verbose-tracing")]
                     veilid_log!(self debug "[LocalNetwork] Not publishing peer info because it is equivalent");
+                    drop(ppi_lock);
+                    // A confirmation that reproduced the published peer info vouches for it again
+                    if self.read_dyn().get_restore_point().is_none() {
+                        self.capture_restore_point(old_peer_info.clone());
+                    }
                     return false;
                 }
             }
@@ -289,6 +296,10 @@ impl RoutingDomainController for LocalNetworkRoutingDomainController {
 
             (opt_old_peer_info, Some(new_peer_info))
         };
+
+        if let Some(new_peer_info) = &opt_new_peer_info {
+            self.capture_restore_point(new_peer_info.clone());
+        }
 
         if let Err(e) = self.event_bus().post(PeerInfoChangeEvent {
             routing_domain: RoutingDomain::LocalNetwork,

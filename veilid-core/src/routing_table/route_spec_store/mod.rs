@@ -200,7 +200,13 @@ impl RouteSpecStore {
     )]
     pub async fn save(&self) -> EyreResult<()> {
         // Snapshot our content so save it since this is an async operation
-        let content = self.content.read().clone();
+        let content = {
+            // Careful with locking order here, we need to lock the content before the cache
+            let content = self.content.read();
+            // Test state changes with every keepalive; take it as it is now
+            content.update_per_ordering(&self.cache.read());
+            content.clone()
+        };
 
         // Save our content to the tablestore
         content.save(&self.table_db().await?).await

@@ -109,6 +109,28 @@ fn egress_per_family<'a>(
     ]
 }
 
+/// A family's hole punch TTL: the carrier-grade NAT one when its traffic leaves from a carrier
+/// NAT or DS-Lite address, since that NAT sits more hops out than a home router
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn hole_punch_ttl(
+    network: &VeilidConfigInternalNetwork,
+    interface_address_state: &NetworkInterfaceAddressState,
+    address_type: AddressType,
+) -> u32 {
+    let egress = match address_type {
+        AddressType::IPV4 => &interface_address_state.egress_v4,
+        AddressType::IPV6 => &interface_address_state.egress_v6,
+    };
+    match egress
+        .as_ref()
+        .and_then(|egress| egress.source)
+        .map(Address::from_ip_addr)
+    {
+        Some(source) if source.is_cgnat_indicator() => network.cgnat_hole_punch_ttl,
+        _ => network.default_hole_punch_ttl,
+    }
+}
+
 /// Compare the egress per family. `was_in_use` is what PublicInternet ran on before the
 /// change and `now_in_use` what it can run on after it.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]

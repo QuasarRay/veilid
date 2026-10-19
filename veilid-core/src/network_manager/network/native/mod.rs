@@ -4,6 +4,7 @@ mod low_level_protocol_tcp;
 mod low_level_protocol_udp;
 mod network_state;
 mod protocol;
+mod restore;
 mod start_protocols;
 mod tasks;
 
@@ -40,7 +41,6 @@ pub const MAX_DIAL_INFO_CONFIRM_FAILURE_COUNT: usize = 3;
 pub const UPDATE_DIAL_INFO_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const NETWORK_INTERFACES_TASK_TICK_PERIOD_SECS: u32 = 1;
 pub const UPNP_TASK_TICK_PERIOD_SECS: u32 = 1;
-pub const HOLE_PUNCH_TTL: u32 = 3;
 
 /// Native network durations derived from config
 #[derive(Clone, Copy, Debug)]
@@ -75,6 +75,8 @@ struct NetworkInner {
     /// validator pool size (capped at the full quorum) seen at the last public internet
     /// dial info confirmation attempt; a below-quorum confirmation re-tests as this grows
     confirmed_validator_count: Option<usize>,
+    /// external addresses and unexamined transports of the last public internet detection
+    last_dial_info_detection: Option<(BTreeSet<Address>, BTreeSet<TransportType>)>,
     /// result of resolving 'auto'/None detect_address_changes mode
     routing_domain_detect_address_changes: BTreeSet<RoutingDomain>,
     /// join handles for all the low level network background tasks
@@ -298,7 +300,7 @@ impl PlatformNetwork for NativeNetwork {
                 match dial_info.protocol_type() {
                     ProtocolType::UDP => {
                         let peer_socket_addr = dial_info.to_socket_addr();
-                        let h = RawUdpProtocolHandler::new_unspecified_bound_handler(
+                        let h = RawUdpProtocolHandler::try_new_unspecified_bound_handler(
                             self.registry(),
                             &peer_socket_addr,
                         )
@@ -411,7 +413,7 @@ impl PlatformNetwork for NativeNetwork {
                     // Connectionless protocols
                     ProtocolType::UDP => {
                         let peer_socket_addr = dial_info.to_socket_addr();
-                        let h = RawUdpProtocolHandler::new_unspecified_bound_handler(
+                        let h = RawUdpProtocolHandler::try_new_unspecified_bound_handler(
                             self.registry(),
                             &peer_socket_addr,
                         )
@@ -725,8 +727,13 @@ impl PlatformNetwork for NativeNetwork {
                     ));
                 }
             };
+            let ttl = hole_punch_ttl(
+                &self.config().internal().network,
+                &self.interfaces.interface_address_state(),
+                dial_info.address_type(),
+            );
             let flow = network_result_try!(ph
-                .send_hole_punch(peer_socket_addr, HOLE_PUNCH_TTL)
+                .send_hole_punch(peer_socket_addr, ttl)
                 .wrap_err("failed to send hole punch to dial info")?);
             let unique_flow = UniqueFlow {
                 flow,
@@ -816,6 +823,7 @@ impl PlatformNetwork for NativeNetwork {
         let mut editor = rdc.edit_dyn();
         editor.set_confirmed(false);
         editor.commit();
+        rdc.discard_restore_point();
         true
     }
 
@@ -838,14 +846,31 @@ impl PlatformNetwork for NativeNetwork {
         }
         self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
     }
+
+    fn restore_state(&self, routing_domain: RoutingDomain) -> Option<PlatformRestoreState> {
+        self.routing_domain_restore_state(routing_domain)
+    }
+
+    fn last_dial_info_detection(&self) -> Option<(BTreeSet<Address>, BTreeSet<TransportType>)> {
+        self.inner.lock().last_dial_info_detection.clone()
+    }
 }
 
 impl NativeNetwork {
+    /// Dial info is known good on the current interface state
+    fn record_confirmed_interface_generation(&self) {
+        self.confirmed_interface_address_generation.store(
+            self.interface_address_generation.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+    }
+
     fn new_inner() -> NetworkInner {
         NetworkInner {
             network_needs_restart: false,
             dial_info_confirm_failure_count: BTreeMap::new(),
             confirmed_validator_count: None,
+            last_dial_info_detection: None,
             routing_domain_detect_address_changes: BTreeSet::new(),
             join_handles: Vec::new(),
             stop_source: None,
@@ -1143,6 +1168,9 @@ impl NativeNetwork {
         )?;
 
         editor_public_internet.commit();
+        if opt_last_network_state.is_none() {
+            self.restore_routing_domain(&*controller_public_internet);
+        }
         controller_public_internet.publish_peer_info();
 
         Ok(())
@@ -1178,6 +1206,9 @@ impl NativeNetwork {
         )?;
 
         editor_local_network.commit();
+        if opt_last_network_state.is_none() {
+            self.restore_routing_domain(&*controller_local_network);
+        }
         controller_local_network.publish_peer_info();
 
         Ok(())
@@ -1234,6 +1265,11 @@ impl NativeNetwork {
 
             // Set confirmed dial info state if there is no other detection mechanism for this routing domain
             editor.set_confirmed(auto_confirm_dial_info);
+
+            // What was published rests on the network state that just changed
+            if opt_last_rd_network_state.is_some() && !auto_confirm_dial_info {
+                controller.discard_restore_point();
+            }
         }
 
         Ok(())

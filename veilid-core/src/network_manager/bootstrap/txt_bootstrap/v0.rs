@@ -96,9 +96,12 @@ impl NetworkManager {
 
         let mut bootstrap_records: Vec<BootstrapRecord> = Vec::new();
         for record_string in record_strings {
-            let Some(bootstrap_record) =
-                BootstrapRecord::new_from_v0_str(self, Some(&dial_info_converter), record_string)
-                    .await?
+            let Some(bootstrap_record) = BootstrapRecord::try_new_from_v0_str(
+                self,
+                Some(&dial_info_converter),
+                record_string,
+            )
+            .await?
             else {
                 continue;
             };

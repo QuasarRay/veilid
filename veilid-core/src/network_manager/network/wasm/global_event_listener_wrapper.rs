@@ -17,7 +17,7 @@ impl<T> GlobalEventListenerWrapper<T>
 where
     T: 'static,
 {
-    pub fn new(event_name: &str, handler: GlobalEventListenerHandler<T>) -> EyreResult<Self> {
+    pub fn try_new(event_name: &str, handler: GlobalEventListenerHandler<T>) -> EyreResult<Self> {
         let global_obj = js_sys::global();
 
         // One pending event is all a receiver needs, so a full channel drops the rest

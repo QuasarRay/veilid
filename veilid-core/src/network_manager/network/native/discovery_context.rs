@@ -157,8 +157,6 @@ struct DiscoveryContextInner {
 pub(super) struct DiscoveryContextUnlockedInner {
     /// Protocol, address family and port this context probes
     config: DiscoveryContextConfig,
-    /// Publication-quality addresses (privacy/CLAT/CGNAT excluded)
-    intf_addrs: BTreeSet<Address>,
     /// Interface address state, including the addresses we send from but never publish
     interface_address_state: Arc<NetworkInterfaceAddressState>,
 }
@@ -196,17 +194,11 @@ impl DiscoveryContext {
             .unwrap_or_log()
             .interface_address_state
             .clone();
-        let intf_addrs = interface_address_state
-            .interface_addresses
-            .iter()
-            .map(|x| Address::from_ip_addr(x.ip()))
-            .collect();
 
         Self {
             network,
             unlocked_inner: Arc::new(DiscoveryContextUnlockedInner {
                 config,
-                intf_addrs,
                 interface_address_state,
             }),
             inner: Arc::new(Mutex::new(DiscoveryContextInner {
@@ -441,15 +433,6 @@ impl DiscoveryContext {
         }
 
         true
-    }
-
-    /// Publication-set interface addresses of this context's family: what we can offer
-    /// peers, not what is ours.
-    fn family_intf_addrs(&self) -> impl Iterator<Item = &Address> {
-        let address_type = self.config.address_type;
-        self.intf_addrs
-            .iter()
-            .filter(move |a| a.address_type() == address_type)
     }
 
     /// True when the address is ours and in this context's family. Uses the identity set,
@@ -694,37 +677,6 @@ impl DiscoveryContext {
             inner.external_infos.clone()
         };
         let local_port = self.config.port;
-
-        // If any local interface address of this context's family is a carrier-grade NAT or
-        // DS-Lite indicator, classify as Symmetric for this family only. Other families may
-        // still be globally reachable.
-        let family_intf_addrs_indicate_cgnat =
-            self.family_intf_addrs().any(|a| a.is_cgnat_indicator());
-        if family_intf_addrs_indicate_cgnat {
-            let external_address_types =
-                external_info.iter().fold(AddressTypeSet::new(), |acc, ei| {
-                    acc | ei.address.address_type()
-                });
-            let this = self.clone();
-            let do_cgnat_symmetric_fut: PinBoxFutureStatic<DetectionResultKind> = Box::pin(
-                async move {
-                    veilid_log!(this debug
-                        "Local interface address indicates carrier-grade NAT or DS-Lite; classifying as SymmetricNAT for {:?}:{:?}",
-                        this.config.protocol_type, this.config.address_type
-                    );
-                    DetectionResultKind::Result {
-                        possibilities: vec![],
-                        result: DetectionResult {
-                            config: this.config,
-                            ddi: DetectedDialInfo::SymmetricNAT,
-                            external_address_types,
-                        },
-                    }
-                },
-            );
-            unord.push(do_cgnat_symmetric_fut);
-            return;
-        }
 
         let mut external_info_addr_port_hist = HashMap::<SocketAddress, usize>::new();
         let mut external_info_addr_hist = HashMap::<Address, usize>::new();

@@ -238,6 +238,37 @@ cfg_if! {
             assert!(cellular.interface_addresses.is_empty());
         }
 
+        /// Carrier NAT addresses never reach publication, the only set discovery classifies
+        /// from: a Tailscale-style 100.x tunnel beside the LAN changes neither that set nor the
+        /// egress, and a carrier NAT egress keeps its source for the hole punch TTL
+        pub fn test_carrier_nat_addresses_are_never_published() {
+            info!("test_carrier_nat_addresses_are_never_published");
+            let plain = state(&lan(), Some(WIRED), None);
+            let mut tailnet = lan();
+            let mut utun4 = point_to_point("utun4");
+            let tailscale_ip = Ipv4Addr::new(100, 101, 102, 103);
+            utun4.add_address(v4(tailscale_ip));
+            tailnet.insert("utun4".to_owned(), utun4);
+            let with_tailnet = state(&tailnet, Some(WIRED), None);
+            assert_eq!(plain.interface_addresses, with_tailnet.interface_addresses);
+            assert_eq!(plain.egress_v4, with_tailnet.egress_v4);
+            assert!(with_tailnet.own_addresses.contains(&IpAddr::V4(tailscale_ip)));
+
+            let mut pdp_ip0 = running("pdp_ip0");
+            let carrier_ip = Ipv4Addr::new(100, 72, 14, 9);
+            pdp_ip0.add_address(v4(carrier_ip));
+            let cellular = state(
+                &BTreeMap::from([("pdp_ip0".to_owned(), pdp_ip0)]),
+                Some(carrier_ip),
+                None,
+            );
+            assert!(cellular.interface_addresses.is_empty());
+            assert_eq!(
+                cellular.egress_v4.and_then(|egress| egress.source),
+                Some(IpAddr::V4(carrier_ip))
+            );
+        }
+
         /// The kernel sends from whichever temporary it prefers; that choice must not move
         /// the published address or read as an interface change
         pub fn test_privacy_address_flip_is_not_a_change() {
@@ -323,6 +354,7 @@ pub async fn test_all() {
         test_egress_follows_the_primary_source();
         test_alias_on_the_egress_is_not_a_change();
         test_clat_egress_names_its_interface();
+        test_carrier_nat_addresses_are_never_published();
         test_network_interfaces().await;
     }
 }

@@ -866,7 +866,7 @@ impl RPCProcessor {
 
         // Make the routed operation
         let operation =
-            RoutedOperation::new(routing_domain, sequencing, vec![], nonce, enc_msg_data)?;
+            RoutedOperation::try_new(routing_domain, sequencing, vec![], nonce, enc_msg_data)?;
 
         // Prepare route operation
         let route_operation =

@@ -7,7 +7,7 @@ const SAVE_MIN_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
 /// Least time between saves in the background, where the process may be frozen within seconds
 #[cfg(feature = "app-lifecycle")]
 const BACKGROUND_SAVE_MIN_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
-/// Longest the table goes unsaved, for the per-entry stats no change accounts for
+/// Longest the table goes unsaved, so changes too small to drive a save still reach disk
 const SAVE_PERIOD: TimestampDuration = TimestampDuration::new_secs(300);
 /// Entry state changes that together make a change worth saving
 const SAVE_STATE_CHANGE_COUNT: usize = 16;
@@ -24,7 +24,7 @@ pub(crate) enum SaveReason {
     Periodic,
     /// A bootstrap finished
     Bootstrap,
-    /// The node detached with changes unsaved
+    /// The node detached
     Detach,
     /// The node shut down
     Terminate,
@@ -33,9 +33,11 @@ pub(crate) enum SaveReason {
 /// When the routing table next goes to disk.
 ///
 /// A new entry, a changed peer info, or enough entries changing state is worth saving once the
-/// changes settle. Per-entry stats change too often to drive saves and ride along on the
-/// periodic one. In the background the platform may freeze or kill the process within seconds,
-/// so changes there are saved without waiting for them to settle.
+/// changes settle. Per-entry stats change too often to drive saves, and are written with an
+/// entry's other changes. In the background the platform may freeze or kill the process within
+/// seconds, so changes there are saved without waiting for them to settle. What a restart
+/// restores at once, our published state and a route good enough for readiness, waits only for
+/// the least interval between saves: on a busy node the changes around it may never settle.
 #[derive(Debug)]
 pub(crate) struct SaveSchedule {
     /// When the last save started
@@ -44,6 +46,8 @@ pub(crate) struct SaveSchedule {
     period_start_ts: Timestamp,
     /// The latest change worth saving since the last save
     last_change_ts: Option<Timestamp>,
+    /// A change since the last save that does not wait for the others to settle
+    urgent: bool,
     /// Entry state changes since the last save
     state_changes: usize,
     /// Whether the app is in the background
@@ -57,6 +61,7 @@ impl SaveSchedule {
             last_save_ts: cur_ts,
             period_start_ts: cur_ts,
             last_change_ts: None,
+            urgent: false,
             state_changes: 0,
             #[cfg(feature = "app-lifecycle")]
             background: false,
@@ -66,6 +71,12 @@ impl SaveSchedule {
     /// A change worth saving
     pub fn changed(&mut self, cur_ts: Timestamp) {
         self.last_change_ts = Some(cur_ts);
+    }
+
+    /// A change worth saving as soon as the least interval between saves allows
+    pub fn urgent_change(&mut self, cur_ts: Timestamp) {
+        self.changed(cur_ts);
+        self.urgent = true;
     }
 
     /// An entry changed state; enough of them make a change worth saving
@@ -113,7 +124,8 @@ impl SaveSchedule {
                 .then_some(SaveReason::Background)
                 .or(periodic);
         }
-        (cur_ts.duration_since(last_change_ts) >= SAVE_SETTLE && since_save >= SAVE_MIN_INTERVAL)
+        let settled = self.urgent || cur_ts.duration_since(last_change_ts) >= SAVE_SETTLE;
+        (settled && since_save >= SAVE_MIN_INTERVAL)
             .then_some(SaveReason::Changed)
             .or(periodic)
     }
@@ -123,6 +135,7 @@ impl SaveSchedule {
         self.last_save_ts = cur_ts;
         self.period_start_ts = cur_ts;
         self.last_change_ts = None;
+        self.urgent = false;
         self.state_changes = 0;
     }
 }

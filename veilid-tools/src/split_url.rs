@@ -240,7 +240,7 @@ impl SplitUrlHost {
     ///
     /// Errors with `SplitUrlError` if the string is empty, is bracketed but not a valid IPv6
     /// address, or contains characters not allowed in a DNS hostname.
-    pub fn new<S: AsRef<str>>(s: S) -> Result<Self, SplitUrlError> {
+    pub fn try_new<S: AsRef<str>>(s: S) -> Result<Self, SplitUrlError> {
         Self::from_str(s.as_ref())
     }
 }

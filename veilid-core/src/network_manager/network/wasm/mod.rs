@@ -2,6 +2,7 @@ mod address_family_confirm;
 mod global_event_listener_wrapper;
 mod global_online_offline_event;
 mod protocol;
+mod restore;
 
 use super::*;
 
@@ -15,7 +16,7 @@ impl_veilid_log_facility!("net");
 
 /////////////////////////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolConfig {
     pub outbound: ProtocolTypeSet,
     pub inbound: ProtocolTypeSet,
@@ -27,6 +28,8 @@ struct WasmNetworkInner {
     network_needs_restart: bool,
     protocol_config: ProtocolConfig,
     last_confirm_request_ts: BTreeMap<RoutingDomain, Timestamp>,
+    // Restored routing domains whose address families are not yet probed on this network
+    verifying_address_families: BTreeSet<RoutingDomain>,
     // Address-family confirmation worker lifecycle (cancelled+joined in cancel_tasks)
     address_family_wakeup: Option<WakeSender>,
     address_family_stop_source: Option<StopSource>,
@@ -131,7 +134,7 @@ impl PlatformNetwork for WasmNetwork {
             };
 
             // A deferred confirmation retries as nodes are seen live over more families
-            if !self.unconfirmed_address_family_domains().is_empty() {
+            if !self.address_family_domains_to_confirm().is_empty() {
                 self.wake_address_family_confirm_worker();
             }
 
@@ -566,6 +569,14 @@ impl PlatformNetwork for WasmNetwork {
             .confirmed();
         confirmed && self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
     }
+
+    fn restore_state(&self, routing_domain: RoutingDomain) -> Option<PlatformRestoreState> {
+        self.routing_domain_restore_state(routing_domain)
+    }
+
+    fn last_dial_info_detection(&self) -> Option<(BTreeSet<Address>, BTreeSet<TransportType>)> {
+        None
+    }
 }
 
 /////////////////////////////////////////////////////////////////
@@ -576,6 +587,7 @@ impl WasmNetwork {
             network_needs_restart: false,
             protocol_config: Default::default(),
             last_confirm_request_ts: BTreeMap::new(),
+            verifying_address_families: BTreeSet::new(),
             address_family_wakeup: None,
             address_family_stop_source: None,
             address_family_worker_jh: None,
@@ -668,6 +680,7 @@ impl WasmNetwork {
 
         // commit routing domain edits
         public_internet_editor.commit();
+        self.restore_public_internet(&*public_internet_controller);
         public_internet_controller.publish_peer_info();
 
         // Spawn the address-family confirmation worker (cancelled+joined in cancel_tasks)

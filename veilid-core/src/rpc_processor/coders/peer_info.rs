@@ -21,7 +21,7 @@ pub fn decode_peer_info(
     }
 
     let routing_table = decode_context.registry.routing_table();
-    let opt_peer_info = UnverifiedPeerInfo::new_from_wire(
+    let opt_peer_info = UnverifiedPeerInfo::try_new_from_wire(
         &routing_table,
         decode_context.origin_routing_domain,
         node_info_message,

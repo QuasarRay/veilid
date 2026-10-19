@@ -189,6 +189,8 @@ network:
     client_allowlist_timeout_ms: 300000
     reverse_connection_receipt_time_ms: 5000
     hole_punch_receipt_time_ms: 5000
+    default_hole_punch_ttl: 3
+    cgnat_hole_punch_ttl: 8
     network_key_password: null
     disable_capabilites: []
     public_keys: null

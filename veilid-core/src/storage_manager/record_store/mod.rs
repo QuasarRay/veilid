@@ -199,7 +199,7 @@ where
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip_all, err)
     )]
-    pub async fn new_record(
+    pub async fn try_new_record(
         &self,
         opaque_record_key: OpaqueRecordKey,
         record: Record<D>,
@@ -211,13 +211,16 @@ where
                 TimestampDuration::new_ms(200),
                 veilid_log_dbg!(
                     self,
-                    "RecordStore({})::new_record lock",
+                    "RecordStore({})::try_new_record lock",
                     self.unlocked_inner.name
                 ),
             )
             .await;
 
-        let opt_commit_action = self.inner.lock().new_record(opaque_record_key, record)?;
+        let opt_commit_action = self
+            .inner
+            .lock()
+            .try_new_record(opaque_record_key, record)?;
         if let Some(commit_action) = opt_commit_action {
             self.process_commit_action(commit_action).await?;
         };
@@ -544,7 +547,7 @@ where
                 .map(|subkey| record.subkey_seq(subkey))
                 .collect::<VeilidAPIResult<Vec<ValueSeqNum>>>()?;
 
-            Ok(Some(InspectResult::new(
+            Ok(Some(InspectResult::try_new(
                 self,
                 subkeys.clone(),
                 "inspect_record",

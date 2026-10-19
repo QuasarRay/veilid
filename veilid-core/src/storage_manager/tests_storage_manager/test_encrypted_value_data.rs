@@ -5,7 +5,7 @@ use data_encoding::BASE64URL_NOPAD;
 fn random_value(size: usize) -> EncryptedValueData {
     let mut data = vec![0u8; size];
     random_bytes(&mut data);
-    EncryptedValueData::new(42.into(), Bytes::from(data), fake_public_key(), None).unwrap()
+    EncryptedValueData::try_new(42.into(), Bytes::from(data), fake_public_key(), None).unwrap()
 }
 
 fn max_value_size() -> usize {
@@ -13,7 +13,7 @@ fn max_value_size() -> usize {
 }
 
 pub fn test_value_data_ok() {
-    assert!(EncryptedValueData::new(
+    assert!(EncryptedValueData::try_new(
         ValueSeqNum::ZERO,
         Bytes::from(vec![0; EncryptedValueData::MAX_LEN]),
         fake_public_key(),
@@ -23,7 +23,7 @@ pub fn test_value_data_ok() {
 }
 
 pub fn test_value_data_too_long() {
-    assert!(EncryptedValueData::new(
+    assert!(EncryptedValueData::try_new(
         ValueSeqNum::ZERO,
         Bytes::from(vec![0; EncryptedValueData::MAX_LEN + 1]),
         fake_public_key(),
@@ -34,7 +34,7 @@ pub fn test_value_data_too_long() {
 
 /// JSON carries the blob as base64 text
 pub fn test_serialize_deserialize() {
-    let orig = EncryptedValueData::new(
+    let orig = EncryptedValueData::try_new(
         42.into(),
         Bytes::copy_from_slice(b"Brent Spiner"),
         fake_public_key(),
@@ -70,9 +70,10 @@ pub fn test_table_value_forms() {
 pub fn test_deserialize_legacy_fields() {
     let data = Bytes::copy_from_slice(b"Brent Spiner");
     let writer = fake_public_key();
-    let legacy =
-        serialize_json(ValueData::new_with_seq(42.into(), data.clone(), writer.clone()).unwrap());
-    let orig = EncryptedValueData::new(42.into(), data, writer, None).unwrap();
+    let legacy = serialize_json(
+        ValueData::try_new_with_seq(42.into(), data.clone(), writer.clone()).unwrap(),
+    );
+    let orig = EncryptedValueData::try_new(42.into(), data, writer, None).unwrap();
 
     let copy: EncryptedValueData = deserialize_json(&legacy).unwrap();
 

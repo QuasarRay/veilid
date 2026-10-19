@@ -10,14 +10,6 @@ pub trait RoutingDomainEditor {
     );
     fn set_relay_compilation(&mut self, relay_compilation: Option<RelayCompilation>);
     fn set_relay_state(&mut self, relay_id: NodeId, state: RoutingDomainRelayState);
-    #[cfg_attr(
-        all(
-            target_arch = "wasm32",
-            target_os = "unknown",
-            not(any(test, feature = "test-util"))
-        ),
-        expect(dead_code)
-    )]
     fn add_dial_info_detail(&mut self, dial_info_detail: DialInfoDetail);
     // #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), expect(dead_code))]
     // fn remove_dial_info_detail(&mut self, dial_info_detail: DialInfoDetail);

@@ -390,6 +390,21 @@ impl TransportStats {
         self.deprioritized_consuming_canary(routing_domain, TransportType::from(dial_info))
     }
 
+    /// Whether any outbound protocol carries this ordering, suppressed or not; WS-only WASM
+    /// has no Unordered carrier
+    pub fn ordering_is_available(
+        &self,
+        routing_domain: RoutingDomain,
+        ordering: SequenceOrdering,
+    ) -> bool {
+        self.routing_table()
+            .get_current_peer_info(routing_domain)
+            .node_info()
+            .outbound_protocols()
+            .iter()
+            .any(|protocol| protocol.sequence_ordering() == ordering)
+    }
+
     /// Whether any non-suppressed transport carries this ordering. Only suppression
     /// counts as degraded (Unknown is usable); WS-only WASM has no Unordered carrier
     pub fn ordering_is_viable(

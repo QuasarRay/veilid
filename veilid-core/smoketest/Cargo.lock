@@ -1649,15 +1649,15 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe6d4f7c813a6072025fc34565fdcc829cd0f6cf424af1a4a972abefc976e806"
+checksum = "fe01f5c6c9792659723c47bf6d5337de5f455f4c749f93bcf4813faa5cf642d7"
 
 [[package]]
 name = "keyvaluedb-memorydb"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2feecd3d8cd06c46717a4556be64aca270fd1d5b39bec841bb54e482d0e6a7de"
+checksum = "ba65a72bc9f15c744f900f07502db2aa9c767b17b8cbc900e7dc58f12f091bbe"
 dependencies = [
  "keyvaluedb",
  "parking_lot",
@@ -1665,9 +1665,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-sqlite"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e71790cac48d1ffddb922f9c2a5421ac6a9d25866721a0213d750b1dd7ab810"
+checksum = "8bb9f0a2e26a9b40dff1b2ba8b7eac9cf6f4321da8b9d313b99408f18f5f9af1"
 dependencies = [
  "async-sqlite",
  "keyvaluedb",
@@ -1676,9 +1676,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-web"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a36642addc71d64cf4314044745763b3694abf98a556660440d862e8e9d7080c"
+checksum = "7553fa638be42e3068c21907f0e086db2a560e9093c4d263c57b39d80efee232"
 dependencies = [
  "flume",
  "futures",

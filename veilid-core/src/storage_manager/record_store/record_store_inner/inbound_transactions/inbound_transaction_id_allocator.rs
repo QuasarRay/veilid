@@ -7,7 +7,7 @@ pub struct InboundTransactionIdAllocator {
 
 impl InboundTransactionIdAllocator {
     pub fn lookup(&mut self, raw_id: u64) -> VeilidAPIResult<Option<InboundTransactionId>> {
-        let id = InboundTransactionId::new(raw_id)?;
+        let id = InboundTransactionId::try_new(raw_id)?;
         Ok(self.all_transaction_ids.contains_key(&id).then_some(id))
     }
 
@@ -18,11 +18,11 @@ impl InboundTransactionIdAllocator {
             id = get_random_u64();
         }
         // Make sure it doesn't match any other id or zero (unlikely, but lets be certain)
-        let mut id = InboundTransactionId::new(id)?;
+        let mut id = InboundTransactionId::try_new(id)?;
         let starting_id = id;
         while self.all_transaction_ids.contains_key(&id) {
             let next_id = u64::from(id).overflowing_add(1);
-            id = InboundTransactionId::new(next_id.0 + if next_id.1 { 1 } else { 0 })?;
+            id = InboundTransactionId::try_new(next_id.0 + if next_id.1 { 1 } else { 0 })?;
             if id == starting_id {
                 apibail_internal!("unable to allocate transaction id");
             }

@@ -679,6 +679,8 @@ _VeilidConfigInternalNetwork _$VeilidConfigInternalNetworkFromJson(
   reverseConnectionReceiptTimeMs:
       (json['reverseConnectionReceiptTimeMs'] as num).toInt(),
   holePunchReceiptTimeMs: (json['holePunchReceiptTimeMs'] as num).toInt(),
+  defaultHolePunchTtl: (json['defaultHolePunchTtl'] as num).toInt(),
+  cgnatHolePunchTtl: (json['cgnatHolePunchTtl'] as num).toInt(),
   restrictedNatRetries: (json['restrictedNatRetries'] as num).toInt(),
   rpc: VeilidConfigInternalRPC.fromJson(json['rpc']),
   dht: VeilidConfigInternalDHT.fromJson(json['dht']),
@@ -698,6 +700,8 @@ Map<String, dynamic> _$VeilidConfigInternalNetworkToJson(
   'clientAllowlistTimeoutMs': instance.clientAllowlistTimeoutMs,
   'reverseConnectionReceiptTimeMs': instance.reverseConnectionReceiptTimeMs,
   'holePunchReceiptTimeMs': instance.holePunchReceiptTimeMs,
+  'defaultHolePunchTtl': instance.defaultHolePunchTtl,
+  'cgnatHolePunchTtl': instance.cgnatHolePunchTtl,
   'restrictedNatRetries': instance.restrictedNatRetries,
   'rpc': instance.rpc.toJson(),
   'dht': instance.dht.toJson(),

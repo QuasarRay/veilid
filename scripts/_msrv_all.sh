@@ -9,6 +9,21 @@ if ! command -v cargo-msrv > /dev/null 2>&1; then
     exit 1
 fi
 
+# cargo-msrv installs the MSRV toolchain without retrying a failed download; fetch it first, retried.
+# Three attempts: each can wait out rustup's 3 minute download timeout
+msrv="$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+if [ -z "$msrv" ]; then
+    echo "no rust-version in Cargo.toml" >&2
+    exit 1
+fi
+i=1
+until rustup toolchain install "$msrv" --profile minimal; do
+    if [ "$i" -ge 3 ]; then echo "giving up installing Rust $msrv after $i attempts" >&2; exit 1; fi
+    echo "retry #$i: rustup toolchain install $msrv" >&2
+    i=$((i+1))
+    sleep 10
+done
+
 #echo "Checking MSRV for veilid-tools"
 #cargo msrv verify --manifest-path=veilid-tools/Cargo.toml
 

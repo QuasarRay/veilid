@@ -9,13 +9,13 @@ const HISTOGRAM_SLOT_COUNT: usize =
 const HISTOGRAM_SLOT_DURATION: TimestampDuration =
     TimestampDuration::new_secs(HISTOGRAM_SLOT_MINUTES * 60);
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::routing_table) struct HistogramSlot {
     pub bucket_counts: BTreeMap<CryptoKind, Vec<u16>>,
     pub pairwise_intersection_counts: BTreeMap<(CryptoKind, CryptoKind), u32>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::routing_table) struct NetworkEstimator {
     histogram: Vec<HistogramSlot>,
     cur_slot: Option<u64>,

@@ -16,17 +16,19 @@ pub struct IgdTickOutcome {
     pub needs_restart: bool,
     /// a mapping came back on a different external port, so the dial info moved
     pub remapped: bool,
+    /// a mapping has no gateway left to renew it through, so the dial info using it is gone
+    pub lost: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct PortMapKey {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub(super) struct PortMapKey {
     protocol_type: IGDProtocolType,
     address_type: IGDAddressType,
     local_port: u16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct PortMapValue {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub(super) struct PortMapValue {
     ext_ip: IpAddr,
     mapped_port: u16,
     timestamp: Timestamp,
@@ -89,7 +91,7 @@ fn convert_protocol_type(igdpt: IGDProtocolType) -> PortMappingProtocol {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum IGDAddressType {
     IPV6,
     IPV4,
@@ -122,7 +124,7 @@ impl fmt::Display for IGDAddressType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum IGDProtocolType {
     UDP,
     TCP,
@@ -402,6 +404,21 @@ impl IGDManager {
         self.inner.lock().deferred_maps.clear();
     }
 
+    /// The port mappings held and their leases
+    pub(super) fn port_maps(&self) -> Vec<(PortMapKey, PortMapValue)> {
+        self.inner
+            .lock()
+            .port_maps
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect()
+    }
+
+    /// Hold restored port mappings; their lease timestamps say when each is renewed
+    pub(super) fn restore_port_maps(&self, port_maps: Vec<(PortMapKey, PortMapValue)>) {
+        self.inner.lock().port_maps.extend(port_maps);
+    }
+
     /// Asynchronously probe for the given address type; returns immediately.
     /// No-op before startup
     pub fn trigger_probe(&self, address_type: IGDAddressType) {
@@ -570,7 +587,9 @@ impl IGDManager {
 
         // Process full renewals
         for (k, v) in full_renews {
-            let (local_ip, gw) = self.find_route(k.address_type)?;
+            let Some((local_ip, gw)) = self.renewal_route(cache_generation, k, &mut outcome) else {
+                continue;
+            };
 
             let desc = self.get_description(k.protocol_type, k.local_port);
             let local_addr = SocketAddr::new(local_ip, k.local_port);
@@ -641,7 +660,9 @@ impl IGDManager {
         }
         // Process normal renewals
         for (k, mut v) in renews {
-            let (local_ip, gw) = self.find_route(k.address_type)?;
+            let Some((local_ip, gw)) = self.renewal_route(cache_generation, k, &mut outcome) else {
+                continue;
+            };
 
             let desc = self.get_description(k.protocol_type, k.local_port);
             match gw
@@ -768,6 +789,35 @@ impl IGDManager {
         let gw = Self::find_gateway_inner(&inner, local_ip)
             .ok_or_else(|| eyre!("gateway missing for interface"))?;
         Ok((local_ip, gw))
+    }
+
+    /// The route to renew a mapping through once its gateway search has finished. A mapping
+    /// with no gateway found, such as one restored onto a network whose router stopped
+    /// answering, is forgotten and reported lost.
+    fn renewal_route(
+        &self,
+        cache_generation: u64,
+        key: PortMapKey,
+        outcome: &mut IgdTickOutcome,
+    ) -> Option<(IpAddr, Arc<Gateway>)> {
+        if self
+            .inner
+            .lock()
+            .pending_probes
+            .contains_key(&key.address_type)
+        {
+            return None;
+        }
+        match self.find_route(key.address_type) {
+            Ok(route) => Some(route),
+            Err(e) => {
+                veilid_log!(self debug "no gateway to renew mapped port {:?}: {}", key, e);
+                if self.store_port_map(cache_generation, key, None) {
+                    outcome.lost = true;
+                }
+                None
+            }
+        }
     }
 
     /// Store a mapping, or forget it with `None`; false if the caches were cleared since

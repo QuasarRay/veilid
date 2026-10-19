@@ -96,7 +96,7 @@ where
         })
     }
 
-    pub fn new_record(
+    pub fn try_new_record(
         &mut self,
         opaque_record_key: OpaqueRecordKey,
         record: Record<D>,

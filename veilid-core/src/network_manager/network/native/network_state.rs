@@ -3,9 +3,13 @@ use igd_manager::IGDAddressType;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProtocolConfig {
+    /// Protocols config allows outbound
     pub outbound: ProtocolTypeSet,
+    /// Protocols config allows inbound
     pub inbound: ProtocolTypeSet,
+    /// Address families globally routable on any interface
     pub family_global: AddressTypeSet,
+    /// Address families present on any interface
     pub family_local: AddressTypeSet,
     /// PublicInternet routing domain capabilities for this protocol
     pub public_internet_capabilities: BTreeSet<VeilidCapability>,
@@ -25,7 +29,7 @@ pub struct AddressConfig {
     pub ipv6_global: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct RoutingDomainNetworkState {
     /// If we are detecting address changes for this routing domain
     pub detect_address_changes: bool,

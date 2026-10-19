@@ -444,11 +444,26 @@ impl NetworkManager {
             }
         }
 
-        // Set up address filter
+        // The address check starts from what is already published, a restored state included
         {
-            let mut inner = self.inner.lock();
-            let address_check = AddressCheck::new(net.clone());
-            inner.address_check = Some(address_check);
+            let mut address_check = AddressCheck::new(net.clone());
+            let routing_table = self.routing_table();
+            for routing_domain in RoutingDomain::all() {
+                address_check.report_peer_info_change(
+                    routing_domain,
+                    routing_table.get_published_peer_info(routing_domain),
+                );
+            }
+            if let Some((external_addresses, unexamined_transports)) =
+                net.last_dial_info_detection()
+            {
+                address_check.report_dial_info_detection(
+                    RoutingDomain::PublicInternet,
+                    external_addresses,
+                    unexamined_transports,
+                );
+            }
+            self.inner.lock().address_check = Some(address_check);
         }
 
         receipt_manager.startup()?;
@@ -781,6 +796,7 @@ impl NetworkManager {
         &self,
         receipt_data: Bytes,
         inbound_noderef: FilteredNodeRef,
+        inbound_flow: Flow,
     ) -> NetworkResult<()> {
         let Ok(_guard) = self.startup_context.startup_lock.enter() else {
             return NetworkResult::service_unavailable("network is not started");
@@ -797,7 +813,13 @@ impl NetworkManager {
         };
 
         receipt_manager
-            .handle_receipt(receipt, ReceiptReturned::InBand { inbound_noderef })
+            .handle_receipt(
+                receipt,
+                ReceiptReturned::InBand {
+                    inbound_noderef,
+                    inbound_flow,
+                },
+            )
             .await
     }
 
@@ -955,13 +977,13 @@ impl NetworkManager {
                 // Add small delay to encourage packets to be delivered in order
                 sleep(HOLE_PUNCH_DELAY_MS).await;
 
-                // Set the hole punch as our 'last connection' to ensure we return the receipt over the direct hole punch
-                self.set_last_flow(peer_nr.unfiltered(), unique_flow.flow, Timestamp::now());
-
-                // Return the receipt using the same dial info send the receipt to it
-                rpc.rpc_call_return_receipt(Destination::direct(peer_nr, None), receipt)
-                    .await
-                    .wrap_err("rpc failure")
+                // Pinned to the punched hole, since a receipt through a relay proves nothing about it
+                rpc.rpc_call_return_receipt(
+                    Destination::direct(peer_nr.with_reply_flow(unique_flow.flow), None),
+                    receipt,
+                )
+                .await
+                .wrap_err("rpc failure")
             }
         }
     }
@@ -1492,6 +1514,14 @@ impl NetworkManager {
     #[cfg_attr(not(feature = "debug-api"), expect(dead_code))]
     pub fn restart_network(&self) {
         self.net().restart_network();
+    }
+
+    /// What a routing domain's published state rests on, for its restore point
+    pub(crate) fn platform_restore_state(
+        &self,
+        routing_domain: RoutingDomain,
+    ) -> Option<PlatformRestoreState> {
+        self.opt_net()?.restore_state(routing_domain)
     }
 
     /// Hand a concluded dial info detection's view to the address check

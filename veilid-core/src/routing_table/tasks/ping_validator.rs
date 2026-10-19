@@ -782,6 +782,10 @@ impl RoutingTable {
                             Ok(())
                         });
                         rss.record_route_test_summary(ordering, true);
+                        if tally.first_valid {
+                            // A route good enough for readiness should survive a restart
+                            routing_table.mark_save_urgent();
+                        }
                         if tally.streak > 0 {
                             veilid_log!(registry debug "Route loopback recovered: {:#} ord={:#} after {} failures pass/fail={}/{}", route_id, ordering, tally.streak, tally.pass, tally.fail);
                         }

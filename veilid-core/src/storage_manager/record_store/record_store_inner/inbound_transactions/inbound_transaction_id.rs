@@ -8,7 +8,7 @@ impl_veilid_log_facility!("stor");
 pub(crate) struct InboundTransactionId(u64);
 
 impl InboundTransactionId {
-    pub(super) fn new(raw_id: u64) -> VeilidAPIResult<Self> {
+    pub(super) fn try_new(raw_id: u64) -> VeilidAPIResult<Self> {
         if raw_id == 0 {
             apibail_internal!("invalid transaction id");
         }

@@ -17,7 +17,7 @@ impl RPCProcessor {
             .enter()
             .map_err(RPCError::map_try_again("not started up"))?;
 
-        let app_message = RPCOperationAppMessage::new(message)?;
+        let app_message = RPCOperationAppMessage::try_new(message)?;
         let statement = RPCStatement::new(RPCStatementDetail::AppMessage(Box::new(app_message)));
 
         // Send the app message request

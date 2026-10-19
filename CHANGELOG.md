@@ -15,6 +15,7 @@
   - **Breaking** `TableDB::store_json`, `load_json` and `delete_json` and `TableDBTransaction::store_json` are gone; the table store serializes its own state as CBOR and apps store raw bytes.
   - **Breaking** `TableDB` and `TableDBTransaction` take keys and values as `Bytes`, `load`, `delete` and `get_keys` return `Bytes`, and `estimate_storage_size_json` is gone.
   - **Breaking** `attach()` and `detach()` succeed when the node is already attaching or detaching, a bind wait reports `Attaching` instead of `Detached`, and `detach()` on a detached node fails with `Not attached`.
+  - **Breaking** `ValueData::new` and `ValueData::new_with_seq` are no longer public: apps receive a `ValueData` from the API and never build one.
   - **Security** B01T direct-bootstrap requests are answered from the routing domain's last successful bootstrap set, persisted across restarts, without resolving DNS, so an unauthenticated packet can no longer trigger non-veilid traffic or block a worker on a slow resolver (thanks to quikchaos for reporting it).
   - Safety routes are allocated, tested and released per sequence ordering, and a dead route's hops stay out of that ordering's new allocations until the hop or this node publishes new peer info, or the online state changes.
   - A lost loopback no longer schedules another test of its own route, and a multi-hop loopback failure no longer blames the first hop's transport.
@@ -112,6 +113,20 @@
   - The migration drops the routing table, whose entry format changed, so a node bootstraps once after upgrading.
   - IP addresses in dial info serialize as text in every format.
   - The record store writes a value's data as bytes instead of base64 text, a quarter smaller per subkey, and values written as text still read.
+  - The routing table saves each entry on its own and writes only the entries that changed since its last save, instead of rewriting the whole table each time.
+  - A saved routing table loads only into a node with the same node ids, bootstrap hosts, bootstrap keys, bootstrap records and network key; generated node ids and the bootstrap keys and records were not checked before.
+  - Detaching always saves the routing table, and shutting down saves it again only if something changed after the detach.
+  - Attaching on a network that has not changed since the last publication, after a detach or a restart, publishes the same signed peer info again with its dial info, relays and port mappings instead of detecting them.
+  - A peer's last report of our address is saved with its routing table entry, so a WAN address that changed while the node was down is still noticed.
+  - Safety routes keep their test results across a restart, so a node that was ready comes back ready instead of first testing its routes again.
+  - Our published state and a route's first passing test reach disk within ten seconds, even while other routing table changes keep arriving.
+  - A restart keeps each routing table entry's per-transport statistics and contact failures as last saved, and drops them when the network changed since the last publication.
+  - A UPnP mapping whose gateway is gone is dropped and dial info detected again, instead of failing its renewal on every tick.
+  - `keyvaluedb` 0.2.6 updates an overwritten SQLite row in place instead of deleting and reinserting it, halving the WAL writes of an overwrite.
+  - A safety route for unordered traffic is tested over a datagram protocol even when another route holds a connection to its first hop, and a node with no datagram protocol, such as a browser, keeps only ordered routes.
+  - A hole punch receipt returns over the punched hole rather than through a relay, so the data that follows it goes direct.
+  - The hole punch TTL comes from the footgun settings `internal.network.default_hole_punch_ttl` (3) and `internal.network.cgnat_hole_punch_ttl` (8), the second used when this node's IPv4 traffic leaves from a carrier-grade NAT, DS-Lite or CLAT address.
+  - A hole punch whose receipt came through a relay, as older responders send it, falls back to the relay rather than treating the relay's flow as the hole.
 
 - veilid-flutter:
   - **Breaking** `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `toString()` on `Timestamp` and `TimestampDuration` writes human-readable output instead of a raw integer.
@@ -142,12 +157,16 @@
   - **Breaking** `scaled_yielding()` drops its `yield_n` threshold, running the closure inline below `cpu_n` and on the CPU pool from there up.
   - **Breaking** The unsafe `aligned_8_u8_vec_uninit()` and `unaligned_u8_vec_uninit()` are replaced by the safe `zeroed_u8_vec()`.
   - **Breaking** `igd::search_gateway()` and the `igd::Gateway` request methods are async, so dropping one ends its router request at once, and `minreq` is gone.
+  - **Breaking** `SplitUrlHost::new` is named `SplitUrlHost::try_new`, since it returns a `Result`.
   - **Breaking** `TrimmedBacktrace` and `TrimBacktraceTrait` are gone, and backtrace captures use `std::backtrace`.
   - AIMD congestion control, behind the `aimd` feature.
-  - Best-effort UDP send-with-TTL in `socket_tools`.
+  - Best-effort UDP send-with-TTL in `socket_tools` (`UdpTtlSender`).
+  - IPv4 send-with-TTL takes effect on macOS and iOS, which send from a twin socket bound to the sender's port, and on Windows, which sets it per packet, so a hole punch from them no longer reaches the far NAT first and makes the reply come from another port.
+  - Windows UDP sockets no longer fail their next receive after an ICMP port unreachable or TTL expired, as on other platforms.
   - `tokio` 1.53.3 is the minimum: the platform resolver registers its file descriptor through the I/O-safe `AsyncFd` constructor.
   - `background_may_freeze()` reports whether the platform freezes a process in the background rather than only throttling it.
   - Apple route discovery declares the XNU route-message ABI itself on iOS, where libc 0.2.190 no longer exports it.
+  - `EgressIdentity` implements `Serialize` and `Deserialize`.
 
 - veilid-wasm:
   - **Breaking** The wasm file no longer loads at import time through a top-level await, so you must `await` the default export `init()` (`import init from "veilid-wasm"`) before calling any other export.

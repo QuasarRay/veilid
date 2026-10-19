@@ -7,7 +7,7 @@ pub struct InboundWatchIdAllocator {
 
 impl InboundWatchIdAllocator {
     pub fn lookup(&mut self, raw_id: u64) -> VeilidAPIResult<Option<InboundWatchId>> {
-        let id = InboundWatchId::new(raw_id)?;
+        let id = InboundWatchId::try_new(raw_id)?;
         Ok(self.all_watch_ids.contains_key(&id).then_some(id))
     }
 
@@ -18,11 +18,11 @@ impl InboundWatchIdAllocator {
             id = get_random_u64();
         }
         // Make sure it doesn't match any other id or zero (unlikely, but lets be certain)
-        let mut id = InboundWatchId::new(id)?;
+        let mut id = InboundWatchId::try_new(id)?;
         let starting_id = id;
         while self.all_watch_ids.contains_key(&id) {
             let next_id = u64::from(id).overflowing_add(1);
-            id = InboundWatchId::new(next_id.0 + if next_id.1 { 1 } else { 0 })?;
+            id = InboundWatchId::try_new(next_id.0 + if next_id.1 { 1 } else { 0 })?;
             if id == starting_id {
                 apibail_internal!("unable to allocate watch id");
             }

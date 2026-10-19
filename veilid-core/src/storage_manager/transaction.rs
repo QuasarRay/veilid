@@ -259,7 +259,7 @@ impl StorageManager {
             let otm = &mut inner.outbound_transaction_manager;
 
             // Start a new transaction
-            let transaction_handle = otm.new_transaction(record_params_list, kind)?;
+            let transaction_handle = otm.try_new_transaction(record_params_list, kind)?;
 
             // Get parameters for beginning a transaction
             let begin_params_list = match otm.prepare_transact_begin_params(transaction_handle) {

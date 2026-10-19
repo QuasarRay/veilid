@@ -233,7 +233,7 @@ pub struct Settings {
 impl Settings {
     //////////////////////////////////////////////////////////////////////////////////
 
-    pub fn new(config_file: Option<&OsStr>) -> Result<Self, config::ConfigError> {
+    pub fn try_new(config_file: Option<&OsStr>) -> Result<Self, config::ConfigError> {
         // Load the default config
         let mut cfg = load_default_config()?;
 

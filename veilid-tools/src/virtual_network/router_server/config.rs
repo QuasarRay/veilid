@@ -581,7 +581,7 @@ fn map_validation_error<S: AsRef<str>>(
 }
 
 impl Config {
-    pub fn new<P: AsRef<Path>>(
+    pub fn try_new<P: AsRef<Path>>(
         config_files: &[P],
         no_predefined_config: bool,
     ) -> Result<Self, ConfigError> {

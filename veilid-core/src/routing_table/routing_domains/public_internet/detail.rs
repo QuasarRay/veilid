@@ -210,7 +210,7 @@ impl PublicInternetRoutingDomainDetail {
                 }
                 considered += 1;
                 let t: TransportType = (&did.dial_info).into();
-                let opt_stats = snap.per_transport.get(&t);
+                let opt_stats = snap.per_transport_stats.get(&t);
                 match opt_stats {
                     None => no_evidence += 1,
                     Some(stats) if stats.last_seen_ts.is_none() => no_evidence += 1,
@@ -392,6 +392,19 @@ impl RoutingDomainDetail for PublicInternetRoutingDomainDetail {
     }
     fn set_entry_summary(&self, live_entry_counts: Arc<EntrySummary>) {
         self.common.set_entry_summary(live_entry_counts);
+    }
+
+    fn get_restore_point(&self) -> Option<Arc<RoutingDomainRestorePoint>> {
+        self.common.get_restore_point()
+    }
+    fn replace_restore_point(
+        &self,
+        restore_point: Option<Arc<RoutingDomainRestorePoint>>,
+    ) -> Option<Arc<RoutingDomainRestorePoint>> {
+        self.common.replace_restore_point(restore_point)
+    }
+    fn restore_current_peer_info(&self, peer_info: Arc<PeerInfo>) -> bool {
+        self.common.restore_current_peer_info(peer_info)
     }
 
     fn can_contain_address(&self, address: Address) -> bool {

@@ -9,7 +9,7 @@ pub(in crate::rpc_processor) struct RPCOperationFindNodeQ {
 }
 
 impl RPCOperationFindNodeQ {
-    pub fn new(
+    pub fn try_new(
         hash_coordinate: HashCoordinate,
         capabilities: Vec<VeilidCapability>,
     ) -> Result<Self, RPCError> {
@@ -54,7 +54,7 @@ impl RPCOperationFindNodeQ {
             })
             .unwrap_or_default();
 
-        Self::new(node_id.to_hash_coordinate(), capabilities)
+        Self::try_new(node_id.to_hash_coordinate(), capabilities)
     }
     pub fn encode(
         &self,
@@ -89,7 +89,7 @@ pub(in crate::rpc_processor) struct RPCOperationFindNodeA {
 }
 
 impl RPCOperationFindNodeA {
-    pub fn new(peers: Vec<Arc<UnverifiedPeerInfo>>) -> Result<Self, RPCError> {
+    pub fn try_new(peers: Vec<Arc<UnverifiedPeerInfo>>) -> Result<Self, RPCError> {
         if peers.len() > MAX_FIND_NODE_A_PEERS_LEN {
             return Err(RPCError::internal(
                 "encoded find node peers length too long",
@@ -125,7 +125,7 @@ impl RPCOperationFindNodeA {
             peers.push(Arc::new(peer_info));
         }
 
-        Self::new(peers)
+        Self::try_new(peers)
     }
     pub fn encode(
         &self,

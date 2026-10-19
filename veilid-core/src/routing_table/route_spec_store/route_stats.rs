@@ -40,23 +40,32 @@ impl RouteStatsDisposition {
 /// view on [RouteStats] is derived from these, never mutated directly. A
 /// success or failure always happens on *some* ordering (the transport used),
 /// so the recorder always knows which entry to update.
-#[derive(Clone, Debug, Default)]
+///
+/// Saved with the route set, so a restarted node holds its routes as tested. What belongs to
+/// one session is not: the tallies, deferrals under blame suppression, loss marks (their state
+/// ends with the session) and the keepalive clock (no flow survives an attach).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RouteOrderingStats {
     /// Consecutive failed-to-send count (loopback test failures count here too)
     pub failed_to_send: usize,
     /// Consecutive loopback failures deferred under blame suppression
+    #[serde(skip)]
     pub deferred_loopback_failures: usize,
     /// Loopback passes this session
+    #[serde(skip)]
     pub loopback_pass: u64,
     /// Loopback failures this session
+    #[serde(skip)]
     pub loopback_fail: u64,
     /// Current run of loopback failures
     pub consecutive_loopback_failures: usize,
     /// Longest run of loopback failures this session
+    #[serde(skip)]
     pub max_consecutive_loopback_failures: usize,
     /// Per-destination lost question tracking: destination pubkey -> lost count
     pub lost_question_destinations: HashMap<PublicKey, usize>,
     /// Destinations a question was lost to, until each answers here: pubkey -> state it was lost in
+    #[serde(skip)]
     pub lost_destination_marks: HashMap<PublicKey, LossEpoch>,
     /// When this ordering was last known valid (loopback pass / rcvd traffic)
     pub last_known_valid_ts: Option<Timestamp>,
@@ -67,10 +76,12 @@ pub struct RouteOrderingStats {
     /// When this ordering last received an answer
     pub last_rcvd_answer_ts: Option<Timestamp>,
     /// Last periodic loopback keepalive enqueue for this ordering
+    #[serde(skip)]
     pub last_loopback_keepalive_ts: Option<Timestamp>,
     /// Answer stats for this ordering
     pub answer: AnswerStats,
     /// Accounting mechanism for this ordering's RPC answers
+    #[serde(skip)]
     answer_stats_accounting: AnswerStatsAccounting,
 }
 
@@ -109,13 +120,17 @@ impl RouteOrderingStats {
     }
 }
 
-/// Loopback tally for one ordering after a result: on a pass, `streak` is the run of failures
-/// the pass ended; on a failure, the current run
+/// Loopback tally for one ordering after a result
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct RouteLoopbackTally {
+    /// On a pass, the run of failures the pass ended; on a failure, the current run
     pub streak: usize,
+    /// Loopback passes this session
     pub pass: u64,
+    /// Loopback failures this session
     pub fail: u64,
+    /// The pass was the first time this ordering was known valid
+    pub first_valid: bool,
 }
 
 /// Loopback and release tallies for one ordering since the last summary line
@@ -232,21 +247,11 @@ impl RouteStats {
 
     /// Make new route stats from a route set spec detail stats
     pub fn new_from_spec_detail_stats(stats: RouteSetSpecDetailStats) -> Self {
-        let mut per_ordering = BTreeMap::<SequenceOrdering, RouteOrderingStats>::new();
-        for (ordering, answer) in stats.answer_by_ordering {
-            per_ordering.insert(
-                ordering,
-                RouteOrderingStats {
-                    answer,
-                    ..Default::default()
-                },
-            );
-        }
         Self {
             created_ts: stats.created_ts,
             transfer: stats.transfer,
             latency: stats.latency,
-            per_ordering,
+            per_ordering: stats.per_ordering.into_iter().collect(),
             ..Default::default()
         }
     }
@@ -469,6 +474,7 @@ impl RouteStats {
         let os = self.ordering_mut(ordering);
         os.deferred_loopback_failures = 0;
         let ended_streak = os.consecutive_loopback_failures;
+        let first_valid = ok && os.last_known_valid_ts.is_none();
         if ok {
             os.last_known_valid_ts = Some(cur_ts);
             os.failed_to_send = 0;
@@ -490,6 +496,7 @@ impl RouteStats {
             },
             pass: os.loopback_pass,
             fail: os.loopback_fail,
+            first_valid,
         }
     }
 
@@ -564,11 +571,11 @@ impl RouteStats {
         }
     }
 
-    /// Snapshot per-ordering answer stats for persistence
-    pub fn answer_by_ordering(&self) -> Vec<(SequenceOrdering, AnswerStats)> {
+    /// Snapshot the per-ordering stats for persistence
+    pub fn per_ordering_snapshot(&self) -> Vec<(SequenceOrdering, RouteOrderingStats)> {
         self.per_ordering
             .iter()
-            .map(|(o, os)| (*o, os.answer.clone()))
+            .map(|(o, os)| (*o, os.clone()))
             .collect()
     }
 
@@ -812,6 +819,6 @@ impl RouteSpecStore {
         cache.roll_answers(cur_ts);
 
         // Update answers from cache into content to save them
-        content.update_answers(&cache);
+        content.update_per_ordering(&cache);
     }
 }

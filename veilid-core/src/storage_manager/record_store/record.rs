@@ -23,7 +23,7 @@ impl<D> Record<D>
 where
     D: RecordDetail,
 {
-    pub fn new(
+    pub fn try_new(
         cur_ts: Timestamp,
         descriptor: Arc<SignedValueDescriptor>,
         detail: D,

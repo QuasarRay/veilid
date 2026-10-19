@@ -382,7 +382,7 @@ impl RouteSpecStore {
             apibail_generic!("no route set available for crypto kinds provided");
         }
 
-        let rssd = RouteSetSpecDetail::new(
+        let rssd = RouteSetSpecDetail::try_new(
             route_set,
             params.directions,
             params.stability,
@@ -417,6 +417,7 @@ impl RouteSpecStore {
             cache.add_allocated_route(route_id.clone(), &rssd, hop_node_refs)?;
             content.add_detail(route_id.clone(), rssd);
         }
+        self.routing_table().mark_save_dirty();
 
         // Notify subscribers (e.g. ConnectionManager for first-hop protection refresh)
         if let Err(e) = self.event_bus().post(RouteAllocationEvent {
@@ -456,6 +457,7 @@ impl RouteSpecStore {
             }
             id_clone
         };
+        self.routing_table().mark_save_dirty();
 
         // Notify subscribers (e.g. ConnectionManager for first-hop protection refresh)
         if let Err(e) = self.event_bus().post(RouteAllocationEvent {

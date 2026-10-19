@@ -7,6 +7,7 @@ mod routing_domain_detail;
 mod routing_domain_detail_common;
 mod routing_domain_low_water_mark;
 mod routing_domain_relay;
+mod routing_domain_restore_point;
 mod routing_domain_state;
 
 use super::*;
@@ -20,6 +21,7 @@ pub use routing_domain_detail::*;
 pub use routing_domain_detail_common::*;
 pub use routing_domain_low_water_mark::*;
 pub use routing_domain_relay::*;
+pub(crate) use routing_domain_restore_point::*;
 pub use routing_domain_state::*;
 
 impl_veilid_log_facility!("rtab");

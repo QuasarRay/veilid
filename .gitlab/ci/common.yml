@@ -39,17 +39,21 @@ variables:
 
 # Anything running earthly needs docker-in-docker. Medium (4 vCPU) is what these jobs have always
 # used; .base_large (8 vCPU) is for the compile-bound ones that can actually use the cores.
+# The MTU: hosted runners carry smaller packets than dind's default 1500 and drop larger ones
+# silently, which stalls TLS handshakes (gl-infra/production#22276); 1360 is GitLab's value.
 .base:
   extends: .runner_medium
   image: docker
   services:
-    - docker:dind
+    - name: docker:dind
+      command: ["--mtu=1360"]
 
 .base_large:
   extends: .runner_large
   image: docker
   services:
-    - docker:dind
+    - name: docker:dind
+      command: ["--mtu=1360"]
 
 # Common earthly setup, as a hidden job so the child pipeline can !reference it.
 .earthly_setup:
@@ -92,5 +96,9 @@ variables:
       export EARTHLY_BUILDKIT_IMAGE="$BK_MIRROR"
     fi
   - echo "earthly buildkit = ${EARTHLY_BUILDKIT_IMAGE:-$BK_UPSTREAM}"
+  # buildkit's own network for RUN steps sits inside dind and needs the same MTU; the logged
+  # bridge MTU is what to check if downloads inside RUN steps stall again
+  - earthly config global.cni_mtu 1360
+  - docker network inspect bridge --format 'dind bridge mtu={{index .Options "com.docker.network.driver.mtu"}}' || true
   - earthly bootstrap
   - test "$CI_PROJECT_PATH" != "veilid/veilid" && project_args="--CI_REGISTRY_IMAGE=$CI_REGISTRY_IMAGE"

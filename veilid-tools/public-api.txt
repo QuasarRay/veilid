@@ -919,6 +919,11 @@ pub use veilid_tools::socket_tools::<<tokio_util::compat::*>>
 pub use veilid_tools::socket_tools::TcpListener
 pub use veilid_tools::socket_tools::TcpStream
 pub use veilid_tools::socket_tools::UdpSocket
+pub struct veilid_tools::socket_tools::UdpTtlSender
+impl veilid_tools::UdpTtlSender
+pub fn veilid_tools::UdpTtlSender::new() -> Self
+impl veilid_tools::UdpTtlSender
+pub fn veilid_tools::UdpTtlSender::send_to<S: std::os::fd::owned::AsFd>(&self, &S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub fn veilid_tools::socket_tools::async_tcp_listener_incoming(tokio::net::tcp::listener::TcpListener) -> core::pin::Pin<alloc::boxed::Box<impl futures_core::stream::Stream<Item = core::io::error::Result<tokio::net::tcp::stream::TcpStream>> + core::marker::Send>>
 pub fn veilid_tools::socket_tools::bind_async_tcp_listener(core::net::socket_addr::SocketAddr) -> core::io::error::Result<core::option::Option<tokio::net::tcp::listener::TcpListener>>
 pub fn veilid_tools::socket_tools::bind_async_udp_socket(core::net::socket_addr::SocketAddr) -> core::io::error::Result<core::option::Option<tokio::net::udp::UdpSocket>>
@@ -928,7 +933,6 @@ pub fn veilid_tools::socket_tools::domain_for_address(core::net::socket_addr::So
 pub fn veilid_tools::socket_tools::new_default_socket2_tcp(core::ffi::primitives::c_int) -> core::io::error::Result<socket2::socket::Socket>
 pub fn veilid_tools::socket_tools::primary_source_ipv4() -> core::option::Option<core::net::ip_addr::Ipv4Addr>
 pub fn veilid_tools::socket_tools::primary_source_ipv6() -> core::option::Option<core::net::ip_addr::Ipv6Addr>
-pub fn veilid_tools::socket_tools::send_udp_datagram_with_ttl<S: std::os::fd::owned::AsFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub fn veilid_tools::socket_tools::set_tcp_stream_linger(&tokio::net::tcp::stream::TcpStream, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>
 pub fn veilid_tools::socket_tools::socket2_operation<S: std::os::fd::owned::AsFd, F: core::ops::function::FnOnce(&socket2::socket::Socket) -> R, R>(&S, F) -> R
 pub fn veilid_tools::socket_tools::split_async_tcp_stream(tokio::net::tcp::stream::TcpStream) -> (veilid_tools::ReadHalf, veilid_tools::WriteHalf)
@@ -949,7 +953,7 @@ pub enum veilid_tools::split_url::SplitUrlHost
 pub veilid_tools::split_url::SplitUrlHost::Hostname(alloc::string::String)
 pub veilid_tools::split_url::SplitUrlHost::IpAddr(core::net::ip_addr::IpAddr)
 impl veilid_tools::SplitUrlHost
-pub fn veilid_tools::SplitUrlHost::new<S: core::convert::AsRef<str>>(S) -> core::result::Result<Self, veilid_tools::SplitUrlError>
+pub fn veilid_tools::SplitUrlHost::try_new<S: core::convert::AsRef<str>>(S) -> core::result::Result<Self, veilid_tools::SplitUrlError>
 impl core::fmt::Display for veilid_tools::SplitUrlHost
 pub fn veilid_tools::SplitUrlHost::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for veilid_tools::SplitUrlHost
@@ -1304,7 +1308,7 @@ pub enum veilid_tools::SplitUrlHost
 pub veilid_tools::SplitUrlHost::Hostname(alloc::string::String)
 pub veilid_tools::SplitUrlHost::IpAddr(core::net::ip_addr::IpAddr)
 impl veilid_tools::SplitUrlHost
-pub fn veilid_tools::SplitUrlHost::new<S: core::convert::AsRef<str>>(S) -> core::result::Result<Self, veilid_tools::SplitUrlError>
+pub fn veilid_tools::SplitUrlHost::try_new<S: core::convert::AsRef<str>>(S) -> core::result::Result<Self, veilid_tools::SplitUrlError>
 impl core::fmt::Display for veilid_tools::SplitUrlHost
 pub fn veilid_tools::SplitUrlHost::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for veilid_tools::SplitUrlHost
@@ -1956,6 +1960,11 @@ impl veilid_tools::TimeoutError
 pub fn veilid_tools::TimeoutError::to_io(self) -> core::io::error::Error
 impl core::convert::From<tokio::time::error::Elapsed> for veilid_tools::TimeoutError
 pub fn veilid_tools::TimeoutError::from(tokio::time::error::Elapsed) -> Self
+pub struct veilid_tools::UdpTtlSender
+impl veilid_tools::UdpTtlSender
+pub fn veilid_tools::UdpTtlSender::new() -> Self
+impl veilid_tools::UdpTtlSender
+pub fn veilid_tools::UdpTtlSender::send_to<S: std::os::fd::owned::AsFd>(&self, &S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub struct veilid_tools::VeilidRng
 impl rand_core::CryptoRng for veilid_tools::VeilidRng
 impl rand_core::RngCore for veilid_tools::VeilidRng
@@ -2211,7 +2220,6 @@ pub fn veilid_tools::random_bytes(&mut [u8])
 pub fn veilid_tools::retry_falloff_log(u64, u64, u64, u64, f64) -> bool
 pub async fn veilid_tools::scaled_yielding<N: core::cmp::PartialOrd, R: core::marker::Send + 'static, T: core::ops::function::FnOnce() -> R + core::marker::Send + 'static>(N, N, T) -> R
 pub fn veilid_tools::secs_to_timestamp_duration(f64) -> u64
-pub fn veilid_tools::send_udp_datagram_with_ttl<S: std::os::fd::owned::AsFd>(&S, &[u8], core::net::socket_addr::SocketAddr, u32) -> core::io::error::Result<usize>
 pub fn veilid_tools::set_tcp_stream_linger(&tokio::net::tcp::stream::TcpStream, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>
 pub async fn veilid_tools::sleep(u32)
 pub fn veilid_tools::socket2_operation<S: std::os::fd::owned::AsFd, F: core::ops::function::FnOnce(&socket2::socket::Socket) -> R, R>(&S, F) -> R

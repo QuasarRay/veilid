@@ -1,4 +1,5 @@
 use super::*;
+use crate::tests::*;
 
 fn now() -> Timestamp {
     // Far enough from zero to subtract windows without underflow
@@ -263,6 +264,42 @@ pub fn test_refused_connect_is_not_evidence() {
         TransportSendOutcome::from_network_result(&disabled),
         Some(TransportSendOutcome::FailedToSend)
     );
+}
+
+/// Our outbound protocols decide which orderings exist: WS alone, as in a browser, has no datagrams
+pub async fn test_ordering_availability_follows_outbound_protocols() {
+    let registry = mock_registry::init("ordering_availability").await;
+    let set_outbound = |outbound: ProtocolTypeSet| {
+        let routing_table = registry.routing_table();
+        let rdc = routing_table.get_routing_domain_controller(RoutingDomain::PublicInternet);
+        let mut editor = rdc.edit_dyn();
+        editor.set_network_config(RoutingDomainNetworkConfig::new(
+            outbound,
+            ProtocolTypeSet::all(),
+            AddressTypeSet::all(),
+            PUBLIC_INTERNET_CAPABILITIES.iter().copied().collect(),
+        ));
+        editor.commit();
+    };
+    let available = |ordering: SequenceOrdering| {
+        registry
+            .network_manager()
+            .transport_stats()
+            .ordering_is_available(RoutingDomain::PublicInternet, ordering)
+    };
+
+    set_outbound(ProtocolType::WS.into());
+    assert!(
+        !available(SequenceOrdering::Unordered),
+        "WS alone should carry no datagrams"
+    );
+    assert!(available(SequenceOrdering::Ordered));
+
+    set_outbound(ProtocolTypeSet::all());
+    assert!(available(SequenceOrdering::Unordered));
+    assert!(available(SequenceOrdering::Ordered));
+
+    mock_registry::terminate(registry).await;
 }
 
 pub fn test_all() {

@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutingDomainNetworkConfig {
     /// The protocols that are supported for outbound connections from this domain
     pub outbound_protocols: ProtocolTypeSet,

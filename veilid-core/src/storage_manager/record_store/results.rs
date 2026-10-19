@@ -21,7 +21,7 @@ pub struct InspectResult {
 }
 
 impl InspectResult {
-    pub fn new(
+    pub fn try_new(
         registry_accessor: &impl VeilidComponentRegistryAccessor,
         requested_subkeys: ValueSubkeyRangeSet,
         log_context: &str,

@@ -8,7 +8,7 @@ pub enum GlobalOnlineOfflineEvent {
 pub static GLOBAL_ONLINE_EVENT: LazyLock<
     Option<GlobalEventListenerWrapper<GlobalOnlineOfflineEvent>>,
 > = LazyLock::new(|| {
-    GlobalEventListenerWrapper::new(
+    GlobalEventListenerWrapper::try_new(
         "online",
         Box::new(move |_| Some(GlobalOnlineOfflineEvent::Online)),
     )
@@ -18,7 +18,7 @@ pub static GLOBAL_ONLINE_EVENT: LazyLock<
 pub static GLOBAL_OFFLINE_EVENT: LazyLock<
     Option<GlobalEventListenerWrapper<GlobalOnlineOfflineEvent>>,
 > = LazyLock::new(|| {
-    GlobalEventListenerWrapper::new(
+    GlobalEventListenerWrapper::try_new(
         "offline",
         Box::new(move |_| Some(GlobalOnlineOfflineEvent::Offline)),
     )

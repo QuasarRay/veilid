@@ -83,7 +83,7 @@ impl fmt::Display for RelayPing {
 }
 
 /// The routing domain's state tracking for a single relay
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoutingDomainRelayState {
     /// When we last sent this relay a keepalive
     pub last_keepalive: Timestamp,

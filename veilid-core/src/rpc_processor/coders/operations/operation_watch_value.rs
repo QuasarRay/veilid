@@ -13,7 +13,7 @@ pub(in crate::rpc_processor) struct RPCOperationWatchValueQ {
 }
 
 impl RPCOperationWatchValueQ {
-    pub fn new(
+    pub fn try_new(
         key: OpaqueRecordKey,
         subkeys: ValueSubkeyRangeSet,
         duration: TimestampDuration,
@@ -98,7 +98,7 @@ impl RPCOperationWatchValueQ {
             None
         };
 
-        Self::new(key, subkeys, duration, count, watch_id)
+        Self::try_new(key, subkeys, duration, count, watch_id)
     }
 
     pub fn encode(
@@ -137,7 +137,7 @@ pub(in crate::rpc_processor) struct RPCOperationWatchValueA {
 }
 
 impl RPCOperationWatchValueA {
-    pub fn new(
+    pub fn try_new(
         accepted: bool,
         duration: TimestampDuration,
         peers: Vec<Arc<UnverifiedPeerInfo>>,
@@ -184,7 +184,7 @@ impl RPCOperationWatchValueA {
         }
         let watch_id = reader.get_watch_id();
 
-        Self::new(accepted, duration, peers, watch_id)
+        Self::try_new(accepted, duration, peers, watch_id)
     }
     pub fn encode(
         &self,

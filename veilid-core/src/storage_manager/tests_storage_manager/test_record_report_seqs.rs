@@ -17,7 +17,7 @@ pub fn test_local_seq_for_follows_the_report_range() {
         ValueSeqNum::from(5u32),
         ValueSeqNum::from(4u32),
     ];
-    let report = DHTRecordReport::new(subkeys, ValueSubkeyRangeSet::new(), local, network)
+    let report = DHTRecordReport::try_new(subkeys, ValueSubkeyRangeSet::new(), local, network)
         .expect("report should build");
 
     assert_eq!(report.local_seq_for(0), Some(ValueSeqNum::from(7u32)));

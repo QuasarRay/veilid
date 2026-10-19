@@ -124,6 +124,8 @@ pub fn fake_veilid_config() -> VeilidConfig {
                 client_allowlist_timeout_ms: 7000,
                 reverse_connection_receipt_time_ms: 8000,
                 hole_punch_receipt_time_ms: 9000,
+                default_hole_punch_ttl: 11,
+                cgnat_hole_punch_ttl: 12,
                 restricted_nat_retries: 10000,
                 rpc: VeilidConfigInternalRPC {
                     concurrency: 5,

@@ -216,6 +216,19 @@ impl RoutingDomainDetail for LocalNetworkRoutingDomainDetail {
         self.common.set_entry_summary(live_entry_counts);
     }
 
+    fn get_restore_point(&self) -> Option<Arc<RoutingDomainRestorePoint>> {
+        self.common.get_restore_point()
+    }
+    fn replace_restore_point(
+        &self,
+        restore_point: Option<Arc<RoutingDomainRestorePoint>>,
+    ) -> Option<Arc<RoutingDomainRestorePoint>> {
+        self.common.replace_restore_point(restore_point)
+    }
+    fn restore_current_peer_info(&self, peer_info: Arc<PeerInfo>) -> bool {
+        self.common.restore_current_peer_info(peer_info)
+    }
+
     fn can_contain_address(&self, address: Address) -> bool {
         if address.is_global() {
             return false;

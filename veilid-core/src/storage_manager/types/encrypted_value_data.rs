@@ -11,7 +11,7 @@ pub struct EncryptedValueData {
 impl EncryptedValueData {
     pub const MAX_LEN: usize = MAX_SUBKEY_SIZE;
 
-    pub fn new(
+    pub fn try_new(
         seq: ValueSeqNum,
         data: Bytes,
         writer: PublicKey,
@@ -251,7 +251,7 @@ impl<'de> serde::Deserialize<'de> for EncryptedValueData {
                 let legacy = LegacyValueData::deserialize(
                     serde::de::value::MapAccessDeserializer::new(map),
                 )?;
-                EncryptedValueData::new(legacy.seq, legacy.data.into(), legacy.writer, None)
+                EncryptedValueData::try_new(legacy.seq, legacy.data.into(), legacy.writer, None)
                     .map_err(serde::de::Error::custom)
             }
         }

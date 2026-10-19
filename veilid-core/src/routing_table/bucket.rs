@@ -8,8 +8,9 @@ impl_veilid_log_facility!("rtab");
 /// Helps to keep managed lists at particular distances so we can evict nodes by priority
 /// where the priority comes from liveness and age of the entry (older is better)
 pub struct Bucket {
-    /// Component registryo accessor
+    /// Component registry accessor
     registry: VeilidComponentRegistry,
+    /// Handed to every new entry for lock-free access to the online detector
     network_manager: NetworkManagerHandle,
     /// Map of keys to entries for this bucket
     entries: BTreeMap<BareNodeId, Arc<BucketEntry>>,
@@ -18,17 +19,6 @@ pub struct Bucket {
 }
 pub(super) type EntriesIter<'a> =
     alloc::collections::btree_map::Iter<'a, BareNodeId, Arc<BucketEntry>>;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct SerializedBucketEntryData {
-    key: BareNodeId,
-    value: u32, // index into serialized entries list
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct SerializedBucketData {
-    entries: Vec<SerializedBucketEntryData>,
-}
 
 impl_veilid_component_accessors!(Bucket);
 
@@ -44,62 +34,6 @@ impl Bucket {
             entries: BTreeMap::new(),
             kind,
         }
-    }
-
-    pub(super) fn load_bucket(
-        &mut self,
-        serialized_object: &TableDBSerializedData,
-        all_entries: &[Option<Arc<BucketEntry>>],
-    ) -> EyreResult<()> {
-        let table_store = self.registry().table_store();
-        let bucket_data: SerializedBucketData = table_store.try_deserialize(serialized_object)?;
-
-        for e in bucket_data.entries {
-            // Skip dangling indices and entries that were dropped on load (e.g. no valid
-            // node ids).
-            let Some(Some(entry)) = all_entries.get(e.value as usize) else {
-                veilid_log!(self debug "bucket references missing entry index {}", e.value);
-                continue;
-            };
-            // An entry must carry the node id for this bucket's kind matching the key,
-            // otherwise it has no best node id for this bucket and must not be added.
-            let has_key = entry.with(|inner| {
-                inner
-                    .node_ids()
-                    .get(self.kind)
-                    .map(|nid| nid.ref_value() == &e.key)
-                    .unwrap_or(false)
-            });
-            if !has_key {
-                veilid_log!(self debug "dropping bucket entry with no node id for {}:{}", self.kind, e.key);
-                continue;
-            }
-            self.entries.insert(e.key, entry.clone());
-        }
-
-        Ok(())
-    }
-
-    pub(super) fn save_bucket(
-        &self,
-        all_entries: &mut Vec<Arc<BucketEntry>>,
-        entry_map: &mut HashMap<*const BucketEntry, u32>,
-    ) -> TableDBSerializedData {
-        let mut entries = Vec::new();
-        for (k, v) in &self.entries {
-            let entry_index = entry_map.entry(Arc::as_ptr(v)).or_insert_with(|| {
-                let entry_index = all_entries.len();
-                all_entries.push(v.clone());
-                entry_index as u32
-            });
-            entries.push(SerializedBucketEntryData {
-                key: k.clone(),
-                value: *entry_index,
-            });
-        }
-        let bucket_data = SerializedBucketData { entries };
-
-        serialize_table_value(&bucket_data)
     }
 
     /// Create a new entry with a node_id of this crypto kind and return it

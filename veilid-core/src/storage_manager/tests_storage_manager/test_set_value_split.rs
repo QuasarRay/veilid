@@ -138,7 +138,7 @@ impl RunOutcome {
 fn make_value(data: &[u8], seq: ValueSeqNum) -> Arc<SignedValueData> {
     let keypair = mock_keypair();
     Arc::new(SignedValueData::new(
-        EncryptedValueData::new(
+        EncryptedValueData::try_new(
             seq,
             Bytes::from(data.to_vec()),
             keypair.key(),

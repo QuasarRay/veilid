@@ -8,7 +8,7 @@ pub(in crate::rpc_processor) struct RPCOperationValidateDialInfo {
 }
 
 impl RPCOperationValidateDialInfo {
-    pub fn new(dial_info: DialInfo, receipt: Bytes, redirect: bool) -> Result<Self, RPCError> {
+    pub fn try_new(dial_info: DialInfo, receipt: Bytes, redirect: bool) -> Result<Self, RPCError> {
         if receipt.len() < RCP0_MIN_RECEIPT_SIZE {
             return Err(RPCError::internal(
                 "ValidateDialInfo receipt too short to set",
@@ -53,7 +53,7 @@ impl RPCOperationValidateDialInfo {
         let receipt = Bytes::copy_from_slice(rcpt_reader);
         let redirect = reader.get_redirect();
 
-        Self::new(dial_info, receipt, redirect)
+        Self::try_new(dial_info, receipt, redirect)
     }
     pub fn encode(
         &self,

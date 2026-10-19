@@ -42,16 +42,16 @@ pub async fn test_watch_value_reported_per_watcher_range() {
     let store = storage_manager
         .get_local_record_store()
         .expect("local record store");
-    let record = Record::<LocalRecordDetail>::new(
+    let record = Record::<LocalRecordDetail>::try_new(
         Timestamp::now(),
         Arc::new(descriptor),
         LocalRecordDetail::new(SafetySelection::Unsafe(Sequencing::PreferOrdered)),
     )
     .expect("record");
     store
-        .new_record(opaque_record_key.clone(), record)
+        .try_new_record(opaque_record_key.clone(), record)
         .await
-        .expect("new_record");
+        .expect("try_new_record");
 
     // Watch the ELEMENT subkeys only, deliberately excluding the head at 0
     // Two watchers over the same record, differing only in range: one narrowed
@@ -76,7 +76,7 @@ pub async fn test_watch_value_reported_per_watcher_range() {
     }
 
     let mk_value = |seq: u32, body: &'static [u8]| {
-        let vd = EncryptedValueData::new(
+        let vd = EncryptedValueData::try_new(
             ValueSeqNum::from(seq),
             Bytes::from_static(body),
             owner_pk.clone(),

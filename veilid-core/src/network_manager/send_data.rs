@@ -93,8 +93,8 @@ impl NetworkManager {
         node_ref: FilteredNodeRef,
         data: Bytes,
     ) -> EyreResult<SendDataResult> {
-        // An answer goes back over the flow its question arrived on; only if that flow is
-        // gone does it fall through to the contact method
+        // A reply goes out on its pinned flow; only if that flow is gone does it fall
+        // through to the contact method
         if let Some(flow) = node_ref.reply_flow() {
             let net = self.net();
             match pin_future!(net.send_data_to_existing_flow(flow, data.clone())).await? {
@@ -539,8 +539,9 @@ impl NetworkManager {
         target_node_ref: FilteredNodeRef,
         data: Bytes,
     ) -> EyreResult<NetworkResult<UniqueFlow>> {
+        // Only a flow to the punched address is the hole; a relayed one has the relay's remote
         let opt_last_flow = target_node_ref
-            .last_flow()
+            .last_flow_to(hole_punch_di.socket_address())
             .filter(|flow| !self.transport_deprioritized(&target_node_ref, flow.transport_type()));
         let data = if let Some(flow) = opt_last_flow {
             veilid_log!(self debug target:"contact_method",
@@ -981,7 +982,9 @@ impl NetworkManager {
                             "reverse connect receipt should be returned in-band",
                         ));
                     }
-                    ReceiptEvent::ReturnedInBand { inbound_noderef } => inbound_noderef,
+                    ReceiptEvent::ReturnedInBand {
+                        inbound_noderef, ..
+                    } => inbound_noderef,
                     ReceiptEvent::Expired => {
                         return Ok(NetworkResult::timeout());
                     }
@@ -1093,11 +1096,12 @@ impl NetworkManager {
         .wrap_err("failed to send signal")?);
 
         // Another hole punch after the signal for UDP redundancy
+        let hole_punch_address = hole_punch_di.socket_address();
         let net = self.net();
         network_result_try!(pin_future!(net.send_hole_punch(hole_punch_di)).await?);
 
         // Wait for the return receipt
-        let inbound_nr = match eventual_value
+        let (inbound_nr, inbound_flow) = match eventual_value
             .timeout_at(stop_token)
             .in_current_span()
             .await
@@ -1115,7 +1119,10 @@ impl NetworkManager {
                             "hole punch receipt should be returned in-band",
                         ));
                     }
-                    ReceiptEvent::ReturnedInBand { inbound_noderef } => inbound_noderef,
+                    ReceiptEvent::ReturnedInBand {
+                        inbound_noderef,
+                        inbound_flow,
+                    } => (inbound_noderef, inbound_flow),
                     ReceiptEvent::Expired => {
                         return Ok(NetworkResult::timeout());
                     }
@@ -1139,23 +1146,30 @@ impl NetworkManager {
             );
         }
 
-        // And now use the existing connection to send over
-        if let Some(flow) = inbound_nr.last_flow() {
-            match self.net().send_data_to_existing_flow(flow, data).await? {
-                NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
-                    self.set_last_flow_from_send(target_nr, unique_flow.flow, Timestamp::now());
-                    Ok(NetworkResult::value(unique_flow))
-                }
-                NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
-                _ => Ok(NetworkResult::no_connection_other(
-                    "unable to send over hole punch",
-                )),
+        // Only a receipt from the punched address proves the hole; a relayed one reads as a
+        // timeout so the send falls back to the relay
+        if *inbound_flow.remote().socket_address() != hole_punch_address {
+            veilid_log!(self debug target:"contact_method",
+                "hole punch receipt from {} came through {}, not the hole",
+                target_nr, inbound_flow
+            );
+            return Ok(NetworkResult::timeout());
+        }
+
+        // And now send over the punched hole
+        match self
+            .net()
+            .send_data_to_existing_flow(inbound_flow, data)
+            .await?
+        {
+            NetworkAttempt::Performed(NetworkResult::Value(unique_flow)) => {
+                self.set_last_flow_from_send(target_nr, unique_flow.flow, Timestamp::now());
+                Ok(NetworkResult::value(unique_flow))
             }
-        } else {
-            Ok(NetworkResult::no_connection_other(format!(
-                "hole punch dropped from {}",
-                target_nr
-            )))
+            NetworkAttempt::Performed(NetworkResult::Timeout) => Ok(NetworkResult::timeout()),
+            _ => Ok(NetworkResult::no_connection_other(
+                "unable to send over hole punch",
+            )),
         }
     }
 }

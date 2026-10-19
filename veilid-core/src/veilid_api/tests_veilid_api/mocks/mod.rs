@@ -52,7 +52,8 @@ pub fn fake_veilid_value_change() -> VeilidValueChange {
         subkeys: ValueSubkeyRangeSet::new(),
         count: 5,
         value: Some(
-            ValueData::new_with_seq(23.into(), b"ValueData".to_vec(), fake_public_key()).unwrap(),
+            ValueData::try_new_with_seq(23.into(), b"ValueData".to_vec(), fake_public_key())
+                .unwrap(),
         ),
     }
 }

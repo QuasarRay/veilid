@@ -13,6 +13,7 @@ pub enum ReceiptEvent {
     ReturnedOutOfBand,
     ReturnedInBand {
         inbound_noderef: FilteredNodeRef,
+        inbound_flow: Flow,
     },
     ReturnedSafety,
     ReturnedPrivate {
@@ -26,9 +27,14 @@ pub enum ReceiptEvent {
 #[derive(Clone, Debug)]
 pub(super) enum ReceiptReturned {
     OutOfBand,
-    InBand { inbound_noderef: FilteredNodeRef },
+    InBand {
+        inbound_noderef: FilteredNodeRef,
+        inbound_flow: Flow,
+    },
     Safety,
-    Private { private_route: PublicKey },
+    Private {
+        private_route: PublicKey,
+    },
 }
 
 pub trait ReceiptCallback: Send + 'static {
@@ -486,7 +492,7 @@ impl ReceiptManager {
             receipt_nonce.encode(),
             match receipt_returned {
                 ReceiptReturned::OutOfBand => "OutOfBand".to_owned(),
-                ReceiptReturned::InBand { ref inbound_noderef } => format!("InBand({})", inbound_noderef),
+                ReceiptReturned::InBand { ref inbound_noderef, ref inbound_flow } => format!("InBand({} via {})", inbound_noderef, inbound_flow),
                 ReceiptReturned::Safety => "Safety".to_owned(),
                 ReceiptReturned::Private { ref private_route } => format!("Private({})", private_route),
             },
@@ -522,9 +528,13 @@ impl ReceiptManager {
             let receipt_event = match receipt_returned {
                 ReceiptReturned::OutOfBand => ReceiptEvent::ReturnedOutOfBand,
                 ReceiptReturned::Safety => ReceiptEvent::ReturnedSafety,
-                ReceiptReturned::InBand { inbound_noderef } => {
-                    ReceiptEvent::ReturnedInBand { inbound_noderef }
-                }
+                ReceiptReturned::InBand {
+                    inbound_noderef,
+                    inbound_flow,
+                } => ReceiptEvent::ReturnedInBand {
+                    inbound_noderef,
+                    inbound_flow,
+                },
                 ReceiptReturned::Private { private_route } => {
                     ReceiptEvent::ReturnedPrivate { private_route }
                 }

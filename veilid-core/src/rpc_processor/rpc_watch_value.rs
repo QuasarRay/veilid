@@ -76,7 +76,7 @@ impl RPCProcessor {
         );
 
         // Send the watchvalue question
-        let watch_value_q = RPCOperationWatchValueQ::new(
+        let watch_value_q = RPCOperationWatchValueQ::try_new(
             opaque_record_key.clone(),
             subkeys.clone(),
             duration,
@@ -358,7 +358,7 @@ impl RPCProcessor {
         }
 
         // Make WatchValue answer
-        let watch_value_a = RPCOperationWatchValueA::new(
+        let watch_value_a = RPCOperationWatchValueA::try_new(
             ret_accepted,
             ret_duration,
             UnverifiedPeerInfo::from_verified_list(closer_to_key_peers),

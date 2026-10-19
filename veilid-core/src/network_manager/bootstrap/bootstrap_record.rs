@@ -205,7 +205,7 @@ impl BootstrapRecord {
 
     /// Parse a v0 record string. A `None` dial info converter skips hostname resolution
     /// entirely, keeping the record with no dial info: enough to serve it onward, not to dial it.
-    pub async fn new_from_v0_str(
+    pub async fn try_new_from_v0_str(
         network_manager: &NetworkManager,
         opt_dial_info_converter: Option<&dyn DialInfoConverter>,
         record_str: &str,
@@ -259,7 +259,7 @@ impl BootstrapRecord {
     /// Parse a v1 record string, verifying its signature against `signing_keys`.
     /// A `None` dial info converter skips hostname resolution entirely, keeping the record
     /// with no dial info: enough to serve it onward, not enough to dial it.
-    pub async fn new_from_v1_str(
+    pub async fn try_new_from_v1_str(
         network_manager: &NetworkManager,
         opt_dial_info_converter: Option<&dyn DialInfoConverter>,
         record_str: &str,

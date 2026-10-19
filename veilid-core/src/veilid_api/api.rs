@@ -673,7 +673,7 @@ impl VeilidAPI {
             cfg_if! {
                 if #[cfg(feature = "mock-api")] {
                     let handle = self.mock_begin_transaction(record_keys, options)?;
-                    DHTTransaction::new(self.clone(), handle)
+                    DHTTransaction::try_new(self.clone(), handle)
                 } else {
                     let storage_manager = self.core_context()?.storage_manager();
                     for record_key in &record_keys {
@@ -687,7 +687,7 @@ impl VeilidAPI {
                     recorder.record_fut(
                         async {
                             let handle = Box::pin(storage_manager.begin_transaction(record_keys, options)).await?;
-                            DHTTransaction::new(self.clone(), handle)
+                            DHTTransaction::try_new(self.clone(), handle)
                         },
                         |name, start, dur, ret| {
                             veilid_log!(self debug

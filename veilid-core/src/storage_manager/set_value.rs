@@ -454,7 +454,7 @@ impl StorageManager {
         }
 
         // Make new subkey data
-        let value_data = ValueData::new_with_seq(seq, data, writer.key())?;
+        let value_data = ValueData::try_new_with_seq(seq, data, writer.key())?;
 
         let encrypted_value_data = self
             .maybe_encrypt_value_data(record_key, &value_data)
@@ -965,10 +965,13 @@ impl StorageManager {
             // record didn't exist, make it
             let cur_ts = Timestamp::now();
             let remote_record_detail = RemoteRecordDetail {};
-            let record =
-                Record::<RemoteRecordDetail>::new(cur_ts, actual_descriptor, remote_record_detail)?;
+            let record = Record::<RemoteRecordDetail>::try_new(
+                cur_ts,
+                actual_descriptor,
+                remote_record_detail,
+            )?;
             remote_record_store
-                .new_record(opaque_record_key.clone(), record)
+                .try_new_record(opaque_record_key.clone(), record)
                 .await?
         };
 

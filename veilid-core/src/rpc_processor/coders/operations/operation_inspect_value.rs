@@ -20,7 +20,7 @@ pub(in crate::rpc_processor) struct RPCOperationInspectValueQ {
 }
 
 impl RPCOperationInspectValueQ {
-    pub fn new(
+    pub fn try_new(
         key: OpaqueRecordKey,
         subkeys: ValueSubkeyRangeSet,
         want_descriptor: bool,
@@ -113,7 +113,7 @@ pub(in crate::rpc_processor) struct RPCOperationInspectValueA {
 }
 
 impl RPCOperationInspectValueA {
-    pub fn new(
+    pub fn try_new(
         accepted: bool,
         seqs: Vec<ValueSeqNum>,
         peers: Vec<Arc<UnverifiedPeerInfo>>,
@@ -240,7 +240,7 @@ impl RPCOperationInspectValueA {
             None
         };
 
-        Self::new(accepted, seqs, peers, descriptor)
+        Self::try_new(accepted, seqs, peers, descriptor)
     }
     pub fn encode(
         &self,

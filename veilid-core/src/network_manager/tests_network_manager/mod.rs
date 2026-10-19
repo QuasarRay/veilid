@@ -5,6 +5,8 @@ mod test_connection_table;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod test_egress_change;
 mod test_envelope_timestamps;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod test_hole_punch_ttl;
 mod test_online_detector;
 mod test_protected_reconnect;
 mod test_transport_stats;
@@ -27,6 +29,9 @@ pub async fn test_all() {
     test_protected_reconnect::test_all();
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     test_egress_change::test_all();
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    test_hole_punch_ttl::test_all();
     test_transport_stats::test_all();
+    test_transport_stats::test_ordering_availability_follows_outbound_protocols().await;
     test_address_family_confirm::test_all();
 }

@@ -618,7 +618,7 @@ impl NetworkInterface {
 /// The interface a family's outbound traffic leaves from, the address it leaves from and the
 /// gateways it leaves through. A privacy address rotating or an alias coming or going changes
 /// nothing here; the source, a gateway or the interface changing does.
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct EgressIdentity {
     /// OS interface name.
     pub interface: String,

@@ -20,12 +20,20 @@ impl NativeNetwork {
         let outcome = outcome?;
         if outcome.needs_restart {
             veilid_log!(self info "upnp port mapping renew failed, triggering network restart");
+            // The published dial info rests on the mapping that could not be renewed
+            self.routing_table()
+                .get_routing_domain_controller(RoutingDomain::PublicInternet)
+                .discard_restore_point();
             let mut inner = self.inner.lock();
             inner.network_needs_restart = true;
         } else if outcome.remapped
             && self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
         {
             veilid_log!(self info "upnp port mapping moved, detecting dial info");
+        } else if outcome.lost
+            && self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
+        {
+            veilid_log!(self info "upnp port mapping lost its gateway, detecting dial info");
         } else if igd_manager.has_mappable_deferred()
             && self.routing_domain_request_confirm_dial_info(RoutingDomain::PublicInternet)
         {

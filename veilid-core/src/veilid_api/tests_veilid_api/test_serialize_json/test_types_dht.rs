@@ -18,7 +18,7 @@ pub fn test_dht_record_descriptor() {
 // value_data
 
 pub fn test_value_data() {
-    let orig = ValueData::new_with_seq(42.into(), b"Brent Spiner".to_vec(), fake_public_key());
+    let orig = ValueData::try_new_with_seq(42.into(), b"Brent Spiner".to_vec(), fake_public_key());
     let copy = deserialize_json(&serialize_json(&orig)).unwrap();
 
     assert_eq!(orig, copy);

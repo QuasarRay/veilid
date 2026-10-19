@@ -59,7 +59,8 @@ impl RPCProcessor {
         let node_ref_filter = NodeRefFilter::new().with_address_type(dial_info.address_type());
 
         // Build the statement to send
-        let validate_dial_info = RPCOperationValidateDialInfo::new(dial_info, receipt, redirect)?;
+        let validate_dial_info =
+            RPCOperationValidateDialInfo::try_new(dial_info, receipt, redirect)?;
         let statement = RPCStatement::new(RPCStatementDetail::ValidateDialInfo(Box::new(
             validate_dial_info,
         )));
@@ -85,7 +86,7 @@ impl RPCProcessor {
                 let receipt_event = v.take_value().unwrap_or_log();
                 match receipt_event {
                     ReceiptEvent::ReturnedPrivate { private_route: _ }
-                    | ReceiptEvent::ReturnedInBand { inbound_noderef: _ }
+                    | ReceiptEvent::ReturnedInBand { .. }
                     | ReceiptEvent::ReturnedSafety => {
                         // Wrong channel, a protocol anomaly rather than evidence either way
                         veilid_log!(self debug "validate_dial_info receipt should be returned out-of-band");
@@ -199,8 +200,11 @@ impl RPCProcessor {
                 }
 
                 // Make a copy of the request, without the redirect flag
-                let validate_dial_info =
-                    RPCOperationValidateDialInfo::new(dial_info.clone(), receipt.clone(), false)?;
+                let validate_dial_info = RPCOperationValidateDialInfo::try_new(
+                    dial_info.clone(),
+                    receipt.clone(),
+                    false,
+                )?;
                 let statement = RPCStatement::new(RPCStatementDetail::ValidateDialInfo(Box::new(
                     validate_dial_info,
                 )));

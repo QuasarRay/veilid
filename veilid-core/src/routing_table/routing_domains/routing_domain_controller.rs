@@ -33,9 +33,9 @@ pub trait RoutingDomainController:
     fn load<'a>(&'a self, _db: &'a TableDB) -> PinBoxFuture<'a, EyreResult<()>> {
         Box::pin(async move { Ok(()) })
     }
-    /// Save persisted state into the supplied routing table transaction
-    fn save<'a>(&'a self, _dbx: &'a TableDBTransaction) -> PinBoxFuture<'a, EyreResult<()>> {
-        Box::pin(async move { Ok(()) })
+    /// The state this domain persists, as its key and value in the routing table TableDB
+    fn persisted_state(&self) -> Option<(Bytes, TableDBSerializedData)> {
+        None
     }
     /// True when this domain's persisted state means the saved routing table must not be trusted
     fn persisted_state_requires_reset<'a>(&'a self, _db: &'a TableDB) -> PinBoxFuture<'a, bool> {
@@ -56,6 +56,67 @@ pub trait RoutingDomainController:
     fn unpublish_peer_info(&self);
     /// Get the published peer info for this routing domain
     fn get_published_peer_info(&self) -> Option<Arc<PeerInfo>>;
+
+    /// Keep the peer info just published, and what it rests on, for a later attach to publish
+    /// again. With no platform restore state nothing is kept: an older restore point
+    /// would hold a peer info older than the one peers have.
+    fn capture_restore_point(&self, peer_info: Arc<PeerInfo>) {
+        let opt_platform = self
+            .network_manager()
+            .platform_restore_state(self.routing_domain());
+        let changed = {
+            let rdd = self.read_dyn();
+            let restore_point = opt_platform.map(|platform| {
+                Arc::new(RoutingDomainRestorePoint::new(platform, &*rdd, peer_info))
+            });
+            let keeps_one = restore_point.is_some();
+            let had_one = rdd.replace_restore_point(restore_point).is_some();
+            keeps_one || had_one
+        };
+        if changed {
+            self.routing_table().mark_save_urgent();
+        }
+    }
+
+    /// Forget the restore point: the network no longer vouches for the published state
+    fn discard_restore_point(&self) {
+        if self.read_dyn().replace_restore_point(None).is_some() {
+            veilid_log!(self debug "[{}] discarded restore point", self.routing_domain());
+            self.routing_table().mark_save_urgent();
+        }
+    }
+
+    /// Put back a restore point the platform network found still valid: config, dial info,
+    /// relays, and the signed peer info peers already hold if nothing in it changed.
+    /// Returns whether that peer info is the current one.
+    fn restore(&self, restore_point: &RoutingDomainRestorePoint) -> bool {
+        let mut editor = self.edit_dyn();
+        editor.set_network_config(restore_point.network_config.clone());
+        editor.clear_dial_info_details(None, None);
+        for did in &restore_point.dial_info_details {
+            editor.add_dial_info_detail(did.clone());
+        }
+        editor.set_confirmed(true);
+        editor.commit();
+
+        // Relay requirements follow the restored dial info
+        let relay_requirements = self.read_dyn().relay_requirements();
+        let (opt_relay_compilation, relay_states) = compile_restored_relays(
+            &self.routing_table(),
+            self.routing_domain(),
+            relay_requirements,
+            &restore_point.relays,
+        );
+        let mut editor = self.edit_dyn();
+        editor.set_relay_compilation(opt_relay_compilation);
+        for (relay_id, state) in relay_states {
+            editor.set_relay_state(relay_id, state);
+        }
+        editor.commit();
+
+        self.read_dyn()
+            .restore_current_peer_info(restore_point.peer_info.clone())
+    }
 
     /// Get the contact methods that node A can use to reach node B in this routing domain
     /// Sorted by preference order, leveraging recent failure inforation, and the optional dial info sort in the request

@@ -29,6 +29,7 @@ const PUBLIC_INTERNET_PERSISTED_STATE_KEY: Bytes =
 /// PublicInternet routing domain state that survives across restarts
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct PublicInternetPersistedState {
+    /// Minimum node counts readiness waits for after a restart
     pub low_water_mark: LowWaterMark,
     /// None until a bootstrap records its result. Any state written by a build that did not
     /// record one reads as None, which is what condemns the routing table saved beside it.
@@ -282,24 +283,18 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
         })
     }
 
-    fn save<'a>(&'a self, dbx: &'a TableDBTransaction) -> PinBoxFuture<'a, EyreResult<()>> {
-        Box::pin(async move {
-            let (low_water_mark, bootstrap) = {
-                let detail = self.read_dyn();
-                (
-                    detail.get_low_water_mark().as_ref().clone(),
-                    detail.get_bootstrap_cache(),
-                )
-            };
-            let persisted = PublicInternetPersistedState {
-                low_water_mark,
-                bootstrap,
-            };
-            let serialized = serialize_table_value(&persisted);
-            dbx.store_serialized(0, PUBLIC_INTERNET_PERSISTED_STATE_KEY, serialized)
-                .await?;
-            Ok(())
-        })
+    fn persisted_state(&self) -> Option<(Bytes, TableDBSerializedData)> {
+        let persisted = {
+            let detail = self.read_dyn();
+            PublicInternetPersistedState {
+                low_water_mark: detail.get_low_water_mark().as_ref().clone(),
+                bootstrap: detail.get_bootstrap_cache(),
+            }
+        };
+        Some((
+            PUBLIC_INTERNET_PERSISTED_STATE_KEY,
+            serialize_table_value(&persisted),
+        ))
     }
 
     fn persisted_state_requires_reset<'a>(&'a self, db: &'a TableDB) -> PinBoxFuture<'a, bool> {
@@ -364,6 +359,11 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
                 if new_peer_info.equivalent(old_peer_info) {
                     #[cfg(feature = "verbose-tracing")]
                     veilid_log!(self debug "[PublicInternet] Not publishing peer info because it is equivalent");
+                    drop(ppi_lock);
+                    // A confirmation that reproduced the published peer info vouches for it again
+                    if self.read_dyn().get_restore_point().is_none() {
+                        self.capture_restore_point(old_peer_info.clone());
+                    }
                     return false;
                 }
             }
@@ -392,6 +392,10 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
 
             (opt_old_peer_info, Some(new_peer_info))
         };
+
+        if let Some(new_peer_info) = &opt_new_peer_info {
+            self.capture_restore_point(new_peer_info.clone());
+        }
 
         if let Err(e) = self.event_bus().post(PeerInfoChangeEvent {
             routing_domain: RoutingDomain::PublicInternet,

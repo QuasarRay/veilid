@@ -146,4 +146,12 @@ pub trait PlatformNetwork: VeilidComponentRegistryAccessor + Send + Sync {
     /// once per network move: dead sockets alone (a thaw, peer churn) say nothing about the
     /// dial info. Returns whether a request was made.
     fn request_confirm_after_empty_table(&self) -> bool;
+
+    /// What the routing domain's published state rests on, and the platform state to put back
+    /// with it, for its restore point. None when the network cannot vouch for the state.
+    fn restore_state(&self, routing_domain: RoutingDomain) -> Option<PlatformRestoreState>;
+
+    /// The external addresses and unexamined transports of the last PublicInternet dial info
+    /// detection, so a new address check starts from them
+    fn last_dial_info_detection(&self) -> Option<(BTreeSet<Address>, BTreeSet<TransportType>)>;
 }

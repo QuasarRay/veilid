@@ -26,14 +26,6 @@ enum DialInfoDetectionOutcome {
 }
 
 impl NativeNetwork {
-    /// Dial info is known good on the current interface state
-    fn record_confirmed_interface_generation(&self) {
-        self.confirmed_interface_address_generation.store(
-            self.interface_address_generation.load(Ordering::Relaxed),
-            Ordering::Relaxed,
-        );
-    }
-
     /// Get routing domains that need dial info confirmation
     pub(super) fn routing_domains_needing_confirm_dial_info(&self) -> RoutingDomainSet {
         let mut needs_confirm_dial_info = RoutingDomainSet::empty();
@@ -535,6 +527,7 @@ impl NativeNetwork {
                     editor.set_confirmed(false);
                     editor.commit();
                     rdc.unpublish_peer_info();
+                    rdc.discard_restore_point();
                 } else {
                     veilid_log!(self debug "DialInfo confirmation failed {} time(s) consecutively for PublicInternet, will retry before unpublishing", confirm_failure_count);
                 }
@@ -550,6 +543,10 @@ impl NativeNetwork {
 
         // The address check re-detects only for an address this detection did not see, or
         // on reports over a transport it reached no verdict on
+        self.inner.lock().last_dial_info_detection = Some((
+            confirmation_result.external_addresses.clone(),
+            confirmation_result.unexamined_transports.clone(),
+        ));
         self.network_manager().report_dial_info_detection(
             RoutingDomain::PublicInternet,
             confirmation_result.external_addresses.clone(),

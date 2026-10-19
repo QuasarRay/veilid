@@ -229,7 +229,7 @@ pub struct IfAddrs {
 }
 
 impl IfAddrs {
-    pub fn new() -> io::Result<Self> {
+    pub fn try_new() -> io::Result<Self> {
         let mut ifaddrs = std::ptr::null_mut();
         // SAFETY: getifaddrs writes a list head (or leaves null) into the out-pointer
         if -1 == unsafe { getifaddrs(&mut ifaddrs) } {
@@ -360,7 +360,7 @@ impl PlatformSupportOpenBSD {
         self.refresh_default_route_interfaces();
 
         // Ask for all the addresses we have
-        let ifaddrs = IfAddrs::new()?;
+        let ifaddrs = IfAddrs::try_new()?;
 
         // Determine all the name to index mappings
         let mut name_to_index = BTreeMap::<String, u32>::new();

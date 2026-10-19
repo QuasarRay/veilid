@@ -201,9 +201,45 @@ fn new_shared_socket2_udp(domain: core::ffi::c_int) -> io::Result<Socket> {
     cfg_if! {
         if #[cfg(unix)] {
             socket.set_reuse_port(true)?;
+        } else if #[cfg(windows)] {
+            // Best effort: where it fails, the receive path still treats these errors as transient
+            let _ = disable_udp_icmp_errors(&socket);
         }
     }
     Ok(socket)
+}
+
+/// Keep ICMP port unreachable and TTL expired out of recv, as on other platforms; Windows
+/// otherwise fails the next receive on the port with WSAECONNRESET or WSAENETRESET
+#[cfg(windows)]
+fn disable_udp_icmp_errors(socket: &Socket) -> io::Result<()> {
+    use std::os::windows::io::AsRawSocket;
+    use winapi::shared::minwindef::{BOOL, DWORD, FALSE};
+    use winapi::um::mswsock::{SIO_UDP_CONNRESET, SIO_UDP_NETRESET};
+    use winapi::um::winsock2::{WSAIoctl, SOCKET, SOCKET_ERROR};
+
+    for code in [SIO_UDP_CONNRESET, SIO_UDP_NETRESET] {
+        let mut report: BOOL = FALSE;
+        let mut returned: DWORD = 0;
+        // SAFETY: the socket is open, and `report` and `returned` outlive this synchronous call
+        let res = unsafe {
+            WSAIoctl(
+                socket.as_raw_socket() as SOCKET,
+                code,
+                (&mut report as *mut BOOL).cast(),
+                std::mem::size_of::<BOOL>() as DWORD,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+                None,
+            )
+        };
+        if res == SOCKET_ERROR {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 fn new_bound_shared_socket2_udp(local_address: SocketAddr) -> io::Result<Option<Socket>> {
@@ -385,6 +421,25 @@ pub fn primary_source_ipv6() -> Option<Ipv6Addr> {
     }
 }
 
+/// Sends single UDP datagrams at a chosen TTL for one shared socket, never touching that
+/// socket's TTL option. Keep one beside each shared socket and drop it with that socket: on
+/// macOS and iOS it holds a twin per TTL bound to the socket's address and port, and a twin left
+/// open after its socket closes takes the port's inbound traffic.
+#[derive(Debug, Default)]
+pub struct UdpTtlSender {
+    /// One per TTL asked for, bound on its first send and rebuilt after a failed one
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    twins: Mutex<Vec<Arc<TtlTwin>>>,
+}
+
+impl UdpTtlSender {
+    /// A sender that binds no twins until its first send
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 // Send a single UDP datagram with a per-packet TTL override
 cfg_if! {
     if #[cfg(unix)] {
@@ -397,36 +452,118 @@ cfg_if! {
             }
         }
 
-        /// Send one UDP datagram with a best-effort per-packet TTL (IPv4) or hop
-        /// limit (IPv6) override, never touching the socket's TTL option:
-        /// - IPv6: `IPV6_HOPLIMIT` cmsg (RFC 3542)
-        /// - IPv4 on Linux/Android: `IP_TTL` cmsg
-        /// - IPv4 elsewhere: sent at the socket's default TTL; no per-packet TTL
-        ///   cmsg exists (xnu honors only `IP_PKTINFO`) and a setsockopt swap would
-        ///   race other senders on the shared socket
-        ///
-        /// Single nonblocking attempt; a full send buffer surfaces as `WouldBlock`.
-        pub fn send_udp_datagram_with_ttl<S: std::os::fd::AsFd>(
-            socket: &S,
-            data: &[u8],
-            remote_addr: SocketAddr,
+        /// The IPv4 low-TTL sender for a wildcard-bound shared socket on macOS and iOS, where
+        /// xnu ignores an `IP_TTL` cmsg. The shared socket keeps all its traffic while the twin
+        /// lives inside its lifetime: xnu gives inbound unicast to the oldest wildcard socket on
+        /// a port and IPv4 ICMP errors only to connected sockets.
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[derive(Debug)]
+        struct TtlTwin {
+            /// Bound to `local_address` after the shared socket
+            socket: Socket,
+            /// The wildcard address and port the twin shares
+            local_address: SocketAddr,
+            /// TTL every datagram from `socket` carries
             ttl: u32,
-        ) -> io::Result<usize> {
-            use std::os::fd::AsRawFd;
-            let ttl = ttl_option_value(ttl)?;
-            cfg_if! {
-                if #[cfg(any(target_os = "linux", target_os = "android"))] {
-                    let (cmsg_level, cmsg_type) = match remote_addr {
-                        SocketAddr::V4(_) => (libc::IPPROTO_IP, libc::IP_TTL),
-                        SocketAddr::V6(_) => (libc::IPPROTO_IPV6, IPV6_HOPLIMIT),
-                    };
-                    sendmsg_with_ttl_cmsg(socket.as_fd().as_raw_fd(), data, remote_addr, cmsg_level, cmsg_type, ttl)
-                } else {
-                    match remote_addr {
-                        SocketAddr::V4(_) => socket2_operation(socket, |s| s.send_to(data, &remote_addr.into())),
-                        SocketAddr::V6(_) => sendmsg_with_ttl_cmsg(socket.as_fd().as_raw_fd(), data, remote_addr, libc::IPPROTO_IPV6, IPV6_HOPLIMIT, ttl),
+        }
+
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        impl TtlTwin {
+            fn try_new(local_address: SocketAddr, ttl: u32) -> io::Result<Self> {
+                let socket = new_shared_socket2_udp(domain_for_address(local_address))?;
+                socket.set_ttl_v4(ttl)?;
+                socket.set_nonblocking(true)?;
+                // It never reads, and LAN broadcasts to the port reach it as well
+                socket.set_recv_buffer_size(1)?;
+                socket.bind(&SockAddr::from(local_address))?;
+                Ok(Self {
+                    socket,
+                    local_address,
+                    ttl,
+                })
+            }
+        }
+
+        impl UdpTtlSender {
+            /// Send one UDP datagram on `socket` with a best-effort per-packet TTL (IPv4) or hop
+            /// limit (IPv6):
+            /// - IPv6: `IPV6_HOPLIMIT` cmsg (RFC 3542)
+            /// - IPv4 on Linux/Android: `IP_TTL` cmsg
+            /// - IPv4 on macOS/iOS from a wildcard-bound socket: from the twin for that TTL
+            /// - IPv4 elsewhere: at the socket's default TTL; a setsockopt swap would race other
+            ///   senders on the shared socket
+            ///
+            /// Single nonblocking attempt; a full send buffer surfaces as `WouldBlock`.
+            pub fn send_to<S: std::os::fd::AsFd>(
+                &self,
+                socket: &S,
+                data: &[u8],
+                remote_addr: SocketAddr,
+                ttl: u32,
+            ) -> io::Result<usize> {
+                use std::os::fd::AsRawFd;
+                let ttl = ttl_option_value(ttl)?;
+                cfg_if! {
+                    if #[cfg(any(target_os = "linux", target_os = "android"))] {
+                        let (cmsg_level, cmsg_type) = match remote_addr {
+                            SocketAddr::V4(_) => (libc::IPPROTO_IP, libc::IP_TTL),
+                            SocketAddr::V6(_) => (libc::IPPROTO_IPV6, IPV6_HOPLIMIT),
+                        };
+                        sendmsg_with_ttl_cmsg(socket.as_fd().as_raw_fd(), data, remote_addr, cmsg_level, cmsg_type, ttl)
+                    } else if #[cfg(any(target_os = "macos", target_os = "ios"))] {
+                        match remote_addr {
+                            SocketAddr::V4(_) => self.send_from_twin(socket, data, remote_addr, ttl as u32),
+                            SocketAddr::V6(_) => sendmsg_with_ttl_cmsg(socket.as_fd().as_raw_fd(), data, remote_addr, libc::IPPROTO_IPV6, IPV6_HOPLIMIT, ttl),
+                        }
+                    } else {
+                        match remote_addr {
+                            SocketAddr::V4(_) => socket2_operation(socket, |s| s.send_to(data, &remote_addr.into())),
+                            SocketAddr::V6(_) => sendmsg_with_ttl_cmsg(socket.as_fd().as_raw_fd(), data, remote_addr, libc::IPPROTO_IPV6, IPV6_HOPLIMIT, ttl),
+                        }
                     }
                 }
+            }
+
+            /// Send from the twin for `ttl`; a socket bound to a specific address, or a twin that
+            /// cannot bind, sends at the socket's TTL
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            fn send_from_twin<S: std::os::fd::AsFd>(
+                &self,
+                socket: &S,
+                data: &[u8],
+                remote_addr: SocketAddr,
+                ttl: u32,
+            ) -> io::Result<usize> {
+                let send_shared = || socket2_operation(socket, |s| s.send_to(data, &remote_addr.into()));
+                // A specific-address twin would take the shared socket's inbound traffic
+                let Some(local_address) = socket2_operation(socket, |s| s.local_addr())
+                    .ok()
+                    .and_then(|sa| sa.as_socket())
+                    .filter(|sa| sa.ip().is_unspecified())
+                else {
+                    return send_shared();
+                };
+                let opt_twin = {
+                    let mut twins = self.twins.lock();
+                    twins.retain(|twin| twin.local_address == local_address);
+                    match twins.iter().find(|twin| twin.ttl == ttl) {
+                        Some(twin) => Some(twin.clone()),
+                        None => TtlTwin::try_new(local_address, ttl).ok().map(|twin| {
+                            let twin = Arc::new(twin);
+                            twins.push(twin.clone());
+                            twin
+                        }),
+                    }
+                };
+                let Some(twin) = opt_twin else {
+                    return send_shared();
+                };
+                let res = twin.socket.send_to(data, &remote_addr.into());
+                // A failed twin, such as one iOS defuncted, is rebuilt by the next send
+                if matches!(&res, Err(e) if e.kind() != io::ErrorKind::WouldBlock) {
+                    self.twins.lock().retain(|cached| !Arc::ptr_eq(cached, &twin));
+                }
+                res
             }
         }
 
@@ -466,40 +603,59 @@ cfg_if! {
             }
         }
     } else if #[cfg(windows)] {
-        /// Send one UDP datagram with a best-effort per-packet TTL (IPv4) or hop
-        /// limit (IPv6) override, never touching the socket's TTL option:
-        /// - IPv6: `IPV6_HOPLIMIT` cmsg via `WSASendMsg`
-        /// - IPv4: sent at the socket's default TTL; `WSASendMsg` has no TTL cmsg
-        ///   and a setsockopt swap would race other senders on the shared socket
-        ///
-        /// Single nonblocking attempt; a full send buffer surfaces as `WouldBlock`.
-        pub fn send_udp_datagram_with_ttl<S: std::os::windows::io::AsSocket>(
-            socket: &S,
-            data: &[u8],
-            remote_addr: SocketAddr,
-            ttl: u32,
-        ) -> io::Result<usize> {
-            let ttl = ttl_option_value(ttl)?;
-            match remote_addr {
-                SocketAddr::V4(_) => socket2_operation(socket, |s| s.send_to(data, &remote_addr.into())),
-                SocketAddr::V6(_) => wsasendmsg_with_hoplimit(socket, data, remote_addr, ttl),
+        /// The IPv4 per-packet TTL cmsg (ws2ipdef.h), which winapi lacks; an `IP_TTL` cmsg
+        /// fails with WSAEINVAL
+        const IP_HOPLIMIT: i32 = 21;
+
+        impl UdpTtlSender {
+            /// Send one UDP datagram on `socket` with a best-effort per-packet TTL (IPv4) or hop
+            /// limit (IPv6):
+            /// - IPv4: `IP_HOPLIMIT` cmsg via `WSASendMsg`, or the socket's default TTL where
+            ///   Windows refuses that cmsg
+            /// - IPv6: `IPV6_HOPLIMIT` cmsg via `WSASendMsg`
+            ///
+            /// Single nonblocking attempt; a full send buffer surfaces as `WouldBlock`.
+            pub fn send_to<S: std::os::windows::io::AsSocket>(
+                &self,
+                socket: &S,
+                data: &[u8],
+                remote_addr: SocketAddr,
+                ttl: u32,
+            ) -> io::Result<usize> {
+                use winapi::shared::ws2def::{IPPROTO_IP, IPPROTO_IPV6};
+                use winapi::shared::ws2ipdef::IPV6_HOPLIMIT;
+                use winapi::um::winsock2::WSAEINVAL;
+
+                let ttl = ttl_option_value(ttl)?;
+                match remote_addr {
+                    SocketAddr::V4(_) => {
+                        match wsasendmsg_with_ttl_cmsg(socket, data, remote_addr, IPPROTO_IP, IP_HOPLIMIT, ttl) {
+                            Err(e) if e.raw_os_error() == Some(WSAEINVAL) => {
+                                socket2_operation(socket, |s| s.send_to(data, &remote_addr.into()))
+                            }
+                            res => res,
+                        }
+                    }
+                    SocketAddr::V6(_) => wsasendmsg_with_ttl_cmsg(socket, data, remote_addr, IPPROTO_IPV6 as i32, IPV6_HOPLIMIT, ttl),
+                }
             }
         }
 
-        fn wsasendmsg_with_hoplimit<S: std::os::windows::io::AsSocket>(
+        fn wsasendmsg_with_ttl_cmsg<S: std::os::windows::io::AsSocket>(
             socket: &S,
             data: &[u8],
             remote_addr: SocketAddr,
+            cmsg_level: i32,
+            cmsg_type: i32,
             ttl: i32,
         ) -> io::Result<usize> {
             use winapi::shared::minwindef::DWORD;
-            use winapi::shared::ws2def::{IPPROTO_IPV6, WSABUF, WSACMSGHDR, WSAMSG};
-            use winapi::shared::ws2ipdef::IPV6_HOPLIMIT;
+            use winapi::shared::ws2def::{WSABUF, WSACMSGHDR, WSAMSG};
             use winapi::um::winsock2::{WSASendMsg, SOCKET, SOCKET_ERROR};
 
             // WSA_CMSG_SPACE(sizeof(int)) layout by hand; winapi has no cmsg macros
             #[repr(C)]
-            struct CmsgHopLimit {
+            struct CmsgTtl {
                 hdr: WSACMSGHDR,
                 value: i32,
             }
@@ -509,11 +665,11 @@ cfg_if! {
                 len: data.len() as u32,
                 buf: data.as_ptr() as *mut i8,
             };
-            let mut cmsg = CmsgHopLimit {
+            let mut cmsg = CmsgTtl {
                 hdr: WSACMSGHDR {
                     cmsg_len: std::mem::size_of::<WSACMSGHDR>() + std::mem::size_of::<i32>(),
-                    cmsg_level: IPPROTO_IPV6 as i32,
-                    cmsg_type: IPV6_HOPLIMIT,
+                    cmsg_level,
+                    cmsg_type,
                 },
                 value: ttl,
             };
@@ -523,12 +679,13 @@ cfg_if! {
                 lpBuffers: &mut wsabuf,
                 dwBufferCount: 1,
                 Control: WSABUF {
-                    len: std::mem::size_of::<CmsgHopLimit>() as u32,
-                    buf: (&mut cmsg as *mut CmsgHopLimit) as *mut i8,
+                    len: std::mem::size_of::<CmsgTtl>() as u32,
+                    buf: (&mut cmsg as *mut CmsgTtl) as *mut i8,
                 },
                 dwFlags: 0,
             };
             let mut sent: DWORD = 0;
+            // SAFETY: msg and everything it points to outlive this synchronous, non-overlapped call
             let res = unsafe {
                 WSASendMsg(
                     std::os::windows::io::AsRawSocket::as_raw_socket(&socket.as_socket()) as SOCKET,

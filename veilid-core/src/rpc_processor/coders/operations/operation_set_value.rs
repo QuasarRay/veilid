@@ -103,7 +103,7 @@ pub(in crate::rpc_processor) struct RPCOperationSetValueA {
 }
 
 impl RPCOperationSetValueA {
-    pub fn new(
+    pub fn try_new(
         accepted: bool,
         need_descriptor: bool,
         value: Option<SignedValueData>,
@@ -198,7 +198,7 @@ impl RPCOperationSetValueA {
             peers.push(Arc::new(peer_info));
         }
 
-        Self::new(accepted, need_descriptor, value, peers)
+        Self::try_new(accepted, need_descriptor, value, peers)
     }
     pub fn encode(
         &self,

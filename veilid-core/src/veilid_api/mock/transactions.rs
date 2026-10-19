@@ -313,7 +313,7 @@ impl VeilidAPI {
                 seq = min_seqnum;
             }
 
-            let value = ValueData::new_with_seq(seq, data, writer.key())?;
+            let value = ValueData::try_new_with_seq(seq, data, writer.key())?;
             tx.staged.insert(slot, value);
             VeilidAPIResult::Ok(None)
         })
@@ -434,7 +434,7 @@ impl VeilidAPI {
             local_seqs
         };
 
-        DHTRecordReport::new(
+        DHTRecordReport::try_new(
             subkeys,
             ValueSubkeyRangeSet::new(),
             local_seqs,

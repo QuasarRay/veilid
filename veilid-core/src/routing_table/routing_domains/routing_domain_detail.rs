@@ -87,6 +87,16 @@ pub trait RoutingDomainDetail:
     /// Update the cached entry summary for this domain
     fn set_entry_summary(&self, entry_summary: Arc<EntrySummary>);
 
+    /// The last published state and what it rests on, if the network still vouches for it
+    fn get_restore_point(&self) -> Option<Arc<RoutingDomainRestorePoint>>;
+    /// Replace the restore point, returning the one it replaced
+    fn replace_restore_point(
+        &self,
+        restore_point: Option<Arc<RoutingDomainRestorePoint>>,
+    ) -> Option<Arc<RoutingDomainRestorePoint>>;
+    /// Use a restored peer info as the current one if a fresh one would say the same
+    fn restore_current_peer_info(&self, peer_info: Arc<PeerInfo>) -> bool;
+
     /// Debugging
     fn debug(&self, alt: bool) -> String;
 }

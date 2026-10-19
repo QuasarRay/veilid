@@ -53,7 +53,7 @@ pub(in crate::rpc_processor) struct RPCOperationSupplyBlockA {
 }
 
 impl RPCOperationSupplyBlockA {
-    pub fn new(duration: TimestampDuration, peers: Vec<PeerInfo>) -> Result<Self, RPCError> {
+    pub fn try_new(duration: TimestampDuration, peers: Vec<PeerInfo>) -> Result<Self, RPCError> {
         if peers.len() > MAX_SUPPLY_BLOCK_A_PEERS_LEN {
             return Err(RPCError::internal("SupplyBlockA peers length too long"));
         }

@@ -50,7 +50,7 @@ pub(in crate::rpc_processor) struct RPCOperationTransactCommandQ {
 }
 
 impl RPCOperationTransactCommandQ {
-    pub fn new(
+    pub fn try_new(
         key: OpaqueRecordKey,
         transaction_id: u64,
         command: TransactCommand,
@@ -238,7 +238,7 @@ impl RPCOperationTransactCommandQ {
             None
         };
 
-        Self::new(key, transaction_id, command, seqs, subkey, value)
+        Self::try_new(key, transaction_id, command, seqs, subkey, value)
     }
     pub fn encode(
         &self,
@@ -292,7 +292,7 @@ pub(in crate::rpc_processor) struct RPCOperationTransactCommandA {
 }
 
 impl RPCOperationTransactCommandA {
-    pub fn new(
+    pub fn try_new(
         transaction_valid: bool,
         duration: TimestampDuration,
         seqs: Option<Vec<ValueSeqNum>>,
@@ -521,7 +521,7 @@ impl RPCOperationTransactCommandA {
             return Err(RPCError::protocol("not valid but fields provided"));
         }
 
-        Self::new(transaction_valid, duration, seqs, subkey, value)
+        Self::try_new(transaction_valid, duration, seqs, subkey, value)
     }
 
     pub fn encode(

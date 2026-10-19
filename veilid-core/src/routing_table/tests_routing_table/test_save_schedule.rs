@@ -21,6 +21,33 @@ pub fn test_save_schedule_change_waits_to_settle() {
     assert_eq!(schedule.due(ts(29)), Some(SaveReason::Changed));
 }
 
+/// Changes that never settle hold back an urgent one only for the least interval between saves
+pub fn test_save_schedule_urgent_change_skips_settle() {
+    info!("--- test_save_schedule_urgent_change_skips_settle ---");
+
+    let mut schedule = SaveSchedule::new(ts(0));
+    for secs in 1..=12 {
+        schedule.changed(ts(secs));
+        assert_eq!(
+            schedule.due(ts(secs)),
+            None,
+            "a change every second never settles"
+        );
+    }
+    schedule.urgent_change(ts(12));
+    assert_eq!(schedule.due(ts(12)), Some(SaveReason::Changed));
+
+    // The save covers it; what follows settles again
+    schedule.saving(ts(12));
+    schedule.changed(ts(20));
+    assert_eq!(
+        schedule.due(ts(22)),
+        None,
+        "a plain change after the save waits to settle"
+    );
+    assert_eq!(schedule.due(ts(25)), Some(SaveReason::Changed));
+}
+
 pub fn test_save_schedule_change_waits_for_min_interval() {
     info!("--- test_save_schedule_change_waits_for_min_interval ---");
 

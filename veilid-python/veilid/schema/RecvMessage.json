@@ -5417,6 +5417,12 @@
       "description": "Internal \"footgun\" network configuration. See [VeilidConfigInternal].",
       "type": "object",
       "properties": {
+        "cgnat_hole_punch_ttl": {
+          "description": "Hole punch TTL behind a carrier-grade NAT, which sits more hops out than a home router.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
         "client_allowlist_timeout_ms": {
           "description": "Time a client stays on the allowlist after connecting, in milliseconds.",
           "type": "integer",
@@ -5431,6 +5437,12 @@
         },
         "connection_initial_timeout_ms": {
           "description": "Timeout to establish a new connection, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "default_hole_punch_ttl": {
+          "description": "TTL (hop limit) of a hole punch, enough to pass this node's NAT but not reach the peer's.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -5507,6 +5519,8 @@
         "client_allowlist_timeout_ms",
         "reverse_connection_receipt_time_ms",
         "hole_punch_receipt_time_ms",
+        "default_hole_punch_ttl",
+        "cgnat_hole_punch_ttl",
         "restricted_nat_retries",
         "rpc",
         "dht",

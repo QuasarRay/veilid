@@ -651,7 +651,7 @@ impl OutboundTransactionRecordState {
         self.record_params.local_snapshot.clone()
     }
 
-    pub(super) fn new_node_transaction(
+    pub(super) fn try_new_node_transaction(
         &mut self,
         lnxid: LocalNodeTransactionId,
         params: NodeTransactionParams,

@@ -12,7 +12,7 @@ struct InspectDescriptorInfo {
 }
 
 impl InspectDescriptorInfo {
-    pub fn new(
+    pub fn try_new(
         descriptor: Arc<SignedValueDescriptor>,
         subkeys: &ValueSubkeyRangeSet,
     ) -> VeilidAPIResult<Self> {
@@ -272,7 +272,7 @@ impl StorageManager {
 
         // If this is the maximum scope we're interested in, return the report
         if matches!(scope, DHTReportScope::Local) {
-            return DHTRecordReport::new(
+            return DHTRecordReport::try_new(
                 local_inspect_result.subkeys().clone(),
                 offline_subkey_writes,
                 local_inspect_result.seqs().to_vec(),
@@ -351,14 +351,14 @@ impl StorageManager {
         }
 
         if outbound_inspect_result.inspect_result.subkeys().is_empty() {
-            DHTRecordReport::new(
+            DHTRecordReport::try_new(
                 local_inspect_result.subkeys().clone(),
                 offline_subkey_writes,
                 local_inspect_result.seqs().to_vec(),
                 vec![ValueSeqNum::NONE; local_inspect_result.seqs().len()],
             )
         } else {
-            DHTRecordReport::new(
+            DHTRecordReport::try_new(
                 outbound_inspect_result.inspect_result.subkeys().clone(),
                 offline_subkey_writes,
                 local_inspect_result.seqs().to_vec(),
@@ -429,7 +429,7 @@ impl StorageManager {
         // Make operation context
         let opt_descriptor_info = if let Some(descriptor) = local_inspect_result.opt_descriptor() {
             // Get the descriptor info. This also truncates the subkeys list to what can be returned from the network.
-            Some(InspectDescriptorInfo::new(descriptor, &subkeys)?)
+            Some(InspectDescriptorInfo::try_new(descriptor, &subkeys)?)
         } else {
             None
         };
@@ -537,7 +537,7 @@ impl StorageManager {
                             let mut ctx = context.lock();
                             if ctx.opt_descriptor_info.is_none() {
                                 // Get the descriptor info. This also truncates the subkeys list to what can be returned from the network.
-                                let descriptor_info = match InspectDescriptorInfo::new(
+                                let descriptor_info = match InspectDescriptorInfo::try_new(
                                     Arc::new(descriptor.clone()),
                                     &subkeys,
                                 ) {
@@ -783,7 +783,7 @@ impl StorageManager {
             answered: ctx.answered,
             #[cfg(feature = "verbose-tracing")]
             answered_safety_routes: ctx.answered_safety_routes.iter().cloned().collect(),
-            inspect_result: InspectResult::new(
+            inspect_result: InspectResult::try_new(
                 self,
                 requested_subkeys,
                 "outbound_inspect_value",

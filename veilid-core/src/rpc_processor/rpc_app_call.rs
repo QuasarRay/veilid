@@ -19,7 +19,7 @@ impl RPCProcessor {
 
         let debug_string = format!("AppCall(message(len)={}) => {:#}", message.len(), dest);
 
-        let app_call_q = RPCOperationAppCallQ::new(message)?;
+        let app_call_q = RPCOperationAppCallQ::try_new(message)?;
         let question = RPCQuestion::new(
             network_result_try!(self.get_destination_respond_to(&dest).await?),
             RPCQuestionDetail::AppCallQ(Box::new(app_call_q)),
@@ -143,7 +143,7 @@ impl RPCProcessor {
         };
 
         // Return the appcall answer
-        let app_call_a = RPCOperationAppCallA::new(message_a)?;
+        let app_call_a = RPCOperationAppCallA::try_new(message_a)?;
 
         // Send status answer
         self.answer(
