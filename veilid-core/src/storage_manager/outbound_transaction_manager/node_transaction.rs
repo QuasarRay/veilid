@@ -27,8 +27,7 @@ pub(super) struct NodeTransaction {
     /// Ref to keep node in routing table
     #[serde(skip)]
     node_ref: Option<NodeRef>,
-    /// When the server says this node transaction is dead
-    /// None means the server has already ended the transaction
+    /// When the server says this node transaction is dead; None once the server has ended it
     opt_expiration: Option<Timestamp>,
     /// The timestamp of when the node transaction was created
     created_ts: Timestamp,

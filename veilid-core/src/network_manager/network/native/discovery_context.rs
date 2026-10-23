@@ -509,7 +509,7 @@ impl DiscoveryContext {
             AddressType::IPV4 => IGDAddressType::IPV4,
         };
 
-        let igd_manager = self.network.igd_manager.clone()?;
+        let igd_manager = self.network.igd_manager()?;
 
         // Attempt a port mapping. If this doesn't succeed, it's not going to
         let Ok(mapped_external_address) = igd_manager
@@ -960,7 +960,7 @@ impl DiscoveryContext {
         // UPNP Automatic Mapping
         ///////////
         // igd_manager is only present when UPnP is enabled
-        if self.network.igd_manager.is_some() {
+        if self.network.igd_manager().is_some() {
             // Attempt a port mapping via all available and enabled mechanisms
             // Try this before the direct mapping in the event that we are restarting
             // and may not have recorded a mapping created the last time

@@ -10,6 +10,7 @@ from veilid.json_api import _JsonVeilidAPI
 
 pytest_plugins = ("pytest_asyncio",)
 
+
 async def simple_update_callback(update: veilid.VeilidUpdate):
     pass
 
@@ -18,8 +19,8 @@ T = TypeVar("T")
 
 
 async def dht_retry(
-    api: _JsonVeilidAPI,
-    op: Callable[[], Awaitable[T]],
+    api: veilid.VeilidAPI,
+    op: Callable[..., Awaitable[T]],
     label: Optional[str] = None,
 ) -> T:
     """Retry a DHT operation that hits a transient network condition.

@@ -4,6 +4,7 @@ fn config(bootstrap: &[&str], bootstrap_records: &[&str]) -> VeilidConfigRouting
     VeilidConfigRoutingTable {
         bootstrap: bootstrap.iter().map(|x| x.to_string()).collect(),
         bootstrap_records: bootstrap_records.iter().map(|x| x.to_string()).collect(),
+        serve_direct_bootstrap: false,
         ..Default::default()
     }
 }

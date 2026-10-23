@@ -802,6 +802,8 @@ pub struct RoutingTable {
     pub bootstrap_keys: Vec<veilid_core::PublicKey>,
     /// Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.
     pub bootstrap_records: Vec<String>,
+    /// Answer direct bootstrap requests (BOOT and B01T).
+    pub serve_direct_bootstrap: bool,
 }
 impl Default for RoutingTable {
     fn default() -> Self {
@@ -812,6 +814,8 @@ impl Default for RoutingTable {
             bootstrap: d.bootstrap,
             bootstrap_keys: d.bootstrap_keys,
             bootstrap_records: d.bootstrap_records,
+            // A server is what serves bootstraps; the packaged config file turns this off
+            serve_direct_bootstrap: true,
         }
     }
 }
@@ -1617,6 +1621,10 @@ impl Settings {
         set_config_value!(inner.core.network.routing_table.bootstrap, value);
         set_config_value!(inner.core.network.routing_table.bootstrap_keys, value);
         set_config_value!(inner.core.network.routing_table.bootstrap_records, value);
+        set_config_value!(
+            inner.core.network.routing_table.serve_direct_bootstrap,
+            value
+        );
         set_config_value!(inner.core.network.rpc.default_route_hop_count, value);
         set_config_value!(inner.core.network.dht.local_subkey_cache_size, value);
         set_config_value!(
@@ -1689,6 +1697,34 @@ impl Settings {
         set_config_value!(inner.core.internal.network.default_hole_punch_ttl, value);
         set_config_value!(inner.core.internal.network.cgnat_hole_punch_ttl, value);
         set_config_value!(inner.core.internal.network.restricted_nat_retries, value);
+        set_config_value!(
+            inner.core.internal.network.routing_table.save.settle_ms,
+            value
+        );
+        set_config_value!(
+            inner
+                .core
+                .internal
+                .network
+                .routing_table
+                .save
+                .min_interval_ms,
+            value
+        );
+        set_config_value!(
+            inner
+                .core
+                .internal
+                .network
+                .routing_table
+                .save
+                .background_min_interval_ms,
+            value
+        );
+        set_config_value!(
+            inner.core.internal.network.routing_table.save.period_ms,
+            value
+        );
         set_config_value!(inner.core.internal.network.rpc.concurrency, value);
         set_config_value!(inner.core.internal.network.rpc.queue_size, value);
         set_config_value!(
@@ -1731,6 +1767,15 @@ impl Settings {
         );
         set_config_value!(
             inner.core.internal.network.dht.max_watch_expiration_ms,
+            value
+        );
+        set_config_value!(
+            inner
+                .core
+                .internal
+                .network
+                .dht
+                .max_watch_inspect_interval_ms,
             value
         );
         set_config_value!(inner.core.internal.network.dht.public_watch_limit, value);
@@ -1851,6 +1896,7 @@ impl Settings {
                     bootstrap: inner.core.network.routing_table.bootstrap.clone(),
                     bootstrap_keys: inner.core.network.routing_table.bootstrap_keys.clone(),
                     bootstrap_records: inner.core.network.routing_table.bootstrap_records.clone(),
+                    serve_direct_bootstrap: inner.core.network.routing_table.serve_direct_bootstrap,
                 },
                 rpc: VeilidConfigRPC {
                     default_route_hop_count: inner.core.network.rpc.default_route_hop_count,
@@ -2195,6 +2241,7 @@ mod tests {
             vec!["bootstrap-v1.veilid.net".to_owned()]
         );
         assert!(s.core.network.routing_table.bootstrap_records.is_empty());
+        assert!(s.core.network.routing_table.serve_direct_bootstrap);
         assert_eq!(
             s.core.network.routing_table.bootstrap_keys,
             vec![
@@ -2259,12 +2306,21 @@ mod tests {
             s.core.internal.network.dht.max_watch_expiration_ms,
             600_000u32
         );
+        assert_eq!(
+            s.core.internal.network.dht.max_watch_inspect_interval_ms,
+            120_000u32
+        );
         assert_eq!(s.core.internal.network.dht.public_transaction_limit, 8u32);
         assert_eq!(s.core.internal.network.dht.member_transaction_limit, 4u32);
         //
         assert!(!s.core.network.upnp);
         assert_eq!(s.core.network.detect_address_changes, None);
         assert_eq!(s.core.internal.network.restricted_nat_retries, 0u32);
+        let save = &s.core.internal.network.routing_table.save;
+        assert_eq!(save.settle_ms, 5_000u32);
+        assert_eq!(save.min_interval_ms, 10_000u32);
+        assert_eq!(save.background_min_interval_ms, 5_000u32);
+        assert_eq!(save.period_ms, 300_000u32);
         //
         assert_eq!(
             s.core.network.tls.certificate_path,

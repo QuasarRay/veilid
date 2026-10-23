@@ -238,6 +238,7 @@ impl ConnectionManager {
             }
             *inner = Some(Self::new_inner(stop_source, sender, async_processor));
         }
+        self.arc.connection_table.startup();
 
         // Subscribe to events that may invalidate our protected-address set
         let commit_sub = impl_subscribe_event_bus_clone!(self, commit_event_handler);
@@ -477,12 +478,12 @@ impl ConnectionManager {
         Ok(NetworkResult::Value(handle))
     }
 
-    // Returns a network connection if one already is established
     #[cfg(feature = "stats")]
     pub(super) fn connection_table_stats(&self) -> ConnectionTableStats {
         self.arc.connection_table.stats()
     }
 
+    // Returns a network connection if one already is established
     pub fn get_connection(&self, flow: Flow) -> Option<ConnectionHandle> {
         let Ok(_guard) = self.arc.startup_lock.enter() else {
             return None;

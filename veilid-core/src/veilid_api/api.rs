@@ -480,6 +480,49 @@ impl VeilidAPI {
         .inspect_err(log_veilid_api_error!(self))
     }
 
+    /// Replace the configuration of a detached node; the new values apply at the next
+    /// [VeilidAPI::attach]. The keys a running node cannot take a new value for must be
+    /// unchanged, see [VeilidConfig::ensure_changeable_from]. A config as [VeilidAPI::get_state]
+    /// reports it, with its secrets blanked, keeps the current secrets.
+    ///
+    /// Errors with [VeilidAPIError::Generic] unless the node is detached, with
+    /// [VeilidAPIError::InvalidArgument] for a key that needs a restart or a value that fails
+    /// validation, or [VeilidAPIError::NotInitialized] if the API has been shut down.
+    #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(__VEILID_LOG_KEY = self.log_key()), skip_all, ret))]
+    pub fn change_config(&self, config: VeilidConfig) -> VeilidAPIResult<()> {
+        let res = (|| {
+            veilid_log!(self debug "change_config()");
+            let context = self.core_context()?;
+            let detached = {
+                cfg_if! {
+                    if #[cfg(feature = "mock-api")] {
+                        MockNetwork::with_node(&self.mock_key()?, |node| {
+                            node.attachment.state.is_detached()
+                        })?
+                    } else {
+                        context.attachment_manager().is_detached()
+                    }
+                }
+            };
+            if !detached {
+                apibail_generic!("the node must be detached to change its config");
+            }
+            config.validate()?;
+            let registry = context.registry();
+            let current = registry.config();
+            let mut config = config;
+            config.fill_secrets_from(&current);
+            config.ensure_changeable_from(&current)?;
+            let safe = (*config.safe()).clone();
+            registry.set_config(config);
+            (registry.update_callback())(VeilidUpdate::Config(Box::new(VeilidStateConfig {
+                config: safe,
+            })));
+            VeilidAPIResult::Ok(())
+        })();
+        res.inspect_err(log_veilid_api_error!(self))
+    }
+
     /// Wait until the attachment state satisfies a condition.
     ///
     /// Returns the first [VeilidStateAttachment] that satisfies `condition`, at once if the current state does.

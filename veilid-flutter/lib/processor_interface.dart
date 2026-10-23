@@ -52,22 +52,3 @@ abstract class DefaultVeilidProcessor implements VeilidProcessorInterface {
     }
   }
 }
-
-/// Network-aware retry, shared across every [VeilidProcessorInterface].
-extension VeilidProcessorRetry on VeilidProcessorInterface {
-  /// Run [closure], retrying VeilidAPI transients per [strategy] (default
-  /// [VeilidAPIRetryStrategy], waiting on network readiness before a tryAgain
-  /// retry).
-  Future<T> retry<T>(Future<T> Function() closure, {RetryStrategy? strategy}) =>
-      (strategy ??
-              VeilidAPIRetryStrategy(
-                tryAgainRetry: (attemptNumber) async {
-                  if (attemptNumber >= 3) {
-                    return false;
-                  }
-                  await waitReadyOrDelay(const Duration(milliseconds: 250));
-                  return true;
-                },
-              ))
-          .retry(closure);
-}

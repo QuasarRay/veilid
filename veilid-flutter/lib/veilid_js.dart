@@ -1112,6 +1112,10 @@ class VeilidJS extends Veilid {
   Future<void> detach() => _wasmPromiseVoid('detach', []);
 
   @override
+  Future<void> changeConfig(VeilidConfig config) =>
+      _wasmPromiseVoid('change_config', [jsonEncode(config).toJS]);
+
+  @override
   Future<void> reportAppLifecycleState(VeilidAppLifecycleState state) =>
       _wasmPromiseVoid('report_app_lifecycle_state', [jsonEncode(state).toJS]);
 

@@ -220,8 +220,7 @@ impl VeilidClient {
             .map_err(|e| format!("failed to initialize logging: {}", e))
             .expect_or_log("failed to initalize WASM platform");
 
-        // Stats manager: process-global, under the default log key. Records ride
-        // the "stats" log facility; WASM has no filesystem so no file output.
+        // Default log key, process-wide; WASM has no filesystem, so records ride the "stats" facility
         #[cfg(feature = "stats")]
         {
             let stats = &platformConfig.logging.stats;
@@ -367,6 +366,14 @@ impl VeilidClient {
     pub async fn detach() -> VeilidAPIResult<()> {
         let veilid_api = get_veilid_api()?;
         veilid_api.detach().await
+    }
+
+    /// Replace the configuration of a detached node; the new values apply at the next `attach`. A config as `getState` reports it, with its secrets blanked, keeps the current secrets.
+    ///
+    /// Throws the same error its core twin `VeilidAPI::change_config` returns: `Generic` unless the node is detached, `InvalidArgument` for a key that needs a restart, and `NotInitialized` if the node is not started.
+    pub fn changeConfig(config: Ts<VeilidConfig>) -> VeilidAPIResult<()> {
+        let veilid_api = get_veilid_api()?;
+        veilid_api.change_config(from_ts(config)?)
     }
 
     /// Report where the host application stands in its lifecycle.

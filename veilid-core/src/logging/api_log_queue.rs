@@ -1,11 +1,11 @@
 //! Bounded hand-off between the tracing call site and the application's update callback.
 //!
-//! The layer used to invoke each `UpdateCallback` inline, on whatever thread emitted the event.
-//! Where that callback crosses an FFI boundary - veilid-flutter serializes each update and posts it
-//! into the Dart isolate - the emitting thread paid a JSON encode and a cross-runtime post per
-//! event, so the embedding application's ability to keep up became backpressure on veilid's own
-//! network threads. A UDP socket wedged on ENOTCONN produced 30k events/s down that path and
-//! stalled the host app's UI thread until the OS killed it.
+//! An `UpdateCallback` invoked inline, on whatever thread emitted the event, makes the embedding
+//! application's ability to keep up backpressure on veilid's own network threads: where the
+//! callback crosses an FFI boundary (veilid-flutter serializes each update and posts it into the
+//! Dart isolate) every event is a JSON encode and a cross-runtime post, and a UDP socket wedged on
+//! ENOTCONN produces 30k events/s down that path, enough to stall the host app's UI thread until
+//! the OS kills it.
 //!
 //! Everything here is best effort by construction. Logs are diagnostics: losing some of them is
 //! always the right trade against stalling the node or the application embedding it.
@@ -43,8 +43,11 @@ const MAX_BATCH: usize = QUEUE_CAPACITY;
 pub(super) struct QueuedLog {
     /// Empty means the event came from process-wide code and reaches every registered callback
     pub log_key: String,
+    /// Severity of the event
     pub log_level: VeilidLogLevel,
+    /// Formatted event text
     pub message: String,
+    /// Captured for errors when the `backtrace` feature is on
     pub backtrace: Option<String>,
 }
 
@@ -59,11 +62,11 @@ pub(super) type QueuedLogSink = Arc<dyn Fn(QueuedLog) + Send + Sync>;
 /// Holds no global state, so its owner decides how many exist and for how long; `ApiTracingLayer`
 /// keeps the one this crate uses. `start` does take `&'static self` - the drain outlives the call
 /// that spawns it and reads the drop counter, which is what pins an instance to a `static` for
-/// anyone who actually wants a running drain.
+/// anyone who wants a running drain.
 pub(super) struct ApiLogQueue {
-    /// Lock-free rather than a `Mutex`: every emitting thread touches this on every event, so a
-    /// lock here would put back the contention that moving delivery off the caller removed
+    /// Lock-free: every emitting thread touches this on every event, and a mutex would serialize them
     sender: ArcSwapOption<flume::Sender<QueuedLog>>,
+    /// Events not queued since the last drain pass reported them
     dropped: AtomicU64,
 }
 
@@ -121,7 +124,7 @@ impl ApiLogQueue {
     cfg_if! {
         if #[cfg(all(target_arch = "wasm32", target_os = "unknown"))] {
             /// No threads in the browser, so the drain is a task on the event loop. It still buys
-            /// the thing that matters: the emitting call site no longer performs the delivery.
+            /// the thing that matters: the emitting call site does not perform the delivery.
             fn spawn_drain(&'static self, rx: flume::Receiver<QueuedLog>, sink: QueuedLogSink) {
                 spawn_detached_local("veilid api log drain", async move {
                     while let Ok(first) = rx.recv_async().await {
@@ -133,8 +136,7 @@ impl ApiLogQueue {
             }
         } else {
             /// A dedicated thread rather than a task on the executor: delivery blocks on whatever
-            /// the application does with the update, and the crash this was written for had that
-            /// blocking happen on the async runtime's own workers.
+            /// the application does with the update, which must not happen on the runtime's workers.
             fn spawn_drain(&'static self, rx: flume::Receiver<QueuedLog>, sink: QueuedLogSink) {
                 if let Err(e) = std::thread::Builder::new()
                     .name("veilid-api-log".to_owned())
@@ -153,9 +155,7 @@ impl ApiLogQueue {
                         }
                     })
                 {
-                    // Clear the sender first, so the event below cannot queue into a queue that
-                    // has no drain. With it cleared the api layer drops it and the other layers -
-                    // terminal, otlp - still carry it, which is where a process-wide failure goes
+                    // Cleared first, so the error below skips this layer and reaches the others
                     self.sender.store(None);
                     tracing::error!("failed to spawn veilid api log drain: {e}");
                 }

@@ -4,7 +4,7 @@ impl_veilid_log_facility!("rpc");
 
 /// Outcome of asking another node to validate one of our dial infos.
 ///
-/// Only a statement that actually went out says anything about whether peers can
+/// Only a statement that went out says anything about whether peers can
 /// reach us; a failure on our own side is no verdict at all.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DialInfoValidationOutcome {

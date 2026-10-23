@@ -14,9 +14,11 @@ use super::*;
 ///
 /// Cheap enough for the hot path: one clock read and one atomic on the suppressed path.
 pub struct LogThrottle {
+    /// Minimum gap between emissions
     interval_us: u64,
-    /// 0 means nothing has been emitted yet
+    /// Raw timestamp of the last emission; 0 means nothing has been emitted yet
     pub(super) last_us: AtomicU64,
+    /// Events dropped since the last emission
     pub(super) suppressed: AtomicU64,
 }
 
@@ -39,8 +41,7 @@ impl LogThrottle {
         let now = get_raw_timestamp();
         let last = self.last_us.load(Ordering::Relaxed);
 
-        // `now < last` is a wall clock stepped backwards. Emit rather than going silent until
-        // the clock catches up, which on a device that resyncs after suspend could be a while.
+        // now < last is a wall clock stepped back: emit rather than stay silent until it catches up
         if last != 0 && now >= last && now - last < self.interval_us {
             self.suppressed.fetch_add(1, Ordering::Relaxed);
             return None;

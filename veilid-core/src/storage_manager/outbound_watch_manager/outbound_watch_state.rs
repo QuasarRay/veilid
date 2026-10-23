@@ -3,14 +3,8 @@ use super::*;
 /// How long to wait without receiving a ValueChanged before triggering a fallback
 /// change inspection to detect missed updates. Silence is not evidence that a watch
 /// is broken, so this is the interval after evidence that it is live, and it doubles
-/// to WATCH_FALLBACK_INSPECT_MAX_INTERVAL while inspections keep finding nothing.
+/// up to the configured ceiling while inspections keep finding nothing.
 const WATCH_FALLBACK_INSPECT_INTERVAL: TimestampDuration = TimestampDuration::new_secs(30);
-
-/// Ceiling for the backed-off interval: an inspection costs one round trip, and a watch short
-/// of consensus may get its changes only this way, so for it this interval IS delivery latency.
-/// A watch at consensus also waits for its renewal window, see `fallback_inspect_due`.
-pub(in crate::storage_manager) const WATCH_FALLBACK_INSPECT_MAX_INTERVAL: TimestampDuration =
-    TimestampDuration::new_secs(120);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundWatchState {
@@ -28,23 +22,18 @@ pub(in crate::storage_manager) struct OutboundWatchState {
     min_expiration: Timestamp,
     /// Calculated field: the set of value changed routes for this watch from all per node watches
     value_changed_routes: BTreeSet<PublicKey>,
-    /// Timestamp when the watch was established or last renewed/reconciled.
+    /// When the watch was established or last renewed/reconciled
     watch_established_ts: Timestamp,
-    /// Timestamp of the last ValueChanged RPC received.
-    /// Set ONLY when an actual ValueChanged arrives from a remote node.
+    /// When the last ValueChanged RPC arrived from a remote node
     last_value_changed_ts: Option<Timestamp>,
-    /// Timestamp of the last fallback change inspection.
+    /// When the last fallback change inspection ran
     last_fallback_inspect_ts: Option<Timestamp>,
-    /// Current fallback interval, doubled each time an inspection finds nothing and
-    /// reset by evidence the watch is live or has changed
+    /// Fallback interval: doubled per empty inspection, reset when the watch proves live or changed
     #[serde(default)]
     opt_fallback_inspect_interval: Option<TimestampDuration>,
-    /// Set by fallback change inspection when changes are found that should
-    /// have been delivered via ValueChanged but weren't. Forces a reconcile
-    /// to re-establish the watch with fresh notification routes.
+    /// Fallback inspection found missed changes; forces a reconcile for fresh notification routes
     needs_forced_reconcile: bool,
-    /// Last sequence number reported to the app per subkey for a transactional (non-committing) hint.
-    /// Gates hints to be monotonically increasing so replays and duplicate per-node reports are dropped.
+    /// Last seq hinted to the app per subkey; hints only rise, so replays and duplicates drop
     #[serde(default)]
     last_reported_subkey_seqs: BTreeMap<ValueSubkey, ValueSeqNum>,
     /// Subkeys reported to the app and not yet read back, with a count of range-only copies
@@ -131,13 +120,11 @@ impl OutboundWatchStateEditor<'_> {
         self.state.last_fallback_inspect_ts = Some(ts);
     }
     /// An inspection was answered with nothing newer: wait longer before asking again,
-    /// up to [WATCH_FALLBACK_INSPECT_MAX_INTERVAL].
-    pub fn back_off_fallback_inspect(&mut self) {
-        let cur = self.state.fallback_inspect_interval();
-        self.state.opt_fallback_inspect_interval = Some(
-            TimestampDuration::new(cur.as_u64().saturating_mul(2))
-                .min(WATCH_FALLBACK_INSPECT_MAX_INTERVAL),
-        );
+    /// up to `max_interval`
+    pub fn back_off_fallback_inspect(&mut self, max_interval: TimestampDuration) {
+        let cur = self.state.fallback_inspect_interval(max_interval);
+        self.state.opt_fallback_inspect_interval =
+            Some(TimestampDuration::new(cur.as_u64().saturating_mul(2)).min(max_interval));
     }
     /// Something that could have hidden a missed update: a productive inspection, or
     /// the watch's node set or parameters moving
@@ -289,21 +276,19 @@ impl OutboundWatchState {
         res
     }
 
-    /// Check if a fallback change inspection is needed because no ValueChanged has
-    /// been received within the current backed-off interval.
-    pub fn needs_fallback_inspect(&self, cur_ts: Timestamp) -> bool {
-        let reference_ts = self
-            .last_fallback_inspect_ts
-            .map(|t| t.max(self.watch_established_ts))
-            .unwrap_or(self.watch_established_ts);
+    /// Whether the current backed-off interval has passed in silence since the latest of
+    /// establishment, the last fallback inspection and the last delivered change
+    pub fn needs_fallback_inspect(
+        &self,
+        cur_ts: Timestamp,
+        max_interval: TimestampDuration,
+    ) -> bool {
+        let reference_ts = [self.last_fallback_inspect_ts, self.last_value_changed_ts]
+            .into_iter()
+            .flatten()
+            .fold(self.watch_established_ts, Timestamp::max);
 
-        if let Some(vc_ts) = self.last_value_changed_ts {
-            if vc_ts >= reference_ts {
-                return false;
-            }
-        }
-
-        cur_ts >= reference_ts.later(self.fallback_inspect_interval())
+        cur_ts >= reference_ts.later(self.fallback_inspect_interval(max_interval))
     }
 
     /// Whether the fallback change inspection is due. Once the interval reaches its ceiling, a
@@ -315,12 +300,13 @@ impl OutboundWatchState {
         cur_ts: Timestamp,
         consensus_count: usize,
         renew_window: TimestampDuration,
+        max_interval: TimestampDuration,
     ) -> bool {
-        if !self.needs_fallback_inspect(cur_ts) {
+        if !self.needs_fallback_inspect(cur_ts, max_interval) {
             return false;
         }
         if self.nodes.len() < consensus_count
-            || self.fallback_inspect_interval() < WATCH_FALLBACK_INSPECT_MAX_INTERVAL
+            || self.fallback_inspect_interval(max_interval) < max_interval
         {
             return true;
         }
@@ -328,11 +314,11 @@ impl OutboundWatchState {
     }
 
     /// The interval currently in force for this watch's fallback inspection
-    pub fn fallback_inspect_interval(&self) -> TimestampDuration {
+    pub fn fallback_inspect_interval(&self, max_interval: TimestampDuration) -> TimestampDuration {
         // Capped on read too: an interval saved under an older, higher ceiling persists
         self.opt_fallback_inspect_interval
             .unwrap_or(WATCH_FALLBACK_INSPECT_INTERVAL)
-            .min(WATCH_FALLBACK_INSPECT_MAX_INTERVAL)
+            .min(max_interval)
     }
 
     /// Whether a forced reconcile is needed (fallback inspection found missed changes).

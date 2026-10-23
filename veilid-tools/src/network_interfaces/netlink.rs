@@ -40,20 +40,46 @@ fn ifreq_from_name(ifname: &str) -> io::Result<ifreq> {
     Ok(req)
 }
 
+#[cfg(any(target_os = "android", target_env = "musl"))]
+fn ioctl_siocgifflags(sock: c_int, req: &mut ifreq) -> c_int {
+    // SAFETY: sock is open and req is a complete ifreq the call fills in place
+    unsafe { ioctl(sock, SIOCGIFFLAGS as i32, req) }
+}
+
+#[cfg(not(any(target_os = "android", target_env = "musl")))]
+fn ioctl_siocgifflags(sock: c_int, req: &mut ifreq) -> c_int {
+    // SAFETY: sock is open and req is a complete ifreq the call fills in place
+    unsafe { ioctl(sock, SIOCGIFFLAGS, req) }
+}
+
+#[cfg(all(
+    any(target_os = "android", target_os = "linux"),
+    any(target_arch = "arm", target_arch = "aarch64")
+))]
+fn if_indextoname_into(index: u32, ifnamebuf: &mut [u8; IF_NAMESIZE + 1]) -> io::Result<()> {
+    // SAFETY: ifnamebuf holds IF_NAMESIZE + 1 bytes, the most if_indextoname writes
+    if unsafe { if_indextoname(index, ifnamebuf.as_mut_ptr()) }.is_null() {
+        bail_io_error_other!("if_indextoname returned null");
+    }
+    Ok(())
+}
+
+#[cfg(not(all(
+    any(target_os = "android", target_os = "linux"),
+    any(target_arch = "arm", target_arch = "aarch64")
+)))]
+fn if_indextoname_into(index: u32, ifnamebuf: &mut [u8; IF_NAMESIZE + 1]) -> io::Result<()> {
+    use std::os::raw::c_char;
+    // SAFETY: ifnamebuf holds IF_NAMESIZE + 1 bytes, the most if_indextoname writes
+    if unsafe { if_indextoname(index, ifnamebuf.as_mut_ptr() as *mut c_char) }.is_null() {
+        bail_io_error_other!("if_indextoname returned null");
+    }
+    Ok(())
+}
+
 fn get_interface_name(index: u32) -> io::Result<String> {
     let mut ifnamebuf = [0u8; (IF_NAMESIZE + 1)];
-    cfg_if! {
-        if #[cfg(all(any(target_os = "android", target_os="linux"), any(target_arch = "arm", target_arch = "aarch64")))] {
-            if unsafe { if_indextoname(index, ifnamebuf.as_mut_ptr()) }.is_null() {
-                bail_io_error_other!("if_indextoname returned null");
-            }
-        } else {
-            use std::os::raw::c_char;
-            if unsafe { if_indextoname(index, ifnamebuf.as_mut_ptr() as *mut c_char) }.is_null() {
-                bail_io_error_other!("if_indextoname returned null");
-            }
-        }
-    }
+    if_indextoname_into(index, &mut ifnamebuf)?;
 
     let ifnamebuflen = ifnamebuf
         .iter()
@@ -186,13 +212,7 @@ impl PlatformSupportNetlink {
             return Err(io::Error::last_os_error());
         }
 
-        cfg_if! {
-            if #[cfg(any(target_os = "android", target_env = "musl"))] {
-                let res = unsafe { ioctl(sock, SIOCGIFFLAGS as i32, &mut req) };
-            } else {
-                let res = unsafe { ioctl(sock, SIOCGIFFLAGS, &mut req) };
-            }
-        }
+        let res = ioctl_siocgifflags(sock, &mut req);
         // SAFETY: sock was opened above and is closed exactly once here
         unsafe { close(sock) };
         if res < 0 {

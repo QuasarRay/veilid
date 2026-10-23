@@ -54,8 +54,7 @@ pub(crate) use veilid_log_err;
 /// Builds a closure that logs its error argument at `DEBUG` level in alternate (`{:#}`) form,
 /// with an optional prefix message. Useful as the argument to `Result::map_err` or `inspect_err`.
 macro_rules! veilid_log_dbg {
-    // Throttled forms first, for the same reason as in `veilid_log!`: a failed `expr` fragment is
-    // a hard error rather than a backtrack.
+    // Throttled forms first, as in `veilid_log!`: a failed `expr` fragment is a hard error, not a backtrack
     ($self_expr:expr, throttle: $ms:expr, $message:expr) => {
         |e| veilid_log_throttled_event!($self_expr, throttle: $ms, prefix: "", level: $crate::Level::DEBUG, target: self::__VEILID_LOG_FACILITY, "{}: {:#}", $message, e)
     };
@@ -174,9 +173,7 @@ pub(crate) const DEBUGWARN: tracing::Level = tracing::Level::DEBUG;
 /// default, and a `fields:` form records structured fields. The `debugwarn` level prefixes
 /// `DEBUGWARN:` and logs at `WARN` in debug builds, `DEBUG` in release builds.
 macro_rules! veilid_log {
-    // Within each level, the `throttle:` arms come first: a failed `expr` fragment is a hard
-    // error rather than a backtrack, so they have to be tried before the arms whose next token
-    // is a message expression.
+    // Within each level the `throttle:` arms come first: a failed `expr` fragment is a hard error, not a backtrack
 
     // ERROR //////////////////////////////////////////////////////////////////////////
     // veilid_log!(self error throttle: 1000, "data: {}", data)

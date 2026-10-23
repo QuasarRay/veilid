@@ -1,8 +1,22 @@
 import { EXTENSION_ID } from '../utils/extension-id.js';
-import type { CaseResult, ContextName } from './types.js';
+import type { CaseResult, ContextName, RunReply, RunRequest } from './types.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const chrome: any;
+// Only the slice of chrome.runtime the driver uses; @types/chrome is not a dependency.
+declare const chrome:
+  | {
+      runtime?: {
+        sendMessage: (
+          extensionId: string,
+          message: unknown,
+          respond: (response: unknown) => void,
+        ) => void;
+        lastError?: { message?: string };
+      };
+    }
+  | undefined;
+
+// What extension/background.ts answers with.
+type ExtensionReply = { type?: string; ok?: boolean; error?: string; results?: CaseResult[] };
 
 // Bounds a whole context run (every selected suite), not one case.
 const RUN_TIMEOUT_MS = 50 * 60 * 1000;
@@ -33,8 +47,8 @@ export async function driveContext(
 // reports where it got to instead of just timing out silently.
 function collect(
   context: ContextName,
-  post: (msg: unknown, transfer?: Transferable[]) => void,
-  onMessage: (handler: (data: any) => void) => void,
+  post: (msg: RunRequest, transfer?: Transferable[]) => void,
+  onMessage: (handler: (data: RunReply | undefined) => void) => void,
   onError: (handler: (message: string) => void) => void,
   suites: string[],
   caseFilter?: string,
@@ -54,10 +68,11 @@ function collect(
       }
       clearTimeout(timer);
       if (data?.type === 'done' && data.ok) {
-        resolve(data.results as CaseResult[]);
-      } else {
-        reject(new Error(data?.error ?? `${context} run failed after ${lastStep}`));
+        resolve(data.results);
+        return;
       }
+      const error = data?.type === 'done' && !data.ok ? data.error : undefined;
+      reject(new Error(error ?? `${context} run failed after ${lastStep}`));
     });
 
     onError((message) => {
@@ -80,7 +95,7 @@ function driveWorker(
   return collect(
     context,
     (msg) => worker.postMessage(msg),
-    (h) => (worker.onmessage = (e) => h(e.data)),
+    (h) => (worker.onmessage = (e: MessageEvent<RunReply>) => h(e.data)),
     (h) => {
       worker.onerror = (e) => h(e.message);
       worker.onmessageerror = () => h('message deserialization error');
@@ -95,15 +110,14 @@ function driveSharedWorker(
   suites: string[],
   caseFilter?: string,
 ): Promise<CaseResult[]> {
-  const worker = new SharedWorker(
-    new URL('../workers/shared.worker.ts', import.meta.url),
-    { type: 'module' },
-  );
+  const worker = new SharedWorker(new URL('../workers/shared.worker.ts', import.meta.url), {
+    type: 'module',
+  });
   worker.port.start();
   return collect(
     context,
     (msg) => worker.port.postMessage(msg),
-    (h) => (worker.port.onmessage = (e) => h(e.data)),
+    (h) => (worker.port.onmessage = (e: MessageEvent<RunReply>) => h(e.data)),
     (h) => (worker.onerror = (e) => h(e.message)),
     suites,
     caseFilter,
@@ -131,7 +145,7 @@ async function driveServiceWorker(
     return await collect(
       context,
       (msg) => sw.postMessage(msg, [channel.port2]),
-      (h) => (channel.port1.onmessage = (e) => h(e.data)),
+      (h) => (channel.port1.onmessage = (e: MessageEvent<RunReply>) => h(e.data)),
       () => {},
       suites,
       caseFilter,
@@ -150,7 +164,7 @@ async function waitUntilServiceWorkerResponds(sw: ServiceWorker, timeoutMs = 600
   const deadline = Date.now() + timeoutMs;
 
   const broadcast = new Promise<void>((resolve) => {
-    const onMessage = (e: MessageEvent) => {
+    const onMessage = (e: MessageEvent<{ type?: string } | undefined>) => {
       if (e.data?.type === 'sw-ready') {
         navigator.serviceWorker.removeEventListener('message', onMessage);
         resolve();
@@ -189,20 +203,18 @@ async function driveExtension(
         'wdio.ext.conf.ts is required for this context',
     );
   }
+  const runtime = chrome.runtime;
 
-  const send = (message: unknown, timeoutMs: number): Promise<any> =>
+  const send = (message: unknown, timeoutMs: number): Promise<ExtensionReply> =>
     new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error('extension message timed out')),
-        timeoutMs,
-      );
-      chrome.runtime.sendMessage(EXTENSION_ID, message, (response: unknown) => {
+      const timer = setTimeout(() => reject(new Error('extension message timed out')), timeoutMs);
+      runtime.sendMessage(EXTENSION_ID, message, (response) => {
         clearTimeout(timer);
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+        if (runtime.lastError) {
+          reject(new Error(runtime.lastError.message));
           return;
         }
-        resolve(response);
+        resolve(response as ExtensionReply);
       });
     });
 
@@ -216,7 +228,7 @@ async function driveExtension(
     }
     try {
       const res = await send({ type: 'ping' }, 2000);
-      if (res?.type === 'pong') break;
+      if (res.type === 'pong') break;
       lastError = `unexpected ping reply: ${JSON.stringify(res)}`;
     } catch (e) {
       lastError = String(e);
@@ -225,8 +237,8 @@ async function driveExtension(
   }
 
   const result = await send({ type: 'run', suites, caseFilter }, RUN_TIMEOUT_MS);
-  if (!result?.ok) {
-    throw new Error(result?.error ?? 'extension run failed');
+  if (!result.ok) {
+    throw new Error(result.error ?? 'extension run failed');
   }
-  return result.results as CaseResult[];
+  return result.results ?? [];
 }

@@ -76,7 +76,7 @@ async def test_version(api_connection: veilid.VeilidAPI):
     print(f"veilid_version_string: {vstr}")
 
 
-@pytest.mark.asyncio    
+@pytest.mark.asyncio
 async def test_features(api_connection: veilid.VeilidAPI):
     features = await api_connection.veilid_features()
     print(f"veilid_features: {features}")
@@ -88,12 +88,46 @@ async def test_config(api_connection: veilid.VeilidAPI):
     cfgstr = await api_connection.default_veilid_config()
     print(f"default_veilid_config:\n{cfgstr}")
     cfgjson = json.loads(cfgstr)
-    
+
     veilidConfigInstance = veilid.VeilidConfig(**cfgjson)
     cfgstr2 = json.dumps(dataclasses.asdict(veilidConfigInstance))
-    
+
     cfgjson2 = json.loads(cfgstr2)
     veilidConfigInstance2 = veilid.VeilidConfig(**cfgjson2)
-    
+
     assert veilidConfigInstance == veilidConfigInstance2
 
+
+@pytest.mark.asyncio
+async def test_change_config(api_connection: veilid.VeilidAPI):
+    config = (await api_connection.get_state()).config.config
+
+    # Attached, the change is refused
+    with pytest.raises(veilid.VeilidAPIErrorGeneric):
+        await api_connection.change_config(config)
+
+    await api_connection.detach()
+    await api_connection.wait_for_attachment_condition(
+        veilid.VeilidStateAttachmentCondition(opt_max_state=veilid.AttachmentState.DETACHED)
+    )
+    try:
+        # Detached, a changeable key takes at once; the config get_state reports
+        # carries no secrets and still applies
+        flipped = dataclasses.replace(
+            config, network=dataclasses.replace(config.network, upnp=not config.network.upnp)
+        )
+        await api_connection.change_config(flipped)
+        after = (await api_connection.get_state()).config.config
+        assert after.network.upnp == flipped.network.upnp
+
+        # A key that needs a restart is refused and nothing changes
+        with pytest.raises(veilid.VeilidAPIErrorInvalidArgument):
+            await api_connection.change_config(
+                dataclasses.replace(flipped, namespace=flipped.namespace + "x")
+            )
+        assert (await api_connection.get_state()).config.config.namespace == flipped.namespace
+
+        await api_connection.change_config(config)
+    finally:
+        await api_connection.attach()
+        await api_connection.wait_for_attachment_condition()

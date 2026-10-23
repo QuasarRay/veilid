@@ -76,6 +76,9 @@ void _eagerResolveNativeSymbols() {
     Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._attach),
     Native.addressOf<NativeFunction<Void Function(Int64)>>(VeilidFFI._detach),
     Native.addressOf<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>(
+      VeilidFFI._changeConfig,
+    ),
+    Native.addressOf<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>(
       VeilidFFI._reportAppLifecycleState,
     ),
     Native.addressOf<
@@ -2233,6 +2236,9 @@ class VeilidFFI extends Veilid {
   @Native<Void Function(Int64)>(symbol: 'detach')
   external static void _detach(int port);
 
+  @Native<Void Function(Int64, Pointer<Utf8>)>(symbol: 'change_config')
+  external static void _changeConfig(int port, Pointer<Utf8> config);
+
   @Native<Void Function(Int64, Pointer<Utf8>)>(
     symbol: 'report_app_lifecycle_state',
   )
@@ -3097,6 +3103,16 @@ class VeilidFFI extends Veilid {
     final recvPort = ReceivePort('detach');
     final sendPort = recvPort.sendPort;
     _detach(sendPort.nativePort);
+    return processFutureVoid(recvPort.first);
+  }
+
+  @override
+  Future<void> changeConfig(VeilidConfig config) {
+    final nativeConfig = jsonEncode(config).toNativeUtf8();
+    final recvPort = ReceivePort('change_config');
+    final sendPort = recvPort.sendPort;
+    _changeConfig(sendPort.nativePort, nativeConfig);
+    malloc.free(nativeConfig);
     return processFutureVoid(recvPort.first);
   }
 

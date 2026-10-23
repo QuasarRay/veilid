@@ -87,6 +87,24 @@
       ]
     },
     {
+      "description": "Replace the configuration of a detached node.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "description": "The new configuration, with the keys that need a restart unchanged.",
+          "$ref": "#/$defs/VeilidConfig"
+        },
+        "op": {
+          "type": "string",
+          "const": "ChangeConfig"
+        }
+      },
+      "required": [
+        "op",
+        "config"
+      ]
+    },
+    {
       "description": "Report where the host application stands in its lifecycle.",
       "type": "object",
       "properties": {
@@ -2932,6 +2950,990 @@
           "type": "string",
           "const": "Background"
         }
+      ]
+    },
+    "VeilidCapability": {
+      "description": "A four-character code",
+      "type": "string"
+    },
+    "VeilidConfig": {
+      "description": "Top level of the Veilid configuration tree",
+      "type": "object",
+      "properties": {
+        "attachment": {
+          "description": "Configuring how the node attaches to the network",
+          "$ref": "#/$defs/VeilidConfigAttachment",
+          "default": {}
+        },
+        "block_store": {
+          "description": "Configuring the block store (storage of large content-addressable content)",
+          "$ref": "#/$defs/VeilidConfigBlockStore"
+        },
+        "capabilities": {
+          "description": "Capabilities to enable for your application/node",
+          "$ref": "#/$defs/VeilidConfigCapabilities"
+        },
+        "internal": {
+          "description": "Internal \"footgun\" tuning. `None` uses safe defaults. Only honored with the\n`footgun-config` feature; otherwise ignored (a warning is logged at startup).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VeilidConfigInternal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "namespace": {
+          "description": "To run multiple Veilid nodes within the same application, either through a single process running\napi_startup/api_startup_json multiple times, or your application running mulitple times side-by-side\nthere needs to be a key used to partition the application's storage (in the TableStore, ProtectedStore, etc).\nAn empty value here is the default, but if you run multiple veilid nodes concurrently, you should set this\nto a string that uniquely identifies this -instance- within the same 'program_name'.\nMust be a valid filename for all Veilid-capable systems, which means no backslashes or forward slashes\nin the name. Stick to a-z,0-9,_ and space and you should be fine.",
+          "type": "string"
+        },
+        "network": {
+          "description": "Configuring how Veilid interacts with the low level network",
+          "$ref": "#/$defs/VeilidConfigNetwork"
+        },
+        "program_name": {
+          "description": "An identifier used to describe the program using veilid-core.\nUsed to partition storage locations in places like the ProtectedStore.\nMust be non-empty and a valid filename for all Veilid-capable systems, which means\nno backslashes or forward slashes in the name. Stick to a-z,0-9,_ and space and you should be fine.\n\nCaution: If you change this string, there is no migration support. Your app's protected store and\ntable store will very likely experience data loss. Pick a program name and stick with it. This is\nnot a 'visible' identifier and it should uniquely identify your application.",
+          "type": "string"
+        },
+        "protected_store": {
+          "description": "Configuring the protected store (keychain/keyring/etc)",
+          "$ref": "#/$defs/VeilidConfigProtectedStore"
+        },
+        "table_store": {
+          "description": "Configuring the table store (persistent encrypted database)",
+          "$ref": "#/$defs/VeilidConfigTableStore"
+        }
+      },
+      "required": [
+        "program_name",
+        "namespace",
+        "capabilities",
+        "protected_store",
+        "table_store",
+        "block_store",
+        "network"
+      ]
+    },
+    "VeilidConfigAddressType": {
+      "description": "An IP address family (IP version) the node may use.",
+      "oneOf": [
+        {
+          "description": "IPv4 (32-bit) addresses.",
+          "type": "string",
+          "const": "IPV4"
+        },
+        {
+          "description": "IPv6 (128-bit) addresses.",
+          "type": "string",
+          "const": "IPV6"
+        }
+      ]
+    },
+    "VeilidConfigAttachment": {
+      "description": "Attachment configuration, owned by the attachment manager.\n\n```yaml\nattachment:\n    app_lifecycle: # only with `--features=app-lifecycle`\n        prefer_foreground: true\n        auto_detect_state: true\n```",
+      "type": "object"
+    },
+    "VeilidConfigBlockStore": {
+      "description": "Block store configuration: content-addressed block storage.",
+      "type": "object",
+      "properties": {
+        "delete": {
+          "description": "Delete the block store on startup.",
+          "type": "boolean"
+        },
+        "directory": {
+          "description": "Directory holding the block store (empty = platform default).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "directory",
+        "delete"
+      ]
+    },
+    "VeilidConfigCapabilities": {
+      "description": "Capabilities advertised by this node.",
+      "type": "object",
+      "properties": {
+        "disable": {
+          "description": "Capabilities to disable (advertised as unavailable).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VeilidCapability"
+          }
+        }
+      },
+      "required": [
+        "disable"
+      ]
+    },
+    "VeilidConfigDHT": {
+      "description": "Configure the Distributed Hash Table (DHT).\nDefaults should be used here unless you are absolutely sure you know what you're doing.\nIf you change the count/fanout/timeout parameters, you may render your node inoperable\nfor correct DHT operations.",
+      "type": "object",
+      "properties": {
+        "local_max_subkey_cache_memory_mb": {
+          "description": "Memory cap for the local subkey cache, in megabytes.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "local_subkey_cache_size": {
+          "description": "Number of subkeys cached for locally-created DHT records.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_concurrent_operations": {
+          "description": "Max concurrent DHT network operations in flight (local-only ops exempt).",
+          "type": "integer",
+          "format": "uint32",
+          "default": 16,
+          "minimum": 0
+        },
+        "remote_max_records": {
+          "description": "Maximum number of remote DHT records stored on behalf of others.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "remote_max_storage_space_mb": {
+          "description": "Disk cap for remote DHT record storage, in megabytes.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "remote_max_subkey_cache_memory_mb": {
+          "description": "Memory cap for the remote subkey cache, in megabytes.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "remote_subkey_cache_size": {
+          "description": "Number of subkeys cached for DHT records stored on behalf of others.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "local_subkey_cache_size",
+        "local_max_subkey_cache_memory_mb",
+        "remote_subkey_cache_size",
+        "remote_max_records",
+        "remote_max_subkey_cache_memory_mb",
+        "remote_max_storage_space_mb"
+      ]
+    },
+    "VeilidConfigInternal": {
+      "description": "Internal \"footgun\" configuration tree, parallel to the main config.\n\nThese fields tune low-level network/DHT timing, fanout, consensus and connection limits.\nChanging them from the defaults can render a node inoperable. They are only honored when\nveilid-core is built with the `footgun-config` feature; without it, any non-default values\nhere are reset to defaults at startup (with a warning).",
+      "type": "object",
+      "properties": {
+        "network": {
+          "description": "Internal network tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalNetwork"
+        }
+      },
+      "required": [
+        "network"
+      ]
+    },
+    "VeilidConfigInternalDHT": {
+      "description": "Internal \"footgun\" DHT configuration. See [VeilidConfigInternal].\nChanging the count/fanout/timeout parameters may render your node inoperable for\ncorrect DHT operations.",
+      "type": "object",
+      "properties": {
+        "consensus_width": {
+          "description": "Maximum number of nodes considered 'close to a record key' for storing a record.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "get_value_count": {
+          "description": "Number of matching values sought for GetValue consensus.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "get_value_fanout": {
+          "description": "Parallel fanout width for GetValue.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "get_value_timeout_ms": {
+          "description": "Timeout for a GetValue operation, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_find_node_count": {
+          "description": "Maximum number of nodes returned by a FindNode query.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_watch_expiration_ms": {
+          "description": "Maximum lifetime of a DHT watch, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_watch_inspect_interval_ms": {
+          "description": "Longest interval between change inspections of a watch, in milliseconds; a watch short\nof consensus, or not yet established, delivers changes at most this late.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "member_transaction_limit": {
+          "description": "Reserved transaction slots for signers who are schema members of the record.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "member_watch_limit": {
+          "description": "Reserved watch slots for watchers whose signer is a schema member of the record.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_peer_count": {
+          "description": "Minimum number of peers to keep in the routing table.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_peer_refresh_time_ms": {
+          "description": "Minimum interval between peer-refresh rounds, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "public_transaction_limit": {
+          "description": "Maximum concurrent transactions by anonymous signers (not a schema member).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "public_watch_limit": {
+          "description": "Maximum concurrent watches by anonymous watchers (signer not a schema member).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "resolve_node_count": {
+          "description": "Number of nodes sought when resolving a node.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "resolve_node_fanout": {
+          "description": "Parallel fanout width when resolving a node.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "resolve_node_timeout_ms": {
+          "description": "Timeout for resolving a node, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "set_value_count": {
+          "description": "Number of nodes that must accept a SetValue for consensus.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "set_value_fanout": {
+          "description": "Parallel fanout width for SetValue.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "set_value_timeout_ms": {
+          "description": "Timeout for a SetValue operation, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "validate_dial_info_receipt_time_ms": {
+          "description": "Time allowed to receive a dial-info validation receipt, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "max_find_node_count",
+        "resolve_node_timeout_ms",
+        "resolve_node_count",
+        "resolve_node_fanout",
+        "get_value_timeout_ms",
+        "get_value_count",
+        "get_value_fanout",
+        "set_value_timeout_ms",
+        "set_value_count",
+        "set_value_fanout",
+        "consensus_width",
+        "min_peer_count",
+        "min_peer_refresh_time_ms",
+        "validate_dial_info_receipt_time_ms",
+        "max_watch_expiration_ms",
+        "max_watch_inspect_interval_ms",
+        "public_watch_limit",
+        "member_watch_limit",
+        "public_transaction_limit",
+        "member_transaction_limit"
+      ]
+    },
+    "VeilidConfigInternalNetwork": {
+      "description": "Internal \"footgun\" network configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "cgnat_hole_punch_ttl": {
+          "description": "Hole punch TTL behind a carrier-grade NAT, which sits more hops out than a home router.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "client_allowlist_timeout_ms": {
+          "description": "Time a client stays on the allowlist after connecting, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "connection_inactivity_timeout_ms": {
+          "description": "Idle time before an inactive connection is dropped, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "connection_initial_timeout_ms": {
+          "description": "Timeout to establish a new connection, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "default_hole_punch_ttl": {
+          "description": "TTL (hop limit) of a hole punch, enough to pass this node's NAT but not reach the peer's.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "dht": {
+          "description": "Internal DHT tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalDHT"
+        },
+        "hole_punch_receipt_time_ms": {
+          "description": "Time allowed to receive a hole-punch receipt, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_connection_frequency_per_min": {
+          "description": "Maximum new connections accepted per minute from one source.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_connections_per_ip4": {
+          "description": "Maximum simultaneous connections from a single IPv4 address.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_connections_per_ip6_prefix": {
+          "description": "Maximum simultaneous connections from a single IPv6 prefix.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_connections_per_ip6_prefix_size": {
+          "description": "IPv6 prefix length (bits) used to group connections for the per-prefix limit.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "protocol": {
+          "description": "Internal per-protocol tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalProtocol"
+        },
+        "restricted_nat_retries": {
+          "description": "NAT-detection retries during dial-info confirmation for port/address-restricted NAT\n(some NATs open to full-cone after a few attempts; off by default).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "reverse_connection_receipt_time_ms": {
+          "description": "Time allowed to receive a reverse-connection receipt, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "routing_table": {
+          "description": "Internal routing table tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalRoutingTable"
+        },
+        "rpc": {
+          "description": "Internal RPC tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalRPC"
+        },
+        "single_send_timeout_ms": {
+          "description": "Cap on any single low-level send, in milliseconds, so a send on a wedged\ntransport cannot consume the caller's whole RPC timeout budget.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "connection_initial_timeout_ms",
+        "single_send_timeout_ms",
+        "connection_inactivity_timeout_ms",
+        "max_connections_per_ip4",
+        "max_connections_per_ip6_prefix",
+        "max_connections_per_ip6_prefix_size",
+        "max_connection_frequency_per_min",
+        "client_allowlist_timeout_ms",
+        "reverse_connection_receipt_time_ms",
+        "hole_punch_receipt_time_ms",
+        "default_hole_punch_ttl",
+        "cgnat_hole_punch_ttl",
+        "restricted_nat_retries",
+        "rpc",
+        "dht",
+        "protocol",
+        "routing_table"
+      ]
+    },
+    "VeilidConfigInternalProtocol": {
+      "description": "Internal \"footgun\" per-protocol configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "udp": {
+          "description": "Internal UDP tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalUDP"
+        }
+      },
+      "required": [
+        "udp"
+      ]
+    },
+    "VeilidConfigInternalRPC": {
+      "description": "Internal \"footgun\" RPC configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "concurrency": {
+          "description": "Number of concurrent RPC worker tasks (0 = automatic).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_route_hop_count": {
+          "description": "Maximum number of hops allowed in a route.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "max_timestamp_ahead_ms": {
+          "description": "Reject messages timestamped more than this many ms in the future (`None` = no limit).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_timestamp_behind_ms": {
+          "description": "Reject messages timestamped more than this many ms in the past (`None` = no limit).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "queue_size": {
+          "description": "Maximum number of queued RPC operations.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "timeout_ms": {
+          "description": "Timeout for an RPC round-trip, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "concurrency",
+        "queue_size",
+        "timeout_ms",
+        "max_route_hop_count"
+      ]
+    },
+    "VeilidConfigInternalRoutingTable": {
+      "description": "Internal \"footgun\" routing table configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "save": {
+          "description": "When the routing table is saved.",
+          "$ref": "#/$defs/VeilidConfigInternalRoutingTableSave"
+        }
+      },
+      "required": [
+        "save"
+      ]
+    },
+    "VeilidConfigInternalRoutingTableSave": {
+      "description": "Internal \"footgun\" routing table save schedule. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "background_min_interval_ms": {
+          "description": "Least time between saves in the background, where the process may be frozen within\nseconds, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_interval_ms": {
+          "description": "Least time between saves driven by changes, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "period_ms": {
+          "description": "Longest the table goes unsaved, so changes too small to drive a save still reach disk,\nin milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "settle_ms": {
+          "description": "Quiet time after a change worth saving before the table is saved, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "settle_ms",
+        "min_interval_ms",
+        "background_min_interval_ms",
+        "period_ms"
+      ]
+    },
+    "VeilidConfigInternalUDP": {
+      "description": "Internal \"footgun\" UDP configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "socket_pool_size": {
+          "description": "Number of UDP sockets in the send/receive pool (0 = automatic).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "socket_pool_size"
+      ]
+    },
+    "VeilidConfigNetwork": {
+      "description": "Network subsystem configuration: connections, routing table, RPC, DHT, transports, and privacy.",
+      "type": "object",
+      "properties": {
+        "address_types": {
+          "description": "Enabled IP address families (empty = all available).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VeilidConfigAddressType"
+          }
+        },
+        "bind_retry_ms": {
+          "description": "Wait before retrying a listen address that failed to bind, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 10000,
+          "minimum": 0
+        },
+        "detect_address_changes": {
+          "description": "Watch for and react to local address changes (`None` = auto-detect).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "dht": {
+          "description": "DHT cache and storage configuration.",
+          "$ref": "#/$defs/VeilidConfigDHT"
+        },
+        "max_connections": {
+          "description": "Maximum total simultaneous connections across all protocols.\nRange: native 32-512, wasm32/browser 16-64.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "network_key_password": {
+          "description": "Optional password; its presence joins a private network with a derived network key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privacy": {
+          "description": "Privacy and relay preferences.",
+          "$ref": "#/$defs/VeilidConfigPrivacy"
+        },
+        "protocol": {
+          "description": "Per-protocol (UDP/TCP/WS/WSS) configuration.",
+          "$ref": "#/$defs/VeilidConfigProtocol"
+        },
+        "routing_table": {
+          "description": "Routing table identity and bootstrap configuration.",
+          "$ref": "#/$defs/VeilidConfigRoutingTable"
+        },
+        "rpc": {
+          "description": "RPC configuration.",
+          "$ref": "#/$defs/VeilidConfigRPC"
+        },
+        "tls": {
+          "description": "TLS configuration for inbound secure protocols.",
+          "$ref": "#/$defs/VeilidConfigTLS"
+        },
+        "upnp": {
+          "description": "Use UPnP to map ports on the local gateway.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "max_connections",
+        "routing_table",
+        "rpc",
+        "dht",
+        "upnp",
+        "tls",
+        "protocol",
+        "privacy"
+      ]
+    },
+    "VeilidConfigPrivacy": {
+      "description": "Privacy preferences for routes.\n\n```yaml\nprivacy:\n    require_inbound_relay: false\n    country_code_denylist: [] # only with `--features=geolocation`\n```",
+      "type": "object",
+      "properties": {
+        "require_inbound_relay": {
+          "description": "Always use an inbound relay; never accept direct inbound connections.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "require_inbound_relay"
+      ]
+    },
+    "VeilidConfigProtectedStore": {
+      "description": "Protected store configuration: where secrets such as the device encryption key are kept.",
+      "type": "object",
+      "properties": {
+        "allow_insecure_fallback": {
+          "description": "Fall back to insecure file storage if no OS keychain/keyring is available.",
+          "type": "boolean"
+        },
+        "always_use_insecure_storage": {
+          "description": "Always use insecure file storage, ignoring any OS keychain/keyring.",
+          "type": "boolean"
+        },
+        "backend": {
+          "description": "Storage backend for secrets (`PlatformDefault` chooses per platform and runtime context).",
+          "$ref": "#/$defs/VeilidConfigProtectedStoreBackend"
+        },
+        "delete": {
+          "description": "Delete the protected store on startup.",
+          "type": "boolean"
+        },
+        "device_encryption_key_password": {
+          "description": "Password used to encrypt the device encryption key.",
+          "type": "string"
+        },
+        "directory": {
+          "description": "Directory for insecure-fallback storage (empty = platform default).",
+          "type": "string"
+        },
+        "new_device_encryption_key_password": {
+          "description": "New password to re-encrypt the device encryption key with, triggering a rotation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "allow_insecure_fallback",
+        "always_use_insecure_storage",
+        "directory",
+        "delete",
+        "device_encryption_key_password",
+        "backend"
+      ]
+    },
+    "VeilidConfigProtectedStoreBackend": {
+      "description": "Which storage backend the protected store uses for secrets.\n\nThe browser-only variants (`LocalStorage`, `IndexedDb`, `ExtensionStorage`) are rejected on\nnative platforms. `PlatformDefault` chooses per platform and runtime context: the OS keyring on\nnative, `localStorage` in a browser Window, IndexedDB in a worker, and extension storage in a\nWebExtension.",
+      "oneOf": [
+        {
+          "description": "Choose automatically based on the platform and runtime context.",
+          "type": "string",
+          "const": "PlatformDefault"
+        },
+        {
+          "description": "Browser `localStorage` (Window contexts only).",
+          "type": "string",
+          "const": "LocalStorage"
+        },
+        {
+          "description": "Browser IndexedDB (available in worker contexts).",
+          "type": "string",
+          "const": "IndexedDb"
+        },
+        {
+          "description": "WebExtension storage (`chrome.storage.local`/`browser.storage.local`).",
+          "type": "string",
+          "const": "ExtensionStorage"
+        }
+      ]
+    },
+    "VeilidConfigProtocol": {
+      "description": "Configure Network Protocols.\n\nVeilid can communicate over UDP, TCP, and Web Sockets.\n\nAll protocols are available by default, and the Veilid node will\nsort out which protocol is used for each peer connection.",
+      "type": "object",
+      "properties": {
+        "tcp": {
+          "description": "TCP protocol configuration.",
+          "$ref": "#/$defs/VeilidConfigTCP"
+        },
+        "udp": {
+          "description": "UDP protocol configuration.",
+          "$ref": "#/$defs/VeilidConfigUDP"
+        },
+        "ws": {
+          "description": "WebSocket protocol configuration.",
+          "$ref": "#/$defs/VeilidConfigWS"
+        }
+      },
+      "required": [
+        "udp",
+        "tcp",
+        "ws"
+      ]
+    },
+    "VeilidConfigRPC": {
+      "description": "Configure RPC.",
+      "type": "object",
+      "properties": {
+        "default_route_hop_count": {
+          "description": "Default number of hops used when allocating private routes.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "default_route_hop_count"
+      ]
+    },
+    "VeilidConfigRoutingTable": {
+      "description": "Configure the network routing table.",
+      "type": "object",
+      "properties": {
+        "bootstrap": {
+          "description": "Bootstrap server hostnames/URLs used to join the network.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bootstrap_keys": {
+          "description": "Public keys trusted to sign bootstrap records.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bootstrap_records": {
+          "description": "Bootstrap records, verbatim, as `veilid-server --dump-txt-record` prints them.\nServed to direct bootstrap requests without any lookup, and usable to bootstrap this\nnode itself. Both record versions are served; bootstrapping from them follows the same\nrule as a TXT bootstrap, so v0 records are only used when no bootstrap keys are set.\nEmpty by default, in which case records come from the bootstrap servers.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "public_keys": {
+          "description": "This node's identity public keys, by crypto kind (empty = generate fresh).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "secret_keys": {
+          "description": "Node identity secret keys matching `public_keys` (empty = generate fresh).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "serve_direct_bootstrap": {
+          "description": "Answer direct bootstrap requests (BOOT and B01T) from the last successful bootstrap set.\nOff by default: a bootstrap server turns it on, and an app has no reason to serve. A node\nthat finds itself among its own bootstraps answers regardless.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "public_keys",
+        "secret_keys",
+        "bootstrap",
+        "bootstrap_keys",
+        "bootstrap_records"
+      ]
+    },
+    "VeilidConfigTCP": {
+      "description": "Enable and configure TCP.\n\n```yaml\ntcp:\n    connect: true\n    listen: true\n    listen_address: ':5150'\n    public_address: ''",
+      "type": "object",
+      "properties": {
+        "connect": {
+          "description": "Allow outbound TCP connections.",
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "Accept inbound TCP connections.",
+          "type": "boolean"
+        },
+        "listen_address": {
+          "description": "Local address to bind, as `ip:port` (empty binds the default port).",
+          "type": "string"
+        },
+        "public_address": {
+          "description": "Externally-reachable `ip:port` to advertise, if behind NAT/port mapping.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "connect",
+        "listen",
+        "listen_address"
+      ]
+    },
+    "VeilidConfigTLS": {
+      "description": "Configure TLS.\n\n```yaml\ntls:\n    certificate_path: /path/to/cert\n    private_key_path: /path/to/private/key\n    connection_initial_timeout_ms: 2000",
+      "type": "object",
+      "properties": {
+        "certificate_path": {
+          "description": "Path to the TLS certificate (PEM) for inbound TLS protocols.",
+          "type": "string"
+        },
+        "connection_initial_timeout_ms": {
+          "description": "Timeout for completing a TLS handshake, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "private_key_path": {
+          "description": "Path to the TLS private key (PEM) for inbound TLS protocols.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificate_path",
+        "private_key_path",
+        "connection_initial_timeout_ms"
+      ]
+    },
+    "VeilidConfigTableStore": {
+      "description": "Table store configuration: the encrypted key-value database backing node state.",
+      "type": "object",
+      "properties": {
+        "delete": {
+          "description": "Delete the table store on startup.",
+          "type": "boolean"
+        },
+        "directory": {
+          "description": "Directory holding the table store database (empty = platform default).",
+          "type": "string"
+        },
+        "max_value_size_mb": {
+          "description": "Maximum size of a single stored value, in megabytes.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "wipe_on_invalid_device_encryption_key": {
+          "description": "Wipe the table store on an invalid device encryption key, rather than failing.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "directory",
+        "delete",
+        "wipe_on_invalid_device_encryption_key",
+        "max_value_size_mb"
+      ]
+    },
+    "VeilidConfigUDP": {
+      "description": "Enable and configure UDP.\n\n```yaml\nudp:\n    enabled: true\n    socket_pool_size: 0\n    listen_address: ':5150'\n    public_address: ''\n```",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable the UDP protocol.",
+          "type": "boolean"
+        },
+        "listen_address": {
+          "description": "Local address to bind, as `ip:port` (empty binds the default port).",
+          "type": "string"
+        },
+        "public_address": {
+          "description": "Externally-reachable `ip:port` to advertise, if behind NAT/port mapping.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "listen_address"
+      ]
+    },
+    "VeilidConfigWS": {
+      "description": "Enable and configure Web Sockets.\n\n```yaml\nws:\n    connect: true\n    listen: true\n    listen_address: ':5150'\n    path: 'ws'\n    url: 'ws://localhost:5150/ws'",
+      "type": "object",
+      "properties": {
+        "connect": {
+          "description": "Allow outbound WebSocket connections.",
+          "type": "boolean"
+        },
+        "listen": {
+          "description": "Accept inbound WebSocket connections.",
+          "type": "boolean"
+        },
+        "listen_address": {
+          "description": "Local address to bind, as `ip:port` (empty binds the default port).",
+          "type": "string"
+        },
+        "path": {
+          "description": "URL path served by the WebSocket listener.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Externally-reachable URL to advertise, if behind NAT/proxy.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "connect",
+        "listen",
+        "listen_address",
+        "path"
       ]
     },
     "VeilidStateAttachmentCondition": {

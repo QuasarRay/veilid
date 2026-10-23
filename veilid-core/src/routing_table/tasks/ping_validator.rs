@@ -6,9 +6,6 @@ use stop_token::future::FutureExt as _;
 
 impl_veilid_log_facility!("rtab");
 
-/// Minimum seconds between tests of the same route
-const ROUTE_TEST_MIN_INTERVAL_SECS: u32 = 15;
-
 /// Loopback failures a route may defer under blame suppression before one is
 /// recorded anyway, so chronic degradation cannot make a dead route immortal
 const MAX_LOOPBACK_FAILURE_DEFERRALS: usize = 3;
@@ -108,8 +105,7 @@ struct PingCompletionResult {
 
 #[derive(Default)]
 struct PingValidationProcessorState {
-    /// Per-group queued items with enqueue timestamps, sorted by priority
-    /// (BTreeMap key = priority number, 0 = highest)
+    /// Per-group queued items with enqueue timestamps, by priority (0 = highest)
     groups:
         BTreeMap<PingValidationGroup, BTreeMap<usize, VecDeque<(Timestamp, PingValidationEntry)>>>,
     /// Per-group in-flight counts
@@ -480,7 +476,7 @@ impl RoutingTable {
 
         // Continuous re-testing of a struggling route is churn, not information
         let route_ids: Vec<RouteId> = {
-            let cooldown = TimestampDuration::new_secs(ROUTE_TEST_MIN_INTERVAL_SECS);
+            let cooldown = self.timings().route_test_cooldown;
             let mut recent = self.route_test_cooldown.lock();
             recent.retain(|_, ts| cur_ts.duration_since(*ts) < cooldown);
             route_ids

@@ -2,7 +2,7 @@
 //!
 //! Only critical, contended locks warrant the two extra timestamp reads per
 //! section; wrap those in `StatsMutex` and leave everything else a plain lock.
-//! With `stats` off this is a transparent alias for `TrackedMutex` — no guard
+//! With `stats` off this is a transparent alias for `TrackedMutex`: no guard
 //! wrapper, no accounting, no cost.
 
 #[cfg(feature = "stats")]
@@ -57,10 +57,7 @@ mod imp {
         }
 
         pub(crate) fn lock(&self) -> StatsMutexGuard<'_, T> {
-            // Uncontended fast path: a successful try_lock skips the wait-start
-            // timestamp entirely, so an uncontended acquire pays for only the one
-            // `acquired` read needed to time how long the lock is held. The
-            // wait-start read is taken only when the lock would actually block.
+            // try_lock first, so the wait-start timestamp is read only when the lock would block
             let (guard, acquired, wait) = match self.inner.try_lock() {
                 Some(guard) => (
                     guard,

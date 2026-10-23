@@ -198,8 +198,7 @@ impl RoutingContext {
         self.api.clone()
     }
 
-    // Resolves to an rpc_processor type, which mock-api does not compile; its only callers are the
-    // app-messaging paths, which the mock serves itself
+    // Returns an rpc_processor type, absent under mock-api, which serves app messaging itself
     #[cfg(not(feature = "mock-api"))]
     #[cfg_attr(feature = "instrument", instrument(target = "veilid_api", level = "debug", fields(duration, __VEILID_LOG_KEY = self.log_key()), ret))]
     async fn get_destination(&self, target: Target) -> VeilidAPIResult<rpc_processor::Destination> {

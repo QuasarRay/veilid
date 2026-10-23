@@ -1,7 +1,7 @@
 use super::*;
 use crate::storage_manager::{SignedValueData, SignedValueDescriptor};
 
-const MAX_SET_VALUE_A_PEERS_LEN: usize = 20;
+const MAX_SET_VALUE_A_PEERS_LEN: usize = veilid_capnp::MAX_SET_VALUE_A_PEERS_LEN as usize;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct ValidateSetValueContext {
@@ -126,12 +126,11 @@ impl RPCOperationSetValueA {
         &self,
         validate_context: &RPCValidateContext<'_>,
     ) -> Result<(), RPCError> {
-        let question_context = validate_context
-            .question_context
-            .as_ref()
-            .expect_or_log("SetValueA requires question context");
-        let QuestionContext::SetValue(set_value_context) = question_context else {
-            return Err(RPCError::internal("Wrong context type for SetValueA"));
+        let Some(QuestionContext::SetValue(set_value_context)) = validate_context.question_context
+        else {
+            return Err(RPCError::protocol(
+                "SetValueA does not answer the question asked",
+            ));
         };
 
         let crypto = validate_context.crypto();

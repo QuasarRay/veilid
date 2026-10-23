@@ -537,8 +537,7 @@ pub fn test_txt_records_survive_restart() {
 /// The failure `free_port` exists to prevent, on demand. A node that loses either bind retries
 /// only every `network.bind_retry_ms` (10 s by default), so a port held for a whole test run
 /// shows up as `network never started` and nothing else. Holding UDP and holding TCP are separate
-/// cases because an ephemeral port the OS hands out for one says nothing about the other, which
-/// is how this reached the gate in the first place.
+/// cases because an ephemeral port the OS hands out for one says nothing about the other.
 async fn run_port_held_case(label: &str, hold_udp: bool, release_after_ms: u32) -> Option<u32> {
     let dir = test_dir(label);
     let port = free_port();
@@ -615,8 +614,7 @@ mod tests {
                     .is_none(),
                 "a held tcp port should stall the bind for the whole budget"
             );
-            // Released early it recovers, but only at the next retry, which is what makes a
-            // longer-lived holder fatal rather than slow
+            // Recovery waits for the next retry, so a longer-lived holder is fatal rather than slow
             let delay = run_port_held_case("released-tcp", false, 5_000)
                 .await
                 .expect("should bind once the port is free");

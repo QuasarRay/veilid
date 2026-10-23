@@ -58,9 +58,7 @@ impl WebsocketNetworkConnection {
             .network
             .connection_initial_timeout_ms;
 
-        // The close result used to be bound, logged only under `verbose-tracing`, and then
-        // dropped in favour of an unconditional success - so in an ordinary build a websocket
-        // that failed to close reported that it had
+        // A close that fails must not report success
         match timeout(timeout_ms, self.inner.ws_meta.close()).await {
             Ok(Ok(_)) => Ok(NetworkResult::value(())),
             Ok(Err(e)) => Err::<(), _>(ws_err_to_io_error(e)).into_network_result(),

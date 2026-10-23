@@ -44,6 +44,36 @@ impl NetworkManager {
         }
     }
 
+    /// A JSON peer is trusted only for its signed node info bytes; everything else in it is
+    /// rebuilt from them, so a tampered or spoofed reply cannot attach its own dial info,
+    /// node ids or timestamp to a bootstrap node's signature
+    pub(crate) fn bind_bootstrap_peer(&self, peer_info: &PeerInfo) -> Option<Arc<PeerInfo>> {
+        let routing_table = self.routing_table();
+        let unverified = match UnverifiedPeerInfo::try_new_from_wire(
+            &routing_table,
+            peer_info.routing_domain(),
+            peer_info.node_info_message(),
+            peer_info.signatures().clone(),
+        ) {
+            Ok(Some(unverified)) => unverified,
+            Ok(None) => {
+                veilid_log!(self debug "Dropping bootstrap peer {} with no usable signature or routing domain", peer_info.node_ids());
+                return None;
+            }
+            Err(e) => {
+                veilid_log!(self debug "Dropping bootstrap peer {}: {}", peer_info.node_ids(), e);
+                return None;
+            }
+        };
+        match unverified.verify_and_extract(&routing_table) {
+            Ok(peer_info) => Some(Arc::new(peer_info)),
+            Err(e) => {
+                veilid_log!(self debug "Dropping bootstrap peer {}: {}", peer_info.node_ids(), e);
+                None
+            }
+        }
+    }
+
     /// Uses the bootstrap v0 (BOOT) mechanism
     #[cfg_attr(
         feature = "instrument",
@@ -78,7 +108,10 @@ impl NetworkManager {
             }
         };
 
-        Ok(bootstrap_peerinfo.into_iter().map(Arc::new).collect())
+        Ok(bootstrap_peerinfo
+            .iter()
+            .filter_map(|pi| self.bind_bootstrap_peer(pi))
+            .collect())
     }
 
     /// Uses the bootstrap v1 (B01T) mechanism
@@ -134,10 +167,15 @@ impl NetworkManager {
         // bootstrap record has an unspecified IP address, and as such a routing domain can not
         // be determined for it by the code that receives the FindNodeA result.
         // The rest fall back to unsigned peer info built from the record itself.
+        let signed_peers: Vec<Arc<PeerInfo>> = bootv1response
+            .peers
+            .iter()
+            .filter_map(|pi| self.bind_bootstrap_peer(pi))
+            .collect();
         let mut peers = Vec::<Arc<PeerInfo>>::new();
         let mut unsigned_bsrecs = Vec::<BootstrapRecord>::new();
         for bsrec in bsrecs.iter() {
-            match bootv1response.peers.iter().find(|pi| {
+            match signed_peers.iter().find(|pi| {
                 pi.node_info()
                     .public_keys()
                     .contains_any_from_iter(bsrec.public_keys().iter())

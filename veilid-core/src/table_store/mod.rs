@@ -97,15 +97,17 @@ pub struct TableInfo {
 
 #[must_use]
 struct TableStoreInner {
+    /// Open tables by real name, weakly held so the last TableDB drop closes one
     opened: WeakValueHashMap<String, Weak<TableDBUnlockedInner>>,
+    /// Device encryption key, None for an unencrypted store
     encryption_key: Option<SharedSecret>,
+    /// Namespaced table name to real name on disk
     all_table_names: BTreeMap<String, String>,
-    // Skips the periodic flush when the name map is unchanged; the flush task
-    // otherwise rewrites the whole map every interval and bloats the WAL
+    /// Name map changed since the last flush, which otherwise rewrites it each interval and bloats the WAL
     all_table_names_dirty: bool,
+    /// Holds the schema version and the name map
     all_tables_db: Option<Database>,
-    // Exclusive per-namespace lock held from init to terminate; a second core
-    // on the same namespace, in this process or another, fails init loudly
+    /// Exclusive per-namespace lock from init to terminate; a second core on the namespace fails init
     namespace_lock: Option<TableStoreLock>,
     /// Tick subscription
     tick_subscription: Option<EventBusSubscription>,
@@ -130,8 +132,7 @@ pub struct TableStore {
     inner: Mutex<TableStoreInner>, // Sync mutex here because TableDB drops can happen at any time
     table_store_driver: TableStoreDriver,
     async_lock: Arc<AsyncMutex<()>>,
-    // Serializes name-map snapshots so a slow flush cannot overwrite a newer
-    // one; taken after async_lock when both are held
+    // Keeps a slow flush from overwriting a newer name-map snapshot; taken after async_lock
     flush_lock: Arc<AsyncMutex<()>>,
     flush_tables_task: TickTask<EyreReport>,
     cleanup_tables_task: TickTask<EyreReport>,
@@ -209,8 +210,7 @@ impl TableStore {
 
     // Cleanup/vacuum database
     async fn cleanup(&self) {
-        // The name-mapping db is not in 'opened' and needs its WAL
-        // checkpointed like any other table
+        // The name-mapping db is not in 'opened' and needs its WAL checkpointed too
         let all_tables_db = self.inner.lock().all_tables_db.clone();
         if let Some(db) = all_tables_db {
             if let Err(e) = db.cleanup().await {
@@ -1255,11 +1255,9 @@ impl TableStore {
 }
 
 /// Encrypt `data` under `secret_key` with the nonce prepended; without a key `data` comes back as is.
-/// Keyed nonces are unique because keys must be unique.
-/// Normally they must be sequential or random, but the critical.
-/// requirement is that they are different for each encryption
-/// but if the contents are guaranteed to be unique, then a nonce
-/// can be generated from the hash of the contents and the encryption key itself.
+///
+/// A keyed nonce is the hash of the content and the key: unique as long as the content is, which table keys are.
+/// Migrations call this; a change here must keep the old version for them.
 #[cfg_attr(
     feature = "instrument",
     instrument(level = "trace", target = "tstore", skip_all)
@@ -1270,9 +1268,6 @@ async fn maybe_encrypt(
     data: Bytes,
     keyed_nonce: bool,
 ) -> Bytes {
-    // NOTE: This function is used in migrations. If it's ever changed,
-    //       an older version must be usable by existing migrations.
-
     let Some(ref sk) = secret_key else {
         return data;
     };
@@ -1304,6 +1299,8 @@ async fn maybe_encrypt(
 }
 
 /// Decrypt `data`, nonce first, under `secret_key`; without a key `data` comes back as is.
+///
+/// Migrations call this; a change here must keep the old version for them.
 #[cfg_attr(
     feature = "instrument",
     instrument(level = "trace", target = "tstore", skip_all)
@@ -1313,9 +1310,6 @@ async fn maybe_decrypt(
     secret_key: &Option<SharedSecret>,
     mut data: Bytes,
 ) -> VeilidAPIResult<Bytes> {
-    // NOTE: This function is used in migrations. If it's ever changed,
-    //       an older version must be usable by existing migrations.
-
     let Some(ref sk) = secret_key else {
         return Ok(data);
     };
@@ -1339,13 +1333,13 @@ async fn maybe_decrypt(
     Ok(out.freeze())
 }
 
+/// Salted hash of the encryption key, stored in each table as the wrong-key check.
+///
+/// Migrations call this; a change here must keep the old version for them.
 async fn hash_table_encryption_key(
     crypto: &VeilidComponentGuard<'_, Crypto>,
     encryption_key: &SharedSecret,
 ) -> Vec<u8> {
-    // NOTE: This function is used in migrations. If it's ever changed,
-    //       an older version must be usable by existing migrations.
-
     const SALT: &[u8] = b"__veilid_table_store_encryption_key_hash__";
 
     let vcrypto = crypto.get_async(encryption_key.kind()).unwrap_or_log();

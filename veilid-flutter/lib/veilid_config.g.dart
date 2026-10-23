@@ -430,6 +430,7 @@ _VeilidConfigRoutingTable _$VeilidConfigRoutingTableFromJson(
   bootstrapRecords: (json['bootstrapRecords'] as List<dynamic>)
       .map((e) => e as String)
       .toList(),
+  serveDirectBootstrap: json['serveDirectBootstrap'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$VeilidConfigRoutingTableToJson(
@@ -440,6 +441,7 @@ Map<String, dynamic> _$VeilidConfigRoutingTableToJson(
   'bootstrap': instance.bootstrap,
   'bootstrapKeys': instance.bootstrapKeys.map((e) => e.toJson()).toList(),
   'bootstrapRecords': instance.bootstrapRecords,
+  'serveDirectBootstrap': instance.serveDirectBootstrap,
 };
 
 _VeilidConfigNetwork _$VeilidConfigNetworkFromJson(Map<String, dynamic> json) =>
@@ -630,6 +632,7 @@ _VeilidConfigInternalDHT _$VeilidConfigInternalDHTFromJson(
   validateDialInfoReceiptTimeMs: (json['validateDialInfoReceiptTimeMs'] as num)
       .toInt(),
   maxWatchExpirationMs: (json['maxWatchExpirationMs'] as num).toInt(),
+  maxWatchInspectIntervalMs: (json['maxWatchInspectIntervalMs'] as num).toInt(),
   publicWatchLimit: (json['publicWatchLimit'] as num).toInt(),
   memberWatchLimit: (json['memberWatchLimit'] as num).toInt(),
   publicTransactionLimit: (json['publicTransactionLimit'] as num).toInt(),
@@ -654,11 +657,40 @@ Map<String, dynamic> _$VeilidConfigInternalDHTToJson(
   'minPeerRefreshTimeMs': instance.minPeerRefreshTimeMs,
   'validateDialInfoReceiptTimeMs': instance.validateDialInfoReceiptTimeMs,
   'maxWatchExpirationMs': instance.maxWatchExpirationMs,
+  'maxWatchInspectIntervalMs': instance.maxWatchInspectIntervalMs,
   'publicWatchLimit': instance.publicWatchLimit,
   'memberWatchLimit': instance.memberWatchLimit,
   'publicTransactionLimit': instance.publicTransactionLimit,
   'memberTransactionLimit': instance.memberTransactionLimit,
 };
+
+_VeilidConfigInternalRoutingTableSave
+_$VeilidConfigInternalRoutingTableSaveFromJson(Map<String, dynamic> json) =>
+    _VeilidConfigInternalRoutingTableSave(
+      settleMs: (json['settleMs'] as num).toInt(),
+      minIntervalMs: (json['minIntervalMs'] as num).toInt(),
+      backgroundMinIntervalMs: (json['backgroundMinIntervalMs'] as num).toInt(),
+      periodMs: (json['periodMs'] as num).toInt(),
+    );
+
+Map<String, dynamic> _$VeilidConfigInternalRoutingTableSaveToJson(
+  _VeilidConfigInternalRoutingTableSave instance,
+) => <String, dynamic>{
+  'settleMs': instance.settleMs,
+  'minIntervalMs': instance.minIntervalMs,
+  'backgroundMinIntervalMs': instance.backgroundMinIntervalMs,
+  'periodMs': instance.periodMs,
+};
+
+_VeilidConfigInternalRoutingTable _$VeilidConfigInternalRoutingTableFromJson(
+  Map<String, dynamic> json,
+) => _VeilidConfigInternalRoutingTable(
+  save: VeilidConfigInternalRoutingTableSave.fromJson(json['save']),
+);
+
+Map<String, dynamic> _$VeilidConfigInternalRoutingTableToJson(
+  _VeilidConfigInternalRoutingTable instance,
+) => <String, dynamic>{'save': instance.save.toJson()};
 
 _VeilidConfigInternalNetwork _$VeilidConfigInternalNetworkFromJson(
   Map<String, dynamic> json,
@@ -685,6 +717,7 @@ _VeilidConfigInternalNetwork _$VeilidConfigInternalNetworkFromJson(
   rpc: VeilidConfigInternalRPC.fromJson(json['rpc']),
   dht: VeilidConfigInternalDHT.fromJson(json['dht']),
   protocol: VeilidConfigInternalProtocol.fromJson(json['protocol']),
+  routingTable: VeilidConfigInternalRoutingTable.fromJson(json['routingTable']),
 );
 
 Map<String, dynamic> _$VeilidConfigInternalNetworkToJson(
@@ -706,6 +739,7 @@ Map<String, dynamic> _$VeilidConfigInternalNetworkToJson(
   'rpc': instance.rpc.toJson(),
   'dht': instance.dht.toJson(),
   'protocol': instance.protocol.toJson(),
+  'routingTable': instance.routingTable.toJson(),
 };
 
 _VeilidConfigInternal _$VeilidConfigInternalFromJson(

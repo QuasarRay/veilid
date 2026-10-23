@@ -167,7 +167,7 @@ ciborium = "0.2.2"
 ### Dependencies for native builds only
 # Linux, Windows, Mac, iOS, Android
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = "0.2.191"
 
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 

@@ -92,6 +92,7 @@ i_wopt()  { brew_ensure binaryen; }
 i_llvm()  { brew_ensure llvm; }
 i_jq()    { brew_ensure jq; }
 i_node()  { brew_ensure node; }
+i_uv()    { brew_ensure uv; }
 i_pods()  { brew_ensure cocoapods; }
 # --prefix: contained cocoapods into GEM_HOME (veilidchat has non-SPM macOS plugins, so it's needed).
 # Needs a host ruby/gem (macOS ships one); no-op with a note if none, so dev-setup doesn't hard-fail.
@@ -150,6 +151,8 @@ else dep_min "cmake" "$(cmake --version 2>/dev/null)" "$REQ_CMAKE" i_cmake; fi
 dep_have "llvm/clang"  "$(command -v clang)"               "brew install llvm" i_llvm
 dep_have "jq"          "$(command -v jq)"                  "brew install jq"   i_jq
 dep_have "python3"     "$(command -v python3)"             "comes with Xcode CLT / brew"
+# uv runs the pinned black and mypy (veilid-python/uv.lock); a check_all.sh tool, not a build dep
+[ "$BUILDONLY" = 1 ] || dep_have "uv" "$(command -v uv)" "brew install uv" i_uv
 dep_have "node"        "$(command -v node)"                "brew install node" i_node
 dep_have "npm"         "$(command -v npm)"                 "comes with node"
 # cocoapods (veilidchat has non-SPM macOS plugins, so it's needed). Under --prefix install it

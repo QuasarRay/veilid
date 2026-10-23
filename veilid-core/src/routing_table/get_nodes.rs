@@ -470,8 +470,14 @@ impl RoutingTable {
         hash_coordinate: HashCoordinate,
         required_capabilities: Vec<VeilidCapability>,
     ) -> NetworkResult<Vec<Arc<PeerInfo>>> {
+        // The key came off the wire: a kind we hold no node id for, or a short key, has no distance
         let crypto_kind = hash_coordinate.kind();
-        let own_node_id = self.node_id(crypto_kind);
+        let Some(own_node_id) = self.node_ids().get(crypto_kind) else {
+            return NetworkResult::invalid_message("unsupported hash coordinate kind");
+        };
+        if hash_coordinate.ref_value().len() != HASH_COORDINATE_LENGTH {
+            return NetworkResult::invalid_message("invalid hash coordinate length");
+        }
 
         // find N nodes closest to the target node in our routing table
         // ensure the nodes returned are only the ones closer to the target node than ourself

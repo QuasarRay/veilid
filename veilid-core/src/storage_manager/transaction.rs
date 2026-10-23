@@ -894,9 +894,6 @@ impl StorageManager {
     /// End a transaction over a set of records
     /// If an existing transaction does not exist over these records
     /// or a transaction can not be performed at this time, this will fail.
-    /// Returns Err(VeilidAPIError::TryAgain) if the transaction could not be ended at this time
-    /// Returns Err(_) if the transaction end failed and resulted in rollback or drop
-    /// End a transaction over a set of records.
     ///
     /// End goes only to nodes that answered every Set and have none in flight, so
     /// nothing can land at a voter after its End. Nodes missing a confirmation get
@@ -904,6 +901,9 @@ impl StorageManager {
     /// RPC timeout; a record still short of the required voters fails with TryAgain
     /// rather than committing torn. Non-voters are marked Failed and the rollback
     /// guard rolls them back once End is recorded.
+    ///
+    /// Returns Err(VeilidAPIError::TryAgain) if the transaction could not be ended at this time
+    /// Returns Err(_) if the transaction end failed and resulted in rollback or drop
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "stor", skip(self, records_lock))
@@ -1165,9 +1165,16 @@ impl StorageManager {
                     if matches!(outcome, CommitOutcome::Reached) {
                         break outcome;
                     }
-                    let elapsed_ms = Timestamp::now().duration_since(round_start).as_u64() / 1_000;
-                    if elapsed_ms < u64::from(COMMIT_ROUND_MIN_INTERVAL_MS) {
-                        sleep(COMMIT_ROUND_MIN_INTERVAL_MS - elapsed_ms as u32).await;
+                    let elapsed = Timestamp::now().duration_since(round_start);
+                    let min_interval = self.timings().commit_round_min_interval;
+                    if elapsed < min_interval {
+                        sleep(
+                            min_interval
+                                .saturating_sub(elapsed)
+                                .millis_u32()
+                                .unwrap_or_default(),
+                        )
+                        .await;
                     }
                 };
                 veilid_stats!(

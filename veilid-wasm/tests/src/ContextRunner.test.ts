@@ -26,7 +26,7 @@ async function ensureRun(): Promise<CaseResult[]> {
     }
   }
   if (runError) {
-    throw runError;
+    throw runError instanceof Error ? runError : new Error(JSON.stringify(runError));
   }
   return results!;
 }
@@ -42,9 +42,7 @@ describe(`veilid-wasm [${context}]`, () => {
       for (const testCase of suite.cases().filter((c) => caseSelected(c, caseFilter))) {
         it(testCase.name, async function () {
           const all = await ensureRun();
-          const result = all.find(
-            (r) => r.suite === suite.name && r.name === testCase.name,
-          );
+          const result = all.find((r) => r.suite === suite.name && r.name === testCase.name);
 
           if (!result) {
             throw new Error(`no result reported for ${suite.name}: ${testCase.name}`);

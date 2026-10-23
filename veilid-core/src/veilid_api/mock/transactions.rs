@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::LazyLock;
 
 /// Identifies one open transaction on a simulated node.
 ///
@@ -17,6 +16,7 @@ impl fmt::Display for OutboundTransactionHandle {
 
 /// One record's participation in a transaction.
 struct MockTransactionRecord {
+    /// Record covered by the transaction
     record_key: RecordKey,
     /// The key that took this record's holder slot, or `None` for an anonymous transaction
     signer: Option<PublicKey>,
@@ -24,6 +24,7 @@ struct MockTransactionRecord {
 
 /// A transaction staging writes until commit.
 struct MockTransaction {
+    /// Records the transaction covers
     records: Vec<MockTransactionRecord>,
     /// Writes waiting for commit, invisible to every other transaction until then
     staged: HashMap<(OpaqueRecordKey, ValueSubkey), ValueData>,
@@ -277,8 +278,7 @@ impl VeilidAPI {
             apibail_generic!("failed schema validation: {}:{}", record_key, subkey);
         }
 
-        // Staged like a storage node would hold it: ciphertext, so the sequence and
-        // identical-bytes rules below compare what is actually stored
+        // Staged as ciphertext, which is what a storage node applies its rules to
         let data = self.mock_crypt_value(&record_key, subkey, &data)?;
 
         with_transactions(|txns| {
@@ -297,8 +297,7 @@ impl VeilidAPI {
                 .as_ref()
                 .is_some_and(|b| b.data() == data.as_slice() && b.ref_writer() == &writer.key());
 
-            // No floor-reuse arm here: an identical retry is handled above, and new bytes
-            // under a reused number is exactly what a storage node refuses
+            // No floor reuse: identical retries are handled above; new bytes under a reused number is refused
             let mut seq = match base.as_ref().map(|b| b.seq()) {
                 None => ValueSeqNum::ZERO,
                 Some(last) if identical => last,
@@ -520,7 +519,7 @@ impl VeilidAPI {
 /// Tear down a transaction dropped without commit or rollback.
 ///
 /// Takes no node identity: releasing the records needs only the transaction id, which is what lets
-/// `Drop` call it with just a registry in hand.
+/// `Drop` call it with only a registry in hand.
 pub(crate) fn mock_drop_transaction(handle: OutboundTransactionHandle) {
     with_transactions(|txns| txns.remove(&handle.txid));
     release_records(handle.txid);

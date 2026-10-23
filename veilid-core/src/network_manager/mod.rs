@@ -86,6 +86,8 @@ pub(crate) struct NetworkManagerTimings {
     pub protected_fast_drop: TimestampDuration,
     /// A suppressed transport's canary period while nothing on our side changes: six RPC timeouts
     pub transport_canary: TimestampDuration,
+    /// Age at which a send outcome leaves a transport's window: two RPC timeouts
+    pub transport_window: TimestampDuration,
 }
 
 impl NetworkManagerTimings {
@@ -95,6 +97,7 @@ impl NetworkManagerTimings {
             envelope_build_slow: rpc_timeout.saturating_mul(20).div(100),
             protected_fast_drop: rpc_timeout,
             transport_canary: rpc_timeout.saturating_mul(6),
+            transport_window: rpc_timeout.saturating_mul(2),
         }
     }
 }
@@ -285,7 +288,11 @@ impl NetworkManager {
         let address_filter = AddressFilter::new(registry.clone());
         let online_detector = OnlineDetector::new(registry.clone());
         let timings = NetworkManagerTimings::new(registry.config().rpc_timeout());
-        let transport_stats = TransportStats::new(registry.clone(), timings.transport_canary);
+        let transport_stats = TransportStats::new(
+            registry.clone(),
+            timings.transport_canary,
+            timings.transport_window,
+        );
 
         let this = Self {
             registry,
@@ -1228,12 +1235,22 @@ impl NetworkManager {
         };
 
         // Is this a direct bootstrap request instead of an envelope?
-        if magic == *BOOT_MAGIC {
-            network_result_value_or_log!(self pin_future!(self.handle_boot_v0_request(flow)).await? => [ format!(": v0 flow={:?}", flow) ] {});
-            return Ok(true);
-        }
-        if magic == *B01T_MAGIC {
-            network_result_value_or_log!(self pin_future!(self.handle_boot_v1_request(flow)).await? => [ format!(": v1 flow={:?}", flow) ] {});
+        if magic == *BOOT_MAGIC || magic == *B01T_MAGIC {
+            // The reply is large and the request is not authenticated, so only a bootstrap
+            // answers, and no faster than it would accept connections
+            if !self.routing_table().serves_direct_bootstrap()
+                || self
+                    .address_filter()
+                    .add_bootstrap_request(remote_addr)
+                    .is_err()
+            {
+                return Ok(true);
+            }
+            if magic == *BOOT_MAGIC {
+                network_result_value_or_log!(self pin_future!(self.handle_boot_v0_request(flow)).await? => [ format!(": v0 flow={:?}", flow) ] {});
+            } else {
+                network_result_value_or_log!(self pin_future!(self.handle_boot_v1_request(flow)).await? => [ format!(": v1 flow={:?}", flow) ] {});
+            }
             return Ok(true);
         }
 
@@ -1316,7 +1333,7 @@ impl NetworkManager {
                     return Ok(false);
                 }
                 TimestampError::SentWhileStalled { .. } => {
-                    veilid_log!(self debug throttle: 1000,
+                    veilid_log!(self debug throttle: PROTOCOL_LOG_THROTTLE_MS,
                         "Envelope from {} ({}) sent while stalled: {:?}",
                         envelope.get_sender_id(),
                         flow.remote(),

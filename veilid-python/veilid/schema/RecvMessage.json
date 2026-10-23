@@ -2154,6 +2154,47 @@
           ]
         },
         {
+          "description": "Result of `ChangeConfig`.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "ChangeConfig"
+            }
+          },
+          "anyOf": [
+            {
+              "description": "Success value.",
+              "type": "object",
+              "properties": {
+                "value": {
+                  "description": "The returned value.",
+                  "type": "null"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "description": "Failure.",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "description": "The error.",
+                  "$ref": "#/$defs/VeilidAPIError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ],
+          "required": [
+            "op"
+          ]
+        },
+        {
           "description": "Result of `ReportAppLifecycleState`.",
           "type": "object",
           "properties": {
@@ -5312,6 +5353,12 @@
           "format": "uint32",
           "minimum": 0
         },
+        "max_watch_inspect_interval_ms": {
+          "description": "Longest interval between change inspections of a watch, in milliseconds; a watch short\nof consensus, or not yet established, delivers changes at most this late.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
         "member_transaction_limit": {
           "description": "Reserved transaction slots for signers who are schema members of the record.",
           "type": "integer",
@@ -5407,6 +5454,7 @@
         "min_peer_refresh_time_ms",
         "validate_dial_info_receipt_time_ms",
         "max_watch_expiration_ms",
+        "max_watch_inspect_interval_ms",
         "public_watch_limit",
         "member_watch_limit",
         "public_transaction_limit",
@@ -5497,6 +5545,10 @@
           "format": "uint32",
           "minimum": 0
         },
+        "routing_table": {
+          "description": "Internal routing table tuning.",
+          "$ref": "#/$defs/VeilidConfigInternalRoutingTable"
+        },
         "rpc": {
           "description": "Internal RPC tuning.",
           "$ref": "#/$defs/VeilidConfigInternalRPC"
@@ -5524,7 +5576,8 @@
         "restricted_nat_retries",
         "rpc",
         "dht",
-        "protocol"
+        "protocol",
+        "routing_table"
       ]
     },
     "VeilidConfigInternalProtocol": {
@@ -5593,6 +5646,55 @@
         "queue_size",
         "timeout_ms",
         "max_route_hop_count"
+      ]
+    },
+    "VeilidConfigInternalRoutingTable": {
+      "description": "Internal \"footgun\" routing table configuration. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "save": {
+          "description": "When the routing table is saved.",
+          "$ref": "#/$defs/VeilidConfigInternalRoutingTableSave"
+        }
+      },
+      "required": [
+        "save"
+      ]
+    },
+    "VeilidConfigInternalRoutingTableSave": {
+      "description": "Internal \"footgun\" routing table save schedule. See [VeilidConfigInternal].",
+      "type": "object",
+      "properties": {
+        "background_min_interval_ms": {
+          "description": "Least time between saves in the background, where the process may be frozen within\nseconds, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_interval_ms": {
+          "description": "Least time between saves driven by changes, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "period_ms": {
+          "description": "Longest the table goes unsaved, so changes too small to drive a save still reach disk,\nin milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "settle_ms": {
+          "description": "Quiet time after a change worth saving before the table is saved, in milliseconds.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "settle_ms",
+        "min_interval_ms",
+        "background_min_interval_ms",
+        "period_ms"
       ]
     },
     "VeilidConfigInternalUDP": {
@@ -5849,6 +5951,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "serve_direct_bootstrap": {
+          "description": "Answer direct bootstrap requests (BOOT and B01T) from the last successful bootstrap set.\nOff by default: a bootstrap server turns it on, and an app has no reason to serve. A node\nthat finds itself among its own bootstraps answers regardless.",
+          "type": "boolean",
+          "default": false
         }
       },
       "required": [

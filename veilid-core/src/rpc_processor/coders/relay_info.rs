@@ -5,6 +5,7 @@ pub fn decode_relay_info(reader: &veilid_capnp::relay_info::Reader) -> Result<Re
 
     rpc_ignore_missing_property!(reader, node_ids);
     let nids_reader = reader.get_node_ids()?;
+    rpc_ignore_max_len!(nids_reader, MAX_CRYPTO_KINDS);
 
     let mut node_ids = NodeIdGroup::with_capacity(nids_reader.len() as usize);
     for nid_reader in nids_reader.iter() {
@@ -25,6 +26,7 @@ pub fn decode_relay_info(reader: &veilid_capnp::relay_info::Reader) -> Result<Re
 
     rpc_ignore_missing_property!(reader, dial_info_detail_list);
     let didl_reader = reader.get_dial_info_detail_list()?;
+    rpc_ignore_max_len!(didl_reader, MAX_DIAL_INFO_DETAILS);
     let mut dial_info_detail_list =
         Vec::<DialInfoDetail>::with_capacity(didl_reader.len().try_into().map_err(
             RPCError::map_protocol("too many dial info details for relay"),

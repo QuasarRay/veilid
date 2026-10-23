@@ -67,6 +67,12 @@ async fn run_test_split_url() {
 }
 
 #[wasm_bindgen_test]
+async fn run_test_network_result() {
+    setup();
+    test_network_result::test_io_error_into_network_result();
+}
+
+#[wasm_bindgen_test]
 async fn run_test_eventual() {
     setup();
     test_eventual::test_eventual().await;

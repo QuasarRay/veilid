@@ -427,6 +427,11 @@ pub struct VeilidConfigRoutingTable {
     /// rule as a TXT bootstrap, so v0 records are only used when no bootstrap keys are set.
     /// Empty by default, in which case records come from the bootstrap servers.
     pub bootstrap_records: Vec<String>,
+    /// Answer direct bootstrap requests (BOOT and B01T) from the last successful bootstrap set.
+    /// Off by default: a bootstrap server turns it on, and an app has no reason to serve. A node
+    /// that finds itself among its own bootstraps answers regardless.
+    #[serde(default)]
+    pub serve_direct_bootstrap: bool,
     // xxx pub enable_public_internet: bool,
     // xxx pub enable_local_network: bool,
 }
@@ -455,6 +460,7 @@ impl Default for VeilidConfigRoutingTable {
             bootstrap,
             bootstrap_keys,
             bootstrap_records: vec![],
+            serve_direct_bootstrap: false,
         }
     }
 }
@@ -977,6 +983,9 @@ pub struct VeilidConfigInternalDHT {
     pub validate_dial_info_receipt_time_ms: u32,
     /// Maximum lifetime of a DHT watch, in milliseconds.
     pub max_watch_expiration_ms: u32,
+    /// Longest interval between change inspections of a watch, in milliseconds; a watch short
+    /// of consensus, or not yet established, delivers changes at most this late.
+    pub max_watch_inspect_interval_ms: u32,
     /// Maximum concurrent watches by anonymous watchers (signer not a schema member).
     pub public_watch_limit: u32,
     /// Reserved watch slots for watchers whose signer is a schema member of the record.
@@ -1004,12 +1013,47 @@ impl Default for VeilidConfigInternalDHT {
             min_peer_refresh_time_ms: 60000,
             validate_dial_info_receipt_time_ms: 1000,
             max_watch_expiration_ms: 600000,
+            max_watch_inspect_interval_ms: 120000,
             public_watch_limit: 32,
             member_watch_limit: 8,
             public_transaction_limit: 8,
             member_transaction_limit: 4,
         }
     }
+}
+
+/// Internal "footgun" routing table save schedule. See [VeilidConfigInternal].
+#[apply(api_data_struct!)]
+#[api(eq, ts)]
+pub struct VeilidConfigInternalRoutingTableSave {
+    /// Quiet time after a change worth saving before the table is saved, in milliseconds.
+    pub settle_ms: u32,
+    /// Least time between saves driven by changes, in milliseconds.
+    pub min_interval_ms: u32,
+    /// Least time between saves in the background, where the process may be frozen within
+    /// seconds, in milliseconds.
+    pub background_min_interval_ms: u32,
+    /// Longest the table goes unsaved, so changes too small to drive a save still reach disk,
+    /// in milliseconds.
+    pub period_ms: u32,
+}
+impl Default for VeilidConfigInternalRoutingTableSave {
+    fn default() -> Self {
+        Self {
+            settle_ms: 5000,
+            min_interval_ms: 10000,
+            background_min_interval_ms: 5000,
+            period_ms: 300000,
+        }
+    }
+}
+
+/// Internal "footgun" routing table configuration. See [VeilidConfigInternal].
+#[apply(api_data_struct!)]
+#[api(eq, default, ts)]
+pub struct VeilidConfigInternalRoutingTable {
+    /// When the routing table is saved.
+    pub save: VeilidConfigInternalRoutingTableSave,
 }
 
 /// Internal "footgun" network configuration. See [VeilidConfigInternal].
@@ -1050,6 +1094,8 @@ pub struct VeilidConfigInternalNetwork {
     pub dht: VeilidConfigInternalDHT,
     /// Internal per-protocol tuning.
     pub protocol: VeilidConfigInternalProtocol,
+    /// Internal routing table tuning.
+    pub routing_table: VeilidConfigInternalRoutingTable,
 }
 impl Default for VeilidConfigInternalNetwork {
     fn default() -> Self {
@@ -1070,6 +1116,7 @@ impl Default for VeilidConfigInternalNetwork {
             rpc: VeilidConfigInternalRPC::default(),
             dht: VeilidConfigInternalDHT::default(),
             protocol: VeilidConfigInternalProtocol::default(),
+            routing_table: VeilidConfigInternalRoutingTable::default(),
         }
     }
 }
@@ -1454,6 +1501,74 @@ impl VeilidConfig {
 
         Ok(())
     }
+
+    /// Take the secrets a config from `get_state` lacks from `current`: blank
+    /// `network.routing_table.secret_keys` or `protected_store` passwords keep the current values.
+    pub fn fill_secrets_from(&mut self, current: &VeilidConfig) {
+        if self.network.routing_table.secret_keys.is_empty() {
+            self.network.routing_table.secret_keys =
+                current.network.routing_table.secret_keys.clone();
+        }
+        if self
+            .protected_store
+            .device_encryption_key_password
+            .is_empty()
+        {
+            self.protected_store.device_encryption_key_password = current
+                .protected_store
+                .device_encryption_key_password
+                .clone();
+        }
+        if self
+            .protected_store
+            .new_device_encryption_key_password
+            .is_none()
+        {
+            self.protected_store.new_device_encryption_key_password = current
+                .protected_store
+                .new_device_encryption_key_password
+                .clone();
+        }
+    }
+
+    /// Check that this config can replace `current` on a node that stays up: the keys a
+    /// running node cannot take a new value for must be unchanged. Those are the storage
+    /// identity (`program_name`, `namespace`, `protected_store`, `table_store`,
+    /// `block_store`), the node identity (`network.routing_table.public_keys` and
+    /// `secret_keys`), the network partition (`network.network_key_password`), the
+    /// `network.dht` storage sizing and `internal`.
+    ///
+    /// Errors with [VeilidAPIError::InvalidArgument] naming the first such key that differs.
+    pub fn ensure_changeable_from(&self, current: &VeilidConfig) -> VeilidAPIResult<()> {
+        let fixed = [
+            (self.program_name == current.program_name, "program_name"),
+            (self.namespace == current.namespace, "namespace"),
+            (
+                self.protected_store == current.protected_store,
+                "protected_store",
+            ),
+            (self.table_store == current.table_store, "table_store"),
+            (self.block_store == current.block_store, "block_store"),
+            (
+                self.network.network_key_password == current.network.network_key_password,
+                "network.network_key_password",
+            ),
+            (
+                self.network.routing_table.public_keys == current.network.routing_table.public_keys,
+                "network.routing_table.public_keys",
+            ),
+            (
+                self.network.routing_table.secret_keys == current.network.routing_table.secret_keys,
+                "network.routing_table.secret_keys",
+            ),
+            (self.network.dht == current.network.dht, "network.dht"),
+            (self.internal == current.internal, "internal"),
+        ];
+        if let Some((_, key)) = fixed.iter().find(|(same, _)| !same) {
+            apibail_invalid_argument!("change_config", key, "needs a restart to change");
+        }
+        Ok(())
+    }
 }
 
 /// The configuration built for each Veilid node during API startup
@@ -1461,13 +1576,14 @@ impl VeilidConfig {
 #[must_use]
 pub struct VeilidStartupOptions {
     update_cb: UpdateCallback,
-    config: Arc<VeilidConfig>,
+    /// Shared by every clone, so a change reaches every component's `config()`
+    config: Arc<ArcSwap<VeilidConfig>>,
 }
 
 impl fmt::Debug for VeilidStartupOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VeilidConfig")
-            .field("config", self.config.as_ref())
+            .field("config", &*self.config())
             .finish()
     }
 }
@@ -1481,7 +1597,7 @@ impl VeilidStartupOptions {
 
         Ok(Self {
             update_cb,
-            config: Arc::new(config),
+            config: Arc::new(ArcSwap::from_pointee(config)),
         })
     }
 
@@ -1491,10 +1607,15 @@ impl VeilidStartupOptions {
         self.update_cb.clone()
     }
 
-    /// The validated configuration for this node.
+    /// The validated configuration for this node, as it stands now.
     #[must_use]
     pub fn config(&self) -> Arc<VeilidConfig> {
-        self.config.clone()
+        self.config.load_full()
+    }
+
+    /// Replace the configuration; the caller has validated it
+    pub(crate) fn set_config(&self, config: VeilidConfig) {
+        self.config.store(Arc::new(config));
     }
 }
 

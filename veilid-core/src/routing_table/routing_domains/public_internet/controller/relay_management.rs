@@ -145,9 +145,7 @@ impl PublicInternetRoutingDomainController {
         // relative-performance set by the same filter, so optimizing it here would drop it as
         // "unmeasurable" and undo the retention above every interval; let it recover or die
         // via the Dead state check instead.
-        // Our own traffic concentrates on the incumbent, so congestion sinks its percentile
-        // while resting candidates look fast: above the floor it must also have degraded
-        // against its own settled baseline before we drop it.
+        // Above the floor it must also have degraded against its own settled baseline
         let last_optimized_duration = cur_ts.duration_since(relay_state.last_optimized);
         let dwell_duration = cur_ts.duration_since(relay_state.selected_ts);
         let latency_settled = Self::relay_latency_settled(&relay_node, &mut relay_state);

@@ -74,56 +74,57 @@ export const config: Options.Testrunner = {
   // Sauce Labs platform configurator - a great tool to configure your capabilities:
   // https://saucelabs.com/platform/platform-configurator
   //
-  capabilities: process.env.WDIO_BROWSER === 'safari'
-  ? [
-      {
-        browserName: 'safari',
-      } as WebdriverIO.Capabilities,
-    ]
-  : process.env.WDIO_BROWSER === 'firefox'
-  ? [
-      {
-        browserName: 'firefox',
-        'moz:firefoxOptions': {
-          ...(process.env.FIREFOX_BIN ? { binary: process.env.FIREFOX_BIN } : {}),
-          args: process.env.WDIO_HEADLESS ? ['-headless'] : [],
-        },
-        ...(process.env.GECKODRIVER_PATH
-          ? { 'wdio:geckodriverOptions': { binary: process.env.GECKODRIVER_PATH } }
-          : {}),
-      } as WebdriverIO.Capabilities,
-    ]
-  : [
-    {
-      // capabilities for local browser web tests
-      browserName: 'chrome', // or "firefox", "microsoftedge", "safari"
-      'goog:chromeOptions': {
-        ...(process.env.CHROME_BIN ? { binary: process.env.CHROME_BIN } : {}),
-        args: [
-          '--use-fake-device-for-media-stream',
-          '--use-fake-ui-for-media-stream',
-          ...(process.env.WDIO_HEADLESS
-            ? ['--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage']
-            : []),
-        ],
-      },
-      // Disable browser log capture. Chrome logs benign P2P WebSocket connect failures as
-      // SEVERE browser-log entries, which the wdio browser runner (via browser.getLogs)
-      // treats as test failures. Real JS errors still fail tests via window 'error' events
-      // (window.__wdioErrors__) and assertions, so only browser-generated network noise is
-      // suppressed. (Firefox didn't surface these as severe logs, so it never tripped.)
-      // 'goog:loggingPrefs' is the runtime key chromedriver wants but isn't in wdio's
-      // capability types, hence the cast.
-      'goog:loggingPrefs': { browser: 'OFF' },
-      // Classic WebDriver only: heavy console output floods the BiDi mapper and
-      // starves wdio's health poll (hardcoded 60s timeout), killing the worker
-      // mid-suite. Console capture uses the vite websocket and is unaffected.
-      'wdio:enforceWebDriverClassic': true,
-      ...(process.env.CHROMEDRIVER_PATH
-        ? { 'wdio:chromedriverOptions': { binary: process.env.CHROMEDRIVER_PATH } }
-        : {}),
-    } as WebdriverIO.Capabilities & { 'goog:loggingPrefs': { browser: string } },
-  ],
+  capabilities:
+    process.env.WDIO_BROWSER === 'safari'
+      ? [
+          {
+            browserName: 'safari',
+          } as WebdriverIO.Capabilities,
+        ]
+      : process.env.WDIO_BROWSER === 'firefox'
+        ? [
+            {
+              browserName: 'firefox',
+              'moz:firefoxOptions': {
+                ...(process.env.FIREFOX_BIN ? { binary: process.env.FIREFOX_BIN } : {}),
+                args: process.env.WDIO_HEADLESS ? ['-headless'] : [],
+              },
+              ...(process.env.GECKODRIVER_PATH
+                ? { 'wdio:geckodriverOptions': { binary: process.env.GECKODRIVER_PATH } }
+                : {}),
+            } as WebdriverIO.Capabilities,
+          ]
+        : [
+            {
+              // capabilities for local browser web tests
+              browserName: 'chrome', // or "firefox", "microsoftedge", "safari"
+              'goog:chromeOptions': {
+                ...(process.env.CHROME_BIN ? { binary: process.env.CHROME_BIN } : {}),
+                args: [
+                  '--use-fake-device-for-media-stream',
+                  '--use-fake-ui-for-media-stream',
+                  ...(process.env.WDIO_HEADLESS
+                    ? ['--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage']
+                    : []),
+                ],
+              },
+              // Disable browser log capture. Chrome logs benign P2P WebSocket connect failures as
+              // SEVERE browser-log entries, which the wdio browser runner (via browser.getLogs)
+              // treats as test failures. Real JS errors still fail tests via window 'error' events
+              // (window.__wdioErrors__) and assertions, so only browser-generated network noise is
+              // suppressed. (Firefox didn't surface these as severe logs, so it never tripped.)
+              // 'goog:loggingPrefs' is the runtime key chromedriver wants but isn't in wdio's
+              // capability types, hence the cast.
+              'goog:loggingPrefs': { browser: 'OFF' },
+              // Classic WebDriver only: heavy console output floods the BiDi mapper and
+              // starves wdio's health poll (hardcoded 60s timeout), killing the worker
+              // mid-suite. Console capture uses the vite websocket and is unaffected.
+              'wdio:enforceWebDriverClassic': true,
+              ...(process.env.CHROMEDRIVER_PATH
+                ? { 'wdio:chromedriverOptions': { binary: process.env.CHROMEDRIVER_PATH } }
+                : {}),
+            } as WebdriverIO.Capabilities & { 'goog:loggingPrefs': { browser: string } },
+          ],
 
   //
   // ===================
@@ -195,9 +196,12 @@ export const config: Options.Testrunner = {
   // The only one supported by default is 'dot'
   // see also: https://webdriver.io/docs/dot-reporter
   reporters: [
-    ['spec', {
-      realtimeReporting: true,
-    }]
+    [
+      'spec',
+      {
+        realtimeReporting: true,
+      },
+    ],
   ],
 
   //

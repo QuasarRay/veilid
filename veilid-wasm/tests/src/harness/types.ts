@@ -60,3 +60,17 @@ export interface CaseResult {
   skipped?: string;
   error?: string;
 }
+
+// What a context driver posts to a worker or the extension. Every field is optional because a
+// receiver sees whatever arrived and guards on `type` before trusting the rest.
+export interface RunRequest {
+  type?: string;
+  suites?: string[];
+  caseFilter?: string;
+}
+
+// What a worker posts back while running and when done.
+export type RunReply =
+  | { type: 'progress'; step: string }
+  | { type: 'done'; ok: true; results: CaseResult[] }
+  | { type: 'done'; ok: false; error?: string };

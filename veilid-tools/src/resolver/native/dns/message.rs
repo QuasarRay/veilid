@@ -57,13 +57,19 @@ pub(crate) struct ResourceRecord {
 /// A parsed DNS message
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Response {
+    /// Transaction id from the header
     pub id: u16,
+    /// QR flag: set on a response
     pub qr: bool,
+    /// Header opcode
     pub opcode: u8,
+    /// TC flag: the answer did not fit the transport
     pub truncated: bool,
     /// 12-bit response code including the EDNS extended bits
     pub rcode: u16,
+    /// Question section
     pub questions: Vec<Question>,
+    /// Answer section; authority and additional records are not kept
     pub answers: Vec<ResourceRecord>,
 }
 

@@ -1,6 +1,6 @@
 use super::*;
 use futures_util::{FutureExt, StreamExt};
-use std::{io, sync::Arc};
+use std::io;
 use stop_token::prelude::*;
 
 impl_veilid_log_facility!("net");
@@ -572,8 +572,7 @@ impl NetworkConnection {
                 .report_connection_finished(connection_id, false);
 
             // Close the low level socket
-            // Both the error and the network result: a close that timed out arrives as the
-            // latter, and matching only on `Err` swallowed it
+            // A close that timed out arrives as a network result, not an error, so match both
             match protocol_connection.close().await {
                 Err(e) => {
                     veilid_log!(registry debug throttle: PROTOCOL_LOG_THROTTLE_MS, "Protocol connection close error: {} flow={:#}", e, flow);

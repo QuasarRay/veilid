@@ -16,7 +16,7 @@ impl_veilid_log_facility!("stor");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(in crate::storage_manager) struct OutboundWatchManager {
-    // Registry for logging
+    /// Registry for logging
     #[serde(skip)]
     opt_registry: Option<VeilidComponentRegistry>,
     /// Each watch per record key
@@ -25,16 +25,13 @@ pub(in crate::storage_manager) struct OutboundWatchManager {
     /// Last known active watch per node+record
     #[serde(with = "serialize_hash_map_as_pairs")]
     pub per_node_states: HashMap<PerNodeKey, OutboundWatchPerNodeState>,
-    /// Value changed updates that need inspection to determine if they should be reported,
-    /// with the earliest time each may run
+    /// Value changes awaiting inspection before reporting, with the earliest time each may run
     #[serde(skip)]
     pub needs_change_inspection: HashMap<RecordKey, (ValueSubkeyRangeSet, Timestamp)>,
     /// Subkeys owed a repeat hint per record, drained by the outbound watch check tick
     #[serde(skip)]
     pub pending_rehints: HashMap<RecordKey, ValueSubkeyRangeSet>,
-    /// Records with a change inspection already running. `needs_change_inspection`
-    /// coalesces only what is PENDING, so a slow node would otherwise run several
-    /// concurrent inspections of one record
+    /// Records with a change inspection running, so a slow one is not run again concurrently
     #[serde(skip)]
     pub change_inspects_in_flight: HashSet<OpaqueRecordKey>,
 }

@@ -1235,16 +1235,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctor"
-version = "1.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
-dependencies = [
- "link-section",
- "linktime-proc-macro",
-]
-
-[[package]]
 name = "ctrlc"
 version = "3.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2992,18 +2982,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.190"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
-
-[[package]]
-name = "libc-print"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e4fb34ccfede7d939c50cf24b65e228fa2af1d3b49f6efd44b080dd3dcf2f1e"
-dependencies = [
- "libc",
-]
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libdbus-sys"
@@ -3040,18 +3021,6 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
-
-[[package]]
-name = "link-section"
-version = "0.19.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39c29a617ce3df32c08497bdc1ab6e2376e0b17948ac166a2fbe5977c5954cd9"
-
-[[package]]
-name = "linktime-proc-macro"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e57c38c1e860fd37c604281cdfb1dd2216977fd76a50f85ba2f388ef3219616"
 
 [[package]]
 name = "linux-raw-sys"
@@ -5685,12 +5654,10 @@ name = "veilid-flutter"
 version = "0.5.7"
 dependencies = [
  "allo-isolate",
- "android_log-sys",
  "async-std",
  "cfg-if",
  "chrono",
  "console_error_panic_hook",
- "ctor",
  "data-encoding",
  "ffi-support",
  "futures-util",
@@ -5700,7 +5667,6 @@ dependencies = [
  "js-sys",
  "lazy_static",
  "libc",
- "libc-print",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",

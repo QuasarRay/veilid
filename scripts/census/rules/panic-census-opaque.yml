@@ -15,6 +15,7 @@ files:
   - "veilid-core-optimized/src/**"
   - "veilid-core/src/**"
   - "veilid-tools/src/**"
+  - "veilid-flutter/rust/src/**"
 ignores:
   - "**/tests/**"
   - "**/tests_*/**"

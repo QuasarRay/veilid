@@ -40,10 +40,10 @@ impl<T: serde::Serialize + core::fmt::Debug + Send + Sync> VeilidComponentStats 
     }
 }
 
-// PascalCase component name -> snake_case stats-map key, acronym-aware
-// (RPCProcessor -> rpc_processor). Stats output is always snake_case regardless
-// of json-camel-case: it is debug-only and has no schema, so one parse format
-// beats matching each binding's language convention.
+/// PascalCase component name to snake_case stats key, acronym-aware (RPCProcessor to rpc_processor).
+///
+/// Always snake_case regardless of json-camel-case: debug-only output with no schema, so one
+/// parse format beats matching each binding's convention.
 #[cfg(feature = "stats")]
 fn component_stats_key(name: &str) -> String {
     let chars: Vec<char> = name.chars().collect();
@@ -209,6 +209,12 @@ impl VeilidComponentRegistry {
                 init_lock: AsyncMutex::new(false),
             }),
         }
+    }
+
+    /// Replace the config every component reads through `config()`. The caller has checked
+    /// that the node is detached and that the keys needing a restart are unchanged.
+    pub fn set_config(&self, config: VeilidConfig) {
+        self.unlocked_inner.startup_options.set_config(config);
     }
 
     #[cfg(any(test, feature = "test-util"))]

@@ -93,6 +93,9 @@ where
         }
     }
 
+    /// Commit both tables, subkey rows first: a failure or crash between the two then leaves the
+    /// record's seq mirror BEHIND its rows, the direction the read-path heal repairs. The reverse
+    /// order mints a mirror claiming rows that were never written, which nothing repairs.
     pub async fn commit(&mut self) -> VeilidAPIResult<()> {
         if self.committed {
             apibail_internal!("commit action already committed");
@@ -173,10 +176,7 @@ where
             }
         }
 
-        // Subkey rows commit before record rows: a failure or crash between the
-        // two tables then leaves the record's seq mirror BEHIND its rows, the
-        // direction the read-path heal repairs. The reverse order mints a
-        // mirror claiming rows that were never written, which nothing repairs.
+        // Subkey rows first, so a crash leaves the seq mirror behind its rows, never ahead
         if let Err(e) = st_xact.clone().commit().await {
             self.rt_xact = Some(rt_xact);
             self.st_xact = Some(st_xact);

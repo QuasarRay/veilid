@@ -111,11 +111,13 @@ class SafetySelectionKind(StrEnum):
     UNSAFE = "Unsafe"
     SAFE = "Safe"
 
+
 class TargetKind(StrEnum):
     """Whether a message target is a node id or a remote private route id."""
 
-    ROUTE_ID= "RouteId"
+    ROUTE_ID = "RouteId"
     NODE_ID = "NodeId"
+
 
 class DHTReportScope(StrEnum):
     """Which sequence numbers a DHT record report covers and the fanout used to gather network ones."""
@@ -153,6 +155,7 @@ class OperationId(str):
 
     pass
 
+
 class EncodedString(str):
     """A byte string carried as its base64url-nopad encoding."""
 
@@ -166,65 +169,78 @@ class EncodedString(str):
         assert isinstance(b, bytes)
         return cls(urlsafe_b64encode_no_pad(b))
 
+
 class BarePublicKey(EncodedString):
     """Untyped signing public key, carrying no cryptosystem kind."""
 
     pass
+
 
 class BareSecretKey(EncodedString):
     """Untyped signing secret key, carrying no cryptosystem kind."""
 
     pass
 
+
 class BareEncapsulationKey(EncodedString):
     """Untyped KEM encapsulation key, carrying no cryptosystem kind."""
 
     pass
+
 
 class BareDecapsulationKey(EncodedString):
     """Untyped KEM decapsulation key, carrying no cryptosystem kind."""
 
     pass
 
+
 class BareSharedSecret(EncodedString):
     """Untyped shared secret, carrying no cryptosystem kind."""
 
     pass
+
 
 class BareHashDigest(EncodedString):
     """Untyped hash digest, carrying no cryptosystem kind."""
 
     pass
 
+
 class BareSignature(EncodedString):
     """Untyped signature, carrying no cryptosystem kind."""
 
     pass
+
 
 class Nonce(EncodedString):
     """A random 24-byte nonce. Has no kinded variant."""
 
     pass
 
+
 class BareRouteId(EncodedString):
     """Untyped route id, carrying no cryptosystem kind."""
 
     pass
+
 
 class BareNodeId(EncodedString):
     """Untyped node id, carrying no cryptosystem kind."""
 
     pass
 
+
 class BareMemberId(EncodedString):
     """Untyped schema member id, carrying no cryptosystem kind."""
 
     pass
 
+
 class BareOpaqueRecordKey(EncodedString):
     """Untyped opaque DHT record key, carrying no cryptosystem kind."""
 
     pass
+
 
 class BareRecordKey(str):
     """Untyped DHT record key: an opaque record key with an optional record encryption secret.
@@ -233,7 +249,9 @@ class BareRecordKey(str):
     """
 
     @classmethod
-    def from_parts(cls, key: BareOpaqueRecordKey, encryption_key: Optional[BareSharedSecret]) -> Self:
+    def from_parts(
+        cls, key: BareOpaqueRecordKey, encryption_key: Optional[BareSharedSecret]
+    ) -> Self:
         """Build a record key from an opaque record key and an optional encryption secret."""
         assert isinstance(key, BareOpaqueRecordKey)
         if encryption_key is not None:
@@ -253,6 +271,7 @@ class BareRecordKey(str):
             return BareSharedSecret(self.split(":", 1)[1])
         return None
 
+
 class BareKeyPair(str):
     """Untyped public/secret key pair, carrying no cryptosystem kind. Encodes as `<public>:<secret>`."""
 
@@ -270,6 +289,7 @@ class BareKeyPair(str):
     def secret(self) -> BareSecretKey:
         """The secret key."""
         return BareSecretKey(self.split(":", 1)[1])
+
 
 class BareKemKeyPair(str):
     """Untyped KEM key pair, carrying no cryptosystem kind. Encodes as `<encapsulation>:<decapsulation>`."""
@@ -289,6 +309,7 @@ class BareKemKeyPair(str):
         """The decapsulation key."""
         return BareDecapsulationKey(self.split(":", 1)[1])
 
+
 class CryptoTyped(str):
     """A value tagged with the `CryptoKind` of the cryptosystem it belongs to. Encodes as `kind:value`."""
 
@@ -303,6 +324,7 @@ class CryptoTyped(str):
             raise ValueError("Not CryptoTyped")
         return self[5:]
 
+
 class SharedSecret(CryptoTyped):
     """Kinded shared secret."""
 
@@ -316,6 +338,7 @@ class SharedSecret(CryptoTyped):
     def value(self) -> BareSharedSecret:
         """The untagged shared secret."""
         return BareSharedSecret(self._value())
+
 
 class RecordKey(CryptoTyped):
     """Kinded DHT record key, with an optional record encryption secret."""
@@ -336,6 +359,7 @@ class RecordKey(CryptoTyped):
         ek = self.value().encryption_key()
         return None if ek == None else SharedSecret.from_value(self.kind(), ek)
 
+
 class HashDigest(CryptoTyped):
     """Kinded hash digest."""
 
@@ -349,6 +373,7 @@ class HashDigest(CryptoTyped):
     def value(self) -> BareHashDigest:
         """The untagged hash digest."""
         return BareHashDigest(self._value())
+
 
 class PublicKey(CryptoTyped):
     """Kinded signing public key: verification, identity, and node ids. KEM encryption to a key uses EncapsulationKey."""
@@ -432,6 +457,7 @@ class KeyPair(CryptoTyped):
         """The kinded secret key."""
         return SecretKey.from_value(kind=self.kind(), value=self.value().secret())
 
+
 class KemKeyPair(CryptoTyped):
     """Kinded KEM key pair for HPKE seal/open. Signing key pairs use KeyPair."""
 
@@ -454,6 +480,7 @@ class KemKeyPair(CryptoTyped):
         """The kinded decapsulation key."""
         return DecapsulationKey.from_value(kind=self.kind(), value=self.value().secret())
 
+
 class Signature(CryptoTyped):
     """Kinded signature."""
 
@@ -467,6 +494,7 @@ class Signature(CryptoTyped):
     def value(self) -> BareSignature:
         """The untagged signature."""
         return BareSignature(self._value())
+
 
 class RouteId(CryptoTyped):
     """Kinded route id."""
@@ -482,6 +510,7 @@ class RouteId(CryptoTyped):
         """The untagged route id."""
         return BareRouteId(self._value())
 
+
 class NodeId(CryptoTyped):
     """Kinded node id."""
 
@@ -495,6 +524,7 @@ class NodeId(CryptoTyped):
     def value(self) -> BareNodeId:
         """The untagged node id."""
         return BareNodeId(self._value())
+
 
 class MemberId(CryptoTyped):
     """Kinded schema member id."""
@@ -510,6 +540,7 @@ class MemberId(CryptoTyped):
         """The untagged member id."""
         return BareMemberId(self._value())
 
+
 class ValueSubkey(int):
     """Index of a subkey within a DHT record."""
 
@@ -521,6 +552,7 @@ class ValueSeqNum(int):
 
     MAX = 0xFFFFFFFE
     """The largest sequence number. Subtract n for a min_seqnum that leaves n writes."""
+
 
 ####################################################################
 
@@ -634,12 +666,12 @@ class DHTSchema(ABC):
     @classmethod
     def dflt(cls, o_cnt: int) -> Self:
         """Make a default schema with the given owner subkey count."""
-        return DHTSchemaDFLT(o_cnt=o_cnt) # type: ignore
+        return DHTSchemaDFLT(o_cnt=o_cnt)  # type: ignore
 
     @classmethod
     def smpl(cls, o_cnt: int, members: list[DHTSchemaSMPLMember]) -> Self:
         """Make a simple schema with the given owner subkey count and members."""
-        return DHTSchemaSMPL(o_cnt=o_cnt, members=members) # type: ignore
+        return DHTSchemaSMPL(o_cnt=o_cnt, members=members)  # type: ignore
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -657,21 +689,18 @@ class DHTSchema(ABC):
         """Convert to its JSON representation."""
         return self.__dict__
 
+
 @final
 class DHTSchemaDFLT(DHTSchema):
     """Default schema: a fixed number of owner-writable subkeys."""
 
     o_cnt: int
 
-    def __init__(
-        self,
-        o_cnt: int
-    ):
+    def __init__(self, o_cnt: int):
         super().__init__(DHTSchemaKind.DFLT)
 
         assert isinstance(o_cnt, int)
         self.o_cnt = o_cnt
-
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -688,11 +717,7 @@ class DHTSchemaSMPL(DHTSchema):
     o_cnt: int
     members: list[DHTSchemaSMPLMember]
 
-    def __init__(
-        self,
-        o_cnt: int,
-        members: list[DHTSchemaSMPLMember]
-    ):
+    def __init__(self, o_cnt: int, members: list[DHTSchemaSMPLMember]):
         super().__init__(DHTSchemaKind.SMPL)
 
         assert isinstance(o_cnt, int)
@@ -707,9 +732,11 @@ class DHTSchemaSMPL(DHTSchema):
     def from_json(cls, j: dict) -> Self:
         """Build from its JSON representation."""
         if DHTSchemaKind(j["kind"]) == DHTSchemaKind.SMPL:
-            return cls(j["o_cnt"],
-                [DHTSchemaSMPLMember.from_json(member) for member in j["members"]])
+            return cls(
+                j["o_cnt"], [DHTSchemaSMPLMember.from_json(member) for member in j["members"]]
+            )
         raise Exception("Invalid DHTSchemaSMPL")
+
 
 class DHTRecordDescriptor:
     """Metadata describing a DHT record: its key, owner, optional owner secret, and schema."""
@@ -744,7 +771,10 @@ class DHTRecordDescriptor:
         """The owner's kinded public and secret keys as a pair, or `None` when the secret is unknown."""
         if self.owner_secret is None:
             return None
-        return KeyPair.from_value(self.owner.kind(), BareKeyPair.from_parts(self.owner.value(), self.owner_secret.value()))
+        return KeyPair.from_value(
+            self.owner.kind(),
+            BareKeyPair.from_parts(self.owner.value(), self.owner_secret.value()),
+        )
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -759,7 +789,6 @@ class DHTRecordDescriptor:
     def to_json(self) -> dict:
         """Convert to its JSON representation."""
         return self.__dict__
-
 
 
 class DHTRecordReport:
@@ -791,8 +820,8 @@ class DHTRecordReport:
         return cls(
             [(p[0], p[1]) for p in j["subkeys"]],
             [(p[0], p[1]) for p in j["offline_subkeys"]],
-            [(ValueSeqNum(s) if s is not None else None) for s in j["local_seqs"] ],
-            [(ValueSeqNum(s) if s is not None else None) for s in j["network_seqs"] ],
+            [(ValueSeqNum(s) if s is not None else None) for s in j["local_seqs"]],
+            [(ValueSeqNum(s) if s is not None else None) for s in j["network_seqs"]],
         )
 
     def to_json(self) -> dict:
@@ -876,7 +905,9 @@ class DHTTransactionSetValueOptions:
         self.min_seqnum = min_seqnum
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}(writer={self.writer!r}, min_seqnum={self.min_seqnum!r})>"
+        return (
+            f"<{self.__class__.__name__}(writer={self.writer!r}, min_seqnum={self.min_seqnum!r})>"
+        )
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -1004,6 +1035,7 @@ class PrivateSpec:
         """Convert to its JSON representation."""
         return self.__dict__
 
+
 class SafetySpec:
     """Options for safety routes (sender privacy): preferred route, hop count, stability, and sequencing."""
 
@@ -1038,6 +1070,7 @@ class SafetySpec:
         """Convert to its JSON representation."""
         return self.__dict__
 
+
 class SafetySelection(ABC):
     """The choice of safety route to include in compiled routes: unsafe, or safe with a SafetySpec."""
 
@@ -1050,12 +1083,12 @@ class SafetySelection(ABC):
     @classmethod
     def unsafe(cls, sequencing: Sequencing = Sequencing.PREFER_ORDERED) -> Self:
         """Make a selection that uses no safety route, only a sequencing preference."""
-        return SafetySelectionUnsafe(sequencing=sequencing) # type: ignore
+        return SafetySelectionUnsafe(sequencing=sequencing)  # type: ignore
 
     @classmethod
     def safe(cls, safety_spec: SafetySpec) -> Self:
         """Make a selection that uses a safety route described by a SafetySpec."""
-        return SafetySelectionSafe(safety_spec=safety_spec) # type: ignore
+        return SafetySelectionSafe(safety_spec=safety_spec)  # type: ignore
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -1070,6 +1103,7 @@ class SafetySelection(ABC):
     def to_json(self) -> dict:
         """Convert to its JSON representation."""
         pass
+
 
 @final
 class SafetySelectionUnsafe(SafetySelection):
@@ -1096,6 +1130,7 @@ class SafetySelectionUnsafe(SafetySelection):
     def to_json(self) -> dict:
         """Convert to its JSON representation."""
         return {"Unsafe": self.sequencing}
+
 
 @final
 class SafetySelectionSafe(SafetySelection):
@@ -1124,7 +1159,6 @@ class SafetySelectionSafe(SafetySelection):
         return {"Safe": self.safety_spec.to_json()}
 
 
-
 class Target(ABC):
     """A destination for a message sent over a routing context: a node id or a remote private route id."""
 
@@ -1137,12 +1171,12 @@ class Target(ABC):
     @classmethod
     def node_id(cls, node_id: NodeId) -> Self:
         """Make a target addressing a node by its node id."""
-        return TargetNodeId(node_id=node_id) # type: ignore
+        return TargetNodeId(node_id=node_id)  # type: ignore
 
     @classmethod
     def route_id(cls, route_id: RouteId) -> Self:
         """Make a target addressing a remote private route by its id."""
-        return TargetRouteId(route_id=route_id) # type: ignore
+        return TargetRouteId(route_id=route_id)  # type: ignore
 
     @classmethod
     def from_json(cls, j: dict) -> Self:
@@ -1157,6 +1191,7 @@ class Target(ABC):
     def to_json(self) -> dict:
         """Convert to its JSON representation."""
         pass
+
 
 @final
 class TargetNodeId(Target):
@@ -1183,6 +1218,7 @@ class TargetNodeId(Target):
     def to_json(self) -> dict:
         """Convert to its JSON representation."""
         return {"NodeId": self.id}
+
 
 @final
 class TargetRouteId(Target):

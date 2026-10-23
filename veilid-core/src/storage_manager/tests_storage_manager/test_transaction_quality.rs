@@ -8,7 +8,6 @@ use crate::storage_manager::outbound_transaction_manager::{
     min_subkey_coverage, select_end_voters, EndCandidate, LocalNodeTransactionId,
 };
 use crate::storage_manager::transaction_command::exits_at_consensus;
-use std::collections::BTreeSet;
 
 const DESIRED: [ValueSubkey; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
 

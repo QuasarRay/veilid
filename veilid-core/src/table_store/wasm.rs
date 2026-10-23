@@ -53,7 +53,7 @@ impl TableStoreDriver {
         Ok(db)
     }
 
-    /// Delete a TableDB table by name. Returns whether one was actually removed.
+    /// Delete a TableDB table by name. Returns whether one was removed.
     pub async fn delete(&self, table_name: &str) -> VeilidAPIResult<bool> {
         if is_browser() {
             let namespaced_table_name = self.get_namespaced_table_name(table_name);
@@ -89,11 +89,8 @@ impl TableStoreDriver {
             .await
             .map_err(VeilidAPIError::from)?;
 
-        // A name belongs to this namespace only if, after the namespace
-        // prefix, it is a bare table real-name or the name-mapping db. A bare
-        // prefix match is not enough: the default namespace has an empty
-        // prefix that matches everything, and namespace "a" prefix-matches
-        // namespace "a_b"'s tables.
+        // A bare prefix match is not enough: the default namespace's empty prefix matches
+        // everything, and namespace "a" prefix-matches namespace "a_b"'s tables
         let prefix = opt_prefix.unwrap_or_default();
         fn owned_by_namespace(name: &str, prefix: &str) -> bool {
             let Some(rest) = name.strip_prefix(prefix) else {

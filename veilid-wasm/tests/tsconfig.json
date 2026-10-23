@@ -23,8 +23,12 @@
   },
   "include": [
     "src",
+    "extension",
     "vite.config.ts",
+    "vite.ext.config.ts",
+    "vite.sw.config.ts",
     "wdio.conf.ts",
+    "wdio.ext.conf.ts",
     "eslint.config.mjs"
   ]
 }

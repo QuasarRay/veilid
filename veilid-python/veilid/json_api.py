@@ -10,7 +10,15 @@ from typing import Awaitable, Callable, Optional, Self
 from jsonschema import exceptions, validators
 
 from . import schema
-from .api import CryptoSystem, RoutingContext, TableDb, TableDbTransaction, DHTTransaction, VeilidAPI
+from .config import VeilidConfig
+from .api import (
+    CryptoSystem,
+    RoutingContext,
+    TableDb,
+    TableDbTransaction,
+    DHTTransaction,
+    VeilidAPI,
+)
 from .error import raise_api_result
 from .operations import (
     CryptoSystemOperation,
@@ -68,7 +76,7 @@ from .types import (
     urlsafe_b64decode_no_pad,
 )
 
-_STREAM_LIMIT = (65536 * 4)
+_STREAM_LIMIT = 65536 * 4
 
 ##############################################################
 
@@ -76,7 +84,7 @@ _STREAM_LIMIT = (65536 * 4)
 def _get_schema_validator(schema):
     cls = validators.validator_for(schema)
     cls.check_schema(schema)
-    validator = cls(schema) # type: ignore
+    validator = cls(schema)  # type: ignore
     return validator
 
 
@@ -182,18 +190,20 @@ class _JsonVeilidAPI(VeilidAPI):
         cls, ipc_path: str, update_callback: Callable[[VeilidUpdate], Awaitable]
     ) -> Self:
 
-        if os.name=='nt':
-            async def open_windows_pipe(path=None, *,
-                                   limit=65536, **kwds):
+        if os.name == "nt":
+
+            async def open_windows_pipe(path=None, *, limit=65536, **kwds):
                 """Similar to `open_unix_connection` but works with Windows Named Pipes."""
                 loop = asyncio.events.get_running_loop()
 
                 reader = asyncio.StreamReader(limit=limit, loop=loop)
                 protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
-                transport, _ = await loop.create_pipe_connection(
-                    lambda: protocol, path, **kwds)
+                transport, _ = await loop.create_pipe_connection(  # type: ignore[attr-defined]
+                    lambda: protocol, path, **kwds
+                )
                 writer = asyncio.StreamWriter(transport, protocol, reader, loop)
                 return reader, writer
+
             reader, writer = await open_windows_pipe(ipc_path, limit=_STREAM_LIMIT)
         else:
             reader, writer = await asyncio.open_unix_connection(ipc_path, limit=_STREAM_LIMIT)
@@ -201,7 +211,7 @@ class _JsonVeilidAPI(VeilidAPI):
         veilid_api = cls(reader, writer, update_callback)
         veilid_api.handle_recv_messages_task = asyncio.create_task(
             veilid_api.handle_recv_messages(), name="JsonVeilidAPI.handle_recv_messages"
-            )
+        )
         return veilid_api
 
     async def handle_recv_message_response(self, j: dict):
@@ -327,7 +337,9 @@ class _JsonVeilidAPI(VeilidAPI):
 
         # Validate if we have a validator
         if response["op"] != req["op"]:
-            raise ValueError(f"Response op does not match request op: {response['op']} != {req['op']}")
+            raise ValueError(
+                f"Response op does not match request op: {response['op']} != {req['op']}"
+            )
         if validate is not None:
             validate(req, response)
 
@@ -349,6 +361,11 @@ class _JsonVeilidAPI(VeilidAPI):
 
     async def detach(self):
         raise_api_result(await self.send_ndjson_request(Operation.DETACH))
+
+    async def change_config(self, config: VeilidConfig):
+        assert isinstance(config, VeilidConfig)
+
+        raise_api_result(await self.send_ndjson_request(Operation.CHANGE_CONFIG, config=config))
 
     async def report_app_lifecycle_state(self, state: VeilidAppLifecycleState):
         assert isinstance(state, VeilidAppLifecycleState)
@@ -385,22 +402,27 @@ class _JsonVeilidAPI(VeilidAPI):
         )
 
     async def get_dht_record_key(
-        self, schema: DHTSchema, owner: PublicKey, encryption_key: Optional[SharedSecret]) -> RecordKey:
+        self, schema: DHTSchema, owner: PublicKey, encryption_key: Optional[SharedSecret]
+    ) -> RecordKey:
         assert isinstance(schema, DHTSchema)
         assert isinstance(owner, PublicKey)
         if encryption_key is not None:
             assert isinstance(encryption_key, SharedSecret)
 
-        return RecordKey(raise_api_result(
-            await self.send_ndjson_request(
-                Operation.GET_DHT_RECORD_KEY,
-                schema=schema,
-                owner=owner,
-                encryption_key=encryption_key,
+        return RecordKey(
+            raise_api_result(
+                await self.send_ndjson_request(
+                    Operation.GET_DHT_RECORD_KEY,
+                    schema=schema,
+                    owner=owner,
+                    encryption_key=encryption_key,
+                )
             )
-        ))
+        )
 
-    async def transact_dht_records(self, record_keys: list[RecordKey], options: TransactDHTRecordsOptions | None) -> DHTTransaction:
+    async def transact_dht_records(
+        self, record_keys: list[RecordKey], options: TransactDHTRecordsOptions | None
+    ) -> DHTTransaction:
         assert isinstance(record_keys, list)
         for record_key in record_keys:
             assert isinstance(record_key, RecordKey)
@@ -419,7 +441,8 @@ class _JsonVeilidAPI(VeilidAPI):
         )
 
     async def new_custom_private_route(
-        self, private_spec: PrivateSpec,
+        self,
+        private_spec: PrivateSpec,
     ) -> RouteBlob:
         assert isinstance(private_spec, PrivateSpec)
 
@@ -509,25 +532,18 @@ class _JsonVeilidAPI(VeilidAPI):
             assert isinstance(sig, Signature)
 
         out = raise_api_result(
-                await self.send_ndjson_request(
-                    Operation.VERIFY_SIGNATURES,
-                    node_ids=node_ids,
-                    data=data,
-                    signatures=signatures,
-                )
-            )
-        if out is None:
-            return out
-        return list(
-            map(
-                lambda x: PublicKey(x),
-                out
+            await self.send_ndjson_request(
+                Operation.VERIFY_SIGNATURES,
+                node_ids=node_ids,
+                data=data,
+                signatures=signatures,
             )
         )
+        if out is None:
+            return out
+        return list(map(lambda x: PublicKey(x), out))
 
-    async def generate_signatures(
-        self, data: bytes, key_pairs: list[KeyPair]
-    ) -> list[Signature]:
+    async def generate_signatures(self, data: bytes, key_pairs: list[KeyPair]) -> list[Signature]:
         assert isinstance(data, bytes)
         assert isinstance(key_pairs, list)
         for kp in key_pairs:
@@ -577,16 +593,12 @@ class _JsonVeilidAPI(VeilidAPI):
         assert isinstance(key, str)
         assert isinstance(value, bytes)
         return raise_api_result(
-            await self.send_ndjson_request(
-                Operation.SAVE_USER_SECRET, key=key, value=value
-            )
+            await self.send_ndjson_request(Operation.SAVE_USER_SECRET, key=key, value=value)
         )
 
     async def load_user_secret(self, key: str) -> Optional[bytes]:
         assert isinstance(key, str)
-        res = raise_api_result(
-            await self.send_ndjson_request(Operation.LOAD_USER_SECRET, key=key)
-        )
+        res = raise_api_result(await self.send_ndjson_request(Operation.LOAD_USER_SECRET, key=key))
         return None if res is None else urlsafe_b64decode_no_pad(res)
 
     async def remove_user_secret(self, key: str) -> bool:
@@ -596,14 +608,10 @@ class _JsonVeilidAPI(VeilidAPI):
         )
 
     async def list_user_secrets(self) -> list[str]:
-        return raise_api_result(
-            await self.send_ndjson_request(Operation.LIST_USER_SECRETS)
-        )
+        return raise_api_result(await self.send_ndjson_request(Operation.LIST_USER_SECRETS))
 
     async def delete_all_user_secrets(self) -> None:
-        raise_api_result(
-            await self.send_ndjson_request(Operation.DELETE_ALL_USER_SECRETS)
-        )
+        raise_api_result(await self.send_ndjson_request(Operation.DELETE_ALL_USER_SECRETS))
 
     async def veilid_version_string(self) -> str:
         return raise_api_result(await self.send_ndjson_request(Operation.VEILID_VERSION_STRING))
@@ -622,12 +630,9 @@ class _JsonVeilidAPI(VeilidAPI):
         return list(
             map(
                 lambda x: CryptoKind(x),
-                raise_api_result(
-                    await self.send_ndjson_request(Operation.VALID_CRYPTO_KINDS)
-                )
+                raise_api_result(await self.send_ndjson_request(Operation.VALID_CRYPTO_KINDS)),
             )
         )
-
 
 
 ######################################################
@@ -641,7 +646,9 @@ def validate_rc_op(request: dict, response: dict):
     VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
     """
     if response["rc_op"] != request["rc_op"]:
-        raise ValueError(f"Response rc_op does not match request rc_op: {response["rc_op"]} != {request["rc_op"]}")
+        raise ValueError(
+            f"Response rc_op does not match request rc_op: {response["rc_op"]} != {request["rc_op"]}"
+        )
 
 
 class _JsonRoutingContext(RoutingContext):
@@ -729,9 +736,7 @@ class _JsonRoutingContext(RoutingContext):
             await self.release()
         return self.__class__(self.api, new_rc_id)
 
-    async def safety(
-        self
-    ) -> SafetySelection:
+    async def safety(self) -> SafetySelection:
         return SafetySelection.from_json(
             raise_api_result(
                 await self.api.send_ndjson_request(
@@ -742,6 +747,7 @@ class _JsonRoutingContext(RoutingContext):
                 )
             )
         )
+
     async def app_call(self, target: Target, message: bytes) -> bytes:
         assert isinstance(target, Target)
         assert isinstance(message, bytes)
@@ -866,7 +872,11 @@ class _JsonRoutingContext(RoutingContext):
         return None if ret is None else ValueData.from_json(ret)
 
     async def set_dht_value(
-        self, key: RecordKey, subkey: ValueSubkey, data: bytes, options: Optional[SetDHTValueOptions] = None
+        self,
+        key: RecordKey,
+        subkey: ValueSubkey,
+        data: bytes,
+        options: Optional[SetDHTValueOptions] = None,
     ) -> Optional[ValueData]:
         assert isinstance(key, RecordKey)
         assert isinstance(subkey, ValueSubkey)
@@ -915,7 +925,6 @@ class _JsonRoutingContext(RoutingContext):
                 count=count,
             )
         )
-
 
     async def cancel_dht_watch(
         self, key: RecordKey, subkeys: list[tuple[ValueSubkey, ValueSubkey]] = []
@@ -966,11 +975,7 @@ class _JsonRoutingContext(RoutingContext):
             )
         )
 
-    async def flush_dht_record(
-        self, 
-        key: RecordKey, 
-        timeout_ms: Optional[int] = None
-    ) -> bool:
+    async def flush_dht_record(self, key: RecordKey, timeout_ms: Optional[int] = None) -> bool:
         assert isinstance(key, RecordKey)
         assert timeout_ms is None or isinstance(timeout_ms, int)
 
@@ -986,8 +991,6 @@ class _JsonRoutingContext(RoutingContext):
         )
 
 
-
-
 ######################################################
 
 
@@ -999,7 +1002,9 @@ def validate_tx_op(request: dict, response: dict):
     VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
     """
     if response["tx_op"] != request["tx_op"]:
-        raise ValueError(f"Response tx_op does not match request tx_op: {response['tx_op']} != {request['tx_op']}")
+        raise ValueError(
+            f"Response tx_op does not match request tx_op: {response['tx_op']} != {request['tx_op']}"
+        )
 
 
 class _JsonTableDbTransaction(TableDbTransaction):
@@ -1085,7 +1090,6 @@ class _JsonTableDbTransaction(TableDbTransaction):
         )
 
 
-
 ######################################################
 
 
@@ -1097,7 +1101,9 @@ def validate_dhttx_op(request: dict, response: dict):
     VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
     """
     if response["dhttx_op"] != request["dhttx_op"]:
-        raise ValueError(f"Response dhttx_op does not match request dhttx_op: {response['dhttx_op']} != {request['dhttx_op']}")
+        raise ValueError(
+            f"Response dhttx_op does not match request dhttx_op: {response['dhttx_op']} != {request['dhttx_op']}"
+        )
 
 
 class _JsonDHTTransaction(DHTTransaction):
@@ -1187,13 +1193,17 @@ class _JsonDHTTransaction(DHTTransaction):
                 dhttx_id=self.dhttx_id,
                 dhttx_op=DhtTransactionOperation.GET,
                 key=key,
-                subkey=subkey
+                subkey=subkey,
             )
         )
         return None if ret is None else ValueData.from_json(ret)
 
     async def set(
-        self, key: RecordKey, subkey: ValueSubkey, data: bytes, options: Optional[DHTTransactionSetValueOptions] = None
+        self,
+        key: RecordKey,
+        subkey: ValueSubkey,
+        data: bytes,
+        options: Optional[DHTTransactionSetValueOptions] = None,
     ) -> Optional[ValueData]:
         assert isinstance(key, RecordKey)
         assert isinstance(subkey, ValueSubkey)
@@ -1243,7 +1253,6 @@ class _JsonDHTTransaction(DHTTransaction):
         )
 
 
-
 ######################################################
 
 
@@ -1255,7 +1264,9 @@ def validate_db_op(request: dict, response: dict):
     VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
     """
     if response["db_op"] != request["db_op"]:
-        raise ValueError(f"Response db_op does not match request db_op: {response['db_op']} != {request['db_op']}")
+        raise ValueError(
+            f"Response db_op does not match request db_op: {response['db_op']} != {request['db_op']}"
+        )
 
 
 class _JsonTableDb(TableDb):
@@ -1394,7 +1405,9 @@ def validate_cs_op(request: dict, response: dict):
     VeilidAPIErrors; those are raised later by `raise_api_result` on the result payload.
     """
     if response["cs_op"] != request["cs_op"]:
-        raise ValueError(f"Response cs_op does not match request cs_op: {response['cs_op']} != {request['cs_op']}")
+        raise ValueError(
+            f"Response cs_op does not match request cs_op: {response['cs_op']} != {request['cs_op']}"
+        )
 
 
 class _JsonCryptoSystem(CryptoSystem):
@@ -1479,7 +1492,9 @@ class _JsonCryptoSystem(CryptoSystem):
             )
         )
 
-    async def generate_shared_secret(self, key: PublicKey, secret: SecretKey, domain: bytes) -> SharedSecret:
+    async def generate_shared_secret(
+        self, key: PublicKey, secret: SecretKey, domain: bytes
+    ) -> SharedSecret:
         assert isinstance(key, PublicKey)
         assert isinstance(secret, SecretKey)
         assert isinstance(domain, bytes)
@@ -1498,9 +1513,7 @@ class _JsonCryptoSystem(CryptoSystem):
             )
         )
 
-    async def hpke_seal(
-        self, recipient: EncapsulationKey, aad: bytes, plaintext: bytes
-    ) -> bytes:
+    async def hpke_seal(self, recipient: EncapsulationKey, aad: bytes, plaintext: bytes) -> bytes:
         assert isinstance(recipient, EncapsulationKey)
         assert isinstance(aad, bytes)
         assert isinstance(plaintext, bytes)
@@ -1519,9 +1532,7 @@ class _JsonCryptoSystem(CryptoSystem):
             )
         )
 
-    async def hpke_open(
-        self, secret: DecapsulationKey, aad: bytes, sealed: bytes
-    ) -> bytes:
+    async def hpke_open(self, secret: DecapsulationKey, aad: bytes, sealed: bytes) -> bytes:
         assert isinstance(secret, DecapsulationKey)
         assert isinstance(aad, bytes)
         assert isinstance(sealed, bytes)
@@ -1552,9 +1563,7 @@ class _JsonCryptoSystem(CryptoSystem):
             )
         )
 
-    async def encapsulation_key_from_signing_key(
-        self, key: PublicKey
-    ) -> EncapsulationKey:
+    async def encapsulation_key_from_signing_key(self, key: PublicKey) -> EncapsulationKey:
         assert isinstance(key, PublicKey)
 
         return EncapsulationKey(
@@ -1569,9 +1578,7 @@ class _JsonCryptoSystem(CryptoSystem):
             )
         )
 
-    async def decapsulation_key_from_signing_secret(
-        self, secret: SecretKey
-    ) -> DecapsulationKey:
+    async def decapsulation_key_from_signing_secret(self, secret: SecretKey) -> DecapsulationKey:
         assert isinstance(secret, SecretKey)
 
         return DecapsulationKey(
@@ -2034,6 +2041,7 @@ async def json_api_connect(
     VeilidConnectionError.
     """
     return await _JsonVeilidAPI.connect(host, port, update_callback)
+
 
 async def json_api_connect_ipc(
     ipc_path: str, update_callback: Callable[[VeilidUpdate], Awaitable]

@@ -50,8 +50,7 @@ def _labels(files, override):
     if override:
         names = [s.strip() for s in override.split(",")]
         if len(names) != len(files):
-            raise SystemExit(
-                f"--labels has {len(names)} names but {len(files)} files were given")
+            raise SystemExit(f"--labels has {len(names)} names but {len(files)} files were given")
         return names
     out, seen = [], {}
     for f in files:
@@ -66,21 +65,46 @@ def _labels(files, override):
 
 def main(argv=None):
     p = argparse.ArgumentParser(
-        prog="veilid-stats", description=DESCRIPTION, epilog=EPILOG,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("files", nargs="+", metavar="FILE",
-                   help="NDJSON stats file(s). One = single report; two+ = comparison.")
-    p.add_argument("-f", "--format", choices=("table", "json"), default="table",
-                   help="Output format: 'table' (human, default) or 'json' (for tools).")
-    p.add_argument("-o", "--output", metavar="FILE",
-                   help="Write the report to FILE instead of stdout.")
-    p.add_argument("--window", type=float, metavar="SECONDS",
-                   help="Only analyze the last SECONDS of each run. Isolates a test "
-                        "workload from an idle head/tail. Default: the whole run.")
-    p.add_argument("--top", type=int, default=20, metavar="N",
-                   help="Cap ranked sections at N rows (default: 20).")
-    p.add_argument("--labels", metavar="A,B,...",
-                   help="Comma-separated run labels, in file order. Default: filenames.")
+        prog="veilid-stats",
+        description=DESCRIPTION,
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "files",
+        nargs="+",
+        metavar="FILE",
+        help="NDJSON stats file(s). One = single report; two+ = comparison.",
+    )
+    p.add_argument(
+        "-f",
+        "--format",
+        choices=("table", "json"),
+        default="table",
+        help="Output format: 'table' (human, default) or 'json' (for tools).",
+    )
+    p.add_argument(
+        "-o", "--output", metavar="FILE", help="Write the report to FILE instead of stdout."
+    )
+    p.add_argument(
+        "--window",
+        type=float,
+        metavar="SECONDS",
+        help="Only analyze the last SECONDS of each run. Isolates a test "
+        "workload from an idle head/tail. Default: the whole run.",
+    )
+    p.add_argument(
+        "--top",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Cap ranked sections at N rows (default: 20).",
+    )
+    p.add_argument(
+        "--labels",
+        metavar="A,B,...",
+        help="Comma-separated run labels, in file order. Default: filenames.",
+    )
     p.add_argument("--version", action="version", version=f"veilid-stats {__version__}")
     args = p.parse_args(argv)
 
@@ -94,13 +118,18 @@ def main(argv=None):
 
     if len(reports) == 1:
         rep = reports[0]
-        text = render.to_json({"kind": "single_run", "report": rep}) \
-            if args.format == "json" else render.render_single(rep, top=args.top)
+        text = (
+            render.to_json({"kind": "single_run", "report": rep})
+            if args.format == "json"
+            else render.render_single(rep, top=args.top)
+        )
     else:
         cmp = core.compare(reports)
-        text = render.to_json({"kind": "comparison", "comparison": cmp}) \
-            if args.format == "json" else \
-            render.render_comparison(cmp, reports[0]["run"]["label"], top=args.top)
+        text = (
+            render.to_json({"kind": "comparison", "comparison": cmp})
+            if args.format == "json"
+            else render.render_comparison(cmp, reports[0]["run"]["label"], top=args.top)
+        )
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:

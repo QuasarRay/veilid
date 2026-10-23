@@ -137,10 +137,9 @@ impl ApiTracingLayer {
 
     /// The callbacks the drain should hand a `log_key`'s events to.
     ///
+    /// Cloned out under the lock and invoked by the caller without it: a callback is application
+    /// code that may block indefinitely, and holding the lock across it would put shutdown behind it.
     fn callbacks_for(log_key: &str) -> Vec<UpdateCallback> {
-        // Cloned out under the lock and invoked by the caller without it: an update callback is
-        // the application's code and may block for as long as it likes - veilid-flutter's posts
-        // into the Dart isolate - and holding this lock across that would put shutdown behind it
         let Some(inner) = &*API_LOGGER_INNER.lock() else {
             return Vec::new();
         };
@@ -157,8 +156,7 @@ impl ApiTracingLayer {
     }
 
     fn emit_log(&self, meta: &'static Metadata<'static>, log_key: &str, message: &str) {
-        // Already behind on delivery, so nothing built here would be delivered anyway. Checked
-        // before the formatting below, which for an error also walks a backtrace.
+        // Checked before formatting (an error also walks a backtrace): a full queue would drop it anyway
         if API_LOG_QUEUE.is_full() {
             API_LOG_QUEUE.note_dropped();
             return;

@@ -126,10 +126,10 @@ pub struct VeilidWASMConfigLoggingAPI {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VeilidWASMConfigLoggingStats {
-    /// Determines if periodic stats logging is enabled.
+    /// Determines if periodic stats logging is enabled
     #[serde(default)]
     pub enabled: bool,
-    /// Seconds between emitted records.
+    /// Seconds between emitted records
     #[serde(default = "default_stats_interval_secs")]
     pub interval_secs: u32,
 }

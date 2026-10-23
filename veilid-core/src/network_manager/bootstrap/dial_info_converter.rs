@@ -43,20 +43,15 @@ where
             if short.len() < 2 {
                 apibail_parse_error!("invalid short url length", short);
             }
-            let url = match &short[0..1] {
-                "U" => {
-                    format!("udp://{}:{}", hostname, &short[1..])
-                }
-                "T" => {
-                    format!("tcp://{}:{}", hostname, &short[1..])
-                }
-                "W" => {
-                    format!("ws://{}:{}", hostname, &short[1..])
-                }
+            let Some((protocol, port)) = short.split_at_checked(1) else {
+                apibail_parse_error!("invalid short url type", short);
+            };
+            let url = match protocol {
+                "U" => format!("udp://{}:{}", hostname, port),
+                "T" => format!("tcp://{}:{}", hostname, port),
+                "W" => format!("ws://{}:{}", hostname, port),
                 #[cfg(feature = "enable-protocol-wss")]
-                "S" => {
-                    format!("wss://{}:{}", hostname, &short[1..])
-                }
+                "S" => format!("wss://{}:{}", hostname, port),
                 _ => {
                     apibail_parse_error!("invalid short url type", short);
                 }

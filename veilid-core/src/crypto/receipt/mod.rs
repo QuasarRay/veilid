@@ -1,7 +1,6 @@
 #![allow(clippy::absurd_extreme_comparisons)]
 
 use super::*;
-use core::convert::TryInto;
 
 // Version number of receipt format
 fourcc_type!(pub(crate) ReceiptVersion);

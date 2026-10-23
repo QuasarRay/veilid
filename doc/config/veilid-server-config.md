@@ -221,6 +221,7 @@ routing_table:
     bootstrap: ['bootstrap-v1.veilid.net']
     bootstrap_keys: ['VLD0:Vj0lKDdUQXmQ5Ol1SZdlvXkBHUccBcQvGLN9vbLSI7k','VLD0:QeQJorqbXtC7v3OlynCZ_W3m76wGNeB5NTF81ypqHAo','VLD0:QNdcl-0OiFfYVj9331XVR6IqZ49NG-E18d5P7lwi4TA']
     bootstrap_records: []
+    serve_direct_bootstrap: true
     limit_over_attached: 64
     limit_fully_attached: 32
     limit_attached_strong: 16
@@ -238,6 +239,14 @@ is empty. Leaving the list empty (the default) means records come from the boots
 
 Older veilid-server builds do not recognize this key. They log it as an unknown config key and
 start normally, so a config file carrying it is still usable on an older node.
+
+`serve_direct_bootstrap` makes the node answer direct bootstrap requests (`BOOT` and `B01T`) with
+its last successful bootstrap set. The reply is large and the request is unauthenticated, so a
+node that is not a bootstrap server should not serve; each sender is held to
+`max_connection_frequency_per_min`. The server setting defaults to on, and the packaged
+`veilid-server.conf` sets it off, so a bootstrap operator turns it on in the config file. A node
+that finds itself among its own bootstraps (in `bootstrap_records` or the DNS records of a name
+in `bootstrap`) answers whatever the setting says.
 
 #### core:network:rpc
 

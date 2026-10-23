@@ -38,6 +38,11 @@ pub trait RoutingDomainController:
         None
     }
     /// True when this domain's persisted state means the saved routing table must not be trusted
+    /// Whether this node found itself among its own bootstraps
+    fn is_own_bootstrap(&self) -> bool {
+        false
+    }
+
     fn persisted_state_requires_reset<'a>(&'a self, _db: &'a TableDB) -> PinBoxFuture<'a, bool> {
         Box::pin(async move { false })
     }

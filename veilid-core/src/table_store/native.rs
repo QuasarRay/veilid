@@ -199,8 +199,7 @@ impl TableStoreDriver {
         veilid_log!(self trace "TableStore::delete '{}' at path '{:?}' deleted", table_name, dbpath);
         std::fs::remove_file(&dbpath).map_err(VeilidAPIError::from)?;
 
-        // A stale -wal left at a reused path gets replayed into the next
-        // database created there, a documented sqlite corruption cause
+        // sqlite replays a stale -wal at a reused path into the next database created there
         for suffix in ["-wal", "-shm"] {
             let mut sibling = dbpath.clone().into_os_string();
             sibling.push(suffix);
@@ -227,11 +226,8 @@ impl TableStoreDriver {
             format!("{}_", namespace)
         };
 
-        // A file belongs to this namespace only if, after the namespace
-        // prefix, it is a bare table real-name or the name-mapping db, plus
-        // sqlite/repair suffixes. A bare prefix match is not enough: the
-        // default namespace has an empty prefix that matches everything, and
-        // namespace "a" prefix-matches namespace "a_b"'s files.
+        // A bare prefix match is not enough: the default namespace's empty prefix matches
+        // everything, and namespace "a" prefix-matches namespace "a_b"'s files
         fn owned_by_namespace(fname: &str, prefix: &str) -> bool {
             let Some(rest) = fname.strip_prefix(prefix) else {
                 return false;

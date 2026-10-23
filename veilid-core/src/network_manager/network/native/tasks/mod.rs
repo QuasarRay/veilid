@@ -94,7 +94,7 @@ impl NativeNetwork {
         }
 
         // Tick the upnp renewal task only when UPnP is enabled (igd manager present)
-        if self.igd_manager.is_some() {
+        if self.igd_manager().is_some() {
             self.upnp_task.tick().await?;
         }
 

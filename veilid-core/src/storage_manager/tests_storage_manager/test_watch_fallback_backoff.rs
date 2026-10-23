@@ -1,13 +1,17 @@
+//! The fallback change inspection fires on SILENCE, and silence is the normal
+//! condition of a record nobody is writing, so a flat interval inspects a quiet
+//! watch forever. The interval has to grow while inspections keep coming back
+//! empty, and snap back on evidence that the watch is live, has gained a node, or
+//! has changed subkeys.
+//!
+//! These pin the pure state machine. The network behaviour it drives is covered by
+//! veilid-python's watch battery.
+
 use super::*;
 
-/// The fallback change inspection fires on SILENCE, and silence is the normal
-/// condition of a record nobody is writing, so a flat interval inspects a quiet
-/// watch forever. The interval has to grow while inspections keep coming back
-/// empty, and snap back on evidence that the watch is live, has gained a node, or
-/// has changed subkeys.
-///
-/// These pin the pure state machine. The network behaviour it drives is covered by
-/// veilid-python's watch battery.
+/// The ceiling every assertion below is written against
+const MAX_INTERVAL: TimestampDuration = TimestampDuration::new_secs(120);
+
 fn make_params(subkeys: ValueSubkeyRangeSet) -> OutboundWatchParameters {
     OutboundWatchParameters {
         expiration: Timestamp::new(0),
@@ -62,29 +66,26 @@ fn test_backoff_doubles_until_capped() {
     let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
     let per_node_states = HashMap::new();
 
-    let base = state.fallback_inspect_interval();
+    let base = state.fallback_inspect_interval(MAX_INTERVAL);
     assert_eq!(base, TimestampDuration::new_secs(30));
 
     // Each empty inspection doubles the interval
     let mut expected = base;
     for _ in 0..2 {
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect()
+            editor.back_off_fallback_inspect(MAX_INTERVAL)
         });
         expected = TimestampDuration::new(expected.as_u64() * 2);
-        assert_eq!(state.fallback_inspect_interval(), expected);
+        assert_eq!(state.fallback_inspect_interval(MAX_INTERVAL), expected);
     }
 
     // And stops at the ceiling rather than growing without bound
     for _ in 0..20 {
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect()
+            editor.back_off_fallback_inspect(MAX_INTERVAL)
         });
     }
-    assert_eq!(
-        state.fallback_inspect_interval(),
-        WATCH_FALLBACK_INSPECT_MAX_INTERVAL
-    );
+    assert_eq!(state.fallback_inspect_interval(MAX_INTERVAL), MAX_INTERVAL);
 }
 
 /// The interval persists with the watch state, so one saved under an older, higher
@@ -93,24 +94,18 @@ fn test_saved_interval_above_ceiling_reads_capped() {
     let per_node_states = HashMap::new();
     let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
     state.edit(&per_node_states, |editor| {
-        editor.back_off_fallback_inspect()
+        editor.back_off_fallback_inspect(MAX_INTERVAL)
     });
 
     let mut saved = serde_json::to_value(&state).unwrap();
     saved["opt_fallback_inspect_interval"] = serde_json::Value::from("600000000");
     let mut state: OutboundWatchState = serde_json::from_value(saved).unwrap();
-    assert_eq!(
-        state.fallback_inspect_interval(),
-        WATCH_FALLBACK_INSPECT_MAX_INTERVAL
-    );
+    assert_eq!(state.fallback_inspect_interval(MAX_INTERVAL), MAX_INTERVAL);
 
     state.edit(&per_node_states, |editor| {
-        editor.back_off_fallback_inspect()
+        editor.back_off_fallback_inspect(MAX_INTERVAL)
     });
-    assert_eq!(
-        state.fallback_inspect_interval(),
-        WATCH_FALLBACK_INSPECT_MAX_INTERVAL
-    );
+    assert_eq!(state.fallback_inspect_interval(MAX_INTERVAL), MAX_INTERVAL);
 }
 
 /// A delivered ValueChanged proves the watch works, so the next miss is worth
@@ -127,17 +122,17 @@ fn test_evidence_resets_backoff() {
     ] {
         let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
         state.edit(&per_node_states, |editor| {
-            editor.back_off_fallback_inspect();
-            editor.back_off_fallback_inspect();
+            editor.back_off_fallback_inspect(MAX_INTERVAL);
+            editor.back_off_fallback_inspect(MAX_INTERVAL);
         });
         assert_ne!(
-            state.fallback_inspect_interval(),
+            state.fallback_inspect_interval(MAX_INTERVAL),
             TimestampDuration::new_secs(30)
         );
 
         state.edit(&per_node_states, reset);
         assert_eq!(
-            state.fallback_inspect_interval(),
+            state.fallback_inspect_interval(MAX_INTERVAL),
             TimestampDuration::new_secs(30),
             "evidence the watch is live should restore the base interval"
         );
@@ -151,22 +146,23 @@ fn test_needs_fallback_inspect_honours_backoff() {
     let per_node_states = HashMap::new();
 
     // Establishment stamps the reference time, so nothing is due immediately
-    assert!(!state.needs_fallback_inspect(Timestamp::new(0)));
+    assert!(!state.needs_fallback_inspect(Timestamp::new(0), MAX_INTERVAL));
 
     // Far enough out, the base interval is due
     let base_due = Timestamp::now_non_decreasing().later(TimestampDuration::new_secs(31));
-    assert!(state.needs_fallback_inspect(base_due));
+    assert!(state.needs_fallback_inspect(base_due, MAX_INTERVAL));
 
     // After one empty inspection the same moment is no longer due
     state.edit(&per_node_states, |editor| {
-        editor.back_off_fallback_inspect()
+        editor.back_off_fallback_inspect(MAX_INTERVAL)
     });
     assert!(
-        !state.needs_fallback_inspect(base_due),
+        !state.needs_fallback_inspect(base_due, MAX_INTERVAL),
         "a backed-off watch should not be due at the base interval"
     );
     assert!(state.needs_fallback_inspect(
-        Timestamp::now_non_decreasing().later(TimestampDuration::new_secs(61))
+        Timestamp::now_non_decreasing().later(TimestampDuration::new_secs(61)),
+        MAX_INTERVAL
     ));
 }
 
@@ -182,27 +178,29 @@ fn test_served_watch_inspects_once_per_renewal() {
     state.edit(&per_node_states, |editor| {
         editor.add_nodes(per_node_states.keys().cloned());
         for _ in 0..4 {
-            editor.back_off_fallback_inspect();
+            editor.back_off_fallback_inspect(MAX_INTERVAL);
         }
     });
-    assert_eq!(
-        state.fallback_inspect_interval(),
-        WATCH_FALLBACK_INSPECT_MAX_INTERVAL
-    );
+    assert_eq!(state.fallback_inspect_interval(MAX_INTERVAL), MAX_INTERVAL);
 
     // Past the ceiling the interval alone says due, but a served watch waits for renewal
-    let past_ceiling = now
-        .later(WATCH_FALLBACK_INSPECT_MAX_INTERVAL.saturating_add(TimestampDuration::new_secs(1)));
-    assert!(state.needs_fallback_inspect(past_ceiling));
-    assert!(!state.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW));
+    let past_ceiling = now.later(MAX_INTERVAL.saturating_add(TimestampDuration::new_secs(1)));
+    assert!(state.needs_fallback_inspect(past_ceiling, MAX_INTERVAL));
+    assert!(!state.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW, MAX_INTERVAL));
 
     // Its renewal window opens the inspection
     let in_renew_window = expiration.earlier(RENEW_WINDOW);
-    assert!(state.fallback_inspect_due(in_renew_window, CONSENSUS_COUNT, RENEW_WINDOW));
+    assert!(state.fallback_inspect_due(
+        in_renew_window,
+        CONSENSUS_COUNT,
+        RENEW_WINDOW,
+        MAX_INTERVAL
+    ));
     assert!(!state.fallback_inspect_due(
         in_renew_window.earlier(TimestampDuration::new_secs(1)),
         CONSENSUS_COUNT,
-        RENEW_WINDOW
+        RENEW_WINDOW,
+        MAX_INTERVAL
     ));
 
     // Short of consensus the ceiling applies
@@ -215,7 +213,7 @@ fn test_served_watch_inspects_once_per_renewal() {
         })
     });
     assert_eq!(short.nodes().len(), CONSENSUS_COUNT - 1);
-    assert!(short.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW));
+    assert!(short.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW, MAX_INTERVAL));
 
     // While still backing off, the interval decides even at consensus
     let mut fresh = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
@@ -225,7 +223,8 @@ fn test_served_watch_inspects_once_per_renewal() {
     assert!(fresh.fallback_inspect_due(
         Timestamp::now_non_decreasing().later(TimestampDuration::new_secs(31)),
         CONSENSUS_COUNT,
-        RENEW_WINDOW
+        RENEW_WINDOW,
+        MAX_INTERVAL
     ));
 
     // A watch whose per-node watches are past expiration is no longer known to be served
@@ -234,10 +233,10 @@ fn test_served_watch_inspects_once_per_renewal() {
     lapsed.edit(&lapsed_per_node_states, |editor| {
         editor.add_nodes(lapsed_per_node_states.keys().cloned());
         for _ in 0..4 {
-            editor.back_off_fallback_inspect();
+            editor.back_off_fallback_inspect(MAX_INTERVAL);
         }
     });
-    assert!(lapsed.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW));
+    assert!(lapsed.fallback_inspect_due(past_ceiling, CONSENSUS_COUNT, RENEW_WINDOW, MAX_INTERVAL));
 }
 
 /// A watch that is wanted but has never established has no state to keep a timer
@@ -252,7 +251,12 @@ fn test_unestablished_watch_is_inspected_at_the_ceiling() {
 
     // Never inspected, so it is due at once, over the DESIRED subkeys
     assert_eq!(
-        outbound_watch.needs_fallback_inspect(Timestamp::new(0), CONSENSUS_COUNT, RENEW_WINDOW),
+        outbound_watch.needs_fallback_inspect(
+            Timestamp::new(0),
+            CONSENSUS_COUNT,
+            RENEW_WINDOW,
+            MAX_INTERVAL
+        ),
         Some(subkeys.clone())
     );
 
@@ -264,7 +268,8 @@ fn test_unestablished_watch_is_inspected_at_the_ceiling() {
         outbound_watch.needs_fallback_inspect(
             now.later(TimestampDuration::new_secs(60)),
             CONSENSUS_COUNT,
-            RENEW_WINDOW
+            RENEW_WINDOW,
+            MAX_INTERVAL
         ),
         None,
         "an unestablished watch should not inspect at the 30s cadence"
@@ -273,7 +278,8 @@ fn test_unestablished_watch_is_inspected_at_the_ceiling() {
         outbound_watch.needs_fallback_inspect(
             now.later(TimestampDuration::new_secs(121)),
             CONSENSUS_COUNT,
-            RENEW_WINDOW
+            RENEW_WINDOW,
+            MAX_INTERVAL
         ),
         Some(subkeys)
     );
@@ -284,7 +290,8 @@ fn test_unestablished_watch_is_inspected_at_the_ceiling() {
         outbound_watch.needs_fallback_inspect(
             now.later(TimestampDuration::new_secs(121)),
             CONSENSUS_COUNT,
-            RENEW_WINDOW
+            RENEW_WINDOW,
+            MAX_INTERVAL
         ),
         None
     );
@@ -377,12 +384,54 @@ fn test_reconcile_retries_silence_not_refusals() {
     assert_eq!(StorageManager::next_reconcile_interval(false, 5, 0), slow);
 }
 
+/// The fallback is a silence timer: a delivered change restarts it from the delivery, so a
+/// record that went quiet after delivering is inspected one interval later, not never.
+fn test_delivery_restarts_the_silence_timer() {
+    let mut state = OutboundWatchState::new(make_params(ValueSubkeyRangeSet::single(0)));
+    let per_node_states = HashMap::new();
+    let base = TimestampDuration::new_secs(30);
+    let one_sec = TimestampDuration::new_secs(1);
+
+    // A change delivered well after establishment
+    let delivered = Timestamp::now_non_decreasing().later(TimestampDuration::new_secs(100));
+    state.edit(&per_node_states, |editor| {
+        editor.touch_value_changed(delivered)
+    });
+    assert!(
+        !state.needs_fallback_inspect(delivered.later(base).earlier(one_sec), MAX_INTERVAL),
+        "silence shorter than the interval is not due"
+    );
+    assert!(
+        state.needs_fallback_inspect(delivered.later(base).later(one_sec), MAX_INTERVAL),
+        "one interval of silence after a delivery is due"
+    );
+
+    // A later fallback inspection moves the reference forward
+    let inspected = delivered.later(TimestampDuration::new_secs(40));
+    state.edit(&per_node_states, |editor| {
+        editor.touch_fallback_inspect(inspected)
+    });
+    assert!(!state.needs_fallback_inspect(inspected.later(base).earlier(one_sec), MAX_INTERVAL));
+    assert!(state.needs_fallback_inspect(inspected.later(base).later(one_sec), MAX_INTERVAL));
+
+    // And so does a delivery after that inspection
+    let delivered_again = inspected.later(TimestampDuration::new_secs(10));
+    state.edit(&per_node_states, |editor| {
+        editor.touch_value_changed(delivered_again)
+    });
+    assert!(
+        !state.needs_fallback_inspect(delivered_again.later(base).earlier(one_sec), MAX_INTERVAL)
+    );
+    assert!(state.needs_fallback_inspect(delivered_again.later(base).later(one_sec), MAX_INTERVAL));
+}
+
 pub fn test_all() {
     test_backoff_doubles_until_capped();
     test_recovery_from_degraded_reinspects_watches();
     test_saved_interval_above_ceiling_reads_capped();
     test_evidence_resets_backoff();
     test_needs_fallback_inspect_honours_backoff();
+    test_delivery_restarts_the_silence_timer();
     test_served_watch_inspects_once_per_renewal();
     test_unestablished_watch_is_inspected_at_the_ceiling();
     test_watch_network_work_holds_only_while_offline();

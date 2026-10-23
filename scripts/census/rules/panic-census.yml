@@ -23,6 +23,7 @@ files:
   - "veilid-core-optimized/src/**"
   - "veilid-core/src/**"
   - "veilid-tools/src/**"
+  - "veilid-flutter/rust/src/**"
 ignores:
   # veilid's tests are `pub fn` in tests_*/ directories, not #[cfg(test)] modules, so the
   # cfg(test) exclusion below does not see them. An assert in a test is the test.

@@ -405,6 +405,7 @@ sealed class VeilidConfigRoutingTable with _$VeilidConfigRoutingTable {
     required List<String> bootstrap,
     required List<PublicKey> bootstrapKeys,
     required List<String> bootstrapRecords,
+    @Default(false) bool serveDirectBootstrap,
   }) = _VeilidConfigRoutingTable;
 
   factory VeilidConfigRoutingTable.fromJson(dynamic json) =>
@@ -652,6 +653,7 @@ sealed class VeilidConfigInternalDHT with _$VeilidConfigInternalDHT {
     required int minPeerRefreshTimeMs,
     required int validateDialInfoReceiptTimeMs,
     required int maxWatchExpirationMs,
+    required int maxWatchInspectIntervalMs,
     required int publicWatchLimit,
     required int memberWatchLimit,
     required int publicTransactionLimit,
@@ -660,6 +662,37 @@ sealed class VeilidConfigInternalDHT with _$VeilidConfigInternalDHT {
 
   factory VeilidConfigInternalDHT.fromJson(dynamic json) =>
       _$VeilidConfigInternalDHTFromJson(json as Map<String, dynamic>);
+}
+
+////////////
+/// Internal "footgun" routing table save schedule. See [VeilidConfigInternal].
+@freezed
+sealed class VeilidConfigInternalRoutingTableSave
+    with _$VeilidConfigInternalRoutingTableSave {
+  const factory VeilidConfigInternalRoutingTableSave({
+    required int settleMs,
+    required int minIntervalMs,
+    required int backgroundMinIntervalMs,
+    required int periodMs,
+  }) = _VeilidConfigInternalRoutingTableSave;
+
+  factory VeilidConfigInternalRoutingTableSave.fromJson(dynamic json) =>
+      _$VeilidConfigInternalRoutingTableSaveFromJson(
+        json as Map<String, dynamic>,
+      );
+}
+
+////////////
+/// Internal "footgun" routing table tuning. See [VeilidConfigInternal].
+@freezed
+sealed class VeilidConfigInternalRoutingTable
+    with _$VeilidConfigInternalRoutingTable {
+  const factory VeilidConfigInternalRoutingTable({
+    required VeilidConfigInternalRoutingTableSave save,
+  }) = _VeilidConfigInternalRoutingTable;
+
+  factory VeilidConfigInternalRoutingTable.fromJson(dynamic json) =>
+      _$VeilidConfigInternalRoutingTableFromJson(json as Map<String, dynamic>);
 }
 
 ////////////
@@ -683,6 +716,7 @@ sealed class VeilidConfigInternalNetwork with _$VeilidConfigInternalNetwork {
     required VeilidConfigInternalRPC rpc,
     required VeilidConfigInternalDHT dht,
     required VeilidConfigInternalProtocol protocol,
+    required VeilidConfigInternalRoutingTable routingTable,
   }) = _VeilidConfigInternalNetwork;
 
   factory VeilidConfigInternalNetwork.fromJson(dynamic json) =>

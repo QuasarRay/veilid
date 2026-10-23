@@ -19,9 +19,11 @@ struct DialInfoConfirmationResult {
 }
 
 enum DialInfoDetectionOutcome {
+    /// Dial info found, with what the validators saw
     Confirmed(DialInfoConfirmationResult),
-    // Too few qualifying validators; the network is the problem, not our dial info
+    /// Too few qualifying validators; the network is the problem, not our dial info
     ValidatorStarvation,
+    /// No external address found, or the detection was stopped or timed out
     Failed,
 }
 
@@ -449,7 +451,7 @@ impl NativeNetwork {
         };
 
         // A quorum upgrade re-tests while peer info is already published; it must not
-        // disturb the routing domain unless the result actually differs
+        // disturb the routing domain unless the result differs
         let is_quorum_upgrade = matches!(
             inbound_stage,
             RoutingDomainInboundStage::NeedsRelays | RoutingDomainInboundStage::ReadyToPublish

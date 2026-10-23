@@ -5,7 +5,6 @@ use super::*;
 use crate::storage_manager::outbound_transaction_manager::{
     record_consensus_stage, LocalNodeTransactionId, OutboundTransactionStage,
 };
-use std::collections::{BTreeSet, HashMap};
 
 fn ids(range: std::ops::Range<u64>) -> BTreeSet<LocalNodeTransactionId> {
     range.map(LocalNodeTransactionId::new).collect()

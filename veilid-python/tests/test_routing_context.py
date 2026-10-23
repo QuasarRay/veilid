@@ -9,7 +9,6 @@ import veilid
 
 from .conftest import dht_retry
 
-
 ##################################################################
 
 
@@ -31,19 +30,18 @@ async def test_routing_contexts(api_connection: veilid.VeilidAPI):
 
     rc = await (await api_connection.new_routing_context()).with_safety(
         veilid.SafetySelection.safe(
-            veilid.SafetySpec(None, 2, veilid.Stability.LOW_LATENCY, veilid.Sequencing.PREFER_UNORDERED)
+            veilid.SafetySpec(
+                None, 2, veilid.Stability.LOW_LATENCY, veilid.Sequencing.PREFER_UNORDERED
+            )
         )
     )
     await rc.release()
-
 
     # Test that creating an Unsafe routing context throws an error
     # as mentioned in the CHANGELOG (footgun feature disabled by default)
     rc = await api_connection.new_routing_context()
     with pytest.raises(Exception):
-        rc = await rc.with_safety(
-            veilid.SafetySelection.unsafe(veilid.Sequencing.PREFER_ORDERED)
-        )
+        rc = await rc.with_safety(veilid.SafetySelection.unsafe(veilid.Sequencing.PREFER_ORDERED))
 
     await rc.release()
 
@@ -86,8 +84,8 @@ async def test_routing_context_app_message_loopback():
                     assert update.detail.route_id is not None
 
                 finally:
-                        # release imported private route
-                        await api.release_private_route(prr)
+                    # release imported private route
+                    await api.release_private_route(prr)
             finally:
                 # release local private route
                 await api.release_private_route(route_blob.route_id)
@@ -119,10 +117,14 @@ async def test_routing_context_app_call_loopback():
 
                     # send an app message to our own private route
                     request = b"abcd1234"
-                    app_call_task = asyncio.create_task(rc.app_call(veilid.TargetRouteId(prr), request), name="app call task")
+                    app_call_task = asyncio.create_task(
+                        rc.app_call(veilid.TargetRouteId(prr), request), name="app call task"
+                    )
 
                     # we should get the same request back
-                    update: veilid.VeilidUpdate = await asyncio.wait_for(app_call_queue.get(), timeout=10)
+                    update: veilid.VeilidUpdate = await asyncio.wait_for(
+                        app_call_queue.get(), timeout=10
+                    )
                     appcall = update.detail
 
                     assert isinstance(appcall, veilid.VeilidAppCall)
@@ -143,6 +145,7 @@ async def test_routing_context_app_call_loopback():
             finally:
                 # release local private route
                 await api.release_private_route(route_blob.route_id)
+
 
 @pytest.mark.asyncio
 async def test_routing_context_app_message_loopback_big_packets():
@@ -235,7 +238,7 @@ async def test_routing_context_app_call_loopback_big_packets():
                     veilid.PrivateSpec(
                         crypto_kinds=[veilid.CryptoKind.CRYPTO_KIND_VLD0],
                         stability=veilid.Stability.RELIABLE,
-                        sequencing=veilid.Sequencing.ENSURE_ORDERED
+                        sequencing=veilid.Sequencing.ENSURE_ORDERED,
                     )
                 )
                 try:

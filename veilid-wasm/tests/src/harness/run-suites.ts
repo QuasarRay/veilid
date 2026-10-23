@@ -4,11 +4,7 @@ import {
   veilidCoreInitConfig,
   veilidCoreStartupConfig,
 } from '../utils/veilid-config.js';
-import {
-  asyncCallWithTimeout,
-  getLogTimestamp,
-  waitForShutdown,
-} from '../utils/wait-utils.js';
+import { asyncCallWithTimeout, getLogTimestamp, waitForShutdown } from '../utils/wait-utils.js';
 import { appCallEventTarget, appMessageEventTarget } from './app-events.js';
 import { expect } from './expect.js';
 import {
@@ -24,6 +20,14 @@ import { suitesByName } from '../suites/registry.js';
 
 let wasmReady: Promise<unknown> | undefined;
 
+// The slice of `stats print` the analyzer reads
+type TxStats = {
+  components?: {
+    rpc_processor?: { answers_after_waiter_dropped?: { kind: string; count: number }[] };
+    storage_manager?: { transaction_quality?: unknown };
+  };
+};
+
 // Transaction quality counters are cumulative; one compact line per case lets the stress
 // analyzer diff consecutive snapshots. Absent when the build has no `stats` feature.
 let txQualityAvailable: boolean | undefined;
@@ -32,19 +36,18 @@ async function logTxQuality(label: string): Promise<void> {
     return;
   }
   // Without the `stats` feature the command answers with a plain "unsupported" line
-  let stats;
+  let stats: TxStats;
   try {
-    stats = JSON.parse(await veilidClient.debug('stats print'));
+    stats = JSON.parse(await veilidClient.debug('stats print')) as TxStats;
   } catch {
     txQualityAvailable = false;
     return;
   }
   txQualityAvailable = true;
-  const late: { kind: string; count: number }[] =
-    stats?.components?.rpc_processor?.answers_after_waiter_dropped ?? [];
+  const late = stats.components?.rpc_processor?.answers_after_waiter_dropped ?? [];
   const line = {
     case: label,
-    tx: stats?.components?.storage_manager?.transaction_quality,
+    tx: stats.components?.storage_manager?.transaction_quality,
     late_answers: late.reduce((sum, k) => sum + Number(k.count), 0),
     late_transact_answers: late
       .filter((k) => k.kind === 'TransactCommandA')

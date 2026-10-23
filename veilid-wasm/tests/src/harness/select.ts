@@ -37,9 +37,7 @@ export function selectedCaseFilter(): string | undefined {
 export function selectedContext(): ContextName {
   const name = (env.VEILID_TEST_CONTEXT ?? 'window') as ContextName;
   if (!ALL_CONTEXTS.includes(name)) {
-    throw new Error(
-      `unknown context '${name}'. Available: ${ALL_CONTEXTS.join(', ')}`,
-    );
+    throw new Error(`unknown context '${name}'. Available: ${ALL_CONTEXTS.join(', ')}`);
   }
   return name;
 }

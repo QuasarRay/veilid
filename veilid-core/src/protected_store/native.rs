@@ -151,8 +151,7 @@ pub(super) async fn build_backend(ps: &ProtectedStore) -> VeilidAPIResult<Protec
     let mut keyring_manager: Option<KeyringManager> = None;
 
     if !config.protected_store.always_use_insecure_storage {
-        // Construction probes the store and can block on user input (an unlock dialog), so it
-        // runs off the async threads like every other keyring call
+        // Construction probes the store and can block on an unlock dialog, so it runs off the async threads
         let program_name = config.program_name.clone();
         let maybe_km = blocking_yielding(move || {
             cfg_if! {
@@ -166,8 +165,7 @@ pub(super) async fn build_backend(ps: &ProtectedStore) -> VeilidAPIResult<Protec
         .await;
         keyring_manager = match maybe_km {
             Ok(v) => Some(v),
-            // A locked store is not a missing store: falling back to insecure storage would
-            // read the DEK as absent and re-key over data the locked store still holds
+            // A locked store is not a missing store; an insecure fallback would re-key over what it still holds
             Err(KeyringError::Locked) => return Err(locked_error()),
             Err(e) => {
                 veilid_log!(ps info "Secure key storage service unavailable, falling back to direct disk-based storage: {}", e);

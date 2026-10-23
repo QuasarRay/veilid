@@ -50,7 +50,9 @@ fn local_udp_bootstrap_url(api: &VeilidAPI) -> String {
 /// Node B lists only A as a bootstrap, so everything it learns arrives over B01T.
 async fn test_txt_then_direct() -> BTreeSet<String> {
     info!("test_txt_then_direct: starting node A");
-    let (update_callback, config) = fixture_veilid_core();
+    let (update_callback, mut config) = fixture_veilid_core();
+    // Serving direct bootstrap is opt-in, and A is not among its own bootstraps
+    config.network.routing_table.serve_direct_bootstrap = true;
     let api_a = api_startup(update_callback, config)
         .await
         .expect("startup failed");
@@ -164,7 +166,7 @@ async fn test_config_records_bootstrap(strings_a: &BTreeSet<String>) {
         .get_served_bootstrap_cache(RoutingDomain::PublicInternet);
     assert_eq!(as_set(served.record_strings()), *strings_a);
 
-    // And good enough to actually join with
+    // And good enough to join with
     let _ = api_c
         .wait_for_attachment_condition(None, None)
         .await

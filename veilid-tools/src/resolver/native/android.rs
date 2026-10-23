@@ -41,7 +41,7 @@ pub(crate) async fn txt_lookup(name: &str) -> Result<Vec<String>, DnsError> {
 }
 
 /// Ask the OS resolver for `name`/`qtype`
-pub(crate) async fn query(name: &str, qtype: u16) -> Result<Response, DnsError> {
+async fn query(name: &str, qtype: u16) -> Result<Response, DnsError> {
     let fns = ANDROID_RES.as_ref().ok_or(DnsError::Unsupported)?;
     let dname = CString::new(name).map_err(|_| DnsError::InvalidName("interior nul"))?;
 

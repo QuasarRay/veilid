@@ -23,13 +23,17 @@ impl StorageManager {
 
         // Collect watches needing fallback inspection
         let consensus_count = registry.config().internal().network.dht.get_value_count as usize;
+        let max_interval = registry
+            .storage_manager()
+            .timings()
+            .watch_inspect_max_interval;
         let inspections: Vec<_> = owm
             .outbound_watches
             .values()
             .filter_map(|ow| {
                 Some((
                     ow.record_key(),
-                    ow.needs_fallback_inspect(cur_ts, consensus_count, renew_window)?,
+                    ow.needs_fallback_inspect(cur_ts, consensus_count, renew_window, max_interval)?,
                 ))
             })
             .collect();

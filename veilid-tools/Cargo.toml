@@ -102,7 +102,7 @@ veilid_tools_ios_tests = [
 ]
 # Capture backtraces (diagnostics, lock tracking); off for wasm product builds
 backtrace = []
-# parking_lot's detector uses the backtrace crate, which does not build for iOS on libc 0.2.190
+# Needs the libc 0.2.191 floor: it restored the iOS dyld bindings the backtrace crate imports
 debug-locks = ["parking_lot/deadlock_detection", "backtrace"]
 log-location-quiet = []
 panic-quiet = []
@@ -159,7 +159,7 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 ] }
 httparse = "1.10.1"
 indent = { version = "0.1.1", optional = true }
-libc = "0.2.170"
+libc = "0.2.191"
 socket2 = { version = "0.6.2", features = ["all"] }
 tokio = { version = "1.53.3", features = [
     "rt-multi-thread",

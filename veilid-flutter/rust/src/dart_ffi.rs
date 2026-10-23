@@ -23,44 +23,6 @@ use veilid_core::bytes::Bytes;
 use veilid_core::tools::*;
 use veilid_core::*;
 
-// Detect flutter load/unload
-cfg_if! {
-    if #[cfg(feature="debug-load")] {
-        #[ctor::ctor]
-        fn onload() {
-            cfg_if! {
-                if #[cfg(target_os="android")] {
-                    use android_log_sys::*;
-                    use std::ffi::{CString, c_int, c_char};
-                    unsafe {
-                        let tag = CString::new("veilid").unwrap_or_log();
-                        let text = CString::new(">>> VEILID-FLUTTER LOADED <<<").unwrap_or_log();
-                        __android_log_write(LogPriority::INFO as c_int, tag.as_ptr() as *const c_char, text.as_ptr() as *const c_char);
-                    }
-                } else {
-                    libc_print::libc_println!(">>> VEILID-FLUTTER LOADED <<<");
-                }
-            }
-        }
-        #[ctor::dtor]
-        fn onunload() {
-            cfg_if! {
-                if #[cfg(target_os="android")] {
-                    use android_log_sys::*;
-                    use std::ffi::{CString, c_int, c_char};
-                    unsafe {
-                        let tag = CString::new("veilid").unwrap_or_log();
-                        let text = CString::new(">>> VEILID-FLUTTER UNLOADED <<<").unwrap_or_log();
-                        __android_log_write(LogPriority::INFO as c_int, tag.as_ptr() as *const c_char, text.as_ptr() as *const c_char);
-                    }
-                } else {
-                    libc_print::libc_println!(">>> VEILID-FLUTTER UNLOADED <<<");
-                }
-            }
-        }
-    }
-}
-
 cfg_if! {
     if #[cfg(target_os = "android")] {
         /// logd is a socket, and `AndroidLogWriter` writes to it on the thread
@@ -81,9 +43,7 @@ cfg_if! {
 
             impl Write for AndroidLog {
                 fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                    // Each buf is one formatted event, emitted once when the writer
-                    // drops: AndroidLogWriter flushes in Drop and does not clear
-                    // its buffer, so an explicit flush here logged every line twice
+                    // AndroidLogWriter flushes in Drop and keeps its buffer, so a flush here doubles every line
                     let mut writer = self.0.make_writer();
                     writer.write(buf)
                 }
@@ -230,9 +190,11 @@ pub struct VeilidFFIConfigLoggingFlame {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VeilidFFIConfigLoggingStats {
+    /// Emit periodic stats records
     pub enabled: bool,
+    /// Seconds between records
     pub interval_secs: u32,
-    /// Directory or file for NDJSON records; empty routes to the "stats" log facility.
+    /// Directory or file for NDJSON records; empty routes to the "stats" log facility
     pub path: String,
 }
 
@@ -260,8 +222,7 @@ pub extern "C" fn initialize_veilid_flutter(
     dart_post_c_object_ptr: ffi::DartPostCObjectFnType,
     crash_path: FfiStr,
 ) {
-    // A duplicate image cannot work (its statics are not the live core's);
-    // failing loudly here beats the silent forever-hang its calls produce
+    // A duplicate image's statics are not the live core's: failing loudly beats its silent hang
     #[cfg(unix)]
     if let Some(desc) = crate::duplicate_image_guard::duplicate_image() {
         eprintln!(
@@ -271,6 +232,7 @@ pub extern "C" fn initialize_veilid_flutter(
         std::process::abort();
     }
 
+    // SAFETY: the pointer is Dart's NativeApi.postCObject, valid for the life of the process
     unsafe {
         store_dart_post_cobject(dart_post_c_object_ptr);
     }
@@ -621,9 +583,7 @@ pub extern "C" fn startup_veilid_core(port: i64, stream_port: i64, config: FfiSt
                         "joining a node started with a different config, this config is ignored"
                     );
                 }
-                // A hot restart's isolate is gone but its handles are not. When no live
-                // consumer remains they belong to nobody, and a table one of them held
-                // open can never be deleted while they stay.
+                // Hot-restart orphans: with no live consumer left, a table they hold open could never be deleted
                 node_state.sinks.reap_dead_except(stream_port);
                 if node_state.sinks.len() == 0 {
                     TABLE_DB_TRANSACTIONS.lock().clear();
@@ -728,6 +688,21 @@ pub extern "C" fn detach(port: i64) {
 
 #[no_mangle]
 #[instrument(level = "trace", target = "ffi", skip_all)]
+pub extern "C" fn change_config(port: i64, config: FfiStr) {
+    let config = config.into_opt_string();
+    DartIsolateWrapper::new(port).spawn_result(
+        async move {
+            let config: VeilidConfig = deserialize_opt_json(config)?;
+            let veilid_api = get_veilid_api().await?;
+            veilid_api.change_config(config)?;
+            VeilidAPIResult::Ok(())
+        }
+        .in_current_span(),
+    );
+}
+
+#[no_mangle]
+#[instrument(level = "trace", target = "ffi", skip_all)]
 pub extern "C" fn report_app_lifecycle_state(port: i64, state: FfiStr) {
     let state = state.into_opt_string();
     DartIsolateWrapper::new(port).spawn_result(
@@ -796,8 +771,7 @@ pub extern "C" fn shutdown_veilid_core(port: i64, stream_port: i64) {
                 return VeilidAPIResult::Ok(());
             }
 
-            // the last reference stays registered through termination so its consumer sees the
-            // updates core emits on the way down
+            // the last reference stays registered so its consumer sees the updates core emits on the way down
             let Some(veilid_api) = api_lock.take() else {
                 return VeilidAPIResult::Err(VeilidAPIError::NotInitialized);
             };
@@ -809,11 +783,9 @@ pub extern "C" fn shutdown_veilid_core(port: i64, stream_port: i64) {
             ROUTING_CONTEXTS.lock().clear();
             veilid_api.shutdown().await;
 
-            // unconditional: a teardown that emits no Shutdown update would park every consumer
-            // in `await for` forever
+            // unconditional: without a Shutdown update every consumer would park in `await for` forever
             sinks.close_all();
-            // dropped out of the guard's scope: retiring a sink posts, and posting under a lock
-            // is how this deadlocks
+            // dropped outside the guard's scope: retiring a sink posts, and posting under a lock deadlocks
             let retired_state = NODE_STATE.lock().take();
             drop(retired_state);
 

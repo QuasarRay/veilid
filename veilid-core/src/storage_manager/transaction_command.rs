@@ -347,7 +347,7 @@ impl StorageManager {
                             TransactCommandDisposition::Invalid
                         };
 
-                        // Only record RTT for Valid responses — Invalid means
+                        // Only record RTT for Valid responses: Invalid means
                         // the server rejected the transaction, which can be a
                         // fast/cheap response that doesn't reflect real RTT.
                         let opt_rtt = matches!(disposition, TransactCommandDisposition::Valid)

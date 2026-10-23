@@ -83,6 +83,7 @@ impl RoutedOperation {
     ) -> Result<Self, RPCError> {
         rpc_ignore_missing_property!(reader, signatures);
         let sigs_reader = reader.get_signatures()?;
+        rpc_ignore_max_len!(sigs_reader, MAX_CRYPTO_KINDS);
         let mut signatures = Vec::<Signature>::with_capacity(
             sigs_reader
                 .len()

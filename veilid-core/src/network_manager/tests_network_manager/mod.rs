@@ -19,6 +19,8 @@ pub async fn test_all() {
     test_bootstrap::test_bootstrap_v1().await;
     test_bootstrap::test_boot_v1_response().await;
     test_bootstrap::test_bootstrap_record_unresolved().await;
+    test_bootstrap::test_short_dial_info_multibyte().await;
+    test_bootstrap::test_bootstrap_peer_json_binding().await;
     test_bootstrap::test_config_bootstrap_records().await;
     test_bootstrap::test_bootstrap_cache_cap();
     test_connection_table::test_add_get_remove().await;

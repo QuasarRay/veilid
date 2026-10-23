@@ -21,24 +21,26 @@ export const dhtSuite: Suite = {
     const cases: TestCase[] = [];
 
     // Stands in for the create/delete record hooks the describe block used.
-    const withRecord = (
-      cryptoKind: CryptoKind,
-      body: (c: CaseContext, rc: VeilidRoutingContext, rec: DHTRecordDescriptor) => Promise<void>,
-    ) => async (c: CaseContext) => {
-      const routingContext = VeilidRoutingContext.create();
-      const dhtRecord = await routingContext.createDHTRecord(cryptoKind, {
-        DFLT: { oCnt: 1 },
-      });
-      c.expect(dhtRecord.key).toBeInstanceOf(RecordKey);
-      c.expect(dhtRecord.owner).toBeInstanceOf(KeyPair);
-      c.expect(dhtRecord.schema).toEqual({ DFLT: { oCnt: 1 } });
+    const withRecord =
+      (
+        cryptoKind: CryptoKind,
+        body: (c: CaseContext, rc: VeilidRoutingContext, rec: DHTRecordDescriptor) => Promise<void>,
+      ) =>
+      async (c: CaseContext) => {
+        const routingContext = VeilidRoutingContext.create();
+        const dhtRecord = await routingContext.createDHTRecord(cryptoKind, {
+          DFLT: { oCnt: 1 },
+        });
+        c.expect(dhtRecord.key).toBeInstanceOf(RecordKey);
+        c.expect(dhtRecord.owner).toBeInstanceOf(KeyPair);
+        c.expect(dhtRecord.schema).toEqual({ DFLT: { oCnt: 1 } });
 
-      try {
-        await body(c, routingContext, dhtRecord);
-      } finally {
-        await routingContext.deleteDHTRecord(dhtRecord.key);
-      }
-    };
+        try {
+          await body(c, routingContext, dhtRecord);
+        } finally {
+          await routingContext.deleteDHTRecord(dhtRecord.key);
+        }
+      };
 
     for (const cryptoKind of veilidCrypto.VALID_CRYPTO_KINDS) {
       cases.push({
@@ -84,9 +86,7 @@ export const dhtSuite: Suite = {
           expect(readonlyDhtRecord).toBeDefined();
 
           // No retry: we're asserting the not-writable rejection.
-          await expect(
-            rc.setDHTValue(rec.key, 0, textEncoder.encode(data)),
-          ).rejects.toMatchObject({
+          await expect(rc.setDHTValue(rec.key, 0, textEncoder.encode(data))).rejects.toMatchObject({
             kind: 'Generic',
             message: 'value is not writable',
           });
@@ -228,10 +228,9 @@ export const dhtSuite: Suite = {
           );
           expect(setValueRes).toBeUndefined();
 
-          const inspectRes = await dhtRetry(
-            () => rc.inspectDHTRecord(rec.key, [[0, 0]], 'Local'),
-            { label: 'inspectDHTRecord Local' },
-          );
+          const inspectRes = await dhtRetry(() => rc.inspectDHTRecord(rec.key, [[0, 0]], 'Local'), {
+            label: 'inspectDHTRecord Local',
+          });
           expect(inspectRes).toBeDefined();
           expect(inspectRes.subkeys).toEqual([[0, 0]]);
           expect(inspectRes.localSeqs).toEqual([0]);

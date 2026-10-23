@@ -37,8 +37,8 @@ static FOREGROUND: Mutex<(usize, Option<ActivityToken>)> = Mutex::new((0, None))
 /// An activity from NSProcessInfo, ended by handing it back
 struct ActivityToken(Retained<ProtocolObject<dyn NSObjectProtocol>>);
 
-// SAFETY: the token is never messaged here, only handed back to NSProcessInfo, which objc2
-// declares Send and Sync
+// SAFETY: the token is only handed back to NSProcessInfo, which objc2 declares Send and Sync,
+// or released, and an objc2 Retained release is thread-safe
 unsafe impl Send for ActivityToken {}
 
 pub(super) fn monitor_started() {
@@ -85,7 +85,7 @@ pub(super) fn end_foreground() {
 
 fn install_observer() {
     let center = NSNotificationCenter::defaultCenter();
-    let changed = RcBlock::new(|_: NonNull<NSNotification>| visibility_changed());
+    let changed = RcBlock::new(|_: NonNull<NSNotification>| abort_on_panic(visibility_changed));
     // The center holds each registration until it is removed, and these never are
     // SAFETY: the names are AppKit constants, valid for the life of the process; the block
     // captures nothing, so it is sendable; with no queue given it runs on the posting thread,

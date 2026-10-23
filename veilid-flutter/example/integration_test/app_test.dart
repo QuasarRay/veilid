@@ -50,6 +50,8 @@ void main() => runWithIntegrationLog(() {
     // Fail the run if any subsystem (online/relay/route/connection/readiness) flapped
     tearDownAll(LogFixture.instance.assertNoFlapping);
 
+    test('veilid config change', testVeilidConfigChange, tags: ['config']);
+
     group('Crypto', () {
       test('list cryptosystems', testListCryptoSystems, tags: ['crypto']);
       test('get cryptosystem', testGetCryptoSystems, tags: ['crypto']);
@@ -248,10 +250,7 @@ void main() => runWithIntegrationLog(() {
         });
 
         group('DHT Transactions $cryptoKind', () {
-          final testDHTTransactions = TestDHTTransactions(
-            cryptoKind,
-            updateProcessorFixture,
-          );
+          final testDHTTransactions = TestDHTTransactions(cryptoKind);
           setUpAll(testDHTTransactions.setUpAll);
           tearDownAll(testDHTTransactions.tearDownAll);
 

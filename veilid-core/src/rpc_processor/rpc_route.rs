@@ -31,10 +31,15 @@ impl RPCProcessor {
         let trace_nr = next_hop_nr.clone();
 
         // Pass along the route
+        let Some(next_hop) = route_hop.next_hop else {
+            return Ok(NetworkResult::invalid_message(
+                "safety route hop without next hop",
+            ));
+        };
         let next_hop_route = RPCOperationRoute::new(
             Arc::new(SafetyRoute {
                 public_key: safety_route.public_key.clone(),
-                hops: SafetyRouteHops::Data(route_hop.next_hop.unwrap_or_log()),
+                hops: SafetyRouteHops::Data(next_hop),
             }),
             routed_operation,
         );

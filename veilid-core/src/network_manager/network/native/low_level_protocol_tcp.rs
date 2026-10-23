@@ -3,11 +3,6 @@ use stop_token::future::FutureExt;
 
 const LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS: usize = 16;
 
-/// Delay before the next accept after one failed. An accept that fails instantly - a listener
-/// whose interface went away, or a process out of file descriptors - is otherwise retried by the
-/// incoming stream as fast as the CPU allows.
-const LISTENER_ACCEPT_ERROR_BACKOFF_MS: u32 = 100;
-
 /////////////////////////////////////////////////////////////////
 
 #[derive(Clone)]
@@ -131,7 +126,7 @@ impl NativeNetwork {
                 }
                 // The incoming stream keeps yielding after an accept error, so without this the
                 // next accept is attempted immediately and a broken listener spins
-                sleep(LISTENER_ACCEPT_ERROR_BACKOFF_MS).await;
+                sleep(self.timings().socket_error_backoff_ms).await;
                 return;
             }
         };

@@ -6,11 +6,13 @@ use super::*;
 /// Per-kind rolling wait/hold accounting
 #[derive(Debug, Default)]
 struct GatedKindAccounting {
+    /// Completions
     count: u64,
-    // Completions that ended in a retryable outcome (no consensus / congestion);
-    // the client defers or retries these, so the ratio to `count` is retry pressure.
+    /// Retryable completions (no consensus or congestion); their ratio to `count` is retry pressure
     retryable: u64,
+    /// Rolling admission waits
     gate_wait_accounting: LatencyStatsAccounting,
+    /// Rolling hold times
     held_accounting: LatencyStatsAccounting,
 }
 

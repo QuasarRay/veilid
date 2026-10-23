@@ -12,11 +12,6 @@ impl_veilid_log_facility!("net");
 /// breaker and the network restart behind it.
 const UDP_RECV_FAIL_AFTER_CONSECUTIVE_ERRORS: usize = 16;
 
-/// Delay between retries once a receive failure has repeated. Not applied to the first failure:
-/// a lone ICMP-driven error is ordinary on a UDP socket and must not add latency to the next
-/// packet.
-const UDP_RECV_ERROR_BACKOFF_MS: u32 = 100;
-
 #[derive(Clone)]
 pub struct RawUdpProtocolHandler {
     /// Component registry for logging and access to other subsystems
@@ -27,6 +22,10 @@ pub struct RawUdpProtocolHandler {
     socket: Arc<UdpSocket>,
     /// Reassembly buffer for fragmented UDP messages
     assembly_buffer: AssemblyBuffer,
+    /// Bound on one fragmented send; a stalled interface parks send_to forever otherwise
+    send_timeout_ms: u32,
+    /// Pause between repeated receive failures; the first is ordinary ICMP noise and costs nothing
+    recv_error_backoff_ms: u32,
     /// Drop to signal cancellation; taken out by `stop()`
     stop_source: Arc<Mutex<Option<StopSource>>>,
     /// Cloned by recv-loops that follow this handler's stop
@@ -36,7 +35,11 @@ pub struct RawUdpProtocolHandler {
 impl_veilid_component_accessors!(RawUdpProtocolHandler);
 
 impl RawUdpProtocolHandler {
-    pub fn new(registry: VeilidComponentRegistry, socket: Arc<UdpSocket>) -> Self {
+    pub fn new(
+        registry: VeilidComponentRegistry,
+        socket: Arc<UdpSocket>,
+        timings: &NativeNetworkTimings,
+    ) -> Self {
         let stop_source = StopSource::new();
         let stop_token = stop_source.token();
 
@@ -45,6 +48,8 @@ impl RawUdpProtocolHandler {
             ttl_sender: Arc::new(UdpTtlSender::new()),
             socket,
             assembly_buffer: AssemblyBuffer::new(),
+            send_timeout_ms: timings.send_timeout_ms,
+            recv_error_backoff_ms: timings.socket_error_backoff_ms,
             stop_source: Arc::new(Mutex::new(Some(stop_source))),
             stop_token,
         }
@@ -91,7 +96,7 @@ impl RawUdpProtocolHandler {
                 // Yield unconditionally: a socket failing instantly would otherwise spin inside a
                 // single poll, which pins a core and leaves the stop token unobserved, so the task
                 // cannot be cancelled either
-                sleep(if consecutive_errors > 1 { UDP_RECV_ERROR_BACKOFF_MS } else { 0 }).await;
+                sleep(if consecutive_errors > 1 { self.recv_error_backoff_ms } else { 0 }).await;
                 continue;
             });
             consecutive_errors = 0;
@@ -195,14 +200,8 @@ impl RawUdpProtocolHandler {
         };
 
         // A stalled interface parks send_to forever; bound the fragmented send so it fails
-        let config = self.registry.config();
-        let net_config = &config.internal().network;
-        let timeout_ms = net_config
-            .rpc
-            .timeout_ms
-            .min(net_config.single_send_timeout_ms);
         network_result_try!(match timeout(
-            timeout_ms,
+            self.send_timeout_ms,
             self.assembly_buffer
                 .split_message(data, remote_addr, sender)
         )
@@ -292,30 +291,40 @@ impl RawUdpProtocolHandler {
 
     #[cfg_attr(
         feature = "instrument",
-        instrument(level = "trace", target = "protocol", skip(registry), err, fields(__VEILID_LOG_KEY = registry.log_key()))
+        instrument(level = "trace", target = "protocol", skip(registry, timings), err, fields(__VEILID_LOG_KEY = registry.log_key()))
     )]
     pub fn try_new_unspecified_bound_handler(
         registry: VeilidComponentRegistry,
         socket_addr: &SocketAddr,
+        timings: &NativeNetworkTimings,
     ) -> io::Result<RawUdpProtocolHandler> {
         // get local wildcard address for bind
         let local_socket_addr = compatible_unspecified_socket_addr(socket_addr);
         let socket = bind_async_udp_socket(local_socket_addr)?
             .ok_or(io::Error::from(io::ErrorKind::AddrInUse))?;
-        Ok(RawUdpProtocolHandler::new(registry, Arc::new(socket)))
+        Ok(RawUdpProtocolHandler::new(
+            registry,
+            Arc::new(socket),
+            timings,
+        ))
     }
 
     /// Bind a UDP socket to a specific local source address
     #[cfg_attr(
         feature = "instrument",
-        instrument(level = "trace", target = "protocol", skip(registry), err, fields(__VEILID_LOG_KEY = registry.log_key()))
+        instrument(level = "trace", target = "protocol", skip(registry, timings), err, fields(__VEILID_LOG_KEY = registry.log_key()))
     )]
     pub fn try_new_specific_bound_handler(
         registry: VeilidComponentRegistry,
         local_socket_addr: SocketAddr,
+        timings: &NativeNetworkTimings,
     ) -> io::Result<RawUdpProtocolHandler> {
         let socket = bind_async_udp_socket(local_socket_addr)?
             .ok_or(io::Error::from(io::ErrorKind::AddrInUse))?;
-        Ok(RawUdpProtocolHandler::new(registry, Arc::new(socket)))
+        Ok(RawUdpProtocolHandler::new(
+            registry,
+            Arc::new(socket),
+            timings,
+        ))
     }
 }

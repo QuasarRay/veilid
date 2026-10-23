@@ -10,15 +10,19 @@ pub(crate) use message::*;
 /// Failure of one lookup
 #[derive(Debug)]
 pub(crate) enum DnsError {
+    /// The name cannot be handed to the resolver
     InvalidName(&'static str),
+    /// An OS error on the resolver's descriptor
     Io(io::Error),
+    /// No answer before the query timeout
     Timeout,
+    /// The answer did not fit the transport
     Truncated,
+    /// The server answered with a failure rcode
     Rcode(u16),
     /// NXDOMAIN, or NOERROR with no answers
-    NoRecords {
-        rcode: u16,
-    },
+    NoRecords { rcode: u16 },
+    /// The answer does not decode
     Malformed(&'static str),
     /// The platform has no resolver for this record type
     Unsupported,

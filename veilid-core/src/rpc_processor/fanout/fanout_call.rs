@@ -215,17 +215,29 @@ pub fn capability_fanout_peer_info_filter(caps: Vec<VeilidCapability>) -> Fanout
 /// timeout is not necessarily indicative of an algorithmic 'failure', just that no definitive stopping condition was found
 /// in the given time
 pub(crate) struct FanoutCall<'a> {
+    /// Routing table the candidates come from
     routing_table: &'a RoutingTable,
+    /// Name for debugging
     name: String,
+    /// Hash coordinate for the record we are fanning out for
     hash_coordinate: HashCoordinate,
+    /// Number of nodes to keep in the closest nodes set
     node_count: usize,
+    /// Number of concurrent fanout lanes to run
     fanout_tasks: usize,
+    /// Accepts that make consensus; 0 means none is required
     consensus_count: usize,
+    /// Number of nodes away from the key that can be considered; 0 means no width is applied
     consensus_width: usize,
+    /// Timeout for the fanout call
     timeout: TimestampDuration,
+    /// Filter deciding which peers are eligible
     peer_info_filter: FanoutPeerInfoFilter,
+    /// Per-node call routine
     call_routine: FanoutCallRoutine,
+    /// Termination check run after each lane response
     check_done: FanoutCheckDone,
+    /// Sizes the post-consensus window, when set
     post_consensus_timeout_callback: Option<FanoutPostConsensusTimeoutCallback>,
     /// Accepts this run needs, when it differs from `consensus_count` (see `set_run_target`)
     opt_run_target_count: Option<usize>,
@@ -629,8 +641,7 @@ impl<'a> FanoutCall<'a> {
         // Get the 'node_count' closest nodes to the key out of our routing table
         let closest_nodes = {
             let peer_info_filter = self.peer_info_filter.clone();
-            // Never-contacted nodes are often dead in a cold table, so only a re-plan
-            // seeds from them
+            // Never-contacted nodes are often dead in a cold table, so only a re-plan seeds from them
             let seed_floor = if self.seed_untried {
                 BucketEntryState::Initial
             } else {

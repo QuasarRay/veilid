@@ -3,10 +3,13 @@ use super::*;
 /// One node's watch on a record.
 #[derive(Clone)]
 pub(crate) struct MockWatch {
+    /// Node holding the watch
     pub watcher: MockNodeKey,
     /// The key this node opened the record under, which is what its reports are decrypted with
     pub record_key: RecordKey,
+    /// Subkeys watched
     pub subkeys: ValueSubkeyRangeSet,
+    /// Reports left before the watch dies
     pub count: u32,
     /// When the watch lapses, or zero for a watch that was never given a deadline
     pub expiration: Timestamp,
@@ -116,6 +119,10 @@ impl VeilidAPI {
 /// Note a committed change and hand back the reports to deliver.
 ///
 /// Runs under the record lock and sends nothing itself, so that delivery happens with no lock held.
+///
+/// The writer hears its own change too: the real ExcludeTarget compares the set's sender against
+/// the watch's target, and app watches register over private routes, so a node watching through a
+/// route is notified of its own node's writes.
 fn take_changes(
     records: &mut HashMap<OpaqueRecordKey, MockRecord>,
     record_key: &RecordKey,
@@ -137,9 +144,7 @@ fn take_changes(
 
     let mut pending = Vec::new();
     for watch in &mut record.watches {
-        // The writer hears its own change too: the real ExcludeTarget compares the set's sender
-        // against the watch's target, and app watches register over private routes, so a node
-        // watching through a route is notified of its own node's writes
+        // The writer hears its own change too
         let reportable = watch.subkeys.intersect(changed);
         if reportable.is_empty() {
             continue;
@@ -204,8 +209,7 @@ impl VeilidAPI {
 
         // Delivered outside the record lock: a callback may re-enter the API
         for mut p in pending {
-            // Records hold ciphertext, and a report carries a value the same way a get returns
-            // one: decrypted under the key its own watcher opened the record with
+            // A report's value is decrypted under its own watcher's record key, as a get would
             if let (Some(value), Some(subkey)) = (p.change.value.take(), p.change.subkeys.first()) {
                 match self.mock_crypt_value_data(&p.record_key, subkey, &value) {
                     // A report with no value still tells the watcher to go read

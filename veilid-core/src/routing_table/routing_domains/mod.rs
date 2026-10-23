@@ -260,6 +260,15 @@ impl RoutingTable {
     }
 
     /// Return everything a particular routing domain can serve to a B01T request
+    /// Direct bootstrap requests are answered when configured, or when this node is one of its
+    /// own bootstraps
+    pub fn serves_direct_bootstrap(&self) -> bool {
+        self.config().network.routing_table.serve_direct_bootstrap
+            || self
+                .get_routing_domain_controller(RoutingDomain::PublicInternet)
+                .is_own_bootstrap()
+    }
+
     pub fn get_served_bootstrap_cache(&self, routing_domain: RoutingDomain) -> BootstrapCache {
         let rdc = self.get_routing_domain_controller(routing_domain);
         let rdd = rdc.read_dyn();

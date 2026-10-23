@@ -325,6 +325,16 @@ impl<T: PartialEq + Ord> HasDuplicates<T> for Vec<T> {
     }
 }
 
+/// Effective user and group of this process
+#[cfg(unix)]
+fn effective_uid_gid() -> (libc::uid_t, libc::gid_t) {
+    // SAFETY: geteuid takes no arguments and cannot fail
+    let uid = unsafe { libc::geteuid() };
+    // SAFETY: getegid takes no arguments and cannot fail
+    let gid = unsafe { libc::getegid() };
+    (uid, gid)
+}
+
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
         use std::os::unix::fs::MetadataExt;
@@ -341,8 +351,7 @@ cfg_if::cfg_if! {
                 return Ok(());
             }
 
-            let uid = unsafe { libc::geteuid() };
-            let gid = unsafe { libc::getegid() };
+            let (uid, gid) = effective_uid_gid();
             let meta = std::fs::metadata(path).map_err(|e| format!("unable to get metadata for path: {}", e))?;
 
             if meta.mode() != 0o600 {
@@ -365,8 +374,7 @@ cfg_if::cfg_if! {
                 return Ok(());
             }
 
-            let uid = unsafe { libc::geteuid() };
-            let gid = unsafe { libc::getegid() };
+            let (uid, gid) = effective_uid_gid();
             let meta = std::fs::metadata(path).map_err(|e| format!("unable to get metadata for path: {}", e))?;
 
             let perm = if group_read {

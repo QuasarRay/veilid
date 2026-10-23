@@ -506,16 +506,21 @@ where
         let rtk = RecordTableKey {
             record_key: stk.record_key.clone(),
         };
-        let Some(old_record) = self.record_cache.get(&rtk).cloned() else {
+        // Nothing to heal is the common case, so the record is cloned only past it
+        let Some(Ok(mirror_seq)) = self
+            .record_cache
+            .peek(&rtk)
+            .map(|record| record.subkey_seq(stk.subkey))
+        else {
             return;
         };
         let row_seq = data.signed_value_data().value_data().seq();
-        let Ok(mirror_seq) = old_record.subkey_seq(stk.subkey) else {
-            return;
-        };
         if row_seq <= mirror_seq {
             return;
         }
+        let Some(old_record) = self.record_cache.get(&rtk).cloned() else {
+            return;
+        };
 
         let record_size_estimator = self.record_size_estimator();
         let mut new_record = old_record.clone();

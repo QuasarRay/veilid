@@ -3,7 +3,7 @@ use crate::storage_manager::SignedValueDescriptor;
 
 const MAX_INSPECT_VALUE_Q_SUBKEY_RANGES_LEN: usize = DHTSchema::MAX_SUBKEY_COUNT / 2;
 const MAX_INSPECT_VALUE_A_SEQS_LEN: usize = DHTSchema::MAX_SUBKEY_COUNT;
-const MAX_INSPECT_VALUE_A_PEERS_LEN: usize = 20;
+const MAX_INSPECT_VALUE_A_PEERS_LEN: usize = veilid_capnp::MAX_INSPECT_VALUE_A_PEERS_LEN as usize;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct ValidateInspectValueContext {
@@ -143,12 +143,12 @@ impl RPCOperationInspectValueA {
         &self,
         validate_context: &RPCValidateContext<'_>,
     ) -> Result<(), RPCError> {
-        let question_context = validate_context
-            .question_context
-            .as_ref()
-            .expect_or_log("InspectValueA requires question context");
-        let QuestionContext::InspectValue(inspect_value_context) = question_context else {
-            return Err(RPCError::internal("Wrong context type for InspectValueA"));
+        let Some(QuestionContext::InspectValue(inspect_value_context)) =
+            validate_context.question_context
+        else {
+            return Err(RPCError::protocol(
+                "InspectValueA does not answer the question asked",
+            ));
         };
 
         let crypto = validate_context.crypto();

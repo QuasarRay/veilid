@@ -7,16 +7,13 @@ pub(in crate::storage_manager) struct OutboundWatch {
     /// Record key being watched
     record_key: RecordKey,
 
-    /// Current state
-    /// None means inactive/cancelled
+    /// Current state, None means inactive/cancelled
     state: Option<OutboundWatchState>,
 
-    /// Desired parameters
-    /// None means cancelled
+    /// Desired parameters, None means cancelled
     desired: Option<OutboundWatchParameters>,
 
-    /// Last fallback change inspection for a watch that has never established.
-    /// Once there is a state, its own timer takes over.
+    /// Last fallback change inspection of a never-established watch; a state's own timer takes over
     #[serde(skip)]
     opt_unestablished_inspect_ts: Option<Timestamp>,
 }
@@ -53,21 +50,23 @@ impl OutboundWatch {
 
     /// Whether this watch is due a fallback change inspection, and over which subkeys.
     /// A wanted but never-established watch has no state to keep a timer in, so it is
-    /// covered here at [UNESTABLISHED_WATCH_INSPECT_INTERVAL].
+    /// covered here at the ceiling: reconcile is already retrying establishment, and until
+    /// it lands this interval is delivery latency
     pub fn needs_fallback_inspect(
         &self,
         cur_ts: Timestamp,
         consensus_count: usize,
         renew_window: TimestampDuration,
+        max_interval: TimestampDuration,
     ) -> Option<ValueSubkeyRangeSet> {
         if let Some(state) = self.state.as_ref() {
             return state
-                .fallback_inspect_due(cur_ts, consensus_count, renew_window)
+                .fallback_inspect_due(cur_ts, consensus_count, renew_window, max_interval)
                 .then(|| state.params().subkeys.clone());
         }
         let desired = self.desired.as_ref()?;
         self.opt_unestablished_inspect_ts
-            .map(|last| cur_ts >= last.later(UNESTABLISHED_WATCH_INSPECT_INTERVAL))
+            .map(|last| cur_ts >= last.later(max_interval))
             .unwrap_or(true)
             .then(|| desired.subkeys.clone())
     }

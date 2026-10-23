@@ -41,7 +41,7 @@ class ConfigBase:
             value = json_data[key]
             try:
                 # See if this field's type knows how to load itself from JSON input.
-                loader = field.type.from_json # type: ignore
+                loader = field.type.from_json  # type: ignore
             except AttributeError:
                 # No, it doesn't. Use the raw value.
                 args[key] = value
@@ -117,6 +117,7 @@ class VeilidConfigRoutingTable(ConfigBase):
     bootstrap: list[str]
     bootstrap_keys: list[PublicKey]
     bootstrap_records: list[str]
+    serve_direct_bootstrap: bool = False
 
 
 @dataclass
@@ -198,6 +199,8 @@ class VeilidConfigProtocol(ConfigBase):
     udp: VeilidConfigUDP
     tcp: VeilidConfigTCP
     ws: VeilidConfigWS
+
+
 #    wss: VeilidConfigWSS
 
 
@@ -277,10 +280,28 @@ class VeilidConfigInternalDHT(ConfigBase):
     min_peer_refresh_time_ms: int
     validate_dial_info_receipt_time_ms: int
     max_watch_expiration_ms: int
+    max_watch_inspect_interval_ms: int
     public_watch_limit: int
     member_watch_limit: int
     public_transaction_limit: int
     member_transaction_limit: int
+
+
+@dataclass
+class VeilidConfigInternalRoutingTableSave(ConfigBase):
+    """Internal "footgun" routing table save schedule."""
+
+    settle_ms: int
+    min_interval_ms: int
+    background_min_interval_ms: int
+    period_ms: int
+
+
+@dataclass
+class VeilidConfigInternalRoutingTable(ConfigBase):
+    """Internal "footgun" routing table tuning."""
+
+    save: VeilidConfigInternalRoutingTableSave
 
 
 @dataclass
@@ -303,6 +324,7 @@ class VeilidConfigInternalNetwork(ConfigBase):
     rpc: VeilidConfigInternalRPC
     dht: VeilidConfigInternalDHT
     protocol: VeilidConfigInternalProtocol
+    routing_table: VeilidConfigInternalRoutingTable
 
 
 @dataclass
@@ -322,6 +344,7 @@ class VeilidConfigInternal(ConfigBase):
 @dataclass
 class VeilidConfigAttachment(ConfigBase):
     """Attachment configuration, owned by the attachment manager."""
+
 
 #    app_lifecycle: VeilidConfigAppLifecycle
 

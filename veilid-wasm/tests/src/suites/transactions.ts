@@ -57,11 +57,7 @@ export const transactionsSuite: Suite = {
         (
           count: number,
           subkeyCount: number,
-          body: (
-            c: CaseContext,
-            rc: VeilidRoutingContext,
-            records: RecordKey[],
-          ) => Promise<void>,
+          body: (c: CaseContext, rc: VeilidRoutingContext, records: RecordKey[]) => Promise<void>,
         ) =>
         async (c: CaseContext) => {
           const routingContext = VeilidRoutingContext.create();
@@ -93,20 +89,26 @@ export const transactionsSuite: Suite = {
           run: withRecords(DHT_RECORD_COUNT, DHT_SUBKEY_COUNT, body),
         });
 
-      simple('should create empty transaction and drop it explicitly', async ({ expect }, _rc, records) => {
-        const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
-          label: 'begin',
-        });
-        expect(tx).toBeInstanceOf(VeilidDHTTransaction);
-        tx.free();
-      });
+      simple(
+        'should create empty transaction and drop it explicitly',
+        async ({ expect }, _rc, records) => {
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
+            label: 'begin',
+          });
+          expect(tx).toBeInstanceOf(VeilidDHTTransaction);
+          tx.free();
+        },
+      );
 
-      simple('should create empty transaction and drop it lazily', async ({ expect }, _rc, records) => {
-        const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
-          label: 'begin',
-        });
-        expect(tx).toBeInstanceOf(VeilidDHTTransaction);
-      });
+      simple(
+        'should create empty transaction and drop it lazily',
+        async ({ expect }, _rc, records) => {
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
+            label: 'begin',
+          });
+          expect(tx).toBeInstanceOf(VeilidDHTTransaction);
+        },
+      );
 
       simple('should create empty transaction and rollback', async ({ expect }, _rc, records) => {
         const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
@@ -124,41 +126,9 @@ export const transactionsSuite: Suite = {
         await dhtRetry(() => tx.commit(), { label: 'commit' });
       });
 
-      simple('should create transaction, add sets, and rollback', async ({ expect }, _rc, records) => {
-        const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
-          label: 'begin',
-        });
-        expect(tx).toBeInstanceOf(VeilidDHTTransaction);
-
-        for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-          const res = await dhtRetry(() => tx.set(records[rec], 0, data[rec]), {
-            label: 'set',
-          });
-          expect(res).toBeUndefined();
-        }
-        await dhtRetry(() => tx.rollback(), { label: 'rollback' });
-      });
-
-      simple('should create transaction, add sets, and commit', async ({ expect }, _rc, records) => {
-        const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
-          label: 'begin',
-        });
-        expect(tx).toBeInstanceOf(VeilidDHTTransaction);
-
-        for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-          const res = await dhtRetry(() => tx.set(records[rec], 0, data[rec]), {
-            label: 'set',
-          });
-          expect(res).toBeUndefined();
-        }
-        await dhtRetry(() => tx.commit(), { label: 'commit' });
-      });
-
-      simple('should extend transaction with a new record and commit', async ({ expect }, rc, records) => {
-        const extraDesc = await rc.createDHTRecord(cryptoKind, {
-          DFLT: { oCnt: DHT_SUBKEY_COUNT },
-        });
-        try {
+      simple(
+        'should create transaction, add sets, and rollback',
+        async ({ expect }, _rc, records) => {
           const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
             label: 'begin',
           });
@@ -170,79 +140,126 @@ export const transactionsSuite: Suite = {
             });
             expect(res).toBeUndefined();
           }
+          await dhtRetry(() => tx.rollback(), { label: 'rollback' });
+        },
+      );
 
-          await dhtRetry(() => tx.extend([extraDesc.key]), { label: 'extend' });
-
-          const extraData = new Uint8Array(DHT_SUBKEY_SIZE).fill(DHT_RECORD_COUNT);
-          const extraRes = await dhtRetry(() => tx.set(extraDesc.key, 0, extraData), {
-            label: 'set extra',
-          });
-          expect(extraRes).toBeUndefined();
-
-          await dhtRetry(() => tx.commit(), { label: 'commit' });
-
-          const readback = await dhtRetry(() => rc.getDHTValue(extraDesc.key, 0, false), {
-            label: 'getDHTValue',
-          });
-          expect(readback).toBeDefined();
-          expect(readback!.data).toEqual(extraData);
-        } finally {
-          await rc.deleteDHTRecord(extraDesc.key);
-        }
-      });
-
-      simple('should extend transaction with a new record and rollback', async ({ expect }, rc, records) => {
-        const extraDesc = await rc.createDHTRecord(cryptoKind, {
-          DFLT: { oCnt: DHT_SUBKEY_COUNT },
-        });
-        try {
+      simple(
+        'should create transaction, add sets, and commit',
+        async ({ expect }, _rc, records) => {
           const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
             label: 'begin',
           });
           expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
-          await dhtRetry(() => tx.set(records[0], 0, data[0]), { label: 'set' });
-          await dhtRetry(() => tx.extend([extraDesc.key]), { label: 'extend' });
-          const extraData = new Uint8Array(DHT_SUBKEY_SIZE).fill(DHT_RECORD_COUNT);
-          await dhtRetry(() => tx.set(extraDesc.key, 0, extraData), { label: 'set extra' });
+          for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
+            const res = await dhtRetry(() => tx.set(records[rec], 0, data[rec]), {
+              label: 'set',
+            });
+            expect(res).toBeUndefined();
+          }
+          await dhtRetry(() => tx.commit(), { label: 'commit' });
+        },
+      );
 
-          await dhtRetry(() => tx.rollback(), { label: 'rollback' });
-
-          const readback = await dhtRetry(() => rc.getDHTValue(extraDesc.key, 0, true), {
-            label: 'getDHTValue',
+      simple(
+        'should extend transaction with a new record and commit',
+        async ({ expect }, rc, records) => {
+          const extraDesc = await rc.createDHTRecord(cryptoKind, {
+            DFLT: { oCnt: DHT_SUBKEY_COUNT },
           });
-          expect(readback).toBeUndefined();
-        } finally {
-          await rc.deleteDHTRecord(extraDesc.key);
-        }
-      });
+          try {
+            const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
+              label: 'begin',
+            });
+            expect(tx).toBeInstanceOf(VeilidDHTTransaction);
 
-      simple('should create transaction, add sets, gets, and commit', async ({ expect }, _rc, records) => {
-        const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
-          label: 'begin',
-        });
-        expect(tx).toBeInstanceOf(VeilidDHTTransaction);
+            for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
+              const res = await dhtRetry(() => tx.set(records[rec], 0, data[rec]), {
+                label: 'set',
+              });
+              expect(res).toBeUndefined();
+            }
 
-        const sets = [];
-        for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-          sets.push(
-            dhtRetry(() => tx.set(records[rec], 0, data[rec]), { label: `set rec${rec}` }),
-          );
-        }
-        for (const res of await Promise.all(sets)) {
-          expect(res).toBeUndefined();
-        }
+            await dhtRetry(() => tx.extend([extraDesc.key]), { label: 'extend' });
 
-        const gets = [];
-        for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
-          gets.push(dhtRetry(() => tx.get(records[rec], 0), { label: `get rec${rec}` }));
-        }
-        for (const res of await Promise.all(gets)) {
-          expect(res).toBeUndefined();
-        }
+            const extraData = new Uint8Array(DHT_SUBKEY_SIZE).fill(DHT_RECORD_COUNT);
+            const extraRes = await dhtRetry(() => tx.set(extraDesc.key, 0, extraData), {
+              label: 'set extra',
+            });
+            expect(extraRes).toBeUndefined();
 
-        await dhtRetry(() => tx.commit(), { label: 'commit' });
-      });
+            await dhtRetry(() => tx.commit(), { label: 'commit' });
+
+            const readback = await dhtRetry(() => rc.getDHTValue(extraDesc.key, 0, false), {
+              label: 'getDHTValue',
+            });
+            expect(readback).toBeDefined();
+            expect(readback!.data).toEqual(extraData);
+          } finally {
+            await rc.deleteDHTRecord(extraDesc.key);
+          }
+        },
+      );
+
+      simple(
+        'should extend transaction with a new record and rollback',
+        async ({ expect }, rc, records) => {
+          const extraDesc = await rc.createDHTRecord(cryptoKind, {
+            DFLT: { oCnt: DHT_SUBKEY_COUNT },
+          });
+          try {
+            const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
+              label: 'begin',
+            });
+            expect(tx).toBeInstanceOf(VeilidDHTTransaction);
+
+            await dhtRetry(() => tx.set(records[0], 0, data[0]), { label: 'set' });
+            await dhtRetry(() => tx.extend([extraDesc.key]), { label: 'extend' });
+            const extraData = new Uint8Array(DHT_SUBKEY_SIZE).fill(DHT_RECORD_COUNT);
+            await dhtRetry(() => tx.set(extraDesc.key, 0, extraData), { label: 'set extra' });
+
+            await dhtRetry(() => tx.rollback(), { label: 'rollback' });
+
+            const readback = await dhtRetry(() => rc.getDHTValue(extraDesc.key, 0, true), {
+              label: 'getDHTValue',
+            });
+            expect(readback).toBeUndefined();
+          } finally {
+            await rc.deleteDHTRecord(extraDesc.key);
+          }
+        },
+      );
+
+      simple(
+        'should create transaction, add sets, gets, and commit',
+        async ({ expect }, _rc, records) => {
+          const tx = await dhtRetry(() => veilidClient.transactDHTRecords(records), {
+            label: 'begin',
+          });
+          expect(tx).toBeInstanceOf(VeilidDHTTransaction);
+
+          const sets = [];
+          for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
+            sets.push(
+              dhtRetry(() => tx.set(records[rec], 0, data[rec]), { label: `set rec${rec}` }),
+            );
+          }
+          for (const res of await Promise.all(sets)) {
+            expect(res).toBeUndefined();
+          }
+
+          const gets = [];
+          for (let rec = 0; rec < DHT_RECORD_COUNT; rec++) {
+            gets.push(dhtRetry(() => tx.get(records[rec], 0), { label: `get rec${rec}` }));
+          }
+          for (const res of await Promise.all(gets)) {
+            expect(res).toBeUndefined();
+          }
+
+          await dhtRetry(() => tx.commit(), { label: 'commit' });
+        },
+      );
 
       simple(
         'should create empty transaction, fail non-transactional sets and then rollback',
@@ -533,10 +550,9 @@ export const transactionsSuite: Suite = {
                   label: 'begin bulk verify',
                 });
                 for (let rec = 0; rec < keys.length; rec++) {
-                  const report = await dhtRetry(
-                    () => tx.inspect(keys[rec], null, 'SyncGet'),
-                    { label: `inspect rec${rec}` },
-                  );
+                  const report = await dhtRetry(() => tx.inspect(keys[rec], null, 'SyncGet'), {
+                    label: `inspect rec${rec}`,
+                  });
                   const subkeyCount = report.networkSeqs.length;
                   c.expect(report.subkeys).toEqual([[0, subkeyCount - 1]]);
                   c.expect(report.networkSeqs).toEqual(Array(subkeyCount).fill(0));
@@ -547,8 +563,7 @@ export const transactionsSuite: Suite = {
                   });
                   c.expect(val).toBeDefined();
                   const globalOrdinal =
-                    (rec * (DHTKEY_MAX_SIZE_BYTES / SUBKEY_MAX_SIZE_BYTES) + lastSubkey) &
-                    0xff;
+                    (rec * (DHTKEY_MAX_SIZE_BYTES / SUBKEY_MAX_SIZE_BYTES) + lastSubkey) & 0xff;
                   c.expect(val!.data[0]).toEqual(globalOrdinal);
                   c.expect(val!.data.length).toEqual(SUBKEY_MAX_SIZE_BYTES);
                 }
@@ -574,9 +589,7 @@ export const transactionsSuite: Suite = {
           bytes: Uint8Array,
         ): Promise<RecordKey[]> => {
           const recordChunks = chunkBytes(bytes, PER_TX_RECORD_BYTES);
-          const subKeysPerRecord = recordChunks.map((d) =>
-            chunkBytes(d, SUBKEY_MAX_SIZE_BYTES),
-          );
+          const subKeysPerRecord = recordChunks.map((d) => chunkBytes(d, SUBKEY_MAX_SIZE_BYTES));
           console.log(
             `split ${bytes.length} bytes across ${recordChunks.length} records, one transaction each`,
           );
@@ -630,14 +643,12 @@ export const transactionsSuite: Suite = {
               try {
                 // verify each record's subkeys landed (one verify transaction per record)
                 for (let rec = 0; rec < keys.length; rec++) {
-                  const tx = await dhtRetry(
-                    () => veilidClient.transactDHTRecords([keys[rec]]),
-                    { label: `begin verify rec${rec}` },
-                  );
-                  const report = await dhtRetry(
-                    () => tx.inspect(keys[rec], null, 'SyncGet'),
-                    { label: `inspect rec${rec}` },
-                  );
+                  const tx = await dhtRetry(() => veilidClient.transactDHTRecords([keys[rec]]), {
+                    label: `begin verify rec${rec}`,
+                  });
+                  const report = await dhtRetry(() => tx.inspect(keys[rec], null, 'SyncGet'), {
+                    label: `inspect rec${rec}`,
+                  });
                   const subkeyCount = report.networkSeqs.length;
                   c.expect(report.networkSeqs).toEqual(Array(subkeyCount).fill(0));
                   await dhtRetry(() => tx.rollback(), {

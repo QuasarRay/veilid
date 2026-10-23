@@ -1,8 +1,5 @@
 use super::*;
 
-/// Longest the metadata goes unsaved
-const METADATA_SAVE_PERIOD: TimestampDuration = TimestampDuration::new_secs(30);
-
 /// Why the storage metadata was saved
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MetadataSaveReason {
@@ -19,6 +16,8 @@ pub(crate) enum MetadataSaveReason {
 /// process within seconds, and a kill while suspended loses what only the periodic save carries.
 #[derive(Debug)]
 pub(crate) struct MetadataSaveSchedule {
+    /// Longest the metadata goes unsaved
+    period: TimestampDuration,
     /// When the last save started
     last_save_ts: Timestamp,
     /// Whether the metadata changed since the last save started
@@ -29,8 +28,9 @@ pub(crate) struct MetadataSaveSchedule {
 }
 
 impl MetadataSaveSchedule {
-    pub fn new(cur_ts: Timestamp) -> Self {
+    pub fn new(cur_ts: Timestamp, period: TimestampDuration) -> Self {
         Self {
+            period,
             last_save_ts: cur_ts,
             dirty: false,
             #[cfg(feature = "app-lifecycle")]
@@ -61,7 +61,7 @@ impl MetadataSaveSchedule {
         if self.background && self.dirty {
             return Some(MetadataSaveReason::Background);
         }
-        (cur_ts.duration_since(self.last_save_ts) >= METADATA_SAVE_PERIOD)
+        (cur_ts.duration_since(self.last_save_ts) >= self.period)
             .then_some(MetadataSaveReason::Periodic)
     }
 

@@ -10,9 +10,11 @@ fn ts(secs: u64) -> Timestamp {
     Timestamp::new(1_000_000_000u64 + secs * 1_000_000u64)
 }
 
+const PERIOD: TimestampDuration = TimestampDuration::new_secs(30);
+
 /// In the foreground a change waits for the periodic save.
 fn test_foreground_change_waits_for_period() {
-    let mut schedule = MetadataSaveSchedule::new(ts(0));
+    let mut schedule = MetadataSaveSchedule::new(ts(0), PERIOD);
     schedule.changed();
     assert_eq!(schedule.due(ts(29)), None);
     assert_eq!(schedule.due(ts(30)), Some(MetadataSaveReason::Periodic));
@@ -20,7 +22,7 @@ fn test_foreground_change_waits_for_period() {
 
 /// The periodic save runs whether or not anything changed.
 fn test_periodic_without_changes() {
-    let mut schedule = MetadataSaveSchedule::new(ts(0));
+    let mut schedule = MetadataSaveSchedule::new(ts(0), PERIOD);
     assert_eq!(schedule.due(ts(30)), Some(MetadataSaveReason::Periodic));
     schedule.saving(ts(30));
     assert_eq!(schedule.due(ts(59)), None);
@@ -30,7 +32,7 @@ fn test_periodic_without_changes() {
 /// In the background a change is due at once, and a save covers it.
 #[cfg(feature = "app-lifecycle")]
 fn test_background_change_saves_at_once() {
-    let mut schedule = MetadataSaveSchedule::new(ts(0));
+    let mut schedule = MetadataSaveSchedule::new(ts(0), PERIOD);
     schedule.set_background(true);
     assert_eq!(schedule.due(ts(1)), None, "nothing changed");
     schedule.changed();
@@ -42,7 +44,7 @@ fn test_background_change_saves_at_once() {
 /// Back in the foreground, a pending change waits for the periodic save again.
 #[cfg(feature = "app-lifecycle")]
 fn test_foreground_return_defers_to_period() {
-    let mut schedule = MetadataSaveSchedule::new(ts(0));
+    let mut schedule = MetadataSaveSchedule::new(ts(0), PERIOD);
     schedule.set_background(true);
     schedule.changed();
     schedule.set_background(false);

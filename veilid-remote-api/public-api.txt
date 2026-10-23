@@ -252,6 +252,8 @@ pub veilid_remote_api::RequestOp::AppCallReply
 pub veilid_remote_api::RequestOp::AppCallReply::call_id: veilid_core::veilid_api::types::aligned_u64::OperationId
 pub veilid_remote_api::RequestOp::AppCallReply::message: alloc::vec::Vec<u8>
 pub veilid_remote_api::RequestOp::Attach
+pub veilid_remote_api::RequestOp::ChangeConfig
+pub veilid_remote_api::RequestOp::ChangeConfig::config: alloc::boxed::Box<veilid_core::veilid_config::VeilidConfig>
 pub veilid_remote_api::RequestOp::Control
 pub veilid_remote_api::RequestOp::Control::args: alloc::vec::Vec<alloc::string::String>
 pub veilid_remote_api::RequestOp::CryptoSystem(veilid_remote_api::CryptoSystemRequest)
@@ -329,6 +331,8 @@ pub veilid_remote_api::ResponseOp::Attach
 pub veilid_remote_api::ResponseOp::Attach::result: veilid_remote_api::ApiResult<()>
 pub veilid_remote_api::ResponseOp::BestCryptoSystem
 pub veilid_remote_api::ResponseOp::BestCryptoSystem::result: veilid_remote_api::ApiResult<u32>
+pub veilid_remote_api::ResponseOp::ChangeConfig
+pub veilid_remote_api::ResponseOp::ChangeConfig::result: veilid_remote_api::ApiResult<()>
 pub veilid_remote_api::ResponseOp::Control
 pub veilid_remote_api::ResponseOp::Control::result: veilid_remote_api::ApiResult<alloc::string::String>
 pub veilid_remote_api::ResponseOp::CryptoSystem(veilid_remote_api::CryptoSystemResponse)

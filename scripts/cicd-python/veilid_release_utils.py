@@ -13,16 +13,29 @@ if __name__ == "__main__":
     load_dotenv()
     token = os.getenv("DO_API_TOKEN")
     if not token:
-        print("Error: DO_API_TOKEN environment variable not found. Please set it in the .env file.", file=sys.stderr)
+        print(
+            "Error: DO_API_TOKEN environment variable not found. Please set it in the .env file.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Set up command-line argument parsing.
     parser = argparse.ArgumentParser(description="Veilid compiling and releasing utility")
-    parser.add_argument("--create-build-machine", action="store_true", help="Create a build machine")
-    parser.add_argument("--delete-build-machine", action="store_true", help="Delete the created build machine")
-    parser.add_argument("--build-deb-repo", action="store_true", help="Creates and signs .deb repository")
-    parser.add_argument("--build-rpm-repo", action="store_true", help="Creates and signs .rpm repository")
-    parser.add_argument("--test-api-credentials", action="store_true", help="Test DigitalOcean API credentials")
+    parser.add_argument(
+        "--create-build-machine", action="store_true", help="Create a build machine"
+    )
+    parser.add_argument(
+        "--delete-build-machine", action="store_true", help="Delete the created build machine"
+    )
+    parser.add_argument(
+        "--build-deb-repo", action="store_true", help="Creates and signs .deb repository"
+    )
+    parser.add_argument(
+        "--build-rpm-repo", action="store_true", help="Creates and signs .rpm repository"
+    )
+    parser.add_argument(
+        "--test-api-credentials", action="store_true", help="Test DigitalOcean API credentials"
+    )
     args = parser.parse_args()
 
     if args.create_build_machine:

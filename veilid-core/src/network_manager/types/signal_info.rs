@@ -5,7 +5,7 @@ use super::*;
 pub(crate) enum SignalInfo {
     /// UDP Hole Punch Request
     HolePunch {
-        /// /// Receipt to be returned after the hole punch
+        /// Receipt to be returned after the hole punch
         receipt: Bytes,
         /// Sender's peer info
         peer_info: Arc<UnverifiedPeerInfo>,

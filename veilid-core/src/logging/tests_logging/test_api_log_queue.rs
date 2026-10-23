@@ -21,7 +21,7 @@ fn dedup(batch: Vec<(VeilidLogLevel, String)>) -> Vec<(VeilidLogLevel, String)> 
 pub fn test_fuzzy_key_collapses_varying_parts() {
     let k = ApiLogQueue::fuzzy_key;
 
-    // The storm this was written for: identical but for the errno
+    // A storm: identical but for the errno
     assert_eq!(
         k("No connection(Socket is not connected (os error 57)) at udp.rs@62:39"),
         k("No connection(Socket is not connected (os error 11)) at udp.rs@99:12")
@@ -48,7 +48,7 @@ pub fn test_fuzzy_key_collapses_varying_parts() {
     );
 }
 
-/// The storm this whole change exists for: 30,000 copies of one line, differing only in a number.
+/// A storm: 30,000 copies of one line, differing only in a number.
 pub fn test_dedup_collapses_a_storm_to_one_line() {
     let batch: Vec<(VeilidLogLevel, String)> = (0..30_000)
         .map(|i| {
@@ -124,9 +124,8 @@ pub async fn test_queue_delivers_through_its_sink() {
 }
 
 /// End to end through the real tracing layer: an event emitted the way veilid emits one has to
-/// come out of a registered update callback. This is the regression that would matter most and
-/// show up least - moving delivery off the caller is exactly the kind of change that can silently
-/// deliver nothing at all.
+/// come out of a registered update callback. A queue that delivers nothing at all is the
+/// regression that would matter most and show up least.
 pub async fn test_emitted_events_reach_the_update_callback() {
     use tracing_subscriber::layer::SubscriberExt as _;
 

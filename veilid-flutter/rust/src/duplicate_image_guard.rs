@@ -95,78 +95,81 @@ fn image_path_of(addr: *const c_void) -> String {
     "<unknown image>".to_owned()
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(target_vendor = "apple")] {
-        // mach-o/dyld.h
-        extern "C" {
-            fn _dyld_image_count() -> u32;
-            fn _dyld_get_image_name(image_index: u32) -> *const libc::c_char;
-        }
+// mach-o/dyld.h
+#[cfg(target_vendor = "apple")]
+extern "C" {
+    fn _dyld_image_count() -> u32;
+    fn _dyld_get_image_name(image_index: u32) -> *const libc::c_char;
+}
 
-        /// Every image dyld has loaded, by the path dyld knows it under
-        fn loaded_image_names() -> Vec<CString> {
-            let mut names = Vec::new();
-            // SAFETY: indexes below the reported count are valid, and dyld returns null for
-            // any index that stopped being valid
-            unsafe {
-                for i in 0.._dyld_image_count() {
-                    let name = _dyld_get_image_name(i);
-                    if !name.is_null() {
-                        names.push(CStr::from_ptr(name).to_owned());
-                    }
-                }
+/// Every image dyld has loaded, by the path dyld knows it under
+#[cfg(target_vendor = "apple")]
+fn loaded_image_names() -> Vec<CString> {
+    let mut names = Vec::new();
+    // SAFETY: indexes below the reported count are valid, and dyld returns null for
+    // any index that stopped being valid
+    unsafe {
+        for i in 0.._dyld_image_count() {
+            let name = _dyld_get_image_name(i);
+            if !name.is_null() {
+                names.push(CStr::from_ptr(name).to_owned());
             }
-            names
-        }
-    } else if #[cfg(any(target_os = "linux", target_os = "android"))] {
-        /// The leading fields of `struct dl_phdr_info`, identical on glibc, musl and bionic
-        #[repr(C)]
-        struct DlPhdrInfoPrefix {
-            dlpi_addr: usize,
-            dlpi_name: *const libc::c_char,
-        }
-
-        type DlPhdrCallback =
-            unsafe extern "C" fn(*mut DlPhdrInfoPrefix, usize, *mut c_void) -> libc::c_int;
-
-        extern "C" {
-            fn dl_iterate_phdr(callback: Option<DlPhdrCallback>, data: *mut c_void) -> libc::c_int;
-        }
-
-        /// Every object the dynamic loader has mapped, by the name it was loaded under
-        fn loaded_image_names() -> Vec<CString> {
-            unsafe extern "C" fn collect(
-                info: *mut DlPhdrInfoPrefix,
-                _size: usize,
-                data: *mut c_void,
-            ) -> libc::c_int {
-                // SAFETY: the loader passes a valid info for each object and our Vec as data;
-                // nothing here can panic, so no unwind crosses the C frame
-                unsafe {
-                    let names = &mut *(data as *mut Vec<CString>);
-                    let name = (*info).dlpi_name;
-                    if !name.is_null() {
-                        let name = CStr::from_ptr(name);
-                        if !name.is_empty() {
-                            names.push(name.to_owned());
-                        }
-                    }
-                }
-                0
-            }
-            let mut names: Vec<CString> = Vec::new();
-            // SAFETY: collect only reads the info it is handed and appends to names
-            unsafe {
-                dl_iterate_phdr(Some(collect), (&mut names as *mut Vec<CString>).cast());
-            }
-            names
-        }
-    } else {
-        /// No loader enumeration on this platform, so a duplicate load goes undetected
-        fn loaded_image_names() -> Vec<CString> {
-            Vec::new()
         }
     }
+    names
+}
+
+/// The leading fields of `struct dl_phdr_info`, identical on glibc, musl and bionic
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[repr(C)]
+struct DlPhdrInfoPrefix {
+    dlpi_addr: usize,
+    dlpi_name: *const libc::c_char,
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+type DlPhdrCallback =
+    unsafe extern "C" fn(*mut DlPhdrInfoPrefix, usize, *mut c_void) -> libc::c_int;
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+extern "C" {
+    fn dl_iterate_phdr(callback: Option<DlPhdrCallback>, data: *mut c_void) -> libc::c_int;
+}
+
+/// Every object the dynamic loader has mapped, by the name it was loaded under
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn loaded_image_names() -> Vec<CString> {
+    unsafe extern "C" fn collect(
+        info: *mut DlPhdrInfoPrefix,
+        _size: usize,
+        data: *mut c_void,
+    ) -> libc::c_int {
+        // SAFETY: the loader passes a valid info for each object and our Vec as data;
+        // nothing here can panic, so no unwind crosses the C frame
+        unsafe {
+            let names = &mut *(data as *mut Vec<CString>);
+            let name = (*info).dlpi_name;
+            if !name.is_null() {
+                let name = CStr::from_ptr(name);
+                if !name.is_empty() {
+                    names.push(name.to_owned());
+                }
+            }
+        }
+        0
+    }
+    let mut names: Vec<CString> = Vec::new();
+    // SAFETY: collect only reads the info it is handed and appends to names
+    unsafe {
+        dl_iterate_phdr(Some(collect), (&mut names as *mut Vec<CString>).cast());
+    }
+    names
+}
+
+/// No loader enumeration on this platform, so a duplicate load goes undetected
+#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+fn loaded_image_names() -> Vec<CString> {
+    Vec::new()
 }
 
 #[cfg(test)]

@@ -316,7 +316,7 @@ impl NativeNetwork {
         self.bind_outbound_source_udp_handlers();
 
         // Probe IGD off the critical path so map_any_port has a populated cache
-        if let Some(igd_manager) = &self.igd_manager {
+        if let Some(igd_manager) = self.igd_manager() {
             let ac = &new_network_state.address_config;
             if ac.ipv4_local || ac.ipv4_global {
                 igd_manager.trigger_probe(IGDAddressType::IPV4);
@@ -376,7 +376,7 @@ impl NativeNetwork {
 
         if change.is_full_move() {
             // Cached gateway, external IP, and port mappings all reference the prior interfaces
-            if let Some(igd_manager) = &self.igd_manager {
+            if let Some(igd_manager) = self.igd_manager() {
                 igd_manager.clear_caches(None);
             }
             // Mark PublicInternet offline; first successful RPC on the new network flips us back
@@ -392,7 +392,7 @@ impl NativeNetwork {
                         interface_address_state,
                         Some(family),
                     ));
-                if let Some(igd_manager) = &self.igd_manager {
+                if let Some(igd_manager) = self.igd_manager() {
                     igd_manager.clear_caches(Some(family.into()));
                 }
             }

@@ -167,8 +167,8 @@ where
             Some(Ok(Message::Binary(v))) => {
                 if v.len() > MAX_MESSAGE_SIZE {
                     // Their fault, not ours: an oversized inbound frame is a peer misbehaving, and
-                    // an `Err` here classified it as a local failure. Matches the wasm websocket
-                    // and the tcp framer, and lets the connection processor punish it
+                    // an `Err` here would make it a local failure. Matches the wasm websocket and
+                    // the tcp framer, and lets the connection processor punish it
                     return Ok(NetworkResult::invalid_message("too large ws message"));
                 }
                 NetworkResult::Value(v)

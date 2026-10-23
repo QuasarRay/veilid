@@ -120,8 +120,7 @@ impl Crypto {
         #[cfg(feature = "stats")]
         let crypto_stats = Arc::new(CryptoStatsAccounting::new());
 
-        // With `stats` on, each cryptosystem is wrapped in a metering decorator so
-        // every call path is counted and timed; with it off the bare `Arc` is stored.
+        // With `stats` on, each cryptosystem is wrapped in a metering decorator
         #[cfg(feature = "enable-crypto-vld0")]
         let crypto_vld0: Arc<dyn CryptoSystem + Send + Sync> = {
             let cs: Arc<dyn CryptoSystem + Send + Sync> =

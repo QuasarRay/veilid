@@ -182,8 +182,8 @@ fn do_capnp_build() {
     append_hash_and_desired_capnp_version_hash("proto/veilid.capnp", "proto/veilid_capnp.rs");
 }
 
-// The MaxMind EULA requires the data be refreshed regularly, so this is a live fetch and not a
-// vendored blob. Source: https://github.com/sapics/ip-location-db
+/// The MaxMind EULA requires the data be refreshed regularly, so this is a live fetch and not a
+/// vendored blob. Source: https://github.com/sapics/ip-location-db
 #[cfg(feature = "geolocation")]
 mod geoip {
     use std::path::Path;
@@ -221,8 +221,8 @@ mod geoip {
         Ok(body)
     }
 
-    // a CDN error page is a 200 with an HTML body; embedding one yields a reader that answers
-    // None for every address with nothing in the log to say why
+    /// A CDN error page is a 200 with an HTML body; embedding one yields a reader that answers
+    /// None for every address with nothing in the log to say why
     fn validate(body: &[u8]) -> Result<(), Error> {
         if body.len() < MIN_SIZE {
             return Err(format!(
@@ -255,8 +255,7 @@ mod geoip {
         }
         match download(url) {
             Ok(body) => {
-                // publish atomically: an interrupted write would leave a truncated file whose
-                // fresh mtime keeps it in place for a day
+                // Atomic publish: a truncated file with a fresh mtime would stay in place for a day
                 let tmp = path.with_extension("mmdb.part");
                 std::fs::write(&tmp, &body)?;
                 std::fs::rename(&tmp, path)?;

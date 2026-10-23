@@ -55,7 +55,7 @@ function matchesObject(actual: unknown, expected: Record<string, unknown>): bool
 function getPath(obj: unknown, path: string): { found: boolean; value: unknown } {
   let cur: unknown = obj;
   for (const part of path.split('.')) {
-    if (cur === null || cur === undefined || !(part in (cur as object))) {
+    if (typeof cur !== 'object' || cur === null || !(part in cur)) {
       return { found: false, value: undefined };
     }
     cur = (cur as Record<string, unknown>)[part];
@@ -88,6 +88,9 @@ export interface Matchers {
   toStrictEqual(expected: unknown): void;
   toBeDefined(): void;
   toBeUndefined(): void;
+  // instanceof wants a Function here; wasm-bindgen classes have private constructors, so no
+  // construct signature accepts them
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   toBeInstanceOf(ctor: Function): void;
   toBeGreaterThan(n: number): void;
   toHaveProperty(path: string, ...expectedValue: unknown[]): void;
@@ -110,7 +113,7 @@ function rejectionMatchers(actual: unknown) {
       throw new Error(`expected a promise to reject, got ${typeName(actual)}`);
     }
     try {
-      await actual;
+      await (actual as Promise<unknown>);
     } catch (e) {
       return e;
     }

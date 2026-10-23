@@ -1,7 +1,8 @@
 use super::*;
 
-const MAX_WATCH_VALUE_Q_SUBKEY_RANGES_LEN: usize = 512;
-const MAX_WATCH_VALUE_A_PEERS_LEN: usize = 20;
+const MAX_WATCH_VALUE_Q_SUBKEY_RANGES_LEN: usize =
+    veilid_capnp::MAX_WATCH_VALUE_Q_SUBKEY_RANGES_LEN as usize;
+const MAX_WATCH_VALUE_A_PEERS_LEN: usize = veilid_capnp::MAX_WATCH_VALUE_A_PEERS_LEN as usize;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationWatchValueQ {

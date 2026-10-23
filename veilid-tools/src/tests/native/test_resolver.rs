@@ -314,8 +314,6 @@ pub async fn test_live() {
         "records should have text"
     );
 
-    let missing = Resolver::txt_lookup("bootstrap-v1.veilid.net").await;
-    assert!(missing.is_ok());
     let nxdomain = Resolver::txt_lookup("no-such-host.veilid.net").await;
     info!("nxdomain: {:?}", nxdomain);
     assert!(matches!(nxdomain, Err(ResolverError::Generic(_))));

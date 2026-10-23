@@ -179,7 +179,7 @@ pub(crate) struct RPCProcessor {
     /// The number of RPC workers to spin up
     concurrency: u32,
     /// The RPCs that are waiting for a reply
-    waiting_rpc_table: OperationWaiter<Message, Option<Arc<QuestionContext>>>,
+    waiting_rpc_table: OperationWaiter<Message, WaitingQuestion>,
     /// The app calls that are waiting for a reply
     waiting_app_call_table: OperationWaiter<Bytes, ()>,
     /// Pool that decouples reply waits from caller cancellation
@@ -337,9 +337,7 @@ impl RPCProcessor {
             .await
             .expect_or_log("should be started up");
 
-        // Release everything waiting on an answer now. Without this the reply pool drain below
-        // waits out each question's full RPC timeout, which no answer can beat: the network is
-        // already down by the time we get here.
+        // Cancel answer waiters now: the network is down, so the drain below would wait out each timeout
         let cancelled = self.waiting_rpc_table.cancel_all_op_waiters()
             + self.waiting_app_call_table.cancel_all_op_waiters();
         if cancelled > 0 {
@@ -1270,6 +1268,11 @@ impl RPCProcessor {
     /// selection and releasing a bad one is recovery, not peer blame. Suppressing it
     /// would wedge a broken route in place for as long as the losses it causes keep the
     /// node degraded. A condemned transport still voids them.
+    ///
+    /// Routed failures are excluded from offline detection: any hop or the route itself may be at
+    /// fault, and spreading one failure across hop ids fabricates the distinct-node breadth that
+    /// defines broad failures. Direct sends are the unambiguous local-connectivity signal; route
+    /// stats carry routed failures.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -1311,10 +1314,7 @@ impl RPCProcessor {
         let network_manager = self.network_manager();
         let online_detector = network_manager.online_detector();
         // Only counts toward offline detection if a transport was actually attempted.
-        // Routed failures are excluded: any hop or the route itself may be at fault, and
-        // spreading one failure across hop ids fabricates the distinct-node breadth that
-        // defines broad failures. Direct sends are the unambiguous local-connectivity
-        // signal; route stats carry routed failures.
+        // Routed failures are excluded; direct sends are the local-connectivity signal
         if let (Some(rd), Some(transport), false) = (opt_rd, opt_transport, is_routed) {
             online_detector.record_failure(
                 rd,
@@ -1371,6 +1371,10 @@ impl RPCProcessor {
     /// Suppression follows `record_send_failure`: route stats are exempt from the
     /// degraded case but not from a condemned transport, and the out-of-band route test
     /// runs regardless.
+    ///
+    /// A question lost over a flow this node did not dial (one that arrived inbound, possibly
+    /// through a relay) says nothing about the peer or about us: the flow is dropped so the next
+    /// contact dials per the contact method, and nothing is charged.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -1383,9 +1387,7 @@ impl RPCProcessor {
             context.node_ref.best_routing_domain()
         };
 
-        // A question sent over a flow we did not dial (one that arrived inbound, possibly
-        // through a relay) says nothing about the peer or about us: drop that flow so the
-        // next contact dials per the contact method, and charge nothing
+        // A flow we did not dial says nothing about either side: drop it and charge nothing
         if !context.is_routed() && !context.send_data_result.dialed_evidence() {
             if let Some(unique_flow) = context.send_data_result.unique_flow() {
                 context.node_ref.clear_last_flow(unique_flow.flow);
@@ -1481,7 +1483,7 @@ impl RPCProcessor {
             // Trigger an out-of-band route test so silently-degraded routes
             // get released without waiting for the next regular cycle. The safety
             // route ref is always allocated, so use its set id directly.
-            // A lost loopback is already the test; retesting from it just loops
+            // A lost loopback is already the test; retesting from it loops
             let is_own_loopback = matches!(&context.destination,
                 Destination::PrivateRoute { private_route, .. } if private_route.public_key == *sr.route_key());
             if !is_own_loopback {
@@ -1883,6 +1885,7 @@ impl RPCProcessor {
         let spi = self.get_sender_peer_info(&dest);
 
         // Wrap question in operation
+        let answer_desc = question.detail().answer_desc();
         let operation = RPCOperation::new_question(question, spi);
         let op_id = operation.op_id();
 
@@ -1947,9 +1950,13 @@ impl RPCProcessor {
         };
 
         // Set up op id eventual
-        let handle = self
-            .waiting_rpc_table
-            .add_op_waiter(op_id, context.map(Arc::new));
+        let handle = self.waiting_rpc_table.add_op_waiter(
+            op_id,
+            WaitingQuestion {
+                answer_desc,
+                context: context.map(Arc::new),
+            },
+        );
 
         // Send question
         let bytes: ByteCount = (message.len() as u64).into();
@@ -2386,11 +2393,18 @@ impl RPCProcessor {
         instrument(level = "trace", target = "rpc", skip_all, fields(__VEILID_LOG_KEY = self.log_key()))
     )]
     async fn validate_rpc_operation(&self, operation: &RPCOperation) -> Result<(), RPCError> {
-        // If this is an answer, get the question context for this answer
-        // If we received an answer for a question we did not ask, this will return an error
-        let question_context = if let RPCOperationKind::Answer(_) = operation.kind() {
+        // An answer must be to a question we asked, and of the kind that question expects
+        let question_context = if let RPCOperationKind::Answer(answer) = operation.kind() {
             let op_id = operation.op_id();
-            self.waiting_rpc_table.get_op_context(op_id)?
+            let waiting = self.waiting_rpc_table.get_op_context(op_id)?;
+            if answer.desc() != waiting.answer_desc {
+                return Err(RPCError::protocol(format!(
+                    "{} answers a question expecting {}",
+                    answer.desc(),
+                    waiting.answer_desc
+                )));
+            }
+            waiting.context
         } else {
             None
         };

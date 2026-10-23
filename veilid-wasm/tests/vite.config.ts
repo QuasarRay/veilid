@@ -1,4 +1,4 @@
-import { defineConfig, searchForWorkspaceRoot } from 'vite';
+import { defineConfig, searchForWorkspaceRoot, type PluginOption } from 'vite';
 import wasm from 'vite-plugin-wasm';
 import { fileURLToPath } from 'node:url';
 
@@ -7,14 +7,16 @@ import { fileURLToPath } from 'node:url';
 // has to be added to `server.fs.allow` below.
 const pkgDir = fileURLToPath(new URL('../pkg', import.meta.url));
 
+// Due to "node16" module resolution in tsconfig.json, `vite-plugin-wasm`'s types resolve to the
+// module namespace rather than to its callable default export.
+const wasmPlugin = wasm as unknown as () => PluginOption;
+
 export default defineConfig({
-  // Due to "node16" module resolution in tsconfig.json, `vite-plugin-wasm`'s types resolve to the
-  // module namespace rather than to its callable default export.
-  plugins: [(wasm as any)()],
+  plugins: [wasmPlugin()],
   // Module workers need their own plugin pipeline to resolve the bundler-target wasm import.
   worker: {
     format: 'es',
-    plugins: () => [(wasm as any)()],
+    plugins: () => [wasmPlugin()],
   },
   // Preserve the relative worker/wasm paths of the file: veilid-wasm dep.
   optimizeDeps: {

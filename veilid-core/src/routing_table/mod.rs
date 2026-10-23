@@ -75,6 +75,8 @@ pub(crate) struct RoutingTableTimings {
     pub no_responsive_bootstrap_delay: TimestampDuration,
     /// How long nodes must answer or lose questions steadily to become reliable or dead
     pub liveness: LivenessSpans,
+    /// Loopback tests of one route come no closer than this: three RPC timeouts
+    pub route_test_cooldown: TimestampDuration,
 }
 
 impl RoutingTableTimings {
@@ -84,6 +86,7 @@ impl RoutingTableTimings {
             bootstrap_txt_timeout: rpc_timeout.saturating_mul(2),
             no_responsive_bootstrap_delay: rpc_timeout.saturating_mul(2),
             liveness: LivenessSpans::new(rpc_timeout),
+            route_test_cooldown: rpc_timeout.saturating_mul(3),
         }
     }
 }
@@ -161,12 +164,12 @@ impl Default for RoutingTableStartupContext {
     }
 }
 
-/// The network manager, held by the routing table while it runs so per-entry state
-/// computation reaches the online detector without a registry lookup. Stored once at
-/// post-init and cleared at pre-terminate; loaded on every entry state read.
 /// Peer infos received more than once are the norm; this many verifications are remembered
 const VERIFIED_PEER_INFO_CACHE_SIZE: usize = 1024;
 
+/// The network manager, held by the routing table while it runs so per-entry state
+/// computation reaches the online detector without a registry lookup. Stored once at
+/// post-init and cleared at pre-terminate; loaded on every entry state read.
 pub(crate) type NetworkManagerHandle = Arc<ArcSwapOption<VeilidComponentGuardArc<NetworkManager>>>;
 
 #[must_use]
@@ -285,6 +288,8 @@ impl RoutingTable {
         ));
         let route_spec_store = RouteSpecStore::new(registry.clone());
         let timings = RoutingTableTimings::new(registry.config().rpc_timeout());
+        let save_timings =
+            SaveTimings::from(&registry.config().internal().network.routing_table.save);
 
         // Create ping validation channel
         let (ping_validation_sender, ping_validation_receiver) = flume::unbounded();
@@ -317,7 +322,7 @@ impl RoutingTable {
             verified_peer_infos: Mutex::new(LruCache::new(VERIFIED_PEER_INFO_CACHE_SIZE)),
             routing_table_health: Mutex::new(Arc::new(RoutingTableHealth::default())),
             network_estimator: Mutex::new(NetworkEstimator::new()),
-            save_schedule: Mutex::new(SaveSchedule::new(Timestamp::now())),
+            save_schedule: Mutex::new(SaveSchedule::new(Timestamp::now(), save_timings)),
             save_lock: AsyncMutex::new(()),
             persisted_entries: Default::default(),
             saved_network_estimator: Default::default(),
@@ -1776,10 +1781,6 @@ impl RoutingTable {
         })
     }
 
-    /// Shortcut function to add a node to our routing table if it doesn't exist
-    /// and add the dial info we have for it. Returns a noderef filtered to
-    /// the routing domain in which this node was registered for convenience.
-    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub(crate) fn peer_info_verified(&self, key: &(Bytes, SignatureGroup)) -> bool {
         self.verified_peer_infos.lock().get(key).is_some()
     }
@@ -1802,15 +1803,16 @@ impl RoutingTable {
         })
     }
 
+    /// Shortcut function to add a node to our routing table if it doesn't exist
+    /// and add the dial info we have for it. Returns a noderef filtered to
+    /// the routing domain in which this node was registered for convenience.
+    #[cfg_attr(feature = "instrument", instrument(level = "trace", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key())))]
     pub fn register_node_with_peer_info(
         &self,
         unverified: Arc<UnverifiedPeerInfo>,
         allow_invalid: bool,
     ) -> EyreResult<FilteredNodeRef> {
         let routing_domain = unverified.routing_domain();
-        // Signatures are checked once the cheap rejections are past, and not at all when the
-        // table already holds this node info: same ids and timestamp mean the same bytes
-        let peer_info: Arc<PeerInfo>;
 
         // if our own node is in the list, then ignore it as we don't add ourselves to our own routing table
         if self
@@ -1862,7 +1864,9 @@ impl RoutingTable {
             );
         }
 
-        peer_info = match self.existing_peer_info(routing_domain, &node_ids) {
+        // Signatures are checked once the cheap rejections are past, and not at all when the
+        // table already holds this node info: same ids and timestamp mean the same bytes
+        let peer_info = match self.existing_peer_info(routing_domain, &node_ids) {
             Some(current)
                 if !current.signatures().is_empty()
                     && current.node_ids() == &node_ids

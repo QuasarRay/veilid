@@ -327,13 +327,11 @@ impl RPCOperationTransactCommandA {
         &self,
         validate_context: &RPCValidateContext<'_>,
     ) -> Result<(), RPCError> {
-        let question_context = validate_context
-            .question_context
-            .as_ref()
-            .expect_or_log("TransactCommandA requires question context");
-        let QuestionContext::TransactCommand(transact_command_context) = question_context else {
-            return Err(RPCError::internal(
-                "Wrong context type for TransactCommandA",
+        let Some(QuestionContext::TransactCommand(transact_command_context)) =
+            validate_context.question_context
+        else {
+            return Err(RPCError::protocol(
+                "TransactCommandA does not answer the question asked",
             ));
         };
 

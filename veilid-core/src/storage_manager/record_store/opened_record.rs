@@ -4,9 +4,7 @@ use super::*;
 /// This is not serialized to storage as it is ephemeral for the lifetime of the opened record
 #[derive(Clone, Debug)]
 pub(in crate::storage_manager) struct OpenedRecord {
-    /// The key pair used to perform writes to subkey on this opened record
-    /// Without this, set_value() will fail regardless of which key or subkey is being written to
-    /// as all writes are signed
+    /// Key pair signing subkey writes on this record; without it every set_value() fails
     writer: Option<KeyPair>,
 
     /// The safety selection in current use
@@ -15,8 +13,7 @@ pub(in crate::storage_manager) struct OpenedRecord {
     /// Encryption key, for newer records
     encryption_key: Option<BareSharedSecret>,
 
-    /// Opened by a background transaction, not the application. Foreground
-    /// opens preempt these.
+    /// Opened by a background transaction, not the application; a foreground open preempts it
     is_background: bool,
 }
 

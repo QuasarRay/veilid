@@ -127,8 +127,7 @@ cfg_if! {
                     if entry_path.starts_with(&test_group_dir) {
                         continue;
                     }
-                    // Every process in the run purges the same stale entries, so one can
-                    // vanish under us at any point from here on
+                    // Every process in the run purges the same stale entries, so one can vanish under us
                     let Ok(file_type) = entries.file_type() else {
                         continue;
                     };

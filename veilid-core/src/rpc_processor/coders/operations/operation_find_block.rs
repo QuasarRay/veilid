@@ -1,8 +1,8 @@
 use super::*;
 
-const MAX_FIND_BLOCK_A_DATA_LEN: usize = 32768;
-const MAX_FIND_BLOCK_A_SUPPLIERS_LEN: usize = 10;
-const MAX_FIND_BLOCK_A_PEERS_LEN: usize = 10;
+const MAX_FIND_BLOCK_A_DATA_LEN: usize = veilid_capnp::MAX_FIND_BLOCK_A_DATA_LEN as usize;
+const MAX_FIND_BLOCK_A_SUPPLIERS_LEN: usize = veilid_capnp::MAX_FIND_BLOCK_A_SUPPLIERS_LEN as usize;
+const MAX_FIND_BLOCK_A_PEERS_LEN: usize = veilid_capnp::MAX_FIND_BLOCK_A_PEERS_LEN as usize;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationFindBlockQ {

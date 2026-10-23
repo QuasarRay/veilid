@@ -17,14 +17,10 @@ export const protectedStoreSuite: Suite = {
       run: async ({ expect }) => {
         await veilidClient.removeUserSecret(KEY);
 
-        expect(await veilidClient.saveUserSecret(KEY, textEncoder.encode('hello'))).toBe(
-          false,
-        );
+        expect(await veilidClient.saveUserSecret(KEY, textEncoder.encode('hello'))).toBe(false);
         expect(textDecoder.decode(await veilidClient.loadUserSecret(KEY))).toBe('hello');
 
-        expect(await veilidClient.saveUserSecret(KEY, textEncoder.encode('world'))).toBe(
-          true,
-        );
+        expect(await veilidClient.saveUserSecret(KEY, textEncoder.encode('world'))).toBe(true);
         expect(textDecoder.decode(await veilidClient.loadUserSecret(KEY))).toBe('world');
       },
     },

@@ -23,8 +23,6 @@ use super::*;
 
 impl_veilid_log_facility!("net");
 
-/// Age at which an outcome leaves the window, down to TRANSPORT_STATS_MIN_SAMPLES
-const WINDOW_SECS: u32 = 10;
 /// Outcomes retained regardless of age, so a quiet period keeps a verdict
 pub(crate) const TRANSPORT_STATS_MIN_SAMPLES: usize = 8;
 /// Distinct failed peers required before the path is blamed rather than the peers
@@ -153,13 +151,14 @@ impl TransportWindow {
         cur_ts: Timestamp,
         outcome: TransportSendOutcome,
         peer: TransportPeerKey,
+        window: TimestampDuration,
     ) {
         self.last_attempt_ts = Some(cur_ts);
         self.outcomes.push_back((cur_ts, outcome, peer));
         while self.outcomes.len() > MAX_SAMPLES {
             self.outcomes.pop_front();
         }
-        self.evict_aged(cur_ts);
+        self.evict_aged(cur_ts, window);
 
         if outcome.is_sent() {
             self.suppressed = false;
@@ -175,9 +174,8 @@ impl TransportWindow {
             && self.distinct_peers() >= TRANSPORT_STATS_MIN_DISTINCT_PEERS
     }
 
-    /// Drop aged outcomes, but never below TRANSPORT_STATS_MIN_SAMPLES
-    pub(crate) fn evict_aged(&mut self, cur_ts: Timestamp) {
-        let window = TimestampDuration::new_secs(WINDOW_SECS);
+    /// Drop outcomes older than `window`, but never below TRANSPORT_STATS_MIN_SAMPLES
+    pub(crate) fn evict_aged(&mut self, cur_ts: Timestamp, window: TimestampDuration) {
         while self.outcomes.len() > TRANSPORT_STATS_MIN_SAMPLES {
             let Some((ts, _, _)) = self.outcomes.front() else {
                 break;
@@ -244,6 +242,8 @@ pub(crate) struct TransportStats {
     windows: Mutex<BTreeMap<(RoutingDomain, LowLevelTransportType), TransportWindow>>,
     /// How long a suppressed transport goes unattempted before a canary while nothing changes
     canary_interval: TimestampDuration,
+    /// Age at which a send outcome leaves a window
+    window: TimestampDuration,
     /// Domains with enforcement armed (outbound ReadyToOperate); elsewhere every send is a canary
     enforcing: Mutex<BTreeSet<RoutingDomain>>,
     /// Debug availability overrides by change generation, so a timed revert skips later toggles
@@ -257,11 +257,16 @@ impl_veilid_component_accessors!(TransportStats);
 
 impl TransportStats {
     /// Create an empty send-health tracker
-    pub fn new(registry: VeilidComponentRegistry, canary_interval: TimestampDuration) -> Self {
+    pub fn new(
+        registry: VeilidComponentRegistry,
+        canary_interval: TimestampDuration,
+        window: TimestampDuration,
+    ) -> Self {
         Self {
             registry,
             windows: Mutex::new(BTreeMap::new()),
             canary_interval,
+            window,
             enforcing: Mutex::new(BTreeSet::new()),
             disabled: Mutex::new(BTreeMap::new()),
             #[cfg(feature = "debug-api")]
@@ -357,7 +362,7 @@ impl TransportStats {
             .lock()
             .entry((routing_domain, transport))
             .or_default()
-            .record(cur_ts, outcome, peer.into());
+            .record(cur_ts, outcome, peer.into(), self.window);
     }
 
     /// Record a nodeless send (bootstrap, discovery); the address still names the
@@ -475,7 +480,7 @@ impl TransportStats {
         let Some(window) = windows.get_mut(&(routing_domain, transport)) else {
             return false;
         };
-        window.evict_aged(cur_ts);
+        window.evict_aged(cur_ts, self.window);
         match window.verdict(cur_ts, self.canary_interval) {
             TransportVerdict::Suppressed {
                 due_for_canary: false,
@@ -510,7 +515,7 @@ impl TransportStats {
         let Some(window) = windows.get_mut(&(routing_domain, transport)) else {
             return TransportVerdict::Unknown;
         };
-        window.evict_aged(cur_ts);
+        window.evict_aged(cur_ts, self.window);
         window.verdict(cur_ts, self.canary_interval)
     }
 
@@ -550,7 +555,7 @@ impl TransportStats {
         {
             let mut windows = self.windows.lock();
             for ((rd, tt), window) in windows.iter_mut() {
-                window.evict_aged(cur_ts);
+                window.evict_aged(cur_ts, self.window);
                 let (sent, failed, timeout) = window.counts();
                 let peers = window.distinct_peers();
                 let verdict = match window.verdict(cur_ts, self.canary_interval) {

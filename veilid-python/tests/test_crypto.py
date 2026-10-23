@@ -154,4 +154,3 @@ async def test_kem_bridge_from_signing_keys(api_connection: veilid.VeilidAPI):
             # bridged halves form a working KEM pair
             sealed = await cs.hpke_seal(ek, b"", b"bridged")
             assert await cs.hpke_open(dk, b"", sealed) == b"bridged"
-

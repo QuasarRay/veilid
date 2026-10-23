@@ -86,8 +86,7 @@ pub fn ed25519_public_to_x25519(public: &[u8]) -> Result<[u8; ED25519_PUBLIC_KEY
 /// The x25519 secret key an ed25519 secret key expands to
 pub fn ed25519_secret_to_x25519(secret: &[u8]) -> Result<[u8; ED25519_SECRET_KEY_LENGTH], Error> {
     let secret = sized::<ED25519_SECRET_KEY_LENGTH>(secret)?;
-    // The raw first half of the expanded key, not SigningKey::to_scalar(): that one reduces
-    // the scalar (dalek-cryptography/curve25519-dalek#565)
+    // The raw expanded-key half, not SigningKey::to_scalar(), which reduces the scalar (curve25519-dalek#565)
     let hash: [u8; 64] = Sha512::default().chain_update(secret).finalize().into();
     let mut out = [0u8; ED25519_SECRET_KEY_LENGTH];
     out.copy_from_slice(&hash[..ED25519_SECRET_KEY_LENGTH]);

@@ -70,6 +70,30 @@ pub(in crate::rpc_processor) enum RPCQuestionDetail {
 }
 
 impl RPCQuestionDetail {
+    /// Descriptor of the answer this question expects
+    pub fn answer_desc(&self) -> &'static str {
+        match self {
+            RPCQuestionDetail::StatusQ(_) => "StatusA",
+            RPCQuestionDetail::FindNodeQ(_) => "FindNodeA",
+            RPCQuestionDetail::AppCallQ(_) => "AppCallA",
+            RPCQuestionDetail::GetValueQ(_) => "GetValueA",
+            RPCQuestionDetail::SetValueQ(_) => "SetValueA",
+            RPCQuestionDetail::WatchValueQ(_) => "WatchValueA",
+            RPCQuestionDetail::InspectValueQ(_) => "InspectValueA",
+            RPCQuestionDetail::TransactBeginQ(_) => "TransactBeginA",
+            RPCQuestionDetail::TransactCommandQ(_) => "TransactCommandA",
+            #[cfg(feature = "unstable-blockstore")]
+            RPCQuestionDetail::SupplyBlockQ(_) => "SupplyBlockA",
+            #[cfg(feature = "unstable-blockstore")]
+            RPCQuestionDetail::FindBlockQ(_) => "FindBlockA",
+            #[cfg(feature = "unstable-tunnels")]
+            RPCQuestionDetail::StartTunnelQ(_) => "StartTunnelA",
+            #[cfg(feature = "unstable-tunnels")]
+            RPCQuestionDetail::CompleteTunnelQ(_) => "CompleteTunnelA",
+            #[cfg(feature = "unstable-tunnels")]
+            RPCQuestionDetail::CancelTunnelQ(_) => "CancelTunnelA",
+        }
+    }
     pub fn desc(&self) -> &'static str {
         match self {
             RPCQuestionDetail::StatusQ(_) => "StatusQ",

@@ -44,8 +44,6 @@ pub(super) type LowLevelProtocolAddress = (LowLevelProtocolType, SocketAddress);
 
 #[derive(Debug)]
 struct ConnectionTableInner {
-    // Maximum total connections across all protocol types
-    max_connections: usize,
     // All connections in one LRU so eviction is global, not per-protocol
     conn_by_id: LruCache<NetworkConnectionId, NetworkConnection>,
     id_by_flow: BTreeMap<Flow, NetworkConnectionId>,
@@ -79,6 +77,17 @@ pub(super) struct ConnectionTableStats {
 impl_veilid_component_accessors!(ConnectionTable);
 
 impl ConnectionTable {
+    fn max_connections(&self) -> usize {
+        self.config().network.max_connections as usize
+    }
+
+    /// Size the priority set from the config as it stands; the table is empty between attaches
+    pub fn startup(&self) {
+        let mut inner = self.inner.lock();
+        inner.priority_flows =
+            LruCache::new(self.max_connections() * PRIORITY_FLOW_PERCENTAGE / 100);
+    }
+
     pub fn new(registry: VeilidComponentRegistry) -> Self {
         let config = registry.config();
         let max_connections = config.network.max_connections as usize;
@@ -86,7 +95,6 @@ impl ConnectionTable {
         Self {
             registry,
             inner: Mutex::new(ConnectionTableInner {
-                max_connections,
                 conn_by_id: LruCache::new_unbounded(),
                 id_by_flow: BTreeMap::new(),
                 ids_by_remote: BTreeMap::new(),
@@ -139,7 +147,7 @@ impl ConnectionTable {
     ) -> Result<Option<NetworkConnection>, ()> {
         // The cap is on the total connection count, so if we're under the
         // maximum nothing needs to be LRUd out.
-        if inner.conn_by_id.len() < inner.max_connections {
+        if inner.conn_by_id.len() < self.max_connections() {
             return Ok(None);
         }
 
@@ -522,7 +530,7 @@ impl ConnectionTable {
         out.push(format!(
             "  Connections: ({}/{})",
             inner.conn_by_id.len(),
-            inner.max_connections
+            self.max_connections()
         ));
         for pt in ProtocolType::all_connection_set() {
             let count = inner

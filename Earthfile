@@ -45,6 +45,7 @@ ARG --global ANDROID_CMAKE_VERSION=$(. /etc/veilid-versions.env && echo $ANDROID
 ARG --global RUST_STABLE_TARGETS=$(. /etc/veilid-versions.env && echo $RUST_STABLE_TARGETS)
 ARG --global RUST_NIGHTLY_TARGETS=$(. /etc/veilid-versions.env && echo $RUST_NIGHTLY_TARGETS)
 ARG --global FLUTTER_BUILD_IMAGE=$(. /etc/veilid-versions.env && echo $FLUTTER_BUILD_IMAGE)
+ARG --global NODE_MAJOR=$(. /etc/veilid-versions.env && echo $NODE_MAJOR)
 # Where +tool-* comes from: `local` builds it here, `container` pulls the per-version image
 # the build_tools CI job pushed. Tags come from the same script .gitlab-ci.yml asks, so a
 # version bump in versions.env moves one tool's tag and leaves the rest of the cache alone.
@@ -124,7 +125,10 @@ deps-base-build:
         'done' \
         > /usr/local/bin/retry && chmod +x /usr/local/bin/retry
     RUN apt-get -y update
-    RUN apt-get install -y ca-certificates iproute2 curl build-essential libssl-dev openssl file git pkg-config libdbus-1-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev checkinstall unzip libncursesw5-dev libncurses5-dev jq selinux-policy-dev bzip2
+    RUN apt-get install -y ca-certificates iproute2 curl gnupg build-essential libssl-dev openssl file git pkg-config libdbus-1-dev libdbus-glib-1-dev libgirepository1.0-dev libcairo2-dev checkinstall unzip libncursesw5-dev libncurses5-dev jq selinux-policy-dev bzip2
+    # Node for the wasm test harness lint (scripts/_lint_typescript.sh): the NodeSource major pinned
+    # in versions.env, since the distribution's nodejs is too old for eslint 9
+    RUN retry sh -c "curl -fsSL https://deb.nodesource.com/setup_$NODE_MAJOR.x | bash -" && apt-get install -y nodejs
     IF [ $(arch) = "x86_64" ]
         RUN apt-get install -y gcc-aarch64-linux-gnu
     ELSE IF [ $(arch) = "aarch64" ]
@@ -621,6 +625,11 @@ test-check-wasm-builds-dart:
 test-check-wasm-builds-js:
     FROM +code-linux
     RUN ./scripts/_check_wasm_builds.sh js
+# eslint's type-aware rules read the generated pkg/veilid_wasm.d.ts, so the wasm package comes first
+test-lint-typescript:
+    FROM +code-linux
+    RUN ./scripts/_check_wasm_builds.sh js
+    RUN ./scripts/_lint_typescript.sh
 test-clippy-wasm32-unknown-unknown:
     FROM +code-linux
     RUN ./scripts/_clippy_wasm32_unknown_unknown.sh
@@ -652,7 +661,7 @@ test-unit-tests-all:
 # flutter-tester - the same run check_all.sh does locally.
 test-dart-format:
     FROM +code-flutter
-    RUN ./scripts/check_format.sh
+    RUN ./scripts/_check_format_dart.sh
 test-readme-sync:
     FROM +code-linux
     RUN ./scripts/check_readme_sync.sh
@@ -668,6 +677,7 @@ test-all:
     BUILD +test-public-api
     BUILD +test-check-wasm-builds-dart
     BUILD +test-check-wasm-builds-js
+    BUILD +test-lint-typescript
     BUILD +test-clippy-wasm32-unknown-unknown
     BUILD +test-clippy-x86-64-pc-windows-gnu
     BUILD +test-clippy-aarch64-apple-darwin

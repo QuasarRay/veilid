@@ -144,11 +144,15 @@ pub(crate) enum OnlineEvent {
     /// subset whose failure is news (see `record_failure`); only those arm the degraded
     /// window, while offline detection keeps the full live set.
     Failure {
+        /// Responsive nodes that failed
         live_node_ids: Vec<NodeId>,
+        /// The subset whose failure is news
         fresh_node_ids: Vec<NodeId>,
         /// Live table size at record time, for the fractional degraded breadth
         responsive_count: usize,
+        /// When the failed question left
         sent_ts: Timestamp,
+        /// Socket class the question went out on
         framing_type: FramingType,
     },
     /// The local network address changed.
@@ -236,8 +240,7 @@ impl Default for OnlineDetectionPerDomain {
 /// Which peers' fresh failures may arm the degraded window
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum DegradedBreadthStrategy {
-    /// Any responsive peer that answered recently and is not already judged failing; the
-    /// pre-2026-09 behavior, kept selectable for comparison runs
+    /// Any responsive peer that answered recently and is not judged failing; for comparison runs
     #[expect(dead_code)]
     Responsive,
     /// Only peers in the Reliable state: the ones whose loss is news rather than habit
@@ -361,6 +364,17 @@ impl OnlineDetector {
     /// Record an RPC failure against the directly attempted node. Routed failures are
     /// never fed here: any hop or the route itself may be at fault, and spreading one
     /// failure across hop ids fabricates broad-failure breadth.
+    ///
+    /// Only currently-responsive nodes count. A probe timing out to a node that is
+    /// Initial/Missing/Dead/Punished is evidence about that node, not about us: a stale
+    /// routing table loads entries as Initial while their persisted answer history
+    /// survives, so a historical-liveness check would count them and flip us offline
+    /// during the attach burst.
+    ///
+    /// The degraded window additionally requires the failure to be news: the ordering
+    /// answered recently and is not already judged Failing. Chronic single-transport
+    /// failers otherwise re-arm the window forever; a real local storm still counts
+    /// each node's first losses before the judge trips.
     pub fn record_failure(
         &self,
         routing_domain: RoutingDomain,
@@ -386,16 +400,7 @@ impl OnlineDetector {
                         .any(|did| did.dial_info.socket_address() == remote)
                 })
         });
-        // Only currently-responsive nodes count. A probe timing out to a node that is
-        // Initial/Missing/Dead/Punished is evidence about that node, not about us: a stale
-        // routing table loads entries as Initial while their persisted answer history
-        // survives, so a historical-liveness check would count them and flip us offline
-        // during the attach burst.
-        //
-        // The degraded window additionally requires the failure to be news: the ordering
-        // answered recently and is not already judged Failing. Chronic single-transport
-        // failers otherwise re-arm the window forever; a real local storm still counts
-        // each node's first losses before the judge trips.
+        // Responsive now, not historically; fresh when the failure is news
         let cur_ts = Timestamp::now();
         let routing_table = self.routing_table();
         let so = transport.sequence_ordering();
@@ -518,7 +523,7 @@ impl OnlineDetector {
     /// credits nothing for the stall: a process frozen for minutes came back to
     /// find every entry's silence counted against it and demoted its reliable
     /// peers for its own absence. Recorded as an offline interval, which is what
-    /// a stall is to the entries - no test was possible - and which also makes
+    /// a stall is to the entries (no test was possible) and which also makes
     /// the thaw a reattach for `online_since`, so a peer last seen before the
     /// freeze keeps its standing until it has been re-tested.
     ///

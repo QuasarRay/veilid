@@ -108,8 +108,7 @@ impl NativeNetwork {
             RoutingDomain::PublicInternet => {
                 let validity = self.public_internet_validity(&network_state)?;
                 let port_maps = self
-                    .igd_manager
-                    .as_ref()
+                    .igd_manager()
                     .map(|igd_manager| igd_manager.port_maps())
                     .unwrap_or_default();
                 let state = {
@@ -194,9 +193,18 @@ impl NativeNetwork {
             .get(&RoutingDomain::PublicInternet)?
             .clone();
         let interface_address_state = &network_state.interface_address_state;
+        // One guard, taken before the literal: a guard made inside it lives for the
+        // whole expression and deadlocks the accessor
+        let (listeners, upnp) = {
+            let inner = self.inner.lock();
+            (
+                inner.preferred_local_addresses.clone(),
+                inner.igd_manager.is_some(),
+            )
+        };
         Some(PublicInternetValidity {
             network_state: rd_network_state,
-            listeners: self.inner.lock().preferred_local_addresses.clone(),
+            listeners,
             egress_v4: interface_address_state.egress_v4.clone(),
             egress_v6: interface_address_state.egress_v6.clone(),
             global_addresses: interface_address_state
@@ -206,7 +214,7 @@ impl NativeNetwork {
                 .filter(|ip| Address::from_ip_addr(*ip).is_global())
                 .collect(),
             protocol_config: self.config().network.protocol.clone(),
-            upnp: self.igd_manager.is_some(),
+            upnp,
             require_inbound_relay: network_state.require_inbound_relay,
         })
     }
@@ -252,7 +260,7 @@ impl NativeNetwork {
                 PublicInternetRestoreState::default()
             }
         };
-        if let Some(igd_manager) = &self.igd_manager {
+        if let Some(igd_manager) = self.igd_manager() {
             igd_manager.restore_port_maps(state.port_maps);
         }
         {

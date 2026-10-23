@@ -73,8 +73,8 @@ pub(super) fn take_entry_time() -> Option<BackgroundTask> {
 
 fn install_observers(mtm: MainThreadMarker) {
     let center = NSNotificationCenter::defaultCenter();
-    let entered = RcBlock::new(|_: NonNull<NSNotification>| entered_background());
-    let entering = RcBlock::new(|_: NonNull<NSNotification>| entering_foreground());
+    let entered = RcBlock::new(|_: NonNull<NSNotification>| abort_on_panic(entered_background));
+    let entering = RcBlock::new(|_: NonNull<NSNotification>| abort_on_panic(entering_foreground));
     // The center holds each registration until it is removed, and these never are
     // SAFETY: both names are UIKit constants, valid for the life of the process; the blocks
     // capture nothing, so they are sendable; with no queue given they run on the posting
@@ -113,9 +113,8 @@ fn entered_background() {
     STATE.store(STATE_BACKGROUND, Ordering::Release);
     if MONITORS.load(Ordering::Acquire) > 0 {
         // Claimed before this handler returns: iOS suspends within seconds of it
-        let previous = ENTRY_TIME
-            .lock()
-            .replace(BackgroundTask::begin(ENTRY_TIME_NAME));
+        let task = BackgroundTask::begin(ENTRY_TIME_NAME);
+        let previous = ENTRY_TIME.lock().replace(task);
         drop(previous);
     }
     notify_changed();
@@ -177,9 +176,11 @@ impl TaskSlot {
         }
         let expiring = self.clone();
         let expiration = RcBlock::new(move || {
-            if let Some(mtm) = MainThreadMarker::new() {
-                expiring.end(mtm, true);
-            }
+            abort_on_panic(|| {
+                if let Some(mtm) = MainThreadMarker::new() {
+                    expiring.end(mtm, true);
+                }
+            })
         });
         let id = application.beginBackgroundTaskWithName_expirationHandler(
             Some(&NSString::from_str(self.name)),

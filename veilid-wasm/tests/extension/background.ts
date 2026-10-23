@@ -5,32 +5,44 @@
 // In this context veilid-core's runtime detection sees chrome.runtime.id and selects the
 // extension-storage ProtectedStore backend (chrome.storage.local), not localStorage/IndexedDB.
 import { runSuites } from '../src/harness/run-suites.js';
+import type { RunRequest } from '../src/harness/types.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const chrome: any;
+// Only the slice of chrome.runtime this worker uses; @types/chrome is not a dependency.
+declare const chrome: {
+  runtime: {
+    onMessageExternal: {
+      addListener: (
+        listener: (
+          message: RunRequest | undefined,
+          sender: unknown,
+          sendResponse: (r: unknown) => void,
+        ) => boolean,
+      ) => void;
+    };
+  };
+};
 
-chrome.runtime.onMessageExternal.addListener(
-  (
-    message: { type?: string; suites?: string[] },
-    _sender: unknown,
-    sendResponse: (r: unknown) => void,
-  ) => {
-    if (message?.type === 'ping') {
-      sendResponse({ type: 'pong' });
-      return false;
+chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'ping') {
+    sendResponse({ type: 'pong' });
+    return false;
+  }
+  if (message?.type !== 'run') {
+    return false;
+  }
+  void (async () => {
+    try {
+      const results = await runSuites(
+        message.suites ?? [],
+        'extension',
+        undefined,
+        message.caseFilter,
+      );
+      sendResponse({ type: 'done', ok: true, results });
+    } catch (err) {
+      sendResponse({ type: 'done', ok: false, error: String(err) });
     }
-    if (message?.type !== 'run') {
-      return false;
-    }
-    (async () => {
-      try {
-        const results = await runSuites(message.suites ?? [], 'extension', undefined, message.caseFilter);
-        sendResponse({ type: 'done', ok: true, results });
-      } catch (err) {
-        sendResponse({ type: 'done', ok: false, error: String(err) });
-      }
-    })();
-    // Keep the message channel open for the async response.
-    return true;
-  },
-);
+  })();
+  // Keep the message channel open for the async response.
+  return true;
+});

@@ -88,15 +88,9 @@ if echo "$NIGHTLY_CHECK" | grep -qi "update available"; then
     exit 1
 fi
 
-# Same check CI runs; fail before anything expensive so a reformat is a one-line fix
+# Every formatter gate, before anything expensive so a reformat is a one-line fix. The same
+# per-language scripts CI's format, format_python, format_typescript and test_dart_format jobs run.
 echo "Performing format check..."
-if ! cargo fmt --all --check; then
-    fail "cargo fmt --all --check found unformatted code. Run 'cargo fmt --all' and commit the result."
-fi
-
-# The Dart half of the format gate; the Rust half is the cargo fmt check above. Same script
-# CI's test_dart_format job runs.
-echo "Performing Dart format check..."
 step ./scripts/check_format.sh
 
 # Crate READMEs are generated from the crate docs; same script CI's test_readme_sync job runs.
@@ -147,9 +141,9 @@ if [ "$earthfile_image" != "$versions_image" ]; then
     fail "Earthfile LINUX_BUILD_IMAGE ($earthfile_image) does not match .dagger/versions.env ($versions_image)."
 fi
 
-# The format gate runs on the upstream rust image rather than the veilid toolchain (it is a cheap
-# standalone job, not an earthly one), so its version is a literal that can drift from the pin.
-# rustfmt's output changes between releases, so a drift means CI and this script disagree.
+# CI's format job (rustfmt) runs on the upstream rust image rather than the veilid toolchain (it is
+# a cheap standalone job, not an earthly one), so its version is a literal that can drift from the
+# pin. rustfmt's output changes between releases, so a drift means CI and this script disagree.
 ci_rust=$(sed -n 's/^  image: rust:\(.*\)-slim$/\1/p' .gitlab-ci.yml)
 versions_rust=$(. .dagger/versions.env && echo "$RUST_VERSION")
 if [ "$ci_rust" != "$versions_rust" ]; then
@@ -162,6 +156,10 @@ echo "Performing census check..."
 step ./scripts/test_census.sh
 step env CENSUS_CHECK_ONLY=1 ./scripts/update_census.sh
 
+# Source-only like the census; same script CI's lint_python job runs.
+echo "Performing Python lint..."
+step ./scripts/_lint_python.sh
+
 echo "Running all tests..."
 
 # cargo-public-api (nightly rustdoc) and cargo-msrv (per-crate rust-version) select their own
@@ -173,6 +171,8 @@ step ./scripts/_smoketest_all.sh $CLEANUP --locked
 # skip cleanup for WASM here because the clippy script does WASM first and cleans up there
 step ./scripts/_check_wasm_builds.sh dart
 step ./scripts/_check_wasm_builds.sh js
+# eslint's type-aware rules read the wasm package the step above built
+step ./scripts/_lint_typescript.sh
 step ./scripts/_build_docs.sh $CLEANUP
 step ./scripts/_unit_tests_all.sh
 step env DEFAULT_CARGO_TARGET=wasm32-unknown-unknown ./scripts/_unit_tests_all.sh

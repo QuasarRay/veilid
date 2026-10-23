@@ -1,5 +1,5 @@
 import { defineConfig, searchForWorkspaceRoot } from 'vite';
-import react from '@vitejs/plugin-react-swc'
+import react from '@vitejs/plugin-react-swc';
 import wasm from 'vite-plugin-wasm';
 import path from 'path';
 
@@ -12,14 +12,7 @@ export default defineConfig({
   server: {
     port: 5001,
     fs: {
-      allow: [
-        workspaceRoot,
-        path.resolve(
-          workspaceRoot,
-          '../../pkg/'
-        ),
-      ],
+      allow: [workspaceRoot, path.resolve(workspaceRoot, '../../pkg/')],
     },
-
   },
-})
+});

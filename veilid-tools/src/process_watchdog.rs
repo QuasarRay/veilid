@@ -2,7 +2,6 @@
 
 use super::*;
 use std::sync::mpsc;
-use std::time::Duration;
 
 /// A plain OS thread that sleeps on a fixed period and reports when it wakes late.
 ///

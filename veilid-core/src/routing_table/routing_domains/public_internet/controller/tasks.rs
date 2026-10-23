@@ -162,7 +162,7 @@ impl PublicInternetRoutingDomainController {
         }
 
         // Route validity (safety_routes_ready) should be stable once established; warn if it churns
-        let safety_ready = self.safety_routes_ready();
+        let safety_ready = self.safety_routes_ready(self.outbound_was_ready());
         let opt_route_penalty = self
             .route_flap_detector
             .lock()

@@ -17,17 +17,40 @@ LATENCY_KEYS = {"fastest", "average", "slowest", "tm90", "tm75", "p90", "p75"}
 # Leaf names whose meaning is unambiguous when a series never varies (all-zero
 # counters would otherwise look like constant gauges).
 COUNTER_LEAVES = {
-    "count", "added", "evicted", "rejected_table_full", "transitions",
-    "state_transitions", "total", "congested", "completed", "demand_events",
-    "holds", "lowers", "raises", "clamps", "entries", "time_offline",
+    "count",
+    "added",
+    "evicted",
+    "rejected_table_full",
+    "transitions",
+    "state_transitions",
+    "total",
+    "congested",
+    "completed",
+    "demand_events",
+    "holds",
+    "lowers",
+    "raises",
+    "clamps",
+    "entries",
+    "time_offline",
 }
 
 # Path suffix -> (label, mode, note). Health signals we want at or near zero;
 # "peak" reads the gauge's high-water mark, "delta" the growth over the window.
 HEALTH = [
-    ("network_manager.connections.rejected_table_full", "conn rejections (table full)", "delta", "count"),
+    (
+        "network_manager.connections.rejected_table_full",
+        "conn rejections (table full)",
+        "delta",
+        "count",
+    ),
     ("network_manager.connections.evicted", "conn evictions", "delta", "count"),
-    ("network_manager.public_internet.transitions", "public online/offline flaps", "delta", "count"),
+    (
+        "network_manager.public_internet.transitions",
+        "public online/offline flaps",
+        "delta",
+        "count",
+    ),
     ("network_manager.public_internet.time_offline", "public time offline", "delta", "us"),
     ("network_manager.local_network.transitions", "local online/offline flaps", "delta", "count"),
     ("attachment_manager.state_transitions", "attachment state changes", "delta", "count"),
@@ -40,9 +63,12 @@ HEALTH = [
 
 # Readable path prefixes and list-key rewrites for display.
 _PREFIX = {
-    "storage_manager": "storage", "network_manager": "net",
-    "rpc_processor": "rpc", "routing_table": "routing",
-    "attachment_manager": "attach", "stats_manager": "stats",
+    "storage_manager": "storage",
+    "network_manager": "net",
+    "rpc_processor": "rpc",
+    "routing_table": "routing",
+    "attachment_manager": "attach",
+    "stats_manager": "stats",
 }
 
 
@@ -121,13 +147,15 @@ def pretty(path):
     p = path
     for raw, short in _PREFIX.items():
         p = p.replace(raw, short, 1)
-    p = (p.replace("gated_operations[", "gate.")
-          .replace("process_by_kind[", "")
-          .replace("operations[", "")
-          .replace("locks[", "lock.")
-          .replace("entries_by_state[", "state.")
-          .replace("time_in_state[", "in.")
-          .replace("]", ""))
+    p = (
+        p.replace("gated_operations[", "gate.")
+        .replace("process_by_kind[", "")
+        .replace("operations[", "")
+        .replace("locks[", "lock.")
+        .replace("entries_by_state[", "state.")
+        .replace("time_in_state[", "in.")
+        .replace("]", "")
+    )
     return p
 
 
@@ -177,7 +205,8 @@ def _unit(path):
     """Physical unit of a scalar leaf, for display: 'us' (time), 'bytes', or 'count'."""
     leaf = path.rsplit(".", 1)[-1]
     if leaf in ("uptime", "attached_uptime", "time_offline") or (
-            "time_in_state[" in path and leaf == "total"):
+        "time_in_state[" in path and leaf == "total"
+    ):
         return "us"
     if "transfer" in path or leaf.endswith("_bytes"):
         return "bytes"
@@ -234,17 +263,19 @@ def build_report(samples, label, window=None):
         p90s = sorted(d["p90"] for d in lcols[lp] if d and d["p90"] is not None)
         slow = [d["slowest"] for d in lcols[lp] if d and d["slowest"] is not None]
         op_latency_paths.add(lp)
-        operations.append({
-            "op": pretty(owner),
-            "dim": dim,
-            "invocations": round(inv),
-            "rate_per_s": inv / dur,
-            "mean_us": total_us / inv if inv else 0.0,
-            "p90_us": _pct(p90s, 50),
-            "worst_us": max(slow) if slow else 0.0,
-            "est_total_s": total_us / 1e6,
-            "direction": "lower_better",
-        })
+        operations.append(
+            {
+                "op": pretty(owner),
+                "dim": dim,
+                "invocations": round(inv),
+                "rate_per_s": inv / dur,
+                "mean_us": total_us / inv if inv else 0.0,
+                "p90_us": _pct(p90s, 50),
+                "worst_us": max(slow) if slow else 0.0,
+                "est_total_s": total_us / 1e6,
+                "direction": "lower_better",
+            }
+        )
     operations.sort(key=lambda r: r["est_total_s"], reverse=True)
 
     # Invocation counters: discrete-event counts only. Duration accumulators
@@ -253,16 +284,24 @@ def build_report(samples, label, window=None):
     op_count_paths = {f"{lp.rpartition('.')[0]}.count" for lp in op_latency_paths}
     counters = []
     for p in scalar_paths:
-        if (kinds[p] != "counter" or p in op_count_paths
-                or p.endswith(".retryable") or _counter_class(p) != "event"):
+        if (
+            kinds[p] != "counter"
+            or p in op_count_paths
+            or p.endswith(".retryable")
+            or _counter_class(p) != "event"
+        ):
             continue
         delta, _ = _pos_increments(scols[p])
         if delta <= 0:
             continue
-        counters.append({
-            "metric": pretty(p), "delta": round(delta),
-            "rate_per_s": delta / dur, "direction": "neutral",
-        })
+        counters.append(
+            {
+                "metric": pretty(p),
+                "delta": round(delta),
+                "rate_per_s": delta / dur,
+                "direction": "neutral",
+            }
+        )
     counters.sort(key=lambda r: r["delta"], reverse=True)
 
     # Retries: operations that ended in a retryable (no-consensus / congested)
@@ -277,10 +316,15 @@ def build_report(samples, label, window=None):
             continue
         rcount, _ = _pos_increments(scols[p])
         ocount, _ = _pos_increments(scols[f"{owner}.count"])
-        retries.append({
-            "op": pretty(owner), "ops": round(ocount), "retries": round(rcount),
-            "rate": (rcount / ocount) if ocount else 0.0, "direction": "lower_better",
-        })
+        retries.append(
+            {
+                "op": pretty(owner),
+                "ops": round(ocount),
+                "retries": round(rcount),
+                "rate": (rcount / ocount) if ocount else 0.0,
+                "direction": "lower_better",
+            }
+        )
     retries.sort(key=lambda r: (r["rate"], r["retries"]), reverse=True)
 
     # Gauges: distribution + high-water mark. Constant series carry no
@@ -293,11 +337,18 @@ def build_report(samples, label, window=None):
         sv = sorted(vals)
         if not sv or sv[0] == sv[-1]:
             continue
-        gauges.append({
-            "metric": pretty(p), "min": sv[0], "mean": sum(sv) / len(sv),
-            "max": sv[-1], "p95": _pct(sv, 95), "last": vals[-1],
-            "unit": _unit(p), "direction": "lower_better",
-        })
+        gauges.append(
+            {
+                "metric": pretty(p),
+                "min": sv[0],
+                "mean": sum(sv) / len(sv),
+                "max": sv[-1],
+                "p95": _pct(sv, 95),
+                "last": vals[-1],
+                "unit": _unit(p),
+                "direction": "lower_better",
+            }
+        )
     gauges.sort(key=lambda r: r["max"], reverse=True)
 
     # Standalone latencies (no invocation count): workers, relays, future adds.
@@ -310,11 +361,15 @@ def build_report(samples, label, window=None):
         slow = [d["slowest"] for d in lcols[lp] if d and d["slowest"] is not None]
         if not avgs:
             continue
-        latencies.append({
-            "metric": pretty(lp), "typical_us": _pct(avgs, 50),
-            "p90_us": _pct(p90s, 50), "worst_us": max(slow) if slow else 0.0,
-            "direction": "lower_better",
-        })
+        latencies.append(
+            {
+                "metric": pretty(lp),
+                "typical_us": _pct(avgs, 50),
+                "p90_us": _pct(p90s, 50),
+                "worst_us": max(slow) if slow else 0.0,
+                "direction": "lower_better",
+            }
+        )
     latencies.sort(key=lambda r: r["worst_us"], reverse=True)
 
     health = _health(scols, lcols, kinds, win)
@@ -324,13 +379,20 @@ def build_report(samples, label, window=None):
 
     return {
         "run": {
-            "label": label, "samples": len(samples),
-            "window_samples": n, "duration_s": t1 - t0,
-            "window_s": dur, "interval_s": dur / max(n - 1, 1),
+            "label": label,
+            "samples": len(samples),
+            "window_samples": n,
+            "duration_s": t1 - t0,
+            "window_s": dur,
+            "interval_s": dur / max(n - 1, 1),
             "attachment_state": state,
         },
-        "operations": operations, "counters": counters, "gauges": gauges,
-        "latencies": latencies, "health": health, "anomalies": anomalies,
+        "operations": operations,
+        "counters": counters,
+        "gauges": gauges,
+        "latencies": latencies,
+        "health": health,
+        "anomalies": anomalies,
         "retries": retries,
     }
 
@@ -353,9 +415,13 @@ def _verdict(base, last, direction, flat_pct=5.0):
 
 def compare(reports):
     """Align runs and diff the last against the first (baseline)."""
-    files = [{k: r["run"].get(k) for k in
-              ("label", "samples", "duration_s", "window_s", "attachment_state")}
-             for r in reports]
+    files = [
+        {
+            k: r["run"].get(k)
+            for k in ("label", "samples", "duration_s", "window_s", "attachment_state")
+        }
+        for r in reports
+    ]
 
     def align(section, key_fn, val_fn, direction):
         keys, rows = [], {}
@@ -370,8 +436,15 @@ def compare(reports):
         for k in keys:
             vals = [rows[k].get(id(r)) for r in reports]
             pct, verd = _verdict(vals[0], vals[-1], direction)
-            out.append({"key": k, "values": vals, "delta_pct": pct, "verdict": verd,
-                        "direction": direction})
+            out.append(
+                {
+                    "key": k,
+                    "values": vals,
+                    "delta_pct": pct,
+                    "verdict": verd,
+                    "direction": direction,
+                }
+            )
         return out
 
     # Judge on per-call latency, which is robust to how many times an operation
@@ -384,8 +457,7 @@ def compare(reports):
     op_total = align("operations", opkey, lambda r: r["est_total_s"], "context")
     lat = align("latencies", lambda r: r["metric"], lambda r: r["worst_us"], "lower_better")
     health = align("health", lambda r: r["metric"], lambda r: r["value"], "lower_better")
-    hunit = {h["metric"]: h.get("unit", "count")
-             for rep in reports for h in rep.get("health", [])}
+    hunit = {h["metric"]: h.get("unit", "count") for rep in reports for h in rep.get("health", [])}
     for row in health:
         row["unit"] = hunit.get(row["key"], "count")
     # Retry rate is a normalized fraction, so unlike call volume it is a fair
@@ -393,11 +465,16 @@ def compare(reports):
     retry = align("retries", lambda r: r["op"], lambda r: r["rate"], "lower_better")
 
     def rank_regressions(rows):
-        rows.sort(key=lambda r: (
-            0 if r["verdict"] == "regressed" else 1,
-            -abs(r["delta_pct"]) if isinstance(r["delta_pct"], (int, float))
-            and r["delta_pct"] != float("inf") else -1e18,
-        ))
+        rows.sort(
+            key=lambda r: (
+                0 if r["verdict"] == "regressed" else 1,
+                (
+                    -abs(r["delta_pct"])
+                    if isinstance(r["delta_pct"], (int, float)) and r["delta_pct"] != float("inf")
+                    else -1e18
+                ),
+            )
+        )
 
     def rank_size(rows, order):
         pos = {r["key"]: i for i, r in enumerate(order)}
@@ -409,9 +486,16 @@ def compare(reports):
     rank_regressions(retry)
     rank_size(op_calls, op_mean)
     rank_size(op_total, op_mean)
-    return {"files": files, "op_mean": op_mean, "op_p90": op_p90,
-            "op_calls": op_calls, "op_total": op_total,
-            "latencies": lat, "health": health, "retry": retry}
+    return {
+        "files": files,
+        "op_mean": op_mean,
+        "op_p90": op_p90,
+        "op_calls": op_calls,
+        "op_total": op_total,
+        "latencies": lat,
+        "health": health,
+        "retry": retry,
+    }
 
 
 def _health(scols, lcols, kinds, win):
@@ -424,10 +508,16 @@ def _health(scols, lcols, kinds, win):
         if not vals:
             continue
         val = max(vals) if mode == "peak" else _pos_increments(scols[path])[0]
-        out.append({
-            "metric": label, "value": round(val), "mode": mode, "unit": unit,
-            "ok": val == 0, "direction": "lower_better",
-        })
+        out.append(
+            {
+                "metric": label,
+                "value": round(val),
+                "mode": mode,
+                "unit": unit,
+                "ok": val == 0,
+                "direction": "lower_better",
+            }
+        )
     return out
 
 
@@ -442,17 +532,23 @@ def _anomalies(scols, lcols, kinds, win):
             continue
         mean = sum(vals) / len(vals)
         var = sum((v - mean) ** 2 for v in vals) / len(vals)
-        std = var ** 0.5
+        std = var**0.5
         if std <= 0:
             continue
         for i, v in enumerate(series):
             if v is None or v <= mean + 3 * std or v <= 0:
                 continue
-            out.append({
-                "t_offset_s": win[i].t - win[0].t, "metric": pretty(p),
-                "value": v, "typical": mean, "kind": "gauge spike",
-                "unit": _unit(p), "ratio": v / mean if mean else float("inf"),
-            })
+            out.append(
+                {
+                    "t_offset_s": win[i].t - win[0].t,
+                    "metric": pretty(p),
+                    "value": v,
+                    "typical": mean,
+                    "kind": "gauge spike",
+                    "unit": _unit(p),
+                    "ratio": v / mean if mean else float("inf"),
+                }
+            )
     for lp, col in lcols.items():
         p90s = sorted(d["p90"] for d in col if d and d["p90"] is not None)
         if not p90s:
@@ -463,10 +559,16 @@ def _anomalies(scols, lcols, kinds, win):
             continue
         i, worst = max(slows, key=lambda x: x[1])
         if typ > 0 and worst > 4 * typ and worst > 100_000:
-            out.append({
-                "t_offset_s": win[i].t - win[0].t, "metric": pretty(lp),
-                "value": worst, "typical": typ, "kind": "latency tail",
-                "unit": "us", "ratio": worst / typ,
-            })
+            out.append(
+                {
+                    "t_offset_s": win[i].t - win[0].t,
+                    "metric": pretty(lp),
+                    "value": worst,
+                    "typical": typ,
+                    "kind": "latency tail",
+                    "unit": "us",
+                    "ratio": worst / typ,
+                }
+            )
     out.sort(key=lambda a: a["ratio"], reverse=True)
     return out

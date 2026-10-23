@@ -1,11 +1,14 @@
 use super::*;
-use std::sync::LazyLock;
 
 /// A record as the simulated network holds it.
 pub(crate) struct MockRecord {
+    /// Owner public key
     pub owner: PublicKey,
+    /// Schema the record was created with
     pub schema: DHTSchema,
+    /// Stored values by subkey
     pub subkeys: HashMap<ValueSubkey, ValueData>,
+    /// Watches held on this record
     pub watches: Vec<MockWatch>,
     /// Signing key currently holding a transaction on this record, mapped to its id
     pub tx_holders: HashMap<Option<PublicKey>, u64>,
@@ -460,8 +463,7 @@ impl VeilidAPI {
         data: Vec<u8>,
         options: Option<SetDHTValueOptions>,
     ) -> VeilidAPIResult<Option<ValueData>> {
-        // A silent write reports success and drops the value, which is the
-        // failure nothing retries
+        // A silent write reports success and drops the value, the failure nothing retries
         if check_fault(MockFaultOp::Set, Some(&record_key), Some(subkey))? {
             return Ok(None);
         }
@@ -487,8 +489,7 @@ impl VeilidAPI {
             VeilidAPIResult::Ok((record.owner.clone(), record.schema.clone()))
         })?;
 
-        // Schema authorization, shared with the real implementation; refused with the same
-        // wording as the real set path so callers can classify the failure
+        // Refused with the same wording as the real set path so callers can classify the failure
         let crypto = self.crypto()?;
         if check_subkey_value_data(&crypto, &schema, &owner, subkey, &writer.key(), data.len())
             .is_err()
@@ -498,8 +499,7 @@ impl VeilidAPI {
 
         let min_seqnum = options.min_seqnum.unwrap_or(ValueSeqNum::NONE);
 
-        // Nothing below this line handles plaintext: a storage node only ever sees ciphertext,
-        // and the sequence and identical-bytes rules are applied to what it stores
+        // From here on the data is ciphertext, which is what a storage node applies its rules to
         let data = self.mock_crypt_value(&record_key, subkey, &data)?;
 
         // Rewriting identical bytes as the same writer keeps the number rather than burning one

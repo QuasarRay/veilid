@@ -161,11 +161,8 @@ impl MeteredCryptoSystem {
     }
 }
 
-// Delegates every method to the wrapped cryptosystem, timing the ones that do
-// real work. Accessors, length getters, and the defaulted `check_*` validators
-// (which route back through the timed methods) pass straight through. The
-// defaulted `generate_shared_secret` is overridden here so it delegates to
-// `inner` as one bucket rather than double-counting its internal dh + hash.
+// Accessors, lengths and the defaulted `check_*` validators pass through untimed; the defaulted
+// `generate_shared_secret` is overridden so its dh + hash count once, as one bucket
 impl CryptoSystem for MeteredCryptoSystem {
     fn kind(&self) -> CryptoKind {
         self.inner.kind()

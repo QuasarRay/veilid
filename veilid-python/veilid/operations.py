@@ -7,6 +7,7 @@ class Operation(StrEnum):
     GET_STATE = "GetState"
     IS_SHUTDOWN = "IsShutdown"
     ATTACH = "Attach"
+    CHANGE_CONFIG = "ChangeConfig"
     DETACH = "Detach"
     REPORT_APP_LIFECYCLE_STATE = "ReportAppLifecycleState"
     WAIT_FOR_ATTACHMENT_CONDITION = "WaitForAttachmentCondition"

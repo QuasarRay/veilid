@@ -1,5 +1,6 @@
-/// Address checker - keep track of how other nodes are seeing our node's address on a per-protocol basis
-/// Used to determine if our address has changed and if we should re-publish new PeerInfo
+//! Address checker - keep track of how other nodes are seeing our node's address on a per-protocol basis
+//! Used to determine if our address has changed and if we should re-publish new PeerInfo
+
 use super::*;
 
 impl_veilid_log_facility!("net");

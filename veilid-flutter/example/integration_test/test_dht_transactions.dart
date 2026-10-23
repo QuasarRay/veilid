@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:veilid/veilid.dart';
-import 'package:veilid_test/veilid_test.dart';
 
 final bogusKey = RecordKey.fromString(
   'VLD0:qD10lHHPD1_Qr23_Qy-1JnxTht12eaWwENVG_m2v7II',
@@ -12,14 +11,24 @@ final bogusKey = RecordKey.fromString(
 class TestDHTTransactions {
   late final VeilidRoutingContext routingContext;
   final CryptoKind cryptoKind;
-  final UpdateProcessorFixture updateProcessorFixture;
   final dhtRecordCount = 2;
   final dhtSubkeySize = 16;
   final dhtSubkeyCount = 2;
   final data = <Uint8List>[];
   final dhtRecords = <RecordKey>[];
 
-  TestDHTTransactions(this.cryptoKind, this.updateProcessorFixture);
+  TestDHTTransactions(this.cryptoKind);
+
+  // Begin and extend report TryAgain until enough nodes answer
+  static final _tryAgainRetry = RetryStrategy(
+    timeout: const Duration(seconds: 30),
+    rules: [
+      RetryRule.delay(
+        matches: (e) => e is VeilidAPIExceptionTryAgain,
+        delay: const Duration(milliseconds: 250),
+      ),
+    ],
+  );
 
   Future<void> setUpAll() async {
     routingContext = await Veilid.instance.routingContext();
@@ -96,7 +105,7 @@ class TestDHTTransactions {
       DHTSchema.dflt(oCnt: dhtSubkeyCount),
     );
     try {
-      final tx = await updateProcessorFixture.retry(
+      final tx = await _tryAgainRetry.retry(
         () => Veilid.instance.transactDHTRecords(dhtRecords),
       );
       expect(tx, isInstanceOf<VeilidDHTTransaction>());
@@ -106,7 +115,7 @@ class TestDHTTransactions {
         expect(res, isNull);
       }
 
-      await updateProcessorFixture.retry(() => tx.extend([extraDesc.key]));
+      await _tryAgainRetry.retry(() => tx.extend([extraDesc.key]));
 
       final extraData = Uint8List.fromList(
         List.filled(dhtSubkeySize, dhtRecordCount),
@@ -130,13 +139,13 @@ class TestDHTTransactions {
       DHTSchema.dflt(oCnt: dhtSubkeyCount),
     );
     try {
-      final tx = await updateProcessorFixture.retry(
+      final tx = await _tryAgainRetry.retry(
         () => Veilid.instance.transactDHTRecords(dhtRecords),
       );
       expect(tx, isInstanceOf<VeilidDHTTransaction>());
 
       await tx.set(dhtRecords[0], 0, data[0]);
-      await updateProcessorFixture.retry(() => tx.extend([extraDesc.key]));
+      await _tryAgainRetry.retry(() => tx.extend([extraDesc.key]));
       final extraData = Uint8List.fromList(
         List.filled(dhtSubkeySize, dhtRecordCount),
       );

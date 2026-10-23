@@ -31,8 +31,7 @@ pub(crate) const CONNECTIONLESS_TIMEOUT: TimestampDuration = TimestampDuration::
 pub(crate) struct LastFlowKey {
     /// Transport the flow runs over
     pub transport: TransportType,
-    /// A node can be reached over several remotes per transport (its own address, its relay,
-    /// our relay); keying on the remote keeps a relayed flow from overwriting a direct one
+    /// Remote address; keying on it keeps a relayed flow from overwriting a direct one
     pub remote: SocketAddress,
 }
 
@@ -86,6 +85,8 @@ pub(crate) struct BucketEntryInner {
     registry: VeilidComponentRegistry,
     /// Online detector access for state computation, without a registry lookup
     network_manager: NetworkManagerHandle,
+    /// Liveness thresholds derived from config, fixed for the process
+    liveness: LivenessSpans,
     /// The best (most-preferred valid) node id. Always present and kept in sync with
     /// `node_ids`, so `best_node_id()` is infallible. Reconstructed on load, not persisted.
     best_node_id: NodeId,
@@ -169,9 +170,11 @@ impl BucketEntryInner {
         network_manager: NetworkManagerHandle,
         best_node_id: NodeId,
     ) -> Self {
+        let liveness = LivenessSpans::new(registry.config().rpc_timeout());
         Self {
             registry,
             network_manager,
+            liveness,
             node_ids: NodeIdGroup::from(best_node_id.clone()),
             best_node_id,
             time_added: Timestamp::now(),
@@ -284,8 +287,8 @@ impl fmt::Display for BucketEntryInner {
         }
         if let Some(ts) = self.rpc_stats.first_steady_lost_question_ts {
             let credit = self
-                .registry
-                .lookup::<NetworkManager>()
+                .network_manager
+                .load_full()
                 .map(|nm| {
                     nm.online_detector().blame_suppressed_overlap(
                         RoutingDomain::PublicInternet,

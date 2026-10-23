@@ -8,6 +8,7 @@ pub mod test_eventual;
 pub mod test_interval_and_timeout;
 pub mod test_ip_extra;
 pub mod test_must_join;
+pub mod test_network_result;
 pub mod test_random;
 pub mod test_split_url;
 pub mod test_startup_lock;

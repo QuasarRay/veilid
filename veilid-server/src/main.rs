@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 #![recursion_limit = "256"]
-// The server binary reports its own startup and client-API failures to the console: those
-// happen either side of the node's log facilities being up, so they cannot go through them.
+// Startup and client-API failures fall either side of the node's log facilities being up
 #![expect(
     clippy::disallowed_macros,
     reason = "console output either side of the node's logging lifetime"

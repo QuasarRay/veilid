@@ -90,9 +90,8 @@ impl RPCProcessor {
                             continue;
                         }
                         Err(e) => {
-                            // Throttled, and for a stronger reason than the line above: error is
-                            // on in every build, so an unthrottled remote-driven error log floods
-                            // an operator who never turned any logging up
+                            // Throttled: error is on in every build, so an unthrottled remote-driven
+                            // error log floods an operator who never turned any logging up
                             veilid_log!(self error throttle: PROTOCOL_LOG_THROTTLE_MS, "couldn't process rpc message: {}", e);
                             continue;
                         }

@@ -1,13 +1,13 @@
-// Injected failures, so a test can drive the paths a real network reaches on its
-// own and a mock never does.
-//
-// The mock succeeds at everything, which makes it useless for the failures that
-// actually hurt: a transaction that cannot reach consensus in begin, a subkey an
-// inspect reports and a read cannot produce. Those are recovery paths with
-// arbitration and adoption logic behind them, and nothing else exercises them.
-//
-// Armed through the debug channel rather than an API of its own, so the switch
-// exists only where the mock does: `fault arm`, `fault list`, `fault clear`.
+//! Injected failures, so a test can drive the paths a real network reaches on its
+//! own and a mock never does.
+//!
+//! The mock succeeds at everything, which makes it useless for the failures that
+//! hurt: a transaction that cannot reach consensus in begin, a subkey an
+//! inspect reports and a read cannot produce. Those are recovery paths with
+//! arbitration and adoption logic behind them, and nothing else exercises them.
+//!
+//! Armed through the debug channel rather than an API of its own, so the switch
+//! exists only where the mock does: `fault arm`, `fault list`, `fault clear`.
 
 use super::*;
 
@@ -53,14 +53,15 @@ impl MockFaultOp {
 /// How a faulted operation fails.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) enum MockFaultMode {
-    /// What a node that could not reach consensus returns, and the one every
-    /// caller is supposed to retry
+    /// What a node that could not reach consensus returns, which every caller retries
     TryAgain,
+    /// The operation times out
     Timeout,
+    /// The record is not found
     KeyNotFound,
+    /// A generic failure
     Generic,
-    /// Succeed and produce nothing: a get that answers null for a subkey an
-    /// inspect just reported, which is the partial read a reader must defer on
+    /// Succeed and produce nothing, the partial read a reader must defer on
     Silent,
 }
 
@@ -88,7 +89,9 @@ impl MockFaultMode {
 }
 
 struct MockFault {
+    /// Operation the fault attaches to
     op: MockFaultOp,
+    /// How the operation fails
     mode: MockFaultMode,
     /// Firings left, or `None` to keep firing until cleared
     remaining: Option<u32>,
@@ -96,6 +99,7 @@ struct MockFault {
     record: Option<String>,
     /// Only subkeys in this set, which is how a partial read is staged
     subkeys: Option<Vec<ValueSubkey>>,
+    /// Firings so far
     fired: u32,
 }
 
@@ -134,7 +138,7 @@ impl MockFault {
 }
 
 /// The fault armed for this operation, if any, counting the firing against it.
-pub(crate) fn take_fault(
+fn take_fault(
     op: MockFaultOp,
     record_key: Option<&RecordKey>,
     subkey: Option<ValueSubkey>,

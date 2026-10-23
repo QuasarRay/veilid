@@ -13,6 +13,7 @@ mod create_record;
 mod debug;
 mod delete_record;
 mod flush_record;
+mod freeze_recovery;
 mod gated_operation;
 mod get_value;
 mod inspect_record;
@@ -56,6 +57,7 @@ use hashlink::{LinkedHashMap, LruCache};
 
 use crate::network_manager::OnlineState;
 use constants::*;
+use freeze_recovery::*;
 use gated_operation::*;
 use inspect_record::{InspectFanoutStop, OutboundInspectValueResult};
 use local_record_detail::*;
@@ -114,13 +116,11 @@ struct StorageManagerInner {
     pub local_record_store: Option<RecordStore<LocalRecordDetail>>,
     /// Records that have been pushed to this node for distribution by other nodes, that we make an effort to republish
     pub remote_record_store: Option<RecordStore<RemoteRecordDetail>>,
-    /// Record subkeys to commit to the network in the background,
-    /// either because they were written to offline, or due to a rehydration action
+    /// Record subkeys to commit to the network in the background, written offline or rehydrated
     pub offline_subkey_writes: LinkedHashMap<OpaqueRecordKey, OfflineSubkeyWrite>,
     /// Records that have pending rehydration requests
     pub rehydration_requests: HashMap<OpaqueRecordKey, RehydrationRequest>,
-    /// Records created by this node this session. Everything in them was just
-    /// written with consensus, so opening them skips the rehydration check.
+    /// Records created this session, written with consensus, so open skips the rehydration check
     pub locally_created_records: HashSet<OpaqueRecordKey>,
     /// StopSources for callers waiting on flush_record; dropped when offline writes for a key drain
     pub flush_record_waiters: HashMap<OpaqueRecordKey, Vec<StopSource>>,
@@ -139,6 +139,8 @@ struct StorageManagerInner {
     pub app_lifecycle_subscription: Option<EventBusSubscription>,
     /// Network stats change subscription
     pub network_stats_change_subscription: Option<EventBusSubscription>,
+    /// Subscription to process stall events
+    pub process_stall_subscription: Option<EventBusSubscription>,
 }
 
 impl fmt::Debug for StorageManagerInner {
@@ -175,16 +177,39 @@ pub(crate) struct StorageManagerTimings {
     pub renew_outbound_watches: TimestampDuration,
     /// Background transactions wait this long after foreground activity: one RPC timeout
     pub background_quiet: TimestampDuration,
+    /// Least time between commit round starts, so a round that fails fast does not spin: 20% of the RPC timeout
+    pub commit_round_min_interval: TimestampDuration,
+    /// How long a finished rehydration check answers for a record, so a reopen does not enqueue another: 60 RPC timeouts
+    pub rehydrate_recheck: TimestampDuration,
+    /// First retry delay of a terminal command, doubling per attempt: 40% of the RPC timeout
+    pub terminal_delivery_backoff_start: TimestampDuration,
+    /// Longest the metadata goes unsaved in the foreground: six RPC timeouts
+    pub metadata_save_period: TimestampDuration,
+    /// Ceiling of a watch's backed-off change inspection interval, from config
+    pub watch_inspect_max_interval: TimestampDuration,
 }
 
 impl StorageManagerTimings {
     pub fn new(config: &VeilidConfig) -> Self {
         let get_value_timeout =
             TimestampDuration::new_ms(config.internal().network.dht.get_value_timeout_ms.into());
+        let rpc_timeout = config.rpc_timeout();
         Self {
             renew_outbound_watches: get_value_timeout
                 .saturating_mul(RENEW_OUTBOUND_WATCHES_GET_TIMEOUT_MULTIPLIER),
-            background_quiet: config.rpc_timeout(),
+            background_quiet: rpc_timeout,
+            commit_round_min_interval: rpc_timeout.saturating_mul(20).div(100),
+            rehydrate_recheck: rpc_timeout.saturating_mul(60),
+            terminal_delivery_backoff_start: rpc_timeout.saturating_mul(40).div(100),
+            metadata_save_period: rpc_timeout.saturating_mul(6),
+            watch_inspect_max_interval: TimestampDuration::new_ms(
+                config
+                    .internal()
+                    .network
+                    .dht
+                    .max_watch_inspect_interval_ms
+                    .into(),
+            ),
         }
     }
 }
@@ -207,6 +232,8 @@ pub(crate) struct StorageManager {
     /// Background time held until the metadata save it is owed lands
     #[cfg(feature = "app-lifecycle")]
     background_save_time: Mutex<Option<BackgroundTimeGuard>>,
+    /// When a freeze is worth change inspecting every watch
+    freeze_recovery: Mutex<FreezeRecovery>,
 
     // Background processes
     /// Persists the manager metadata when its schedule says so
@@ -323,6 +350,7 @@ impl StorageManager {
                     #[cfg(feature = "app-lifecycle")]
                     app_lifecycle_subscription: None,
                     network_stats_change_subscription: None,
+                    process_stall_subscription: None,
                 },
                 "storage_manager_inner",
             ),
@@ -330,9 +358,13 @@ impl StorageManager {
             registry: registry.clone(),
             startup_lock: Arc::new(StartupLock::new()),
             save_metadata_lock: AsyncMutex::new(()),
-            metadata_save_schedule: Mutex::new(MetadataSaveSchedule::new(Timestamp::now())),
+            metadata_save_schedule: Mutex::new(MetadataSaveSchedule::new(
+                Timestamp::now(),
+                timings.metadata_save_period,
+            )),
             #[cfg(feature = "app-lifecycle")]
             background_save_time: Mutex::new(None),
+            freeze_recovery: Mutex::new(FreezeRecovery::new(platform_may_freeze())),
 
             save_metadata_task: TickTask::new(
                 "save_metadata_task",
@@ -555,6 +587,8 @@ impl StorageManager {
             impl_subscribe_event_bus_async!(self, Self, app_lifecycle_event_handler);
         let network_stats_change_subscription =
             impl_subscribe_event_bus!(self, Self, network_stats_change_event_handler);
+        let process_stall_subscription =
+            impl_subscribe_event_bus!(self, Self, process_stall_event_handler);
 
         // Resolve outbound watch manager noderefs
         self.outbound_watch_manager
@@ -572,6 +606,7 @@ impl StorageManager {
             inner.app_lifecycle_subscription = Some(app_lifecycle_subscription);
         }
         inner.network_stats_change_subscription = Some(network_stats_change_subscription);
+        inner.process_stall_subscription = Some(process_stall_subscription);
 
         Ok(())
     }
@@ -599,6 +634,9 @@ impl StorageManager {
                 self.event_bus().unsubscribe(sub);
             }
             if let Some(sub) = inner.network_stats_change_subscription.take() {
+                self.event_bus().unsubscribe(sub);
+            }
+            if let Some(sub) = inner.process_stall_subscription.take() {
                 self.event_bus().unsubscribe(sub);
             }
         }
@@ -670,6 +708,7 @@ impl StorageManager {
                 #[cfg(feature = "app-lifecycle")]
                 app_lifecycle_subscription: None,
                 network_stats_change_subscription: None,
+                process_stall_subscription: None,
             };
         }
 
@@ -1092,6 +1131,17 @@ impl StorageManager {
         }
     }
 
+    /// A stall the OS held the process through. A freeze while put away loses the deliveries
+    /// sent meanwhile, so every watch is change inspected once the app is active again. A flaky
+    /// network is left to the watch intervals: this never reads the online detector
+    fn process_stall_event_handler(&self, evt: Arc<ProcessStallEvent>) {
+        if self.freeze_recovery.lock().note_stall(evt.began, evt.ended) {
+            veilid_log!(self debug "froze in the background for {}, change inspecting all watches",
+                evt.ended.duration_since(evt.began));
+            self.change_inspect_all_watches();
+        }
+    }
+
     /// Whether an online-state change is the moment to ask every watch for missed
     /// changes. Degraded suppresses blame because the failures were about this
     /// node; a watch established or renewed then may never have been accepted, and
@@ -1125,6 +1175,14 @@ impl StorageManager {
     /// only until this returns
     #[cfg(feature = "app-lifecycle")]
     async fn app_lifecycle_event_handler(&self, evt: Arc<AppLifecycleEvent>) {
+        let sweep = self.freeze_recovery.lock().note_lifecycle(
+            evt.state == VeilidAppLifecycleState::Background,
+            Timestamp::now_non_decreasing(),
+        );
+        if sweep {
+            veilid_log!(self debug "back from a freeze in the background, change inspecting all watches");
+            self.change_inspect_all_watches();
+        }
         // A hidden desktop app keeps running, so its saves keep the foreground schedule
         let background =
             evt.state == VeilidAppLifecycleState::Background && background_may_freeze();

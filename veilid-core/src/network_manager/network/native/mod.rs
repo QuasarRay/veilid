@@ -44,7 +44,11 @@ pub const UPNP_TASK_TICK_PERIOD_SECS: u32 = 1;
 
 /// Native network durations derived from config
 #[derive(Clone, Copy, Debug)]
-pub(super) struct NativeNetworkTimings {
+pub(crate) struct NativeNetworkTimings {
+    /// Bound on one send, in milliseconds: the smaller of the RPC and single-send timeouts
+    pub send_timeout_ms: u32,
+    /// Pause after a failed accept or receive, in milliseconds, so a broken socket costs a timer and not a core: 2% of the RPC timeout
+    pub socket_error_backoff_ms: u32,
     /// Time to deliver a dial info validation request before the receipt wait: 75% of a send
     pub validate_dial_info_send_budget: TimestampDuration,
     /// Backstop on a detection pass, whose steps carry their own timeouts: twelve RPC timeouts
@@ -53,9 +57,12 @@ pub(super) struct NativeNetworkTimings {
 
 impl NativeNetworkTimings {
     pub fn new(config: &VeilidConfig) -> Self {
-        let single_send_timeout =
-            TimestampDuration::new_ms(config.internal().network.single_send_timeout_ms.into());
+        let rpc_timeout_ms = config.internal().network.rpc.timeout_ms;
+        let single_send_timeout_ms = config.internal().network.single_send_timeout_ms;
+        let single_send_timeout = TimestampDuration::new_ms(single_send_timeout_ms.into());
         Self {
+            send_timeout_ms: rpc_timeout_ms.min(single_send_timeout_ms),
+            socket_error_backoff_ms: rpc_timeout_ms.saturating_mul(2) / 100,
             validate_dial_info_send_budget: single_send_timeout.saturating_mul(75).div(100),
             dial_info_detection_timeout: config.rpc_timeout().saturating_mul(12),
         }
@@ -95,6 +102,8 @@ struct NetworkInner {
     listener_states: BTreeMap<SocketAddr, Arc<RwLock<ListenerState>>>,
     /// Preferred local addresses for transports for outgoing connections
     preferred_local_addresses: BTreeMap<TransportType, SocketAddr>,
+    /// UPnP mapper, present while the network is up with `network.upnp` on
+    igd_manager: Option<igd_manager::IGDManager>,
     /// Network state
     network_state: Option<Arc<NetworkState>>,
 }
@@ -117,10 +126,6 @@ pub(super) struct NetworkUnlockedInner {
     network_interfaces_task: TickTask<EyreReport>,
     upnp_task: TickTask<EyreReport>,
     network_task_lock: AsyncRwLock<()>,
-
-    // Managers
-    // None unless UPnP is enabled, so we never create the manager or emit SSDP when disabled
-    igd_manager: Option<igd_manager::IGDManager>,
 
     // Durations derived from config
     timings: NativeNetworkTimings,
@@ -303,6 +308,7 @@ impl PlatformNetwork for NativeNetwork {
                         let h = RawUdpProtocolHandler::try_new_unspecified_bound_handler(
                             self.registry(),
                             &peer_socket_addr,
+                            self.timings(),
                         )
                         .wrap_err("create socket failure")?;
                         network_result_try!(h
@@ -416,6 +422,7 @@ impl PlatformNetwork for NativeNetwork {
                         let h = RawUdpProtocolHandler::try_new_unspecified_bound_handler(
                             self.registry(),
                             &peer_socket_addr,
+                            self.timings(),
                         )
                         .wrap_err("create socket failure")?;
                         // Attribute the send only; a missing reply is the peer's silence
@@ -865,6 +872,11 @@ impl NativeNetwork {
         );
     }
 
+    /// The UPnP mapper, while the network is up with `network.upnp` on
+    fn igd_manager(&self) -> Option<igd_manager::IGDManager> {
+        self.inner.lock().igd_manager.clone()
+    }
+
     fn new_inner() -> NetworkInner {
         NetworkInner {
             network_needs_restart: false,
@@ -880,6 +892,7 @@ impl NativeNetwork {
             tls_acceptor: None,
             listener_states: BTreeMap::new(),
             preferred_local_addresses: BTreeMap::new(),
+            igd_manager: None,
             network_state: None,
         }
     }
@@ -897,11 +910,7 @@ impl NativeNetwork {
             );
         }
 
-        // Only create the IGD manager when UPnP is enabled; otherwise we never start
-        // the worker or emit SSDP probes. require_inbound_relay implies upnp off.
         let config = registry.config();
-        let igd_manager = (config.network.upnp && !config.network.privacy.require_inbound_relay)
-            .then(|| igd_manager::IGDManager::new(registry));
 
         NetworkUnlockedInner {
             startup_lock: StartupLock::new(),
@@ -916,7 +925,6 @@ impl NativeNetwork {
             ),
             upnp_task: TickTask::new("upnp_task", UPNP_TASK_TICK_PERIOD_SECS),
             network_task_lock: AsyncRwLock::new(()),
-            igd_manager,
             timings: NativeNetworkTimings::new(&config),
         }
     }
@@ -940,12 +948,7 @@ impl NativeNetwork {
 
     /// Upper bound on one send; a stalled connection parks channel sends forever otherwise
     fn single_send_timeout_ms(&self) -> u32 {
-        let config = self.config();
-        let net_config = &config.internal().network;
-        net_config
-            .rpc
-            .timeout_ms
-            .min(net_config.single_send_timeout_ms)
+        self.timings().send_timeout_ms
     }
 
     fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
@@ -1315,10 +1318,17 @@ impl NativeNetwork {
             inner.stop_source = Some(StopSource::new());
         }
 
-        // Start the IGD worker so its first probes can run while bind/discovery proceeds
-        if let Some(igd_manager) = &self.igd_manager {
+        // Made per attach so a config change applies at the next one, and a detached node
+        // never emits SSDP; require_inbound_relay implies upnp off
+        let igd_manager = {
+            let config = self.config();
+            (config.network.upnp && !config.network.privacy.require_inbound_relay)
+                .then(|| igd_manager::IGDManager::new(self.registry()))
+        };
+        if let Some(igd_manager) = &igd_manager {
             igd_manager.startup();
         }
+        self.inner.lock().igd_manager = igd_manager;
 
         // Bind all listening network protocols
         let res = self.bind_all_listeners();
@@ -1376,7 +1386,8 @@ impl NativeNetwork {
         veilid_log!(self debug "stopping {} low level network tasks", unord.len());
         while unord.next().await.is_some() {}
 
-        if let Some(igd_manager) = &self.igd_manager {
+        let igd_manager = self.inner.lock().igd_manager.take();
+        if let Some(igd_manager) = igd_manager {
             igd_manager.shutdown().await;
         }
 

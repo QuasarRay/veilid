@@ -142,9 +142,10 @@ fi
 # Build wasm into an npm package, output into ./pkg
 ./wasm_build_js.sh $BUILD_MODE $CARGO_FEATURES $CARGO_OPTIONS || { echo "wasm build failed" >&2; exit 1; }
 
-# Install test deps and run test suite
+# Install test deps from the lock and run test suite
+source "$SCRIPTDIR/../scripts/_node_pinned.sh"
 cd tests || exit 1
-npm install || { echo "npm install failed" >&2; exit 1; }
+npm ci --no-audit --no-fund || { echo "npm ci failed" >&2; exit 1; }
 original_tmpdir=$TMPDIR
 mkdir -p ~/tmp
 export TMPDIR=~/tmp

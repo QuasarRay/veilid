@@ -1,7 +1,6 @@
 #![cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 // Dedicated FIFO pool so heavy CPU work never starves the executor's blocking pool

@@ -222,8 +222,7 @@ pub async fn run_veilid_server_subnode(
     }
 
     // Process dump-txt-record
-    // A local wall for a one-shot CLI mode, not node timekeeping: it bounds how long the
-    // process waits for the network before printing, and outlives no state.
+    // A local wall for a one-shot CLI wait, not node timekeeping: it outlives no state
     #[expect(
         clippy::disallowed_methods,
         reason = "bounds a one-shot CLI wait, not a node timestamp"

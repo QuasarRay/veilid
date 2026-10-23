@@ -11,10 +11,17 @@ note: |
   The comment may run to several lines; only the first has to start with SAFETY:.
   A comment serves exactly the one block below it, so two adjacent unsafe blocks
   need two comments.
+
+  Blind spot: a macro body (cfg_if!, among others) is one token tree to the parser,
+  so an unsafe block inside it is never seen by this rule or counted by the sites
+  rule. Hoist the block into a #[cfg]-gated fn beside its caller. A block inside a
+  macro_rules! definition cannot move (its expansions are the sites); it keeps a
+  hand-written SAFETY line.
 files:
   - "veilid-core-optimized/src/**"
   - "veilid-core/src/**"
   - "veilid-tools/src/**"
+  - "veilid-flutter/rust/src/**"
 
 utils:
   safety-comment:

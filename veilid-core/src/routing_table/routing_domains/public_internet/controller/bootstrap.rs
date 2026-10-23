@@ -200,6 +200,14 @@ impl PublicInternetRoutingDomainController {
         let bootstrap_cache =
             BootstrapCache::new(bootstrapped_record_strings, bootstrapped_records);
 
+        // A round that resolved anything decides whether this node is one of its own bootstraps
+        if own_node_seen || !bootstrap_cache.records().is_empty() {
+            let was_own_bootstrap = self.own_bootstrap.swap(own_node_seen, Ordering::AcqRel);
+            if own_node_seen && !was_own_bootstrap {
+                veilid_log!(self info "This node is one of its own bootstraps and answers direct bootstrap requests");
+            }
+        }
+
         // Only this node among the bootstraps: nothing to bootstrap from until other nodes connect
         if own_node_seen && bootstrapped_peers.is_empty() {
             self.record_bootstrap_cache(bootstrap_cache);

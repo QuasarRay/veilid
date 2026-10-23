@@ -251,14 +251,11 @@ macro_rules! impl_crypto_typed_group {
                 /// Errors with `VeilidAPIError::ParseError` if `s` is not bracketed (`[..]`),
                 /// or `VeilidAPIError::Generic` if any comma-separated element fails to parse.
                 fn from_str(s: &str) -> Result<Self, Self::Err> {
-                    let mut items = Vec::new();
-                    if s.len() < 2 {
-                        apibail_parse_error!("invalid length", s);
-                    }
-                    if &s[0..1] != "[" || &s[(s.len() - 1)..] != "]" {
+                    let Some(inner) = s.strip_prefix('[').and_then(|s| s.strip_suffix(']')) else {
                         apibail_parse_error!("invalid format", s);
-                    }
-                    for x in s[1..s.len() - 1].split(',') {
+                    };
+                    let mut items = Vec::new();
+                    for x in inner.split(',') {
                         let tk = $name::from_str(x.trim())?;
                         items.push(tk);
                     }

@@ -240,6 +240,57 @@ async fn test_attach_detach_multiple() {
     }
 }
 
+async fn test_change_config() {
+    info!("test_change_config: starting");
+    let (update_callback, config) = fixture_veilid_core();
+    let api = api_startup(update_callback, config)
+        .await
+        .expect("startup failed");
+    let current = api.config().unwrap();
+
+    // Detached, a changeable key takes at once
+    let mut flipped = (*current).clone();
+    flipped.network.upnp = !flipped.network.upnp;
+    api.change_config(flipped.clone()).unwrap();
+    assert_eq!(api.config().unwrap().network.upnp, flipped.network.upnp);
+
+    // A key that needs a restart is refused and nothing changes
+    let mut restart = flipped.clone();
+    restart.namespace = format!("{}x", restart.namespace);
+    assert!(matches!(
+        api.change_config(restart),
+        Err(VeilidAPIError::InvalidArgument { .. })
+    ));
+    assert_eq!(api.config().unwrap().namespace, flipped.namespace);
+
+    // A config as get_state reports it carries no secrets, and still applies
+    let safe = (*api.config().unwrap().safe()).clone();
+    api.change_config(safe).unwrap();
+    assert_eq!(
+        api.config().unwrap().network.routing_table.secret_keys,
+        current.network.routing_table.secret_keys
+    );
+
+    // Attaching or attached, the call is refused
+    api.change_config((*current).clone()).unwrap();
+    api.attach().await.unwrap();
+    let _ = api
+        .wait_for_attachment_condition(Some(ATTACH_STARTED), Some(ATTACHMENT_WAIT_TIMEOUT))
+        .await
+        .unwrap();
+    assert!(matches!(
+        api.change_config((*current).clone()),
+        Err(VeilidAPIError::Generic { .. })
+    ));
+    api.detach().await.unwrap();
+    let _ = api
+        .wait_for_attachment_condition(Some(DETACHED), Some(ATTACHMENT_WAIT_TIMEOUT))
+        .await
+        .unwrap();
+    api.shutdown().await;
+    info!("test_change_config: finished");
+}
+
 pub async fn test_all() {
     test_startup_shutdown().await;
     test_startup_shutdown_from_config().await;
@@ -248,4 +299,5 @@ pub async fn test_all() {
     test_startup_shutdown_multiple().await;
     test_startup_shutdown_from_config_multiple().await;
     test_attach_detach_multiple().await;
+    test_change_config().await;
 }

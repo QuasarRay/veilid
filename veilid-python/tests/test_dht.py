@@ -1,5 +1,5 @@
 # DHT Veilid Tests
-from typing import Any, Awaitable, Callable, Optional, Coroutine
+from typing import Any, Awaitable, Callable, Iterable, Optional, Coroutine
 import pytest
 import asyncio
 import time
@@ -13,7 +13,11 @@ from .conftest import dht_retry
 
 ##################################################################
 BOGUS_KEY = veilid.RecordKey.from_value(
-    veilid.CryptoKind.CRYPTO_KIND_VLD0, veilid.BareRecordKey.from_parts(veilid.BareOpaqueRecordKey.from_bytes(b'                                '), None))
+    veilid.CryptoKind.CRYPTO_KIND_VLD0,
+    veilid.BareRecordKey.from_parts(
+        veilid.BareOpaqueRecordKey.from_bytes(b"                                "), None
+    ),
+)
 
 
 @pytest.mark.asyncio
@@ -54,7 +58,7 @@ async def test_create_delete_dht_record_simple(api_connection: veilid.VeilidAPI)
     rc = await api_connection.new_routing_context()
     async with rc:
         for kind in await api_connection.valid_crypto_kinds():
-            rec = await rc.create_dht_record(kind,veilid.DHTSchema.dflt(1))
+            rec = await rc.create_dht_record(kind, veilid.DHTSchema.dflt(1))
             await rc.close_dht_record(rec.key)
             await rc.delete_dht_record(rec.key)
 
@@ -81,7 +85,8 @@ async def test_open_dht_record_without_rehydration(api_connection: veilid.Veilid
 
             # A record this node holds reopens from its local copy either way
             reopened = await rc.open_dht_record(
-                rec.key, None, veilid.OpenDHTRecordOptions(rehydrate=False))
+                rec.key, None, veilid.OpenDHTRecordOptions(rehydrate=False)
+            )
             assert reopened.key == rec.key
             vd = await rc.get_dht_value(rec.key, ValueSubkey(0), False)
             assert vd is not None
@@ -118,9 +123,9 @@ async def test_set_get_dht_value(api_connection: veilid.VeilidAPI):
 
             with pytest.raises(veilid.VeilidAPIError):
                 await rc.set_dht_value(rec.key, ValueSubkey(2), b"BLAH BLAH BLAH")
-                
-            #print("vd2: {}", vd2.__dict__)
-            #print("vd3: {}", vd3.__dict__)
+
+            # print("vd2: {}", vd2.__dict__)
+            # print("vd3: {}", vd3.__dict__)
 
             assert vd2 == vd3
 
@@ -148,7 +153,7 @@ async def test_set_bulk_get_bulk_dht_value(api_connection: veilid.VeilidAPI):
             # write dht records on server 0
             records = []
             schema = veilid.DHTSchema.dflt(SUBKEY_COUNT)
-            print(f'writing {COUNT} records with {SUBKEY_COUNT} subkeys')
+            print(f"writing {COUNT} records with {SUBKEY_COUNT} subkeys")
             init_futures = set()
             for n in range(COUNT):
                 desc = await rc.create_dht_record(kind, schema)
@@ -156,7 +161,7 @@ async def test_set_bulk_get_bulk_dht_value(api_connection: veilid.VeilidAPI):
 
                 for i in range(SUBKEY_COUNT):
                     init_futures.add(rc.set_dht_value(desc.key, ValueSubkey(i), TEST_DATA))
-                print(f'  {n}: {desc.key} {desc.owner}:{desc.owner_secret}')
+                print(f"  {n}: {desc.key} {desc.owner}:{desc.owner_secret}")
 
             await asyncio.gather(*init_futures)
 
@@ -164,17 +169,18 @@ async def test_set_bulk_get_bulk_dht_value(api_connection: veilid.VeilidAPI):
             # await sync_win(rc, records, SUBKEY_COUNT, init_futures)
 
             # read dht records on server 0
-            print(f'reading {COUNT} records cached {READ_COUNT} times')
+            print(f"reading {COUNT} records cached {READ_COUNT} times")
             for n, desc in enumerate(records):
                 get_futures = set()
                 for j in range(READ_COUNT):
                     for i in range(SUBKEY_COUNT):
-                        get_futures.add(rc.get_dht_value(desc.key, ValueSubkey(i), force_refresh=True))
-                
+                        get_futures.add(
+                            rc.get_dht_value(desc.key, ValueSubkey(i), force_refresh=True)
+                        )
+
                 await asyncio.gather(*get_futures)
                 await rc.close_dht_record(desc.key)
-                print(f'  {n}')
-
+                print(f"  {n}")
 
 
 @pytest.mark.asyncio
@@ -186,10 +192,13 @@ async def test_set_get_dht_value_with_owner(api_connection: veilid.VeilidAPI):
             async with cs:
                 owner = await cs.generate_key_pair()
 
-
             rec = await rc.create_dht_record(kind, veilid.DHTSchema.dflt(2), owner=owner)
 
-            record_key = await api_connection.get_dht_record_key(veilid.DHTSchema.dflt(2), owner = owner.key(), encryption_key=rec.key.encryption_key())
+            record_key = await api_connection.get_dht_record_key(
+                veilid.DHTSchema.dflt(2),
+                owner=owner.key(),
+                encryption_key=rec.key.encryption_key(),
+            )
 
             assert rec.key == record_key
             assert rec.owner == owner.key()
@@ -208,8 +217,8 @@ async def test_set_get_dht_value_with_owner(api_connection: veilid.VeilidAPI):
             vd4 = await rc.get_dht_value(rec.key, ValueSubkey(1), False)
             assert vd4 is None
 
-            #print("vd2: {}", vd2.__dict__)
-            #print("vd3: {}", vd3.__dict__)
+            # print("vd2: {}", vd2.__dict__)
+            # print("vd3: {}", vd3.__dict__)
 
             assert vd2 == vd3
 
@@ -336,14 +345,18 @@ async def test_open_writer_dht_value(api_connection: veilid.VeilidAPI):
 
                 # Verify subkey 0 can be set because override with the right writer
                 # Should have prior sequence number as its returned value because it exists online at seq 0
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, veilid.SetDHTValueOptions(writer=owner_keypair))
+                vdtemp = await rc.set_dht_value(
+                    record_key, ValueSubkey(0), va, veilid.SetDHTValueOptions(writer=owner_keypair)
+                )
                 assert vdtemp is not None
                 assert vdtemp.data == vb
                 assert vdtemp.seq == 0
                 assert vdtemp.writer == owner
 
                 # Should update the second time to seq 1
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, veilid.SetDHTValueOptions(writer=owner_keypair))
+                vdtemp = await rc.set_dht_value(
+                    record_key, ValueSubkey(0), va, veilid.SetDHTValueOptions(writer=owner_keypair)
+                )
                 assert vdtemp is None
 
                 # Clean up
@@ -376,7 +389,9 @@ async def test_open_writer_dht_value_no_offline(api_connection: veilid.VeilidAPI
                 vc = b"!@#$%^&*()"
 
                 # Test subkey writes
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(1), va, veilid.SetDHTValueOptions(None, False))
+                vdtemp = await rc.set_dht_value(
+                    record_key, ValueSubkey(1), va, veilid.SetDHTValueOptions(None, False)
+                )
                 assert vdtemp is None
 
                 vdtemp = await rc.get_dht_value(record_key, ValueSubkey(1), False)
@@ -388,7 +403,9 @@ async def test_open_writer_dht_value_no_offline(api_connection: veilid.VeilidAPI
                 vdtemp = await rc.get_dht_value(record_key, ValueSubkey(0), False)
                 assert vdtemp is None
 
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), vb, veilid.SetDHTValueOptions(None, False))
+                vdtemp = await rc.set_dht_value(
+                    record_key, ValueSubkey(0), vb, veilid.SetDHTValueOptions(None, False)
+                )
                 assert vdtemp is None
 
                 vdtemp = await rc.get_dht_value(record_key, ValueSubkey(0), True)
@@ -400,11 +417,15 @@ async def test_open_writer_dht_value_no_offline(api_connection: veilid.VeilidAPI
                 assert vdtemp.data == va
 
                 # Equal value should not trigger sequence number update
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(1), va, veilid.SetDHTValueOptions(None, False))
+                vdtemp = await rc.set_dht_value(
+                    record_key, ValueSubkey(1), va, veilid.SetDHTValueOptions(None, False)
+                )
                 assert vdtemp is None
 
                 # Different value should trigger sequence number update
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(1), vb, veilid.SetDHTValueOptions(None, False))
+                vdtemp = await rc.set_dht_value(
+                    record_key, ValueSubkey(1), vb, veilid.SetDHTValueOptions(None, False)
+                )
                 assert vdtemp is None
 
                 # Now that we initialized some subkeys
@@ -424,14 +445,18 @@ async def test_open_writer_dht_value_no_offline(api_connection: veilid.VeilidAPI
                 assert rec.schema.o_cnt == 2
 
                 # Verify subkey 1 can be set before it is get but newer is available online
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(1), vc, veilid.SetDHTValueOptions(None, False))
+                vdtemp = await rc.set_dht_value(
+                    record_key, ValueSubkey(1), vc, veilid.SetDHTValueOptions(None, False)
+                )
                 assert vdtemp is not None
                 assert vdtemp.data == vb
                 assert vdtemp.seq == 1
                 assert vdtemp.writer == owner
 
                 # Verify subkey 1 can be set a second time and it updates because seq is newer
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(1), vc, veilid.SetDHTValueOptions(None, False))
+                vdtemp = await rc.set_dht_value(
+                    record_key, ValueSubkey(1), vc, veilid.SetDHTValueOptions(None, False)
+                )
                 assert vdtemp is None
 
                 # Verify the network got the subkey update with a refresh check
@@ -457,22 +482,36 @@ async def test_open_writer_dht_value_no_offline(api_connection: veilid.VeilidAPI
 
                 # Verify subkey 1 can NOT be set because we have the wrong writer
                 with pytest.raises(veilid.VeilidAPIError):
-                    await rc.set_dht_value(record_key, ValueSubkey(1), va, veilid.SetDHTValueOptions(None, False))
+                    await rc.set_dht_value(
+                        record_key, ValueSubkey(1), va, veilid.SetDHTValueOptions(None, False)
+                    )
 
                 # Verify subkey 0 can NOT be set because we have the wrong writer
                 with pytest.raises(veilid.VeilidAPIError):
-                    await rc.set_dht_value(record_key, ValueSubkey(0), va, veilid.SetDHTValueOptions(None, False))
+                    await rc.set_dht_value(
+                        record_key, ValueSubkey(0), va, veilid.SetDHTValueOptions(None, False)
+                    )
 
                 # Verify subkey 0 can be set because override with the right writer
                 # Should have prior sequence number as its returned value because it exists online at seq 0
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, veilid.SetDHTValueOptions(writer=owner_keypair, allow_offline=False))
+                vdtemp = await rc.set_dht_value(
+                    record_key,
+                    ValueSubkey(0),
+                    va,
+                    veilid.SetDHTValueOptions(writer=owner_keypair, allow_offline=False),
+                )
                 assert vdtemp is not None
                 assert vdtemp.data == vb
                 assert vdtemp.seq == 0
                 assert vdtemp.writer == owner
 
                 # Should update the second time to seq 1
-                vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, veilid.SetDHTValueOptions(writer=owner_keypair, allow_offline=False))
+                vdtemp = await rc.set_dht_value(
+                    record_key,
+                    ValueSubkey(0),
+                    va,
+                    veilid.SetDHTValueOptions(writer=owner_keypair, allow_offline=False),
+                )
                 assert vdtemp is None
 
                 # Clean up
@@ -480,8 +519,9 @@ async def test_open_writer_dht_value_no_offline(api_connection: veilid.VeilidAPI
                 await rc.delete_dht_record(record_key)
 
 
-
-@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.skipif(
+    os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running"
+)
 @pytest.mark.asyncio
 async def test_watch_dht_values():
 
@@ -516,7 +556,7 @@ async def test_watch_dht_values():
         # Clear the change queue if record purge cancels old watches
         while True:
             try:
-                upd = await asyncio.wait_for(value_change_queue.get(), timeout=3)
+                await asyncio.wait_for(value_change_queue.get(), timeout=3)
             except asyncio.TimeoutError:
                 break
 
@@ -549,7 +589,7 @@ async def test_watch_dht_values():
                 await sync(rc1, [rec1])
 
                 # Server 0: Now we should NOT get an update because the update is the same as our local copy
-                upd = None
+                upd: Optional[veilid.VeilidUpdate] = None
                 try:
                     upd = await asyncio.wait_for(value_change_queue.get(), timeout=10)
                 except asyncio.TimeoutError:
@@ -581,8 +621,13 @@ async def test_watch_dht_values():
                 assert active
 
                 # Server 1: Now set multiple subkeys and trigger an update
-                vd = await asyncio.gather(*[rc1.set_dht_value(rec1.key, ValueSubkey(3), b"BLAH BLAH BLAH"), rc1.set_dht_value(rec1.key, ValueSubkey(4), b"BZORT BZORT")])
-                assert vd == [None, None]
+                vds = await asyncio.gather(
+                    *[
+                        rc1.set_dht_value(rec1.key, ValueSubkey(3), b"BLAH BLAH BLAH"),
+                        rc1.set_dht_value(rec1.key, ValueSubkey(4), b"BZORT BZORT"),
+                    ]
+                )
+                assert vds == [None, None]
                 await sync(rc1, [rec1])
 
                 # Server 0: subkey 3 is in the cancelled range, so only subkey 4 may surface
@@ -621,8 +666,13 @@ async def test_watch_dht_values():
                 assert upd.detail.value is None
 
                 # Now set multiple subkeys
-                vd = await asyncio.gather(*[rc1.set_dht_value(rec1.key, ValueSubkey(3), b"BLAH BLAH BLAH BLAH"), rc1.set_dht_value(rec1.key, ValueSubkey(5), b"BZORT BZORT BZORT")])
-                assert vd == [None, None]
+                vds = await asyncio.gather(
+                    *[
+                        rc1.set_dht_value(rec1.key, ValueSubkey(3), b"BLAH BLAH BLAH BLAH"),
+                        rc1.set_dht_value(rec1.key, ValueSubkey(5), b"BZORT BZORT BZORT"),
+                    ]
+                )
+                assert vds == [None, None]
                 await sync(rc1, [rec1])
 
                 # Now we should NOT get an update
@@ -642,7 +692,9 @@ async def test_watch_dht_values():
                 await rc0.delete_dht_record(rec0.key)
 
 
-@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.skipif(
+    os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running"
+)
 @pytest.mark.skipif(os.getenv("STRESS") != "1", reason="stress test takes a long time")
 @pytest.mark.asyncio
 async def test_watch_many_dht_values():
@@ -711,7 +763,7 @@ async def test_watch_many_dht_values():
 
                 # Open and set all records
                 missing_records = set()
-                for (n, record) in enumerate(records):
+                for n, record in enumerate(records):
                     print(f"setting record {n}")
 
                     # Server 1: Open the subkey
@@ -742,7 +794,7 @@ async def test_watch_many_dht_values():
                         missing_records.remove(upd.detail.key)
                     except:
                         # Dump which records didn't get updates
-                        for (m, record) in enumerate(records):
+                        for m, record in enumerate(records):
                             if record.key not in missing_records:
                                 continue
                             print(f"missing update for record {m}: {record}")
@@ -760,7 +812,9 @@ async def test_watch_many_dht_values():
                     await rc0.delete_dht_record(record.key)
 
 
-@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.skipif(
+    os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running"
+)
 @pytest.mark.skipif(os.getenv("STRESS") != "1", reason="stress test takes a long time")
 @pytest.mark.asyncio
 async def test_watch_push_sustained():
@@ -840,7 +894,10 @@ async def test_watch_push_sustained():
                     upd = await asyncio.wait_for(value_change_queue.get(), timeout=timeout)
                 except asyncio.TimeoutError:
                     return False
-                if not isinstance(upd.detail, veilid.VeilidValueChange) or upd.detail.key != rec0.key:
+                if (
+                    not isinstance(upd.detail, veilid.VeilidValueChange)
+                    or upd.detail.key != rec0.key
+                ):
                     return True
                 now = time.monotonic()
                 if upd.detail.value is not None:
@@ -885,7 +942,9 @@ async def test_watch_push_sustained():
             await rc0.close_dht_record(rec0.key)
             await rc0.delete_dht_record(rec0.key)
 
-            assert highest_seen == total_writes, f"final write never arrived: {highest_seen} < {total_writes}"
+            assert (
+                highest_seen == total_writes
+            ), f"final write never arrived: {highest_seen} < {total_writes}"
             assert slow / total_writes <= max_fallback_fraction, (
                 f"{slow}/{total_writes} deliveries exceeded {fallback_band_secs}s: "
                 "pushes are being lost and rescued by the fallback inspect"
@@ -907,28 +966,42 @@ async def test_min_seqnum_dht_value(api_connection: veilid.VeilidAPI):
             vb = b"1234567890"
 
             # A minimum above the automatic sequence number wins
-            vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(100)))
+            vdtemp = await rc.set_dht_value(
+                record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(100))
+            )
             assert vdtemp is None
 
-            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL)
+            rr = await rc.inspect_dht_record(
+                record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL
+            )
             assert rr.local_seqs == [100]
 
             # Identical data already satisfying the minimum keeps the sequence number
-            vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(100)))
+            vdtemp = await rc.set_dht_value(
+                record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(100))
+            )
             assert vdtemp is None
 
-            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL)
+            rr = await rc.inspect_dht_record(
+                record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL
+            )
             assert rr.local_seqs == [100]
 
             # Identical data below a raised minimum still gets raised
-            vdtemp = await rc.set_dht_value(record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(200)))
+            vdtemp = await rc.set_dht_value(
+                record_key, ValueSubkey(0), va, no_offline(ValueSeqNum(200))
+            )
             assert vdtemp is None
 
-            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL)
+            rr = await rc.inspect_dht_record(
+                record_key, [(ValueSubkey(0), ValueSubkey(0))], veilid.DHTReportScope.LOCAL
+            )
             assert rr.local_seqs == [200]
 
             # MAX minus one leaves exactly one write
-            vdtemp = await rc.set_dht_value(record_key, ValueSubkey(1), va, no_offline(ValueSeqNum(ValueSeqNum.MAX - 1)))
+            vdtemp = await rc.set_dht_value(
+                record_key, ValueSubkey(1), va, no_offline(ValueSeqNum(ValueSeqNum.MAX - 1))
+            )
             assert vdtemp is None
 
             vdtemp = await dht_retry(
@@ -938,7 +1011,9 @@ async def test_min_seqnum_dht_value(api_connection: veilid.VeilidAPI):
             )
             assert vdtemp is None
 
-            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(1), ValueSubkey(1))], veilid.DHTReportScope.LOCAL)
+            rr = await rc.inspect_dht_record(
+                record_key, [(ValueSubkey(1), ValueSubkey(1))], veilid.DHTReportScope.LOCAL
+            )
             assert rr.local_seqs == [ValueSeqNum.MAX]
 
             # And nothing after it
@@ -956,12 +1031,16 @@ async def test_min_seqnum_dht_value(api_connection: veilid.VeilidAPI):
             # A write straight to max leaves nothing after it
             vdtemp = await dht_retry(
                 api_connection,
-                lambda: rc.set_dht_value(record_key, ValueSubkey(2), va, no_offline(ValueSeqNum(ValueSeqNum.MAX))),
+                lambda: rc.set_dht_value(
+                    record_key, ValueSubkey(2), va, no_offline(ValueSeqNum(ValueSeqNum.MAX))
+                ),
                 "write straight to max",
             )
             assert vdtemp is None
 
-            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(2), ValueSubkey(2))], veilid.DHTReportScope.LOCAL)
+            rr = await rc.inspect_dht_record(
+                record_key, [(ValueSubkey(2), ValueSubkey(2))], veilid.DHTReportScope.LOCAL
+            )
             assert rr.local_seqs == [ValueSeqNum.MAX]
 
             with pytest.raises(veilid.VeilidAPIError):
@@ -970,7 +1049,9 @@ async def test_min_seqnum_dht_value(api_connection: veilid.VeilidAPI):
             # Re-sending with the same minimum is a retry: it reuses the sequence number instead of failing
             vdtemp = await dht_retry(
                 api_connection,
-                lambda: rc.set_dht_value(record_key, ValueSubkey(2), va, no_offline(ValueSeqNum(ValueSeqNum.MAX))),
+                lambda: rc.set_dht_value(
+                    record_key, ValueSubkey(2), va, no_offline(ValueSeqNum(ValueSeqNum.MAX))
+                ),
                 "min_seqnum retry",
             )
             assert vdtemp is None
@@ -979,7 +1060,9 @@ async def test_min_seqnum_dht_value(api_connection: veilid.VeilidAPI):
             # the value that got there first stands, and the writer is told what it lost to
             vdtemp = await dht_retry(
                 api_connection,
-                lambda: rc.set_dht_value(record_key, ValueSubkey(2), vb, no_offline(ValueSeqNum(ValueSeqNum.MAX))),
+                lambda: rc.set_dht_value(
+                    record_key, ValueSubkey(2), vb, no_offline(ValueSeqNum(ValueSeqNum.MAX))
+                ),
                 "min_seqnum retry with different data",
             )
             assert vdtemp is not None
@@ -987,7 +1070,9 @@ async def test_min_seqnum_dht_value(api_connection: veilid.VeilidAPI):
             assert vdtemp.seq == ValueSeqNum.MAX
 
             # A subkey at max must not break the sequence numbers a set would produce
-            rr = await rc.inspect_dht_record(record_key, [(ValueSubkey(0), ValueSubkey(2))], veilid.DHTReportScope.UPDATE_SET)
+            rr = await rc.inspect_dht_record(
+                record_key, [(ValueSubkey(0), ValueSubkey(2))], veilid.DHTReportScope.UPDATE_SET
+            )
             assert rr.local_seqs == [201, ValueSeqNum.MAX, ValueSeqNum.MAX]
 
             await rc.close_dht_record(record_key)
@@ -1005,7 +1090,7 @@ async def test_inspect_dht_record(api_connection: veilid.VeilidAPI):
             assert vd is None
 
             rr = await rc.inspect_dht_record(rec.key, [], veilid.DHTReportScope.LOCAL)
-            #print("rr: {}", rr.__dict__)
+            # print("rr: {}", rr.__dict__)
             assert rr.subkeys == [(0, 1)]
             assert rr.local_seqs == [0, None]
             assert rr.network_seqs == [None, None]
@@ -1013,7 +1098,7 @@ async def test_inspect_dht_record(api_connection: veilid.VeilidAPI):
             await sync(rc, [rec])
 
             rr2 = await rc.inspect_dht_record(rec.key, [], veilid.DHTReportScope.SYNC_GET)
-            #print("rr2: {}", rr2.__dict__)
+            # print("rr2: {}", rr2.__dict__)
             assert rr2.subkeys == [(0, 1)]
             assert rr2.local_seqs == [0, None]
             assert rr2.network_seqs == [0, None]
@@ -1022,48 +1107,54 @@ async def test_inspect_dht_record(api_connection: veilid.VeilidAPI):
             await rc.delete_dht_record(rec.key)
 
 
-
-
-async def _run_test_schema_limit(api_connection: veilid.VeilidAPI, open_record: Callable[[veilid.RoutingContext, veilid.CryptoSystem, int], Awaitable[tuple[veilid.DHTRecordDescriptor, Optional[veilid.KeyPair]]]], count: int, test_data: bytes):
+async def _run_test_schema_limit(
+    api_connection: veilid.VeilidAPI,
+    open_record: Callable[
+        [veilid.RoutingContext, veilid.CryptoSystem, int],
+        Awaitable[tuple[veilid.DHTRecordDescriptor, Optional[veilid.KeyPair]]],
+    ],
+    count: int,
+    test_data: bytes,
+):
     rc = await api_connection.new_routing_context()
     async with rc:
         for kind in await api_connection.valid_crypto_kinds():
             cs = await api_connection.get_crypto_system(kind)
             async with cs:
-                (desc, writer) = await open_record(rc, cs, count)
-                print(f'{desc.key} {writer}')
+                desc, writer = await open_record(rc, cs, count)
+                print(f"{desc.key} {writer}")
 
                 # write dht records on server 0
-                records = []
-                print(f'writing {count} subkeys:', end='')
+                print(f"writing {count} subkeys:", end="")
                 for n in range(count):
                     await rc.set_dht_value(desc.key, ValueSubkey(n), test_data)
-                    print(f' {n}', end='')
-                print('\n')
+                    print(f" {n}", end="")
+                print("\n")
 
                 await sync(rc, [desc])
 
                 await rc.close_dht_record(desc.key)
 
                 # read dht records on server 0
-                print(f'reading {count} subkeys:', end='')
+                print(f"reading {count} subkeys:", end="")
                 desc1 = await rc.open_dht_record(desc.key)
                 for n in range(count):
                     vd0 = await rc.get_dht_value(desc1.key, ValueSubkey(n))
                     assert vd0 is not None
                     assert vd0.data == test_data
-                    print(f' {n}', end='')
-                print('\n')
+                    print(f" {n}", end="")
+                print("\n")
 
 
 @pytest.mark.asyncio
 async def test_schema_limit_dflt(api_connection: veilid.VeilidAPI):
 
-    async def open_record(rc: veilid.RoutingContext, cs: veilid.CryptoSystem, count: int) -> tuple[veilid.DHTRecordDescriptor, Optional[veilid.KeyPair]]:
+    async def open_record(
+        rc: veilid.RoutingContext, cs: veilid.CryptoSystem, count: int
+    ) -> tuple[veilid.DHTRecordDescriptor, Optional[veilid.KeyPair]]:
         schema = veilid.DHTSchema.dflt(count)
         desc = await rc.create_dht_record(await cs.kind(), schema)
         return (desc, desc.owner_key_pair())
-
 
     print("Test with maximum number of subkeys before lower limit hit")
     TEST_DATA = b"A" * 32768
@@ -1091,11 +1182,13 @@ async def test_schema_limit_dflt(api_connection: veilid.VeilidAPI):
 @pytest.mark.asyncio
 async def test_schema_limit_smpl(api_connection: veilid.VeilidAPI):
 
-    async def open_record(rc: veilid.RoutingContext, cs: veilid.CryptoSystem, count: int) -> tuple[veilid.DHTRecordDescriptor, veilid.KeyPair]:
+    async def open_record(
+        rc: veilid.RoutingContext, cs: veilid.CryptoSystem, count: int
+    ) -> tuple[veilid.DHTRecordDescriptor, veilid.KeyPair]:
         writer_keypair = await cs.generate_key_pair()
         writer_id = await api_connection.generate_member_id(writer_keypair.key())
         schema = veilid.DHTSchema.smpl(0, [veilid.DHTSchemaSMPLMember(writer_id.value(), count)])
-        desc = await rc.create_dht_record(await cs.kind(),schema)
+        desc = await rc.create_dht_record(await cs.kind(), schema)
         await rc.open_dht_record(desc.key, writer_keypair)
 
         return (desc, writer_keypair)
@@ -1123,7 +1216,6 @@ async def test_schema_limit_smpl(api_connection: veilid.VeilidAPI):
         await _run_test_schema_limit(api_connection, open_record, COUNT, TEST_DATA)
 
 
-
 @pytest.mark.asyncio
 async def test_flush_dht_record(api_connection: veilid.VeilidAPI):
     rc = await api_connection.new_routing_context()
@@ -1143,7 +1235,9 @@ async def test_flush_dht_record(api_connection: veilid.VeilidAPI):
             await rc.delete_dht_record(rec.key)
 
 
-@pytest.mark.skipif(os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running")
+@pytest.mark.skipif(
+    os.getenv("INTEGRATION") != "1", reason="integration test requires two servers running"
+)
 @pytest.mark.asyncio
 async def test_dht_integration_writer_reader():
 
@@ -1180,21 +1274,21 @@ async def test_dht_integration_writer_reader():
                 # write dht records on server 0
                 records = []
                 schema = veilid.DHTSchema.dflt(1)
-                print(f'writing {COUNT} records')
+                print(f"writing {COUNT} records")
                 for n in range(COUNT):
                     desc = await rc0.create_dht_record(kind, schema)
                     records.append(desc)
-                    print(f'  {n}: key={desc.key} owner={desc.owner_bare_key_pair()}')
+                    print(f"  {n}: key={desc.key} owner={desc.owner_bare_key_pair()}")
 
                     await rc0.set_dht_value(desc.key, ValueSubkey(0), TEST_DATA)
 
                 await sync(rc0, records)
 
                 # read dht records on server 1
-                print(f'reading {COUNT} records')
+                print(f"reading {COUNT} records")
                 n = 0
                 for desc in records:
-                    print(f'  {n}: key={desc.key} owner={desc.owner_key_pair()}')
+                    print(f"  {n}: key={desc.key} owner={desc.owner_key_pair()}")
                     n += 1
 
                     desc1 = await rc1.open_dht_record(desc.key)
@@ -1202,7 +1296,6 @@ async def test_dht_integration_writer_reader():
                     assert vd1 is not None
                     assert vd1.data == TEST_DATA
                     await rc1.close_dht_record(desc1.key)
-
 
 
 @pytest.mark.skipif(os.getenv("STRESS") != "1", reason="stress test takes a long time")
@@ -1231,13 +1324,13 @@ async def test_dht_write_read_local():
                 # capped low: higher counts take 10s of minutes on slow
                 # connections or debug veilid-server builds
                 COUNT = 100
-                TEST_DATA = b"ABCD"*1024
-                TEST_DATA2 = b"ABCD"*4096
+                TEST_DATA = b"ABCD" * 1024
+                TEST_DATA2 = b"ABCD" * 4096
 
                 # write dht records on server 0
                 records = []
                 schema = veilid.DHTSchema.dflt(2)
-                print(f'writing {COUNT} records')
+                print(f"writing {COUNT} records")
                 for n in range(COUNT):
                     desc = await rc0.create_dht_record(kind, schema)
                     records.append(desc)
@@ -1245,7 +1338,7 @@ async def test_dht_write_read_local():
                     await rc0.set_dht_value(desc.key, ValueSubkey(0), TEST_DATA)
                     await rc0.set_dht_value(desc.key, ValueSubkey(1), TEST_DATA2)
 
-                    print(f'  {n}: {desc.key} {desc.owner}:{desc.owner_secret}')
+                    print(f"  {n}: {desc.key} {desc.owner}:{desc.owner_secret}")
 
                 await sync(rc0, records)
 
@@ -1256,7 +1349,7 @@ async def test_dht_write_read_local():
                 await api0.debug("record purge remote")
 
                 # read dht records on server 0
-                print(f'reading {COUNT} records')
+                print(f"reading {COUNT} records")
                 n = 0
                 for desc0 in records:
                     desc1 = await rc0.open_dht_record(desc0.key)
@@ -1270,7 +1363,7 @@ async def test_dht_write_read_local():
                     assert vd1.data == TEST_DATA2
                     await rc0.close_dht_record(desc1.key)
 
-                    print(f'  {n}')
+                    print(f"  {n}")
                     n += 1
 
 
@@ -1305,36 +1398,40 @@ async def test_dht_write_read_full_subkeys_local():
                     # Number of subkeys per record
                     SUBKEY_COUNT = 32
                     # BareNonce to encrypt test data
-                    NONCE = veilid.Nonce.from_bytes(b"A"*await cs.nonce_length())
+                    NONCE = veilid.Nonce.from_bytes(b"A" * await cs.nonce_length())
                     # Secret to encrypt test data
-                    SECRET = veilid.SharedSecret.from_value(await cs.kind(), veilid.BareSharedSecret.from_bytes(b"A"*await cs.shared_secret_length()))
+                    SECRET = veilid.SharedSecret.from_value(
+                        await cs.kind(),
+                        veilid.BareSharedSecret.from_bytes(b"A" * await cs.shared_secret_length()),
+                    )
                     # Max subkey size
-                    MAX_SUBKEY_SIZE = min(32768, 1024*1024//SUBKEY_COUNT)
+                    MAX_SUBKEY_SIZE = min(32768, 1024 * 1024 // SUBKEY_COUNT)
                     # MAX_SUBKEY_SIZE = 256
 
                     # write dht records on server 0
                     records = []
                     subkey_data_list = []
                     schema = veilid.DHTSchema.dflt(SUBKEY_COUNT)
-                    print(f'writing {COUNT} records with full subkeys')
+                    print(f"writing {COUNT} records with full subkeys")
                     init_futures = set()
                     for n in range(COUNT):
 
                         # Make encrypted data that is consistent and hard to compress
-                        subkey_data = bytes(chr(ord("A")+n%32)*MAX_SUBKEY_SIZE, 'ascii')
+                        subkey_data = bytes(chr(ord("A") + n % 32) * MAX_SUBKEY_SIZE, "ascii")
                         print(f"subkey_data({n}):len={len(subkey_data)}")
 
                         subkey_data = await cs.crypt_no_auth(subkey_data, NONCE, SECRET)
                         subkey_data_list.append(subkey_data)
 
-
                         desc = await rc0.create_dht_record(kind, schema)
                         records.append(desc)
 
                         for i in range(SUBKEY_COUNT):
-                            init_futures.add(rc0.set_dht_value(desc.key, ValueSubkey(i), subkey_data))
+                            init_futures.add(
+                                rc0.set_dht_value(desc.key, ValueSubkey(i), subkey_data)
+                            )
 
-                        print(f'  {n}: {desc.key} {desc.owner}:{desc.owner_secret}')
+                        print(f"  {n}: {desc.key} {desc.owner}:{desc.owner_secret}")
 
                     # Wait for all records to synchronize, with progress bars
                     await sync_win(rc0, records, SUBKEY_COUNT, init_futures)
@@ -1346,25 +1443,25 @@ async def test_dht_write_read_full_subkeys_local():
                     await api0.debug("record purge remote")
 
                     # read dht records on server 0
-                    print(f'reading {COUNT} records')
+                    print(f"reading {COUNT} records")
                     for n, desc0 in enumerate(records):
                         desc1 = await rc0.open_dht_record(desc0.key)
 
                         for i in range(SUBKEY_COUNT):
                             vd0 = None
                             while vd0 == None:
-                                vd0 = await rc0.get_dht_value(desc1.key, ValueSubkey(i), force_refresh=True)
+                                vd0 = await rc0.get_dht_value(
+                                    desc1.key, ValueSubkey(i), force_refresh=True
+                                )
                                 if vd0 != None:
                                     assert vd0.data == subkey_data_list[n]
                                     break
                                 time.sleep(1)
                                 print(f"retrying record {n} subkey {i}")
 
-
                         await rc0.close_dht_record(desc1.key)
 
-                        print(f'  {n}')
-
+                        print(f"  {n}")
 
 
 @pytest.mark.skipif(os.getenv("FILLDHT") is None, reason="fill disk test disabled")
@@ -1398,29 +1495,32 @@ async def test_dht_fill_dht_local():
                     # Number of subkeys per record
                     SUBKEY_COUNT = 32
                     # BareNonce to encrypt test data
-                    NONCE = Nonce.from_bytes(b"A"*await cs.nonce_length())
+                    NONCE = Nonce.from_bytes(b"A" * await cs.nonce_length())
                     # Secret to encrypt test data
-                    SECRET = SharedSecret.from_value(await cs.kind(), BareSharedSecret.from_bytes(b"A"*await cs.shared_secret_length()))
+                    SECRET = SharedSecret.from_value(
+                        await cs.kind(),
+                        BareSharedSecret.from_bytes(b"A" * await cs.shared_secret_length()),
+                    )
                     # Max subkey size
-                    MAX_SUBKEY_SIZE = min(32768, 1024*1024//SUBKEY_COUNT)
+                    MAX_SUBKEY_SIZE = min(32768, 1024 * 1024 // SUBKEY_COUNT)
                     # MAX_SUBKEY_SIZE = 256
 
                     # write dht records on server 0
-                    records : list[DHTRecordDescriptor] = []
-                    subkey_data_list : list[bytes] = []
+                    records: list[DHTRecordDescriptor] = []
+                    subkey_data_list: list[bytes] = []
                     schema = DHTSchema.dflt(SUBKEY_COUNT)
                     for n in range(COUNT):
                         desc = await rc0.create_dht_record(kind, schema)
                         records.append(desc)
 
                         # Make encrypted data that is consistent and hard to compress
-                        subkey_data = bytes(chr(ord("A")+n%32)*MAX_SUBKEY_SIZE, 'ascii')
+                        subkey_data = bytes(chr(ord("A") + n % 32) * MAX_SUBKEY_SIZE, "ascii")
                         subkey_data = await cs.crypt_no_auth(subkey_data, NONCE, SECRET)
                         subkey_data_list.append(subkey_data)
 
                     start = time.time()
 
-                    init_set_futures : set[Coroutine[Any, Any, ValueData | None]] = set()
+                    init_set_futures: set[Coroutine[Any, Any, ValueData | None]] = set()
 
                     for i in range(SUBKEY_COUNT):
                         for n in range(COUNT):
@@ -1430,7 +1530,9 @@ async def test_dht_fill_dht_local():
                             async def setter(key: RecordKey, subkey: ValueSubkey, data: bytes):
                                 await dht_retry(
                                     api0,
-                                    lambda: rc0.set_dht_value(key, subkey, data, SetDHTValueOptions(allow_offline=False)),
+                                    lambda: rc0.set_dht_value(
+                                        key, subkey, data, SetDHTValueOptions(allow_offline=False)
+                                    ),
                                     label=f"set {key} #{subkey}",
                                 )
 
@@ -1474,9 +1576,7 @@ async def test_close_reopen_subkey_update_race(api_connection: veilid.VeilidAPI)
                 head_counter = [0]
 
                 async def write_subkey(subkey: int, value: bytes):
-                    tx = await api_connection.transact_dht_records(
-                        [record_key], None
-                    )
+                    tx = await api_connection.transact_dht_records([record_key], None)
                     async with tx:
                         assert await tx.set(record_key, ValueSubkey(subkey), value) is None
                         await tx.commit()
@@ -1484,15 +1584,13 @@ async def test_close_reopen_subkey_update_race(api_connection: veilid.VeilidAPI)
                 async def churn_subkey0(n: int):
                     for _ in range(n):
                         head_counter[0] += 1
-                        await write_subkey(
-                            0, f"head-rev{head_counter[0]}".encode()
-                        )
+                        await write_subkey(0, f"head-rev{head_counter[0]}".encode())
 
-                await write_subkey(1, value_init)         # seq=0 on subkey 1
+                await write_subkey(1, value_init)  # seq=0 on subkey 1
                 await churn_subkey0(SUBKEY0_WRITES_BETWEEN)
-                await write_subkey(1, value_a)            # seq=1 on subkey 1
+                await write_subkey(1, value_a)  # seq=1 on subkey 1
                 await churn_subkey0(SUBKEY0_WRITES_BETWEEN)
-                await write_subkey(1, value_b)            # seq=2 on subkey 1
+                await write_subkey(1, value_b)  # seq=2 on subkey 1
                 await churn_subkey0(SUBKEY0_WRITES_BETWEEN)
 
                 await rc.close_dht_record(record_key)
@@ -1501,16 +1599,16 @@ async def test_close_reopen_subkey_update_race(api_connection: veilid.VeilidAPI)
                 assert rec2.key == record_key
 
                 try:
-                    vd = await rc.get_dht_value(
-                        record_key, ValueSubkey(1), force_refresh=True
-                    )
+                    vd = await rc.get_dht_value(record_key, ValueSubkey(1), force_refresh=True)
                     if vd is None:
                         failures.append((i, "got None"))
                         print(f"  iter {i}: got None")
                     elif vd.data != value_b:
                         failures.append((i, f"got data={vd.data!r} seq={vd.seq}"))
-                        print(f"  iter {i}: STALE: got data={vd.data!r} seq={vd.seq}, "
-                              f"expected {value_b!r} (seq=2)")
+                        print(
+                            f"  iter {i}: STALE: got data={vd.data!r} seq={vd.seq}, "
+                            f"expected {value_b!r} (seq=2)"
+                        )
                     else:
                         print(f"  iter {i}: OK seq={vd.seq}")
                 finally:
@@ -1576,7 +1674,8 @@ async def sync(rc: veilid.RoutingContext, records: list[veilid.DHTRecordDescript
         subkeysleft = 0
         for desc in records:
             rr = await rc.inspect_dht_record(desc.key, [])
-            left = 0; [left := left + (x[1]-x[0]+1) for x in rr.offline_subkeys]
+            left = 0
+            [left := left + (x[1] - x[0] + 1) for x in rr.offline_subkeys]
             if left == 0:
                 donerecords.add(desc)
             else:
@@ -1584,16 +1683,16 @@ async def sync(rc: veilid.RoutingContext, records: list[veilid.DHTRecordDescript
         syncrecords = [x for x in syncrecords if x not in donerecords]
         if len(syncrecords) == 0:
             break
-        print(f'  syncing {len(syncrecords)} records {subkeysleft} subkeys left')
+        print(f"  syncing {len(syncrecords)} records {subkeysleft} subkeys left")
         time.sleep(1)
 
 
 async def sync_win(
-        rc: veilid.RoutingContext,
-        records: list[veilid.DHTRecordDescriptor],
-        subkey_count: int,
-        init_futures: set[Awaitable[Any]]
-    ):
+    rc: veilid.RoutingContext,
+    records: list[veilid.DHTRecordDescriptor],
+    subkey_count: int,
+    init_futures: Iterable[Awaitable[Any]],
+):
     import sys
 
     # headless: curses needs a tty; finish the writes then poll with plain prints
@@ -1613,17 +1712,20 @@ async def sync_win(
     curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_YELLOW)
     curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_GREEN)
 
-    HEIGHT=len(records) + 3
+    HEIGHT = len(records) + 3
     GRAPHWIDTH = subkey_count
-    WIDTH=GRAPHWIDTH + 4 + 1 + 43 + 2
+    WIDTH = GRAPHWIDTH + 4 + 1 + 43 + 2
 
     cur_lines = curses.LINES
     cur_cols = curses.COLS
-    win = curses.newwin(HEIGHT, WIDTH,
-        max(0, int(cur_lines/2) - int(HEIGHT/2)),
-        max(0, int(cur_cols/2) - int(WIDTH/2)))
+    win = curses.newwin(
+        HEIGHT,
+        WIDTH,
+        max(0, int(cur_lines / 2) - int(HEIGHT / 2)),
+        max(0, int(cur_cols / 2) - int(WIDTH / 2)),
+    )
     win.clear()
-    win.border(0,0,0,0)
+    win.border(0, 0, 0, 0)
     win.nodelay(True)
 
     # Record inspection and completion state
@@ -1639,8 +1741,10 @@ async def sync_win(
 
     # Add initial futures with None key
     for fut in init_futures:
+
         async def _do_init_fut(fut):
             return (None, await fut)
+
         futures.add(asyncio.create_task(_do_init_fut(fut)))
 
     # Loop until all records are completed
@@ -1650,13 +1754,15 @@ async def sync_win(
         for n, desc in enumerate(records):
             if desc.key in donerecords or desc.key in futurerecords:
                 continue
+
             async def _do_inspect(key: veilid.RecordKey):
                 return (key, await rc.inspect_dht_record(key, []))
+
             futures.add(asyncio.create_task(_do_inspect(desc.key)))
             futurerecords.add(desc.key)
 
         # Wait for some futures to finish
-        done, futures = await asyncio.wait(futures, return_when = asyncio.FIRST_COMPLETED)
+        done, futures = await asyncio.wait(futures, return_when=asyncio.FIRST_COMPLETED)
 
         # Process finished futures into the state
         for rr_fut in done:
@@ -1666,7 +1772,12 @@ async def sync_win(
             if key is not None:
                 futurerecords.remove(key)
 
-                if len(rr.subkeys) == 1 and rr.subkeys[0] == (0, subkey_count-1) and None not in rr.local_seqs and len(rr.offline_subkeys) == 0:
+                if (
+                    len(rr.subkeys) == 1
+                    and rr.subkeys[0] == (0, subkey_count - 1)
+                    and None not in rr.local_seqs
+                    and len(rr.offline_subkeys) == 0
+                ):
                     if key in recordreports:
                         del recordreports[key]
                     donerecords.add(key)
@@ -1678,31 +1789,30 @@ async def sync_win(
             cur_lines = curses.LINES
             cur_cols = curses.COLS
             win.move(
-                max(0, int(cur_lines/2) - int(HEIGHT/2)),
-                max(0, int(cur_cols/2) - int(WIDTH/2)))
-            win.border(0,0,0,0)
+                max(0, int(cur_lines / 2) - int(HEIGHT / 2)),
+                max(0, int(cur_cols / 2) - int(WIDTH / 2)),
+            )
+            win.border(0, 0, 0, 0)
         win.addstr(1, 1, "syncing records to the network", curses.color_pair(0))
         for n, rd in enumerate(records):
             key = rd.key
-            win.addstr(n+2, GRAPHWIDTH+1, key, curses.color_pair(0))
+            win.addstr(n + 2, GRAPHWIDTH + 1, key, curses.color_pair(0))
 
             if key in donerecords:
-                win.addstr(n+2, 1, " " * subkey_count, curses.color_pair(4))
+                win.addstr(n + 2, 1, " " * subkey_count, curses.color_pair(4))
             elif key in recordreports:
                 rr = recordreports[key]
-                win.addstr(n+2, 1, " " * subkey_count, curses.color_pair(1))
-                for (a,b) in rr.subkeys:
-                    for m in range(a, b+1):
+                win.addstr(n + 2, 1, " " * subkey_count, curses.color_pair(1))
+                for a, b in rr.subkeys:
+                    for m in range(a, b + 1):
                         if rr.local_seqs[m] != None:
-                            win.addstr(n+2, m+1, " ", curses.color_pair(2))
-                for (a,b) in rr.offline_subkeys:
-                    win.addstr(n+2, a+1, " " * (b-a+1), curses.color_pair(3))
+                            win.addstr(n + 2, m + 1, " ", curses.color_pair(2))
+                for a, b in rr.offline_subkeys:
+                    win.addstr(n + 2, a + 1, " " * (b - a + 1), curses.color_pair(3))
             else:
-                win.addstr(n+2, 1, " " * subkey_count, curses.color_pair(1))
+                win.addstr(n + 2, 1, " " * subkey_count, curses.color_pair(1))
 
         win.refresh()
-        time.sleep(.5)
-
+        time.sleep(0.5)
 
     curses.endwin()
-

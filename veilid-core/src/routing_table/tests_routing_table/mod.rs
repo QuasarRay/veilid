@@ -10,6 +10,7 @@ pub mod test_relay_info;
 pub mod test_restore_point;
 pub mod test_route_stats;
 pub mod test_routing_metrics;
+pub mod test_safety_routes_ready;
 pub mod test_save_schedule;
 pub mod test_serialize_routing_table;
 pub mod test_signed_node_info;
@@ -65,6 +66,8 @@ pub async fn test_all() {
     test_nodes_needed::test_nodes_needed_low_water_mark_term_capped();
     test_nodes_needed::test_nodes_needed_fallback_bootstrap_timing();
     test_nodes_needed::test_nodes_needed_peer_minimum_refresh_scoped_to_attach();
+    test_safety_routes_ready::test_safety_routes_ready_attain_needs_the_pool();
+    test_safety_routes_ready::test_safety_routes_ready_keeps_on_one_route();
     test_own_dial_info::test_matches_own_dial_info().await;
     test_persisted_reset::test_persisted_reset_no_recorded_bootstrap();
     test_persisted_reset::test_persisted_reset_recorded_empty();

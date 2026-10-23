@@ -84,10 +84,11 @@ impl MatchesDialInfoFilter for Flow {
 /// and will be unique with high probability per low-level connection
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) struct UniqueFlow {
+    /// The flow this record names
     pub flow: Flow,
+    /// The low-level connection it rides; None for connectionless protocols
     pub connection_id: Option<NetworkConnectionId>,
-    /// Whether this flow is outbound-dial evidence (we used the peer's dial info, or an
-    /// outbound connection) rather than a flow the peer opened to us; UDP always counts
+    /// Outbound-dial evidence: we dialed it or it is UDP, not a flow the peer opened to us
     pub dialed: bool,
 }
 

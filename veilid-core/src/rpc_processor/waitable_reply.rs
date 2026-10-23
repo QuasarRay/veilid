@@ -72,17 +72,26 @@ impl WaitableReplyContext {
     }
 }
 
+/// What an answer must match to be accepted for the question waiting on it
+#[derive(Clone, Debug)]
+pub(super) struct WaitingQuestion {
+    /// Descriptor of the answer kind the question expects
+    pub answer_desc: &'static str,
+    /// Context the answer's validation needs, when the question carries one
+    pub context: Option<Arc<QuestionContext>>,
+}
+
 #[derive(Debug)]
 #[must_use]
 pub(super) struct WaitableReply {
-    pub handle: OperationWaitHandle<Message, Option<Arc<QuestionContext>>>,
+    pub handle: OperationWaitHandle<Message, WaitingQuestion>,
     _opt_connection_ref_scope: Option<ConnectionRefScope>,
     pub context: WaitableReplyContext,
 }
 
 impl WaitableReply {
     pub fn new(
-        handle: OperationWaitHandle<Message, Option<Arc<QuestionContext>>>,
+        handle: OperationWaitHandle<Message, WaitingQuestion>,
         opt_connection_ref_scope: Option<ConnectionRefScope>,
         context: WaitableReplyContext,
     ) -> Self {

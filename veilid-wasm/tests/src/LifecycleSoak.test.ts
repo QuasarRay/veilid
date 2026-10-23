@@ -25,7 +25,7 @@ const soakInitConfig: VeilidWASMConfig = {
       level: 'Off',
     },
   },
-} as VeilidWASMConfig;
+};
 
 function report(line: string): void {
   console.log(`${getLogTimestamp()}: SOAK ${line}`);
@@ -38,7 +38,7 @@ async function hidePage(): Promise<() => Promise<void>> {
   await waitForMs(1_000);
   if (document.hidden) {
     report('hidden under a tab');
-    return async () => tab?.close();
+    return () => Promise.resolve(tab?.close());
   }
   tab?.close();
   await browser.minimizeWindow();

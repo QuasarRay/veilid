@@ -44,6 +44,7 @@ pub fn fake_veilid_config() -> VeilidConfig {
                 )
                 .unwrap()],
                 bootstrap_records: vec![],
+                serve_direct_bootstrap: false,
             },
             rpc: VeilidConfigRPC {
                 default_route_hop_count: 8,
@@ -151,6 +152,7 @@ pub fn fake_veilid_config() -> VeilidConfig {
                     min_peer_refresh_time_ms: 12,
                     validate_dial_info_receipt_time_ms: 13,
                     max_watch_expiration_ms: 22,
+                    max_watch_inspect_interval_ms: 120_000,
                     public_watch_limit: 20,
                     member_watch_limit: 21,
                     public_transaction_limit: 23,
@@ -161,6 +163,7 @@ pub fn fake_veilid_config() -> VeilidConfig {
                         socket_pool_size: 30,
                     },
                 },
+                routing_table: VeilidConfigInternalRoutingTable::default(),
             },
         }),
     }

@@ -76,9 +76,9 @@ pub(crate) enum InboundInspectValueResult {
 /// What an inspect fanout is waiting to learn, and therefore when it may stop.
 #[derive(Debug, Copy, Clone)]
 pub(super) enum InspectFanoutStop {
-    /// The seqs. Stops on [inspect_fanout_done].
+    /// The seqs. Stops on [inspect_fanout_done]
     SubkeyConsensus,
-    /// The descriptor. Stops on [descriptor_fanout_done], at the first node that has it.
+    /// The descriptor. Stops on [descriptor_fanout_done], at the first node that has it
     Descriptor,
 }
 

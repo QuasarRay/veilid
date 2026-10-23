@@ -1,6 +1,6 @@
 use super::*;
 
-const MAX_FIND_NODE_A_PEERS_LEN: usize = 20;
+const MAX_FIND_NODE_A_PEERS_LEN: usize = veilid_capnp::MAX_FIND_NODE_A_PEERS_LEN as usize;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationFindNodeQ {
@@ -41,6 +41,9 @@ impl RPCOperationFindNodeQ {
         rpc_ignore_missing_property!(reader, node_id);
         let ni_reader = reader.get_node_id()?;
         let node_id = decode_node_id(&ni_reader)?;
+        if node_id.ref_value().len() != HASH_COORDINATE_LENGTH {
+            return Err(RPCError::protocol("invalid node id length"));
+        }
 
         rpc_ignore_missing_property!(reader, capabilities);
         let cap_reader = reader.get_capabilities()?;

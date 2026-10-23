@@ -151,7 +151,7 @@ impl NetworkManager {
     }
 
     /// The config bootstrap records as a bootstrap source. This is the only path that resolves
-    /// them, and it runs only when this node is actually bootstrapping itself. Bootstrapping
+    /// them, and it runs only when this node is bootstrapping itself. Bootstrapping
     /// takes the newest version this node will accept, the way a TXT bootstrap does.
     pub async fn config_bootstrap(&self) -> EyreResult<BootstrapPeers> {
         let record_strings = self

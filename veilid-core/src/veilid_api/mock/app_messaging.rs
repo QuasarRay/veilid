@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::LazyLock;
 
 /// Private routes allocated in this process, mapped to the node that answers them.
 ///

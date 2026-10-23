@@ -379,7 +379,7 @@ impl TableDB {
         }
     }
 
-    /// Read an serialized value from a column in the TableDB immediately
+    /// Read a serialized value from a column in the TableDB immediately
     ///
     /// Blocks on the on-disk read.
     ///

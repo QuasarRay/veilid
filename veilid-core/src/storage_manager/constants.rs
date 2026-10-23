@@ -1,8 +1,5 @@
 use super::*;
 
-/// Least time between commit round starts, so a round that fails fast does not spin
-pub(super) const COMMIT_ROUND_MIN_INTERVAL_MS: u32 = 1_000;
-
 /// Frequency to flush record stores to disk
 pub const FLUSH_RECORD_STORES_INTERVAL_SECS: u32 = 1;
 /// Frequency to check whether a metadata save is due
@@ -43,18 +40,10 @@ pub const REHYDRATE_BATCH_SIZE: usize = 16;
 pub const REHYDRATE_REQUESTS_PER_TICK: usize = 4;
 /// Number of subkey sets to push in parallel during transactional rehydration
 pub const REHYDRATE_SET_CONCURRENCY: usize = 8;
-/// How often to change inspect a watch that is wanted but has never established. Reconcile
-/// is already retrying establishment, and until it lands this interval is delivery latency,
-/// so it matches the fallback ceiling of an established watch short of consensus
-pub const UNESTABLISHED_WATCH_INSPECT_INTERVAL: TimestampDuration =
-    TimestampDuration::new_secs(120);
 /// Delay before retrying a failed change inspection
 pub const CHANGE_INSPECT_RETRY_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
 /// Length of descriptor cache (512 records and 5 nodes per record, roughly 184320 bytes)
 pub const DESCRIPTOR_CACHE_SIZE: usize = 2560;
-/// How long a completed rehydration check answers for a record, so a reopen
-/// within the interval does not enqueue another one
-pub const REHYDRATE_RECHECK_INTERVAL: TimestampDuration = TimestampDuration::new_secs(300);
 /// Records worth of remembered rehydration checks
 pub const REHYDRATION_CHECKED_CACHE_SIZE: usize = 1024;
 /// Consecutive hard rehydration failures on one record before it earns a warning

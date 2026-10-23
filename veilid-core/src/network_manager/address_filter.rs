@@ -461,23 +461,8 @@ impl AddressFilter {
                     veilid_log!(self warn "Address filter count exceeded: {:?}", v4);
                     return Err(AddConnectionError::CountExceeded);
                 }
-                // See if this ip block has connected too frequently
-                let tstamps = inner.conn_timestamps_by_ip4.entry(v4).or_default();
-                tstamps.retain(|v| {
-                    // keep timestamps that are less than a minute away
-                    ts.duration_since(*v) < TimestampDuration::new_secs(60)
-                });
-                if tstamps.len() > self.max_connection_frequency_per_min {
-                    veilid_log!(self error "Address filter rate overflow: {:?}", v4);
-                }
-                if tstamps.len() >= self.max_connection_frequency_per_min {
-                    veilid_log!(self warn "Address filter rate exceeded: {:?}", v4);
-                    return Err(AddConnectionError::RateExceeded);
-                }
-
-                // If it's okay, add the counts and timestamps
+                self.note_frequency(inner.conn_timestamps_by_ip4.entry(v4).or_default(), ts, v4)?;
                 *cnt += 1;
-                tstamps.push(ts);
             }
             IpAddr::V6(v6) => {
                 // See if we have too many connections from this ip block
@@ -489,21 +474,58 @@ impl AddressFilter {
                     veilid_log!(self warn "Address filter count exceeded: {:?}", v6);
                     return Err(AddConnectionError::CountExceeded);
                 }
-                // See if this ip block has connected too frequently
-                let tstamps = inner.conn_timestamps_by_ip6_prefix.entry(v6).or_default();
-                if tstamps.len() > self.max_connection_frequency_per_min {
-                    veilid_log!(self error "Address filter rate overflow: {:?}", v6);
-                }
-                if tstamps.len() >= self.max_connection_frequency_per_min {
-                    veilid_log!(self warn "Address filter rate exceeded: {:?}", v6);
-                    return Err(AddConnectionError::RateExceeded);
-                }
-
-                // If it's okay, add the counts and timestamps
+                self.note_frequency(
+                    inner.conn_timestamps_by_ip6_prefix.entry(v6).or_default(),
+                    ts,
+                    v6,
+                )?;
                 *cnt += 1;
-                tstamps.push(ts);
             }
         }
+        Ok(())
+    }
+
+    /// Counts a direct bootstrap request against its block's connection rate, so a flood of
+    /// requests draws no more replies than connections would
+    pub fn add_bootstrap_request(&self, addr: IpAddr) -> Result<(), AddConnectionError> {
+        let inner = &mut *self.inner.lock();
+
+        let ipblock = ip_to_ipblock(self.max_connections_per_ip6_prefix_size, addr);
+        if self.is_ip_addr_punished_inner(inner, ipblock) {
+            return Err(AddConnectionError::Punished);
+        }
+
+        let ts = Timestamp::now_non_decreasing();
+        self.purge_old_connection_timestamps_inner(inner, ts);
+
+        match ipblock {
+            IpAddr::V4(v4) => {
+                self.note_frequency(inner.conn_timestamps_by_ip4.entry(v4).or_default(), ts, v4)
+            }
+            IpAddr::V6(v6) => self.note_frequency(
+                inner.conn_timestamps_by_ip6_prefix.entry(v6).or_default(),
+                ts,
+                v6,
+            ),
+        }
+    }
+
+    /// Records one event for the block, or refuses it at the per-minute rate
+    fn note_frequency(
+        &self,
+        tstamps: &mut Vec<Timestamp>,
+        ts: Timestamp,
+        block: impl fmt::Debug,
+    ) -> Result<(), AddConnectionError> {
+        tstamps.retain(|v| ts.duration_since(*v) < TimestampDuration::new_secs(60));
+        if tstamps.len() > self.max_connection_frequency_per_min {
+            veilid_log!(self error "Address filter rate overflow: {:?}", block);
+        }
+        if tstamps.len() >= self.max_connection_frequency_per_min {
+            veilid_log!(self warn "Address filter rate exceeded: {:?}", block);
+            return Err(AddConnectionError::RateExceeded);
+        }
+        tstamps.push(ts);
         Ok(())
     }
 

@@ -27,7 +27,8 @@ impl StorageManager {
         let mut cache = self.rehydration_checked.lock();
         match cache.get(opaque_record_key) {
             Some(checked_ts) => {
-                Timestamp::now_non_decreasing() >= checked_ts.later(REHYDRATE_RECHECK_INTERVAL)
+                Timestamp::now_non_decreasing()
+                    >= checked_ts.later(self.timings().rehydrate_recheck)
             }
             None => true,
         }
@@ -596,13 +597,12 @@ impl RehydrationFailureRuns {
 
     /// Count a failure and return the run it extended
     pub fn note(&mut self, opaque_record_key: OpaqueRecordKey) -> u32 {
-        let run = self
-            .runs
-            .get_mut(&opaque_record_key)
-            .map(|run| run.saturating_add(1))
-            .unwrap_or(1);
-        self.runs.insert(opaque_record_key, run);
-        run
+        if let Some(run) = self.runs.get_mut(&opaque_record_key) {
+            *run = run.saturating_add(1);
+            return *run;
+        }
+        self.runs.insert(opaque_record_key, 1);
+        1
     }
 
     /// End the record's run

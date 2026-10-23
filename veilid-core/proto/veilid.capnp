@@ -1,5 +1,37 @@
 @0xf981aec14891e605;
 
+# Wire limits
+##############################
+# Every list and blob a decoder reads is capped here, so the schema states its own bounds and
+# encoders and decoders share them.
+
+# NodeInfo
+const maxEnvelopeVersions :UInt32 = 16;
+const maxCapabilities :UInt32 = 64;
+const maxDialInfoDetails :UInt32 = 64;
+const maxRelayInfos :UInt32 = 16;
+
+# Answer peer lists
+const maxFindNodeAPeersLen :UInt32 = 20;
+const maxGetValueAPeersLen :UInt32 = 20;
+const maxSetValueAPeersLen :UInt32 = 20;
+const maxInspectValueAPeersLen :UInt32 = 20;
+const maxWatchValueAPeersLen :UInt32 = 20;
+const maxTransactBeginAPeersLen :UInt32 = 20;
+const maxSupplyBlockAPeersLen :UInt32 = 20;
+const maxFindBlockAPeersLen :UInt32 = 10;
+const maxFindBlockASuppliersLen :UInt32 = 10;
+
+# Subkey range lists
+const maxWatchValueQSubkeyRangesLen :UInt32 = 512;
+const maxValueChangedSubkeyRangesLen :UInt32 = 512;
+
+# Blobs
+const maxAppMessageMessageLen :UInt32 = 32768;
+const maxAppCallQMessageLen :UInt32 = 32768;
+const maxAppCallAMessageLen :UInt32 = 32768;
+const maxFindBlockADataLen :UInt32 = 32768;
+
 # Typed IDs and Hashes
 ##############################
 

@@ -203,8 +203,8 @@ impl NetworkManager {
     /// benefits from the relay.
     ///
     /// Returns the network result rather than swallowing it: a relay whose downstream flows are
-    /// all dead fails on every packet as `Ok(NonValue)`, and discarding that left the condition
-    /// invisible to logging, to the transport counters and to the online detector alike.
+    /// all dead fails on every packet as `Ok(NonValue)`, which logging, the transport counters
+    /// and the online detector all need to see.
     #[cfg_attr(
         feature = "instrument",
         instrument(level = "trace", target = "net", skip_all, err, fields(__VEILID_LOG_KEY = self.log_key()))
@@ -226,10 +226,9 @@ impl NetworkManager {
             .send_data_cm_existing(destination_node_ref.clone(), sequencing, data)
             .await?;
 
-        // Relaying bypasses `send_data`, and with it the only place outbound sends were counted,
-        // so a relay whose downstream flows were all dead read as idle rather than broken. Safe to
-        // feed from here: suppression needs failures across several distinct peers, so one dead
-        // destination indicts the peer rather than the transport.
+        // Relaying bypasses `send_data`, where outbound sends are otherwise counted. Safe to feed
+        // from here: suppression needs failures across several distinct peers, so one dead
+        // destination indicts the peer rather than the transport
         if let (Some(routing_domain), Some(transport), Some(outcome)) = (
             destination_node_ref.best_routing_domain(),
             opt_transport,

@@ -29,8 +29,7 @@
 
 #![warn(missing_docs)]
 #![deny(warnings)]
-// A mock build compiles out most of the crate, leaving shared imports with no users and the API's
-// async signatures with nothing to await. The default build still denies both.
+// A mock build leaves shared imports unused and async API fns with nothing to await; the default build denies both
 #![cfg_attr(
     feature = "mock-api",
     allow(dead_code, unused_imports, clippy::unused_async)
@@ -77,8 +76,7 @@ mod stats_mutex;
 mod veilid_api;
 mod veilid_config;
 
-// The subsystems mock-api replaces are not compiled at all, so nothing can bind a socket,
-// open a file or reach a keychain
+// The subsystems mock-api replaces are not compiled, so nothing can bind a socket, open a file or reach a keychain
 #[cfg(not(feature = "mock-api"))]
 mod attachment_manager;
 #[cfg(all(feature = "unstable-blockstore", not(feature = "mock-api")))]
@@ -187,16 +185,17 @@ mod veilid_capnp {
         clippy::unused_async,
         clippy::ptr_cast_constness
     )]
-    // capnp emits `pub` everywhere; this module is crate-only, and capnp's own trait impls
-    // on the generated types are what make them externally reachable
+    // capnp emits `pub` types in this crate-only module, and its trait impls make them reachable
     #![allow(unnameable_types)]
+    // The schema declares limits whose only readers are feature-gated coders
+    #![cfg_attr(not(feature = "unstable-blockstore"), allow(dead_code))]
     include!("../proto/veilid_capnp.rs");
 }
 
 #[cfg(all(not(feature = "mock-api"), feature = "app-lifecycle"))]
 use self::attachment_manager::AppLifecycleEvent;
 #[cfg(not(feature = "mock-api"))]
-use self::attachment_manager::TickEvent;
+use self::attachment_manager::{ProcessStallEvent, TickEvent};
 use self::component::*;
 use self::core_context::RegisteredComponents;
 #[allow(unused_imports)]

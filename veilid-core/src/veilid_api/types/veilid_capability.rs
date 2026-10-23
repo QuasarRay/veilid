@@ -69,4 +69,4 @@ cfg_if! {
 }
 
 /// Maximum number of capabilities a node may advertise.
-pub const MAX_CAPABILITIES: usize = 64;
+pub const MAX_CAPABILITIES: usize = crate::veilid_capnp::MAX_CAPABILITIES as usize;

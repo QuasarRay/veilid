@@ -67,6 +67,7 @@ pub fn decode_node_info(reader: &veilid_capnp::node_info::Reader) -> Result<Node
 
     rpc_ignore_missing_property!(reader, dial_info_detail_list);
     let didl_reader = reader.get_dial_info_detail_list()?;
+    rpc_ignore_max_len!(didl_reader, MAX_DIAL_INFO_DETAILS);
     let mut dial_info_detail_list = Vec::<DialInfoDetail>::with_capacity(
         didl_reader
             .len()
@@ -82,6 +83,7 @@ pub fn decode_node_info(reader: &veilid_capnp::node_info::Reader) -> Result<Node
 
     rpc_ignore_missing_property!(reader, relay_info_list);
     let ril_reader = reader.get_relay_info_list()?;
+    rpc_ignore_max_len!(ril_reader, MAX_RELAY_INFOS);
     let mut relay_info_list = Vec::<RelayInfo>::with_capacity(
         ril_reader
             .len()

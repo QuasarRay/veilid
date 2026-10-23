@@ -1,10 +1,11 @@
+//! An inspect stops early only once SOME subkey has reached consensus. A range in
+//! which no subkey is ever answered can therefore never stop early, and runs to
+//! `max_find_node_count` nodes or the full `get_value_timeout_ms`. Callers that
+//! choose an inspect range depend on this, so it is pinned here.
+
 use super::*;
 use inspect_record::{descriptor_fanout_done, inspect_fanout_done};
 
-/// An inspect stops early only once SOME subkey has reached consensus. A range in
-/// which no subkey is ever answered can therefore never stop early, and runs to
-/// `max_find_node_count` nodes or the full `get_value_timeout_ms`. Callers that
-/// choose an inspect range depend on this, so it is pinned here.
 const CONSENSUS: usize = 3;
 
 fn done(counts: &[usize], stalled: bool) -> bool {

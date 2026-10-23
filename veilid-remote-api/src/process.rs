@@ -911,6 +911,9 @@ impl JsonRequestProcessor {
             RequestOp::Detach => ResponseOp::Detach {
                 result: to_json_api_result(self.api.detach().await),
             },
+            RequestOp::ChangeConfig { config } => ResponseOp::ChangeConfig {
+                result: to_json_api_result(self.api.change_config(*config)),
+            },
             RequestOp::ReportAppLifecycleState { state } => ResponseOp::ReportAppLifecycleState {
                 result: to_json_api_result(self.report_app_lifecycle_state(state)),
             },

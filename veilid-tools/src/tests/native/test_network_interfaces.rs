@@ -326,6 +326,43 @@ cfg_if! {
             assert_eq!(interfaces["en0"].addresses().len(), 5);
         }
 
+        /// Link-local IPv6 is never published, so an AirDrop or tunnel interface rotating its
+        /// link-local address changes nothing peers see
+        pub fn test_link_local_ipv6_is_never_published() {
+            info!("test_link_local_ipv6_is_never_published");
+            let with_rotation = |rotated: &str| {
+                let mut interfaces = wifi();
+                let mut awdl = running("awdl0");
+                awdl.add_address(v6(rotated, false, true));
+                interfaces.insert("awdl0".to_owned(), awdl);
+                let mut utun = NetworkInterface::new(
+                    "utun0".to_owned(),
+                    InterfaceFlags {
+                        is_running: true,
+                        is_point_to_point: true,
+                        ..InterfaceFlags::default()
+                    },
+                );
+                utun.add_address(v6("fe80::81a1:1a42:8f9d:249c", false, true));
+                interfaces.insert("utun0".to_owned(), utun);
+                state(&interfaces, Some(LAN), Some(TEMP_NEW.parse().unwrap()))
+            };
+
+            let before = with_rotation("fe80::4003:dfff:fefc:8c01");
+            let after = with_rotation("fe80::caf:f3ff:feab:c0c4");
+
+            let link_local = |a: &IfAddr| match a {
+                IfAddr::V6(v6) => ipv6addr_is_unicast_link_local(&v6.ip),
+                IfAddr::V4(_) => false,
+            };
+            assert!(!before.interface_addresses.iter().any(link_local));
+            assert_eq!(before.interface_addresses.len(), 2, "the LAN address and the stable global");
+            assert!(before.is_own_address("fe80::58:e37e:2bab:d83f".parse().unwrap()));
+            assert_eq!(before.interface_addresses, after.interface_addresses);
+            assert_eq!(before.gateway_addresses, after.gateway_addresses);
+            assert_eq!(before.egress_v4, after.egress_v4);
+        }
+
         pub async fn test_network_interfaces() {
             info!("testing network interfaces");
             let t1 = get_raw_timestamp();
@@ -355,6 +392,7 @@ pub async fn test_all() {
         test_alias_on_the_egress_is_not_a_change();
         test_clat_egress_names_its_interface();
         test_carrier_nat_addresses_are_never_published();
+        test_link_local_ipv6_is_never_published();
         test_network_interfaces().await;
     }
 }

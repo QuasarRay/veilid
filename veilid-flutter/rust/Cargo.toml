@@ -34,7 +34,6 @@ mock-api = ["rt-tokio", "veilid-core/mock-api", "veilid-core/default-tokio"]
 mock-api-wasm = ["default-wasm", "veilid-core/mock-api", "debug-api"]
 rt-async-std = ["veilid-core/rt-async-std", "async-std"]
 rt-tokio = ["veilid-core/rt-tokio", "tokio"]
-debug-load = ["dep:ctor", "dep:libc-print", "dep:android_log-sys"]
 # Dense veilid-core spans for the always-compiled FlameLayer (FLAME=1), the
 # same coverage veilid-server's `flame` feature gives it
 flame = ["veilid-core/instrument"]
@@ -82,9 +81,7 @@ allo-isolate = { version = "0.1.27", default-features = false }
 ffi-support = "0.4.4"
 lazy_static = "1.5.0"
 hostname = "0.4.2"
-ctor = { version = "1.0.6", optional = true }
-libc-print = { version = "0.3.0", optional = true }
-# No local-offset: it pulls num_threads, which does not build for iOS on libc 0.2.190
+# No local-offset: unused, chrono supplies the local offset in dart_ffi.rs
 time = "0.3.47"
 chrono = "0.4.40"
 
@@ -94,7 +91,6 @@ jni = "0.22.4"
 paranoid-android = "0.2.2"
 # Keeps logd's blocking writes off worker threads - see android_log_writer in dart_ffi.rs
 tracing-appender = "0.2.4"
-android_log-sys = { version = "0.3.2", optional = true }
 
 # Dependencies for iOS builds only
 [target.'cfg(target_os = "ios")'.dependencies]
@@ -116,4 +112,4 @@ lazy_static = "1.5.0"
 workspace = true
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = "0.2.191"

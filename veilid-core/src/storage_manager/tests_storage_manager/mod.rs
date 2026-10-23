@@ -2,6 +2,7 @@ use super::*;
 
 mod test_commit_rounds;
 mod test_encrypted_value_data;
+mod test_freeze_recovery;
 #[cfg(feature = "aimd-dht")]
 mod test_gated_operation;
 mod test_inbound_set_value_signature;
@@ -22,6 +23,7 @@ mod test_watch_subkey_filter;
 pub async fn test_all() {
     test_commit_rounds::test_all();
     test_encrypted_value_data::test_all().await;
+    test_freeze_recovery::test_all();
     #[cfg(feature = "aimd-dht")]
     test_gated_operation::test_all();
     test_inbound_set_value_signature::test_all().await;

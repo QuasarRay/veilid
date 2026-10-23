@@ -99,10 +99,15 @@ pub struct AimdStepResult {
 /// operation.
 #[derive(Debug)]
 pub struct AimdController {
+    /// Tuning fixed at construction
     params: AimdParams,
+    /// The authoritative limit
     limit: AtomicU64,
+    /// Operations completed in the current window
     completed: AtomicU64,
+    /// Congested operations in the current window
     congested: AtomicU64,
+    /// Waits on the limit in the current window
     demand_events: AtomicU64,
     /// Microsecond timestamp of the last decrease; 0 = never
     last_md_ts_us: AtomicU64,

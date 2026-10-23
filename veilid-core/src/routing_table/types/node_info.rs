@@ -1,5 +1,10 @@
 use super::*;
 
+/// Most dial info details a node info carries
+pub const MAX_DIAL_INFO_DETAILS: usize = veilid_capnp::MAX_DIAL_INFO_DETAILS as usize;
+/// Most relay infos a node info carries
+pub const MAX_RELAY_INFOS: usize = veilid_capnp::MAX_RELAY_INFOS as usize;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NodeInfo {
     timestamp: Timestamp,

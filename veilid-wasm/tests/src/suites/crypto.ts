@@ -83,9 +83,7 @@ export const cryptoSuite: Suite = {
         name: `should aead encrypt and decrypt for ${cryptoKind}`,
         run: ({ expect }) => {
           const vcrypto = veilidClient.getCrypto(cryptoKind);
-          const body = textEncoder.encode(
-            'This is an encoded body with my secret data in it🔥',
-          );
+          const body = textEncoder.encode('This is an encoded body with my secret data in it🔥');
           const ad = textEncoder.encode('This is data associated with my secret data👋');
 
           const nonce = vcrypto.randomNonce();
@@ -106,7 +104,7 @@ export const cryptoSuite: Suite = {
 
       cases.push({
         name: `should hpke seal and open for ${cryptoKind}`,
-        run: ({ expect }) => {
+        run: async ({ expect }) => {
           const vcrypto = veilidClient.getCrypto(cryptoKind);
           const plaintext = textEncoder.encode('This is a sealed message🔒');
           const aad = textEncoder.encode('This is data bound to the seal👋');
@@ -119,13 +117,13 @@ export const cryptoSuite: Suite = {
           expect(vcrypto.hpkeOpen(keypair.secret, aad, sealed)).toEqual(plaintext);
 
           // wrong recipient
-          expect(() => vcrypto.hpkeOpen(keypair2.secret, aad, sealed)).toThrow();
+          await expect(() => vcrypto.hpkeOpen(keypair2.secret, aad, sealed)).toThrow();
           // mismatched aad
-          expect(() => vcrypto.hpkeOpen(keypair.secret, plaintext, sealed)).toThrow();
+          await expect(() => vcrypto.hpkeOpen(keypair.secret, plaintext, sealed)).toThrow();
           // tampered blob
           const tampered = new Uint8Array(sealed);
           tampered[tampered.length - 1] ^= 0x80;
-          expect(() => vcrypto.hpkeOpen(keypair.secret, aad, tampered)).toThrow();
+          await expect(() => vcrypto.hpkeOpen(keypair.secret, aad, tampered)).toThrow();
         },
       });
 

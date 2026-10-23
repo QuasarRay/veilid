@@ -106,6 +106,16 @@ outright. Paste the V1 line from the step above into `routing_table:`
 Records configured this way are answered to direct bootstrap requests as soon as the node starts,
 and this node can join the network from them without resolving `bootstrap` at all.
 
+### Serve direct bootstrap requests
+
+The packaged `veilid-server.conf` turns direct bootstrap serving off, since a node that is not a
+bootstrap has no reason to answer unauthenticated requests with its peer set. A bootstrap turns it
+on under `routing_table:`
+
+- `serve_direct_bootstrap: true`
+
+A node that finds itself among its own bootstraps answers regardless of the setting.
+
 ### Start the Veilid service
 
 Disconnect from the Veilid user and start veilid-server.service.

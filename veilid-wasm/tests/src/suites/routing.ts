@@ -173,10 +173,7 @@ export const routingSuite: Suite = {
 
           await veilidClient.appCallReply(receivedCall.detail.callId, reply);
 
-          const returnedReply = await asyncCallWithTimeout<Uint8Array>(
-            appCallPromise,
-            30_000,
-          );
+          const returnedReply = await asyncCallWithTimeout<Uint8Array>(appCallPromise, 30_000);
           expect(returnedReply).toEqual(reply);
 
           veilidClient.releasePrivateRoute(routeId);

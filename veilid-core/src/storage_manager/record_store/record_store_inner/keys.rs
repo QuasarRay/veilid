@@ -47,12 +47,12 @@ impl SubkeyTableKey {
 impl TryFrom<&[u8]> for SubkeyTableKey {
     type Error = EyreReport;
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let key = OpaqueRecordKey::try_from(&bytes[0..bytes.len() - 4])?;
-        let subkey = ValueSubkey::from_le_bytes(
-            bytes[(bytes.len() - 4)..]
-                .try_into()
-                .wrap_err("invalid subkey")?,
-        );
+        let Some(key_len) = bytes.len().checked_sub(4) else {
+            bail!("subkey table key too short");
+        };
+        let key = OpaqueRecordKey::try_from(&bytes[..key_len])?;
+        let subkey =
+            ValueSubkey::from_le_bytes(bytes[key_len..].try_into().wrap_err("invalid subkey")?);
 
         Ok(SubkeyTableKey {
             record_key: key,

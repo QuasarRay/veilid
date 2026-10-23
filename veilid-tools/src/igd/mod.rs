@@ -10,10 +10,6 @@ pub use gateway::Gateway;
 pub use search::search_gateway;
 
 use super::*;
-use std::collections::HashMap;
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::time::Duration;
 
 /// Protocol for a port mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

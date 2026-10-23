@@ -76,7 +76,7 @@ Step 'cargo fmt --all --check' { cargo fmt --all --check }
 if (-not $SkipFlutter) {
     Require-Tool flutter 'Run dev-setup\setup_windows.ps1 -Install -Flutter.'
     Require-Tool dart 'Run dev-setup\setup_windows.ps1 -Install -Flutter.'
-    # Same file set as scripts/check_format.sh: veilid-flutter sources minus build output and generated code
+    # Same file set as scripts/_check_format_dart.sh: veilid-flutter sources minus build output and generated code
     $dartVersion = $Versions['DART_VERSION']
     if (-not $dartVersion) { Fail 'could not read DART_VERSION from .dagger/versions.env' }
     $dartLanguageVersion = ($dartVersion -split '\.')[0..1] -join '.'

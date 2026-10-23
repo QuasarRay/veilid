@@ -10,8 +10,7 @@ export const tableSuite: Suite = {
   requiresNetwork: false,
   cases: (): TestCase[] => {
     // Shared across the cases below, which run in order like the describe blocks they replace.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let table: any;
+    let table: VeilidTableDB;
     const key = 'test-key with unicode 🚀';
     const value = 'test value with unicode 🚀';
 

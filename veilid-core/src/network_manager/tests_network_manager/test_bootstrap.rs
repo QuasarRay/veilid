@@ -184,6 +184,90 @@ pub async fn test_boot_v1_response() {
     mock_registry::terminate(registry).await;
 }
 
+/// A JSON bootstrap peer's node info and ids come from its signed bytes, not from the JSON
+pub async fn test_bootstrap_peer_json_binding() {
+    let registry = mock_registry::init("jsonbind").await;
+    let network_manager = registry.network_manager();
+    let routing_table = registry.routing_table();
+
+    let keypair = mock_keypairs()[0].clone();
+    let node_info = NodeInfo::new(
+        Timestamp::now(),
+        VALID_ENVELOPE_VERSIONS.to_vec(),
+        vec![CryptoInfo::VLD0 {
+            public_key: keypair.ref_value().key(),
+        }],
+        PUBLIC_INTERNET_CAPABILITIES.to_vec(),
+        ProtocolTypeSet::all(),
+        AddressTypeSet::all(),
+        vec![DialInfoDetail {
+            class: DialInfoClass::Direct,
+            dial_info: DialInfo::udp(SocketAddress::new(
+                Address::IPV4(Ipv4Addr::new(1, 2, 3, 4)),
+                5150,
+            )),
+        }],
+        vec![],
+    );
+    let secret_keys =
+        SecretKeyGroup::from(SecretKey::new(keypair.kind(), keypair.ref_value().secret()));
+    let peer_info = PeerInfo::try_new_from_node_info(
+        &routing_table,
+        RoutingDomain::PublicInternet,
+        &secret_keys,
+        node_info,
+    )
+    .expect("should sign peer info");
+    let json = serialize_json(&peer_info);
+
+    // Fields beside the signed bytes are ignored
+    let mut tampered: serde_json::Value = serde_json::from_str(&json).expect("should parse");
+    tampered["node_info"]["timestamp"] =
+        serde_json::to_value(Timestamp::new(u64::MAX / 2)).expect("should serialize");
+    tampered["node_info"]["dial_info_detail_list"] = serde_json::json!([]);
+    let tampered: PeerInfo =
+        deserialize_json(&tampered.to_string()).expect("should parse tampered peer info");
+    assert_ne!(tampered.node_info(), peer_info.node_info());
+    let bound = network_manager
+        .bind_bootstrap_peer(&tampered)
+        .expect("signed bytes are intact");
+    assert_eq!(bound.node_info(), peer_info.node_info());
+    assert_eq!(bound.node_ids(), peer_info.node_ids());
+
+    // A changed signed byte is refused
+    let mut tampered: serde_json::Value = serde_json::from_str(&json).expect("should parse");
+    let byte = tampered["node_info_message"][0]
+        .as_u64()
+        .expect("bytes serialize as numbers");
+    tampered["node_info_message"][0] = serde_json::Value::from(byte ^ 1);
+    let tampered: PeerInfo =
+        deserialize_json(&tampered.to_string()).expect("should parse tampered peer info");
+    assert!(network_manager.bind_bootstrap_peer(&tampered).is_none());
+
+    mock_registry::terminate(registry).await;
+}
+
+/// A short dial info or hostname with a multibyte character fails to parse instead of panicking
+pub async fn test_short_dial_info_multibyte() {
+    let dial_info_converter = MockDialInfoConverter::default();
+    for (short_url, hostname) in [
+        ("é5150", "example.org"),
+        ("Ué150", "example.org"),
+        ("U5150", "é.example.org"),
+        ("U5150", "example.orgé"),
+        ("W5150", "[::1]é"),
+    ] {
+        let short_dial_info = ShortDialInfo {
+            short_url: short_url.to_owned(),
+            hostname: hostname.to_owned(),
+        };
+        assert!(dial_info_converter
+            .try_vec_from_short(&short_dial_info)
+            .await
+            .is_err());
+    }
+}
+
 /// A record parsed for serving is verified but never resolved
 pub async fn test_bootstrap_record_unresolved() {
     let registry = mock_registry::init("unresolved").await;

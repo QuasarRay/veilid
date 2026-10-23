@@ -96,9 +96,7 @@ async def test_group_roster_layout(api_connection: veilid.VeilidAPI):
             cs = await api_connection.get_crypto_system(kind)
             async with cs:
                 MEMBERS = 4
-                desc, keypairs = await make_roster_record(
-                    api_connection, rc, cs, MEMBERS
-                )
+                desc, keypairs = await make_roster_record(api_connection, rc, cs, MEMBERS)
 
                 assert isinstance(desc.schema, veilid.DHTSchemaSMPL)
                 assert len(desc.schema.members) == MEMBERS
@@ -241,9 +239,7 @@ async def test_group_ballot_write_once_seq(api_connection: veilid.VeilidAPI):
                 # Retraction attempt: differing bytes advance the seq, marking the slot poisoned
                 await dht_retry(
                     api_connection,
-                    lambda: rc.set_dht_value(
-                        desc.key, subkey, b"ballot: retracted", opts
-                    ),
+                    lambda: rc.set_dht_value(desc.key, subkey, b"ballot: retracted", opts),
                     "rewrite",
                 )
                 vd = await rc.get_dht_value(desc.key, subkey, True)
@@ -274,9 +270,7 @@ async def test_group_subkey_budget(api_connection: veilid.VeilidAPI):
             cs = await api_connection.get_crypto_system(kind)
             async with cs:
                 MEMBERS = int(os.getenv("GROUP_MEMBERS", "62"))
-                desc, keypairs = await make_roster_record(
-                    api_connection, rc, cs, MEMBERS
-                )
+                desc, keypairs = await make_roster_record(api_connection, rc, cs, MEMBERS)
                 subkey_count = OWNER_SUBKEY_COUNT + MEMBERS
                 limit = max_subkey_len(subkey_count)
                 # A VLD1 adopt ballot embeds an ML-DSA-signed transition statement
@@ -303,17 +297,13 @@ async def test_group_subkey_budget(api_connection: veilid.VeilidAPI):
                 assert vd is not None and len(vd.data) == limit
 
                 with pytest.raises(Exception):
-                    await rc.set_dht_value(
-                        desc.key, subkey, b"A" * (limit + 1), opts
-                    )
+                    await rc.set_dht_value(desc.key, subkey, b"A" * (limit + 1), opts)
 
                 await rc.close_dht_record(desc.key)
                 await rc.delete_dht_record(desc.key)
 
 
-@pytest.mark.skipif(
-    os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time"
-)
+@pytest.mark.skipif(os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time")
 @pytest.mark.asyncio
 async def test_group_roster_scale(api_connection: veilid.VeilidAPI):
     """Create rosters at realistic group sizes and confirm the schema holds.
@@ -329,9 +319,7 @@ async def test_group_roster_scale(api_connection: veilid.VeilidAPI):
         async with cs:
             for members in sizes:
                 start = time.monotonic()
-                desc, keypairs = await make_roster_record(
-                    api_connection, rc, cs, members
-                )
+                desc, keypairs = await make_roster_record(api_connection, rc, cs, members)
                 create_s = time.monotonic() - start
 
                 subkey_count = OWNER_SUBKEY_COUNT + members
@@ -348,9 +336,7 @@ async def test_group_roster_scale(api_connection: veilid.VeilidAPI):
                 await rc.delete_dht_record(desc.key)
 
 
-@pytest.mark.skipif(
-    os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time"
-)
+@pytest.mark.skipif(os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time")
 @pytest.mark.asyncio
 async def test_group_status_write_latency(api_connection: veilid.VeilidAPI):
     """Per-write cost of a status-slot update, which sets the send-path debounce.
@@ -385,9 +371,7 @@ async def test_group_status_write_latency(api_connection: veilid.VeilidAPI):
                 failures = 0
                 for r in range(rounds):
                     if concurrent:
-                        results = await asyncio.gather(
-                            *[write(i, r) for i in range(members)]
-                        )
+                        results = await asyncio.gather(*[write(i, r) for i in range(members)])
                     else:
                         results = [await write(i, r) for i in range(members)]
                     for x in results:
@@ -414,9 +398,7 @@ async def test_group_status_write_latency(api_connection: veilid.VeilidAPI):
             await rc.delete_dht_record(desc.key)
 
 
-@pytest.mark.skipif(
-    os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time"
-)
+@pytest.mark.skipif(os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time")
 @pytest.mark.asyncio
 async def test_group_inspect_cost(api_connection: veilid.VeilidAPI):
     """Cost of scanning every ballot slot, paid once per epoch transition to find
@@ -444,9 +426,7 @@ async def test_group_inspect_cost(api_connection: veilid.VeilidAPI):
                     "seed ballot",
                 )
 
-            full_range = [
-                (member_subkey(0), member_subkey(members - 1))
-            ]
+            full_range = [(member_subkey(0), member_subkey(members - 1))]
             # First network inspect of a scope pays the locating fanout, later ones hit the cache
             repeats = int(os.getenv("GROUP_REPEATS", "5"))
             for scope in (
@@ -458,9 +438,7 @@ async def test_group_inspect_cost(api_connection: veilid.VeilidAPI):
                     rr = await rc.inspect_dht_record(desc.key, full_range, scope)
                     elapsed = time.monotonic() - start
                     seqs = (
-                        rr.local_seqs
-                        if scope == veilid.DHTReportScope.LOCAL
-                        else rr.network_seqs
+                        rr.local_seqs if scope == veilid.DHTReportScope.LOCAL else rr.network_seqs
                     )
                     written = sum(1 for s in seqs if s is not None)
                     report(
@@ -476,9 +454,7 @@ async def test_group_inspect_cost(api_connection: veilid.VeilidAPI):
             await rc.delete_dht_record(desc.key)
 
 
-@pytest.mark.skipif(
-    os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time"
-)
+@pytest.mark.skipif(os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time")
 @pytest.mark.asyncio
 async def test_group_inspect_fill_sensitivity(api_connection: veilid.VeilidAPI):
     """Network inspect cost as a function of how many slots are written.
@@ -495,9 +471,7 @@ async def test_group_inspect_fill_sensitivity(api_connection: veilid.VeilidAPI):
         cs = await api_connection.get_crypto_system(kind)
         async with cs:
             for filled in (members, members // 2, 1):
-                desc, keypairs = await make_roster_record(
-                    api_connection, rc, cs, members
-                )
+                desc, keypairs = await make_roster_record(api_connection, rc, cs, members)
                 await rc.open_dht_record(desc.key, keypairs[0])
                 for i in range(filled):
                     await dht_retry(
@@ -513,9 +487,7 @@ async def test_group_inspect_fill_sensitivity(api_connection: veilid.VeilidAPI):
 
                 rng = [(member_subkey(0), member_subkey(members - 1))]
                 start = time.monotonic()
-                await rc.inspect_dht_record(
-                    desc.key, rng, veilid.DHTReportScope.SYNC_GET
-                )
+                await rc.inspect_dht_record(desc.key, rng, veilid.DHTReportScope.SYNC_GET)
                 elapsed = time.monotonic() - start
                 report(
                     "inspect_fill",
@@ -529,9 +501,7 @@ async def test_group_inspect_fill_sensitivity(api_connection: veilid.VeilidAPI):
                 await rc.delete_dht_record(desc.key)
 
 
-@pytest.mark.skipif(
-    os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time"
-)
+@pytest.mark.skipif(os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time")
 @pytest.mark.asyncio
 async def test_group_get_value_cost(api_connection: veilid.VeilidAPI):
     """Cost of network-verifying a single slot, repeated.
@@ -596,7 +566,7 @@ async def test_group_watch_notification_latency():
     This is the group message-notification path: one watch on the shared record
     stands in for watching every member's log.
     """
-    value_change_queue: asyncio.Queue[veilid.VeilidUpdate] = asyncio.Queue()
+    value_change_queue: asyncio.Queue[tuple[float, veilid.VeilidUpdate]] = asyncio.Queue()
 
     async def watcher_callback(update: veilid.VeilidUpdate):
         if update.kind == veilid.VeilidUpdateKind.VALUE_CHANGE:
@@ -636,9 +606,7 @@ async def test_group_watch_notification_latency():
                 members = int(os.getenv("GROUP_MEMBERS", "8"))
                 writes = int(os.getenv("GROUP_WRITES", "10"))
 
-                desc, keypairs = await make_roster_record(
-                    api_writer, rc_writer, cs, members
-                )
+                desc, keypairs = await make_roster_record(api_writer, rc_writer, cs, members)
                 await rc_writer.open_dht_record(desc.key, keypairs[0])
 
                 # Publish the record so the watcher node can resolve it
@@ -674,9 +642,8 @@ async def test_group_watch_notification_latency():
                         "status write",
                     )
                     try:
-                        recv, upd = await asyncio.wait_for(
-                            value_change_queue.get(), timeout=30
-                        )
+                        recv, upd = await asyncio.wait_for(value_change_queue.get(), timeout=30)
+                        assert isinstance(upd.detail, veilid.VeilidValueChange)
                         assert upd.detail.key == desc.key
                         latencies.append(recv - sent)
                     except asyncio.TimeoutError:
@@ -696,7 +663,9 @@ async def test_group_watch_notification_latency():
                         max=f"{latencies[-1]:.3f}",
                     )
                 else:
-                    report("watch_latency", members=members, writes=writes, delivered=0, missed=missed)
+                    report(
+                        "watch_latency", members=members, writes=writes, delivered=0, missed=missed
+                    )
 
                 await rc_watcher.cancel_dht_watch(desc.key)
                 await rc_watcher.close_dht_record(desc.key)
@@ -708,9 +677,7 @@ async def test_group_watch_notification_latency():
     os.getenv("INTEGRATION") != "1",
     reason="integration test requires multiple servers running",
 )
-@pytest.mark.skipif(
-    os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time"
-)
+@pytest.mark.skipif(os.getenv("PERFORMANCE") != "1", reason="performance test takes a long time")
 @pytest.mark.asyncio
 async def test_group_watch_fanout():
     """Notification cost as the watcher count grows.

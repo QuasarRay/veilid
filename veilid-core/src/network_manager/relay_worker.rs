@@ -90,7 +90,7 @@ impl NetworkManager {
                             // Inbound relay the packet to the desired destination
                             veilid_log!(self trace throttle: PROTOCOL_LOG_THROTTLE_MS, "inbound relaying {} bytes to {}", data.len(), relay_nr);
                             // Kept for the failure message: the node ref moves into the send
-                            let relay_nr_dbg = relay_nr.to_string();
+                            let relay_nr_dbg = relay_nr.clone();
                             // Throttled: one log per relayed envelope, and a peer sets the rate
                             match pin_future!(
                                 self.send_inbound_relay_data(relay_nr, sequencing, data)

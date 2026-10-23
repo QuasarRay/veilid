@@ -226,9 +226,7 @@ async def test_stress_multi_writer_same_record(apis):
             kp = await cs.generate_key_pair()
             writers.append(kp)
             members.append(await api0.generate_member_id(kp.key()))
-    schema = DHTSchema.smpl(
-        0, [DHTSchemaSMPLMember(m.value(), SUBKEYS_PER_TX) for m in members]
-    )
+    schema = DHTSchema.smpl(0, [DHTSchemaSMPLMember(m.value(), SUBKEYS_PER_TX) for m in members])
     rcs = [await api.new_routing_context() for api in apis]
     async with contextlib.AsyncExitStack() as stack:
         for rc in rcs:
@@ -322,9 +320,7 @@ async def test_stress_anonymous_readers_during_member_writes(apis):
                     await run_tx(api1, [key], ops, reads)
                     await asyncio.sleep(random.uniform(0, 0.2))
 
-            await asyncio.wait_for(
-                asyncio.gather(writer(), reader(rec1.key)), SCENARIO_TIMEOUT
-            )
+            await asyncio.wait_for(asyncio.gather(writer(), reader(rec1.key)), SCENARIO_TIMEOUT)
         finally:
             writes.report()
             reads.report()

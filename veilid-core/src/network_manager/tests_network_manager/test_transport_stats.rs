@@ -1,4 +1,7 @@
 use super::*;
+
+/// The window every assertion below is written against
+const WINDOW: TimestampDuration = TimestampDuration::new_secs(10);
 use crate::tests::*;
 
 fn now() -> Timestamp {
@@ -24,7 +27,7 @@ fn peer(n: u8) -> TransportPeerKey {
 fn window_with(outcomes: &[(Timestamp, TransportSendOutcome)]) -> TransportWindow {
     let mut w = TransportWindow::default();
     for (i, (ts, o)) in outcomes.iter().enumerate() {
-        w.record(*ts, *o, peer(i as u8));
+        w.record(*ts, *o, peer(i as u8), WINDOW);
     }
     w
 }
@@ -74,7 +77,7 @@ pub fn test_window_keeps_min_samples_when_quiet() {
         .map(|_| (secs_ago(60), TransportSendOutcome::Timeout))
         .collect();
     let mut w = window_with(&outcomes);
-    w.evict_aged(now());
+    w.evict_aged(now(), WINDOW);
     assert_eq!(w.sample_count(), TRANSPORT_STATS_MIN_SAMPLES);
     assert!(matches!(
         w.verdict(now(), CANARY),
@@ -114,14 +117,14 @@ pub fn test_concentrated_failures_are_not_a_dead_path() {
     // not that our path is broken, so there must be no verdict
     let mut w = TransportWindow::default();
     for _ in 0..TRANSPORT_STATS_MIN_SAMPLES * 2 {
-        w.record(now(), TransportSendOutcome::Timeout, peer(1));
+        w.record(now(), TransportSendOutcome::Timeout, peer(1), WINDOW);
     }
     assert_eq!(w.verdict(now(), CANARY), TransportVerdict::Unknown);
 
     // The same failures spread across enough distinct peers do implicate the path
     let mut w = TransportWindow::default();
     for i in 0..TRANSPORT_STATS_MIN_SAMPLES {
-        w.record(now(), TransportSendOutcome::Timeout, peer(i as u8));
+        w.record(now(), TransportSendOutcome::Timeout, peer(i as u8), WINDOW);
     }
     assert!(matches!(
         w.verdict(now(), CANARY),
@@ -178,7 +181,12 @@ pub fn test_suppression_survives_losing_peer_diversity() {
     // there would un-suppress on thin evidence and oscillate
     let mut w = TransportWindow::default();
     for i in 0..TRANSPORT_STATS_MIN_SAMPLES {
-        w.record(secs_ago(60), TransportSendOutcome::Timeout, peer(i as u8));
+        w.record(
+            secs_ago(60),
+            TransportSendOutcome::Timeout,
+            peer(i as u8),
+            WINDOW,
+        );
     }
     assert!(matches!(
         w.verdict(secs_ago(60), CANARY),
@@ -188,9 +196,9 @@ pub fn test_suppression_survives_losing_peer_diversity() {
     // The canary trickles retries at one peer while the spread evidence ages out,
     // leaving only the concentrated survivors
     for _ in 0..TRANSPORT_STATS_MIN_SAMPLES {
-        w.record(now(), TransportSendOutcome::Timeout, peer(1));
+        w.record(now(), TransportSendOutcome::Timeout, peer(1), WINDOW);
     }
-    w.evict_aged(now());
+    w.evict_aged(now(), WINDOW);
     assert!(w.distinct_peers() < TRANSPORT_STATS_MIN_DISTINCT_PEERS);
     assert!(matches!(
         w.verdict(now(), CANARY),
@@ -198,7 +206,7 @@ pub fn test_suppression_survives_losing_peer_diversity() {
     ));
 
     // Only a send that works releases it
-    w.record(now(), TransportSendOutcome::Sent, peer(1));
+    w.record(now(), TransportSendOutcome::Sent, peer(1), WINDOW);
     assert_eq!(w.verdict(now(), CANARY), TransportVerdict::Healthy);
 }
 
@@ -216,7 +224,7 @@ pub fn test_unbound_sends_count_toward_diversity() {
 
     let mut w = TransportWindow::default();
     for i in 0..TRANSPORT_STATS_MIN_SAMPLES {
-        w.record(now(), TransportSendOutcome::Timeout, addr(i as u8));
+        w.record(now(), TransportSendOutcome::Timeout, addr(i as u8), WINDOW);
     }
     assert!(matches!(
         w.verdict(now(), CANARY),
@@ -226,7 +234,7 @@ pub fn test_unbound_sends_count_toward_diversity() {
     // Repeats against one address are one endpoint, exactly as for one node
     let mut w = TransportWindow::default();
     for _ in 0..TRANSPORT_STATS_MIN_SAMPLES * 2 {
-        w.record(now(), TransportSendOutcome::Timeout, addr(1));
+        w.record(now(), TransportSendOutcome::Timeout, addr(1), WINDOW);
     }
     assert_eq!(w.verdict(now(), CANARY), TransportVerdict::Unknown);
 }

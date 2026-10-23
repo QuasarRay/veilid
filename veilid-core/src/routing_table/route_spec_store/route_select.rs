@@ -19,8 +19,7 @@ pub struct RouteSelectParams {
     pub avoid_nodes: Vec<NodeId>,
     /// Destination is a private route; an unsafe one doubles a short hop count
     pub is_destination_safe: bool,
-    /// Destination key and the state its losses are judged in; routes that lost a question to it
-    /// in that state rank last
+    /// Destination key and loss epoch; routes that lost a question to it in that epoch rank last
     pub opt_destination: Option<(PublicKey, LossEpoch)>,
 }
 
@@ -43,8 +42,7 @@ struct FirstAvailableRouteParams {
     pub directions: DirectionSet,
     /// Nodes that must not appear as hops
     pub avoid_nodes: Vec<NodeId>,
-    /// Destination key and the state its losses are judged in; routes that lost a question to it
-    /// in that state rank last
+    /// Destination key and loss epoch; routes that lost a question to it in that epoch rank last
     pub opt_destination: Option<(PublicKey, LossEpoch)>,
 }
 

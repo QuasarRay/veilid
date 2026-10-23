@@ -1,6 +1,6 @@
 # Shared Dart source walk and formatter settings. Source it from the repo root.
 #
-# One walk so scripts/fmt.sh and scripts/check_format.sh can never disagree about what is
+# One walk so scripts/fmt.sh and scripts/_check_format_dart.sh can never disagree about what is
 # checked. Generated code is skipped for the same reason the analyzer skips it: nobody edits
 # it, and a regenerator's output is not the author's fault.
 #

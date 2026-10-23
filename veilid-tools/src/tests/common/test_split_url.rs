@@ -134,6 +134,21 @@ pub fn test_split_url() {
     assert_err!(SplitUrl::from_str("a://[1111::2222]:/"));
     assert_err!(SplitUrl::from_str("a://[1111::2222]:"));
 
+    // multibyte characters fail to parse instead of panicking on a byte index
+    assert_err!(SplitUrl::from_str("ws://é.example.org"));
+    assert_err!(SplitUrl::from_str("ws://é.example.org:5150"));
+    assert_err!(SplitUrl::from_str("ws://example.orgé"));
+    assert_err!(SplitUrl::from_str("ws://example.orgé:5150"));
+    assert_err!(SplitUrl::from_str("ws://[::1]é"));
+    assert_err!(SplitUrl::from_str("ws://[::1]:é"));
+    assert_err!(SplitUrl::from_str("ws://[é]"));
+    assert_err!(SplitUrl::from_str("ws://é@example.org"));
+    assert_err!(SplitUrl::from_str("ws://example.org/é"));
+    assert_err!(SplitUrlHost::from_str("é"));
+    assert_err!(SplitUrlHost::from_str("[é"));
+    assert_err!(SplitUrlHost::from_str("é]"));
+    assert_err!(SplitUrlHost::from_str("[::1]é"));
+
     assert_split_url_parse!("sch://foo:bar@baz.com:1234/fnord#qux?zuz");
     assert_split_url_parse!("sch://foo:bar@baz.com:1234/fnord#qux");
     assert_split_url_parse!("sch://foo:bar@baz.com:1234/fnord?zuz");

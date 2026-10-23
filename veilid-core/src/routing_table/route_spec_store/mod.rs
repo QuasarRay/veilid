@@ -46,10 +46,10 @@ const REMOTE_PRIVATE_ROUTE_CACHE_EXPIRY: TimestampDuration = TimestampDuration::
 const ROUTE_MIN_IDLE_TIME_MS: u32 = 30_000;
 /// Number of unique failing destinations before invalidating compiled route cache for a route
 const ROUTE_LOST_DESTINATIONS_INVALIDATE_THRESHOLD: usize = 5;
-/// Number of consecutive send failures before invalidating compiled route cache for a safety route.
+/// Number of consecutive send failures before invalidating compiled route cache for a safety route
 const ROUTE_SEND_FAILURES_INVALIDATE_THRESHOLD: usize = 1;
 /// Consecutive loopback failures that kill an ordering. Datagram legs compound across hops, so
-/// unordered routes get more slack. Provisional until the 2026-09-12 ambient-rate runs settle them.
+/// unordered routes get more slack.
 const ROUTE_LOOPBACK_FAILURES_INVALIDATE_THRESHOLD_ORDERED: usize = 3;
 const ROUTE_LOOPBACK_FAILURES_INVALIDATE_THRESHOLD_UNORDERED: usize = 5;
 
@@ -93,10 +93,6 @@ pub(crate) struct RouteSpecStore {
     allocate_route_lock: AsyncMutex<()>,
     /// Maximum number of hops in a route
     max_route_hop_count: usize,
-    /// Default number of hops in a safe route
-    default_route_hop_count_safe: usize,
-    /// Default number of hops in an unsafe route
-    default_route_hop_count_unsafe: usize,
     /// Round-robin counter for distributing route selection across available routes
     route_selection_counter: AtomicUsize,
     /// Round-robin counter for distributing route-test destination selection
@@ -116,9 +112,6 @@ impl RouteSpecStore {
         let config = registry.config();
 
         let max_route_hop_count = config.internal().network.rpc.max_route_hop_count as usize;
-        let default_route_hop_count_safe = config.network.rpc.default_route_hop_count as usize;
-        let default_route_hop_count_unsafe =
-            max_route_hop_count.min(default_route_hop_count_safe * 2);
 
         Self {
             registry: registry.clone(),
@@ -127,8 +120,6 @@ impl RouteSpecStore {
             compiled_route_cache: AsyncKeyedCache::new(COMPILED_ROUTE_CACHE_SIZE),
             allocate_route_lock: AsyncMutex::new(()),
             max_route_hop_count,
-            default_route_hop_count_safe,
-            default_route_hop_count_unsafe,
             route_selection_counter: AtomicUsize::new(0),
             test_destination_rotation_counter: AtomicUsize::new(0),
             route_test_summary: Mutex::new(RouteTestSummary::default()),
@@ -142,11 +133,12 @@ impl RouteSpecStore {
     }
 
     pub fn get_default_route_hop_count_safe(&self) -> usize {
-        self.default_route_hop_count_safe
+        self.config().network.rpc.default_route_hop_count as usize
     }
 
     pub fn get_default_route_hop_count_unsafe(&self) -> usize {
-        self.default_route_hop_count_unsafe
+        self.max_route_hop_count
+            .min(self.get_default_route_hop_count_safe() * 2)
     }
 
     #[cfg_attr(

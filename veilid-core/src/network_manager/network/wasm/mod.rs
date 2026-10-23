@@ -41,6 +41,8 @@ struct WasmNetworkInner {
 pub(super) struct WasmNetworkUnlockedInner {
     // Startup lock
     startup_lock: StartupLock,
+    // Bound on one send; a stalled connection parks channel sends forever otherwise
+    send_timeout_ms: u32,
 }
 
 #[derive(Clone)]
@@ -429,13 +431,7 @@ impl PlatformNetwork for WasmNetwork {
             // Try to send to the exact existing connection if one exists
             if let Some(conn) = network_manager.connection_manager().get_connection(flow) {
                 // A stalled connection parks channel sends; bound it so it fails
-                let config = self.config();
-                let net_config = &config.internal().network;
-                let timeout_ms = net_config
-                    .rpc
-                    .timeout_ms
-                    .min(net_config.single_send_timeout_ms);
-                match timeout(timeout_ms, conn.send_async(data)).await {
+                match timeout(self.send_timeout_ms, conn.send_async(data)).await {
                     Ok(ConnectionHandleSendResult::Sent) => {
                         // Network accounting
                         network_manager.stats_packet_sent(ip_addr, ByteCount::new(data_len as u64));
@@ -485,13 +481,7 @@ impl PlatformNetwork for WasmNetwork {
             );
 
             // A stalled connection parks channel sends; bound it so it fails
-            let config = self.config();
-            let net_config = &config.internal().network;
-            let timeout_ms = net_config
-                .rpc
-                .timeout_ms
-                .min(net_config.single_send_timeout_ms);
-            match timeout(timeout_ms, conn.send_async(data)).await {
+            match timeout(self.send_timeout_ms, conn.send_async(data)).await {
                 Ok(ConnectionHandleSendResult::Sent) => {}
                 Ok(ConnectionHandleSendResult::NotSent) => {
                     return Ok(NetworkResult::NoConnection(io::Error::new(
@@ -596,17 +586,23 @@ impl WasmNetwork {
         }
     }
 
-    fn new_unlocked_inner() -> WasmNetworkUnlockedInner {
+    fn new_unlocked_inner(registry: &VeilidComponentRegistry) -> WasmNetworkUnlockedInner {
+        let config = registry.config();
+        let net_config = &config.internal().network;
         WasmNetworkUnlockedInner {
             startup_lock: StartupLock::new(),
+            send_timeout_ms: net_config
+                .rpc
+                .timeout_ms
+                .min(net_config.single_send_timeout_ms),
         }
     }
 
     pub fn new(registry: VeilidComponentRegistry) -> Self {
         Self {
-            registry,
             inner: Arc::new(Mutex::new(Self::new_inner())),
-            unlocked_inner: Arc::new(Self::new_unlocked_inner()),
+            unlocked_inner: Arc::new(Self::new_unlocked_inner(&registry)),
+            registry,
         }
     }
 

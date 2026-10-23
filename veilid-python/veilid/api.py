@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Self
 
 from . import types
+from .config import VeilidConfig
 from .state import (
     VeilidAppLifecycleState,
     VeilidState,
@@ -64,9 +65,7 @@ class RoutingContext(ABC):
         pass
 
     @abstractmethod
-    async def with_safety(
-        self, safety_selection: types.SafetySelection, release=True
-    ) -> Self:
+    async def with_safety(self, safety_selection: types.SafetySelection, release=True) -> Self:
         """Return a routing context using a custom SafetySelection. Pass an unsafe selection to disable safety.
 
         Returns a new context the caller must release; with release=True (default) the current
@@ -127,7 +126,10 @@ class RoutingContext(ABC):
 
     @abstractmethod
     async def create_dht_record(
-        self, kind: types.CryptoKind, schema: types.DHTSchema, owner: Optional[types.KeyPair] = None
+        self,
+        kind: types.CryptoKind,
+        schema: types.DHTSchema,
+        owner: Optional[types.KeyPair] = None,
     ) -> types.DHTRecordDescriptor:
         """Create a new DHT record. The record is considered 'open' after creation succeeds.
 
@@ -213,7 +215,11 @@ class RoutingContext(ABC):
 
     @abstractmethod
     async def set_dht_value(
-        self, key: types.RecordKey, subkey: types.ValueSubkey, data: bytes, options: Optional[types.SetDHTValueOptions] = None
+        self,
+        key: types.RecordKey,
+        subkey: types.ValueSubkey,
+        data: bytes,
+        options: Optional[types.SetDHTValueOptions] = None,
     ) -> Optional[types.ValueData]:
         """Push a changed subkey value to the network. The record must first be opened or created.
 
@@ -300,9 +306,7 @@ class RoutingContext(ABC):
 
     @abstractmethod
     async def flush_dht_record(
-        self,
-        key: types.RecordKey,
-        timeout_ms: Optional[int] = None
+        self, key: types.RecordKey, timeout_ms: Optional[int] = None
     ) -> bool:
         """Wait for pending offline subkey writes for a record to be flushed to the network.
 
@@ -314,7 +318,6 @@ class RoutingContext(ABC):
         VeilidAPIErrorNotInitialized if the node shuts down while waiting.
         """
         pass
-
 
 
 class TableDbTransaction(ABC):
@@ -564,9 +567,7 @@ class CryptoSystem(ABC):
         pass
 
     @abstractmethod
-    async def hpke_open(
-        self, secret: types.DecapsulationKey, aad: bytes, sealed: bytes
-    ) -> bytes:
+    async def hpke_open(self, secret: types.DecapsulationKey, aad: bytes, sealed: bytes) -> bytes:
         """Open a sealed blob produced by hpke_seal with the recipient KEM decapsulation key.
 
         aad must match what was supplied at seal. Only the recipient can open a sealed
@@ -938,7 +939,11 @@ class DHTTransaction(ABC):
 
     @abstractmethod
     async def set(
-        self, key: types.RecordKey, subkey: types.ValueSubkey, data: bytes, options: Optional[types.DHTTransactionSetValueOptions] = None
+        self,
+        key: types.RecordKey,
+        subkey: types.ValueSubkey,
+        data: bytes,
+        options: Optional[types.DHTTransactionSetValueOptions] = None,
     ) -> Optional[types.ValueData]:
         """Add a set operation to the transaction.
 
@@ -1059,6 +1064,19 @@ class VeilidAPI(ABC):
 
         Raises VeilidAPIErrorGeneric if already detached, or VeilidAPIErrorNotInitialized if the
         node is shut down.
+        """
+        pass
+
+    @abstractmethod
+    async def change_config(self, config: VeilidConfig):
+        """Replace the configuration of a detached node; the new values apply at the next attach().
+
+        The keys a running node cannot take a new value for must be unchanged: program_name,
+        namespace, the three stores, the routing table keys, the network key password, the DHT
+        storage sizing and the internal tuning.
+
+        Raises VeilidAPIErrorGeneric unless the node is detached, VeilidAPIErrorInvalidArgument
+        for a key that needs a restart, or VeilidAPIErrorNotInitialized if the node is shut down.
         """
         pass
 
@@ -1273,7 +1291,11 @@ class VeilidAPI(ABC):
 
     @abstractmethod
     async def get_dht_record_key(
-        self, schema: types.DHTSchema, owner: types.PublicKey, encryption_key: Optional[types.SharedSecret]) -> types.RecordKey:
+        self,
+        schema: types.DHTSchema,
+        owner: types.PublicKey,
+        encryption_key: Optional[types.SharedSecret],
+    ) -> types.RecordKey:
         """Deterministically build the record key for a schema and owner public key. The key's crypto kind is that of owner.
 
         Raises VeilidAPIErrorInvalidArgument if schema is malformed, VeilidAPIErrorGeneric if owner or
@@ -1284,7 +1306,10 @@ class VeilidAPI(ABC):
 
     @abstractmethod
     async def transact_dht_records(
-        self, record_keys: list[types.RecordKey], options: Optional[types.TransactDHTRecordsOptions]) -> DHTTransaction:
+        self,
+        record_keys: list[types.RecordKey],
+        options: Optional[types.TransactDHTRecordsOptions],
+    ) -> DHTTransaction:
         """Start a transaction over a set of DHT records.
 
         Record keys must already be opened via a routing context. At most 32 records per

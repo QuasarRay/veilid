@@ -31,6 +31,14 @@ mod web;
 #[cfg(target_os = "windows")]
 mod windows;
 
+/// Runs a callback body handed to a foreign runtime, aborting instead of unwinding into it
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+fn abort_on_panic(f: impl FnOnce()) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err() {
+        std::process::abort();
+    }
+}
+
 /// Where the host application stands, as far as its platform reports
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppLifecycleState {

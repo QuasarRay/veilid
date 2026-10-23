@@ -22,7 +22,8 @@ const STATE_UNKNOWN: u8 = 0;
 const STATE_ACTIVE: u8 = 1;
 const STATE_BACKGROUND: u8 = 2;
 
-/// Interval between extension API calls while an extension's worker holds background time
+/// Interval between extension API calls while an extension's worker holds background time;
+/// Chrome ends a service worker idle for 30 s
 const EXTENSION_KEEPALIVE_MS: u32 = 20_000;
 /// How often an event kept open checks whether background time is still held
 const BACKGROUND_TIME_POLL_MS: u32 = 250;

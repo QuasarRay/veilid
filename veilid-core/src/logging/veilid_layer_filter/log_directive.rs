@@ -118,7 +118,7 @@ impl VeilidLogDirective {
                 name.to_owned(),
             ));
         }
-        if &name[0..1] == "#" {
+        if name.starts_with('#') {
             Self::check_valid_log_facility_tag(name)?;
         } else {
             Self::check_valid_log_facility_name(name)?;

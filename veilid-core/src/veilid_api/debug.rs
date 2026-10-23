@@ -923,9 +923,8 @@ fn get_safety_selection(
         let default_route_hop_count =
             registry.config().network.rpc.default_route_hop_count as usize;
 
-        if !text.is_empty() && &text[0..1] == "-" {
+        if let Some(text) = text.strip_prefix('-') {
             // Unsafe
-            let text = &text[1..];
             let seq = get_sequencing(text).unwrap_or_default();
             Some(SafetySelection::Unsafe(seq))
         } else {
@@ -3459,10 +3458,7 @@ impl VeilidAPI {
                 unreachable!("array out of bounds must panic: {}", y);
             }
             "nullptr" => {
-                // Laundered through `black_box` so the null is not visible at the read: rustc's
-                // `invalid_null_arguments` rejects a statically-null argument, which is right
-                // everywhere except a crash test that needs the read to actually happen. Still
-                // null at runtime, so the fault is unchanged.
+                // black_box hides the null from the invalid_null_arguments lint; it is still null at runtime
                 let x: *const i32 = std::hint::black_box(std::ptr::null());
                 // SAFETY: none, this crash test reads null on purpose; volatile keeps the load
                 // from folding away. Natively it faults (a signal, not a panic); on wasm address
@@ -3587,12 +3583,11 @@ impl VeilidAPI {
                 if text.is_empty() {
                     return None;
                 }
-                if &text[0..1] == "#" {
+                if let Some(text) = text.strip_prefix('#') {
                     let routing_table = registry.routing_table();
                     let rss = routing_table.route_spec_store();
 
                     // Private route
-                    let text = &text[1..];
 
                     let private_route = if let Some(prid) =
                         get_route_id(registry.clone(), false, true)(text)

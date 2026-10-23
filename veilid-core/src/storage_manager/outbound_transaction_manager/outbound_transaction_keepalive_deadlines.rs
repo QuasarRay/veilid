@@ -3,14 +3,13 @@ use super::*;
 /// Per-train mutable state, shared by every queued and in-flight keepalive for that train.
 #[derive(Debug, Default)]
 pub(super) struct OutboundTransactionKeepaliveState {
-    /// Most recent successful keepalive RTT.
+    /// Most recent successful keepalive RTT
     pub opt_last_rtt: Option<TimestampDuration>,
-    /// Most recent server-reported expiration; drives the next send time.
+    /// Most recent server-reported expiration; drives the next send time
     pub opt_last_expiration: Option<Timestamp>,
-    /// A command answer refreshed the expiration since the last deadline was set,
-    /// so that deadline reschedules instead of sending
+    /// A command answer refreshed the expiration; the next deadline reschedules instead of sending
     pub refreshed: bool,
-    /// Server told us the inbound transaction is gone. Future fires should bail.
+    /// Server told us the inbound transaction is gone. Future fires should bail
     pub dead: bool,
 }
 

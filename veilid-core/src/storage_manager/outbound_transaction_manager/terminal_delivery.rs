@@ -28,14 +28,19 @@ pub(in crate::storage_manager) struct TerminalDelivery {
     pub expiration_ts: Timestamp,
 }
 
-/// First retry delay; doubles per attempt, clamped to the remaining server-side lifetime
-const TERMINAL_DELIVERY_BACKOFF_START_MS: u64 = 2_000;
-
 impl TerminalDelivery {
     /// Retry until answered, expired, or shutdown; runs detached in the background
     /// operation processor.
     pub async fn run(self, registry: VeilidComponentRegistry) {
-        let mut backoff_ms = TERMINAL_DELIVERY_BACKOFF_START_MS;
+        // Doubles per attempt, clamped to the remaining server-side lifetime
+        let mut backoff_ms = u64::from(
+            registry
+                .storage_manager()
+                .timings()
+                .terminal_delivery_backoff_start
+                .millis_u32()
+                .unwrap_or_default(),
+        );
         let mut attempts = 0u32;
         loop {
             if Timestamp::now() >= self.expiration_ts {

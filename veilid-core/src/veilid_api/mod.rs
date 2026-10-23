@@ -2,8 +2,7 @@
 #[cfg(target_os = "android")]
 pub mod android;
 mod api;
-// The real debug commands reach into the subsystems mock-api removes; S7 reintroduces the few
-// the tests use as mock-native commands
+// The real debug commands reach into the subsystems mock-api removes; the mock serves its own few
 #[cfg(all(feature = "debug-api", not(feature = "mock-api")))]
 mod debug;
 #[cfg(all(not(feature = "debug-api"), not(feature = "mock-api")))]
@@ -33,8 +32,7 @@ pub use routing_context::*;
 pub use serialize_helpers::*;
 pub use types::*;
 
-// The mock supplies the store types the real subsystems would, so every consumer of the public
-// API compiles unchanged against either build
+// The mock supplies the store types, so public API consumers compile unchanged against either build
 #[cfg(not(feature = "mock-api"))]
 pub(crate) use protected_store::*;
 #[cfg(not(feature = "mock-api"))]

@@ -139,8 +139,7 @@ impl VeilidCoreContext {
         // Register all components
         // Crypto first: it depends on no other component, and everything else may use it
         registry.register(Crypto::new);
-        // Under mock-api the rest do not exist: the mock serves every API path, so a registry
-        // holding only Crypto is the whole node
+        // Under mock-api the mock serves every API path; a registry holding only Crypto is the node
         #[cfg(not(feature = "mock-api"))]
         {
             registry.register(ProtectedStore::new);

@@ -1,7 +1,8 @@
 use super::*;
 use crate::storage_manager::SignedValueData;
 
-const MAX_VALUE_CHANGED_SUBKEY_RANGES_LEN: usize = 512;
+const MAX_VALUE_CHANGED_SUBKEY_RANGES_LEN: usize =
+    veilid_capnp::MAX_VALUE_CHANGED_SUBKEY_RANGES_LEN as usize;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationValueChanged {

@@ -26,9 +26,7 @@ export function suitesByName(names: string[]): Suite[] {
   return names.map((n) => {
     const suite = ALL_SUITES.find((s) => s.name === n);
     if (!suite) {
-      throw new Error(
-        `unknown test suite '${n}', expected one of: ${ALL_SUITE_NAMES.join(', ')}`,
-      );
+      throw new Error(`unknown test suite '${n}', expected one of: ${ALL_SUITE_NAMES.join(', ')}`);
     }
     return suite;
   });

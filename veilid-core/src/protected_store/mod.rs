@@ -18,9 +18,9 @@ pub static KNOWN_PROTECTED_STORE_KEYS: [&str; 2] = ["device_encryption_key", "_t
 /// Whether a protected store operation comes from veilid-core itself or from an application.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ProtectedStoreContext {
-    /// An application, via the public API.
+    /// An application, via the public API
     Api,
-    /// veilid-core itself. Full access to every key.
+    /// veilid-core itself, with access to every key
     Internal,
 }
 

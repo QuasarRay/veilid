@@ -85,6 +85,11 @@ pub enum RequestOp {
     Attach,
     /// Disconnect from the network.
     Detach,
+    /// Replace the configuration of a detached node.
+    ChangeConfig {
+        /// The new configuration, with the keys that need a restart unchanged.
+        config: Box<VeilidConfig>,
+    },
     /// Report where the host application stands in its lifecycle.
     ReportAppLifecycleState {
         /// Where the host application now stands.
@@ -299,6 +304,12 @@ pub enum ResponseOp {
     },
     /// Result of `Detach`.
     Detach {
+        /// Success, or error.
+        #[serde(flatten)]
+        result: ApiResult<()>,
+    },
+    /// Result of `ChangeConfig`.
+    ChangeConfig {
         /// Success, or error.
         #[serde(flatten)]
         result: ApiResult<()>,

@@ -756,6 +756,7 @@ pub fn veilid_tools::InterfaceAddress::is_cgnat_or_ds_lite(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_clat(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_dynamic(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_ipv4_link_local(&self) -> bool
+pub fn veilid_tools::InterfaceAddress::is_ipv6_link_local(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_preferred(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_temporary(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::new(veilid_tools::IfAddr, veilid_tools::AddressFlags) -> Self
@@ -1718,6 +1719,7 @@ pub fn veilid_tools::InterfaceAddress::is_cgnat_or_ds_lite(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_clat(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_dynamic(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_ipv4_link_local(&self) -> bool
+pub fn veilid_tools::InterfaceAddress::is_ipv6_link_local(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_preferred(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::is_temporary(&self) -> bool
 pub fn veilid_tools::InterfaceAddress::new(veilid_tools::IfAddr, veilid_tools::AddressFlags) -> Self

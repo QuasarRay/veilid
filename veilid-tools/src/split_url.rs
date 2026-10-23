@@ -257,8 +257,8 @@ impl FromStr for SplitUrlHost {
         if let Ok(v4) = Ipv4Addr::from_str(s) {
             return Ok(SplitUrlHost::IpAddr(IpAddr::V4(v4)));
         }
-        if &s[0..1] == "[" && &s[s.len() - 1..] == "]" {
-            if let Ok(v6) = Ipv6Addr::from_str(&s[1..s.len() - 1]) {
+        if let Some(v6_str) = s.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if let Ok(v6) = Ipv6Addr::from_str(v6_str) {
                 return Ok(SplitUrlHost::IpAddr(IpAddr::V6(v6)));
             }
             return Err(SplitUrlError::new("Invalid ipv6 address"));
@@ -338,17 +338,12 @@ impl SplitUrl {
 }
 
 fn split_host_with_port(s: &str) -> Option<(&str, &str)> {
-    // special case for ipv6 colons
-    if s.len() > 2 && s[0..1] == *"[" {
-        if let Some(end) = s.find(']') {
-            if end < (s.len() - 2) && s[end + 1..end + 2] == *":" {
-                return Some((&s[0..end + 1], &s[end + 2..]));
-            }
-        }
-        None
-    } else {
-        s.split_once(':')
+    // a bracketed ipv6 host has colons of its own
+    if s.starts_with('[') {
+        let (host, rest) = s.split_at(s.find(']')? + 1);
+        return rest.strip_prefix(':').map(|port| (host, port));
     }
+    s.split_once(':')
 }
 
 impl FromStr for SplitUrl {

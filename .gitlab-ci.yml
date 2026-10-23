@@ -49,6 +49,37 @@ stages:
     changes:
       - veilid-*/**/*.rs # Should fire when rust source files are changed
       - "**/*[Cc]argo*"
+      - scripts/_check_format_rust.sh
+      - .gitlab-ci.yml
+      - .gitlab/**/*
+    when: on_success
+  - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH
+    when: on_success
+  # Do not run any other pipeline types
+  - when: never
+
+# Rules for the Python gates (black, mypy): the sources wherever they live, the project files
+# and the scripts that run them
+.branch_python_rules: &branch_python_rules
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)
+    changes:
+      - "**/*.py"
+      - veilid-python/**/*
+      - scripts/**/*
+      - .gitlab-ci.yml
+      - .gitlab/**/*
+    when: on_success
+  - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH
+    when: on_success
+  # Do not run any other pipeline types
+  - when: never
+
+# Rules for the TypeScript format gate (prettier)
+.branch_typescript_rules: &branch_typescript_rules
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH)
+    changes:
+      - veilid-wasm/**/*
+      - scripts/**/*
       - .gitlab-ci.yml
       - .gitlab/**/*
     when: on_success
@@ -94,7 +125,7 @@ stages:
 ###########################################################################
 # Jobs
 
-format:
+format_rust:
   extends: .runner_small
   stage: test
   # Pinned to RUST_VERSION: unpinned `rust:slim` tracks stable (1.98.1 at the time of writing)
@@ -110,10 +141,42 @@ format:
     - rustup component add rustfmt
 
   script:
-    - cargo fmt --all -- --check --verbose
+    - ./scripts/_check_format_rust.sh
 
   rules:
     - *branch_format_rules
+
+# The Python and TypeScript halves of the format gate, and mypy. Source-only, so each runs on the
+# smallest upstream image with its interpreter, pinned by tag like the format_rust job; the tools
+# themselves come from veilid-python/uv.lock and veilid-wasm/tests/package-lock.json. eslint reads
+# types generated from the wasm crate, so it is an earthly job below (test_lint_typescript).
+format_python:
+  extends: .runner_small
+  stage: test
+  image: astral/uv:0.13.1-python3.12-trixie-slim
+  script:
+    - ./scripts/_check_format_python.sh
+  rules:
+    - *branch_python_rules
+
+lint_python:
+  extends: .runner_small
+  stage: test
+  image: astral/uv:0.13.1-python3.12-trixie-slim
+  script:
+    - ./scripts/_lint_python.sh
+  rules:
+    - *branch_python_rules
+
+format_typescript:
+  extends: .runner_small
+  stage: test
+  image: node:22.23.3-slim
+  script:
+    - (cd veilid-wasm/tests && npm ci --no-audit --no-fund)
+    - ./scripts/_check_format_typescript.sh
+  rules:
+    - *branch_typescript_rules
 
 # Which build images are missing, decided in a curl-only container: no docker, no docker-in-docker
 # service, no earthly. The registry v2 API answers 200/404 for a tag given only a JWT, so this is
@@ -243,6 +306,12 @@ test_readme_sync:
   tags: [saas-linux-medium-amd64]
   variables:
     earthly_target: test-readme-sync
+
+# eslint over the wasm test harness and example; type-aware, so it builds the wasm package first.
+test_lint_typescript:
+  extends: .unit_test
+  variables:
+    earthly_target: test-lint-typescript
 
 # test_check_wasm_builds_dart:
 #   extends: .unit_test

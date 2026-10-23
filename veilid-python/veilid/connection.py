@@ -11,7 +11,6 @@ from functools import cache
 import veilid
 from veilid.json_api import _JsonVeilidAPI
 
-
 ERRNO_PATTERN = re.compile(r"errno (\d+)", re.IGNORECASE)
 
 
@@ -39,7 +38,7 @@ def server_info(subindex: int = 0) -> tuple[str, int]:
 
 def ipc_path_exists(path: str) -> bool:
     """Determine if an IPC socket exists in a platform independent way."""
-    if os.name == 'nt':
+    if os.name == "nt":
         if not path.upper().startswith("\\\\.\\PIPE\\"):
             return False
         return path[9:] in os.listdir("\\\\.\\PIPE")
@@ -57,15 +56,15 @@ def ipc_info(subindex: int = 0) -> str:
     if VEILID_SERVER_IPC is not None:
         return VEILID_SERVER_IPC
 
-    if os.name == 'nt':
-        return f'\\\\.\\PIPE\\veilid-server\\{subindex}'
+    if os.name == "nt":
+        return f"\\\\.\\PIPE\\veilid-server\\{subindex}"
 
     ipc_path = f"/var/db/veilid-server/ipc/{subindex}"
     if os.path.exists(ipc_path):
         return ipc_path
 
     # hack to deal with rust's 'directories' crate case-inconsistency
-    if sys.platform.startswith('darwin'):
+    if sys.platform.startswith("darwin"):
         data_dir = appdirs.user_data_dir("org.Veilid.Veilid")
     else:
         data_dir = appdirs.user_data_dir("veilid", "veilid")

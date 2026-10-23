@@ -3,12 +3,17 @@ use super::*;
 impl_veilid_log_facility!("rtab");
 
 pub(crate) struct FilteredNodeRef {
+    /// Component registry accessor
     registry: VeilidComponentRegistry,
+    /// The entry this ref counts toward
     entry: Arc<BucketEntry>,
+    /// Routing domains and dial info this ref is narrowed to
     filter: NodeRefFilter,
+    /// Sequencing the ref's sends must satisfy
     sequencing: Sequencing,
     /// The flow a reply must go out on, ahead of contact method selection
     reply_flow: Option<Flow>,
+    /// Backtrace tracking id of this ref
     #[cfg(feature = "tracking")]
     track_id: usize,
 }

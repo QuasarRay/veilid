@@ -10,6 +10,8 @@ const ALLOCATION_CONNECTIVITY_NODES_TESTED_FACTOR: f32 = 0.25;
 const ALLOCATION_LOW_WATER_MARK_NODES_TESTED_FACTOR: f32 = 0.5;
 /// Cap on required tested nodes so a large stale table can't inflate the readiness bar
 const MAX_REQUIRED_TESTED_CONNECTIVITY_NODES: usize = 12;
+/// Automatic safety routes of each default length needed to attain outbound readiness
+const MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT: usize = 2;
 
 /// Description of which nodes this routing domain needs per crypto kind to operate properly
 pub struct NodesNeeded {
@@ -65,7 +67,32 @@ pub fn nodes_needed_for_counts(
     }
 }
 
+/// Pool readiness: two live ordered routes per default length to attain it, then any one
+/// keeps it, so route churn on a lossy link does not flap the DHT gate
+#[must_use]
+pub fn safety_routes_ready_for(
+    outbound_was_ready: bool,
+    safe_routes: usize,
+    unsafe_routes: usize,
+) -> bool {
+    if outbound_was_ready {
+        safe_routes + unsafe_routes >= 1
+    } else {
+        safe_routes >= MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT
+            && unsafe_routes >= MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT
+    }
+}
+
 impl PublicInternetRoutingDomainController {
+    /// Outbound readiness as of the last health refresh; it keeps itself on one live route
+    pub(in crate::routing_table) fn outbound_was_ready(&self) -> bool {
+        self.routing_table()
+            .get_routing_table_health()
+            .routing_domain_health
+            .get(&RoutingDomain::PublicInternet)
+            .is_some_and(|h| h.is_ready_outbound)
+    }
+
     pub fn state(&self) -> RoutingDomainState {
         let (
             relay_requirements,
@@ -123,6 +150,8 @@ impl PublicInternetRoutingDomainController {
             }
         };
 
+        let outbound_was_ready = self.outbound_was_ready();
+
         // Determine outbound stage
         let outbound_stage = {
             if address_types.is_empty()
@@ -139,7 +168,7 @@ impl PublicInternetRoutingDomainController {
                     RoutingDomainOutboundStage::NeedsPublishedPeerInfo
                 } else if !nodes_needed.needs_more_tested_nodes.is_empty() {
                     RoutingDomainOutboundStage::NeedsMoreTestedNodes
-                } else if !self.safety_routes_ready() {
+                } else if !self.safety_routes_ready(outbound_was_ready) {
                     RoutingDomainOutboundStage::NeedsSafetyRoutes
                 } else {
                     RoutingDomainOutboundStage::ReadyToOperate

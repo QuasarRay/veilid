@@ -9,7 +9,7 @@ fn ts(secs: u64) -> Timestamp {
 pub fn test_save_schedule_change_waits_to_settle() {
     info!("--- test_save_schedule_change_waits_to_settle ---");
 
-    let mut schedule = SaveSchedule::new(ts(0));
+    let mut schedule = SaveSchedule::new(ts(0), SaveTimings::default());
     schedule.changed(ts(20));
     assert!(schedule.is_dirty());
     assert_eq!(schedule.due(ts(24)), None);
@@ -25,7 +25,7 @@ pub fn test_save_schedule_change_waits_to_settle() {
 pub fn test_save_schedule_urgent_change_skips_settle() {
     info!("--- test_save_schedule_urgent_change_skips_settle ---");
 
-    let mut schedule = SaveSchedule::new(ts(0));
+    let mut schedule = SaveSchedule::new(ts(0), SaveTimings::default());
     for secs in 1..=12 {
         schedule.changed(ts(secs));
         assert_eq!(
@@ -51,7 +51,7 @@ pub fn test_save_schedule_urgent_change_skips_settle() {
 pub fn test_save_schedule_change_waits_for_min_interval() {
     info!("--- test_save_schedule_change_waits_for_min_interval ---");
 
-    let mut schedule = SaveSchedule::new(ts(0));
+    let mut schedule = SaveSchedule::new(ts(0), SaveTimings::default());
     schedule.changed(ts(1));
     // Settled at 6s, but the last save was at 0s
     assert_eq!(schedule.due(ts(6)), None);
@@ -61,7 +61,7 @@ pub fn test_save_schedule_change_waits_for_min_interval() {
 pub fn test_save_schedule_periodic_without_changes() {
     info!("--- test_save_schedule_periodic_without_changes ---");
 
-    let schedule = SaveSchedule::new(ts(0));
+    let schedule = SaveSchedule::new(ts(0), SaveTimings::default());
     assert!(!schedule.is_dirty());
     assert_eq!(schedule.due(ts(299)), None);
     assert_eq!(schedule.due(ts(300)), Some(SaveReason::Periodic));
@@ -70,7 +70,7 @@ pub fn test_save_schedule_periodic_without_changes() {
 pub fn test_save_schedule_state_changes_add_up() {
     info!("--- test_save_schedule_state_changes_add_up ---");
 
-    let mut schedule = SaveSchedule::new(ts(0));
+    let mut schedule = SaveSchedule::new(ts(0), SaveTimings::default());
     for _ in 0..15 {
         schedule.state_changed(ts(20));
     }
@@ -90,7 +90,7 @@ pub fn test_save_schedule_state_changes_add_up() {
 pub fn test_save_schedule_saving_covers_earlier_changes_only() {
     info!("--- test_save_schedule_saving_covers_earlier_changes_only ---");
 
-    let mut schedule = SaveSchedule::new(ts(0));
+    let mut schedule = SaveSchedule::new(ts(0), SaveTimings::default());
     schedule.changed(ts(20));
     schedule.saving(ts(25));
     assert!(!schedule.is_dirty());
@@ -105,7 +105,7 @@ pub fn test_save_schedule_saving_covers_earlier_changes_only() {
 pub fn test_save_schedule_background_saves_at_once() {
     info!("--- test_save_schedule_background_saves_at_once ---");
 
-    let mut schedule = SaveSchedule::new(ts(0));
+    let mut schedule = SaveSchedule::new(ts(0), SaveTimings::default());
     schedule.set_background(true, ts(20));
     assert_eq!(schedule.due(ts(20)), Some(SaveReason::Background));
     schedule.saving(ts(20));
@@ -126,7 +126,7 @@ pub fn test_save_schedule_background_saves_at_once() {
 pub fn test_save_schedule_return_from_background_restarts_period() {
     info!("--- test_save_schedule_return_from_background_restarts_period ---");
 
-    let mut schedule = SaveSchedule::new(ts(0));
+    let mut schedule = SaveSchedule::new(ts(0), SaveTimings::default());
     schedule.set_background(true, ts(20));
     schedule.saving(ts(20));
 

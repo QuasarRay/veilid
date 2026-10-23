@@ -484,6 +484,15 @@ impl InterfaceAddress {
             IfAddr::V6(_) => false,
         }
     }
+
+    /// IPv6 link-local (RFC 4291 fe80::/10)
+    #[must_use]
+    pub fn is_ipv6_link_local(&self) -> bool {
+        match &self.if_addr {
+            IfAddr::V4(_) => false,
+            IfAddr::V6(v6) => ipv6addr_is_unicast_link_local(&v6.ip),
+        }
+    }
 }
 
 // #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -776,11 +785,7 @@ impl NetworkInterfaces {
         #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
         let (primary_v4, primary_v6): (Option<Ipv4Addr>, Option<Ipv6Addr>) = (None, None);
 
-        // Drop globally-routable addresses from interfaces other than the one carrying the
-        // kernel's primary outbound source for that family (e.g. iOS cellular IPv6 while wifi
-        // is primary). Private/local addresses are kept so the LocalNetwork routing domain
-        // still works. Don't do this on wasm32-unknown-unknown because we don't have access to
-        // the network stack.
+        // wasm has no network stack to filter
         #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
         Self::filter_non_primary_global_addresses(&mut last_interfaces, primary_v4, primary_v6);
 
@@ -855,12 +860,12 @@ impl NetworkInterfaces {
 
     /////////////////////////////////////////////
 
-    // Keep global addresses only on the interface carrying the kernel's primary outbound
-    // source for that family; a global on any other interface (iOS cellular beside wifi) is
-    // unreachable from peers, and publishing it causes timeouts. The interface decides, not
-    // the exact address: the kernel sends from a privacy address, which must not choose the
-    // stable global that gets published. Private, link-local and ULA addresses stay for
-    // LocalNetwork. Interfaces left with no addresses are dropped.
+    /// Keep global addresses only on the interface carrying the kernel's primary outbound
+    /// source for that family; a global on any other interface (iOS cellular beside wifi) is
+    /// unreachable from peers, and publishing it causes timeouts. The interface decides, not
+    /// the exact address: the kernel sends from a privacy address, which must not choose the
+    /// stable global that gets published. Private, link-local and ULA addresses stay for
+    /// LocalNetwork. Interfaces left with no addresses are dropped.
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     pub(crate) fn filter_non_primary_global_addresses(
         interfaces: &mut BTreeMap<String, NetworkInterface>,
@@ -963,12 +968,14 @@ fn owner_of(interfaces: &BTreeMap<String, NetworkInterface>, ip: IpAddr) -> Opti
 
 /// Publication keeps what peers can reach: RFC 4941 privacy addresses rotate and churn peer
 /// info, CLAT46 and CGNAT/DS-Lite addresses are not reachable, IPv4 link-local is a transient
-/// DHCP fallback
+/// DHCP fallback, and IPv6 link-local needs a scope id no dial info carries, so no peer can
+/// dial it and every tunnel and AirDrop interface would churn peer info as its address rotates
 fn is_published(addr: &InterfaceAddress) -> bool {
     !addr.is_temporary()
         && !addr.is_clat()
         && !addr.is_cgnat_or_ds_lite()
         && !addr.is_ipv4_link_local()
+        && !addr.is_ipv6_link_local()
 }
 
 /// The interface the kernel sends `primary` from, the address veilid sends from there and the

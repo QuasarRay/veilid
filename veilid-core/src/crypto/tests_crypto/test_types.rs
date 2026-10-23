@@ -452,11 +452,28 @@ pub fn test_public_key_ordering() {
     assert!(k5 < k4);
 }
 
+pub fn test_typed_group_parse() {
+    let tks = format!(
+        "{}:7lxDEabK_qgjbe38RtBa3IZLrud84P6NhGP-pRTZzdQ",
+        best_crypto_kind()
+    );
+    let group_str = format!("[{}]", tks);
+    let group = PublicKeyGroup::from_str(&group_str).expect("should parse");
+    assert_eq!(group.len(), 1);
+    assert_eq!(group.to_string(), group_str);
+
+    // a multibyte character fails to parse instead of panicking on a byte index
+    for s in ["", "[", "]", "é", "[é", "é]", "[é]", "[::]é"] {
+        assert!(PublicKeyGroup::from_str(s).is_err(), "{s} should fail");
+    }
+}
+
 pub async fn test_all() {
     let api = crypto_tests_startup().await;
     let crypto = api.crypto().unwrap();
 
     test_public_key_ordering();
+    test_typed_group_parse();
 
     // Test versions
     for v in VALID_CRYPTO_KINDS {

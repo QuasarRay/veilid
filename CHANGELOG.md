@@ -16,7 +16,14 @@
   - **Breaking** `TableDB` and `TableDBTransaction` take keys and values as `Bytes`, `load`, `delete` and `get_keys` return `Bytes`, and `estimate_storage_size_json` is gone.
   - **Breaking** `attach()` and `detach()` succeed when the node is already attaching or detaching, a bind wait reports `Attaching` instead of `Detached`, and `detach()` on a detached node fails with `Not attached`.
   - **Breaking** `ValueData::new` and `ValueData::new_with_seq` are no longer public: apps receive a `ValueData` from the API and never build one.
+  - **Breaking** `VeilidAPI::debug_help()`, `debug_uptime()` and `debug_die()` are no longer public; `debug()` runs them as the `help`, `uptime` and `die` commands.
+  - **Breaking** A node answers direct bootstrap requests (BOOT and B01T) only when the new `network.routing_table.serve_direct_bootstrap` config is set, which is off by default, or when it finds itself among its own bootstraps, so an app no longer hands its peer set to anyone who asks.
   - **Security** B01T direct-bootstrap requests are answered from the routing domain's last successful bootstrap set, persisted across restarts, without resolving DNS, so an unauthenticated packet can no longer trigger non-veilid traffic or block a worker on a slow resolver (thanks to quikchaos for reporting it).
+  - **Security** A dial info, bootstrap record or node id list holding a non-ASCII character fails to parse instead of panicking the node, which any peer could trigger with its own peer info (thanks to quikchaos for reporting it).
+  - **Security** A safety route hop with no next hop, an answer of a type this node did not ask for, a DHT question whose record key has an unsupported kind or the wrong length, and a FindNode question with a short node id are refused instead of panicking the node.
+  - **Security** Dial info detail, relay info, relay node id and routed signature lists are capped before they are allocated or walked, so a peer info carrying an oversized list of empty elements no longer costs hundreds of megabytes or a second of CPU per message.
+  - **Security** A direct bootstrap request counts against its sender's connection rate, `network.max_connection_frequency_per_min`, so a flood of 4-byte requests cannot draw unlimited multi-kilobyte replies.
+  - **Security** A bootstrap peer received as JSON is rebuilt from its signed node info bytes, so a spoofed or tampered reply can no longer attach its own dial info, node ids or timestamp to a bootstrap node's signature.
   - Safety routes are allocated, tested and released per sequence ordering, and a dead route's hops stay out of that ordering's new allocations until the hop or this node publishes new peer info, or the online state changes.
   - A lost loopback no longer schedules another test of its own route, and a multi-hop loopback failure no longer blames the first hop's transport.
   - Per-ordering loopback tallies, a `route test summary` log line for each minute with a loopback failure or release, and the `route diag` and `route reallocate` debug commands.
@@ -24,10 +31,12 @@
   - A refused connect no longer counts as evidence against a transport.
   - An interface address change marks PublicInternet offline, purges connections and re-detects dial info only when the interface, source address or gateway its traffic leaves from change, so a tunnel, a secondary interface or an alias coming or going no longer drops the relay or re-maps the external port; a change to one family's egress while another still carries traffic retires that family's connections and mappings alone.
   - The Apple route reader no longer keeps a link-local gateway's embedded interface index in its address.
-  - A dropped protected connection is re-opened by a keepalive ping instead of a bare connect, which the far end could not attribute to this node and closed at its initial timeout, and a connection this node closed itself no longer counts against the relay's protected-connection lifetime or the re-open breaker, so a move between interfaces keeps its relay. After an egress change the relay optimizer waits for latency measured from the new egress before ranking an incumbent, and a relay is judged on its protected-connection lifetimes only once three have been recorded.
+  - A dropped protected connection is re-opened by a keepalive ping instead of a bare connect, which the far end could not attribute to this node and closed at its initial timeout, and a connection this node closed itself no longer counts against the relay's protected-connection lifetime or the re-open breaker, so a move between interfaces keeps its relay.
+  - After an egress change the relay optimizer waits for latency measured from the new egress before ranking an incumbent, and a relay is judged on its protected-connection lifetimes only once three have been recorded.
   - An IPv4 egress from this host's own CLAT translator moves with the IPv6 route it rides on, and is not a global family while that route is gone.
   - A send that aborted before any transport was tried no longer counts a node as unreachable while this node's own PublicInternet network is down, so a two-second gap between egresses no longer kills a relay.
-  - An outbound-only node asks for dial info detection only when every recent reporter names one external address, once per address, so a symmetric NAT's stable address is detected exactly once instead of once per transport. A concluded detection tells the address check which external addresses it saw, so the address it just examined is not re-detected, the periodic outbound-only recheck is gone, and a transport the detection reached no verdict on is re-detected when enough reporters answer over it.
+  - An outbound-only node asks for dial info detection only when every recent reporter names one external address, once per address, so a symmetric NAT's stable address is detected exactly once instead of once per transport.
+  - A concluded detection tells the address check which external addresses it saw, so the address it just examined is not re-detected, the periodic outbound-only recheck is gone, and a transport the detection reached no verdict on is re-detected when enough reporters answer over it.
   - PublicInternet offline detection counts a lost question only when it was sent after the last answer arrived, so a burst of timeouts overlapping a working path no longer flips a node offline and back within a second; the offline decision logs the failing nodes per socket class.
   - PublicInternet leaves the offline state only on an answer to a question sent after it went offline, so an answer to an older question or unasked inbound traffic can no longer flip a node online onto a dead network, where it would fail discovery, unpublish and mark its peers dead.
   - A send this node declined, over a suppressed transport or to a punished node, is no longer recorded as the peer being unreachable, so a relay no longer dies at its first keepalive over a transport the node has stopped using.
@@ -126,10 +135,19 @@
   - A safety route for unordered traffic is tested over a datagram protocol even when another route holds a connection to its first hop, and a node with no datagram protocol, such as a browser, keeps only ordered routes.
   - A hole punch receipt returns over the punched hole rather than through a relay, so the data that follows it goes direct.
   - The hole punch TTL comes from the footgun settings `internal.network.default_hole_punch_ttl` (3) and `internal.network.cgnat_hole_punch_ttl` (8), the second used when this node's IPv4 traffic leaves from a carrier-grade NAT, DS-Lite or CLAT address.
+  - The routing table save schedule comes from the footgun settings under `internal.network.routing_table.save`, and the ceiling of a watch's change inspection interval from `internal.network.dht.max_watch_inspect_interval_ms`.
   - A hole punch whose receipt came through a relay, as older responders send it, falls back to the relay rather than treating the relay's flow as the hole.
+  - IPv6 link-local addresses are no longer published as LocalNetwork dial info, since a dial info carries no scope id and no peer could dial them, so a tunnel or AirDrop interface rotating its link-local address no longer churns the LocalNetwork peer info.
+  - A reply sent while its interface is going away, as in a cellular-to-wifi switch, is a lost send at debug level instead of an RPC error with a backtrace, and an RPC network error's message keeps the socket error behind it.
+  - Once PublicInternet outbound readiness is attained, any live ordered safety route keeps it and only an empty pool loses it; two routes per default length remain the bar to attain it and the allocation target, so route churn on a lossy link no longer flaps `public_internet_ready`.
+  - A watch's fallback inspection is a silence timer: a delivered change restarts it instead of switching it off for the rest of the watch, so a record that goes quiet after delivering is inspected again one interval later.
+  - On iOS, Android and web, a process the platform froze in the background change-inspects every watch once when the app is active again, so a change missed while frozen arrives on return instead of waiting for a storing node's retry.
+  - New `VeilidAPI::change_config()` replaces a detached node's configuration for its next attach, refusing the keys that need a restart, and UPnP is set up per attach so a change to `network.upnp` takes effect then.
 
 - veilid-flutter:
   - **Breaking** `Timestamp.fromString()` is now `Timestamp.fromJson()`, and `toString()` on `Timestamp` and `TimestampDuration` writes human-readable output instead of a raw integer.
+  - `VeilidConfigRoutingTable` gains `serveDirectBootstrap`, default false.
+  - The `debug-load` feature, which logged the library's load and unload, is gone.
   - **Breaking** Full conversion to native assets and Rust build hooks, so apps drop their own steps for building and linking veilid-flutter and let Flutter do it.
   - **Breaking** CocoaPods support is removed.
   - **Breaking** The minimum Flutter version is 3.47.1, for its build hook support.
@@ -139,14 +157,20 @@
   - Fix multiple-attach idempotency.
   - `AttachmentState.isDetached` no longer returns true for every state.
   - The `time` dependency drops `local-offset`, whose `num_threads` dependency does not build for iOS on libc 0.2.190.
+  - **Breaking** The `VeilidProcessorRetry.retry` extension is gone: its wait for network readiness had no bound, so apps bring their own retry strategy.
+  - New `Veilid.changeConfig()` replaces a detached node's configuration for its next attach.
 
 - veilid-cli:
   - The interactive console no longer exits or floods `thingbuf receiver has closed` when a log burst overruns the line editor.
 
 - veilid-python:
+  - `VeilidConfigRoutingTable` gains `serve_direct_bootstrap`, default `False`.
+  - Python sources are formatted with `black` and checked with `mypy`.
   - More tests.
+  - New `change_config()` replaces a detached node's configuration for its next attach.
 
 - veilid-server:
+  - veilid-server answers direct bootstrap requests by default, and the packaged `veilid-server.conf` turns that off, so a bootstrap operator enables `serve_direct_bootstrap` in the config file.
   - The process exits at most 500 ms after the node shuts down instead of waiting out system DNS lookups left on the blocking pool.
   - Server errors use eyre's standard report handler instead of color-eyre's colored reports.
 
@@ -159,6 +183,7 @@
   - **Breaking** `igd::search_gateway()` and the `igd::Gateway` request methods are async, so dropping one ends its router request at once, and `minreq` is gone.
   - **Breaking** `SplitUrlHost::new` is named `SplitUrlHost::try_new`, since it returns a `Result`.
   - **Breaking** `TrimmedBacktrace` and `TrimBacktraceTrait` are gone, and backtrace captures use `std::backtrace`.
+  - **Security** `SplitUrl` and `SplitUrlHost` reject a host holding a non-ASCII character instead of panicking on a byte index inside it.
   - AIMD congestion control, behind the `aimd` feature.
   - Best-effort UDP send-with-TTL in `socket_tools` (`UdpTtlSender`).
   - IPv4 send-with-TTL takes effect on macOS and iOS, which send from a twin socket bound to the sender's port, and on Windows, which sets it per packet, so a hole punch from them no longer reaches the far NAT first and makes the reply come from another port.
@@ -167,11 +192,16 @@
   - `background_may_freeze()` reports whether the platform freezes a process in the background rather than only throttling it.
   - Apple route discovery declares the XNU route-message ABI itself on iOS, where libc 0.2.190 no longer exports it.
   - `EgressIdentity` implements `Serialize` and `Deserialize`.
+  - `NetworkInterfaceAddressState::interface_addresses` excludes IPv6 link-local addresses, which stay in `own_addresses`.
+  - A send whose interface is down or detaching (`ENETDOWN`, `ENXIO`, `EHOSTDOWN`, `ENETRESET` and their Winsock equivalents) is a `NoConnection` network result instead of an error, on every platform.
+  - `libc` 0.2.191 is the floor: it restores the iOS dyld bindings the `backtrace` crate imports, so `debug-locks` builds for iOS again.
 
 - veilid-wasm:
   - **Breaking** The wasm file no longer loads at import time through a top-level await, so you must `await` the default export `init()` (`import init from "veilid-wasm"`) before calling any other export.
+  - The TypeScript sources are formatted with `prettier` and linted with `eslint` as part of the repository gates.
   - **Breaking** Thrown errors are `Error` instances instead of plain objects, with `VeilidAPIError` extending `Error` and a subclass per variant, so code that switches on `kind` still works but code that compares a caught error to a plain object must change.
   - **Breaking** A constant whose feature is compiled out throws `Unimplemented` instead of reading as undefined.
+  - New `changeConfig()` replaces a detached node's configuration for its next attach.
 
 **Changed in Veilid 0.5.7**
 

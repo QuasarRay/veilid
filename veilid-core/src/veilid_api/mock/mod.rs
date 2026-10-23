@@ -20,7 +20,6 @@ pub(crate) use transactions::{mock_drop_transaction, OutboundTransactionHandle};
 pub(crate) use watches::*;
 
 use super::*;
-use std::sync::LazyLock;
 
 impl_veilid_log_facility!("mock");
 
@@ -90,24 +89,28 @@ pub(crate) fn check_node_id(crypto: &Crypto, node_id: &NodeId) -> VeilidAPIResul
 }
 
 /// One simulated node's private state.
+///
+/// The local store is kept apart from the shared DHT so a report's local and network sequence
+/// numbers can differ; it survives close and reopen as the real store does, and only delete or a
+/// purge drops it.
 pub(crate) struct MockNode {
+    /// This node's ids, one per crypto kind
     pub node_ids: Vec<NodeId>,
+    /// Records this node has open
     pub opened_records: HashMap<OpaqueRecordKey, MockOpenedRecord>,
-    /// This node's local record store, lagging the network until a get or set refreshes it.
-    /// Persists across close and reopen as the real store does; only delete or a purge drops it.
-    /// Keeping it separate from the shared store is what makes local and network sequence
-    /// numbers in a report differ.
+    /// Local copy of each record's values, lagging the shared DHT until a get or set refreshes it
     pub local_records: HashMap<OpaqueRecordKey, HashMap<ValueSubkey, ValueData>>,
-    /// The descriptor of every record in this node's local store, which is what lets it be
-    /// opened again with no network: the real local store holds the owner and schema beside
-    /// the values, and `open_record` returns them without asking anybody.
+    /// Owner and schema of every record in the local store, so a reopen needs no network
     pub local_descriptors: HashMap<OpaqueRecordKey, (PublicKey, DHTSchema)>,
-    /// Writes made while detached, waiting to reach the shared store. Kept outside
-    /// [MockOpenedRecord] because the queue outlives a close.
+    /// Writes queued while detached, outside [MockOpenedRecord] because the queue outlives a close
     pub offline_writes: HashMap<OpaqueRecordKey, HashMap<ValueSubkey, ValueData>>,
+    /// Simulated attachment state
     pub attachment: MockAttachment,
+    /// In-memory table store
     pub tables: MockTableStore,
+    /// In-memory protected store
     pub secrets: MockProtectedStore,
+    /// Where this node's updates are delivered
     pub update_callback: UpdateCallback,
 }
 

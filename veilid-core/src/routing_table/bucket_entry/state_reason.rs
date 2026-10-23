@@ -134,11 +134,11 @@ pub(crate) struct OrderingReachability {
     pub has_indirect: bool,
 }
 
-/// Cached per-ordering contact-method viability summary for one entry
+/// Cached per-ordering contact-method viability summary for one entry; an ordering with no
+/// contact methods is absent (vacuous: a WS-only environment lives or dies entirely on Ordered)
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CMViability {
-    /// Reachability inputs keyed by ordering. Orderings with no contact methods are
-    /// absent (vacuous: a WS-only environment lives or dies entirely on Ordered).
+    /// Reachability inputs keyed by ordering
     pub per_ordering: BTreeMap<SequenceOrdering, OrderingReachability>,
     /// Peer info timestamps this was computed against, per routing domain (ours, theirs)
     pub basis: BTreeMap<RoutingDomain, (Timestamp, Timestamp)>,
@@ -240,7 +240,7 @@ impl BucketEntryInner {
         };
         Self::compute_state_reason_from_stats(
             cur_ts,
-            &LivenessSpans::new(self.config().rpc_timeout()),
+            &self.liveness,
             self.punishment,
             &self.rpc_stats,
             &self.per_sequence_ordering_stats,
@@ -289,10 +289,8 @@ impl BucketEntryInner {
             }
         }
 
-        // [D3] never heard from the node, and node-level lost questions at threshold.
-        // "Seen" means traffic FROM the node (last_seen_ts), not dial attempts toward it:
-        // question_sent creates a per-transport bucket on send, so map emptiness would
-        // leave every dialed-but-silent node to ride the full [D4] span.
+        // [D3] never heard from the node (traffic FROM it, not dial attempts toward it), and
+        // node-level lost questions at threshold
         if rpc_stats.last_seen_ts.is_none()
             && rpc_stats.recent_lost_questions >= DEAD_NEVER_SEEN_LOST_QUESTIONS
         {

@@ -25,7 +25,7 @@ impl<T> NetworkResultExt<T> for Result<T, TimeoutError> {
 /// Folds an [`io::Result`] into a [`NetworkResult`], routing benign socket errors to
 /// the matching network condition.
 pub trait IoNetworkResultExt<T> {
-    /// `Ok(v)` becomes `Value(v)`. Unreachable-host, timeout, connection-reset,
+    /// `Ok(v)` becomes `Value(v)`. Path-gone, timeout, connection-reset,
     /// already-in-use and bad-data errors map to the corresponding non-error variant;
     /// any other error stays an `Err`.
     fn into_network_result(self) -> io::Result<NetworkResult<T>>;
@@ -44,20 +44,37 @@ pub fn is_connection_refused(e: &io::Error) -> bool {
     e.raw_os_error() == Some(refused)
 }
 
-fn io_error_kind_from_error<T>(e: io::Error) -> io::Result<NetworkResult<T>> {
-    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-    if let Some(os_err) = e.raw_os_error() {
-        if os_err == libc::EHOSTUNREACH || os_err == libc::ENETUNREACH {
-            return Ok(NetworkResult::NoConnection(e));
-        }
-    }
+/// The path to the peer is gone: no route, or its interface is down, detaching or reset.
+/// Keyed on the os error: `ENXIO` and `EHOSTDOWN` have no stable `ErrorKind`.
+fn is_path_gone(e: &io::Error) -> bool {
+    let Some(os_err) = e.raw_os_error() else {
+        return false;
+    };
+    #[cfg(unix)]
+    let gone = [
+        libc::EHOSTUNREACH,
+        libc::ENETUNREACH,
+        libc::ENETDOWN,
+        libc::EHOSTDOWN,
+        libc::ENETRESET,
+        libc::ENXIO,
+    ];
     #[cfg(windows)]
-    if let Some(os_err) = e.raw_os_error() {
-        if os_err == winapi::um::winsock2::WSAENETRESET
-            || os_err == winapi::um::winsock2::WSAENETUNREACH
-        {
-            return Ok(NetworkResult::NoConnection(e));
-        }
+    let gone = [
+        winapi::um::winsock2::WSAEHOSTUNREACH,
+        winapi::um::winsock2::WSAENETUNREACH,
+        winapi::um::winsock2::WSAENETDOWN,
+        winapi::um::winsock2::WSAEHOSTDOWN,
+        winapi::um::winsock2::WSAENETRESET,
+    ];
+    #[cfg(not(any(unix, windows)))]
+    let gone: [i32; 0] = [];
+    gone.contains(&os_err)
+}
+
+fn io_error_kind_from_error<T>(e: io::Error) -> io::Result<NetworkResult<T>> {
+    if is_path_gone(&e) {
+        return Ok(NetworkResult::NoConnection(e));
     }
     match e.kind() {
         io::ErrorKind::TimedOut => Ok(NetworkResult::Timeout),

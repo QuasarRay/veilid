@@ -52,6 +52,16 @@ pub struct TickEvent {
     pub cur_tick_ts: Timestamp,
 }
 
+/// Event sent when the OS held the whole process: the watchdog thread woke late, or on web
+/// the tick did, the only witness there
+#[derive(Debug, Clone)]
+pub struct ProcessStallEvent {
+    /// When the stall began, by the time slept
+    pub began: Timestamp,
+    /// When the process ran again
+    pub ended: Timestamp,
+}
+
 /// Event sent when the host application moves in or out of the background, on platforms that
 /// report it
 #[cfg(feature = "app-lifecycle")]
@@ -359,10 +369,18 @@ impl AttachmentManager {
                         TimestampDuration::new(late_us), Timestamp::new(now_us));
                     // First to run after a freeze, so the stall is known before its envelopes
                     let slept_us = late_us + (TICK_INTERVAL_MSEC as u64) * 1000;
-                    registry.network_manager().address_filter().record_stall(
-                        Timestamp::new(now_us.saturating_sub(slept_us)),
-                        Timestamp::new(now_us),
-                    );
+                    let began = Timestamp::new(now_us.saturating_sub(slept_us));
+                    let ended = Timestamp::new(now_us);
+                    registry
+                        .network_manager()
+                        .address_filter()
+                        .record_stall(began, ended);
+                    if let Err(e) = registry
+                        .event_bus()
+                        .post(ProcessStallEvent { began, ended })
+                    {
+                        veilid_log!(this warn "failed to post ProcessStallEvent: {}", e);
+                    }
                 },
             ));
         }
@@ -547,9 +565,15 @@ impl AttachmentManager {
                     .record_local_stall(lag);
                 // No watchdog thread here, so the tick is the only witness to a frozen tab
                 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-                self.network_manager()
-                    .address_filter()
-                    .record_stall(last_tick_ts, cur_tick_ts);
+                {
+                    self.network_manager()
+                        .address_filter()
+                        .record_stall(last_tick_ts, cur_tick_ts);
+                    self.event_bus().post(ProcessStallEvent {
+                        began: last_tick_ts,
+                        ended: cur_tick_ts,
+                    })?;
+                }
                 // An app in the background hears on its return instead
                 if stalled && !self.in_background() {
                     self.resend_veilid_state_attachment();

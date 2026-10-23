@@ -11,7 +11,7 @@ impl NativeNetwork {
         _t: Timestamp,
     ) -> EyreResult<()> {
         // Only present when UPnP is enabled
-        let Some(igd_manager) = &self.igd_manager else {
+        let Some(igd_manager) = self.igd_manager() else {
             return Ok(());
         };
         let Ok(outcome) = igd_manager.tick().timeout_at(stop_token).await else {

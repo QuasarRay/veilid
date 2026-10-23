@@ -5,11 +5,11 @@ use super::*;
 /// Durability signal for the outbound transaction expiry check
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(in crate::storage_manager) enum DurabilityExpiration {
-    /// Durability already broken; drop now.
+    /// Durability already broken; drop now
     Lost,
-    /// At least required_strict_consensus_count nodes alive on every record until this timestamp.
+    /// At least required_strict_consensus_count nodes alive on every record until this timestamp
     AliveUntil(Timestamp),
-    /// No keepalive-active nodes. Don't drop on this signal.
+    /// No keepalive-active nodes. Don't drop on this signal
     NotApplicable,
 }
 

@@ -566,42 +566,6 @@ cfg_if! {
                 res
             }
         }
-
-        fn sendmsg_with_ttl_cmsg(
-            fd: std::os::fd::RawFd,
-            data: &[u8],
-            remote_addr: SocketAddr,
-            cmsg_level: libc::c_int,
-            cmsg_type: libc::c_int,
-            ttl: libc::c_int,
-        ) -> io::Result<usize> {
-            let sockaddr = SockAddr::from(remote_addr);
-            let mut iov = libc::iovec {
-                iov_base: data.as_ptr() as *mut libc::c_void,
-                iov_len: data.len(),
-            };
-            // u64 array for cmsg alignment; larger than CMSG_SPACE(sizeof(int)) everywhere
-            let mut cmsg_buf = [0u64; 8];
-            unsafe {
-                let mut msg: libc::msghdr = std::mem::zeroed();
-                msg.msg_name = sockaddr.as_ptr() as *mut libc::c_void;
-                msg.msg_namelen = sockaddr.len();
-                msg.msg_iov = &mut iov;
-                msg.msg_iovlen = 1;
-                msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
-                msg.msg_controllen = libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as libc::c_uint) as _;
-                let cmsg = libc::CMSG_FIRSTHDR(&msg);
-                (*cmsg).cmsg_level = cmsg_level;
-                (*cmsg).cmsg_type = cmsg_type;
-                (*cmsg).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as libc::c_uint) as _;
-                std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), ttl);
-                let res = libc::sendmsg(fd, &msg, 0);
-                if res < 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(res as usize)
-            }
-        }
     } else if #[cfg(windows)] {
         /// The IPv4 per-packet TTL cmsg (ws2ipdef.h), which winapi lacks; an `IP_TTL` cmsg
         /// fails with WSAEINVAL
@@ -640,68 +604,109 @@ cfg_if! {
                 }
             }
         }
-
-        fn wsasendmsg_with_ttl_cmsg<S: std::os::windows::io::AsSocket>(
-            socket: &S,
-            data: &[u8],
-            remote_addr: SocketAddr,
-            cmsg_level: i32,
-            cmsg_type: i32,
-            ttl: i32,
-        ) -> io::Result<usize> {
-            use winapi::shared::minwindef::DWORD;
-            use winapi::shared::ws2def::{WSABUF, WSACMSGHDR, WSAMSG};
-            use winapi::um::winsock2::{WSASendMsg, SOCKET, SOCKET_ERROR};
-
-            // WSA_CMSG_SPACE(sizeof(int)) layout by hand; winapi has no cmsg macros
-            #[repr(C)]
-            struct CmsgTtl {
-                hdr: WSACMSGHDR,
-                value: i32,
-            }
-
-            let sockaddr = SockAddr::from(remote_addr);
-            let mut wsabuf = WSABUF {
-                len: data.len() as u32,
-                buf: data.as_ptr() as *mut i8,
-            };
-            let mut cmsg = CmsgTtl {
-                hdr: WSACMSGHDR {
-                    cmsg_len: std::mem::size_of::<WSACMSGHDR>() + std::mem::size_of::<i32>(),
-                    cmsg_level,
-                    cmsg_type,
-                },
-                value: ttl,
-            };
-            let mut msg = WSAMSG {
-                name: sockaddr.as_ptr() as *mut _,
-                namelen: sockaddr.len(),
-                lpBuffers: &mut wsabuf,
-                dwBufferCount: 1,
-                Control: WSABUF {
-                    len: std::mem::size_of::<CmsgTtl>() as u32,
-                    buf: (&mut cmsg as *mut CmsgTtl) as *mut i8,
-                },
-                dwFlags: 0,
-            };
-            let mut sent: DWORD = 0;
-            // SAFETY: msg and everything it points to outlive this synchronous, non-overlapped call
-            let res = unsafe {
-                WSASendMsg(
-                    std::os::windows::io::AsRawSocket::as_raw_socket(&socket.as_socket()) as SOCKET,
-                    &mut msg,
-                    0,
-                    &mut sent,
-                    std::ptr::null_mut(),
-                    None,
-                )
-            };
-            if res == SOCKET_ERROR {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(sent as usize)
-        }
     }
+}
+
+#[cfg(unix)]
+fn sendmsg_with_ttl_cmsg(
+    fd: std::os::fd::RawFd,
+    data: &[u8],
+    remote_addr: SocketAddr,
+    cmsg_level: libc::c_int,
+    cmsg_type: libc::c_int,
+    ttl: libc::c_int,
+) -> io::Result<usize> {
+    let sockaddr = SockAddr::from(remote_addr);
+    let mut iov = libc::iovec {
+        iov_base: data.as_ptr() as *mut libc::c_void,
+        iov_len: data.len(),
+    };
+    // u64 array for cmsg alignment; larger than CMSG_SPACE(sizeof(int)) everywhere
+    let mut cmsg_buf = [0u64; 8];
+    // SAFETY: sockaddr, iov and cmsg_buf outlive the call; msg_controllen is
+    // CMSG_SPACE(sizeof(int)), which fits in cmsg_buf, so the cmsg writes stay inside it
+    unsafe {
+        let mut msg: libc::msghdr = std::mem::zeroed();
+        msg.msg_name = sockaddr.as_ptr() as *mut libc::c_void;
+        msg.msg_namelen = sockaddr.len();
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+        msg.msg_controllen =
+            libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as libc::c_uint) as _;
+        let cmsg = libc::CMSG_FIRSTHDR(&msg);
+        (*cmsg).cmsg_level = cmsg_level;
+        (*cmsg).cmsg_type = cmsg_type;
+        (*cmsg).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as libc::c_uint) as _;
+        std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), ttl);
+        let res = libc::sendmsg(fd, &msg, 0);
+        if res < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(res as usize)
+    }
+}
+
+#[cfg(windows)]
+fn wsasendmsg_with_ttl_cmsg<S: std::os::windows::io::AsSocket>(
+    socket: &S,
+    data: &[u8],
+    remote_addr: SocketAddr,
+    cmsg_level: i32,
+    cmsg_type: i32,
+    ttl: i32,
+) -> io::Result<usize> {
+    use winapi::shared::minwindef::DWORD;
+    use winapi::shared::ws2def::{WSABUF, WSACMSGHDR, WSAMSG};
+    use winapi::um::winsock2::{WSASendMsg, SOCKET, SOCKET_ERROR};
+
+    // WSA_CMSG_SPACE(sizeof(int)) layout by hand; winapi has no cmsg macros
+    #[repr(C)]
+    struct CmsgTtl {
+        hdr: WSACMSGHDR,
+        value: i32,
+    }
+
+    let sockaddr = SockAddr::from(remote_addr);
+    let mut wsabuf = WSABUF {
+        len: data.len() as u32,
+        buf: data.as_ptr() as *mut i8,
+    };
+    let mut cmsg = CmsgTtl {
+        hdr: WSACMSGHDR {
+            cmsg_len: std::mem::size_of::<WSACMSGHDR>() + std::mem::size_of::<i32>(),
+            cmsg_level,
+            cmsg_type,
+        },
+        value: ttl,
+    };
+    let mut msg = WSAMSG {
+        name: sockaddr.as_ptr() as *mut _,
+        namelen: sockaddr.len(),
+        lpBuffers: &mut wsabuf,
+        dwBufferCount: 1,
+        Control: WSABUF {
+            len: std::mem::size_of::<CmsgTtl>() as u32,
+            buf: (&mut cmsg as *mut CmsgTtl) as *mut i8,
+        },
+        dwFlags: 0,
+    };
+    let mut sent: DWORD = 0;
+    // SAFETY: msg and everything it points to outlive this synchronous, non-overlapped call
+    let res = unsafe {
+        WSASendMsg(
+            std::os::windows::io::AsRawSocket::as_raw_socket(&socket.as_socket()) as SOCKET,
+            &mut msg,
+            0,
+            &mut sent,
+            std::ptr::null_mut(),
+            None,
+        )
+    };
+    if res == SOCKET_ERROR {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(sent as usize)
 }
 
 /// A TTL or hop limit as the int the socket layer takes; values outside 1..=255 are refused

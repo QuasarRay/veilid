@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Format every Dart source scripts/check_format.sh checks, `cargo fmt` the Rust side, and
-# regenerate the crate READMEs scripts/check_readme_sync.sh checks. Run it, then commit the
+# Format every Dart, Python, TypeScript/JavaScript and Rust source scripts/check_format.sh checks,
+# and regenerate the crate READMEs scripts/check_readme_sync.sh checks. Run it, then commit the
 # result.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/_dart_sources.sh
+source scripts/_python_sources.sh
+source scripts/_typescript_sources.sh
 source scripts/_readme_crates.sh
 
 files=$(dart_source_files)
@@ -15,6 +17,8 @@ if [ -z "$files" ]; then
 fi
 
 echo "$files" | xargs dart format --language-version="$DART_FORMAT_LANGUAGE_VERSION" --
+python_black
+typescript_prettier --write --log-level warn
 cargo fmt --all
 
 for crate in $(readme_crates); do

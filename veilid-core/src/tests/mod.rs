@@ -24,8 +24,7 @@ pub async fn run_crypto_timing_test() {
 /// Main tests entry point for ios, android, and wasm targets
 #[cfg(any(test, feature = "test-util"))]
 pub async fn run_all_tests() {
-    // Only against the mock: this harness runs one monolithic test, so unlike nextest it cannot
-    // filter the live attach out, and check_all.sh needs this pass to stay offline
+    // Mock only: unlike nextest this monolithic harness cannot filter out the live attach, and check_all.sh stays offline
     #[cfg(feature = "mock-api")]
     {
         info!("TEST: veilid_core");

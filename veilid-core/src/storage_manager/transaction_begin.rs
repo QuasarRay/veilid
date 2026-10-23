@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use super::*;
 
 impl_veilid_log_facility!("stor");

@@ -2,8 +2,6 @@ use super::*;
 
 impl_veilid_log_facility!("rtab");
 
-/// Number of automatic safety routes of each safe/unsafe default length required for operation
-const MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT: usize = 2;
 /// Interval between loopback keepalive ticks on allocated routes; suppressed when real traffic
 /// or a recent route test has already bumped `last_known_valid_ts` within the same window.
 const SR_LOOPBACK_KEEPALIVE_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
@@ -40,8 +38,8 @@ impl PublicInternetRoutingDomainController {
         a.0.cmp(&b.0)
     }
 
-    /// Determine if we have enough safety routes that have been -tested- allocated to perform routing operations
-    pub(in crate::routing_table) fn safety_routes_ready(&self) -> bool {
+    /// Determine if we have enough tested automatic safety routes to perform routing operations
+    pub(in crate::routing_table) fn safety_routes_ready(&self, outbound_was_ready: bool) -> bool {
         let routing_table = self.routing_table();
         let rss = routing_table.route_spec_store();
 
@@ -62,8 +60,7 @@ impl PublicInternetRoutingDomainController {
             Option::<()>::None
         });
 
-        safe_route_count >= MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT
-            && unsafe_route_count >= MINIMUM_BACKGROUND_SAFETY_ROUTE_COUNT
+        safety_routes_ready_for(outbound_was_ready, safe_route_count, unsafe_route_count)
     }
 
     /// Get the list of routes to test and drop

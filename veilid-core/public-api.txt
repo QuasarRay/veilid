@@ -2791,6 +2791,7 @@ pub struct veilid_core::VeilidAPI
 impl veilid_core::VeilidAPI
 pub async fn veilid_core::VeilidAPI::app_call_reply(&self, veilid_core::OperationId, alloc::vec::Vec<u8>) -> veilid_core::VeilidAPIResult<()>
 pub async fn veilid_core::VeilidAPI::attach(&self) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::VeilidAPI::change_config(&self, veilid_core::VeilidConfig) -> veilid_core::VeilidAPIResult<()>
 pub fn veilid_core::VeilidAPI::config(&self) -> veilid_core::VeilidAPIResult<alloc::rcs::arc::Arc<veilid_core::VeilidConfig>>
 pub fn veilid_core::VeilidAPI::crypto(&self) -> veilid_core::VeilidAPIResult<veilid_core::VeilidComponentGuard<'_, veilid_core::Crypto>>
 pub async fn veilid_core::VeilidAPI::delete_all_user_secrets(&self) -> veilid_core::VeilidAPIResult<()>
@@ -2877,6 +2878,8 @@ pub veilid_core::VeilidConfig::program_name: alloc::string::String
 pub veilid_core::VeilidConfig::protected_store: veilid_core::VeilidConfigProtectedStore
 pub veilid_core::VeilidConfig::table_store: veilid_core::VeilidConfigTableStore
 impl veilid_core::VeilidConfig
+pub fn veilid_core::VeilidConfig::ensure_changeable_from(&self, &veilid_core::VeilidConfig) -> veilid_core::VeilidAPIResult<()>
+pub fn veilid_core::VeilidConfig::fill_secrets_from(&mut self, &veilid_core::VeilidConfig)
 pub fn veilid_core::VeilidConfig::get_key_json(&self, &str, bool) -> veilid_core::VeilidAPIResult<alloc::string::String>
 pub fn veilid_core::VeilidConfig::internal(&self) -> &veilid_core::VeilidConfigInternal
 pub fn veilid_core::VeilidConfig::new(&str, &str, &str, core::option::Option<&str>, core::option::Option<&str>) -> Self
@@ -2915,6 +2918,7 @@ pub veilid_core::VeilidConfigInternalDHT::get_value_fanout: u32
 pub veilid_core::VeilidConfigInternalDHT::get_value_timeout_ms: u32
 pub veilid_core::VeilidConfigInternalDHT::max_find_node_count: u32
 pub veilid_core::VeilidConfigInternalDHT::max_watch_expiration_ms: u32
+pub veilid_core::VeilidConfigInternalDHT::max_watch_inspect_interval_ms: u32
 pub veilid_core::VeilidConfigInternalDHT::member_transaction_limit: u32
 pub veilid_core::VeilidConfigInternalDHT::member_watch_limit: u32
 pub veilid_core::VeilidConfigInternalDHT::min_peer_count: u32
@@ -2945,6 +2949,7 @@ pub veilid_core::VeilidConfigInternalNetwork::max_connections_per_ip6_prefix_siz
 pub veilid_core::VeilidConfigInternalNetwork::protocol: veilid_core::VeilidConfigInternalProtocol
 pub veilid_core::VeilidConfigInternalNetwork::restricted_nat_retries: u32
 pub veilid_core::VeilidConfigInternalNetwork::reverse_connection_receipt_time_ms: u32
+pub veilid_core::VeilidConfigInternalNetwork::routing_table: veilid_core::VeilidConfigInternalRoutingTable
 pub veilid_core::VeilidConfigInternalNetwork::rpc: veilid_core::VeilidConfigInternalRPC
 pub veilid_core::VeilidConfigInternalNetwork::single_send_timeout_ms: u32
 impl core::default::Default for veilid_core::VeilidConfigInternalNetwork
@@ -2960,6 +2965,15 @@ pub veilid_core::VeilidConfigInternalRPC::queue_size: u32
 pub veilid_core::VeilidConfigInternalRPC::timeout_ms: u32
 impl core::default::Default for veilid_core::VeilidConfigInternalRPC
 pub fn veilid_core::VeilidConfigInternalRPC::default() -> Self
+pub struct veilid_core::VeilidConfigInternalRoutingTable
+pub veilid_core::VeilidConfigInternalRoutingTable::save: veilid_core::VeilidConfigInternalRoutingTableSave
+pub struct veilid_core::VeilidConfigInternalRoutingTableSave
+pub veilid_core::VeilidConfigInternalRoutingTableSave::background_min_interval_ms: u32
+pub veilid_core::VeilidConfigInternalRoutingTableSave::min_interval_ms: u32
+pub veilid_core::VeilidConfigInternalRoutingTableSave::period_ms: u32
+pub veilid_core::VeilidConfigInternalRoutingTableSave::settle_ms: u32
+impl core::default::Default for veilid_core::VeilidConfigInternalRoutingTableSave
+pub fn veilid_core::VeilidConfigInternalRoutingTableSave::default() -> Self
 pub struct veilid_core::VeilidConfigInternalUDP
 pub veilid_core::VeilidConfigInternalUDP::socket_pool_size: u32
 pub struct veilid_core::VeilidConfigNetwork
@@ -3004,6 +3018,7 @@ pub veilid_core::VeilidConfigRoutingTable::bootstrap_keys: alloc::vec::Vec<veili
 pub veilid_core::VeilidConfigRoutingTable::bootstrap_records: alloc::vec::Vec<alloc::string::String>
 pub veilid_core::VeilidConfigRoutingTable::public_keys: veilid_core::PublicKeyGroup
 pub veilid_core::VeilidConfigRoutingTable::secret_keys: veilid_core::SecretKeyGroup
+pub veilid_core::VeilidConfigRoutingTable::serve_direct_bootstrap: bool
 impl core::default::Default for veilid_core::VeilidConfigRoutingTable
 pub fn veilid_core::VeilidConfigRoutingTable::default() -> Self
 pub struct veilid_core::VeilidConfigTCP

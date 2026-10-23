@@ -1,7 +1,7 @@
 use super::*;
 
-const MAX_APP_CALL_Q_MESSAGE_LEN: usize = 32768;
-const MAX_APP_CALL_A_MESSAGE_LEN: usize = 32768;
+const MAX_APP_CALL_Q_MESSAGE_LEN: usize = veilid_capnp::MAX_APP_CALL_Q_MESSAGE_LEN as usize;
+const MAX_APP_CALL_A_MESSAGE_LEN: usize = veilid_capnp::MAX_APP_CALL_A_MESSAGE_LEN as usize;
 
 #[derive(Clone)]
 pub(in crate::rpc_processor) struct RPCOperationAppCallQ {

@@ -1,6 +1,6 @@
 use super::*;
 
-const MAX_SUPPLY_BLOCK_A_PEERS_LEN: usize = 20;
+const MAX_SUPPLY_BLOCK_A_PEERS_LEN: usize = veilid_capnp::MAX_SUPPLY_BLOCK_A_PEERS_LEN as usize;
 
 #[derive(Debug, Clone)]
 pub(in crate::rpc_processor) struct RPCOperationSupplyBlockQ {

@@ -4,21 +4,24 @@ export const waitForMs = (milliseconds: number) => {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 };
 
-export const asyncCallWithTimeout = async<T>(asyncPromise: Promise<T>, timeLimit: number): Promise<T> => {
+export const asyncCallWithTimeout = async <T>(
+  asyncPromise: Promise<T>,
+  timeLimit: number,
+): Promise<T> => {
   let timeoutHandle: ReturnType<typeof setTimeout>;
 
   const timeoutPromise = new Promise<T>((_resolve, reject) => {
     timeoutHandle = setTimeout(
       () => reject(new Error('Async call timeout limit reached')),
-      timeLimit
+      timeLimit,
     );
   });
 
-  return Promise.race([asyncPromise, timeoutPromise]).then(result => {
+  return Promise.race([asyncPromise, timeoutPromise]).then((result) => {
     clearTimeout(timeoutHandle);
     return result;
-  })
-}
+  });
+};
 
 export const waitForShutdown = async () => {
   while (true) {
@@ -28,13 +31,16 @@ export const waitForShutdown = async () => {
     }
     await waitForMs(250);
   }
-}
+};
 
-export const waitForOfflineSubkeyWrite = async (routingContext: VeilidRoutingContext, key: RecordKey) => {
+export const waitForOfflineSubkeyWrite = async (
+  routingContext: VeilidRoutingContext,
+  key: RecordKey,
+) => {
   while ((await routingContext.inspectDHTRecord(key)).offlineSubkeys.length != 0) {
     await waitForMs(250);
   }
-}
+};
 
 export const getLogTimestamp = () => {
   const now = new Date();
@@ -54,10 +60,12 @@ export const getLogTimestamp = () => {
   const msec = milliseconds.toString().padStart(3, '0');
 
   return `${hh}:${mm}:${ss}.${msec}`;
-}
+};
 
-export const waitForSingleEvent = <T extends Event>(element: EventTarget, eventName: string): Promise<T> => {
-
+export const waitForSingleEvent = <T extends Event>(
+  element: EventTarget,
+  eventName: string,
+): Promise<T> => {
   let send: (value: T) => void;
   const promise = new Promise<T>((resolve) => {
     send = resolve;
@@ -75,7 +83,7 @@ export const waitForSingleEvent = <T extends Event>(element: EventTarget, eventN
   element.addEventListener(eventName, listener);
 
   return promise;
-}
+};
 
 // A fire-and-forget app message can be slow or silently dropped on a single-threaded WASM node
 // whose public-internet readiness flaps and whose routes occasionally fail a hop. Resend until
@@ -93,7 +101,7 @@ export const sendUntilReceived = async <T extends Event>(
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     if (attempt > 1) {
-      await veilidClient.waitForAttachmentCondition(undefined, perAttemptMs).catch(() => { });
+      await veilidClient.waitForAttachmentCondition(undefined, perAttemptMs).catch(() => {});
     }
     await send();
     try {
@@ -103,4 +111,4 @@ export const sendUntilReceived = async <T extends Event>(
     }
   }
   throw lastError;
-}
+};

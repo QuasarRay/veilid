@@ -1,5 +1,6 @@
-/// Veilid WASM Bindings for Flutter/Dart
-/// The Flutter/Dart bindings are in this lib.rs directly
+//! Veilid WASM Bindings for Flutter/Dart
+//! The Flutter/Dart bindings are in this module directly
+
 use super::*;
 use tracing::warn;
 use veilid_core::bytes::Bytes;
@@ -84,7 +85,7 @@ fn peek_init_key(config_json: &str) -> VeilidAPIResult<InitKey> {
     Ok((key.program_name, key.namespace))
 }
 
-/// The init key of the node that is actually running.
+/// The init key of the running node.
 fn running_init_key(veilid_api: &veilid_core::VeilidAPI) -> VeilidAPIResult<InitKey> {
     let config = veilid_api.config()?;
     Ok((config.program_name.clone(), config.namespace.clone()))
@@ -203,8 +204,7 @@ pub fn initialize_veilid_core(platform_config: String) {
         .map_err(|e| format!("failed to initialize logging: {}", e))
         .expect_or_log("failed to initalize WASM platform");
 
-    // Stats manager: process-global, under the default log key. WASM has no
-    // filesystem so records ride the "stats" log facility.
+    // Default log key, process-wide; WASM has no filesystem, so records ride the "stats" facility
     #[cfg(feature = "stats")]
     {
         let stats = &platform_config.logging.stats;
@@ -280,9 +280,7 @@ pub fn startup_veilid_core(
     wrap_api_future_void(async move {
         let init_key = peek_init_key(&json_config)?;
 
-        // held across the startup await, the FFI shim's api lock does the same: two callers racing
-        // a fresh start would otherwise both reach api_startup_json and the loser would take core's
-        // AlreadyInitialized for a config that should have joined
+        // held across the await: a racing second start must join, not take core's AlreadyInitialized
         let _lifecycle = LIFECYCLE_LOCK.lock().await;
 
         // join the running node when it is the same one this config asks for
@@ -396,6 +394,15 @@ pub fn detach() -> Promise {
 }
 
 #[wasm_bindgen()]
+pub fn change_config(config: String) -> Promise {
+    wrap_api_future_void(async move {
+        let config: veilid_core::VeilidConfig = veilid_core::deserialize_json(&config)?;
+        let veilid_api = get_veilid_api()?;
+        veilid_api.change_config(config)
+    })
+}
+
+#[wasm_bindgen()]
 pub fn report_app_lifecycle_state(state: String) -> Promise {
     wrap_api_future_void(async move {
         let state: veilid_core::VeilidAppLifecycleState = veilid_core::deserialize_json(&state)?;
@@ -458,12 +465,10 @@ pub fn shutdown_veilid_core(caller_id: String, generation: String) -> Promise {
         let veilid_api = take_veilid_api()?;
         let retired_state = (**NODE_STATE).take();
 
-        // the last reference stays registered through termination so its consumer sees the
-        // updates core emits on the way down
+        // the last reference stays registered so its consumer sees the updates core emits on the way down
         veilid_api.shutdown().await;
 
-        // unconditional: a teardown that emits no Shutdown update would park every consumer
-        // in `await for` forever
+        // unconditional: without a Shutdown update every consumer would park in `await for` forever
         sinks.close_all();
         drop(retired_state);
 

@@ -4,7 +4,6 @@ import pytest
 import veilid
 from veilid.api import CryptoSystem
 
-
 TEST_DB = "__pytest_db"
 TEST_RENAMED_DB = "__pytest_renamed_db"
 TEST_NONEXISTENT_DB = "__pytest_nonexistent_db"

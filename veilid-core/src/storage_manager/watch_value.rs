@@ -1427,7 +1427,8 @@ impl StorageManager {
             };
             let remaining_count = state.remaining_count().saturating_sub(1);
             let cur_ts = Timestamp::now_non_decreasing();
-            let missing_value_changes = state.needs_fallback_inspect(cur_ts);
+            let missing_value_changes =
+                state.needs_fallback_inspect(cur_ts, self.timings().watch_inspect_max_interval);
             let seq = value.seq();
             state.edit(&owm.per_node_states, |editor| {
                 editor.set_remaining_count(remaining_count);
@@ -2153,13 +2154,6 @@ impl StorageManager {
         }
     }
 
-    /// Check all watches for changes
-    /// Used when we come back online from being offline and may have
-    /// missed some ValueChanged notifications
-    #[cfg_attr(
-        feature = "instrument",
-        instrument(level = "trace", target = "watch", skip_all)
-    )]
     /// Feed a completed change inspection back into its watch's fallback interval.
     /// Finding nothing is the common case and earns a longer wait; finding a missed
     /// change means the watch is not delivering and we want to look again promptly.
@@ -2175,11 +2169,12 @@ impl StorageManager {
         let Some(state) = outbound_watch.state_mut() else {
             return;
         };
+        let max_interval = self.timings().watch_inspect_max_interval;
         state.edit(&owm.per_node_states, |editor| {
             if productive {
                 editor.reset_fallback_inspect_backoff();
             } else {
-                editor.back_off_fallback_inspect();
+                editor.back_off_fallback_inspect(max_interval);
             }
         });
     }
@@ -2209,6 +2204,13 @@ impl StorageManager {
         owm.enqueue_change_inspect_after(record_key, subkeys, not_before);
     }
 
+    /// Check all watches for changes
+    /// Used when we come back online from being offline and may have
+    /// missed some ValueChanged notifications
+    #[cfg_attr(
+        feature = "instrument",
+        instrument(level = "trace", target = "watch", skip_all)
+    )]
     pub fn change_inspect_all_watches(&self) {
         let owm = &mut *self.outbound_watch_manager_mut();
 

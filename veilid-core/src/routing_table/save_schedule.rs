@@ -1,16 +1,41 @@
 use super::*;
 
-/// Quiet time after a change worth saving before it is saved
-const SAVE_SETTLE: TimestampDuration = TimestampDuration::new_secs(5);
-/// Least time between saves driven by changes
-const SAVE_MIN_INTERVAL: TimestampDuration = TimestampDuration::new_secs(10);
-/// Least time between saves in the background, where the process may be frozen within seconds
-#[cfg(feature = "app-lifecycle")]
-const BACKGROUND_SAVE_MIN_INTERVAL: TimestampDuration = TimestampDuration::new_secs(5);
-/// Longest the table goes unsaved, so changes too small to drive a save still reach disk
-const SAVE_PERIOD: TimestampDuration = TimestampDuration::new_secs(300);
 /// Entry state changes that together make a change worth saving
 const SAVE_STATE_CHANGE_COUNT: usize = 16;
+
+/// When the routing table is saved, from config
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SaveTimings {
+    /// Quiet time after a change worth saving before it is saved
+    pub settle: TimestampDuration,
+    /// Least time between saves driven by changes
+    pub min_interval: TimestampDuration,
+    /// Least time between saves in the background, where the process may be frozen within seconds
+    #[cfg(feature = "app-lifecycle")]
+    pub background_min_interval: TimestampDuration,
+    /// Longest the table goes unsaved, so changes too small to drive a save still reach disk
+    pub period: TimestampDuration,
+}
+
+impl From<&VeilidConfigInternalRoutingTableSave> for SaveTimings {
+    fn from(save: &VeilidConfigInternalRoutingTableSave) -> Self {
+        Self {
+            settle: TimestampDuration::new_ms(save.settle_ms.into()),
+            min_interval: TimestampDuration::new_ms(save.min_interval_ms.into()),
+            #[cfg(feature = "app-lifecycle")]
+            background_min_interval: TimestampDuration::new_ms(
+                save.background_min_interval_ms.into(),
+            ),
+            period: TimestampDuration::new_ms(save.period_ms.into()),
+        }
+    }
+}
+
+impl Default for SaveTimings {
+    fn default() -> Self {
+        Self::from(&VeilidConfigInternalRoutingTableSave::default())
+    }
+}
 
 /// Why the routing table was saved
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +65,8 @@ pub(crate) enum SaveReason {
 /// the least interval between saves: on a busy node the changes around it may never settle.
 #[derive(Debug)]
 pub(crate) struct SaveSchedule {
+    /// The intervals from config
+    timings: SaveTimings,
     /// When the last save started
     last_save_ts: Timestamp,
     /// When the periodic save's clock started: the last save, or the app's return from the background
@@ -56,8 +83,9 @@ pub(crate) struct SaveSchedule {
 }
 
 impl SaveSchedule {
-    pub fn new(cur_ts: Timestamp) -> Self {
+    pub fn new(cur_ts: Timestamp, timings: SaveTimings) -> Self {
         Self {
+            timings,
             last_save_ts: cur_ts,
             period_start_ts: cur_ts,
             last_change_ts: None,
@@ -113,19 +141,19 @@ impl SaveSchedule {
     /// Why a save is due, if one is
     pub fn due(&self, cur_ts: Timestamp) -> Option<SaveReason> {
         let since_save = cur_ts.duration_since(self.last_save_ts);
-        let periodic = (cur_ts.duration_since(self.period_start_ts) >= SAVE_PERIOD)
+        let periodic = (cur_ts.duration_since(self.period_start_ts) >= self.timings.period)
             .then_some(SaveReason::Periodic);
         let Some(last_change_ts) = self.last_change_ts else {
             return periodic;
         };
         #[cfg(feature = "app-lifecycle")]
         if self.background {
-            return (since_save >= BACKGROUND_SAVE_MIN_INTERVAL)
+            return (since_save >= self.timings.background_min_interval)
                 .then_some(SaveReason::Background)
                 .or(periodic);
         }
-        let settled = self.urgent || cur_ts.duration_since(last_change_ts) >= SAVE_SETTLE;
-        (settled && since_save >= SAVE_MIN_INTERVAL)
+        let settled = self.urgent || cur_ts.duration_since(last_change_ts) >= self.timings.settle;
+        (settled && since_save >= self.timings.min_interval)
             .then_some(SaveReason::Changed)
             .or(periodic)
     }

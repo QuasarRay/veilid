@@ -3,10 +3,6 @@ use stop_token::future::FutureExt;
 
 const UDP_LISTENER_RESTART_AFTER_CONSECUTIVE_ERRORS: usize = 16;
 
-/// Delay before retrying a receive that failed, so a listener whose socket is broken costs a
-/// timer rather than a core while it works its way to a restart.
-const UDP_LISTENER_ERROR_BACKOFF_MS: u32 = 100;
-
 /// Runtime command to a UDP listener task
 pub(super) enum UdpListenerCommand {
     /// Spawn a recv-loop for this handler
@@ -71,7 +67,7 @@ impl NativeNetwork {
                         // Space out the retries: `recv_message` already backs off internally, but
                         // it can also fail on its first try every time, and this loop must not
                         // become the spin its callee stopped being
-                        sleep(UDP_LISTENER_ERROR_BACKOFF_MS).await;
+                        sleep(this.timings().socket_error_backoff_ms).await;
                     }
                     Err(_) => {
                         return UdpListenerEvent::HandlerExited(None);
@@ -197,7 +193,8 @@ impl NativeNetwork {
         let socket_arc = Arc::new(udp_socket);
 
         // Create protocol handler
-        let protocol_handler = RawUdpProtocolHandler::new(self.registry(), socket_arc);
+        let protocol_handler =
+            RawUdpProtocolHandler::new(self.registry(), socket_arc, self.timings());
 
         // Record protocol handler
         let mut inner = self.inner.lock();
@@ -375,7 +372,11 @@ impl NativeNetwork {
             if already {
                 continue;
             }
-            match RawUdpProtocolHandler::try_new_specific_bound_handler(self.registry(), addr) {
+            match RawUdpProtocolHandler::try_new_specific_bound_handler(
+                self.registry(),
+                addr,
+                self.timings(),
+            ) {
                 Ok(ph) => {
                     let mut inner = self.inner.lock();
                     inner.udp_protocol_handlers.insert(addr, ph.clone());

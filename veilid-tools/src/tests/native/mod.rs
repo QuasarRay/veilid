@@ -40,6 +40,10 @@ pub async fn run_all_tests() {
     info!("TEST: test_split_url");
     test_split_url::test_split_url();
 
+    // Network result tests
+    info!("TEST: test_network_result");
+    test_network_result::test_io_error_into_network_result();
+
     // Must join tests
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     {
@@ -188,6 +192,12 @@ cfg_if! {
         fn run_test_split_url() {
             setup();
             test_split_url::test_split_url();
+        }
+
+        #[test]
+        fn run_test_network_result() {
+            setup();
+            test_network_result::test_io_error_into_network_result();
         }
 
         #[test]

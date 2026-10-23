@@ -1,6 +1,7 @@
 import aiohttp
 import sys
 
+
 async def test_api_credentials(token: str) -> None:
     headers = {
         "Authorization": f"Bearer {token}",

@@ -127,6 +127,17 @@ abstract class Veilid {
   /// Throws [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
   Future<void> detach();
 
+  /// Replace the configuration of a detached node; the new values apply at
+  /// the next [attach]. The keys a running node cannot take a new value for
+  /// must be unchanged: the program name and namespace, the three stores, the
+  /// node keys, the network key password, the DHT storage sizing and the
+  /// internal tuning.
+  ///
+  /// Throws [VeilidAPIExceptionGeneric] unless the node is detached,
+  /// [VeilidAPIExceptionInvalidArgument] for a key that needs a restart, and
+  /// [VeilidAPIExceptionNotInitialized] if Veilid has been shut down.
+  Future<void> changeConfig(VeilidConfig config);
+
   /// Report where the host application stands in its lifecycle.
   ///
   /// The node follows this itself in an iOS, Android or macOS app and in a

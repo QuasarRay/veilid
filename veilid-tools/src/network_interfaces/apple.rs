@@ -334,8 +334,7 @@ impl PlatformSupportApple {
     fn get_address_flags(ifname: &str, addr: sockaddr_in6) -> io::Result<AddressFlags> {
         let mut flags_req = in6_ifreq::from_name(ifname)?;
         flags_req.set_addr(addr);
-        let mut lifetime_req = in6_ifreq::from_name(ifname)?;
-        lifetime_req.set_addr(addr);
+        let mut lifetime_req = flags_req.clone();
 
         // SAFETY: socket() has no pointer arguments
         let sock = unsafe { socket(AF_INET6, SOCK_DGRAM, 0) };

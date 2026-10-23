@@ -1,5 +1,4 @@
 use super::*;
-use core::convert::TryInto;
 
 // Version number of envelope format
 fourcc_type!(pub(crate) EnvelopeVersion);
@@ -14,7 +13,7 @@ pub const ENV0_MIN_ENVELOPE_SIZE: usize = 0x6A + 0x40; // Header + BareSignature
 /// Envelope versions in order of preference, best envelope version is the first one, worst is the last one
 pub const VALID_ENVELOPE_VERSIONS: [EnvelopeVersion; 1] = [ENVELOPE_VERSION_ENV0];
 /// Number of envelope versions to keep on structures if many are present beyond the ones we consider valid
-pub const MAX_ENVELOPE_VERSIONS: usize = 16;
+pub const MAX_ENVELOPE_VERSIONS: usize = crate::veilid_capnp::MAX_ENVELOPE_VERSIONS as usize;
 
 /// Envelopes are versioned
 ///

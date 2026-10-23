@@ -90,6 +90,8 @@ pub struct PublicInternetRoutingDomainControllerUnlockedInner {
     bootstrap_wait_detector: AtomicOptionTimestamp,
     /// Set by a round that found only this node; holds off rounds and silence-driven rebootstrap
     bootstrap_standoff: Mutex<Option<BootstrapStandoff>>,
+    /// This node appeared among its own bootstraps in the last round that resolved any
+    own_bootstrap: AtomicBool,
     /// Per crypto kind, when we first observed zero responsive connectivity nodes
     no_responsive_since: Mutex<BTreeMap<CryptoKind, Timestamp>>,
 }
@@ -178,6 +180,7 @@ impl PublicInternetRoutingDomainController {
             peer_info_subscription: Default::default(),
             bootstrap_wait_detector: AtomicOptionTimestamp::new(None),
             bootstrap_standoff: Mutex::new(None),
+            own_bootstrap: AtomicBool::new(false),
             no_responsive_since: Default::default(),
         };
         let this = Self {
@@ -295,6 +298,10 @@ impl RoutingDomainController for PublicInternetRoutingDomainController {
             PUBLIC_INTERNET_PERSISTED_STATE_KEY,
             serialize_table_value(&persisted),
         ))
+    }
+
+    fn is_own_bootstrap(&self) -> bool {
+        self.own_bootstrap.load(Ordering::Acquire)
     }
 
     fn persisted_state_requires_reset<'a>(&'a self, db: &'a TableDB) -> PinBoxFuture<'a, bool> {

@@ -292,9 +292,11 @@ class PeerTableData:
     @classmethod
     def from_json(cls, j: dict) -> Self:
         """JSON object hook"""
-        return cls([NodeId(node_id) for node_id in j["node_ids"]],
-                   j["peer_address"],
-                   PeerStats.from_json(j["peer_stats"]))
+        return cls(
+            [NodeId(node_id) for node_id in j["node_ids"]],
+            j["peer_address"],
+            PeerStats.from_json(j["peer_stats"]),
+        )
 
     def to_json(self) -> dict:
         """Serialize to a JSON-compatible dict."""
@@ -445,7 +447,13 @@ class VeilidAppCall:
     message: bytes
     call_id: OperationId
 
-    def __init__(self, sender: Optional[NodeId], route_id: Optional[BareRouteId], message: bytes, call_id: OperationId):
+    def __init__(
+        self,
+        sender: Optional[NodeId],
+        route_id: Optional[BareRouteId],
+        message: bytes,
+        call_id: OperationId,
+    ):
         self.sender = sender
         self.route_id = route_id
         self.message = message
@@ -497,7 +505,13 @@ class VeilidValueChange:
     count: int
     value: Optional[ValueData]
 
-    def __init__(self, key: RecordKey, subkeys: list[tuple[ValueSubkey, ValueSubkey]], count: int, value: Optional[ValueData]):
+    def __init__(
+        self,
+        key: RecordKey,
+        subkeys: list[tuple[ValueSubkey, ValueSubkey]],
+        count: int,
+        value: Optional[ValueData],
+    ):
         self.key = key
         self.subkeys = subkeys
         self.count = count

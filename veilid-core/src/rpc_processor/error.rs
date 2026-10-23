@@ -45,8 +45,9 @@ impl RPCError {
     pub fn else_internal<M: ToString>(message: M) -> impl FnOnce() -> Self {
         move || Self::Internal(message.to_string())
     }
-    pub fn network<X: ToString>(x: X) -> Self {
-        Self::Network(x.to_string())
+    /// Alternate form, so a wrapped send error keeps its cause chain
+    pub fn network<X: core::fmt::Display>(x: X) -> Self {
+        Self::Network(format!("{x:#}"))
     }
     #[expect(dead_code)]
     pub fn map_network<M: ToString, X: ToString>(message: M) -> impl FnOnce(X) -> Self {

@@ -115,6 +115,8 @@ i_clang() { pkgi clang llvm; }
 i_jq()    { pkgi jq; }
 i_java()  { if [ "$PKG" = apt ]; then pkgi openjdk-$JAVA_VERSION-jdk-headless; else pkgi java-$JAVA_VERSION-openjdk-headless; fi; }
 i_pip()   { pkgi python3 python3-pip; }
+# No distro package on the supported apt releases; the upstream installer lands it in ~/.local/bin
+i_uv()    { [ -n "$PREFIX" ] && return 0; curl -LsSf https://astral.sh/uv/install.sh | sh; }
 # wasm-opt: download the pinned binaryen; no-op if the installed version already
 # satisfies the requirement (avoids a downgrade under --upgrade).
 i_wopt()  { ver_ge "$(ver_of "$(wasm-opt --version 2>/dev/null)")" "$BINARYEN_VERSION" 2>/dev/null && return 0
@@ -164,6 +166,8 @@ dep_have "llvm/clang"  "$(command -v clang)"               "$PKG install clang l
 dep_have "jq"          "$(command -v jq)"                  "$PKG install jq" i_jq
 dep_have "python3"     "$(command -v python3)"             "$PKG install python3" i_pip
 dep_have "pip3"        "$(command -v pip3)"                "$PKG install python3-pip" i_pip
+# uv runs the pinned black and mypy (veilid-python/uv.lock); a check_all.sh tool, not a build dep
+[ "$BUILDONLY" = 1 ] || dep_have "uv" "$(command -v uv)" "curl -LsSf https://astral.sh/uv/install.sh | sh" i_uv
 dep_have "node"        "$(command -v node)"                "install from https://nodejs.org or your package manager"
 dep_have "npm"         "$(command -v npm)"                 "comes with node"
 

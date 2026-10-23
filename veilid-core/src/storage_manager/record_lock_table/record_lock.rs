@@ -16,15 +16,19 @@ struct RecordLockInner<R: RecordLockPurpose, S: RecordLockPurpose> {
 /// Record lock management structure
 #[derive(Debug)]
 pub(super) struct RecordLock<R: RecordLockPurpose, S: RecordLockPurpose> {
+    /// Registry for logging
     registry: VeilidComponentRegistry,
+    /// The record this lock covers
     record: OpaqueRecordKey,
-    /// Write = Lifetime mode. Read = any non-Lifetime mode.
+    /// Write = Lifetime mode. Read = any non-Lifetime mode
     lifetime_lock: Arc<AsyncRwLock<()>>,
-    /// Write = Transaction mode. Read = Subkey mode.
+    /// Write = Transaction mode. Read = Subkey mode
     transaction_lock: Arc<AsyncRwLock<()>>,
-    /// Mutual exclusion among Watch ops on this record.
+    /// Mutual exclusion among Watch ops on this record
     watch_lock: Arc<AsyncMutex<()>>,
+    /// Subkey locks, purpose state and peek count
     inner: Mutex<RecordLockInner<R, S>>,
+    /// Backtrace of each live guard, for lock debugging
     #[cfg(feature = "debug-locks")]
     active_guards: Arc<Mutex<HashMap<usize, Backtrace>>>,
 }
